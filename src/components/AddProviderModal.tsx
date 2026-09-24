@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowRight, CheckCircle2, CircleAlert, KeyRound, LoaderCircle, LockKeyhole, Server, X } from 'lucide-react';
+import { getProviderLogo } from '../data/providers';
+import { ProviderMark } from './ProviderMark';
 
 export type ProviderOption = {
   id: string;
@@ -8,15 +10,17 @@ export type ProviderOption = {
   auth: string;
   color: string;
   initial: string;
+  logo?: string;
   defaultEndpoint?: string;
 };
 
 export const providerOptions: ProviderOption[] = [
-  { id: 'openai', name: 'OpenAI', description: 'GPT and Responses APIs', auth: 'API key', color: '#6fdb9b', initial: 'O', defaultEndpoint: 'https://api.openai.com/v1' },
-  { id: 'anthropic', name: 'Anthropic', description: 'Claude models', auth: 'API key', color: '#d97757', initial: 'A', defaultEndpoint: 'https://api.anthropic.com/v1' },
-  { id: 'google', name: 'Google', description: 'Gemini models', auth: 'API key', color: '#83b7ff', initial: 'G', defaultEndpoint: 'https://generativelanguage.googleapis.com/v1beta' },
-  { id: 'ollama', name: 'Ollama', description: 'Local models on your machine', auth: 'No key', color: '#e2bd52', initial: 'L', defaultEndpoint: 'http://localhost:11434/v1' },
-  { id: 'openrouter', name: 'OpenRouter', description: 'Many models through one API', auth: 'API key', color: '#b995e8', initial: 'R', defaultEndpoint: 'https://openrouter.ai/api/v1' },
+  { id: 'openai', name: 'OpenAI', description: 'GPT and Responses APIs', auth: 'API key', color: '#6fdb9b', initial: 'O', logo: getProviderLogo('openai'), defaultEndpoint: 'https://api.openai.com/v1' },
+  { id: 'anthropic', name: 'Anthropic', description: 'Claude models', auth: 'API key', color: '#d97757', initial: 'A', logo: getProviderLogo('anthropic'), defaultEndpoint: 'https://api.anthropic.com/v1' },
+  { id: 'google', name: 'Google', description: 'Gemini models', auth: 'API key', color: '#83b7ff', initial: 'G', logo: getProviderLogo('google'), defaultEndpoint: 'https://generativelanguage.googleapis.com/v1beta' },
+  { id: 'ollama', name: 'Ollama', description: 'Local models on your machine', auth: 'No key', color: '#e2bd52', initial: 'L', logo: getProviderLogo('ollama'), defaultEndpoint: 'http://localhost:11434/v1' },
+  { id: 'mistral', name: 'Mistral', description: 'Efficient hosted models', auth: 'API key', color: '#f97316', initial: 'M', logo: getProviderLogo('mistral'), defaultEndpoint: 'https://api.mistral.ai/v1' },
+  { id: 'openrouter', name: 'OpenRouter', description: 'Many models through one API', auth: 'API key', color: '#b995e8', initial: 'R', logo: getProviderLogo('openrouter'), defaultEndpoint: 'https://openrouter.ai/api/v1' },
   { id: 'custom', name: 'Custom endpoint', description: 'Any OpenAI-compatible server', auth: 'API key', color: '#9c9584', initial: 'C', defaultEndpoint: 'http://localhost:8000/v1' },
 ];
 
@@ -119,7 +123,7 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave }: {
                 const active = option.id === selected.id;
                 return (
                   <button key={option.id} type="button" onClick={() => selectProvider(option.id)} aria-pressed={active} className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-colors ${active ? 'border-gold/60 bg-gold-soft' : 'border-line bg-surface hover:border-line-strong'}`}>
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[10px] font-bold" style={{ background: `${option.color}18`, color: option.color }}>{option.initial}</span>
+                    <ProviderMark logo={option.logo} initial={option.initial} color={option.color} className="h-8 w-8 rounded-lg text-[10px]" />
                     <span className="min-w-0 flex-1">
                       <span className="block text-xs font-semibold">{option.name}</span>
                       <span className="muted mt-0.5 block truncate text-[10px]">{option.description}</span>

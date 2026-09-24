@@ -1,5 +1,19 @@
 import type { ProviderRecord } from '../components/ProviderCard';
 
+export const providerLogoMap = {
+  openai: '/providers/openai.png',
+  anthropic: '/providers/anthropic.png',
+  google: '/providers/gemini.png',
+  ollama: '/providers/ollama.png',
+  mistral: '/providers/mistral.png',
+  openrouter: '/providers/openrouter.png',
+} as const;
+
+export function getProviderLogo(id: string | null | undefined) {
+  if (!id) return undefined;
+  return providerLogoMap[id as keyof typeof providerLogoMap];
+}
+
 export const providerCatalog: ProviderRecord[] = [
   {
     id: 'openai',
@@ -15,6 +29,7 @@ export const providerCatalog: ProviderRecord[] = [
     health: 100,
     color: '#6fdb9b',
     initial: 'O',
+    logo: providerLogoMap.openai,
     endpoint: 'https://api.openai.com/v1',
     modelList: ['gpt-4.1-mini', 'gpt-4.1', 'text-embedding-3-small'],
   },
@@ -32,6 +47,7 @@ export const providerCatalog: ProviderRecord[] = [
     health: 100,
     color: '#d97757',
     initial: 'A',
+    logo: providerLogoMap.anthropic,
     endpoint: 'https://api.anthropic.com/v1',
     modelList: ['claude-sonnet-4', 'claude-opus-4', 'claude-haiku-3-5'],
   },
@@ -49,6 +65,7 @@ export const providerCatalog: ProviderRecord[] = [
     health: 98,
     color: '#83b7ff',
     initial: 'G',
+    logo: providerLogoMap.google,
     endpoint: 'https://generativelanguage.googleapis.com/v1beta',
     modelList: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-embedding-001'],
   },
@@ -66,6 +83,7 @@ export const providerCatalog: ProviderRecord[] = [
     health: 72,
     color: '#e2bd52',
     initial: 'L',
+    logo: providerLogoMap.ollama,
     endpoint: 'http://localhost:11434/v1',
     modelList: ['qwen3-coder', 'llama3.2', 'nomic-embed-text'],
   },
@@ -83,6 +101,7 @@ export const providerCatalog: ProviderRecord[] = [
     health: 0,
     color: '#f97316',
     initial: 'M',
+    logo: providerLogoMap.mistral,
     endpoint: 'https://api.mistral.ai/v1',
     modelList: [],
   },
@@ -100,6 +119,7 @@ export const providerCatalog: ProviderRecord[] = [
     health: 0,
     color: '#b995e8',
     initial: 'R',
+    logo: providerLogoMap.openrouter,
     endpoint: 'https://openrouter.ai/api/v1',
     modelList: [],
   },

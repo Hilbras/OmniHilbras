@@ -84,6 +84,7 @@ export function ProvidersContent() {
       health: 100,
       color: option.color,
       initial: option.initial,
+      logo: option.logo,
       endpoint: newProvider.endpoint,
       modelList: [],
     };

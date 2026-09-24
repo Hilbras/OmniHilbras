@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { Activity, Check, ChevronRight, CircleDot, Gauge, ShieldCheck, Zap } from 'lucide-react';
+import { getProviderLogo } from '../data/providers';
+import { ProviderMark } from './ProviderMark';
 
 type RouteId = 'auto' | 'anthropic' | 'openai' | 'local';
 
@@ -8,6 +10,7 @@ type Route = {
   label: string;
   provider: string;
   model: string;
+  providerId?: string;
   latency: string;
   cost: string;
   color: string;
@@ -30,6 +33,7 @@ const routes: Route[] = [
     label: 'Anthropic',
     provider: 'Anthropic',
     model: 'claude-sonnet-4',
+    providerId: 'anthropic',
     latency: '438 ms',
     cost: 'premium',
     color: '#d97757',
@@ -40,6 +44,7 @@ const routes: Route[] = [
     label: 'OpenAI',
     provider: 'OpenAI',
     model: 'gpt-4.1-mini',
+    providerId: 'openai',
     latency: '286 ms',
     cost: 'efficient',
     color: '#6fdb9b',
@@ -50,6 +55,7 @@ const routes: Route[] = [
     label: 'Local',
     provider: 'Ollama',
     model: 'qwen3-coder',
+    providerId: 'ollama',
     latency: '92 ms',
     cost: 'private',
     color: '#83b7ff',
@@ -125,13 +131,7 @@ export function RoutePreview() {
             <span className="hidden shrink-0 font-mono text-[10px] text-success min-[360px]:inline">200 OK</span>
           </div>
           <div className="flex items-center gap-3">
-            <span
-              className="grid h-9 w-9 place-items-center rounded-full text-xs font-bold text-[#17150f]"
-              style={{ background: activeRoute.color }}
-              aria-hidden="true"
-            >
-              {activeRoute.initial}
-            </span>
+            <ProviderMark logo={getProviderLogo(activeRoute.providerId)} initial={activeRoute.initial} color={activeRoute.color} className="h-9 w-9 rounded-full text-xs" />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">{activeRoute.provider}</p>
               <p className="truncate font-mono text-[10px] text-muted">{activeRoute.model}</p>
@@ -169,7 +169,7 @@ export function RoutePreview() {
                   selected ? 'border-gold/60 bg-gold-soft text-gold-text' : 'border-line bg-surface text-muted hover:border-line-strong hover:text-text'
                 }`}
               >
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: route.color }} aria-hidden="true" />
+                <ProviderMark logo={getProviderLogo(route.providerId)} initial={route.initial} color={route.color} className="h-5 w-5 rounded-md text-[8px]" />
                 <span className="min-w-0 truncate text-[11px] font-medium">{route.label}</span>
                 {selected && <ChevronRight className="ml-auto h-3 w-3 shrink-0" aria-hidden="true" />}
               </button>

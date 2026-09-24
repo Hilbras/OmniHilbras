@@ -1,4 +1,5 @@
 import { ArrowUpRight, CheckCircle2, CircleAlert, Clock3, Cpu, KeyRound, Server, Zap } from 'lucide-react';
+import { ProviderMark } from './ProviderMark';
 
 export type ProviderStatus = 'connected' | 'attention' | 'available';
 
@@ -17,6 +18,7 @@ export type ProviderRecord = {
   health: number;
   color: string;
   initial: string;
+  logo?: string;
   endpoint: string;
   modelList: string[];
 };
@@ -55,9 +57,7 @@ export function ProviderCard({ provider, detailHref, onManage, onConnect }: { pr
     <article className="card group flex min-w-0 flex-col overflow-hidden transition-transform duration-200 hover:-translate-y-0.5">
       <div className="flex items-start justify-between gap-3 border-b border-line/70 p-4 sm:p-5">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border text-xs font-bold" style={{ borderColor: `${provider.color}35`, background: `${provider.color}14`, color: provider.color }}>
-            {provider.initial}
-          </span>
+          <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-10 w-10 rounded-xl" />
           <div className="min-w-0">
             <a href={detailHref} className="truncate text-sm font-semibold transition-colors hover:text-gold-text">{provider.name}</a>
             <p className="muted mt-1 truncate text-[11px]">{provider.category}</p>

@@ -20,11 +20,14 @@ import {
   Zap,
 } from 'lucide-react';
 import { DashboardShell } from '../components/DashboardShell';
+import { ProviderMark } from '../components/ProviderMark';
+import { getProviderLogo } from '../data/providers';
 
 type Range = '24h' | '7d' | '30d';
 type Metric = 'requests' | 'latency' | 'cost';
 
 type Provider = {
+  id: string;
   name: string;
   model: string;
   requests: string;
@@ -35,10 +38,10 @@ type Provider = {
 };
 
 const providers: Provider[] = [
-  { name: 'OpenAI', model: 'gpt-4.1-mini', requests: '8,921', latency: '286 ms', status: 'healthy', color: '#6fdb9b', initial: 'O' },
-  { name: 'Anthropic', model: 'claude-sonnet-4', requests: '5,284', latency: '438 ms', status: 'healthy', color: '#d97757', initial: 'A' },
-  { name: 'Google', model: 'gemini-2.5-pro', requests: '2,870', latency: '512 ms', status: 'healthy', color: '#83b7ff', initial: 'G' },
-  { name: 'Ollama', model: 'qwen3-coder', requests: '1,417', latency: '92 ms', status: 'degraded', color: '#e2bd52', initial: 'L' },
+  { id: 'openai', name: 'OpenAI', model: 'gpt-4.1-mini', requests: '8,921', latency: '286 ms', status: 'healthy', color: '#6fdb9b', initial: 'O' },
+  { id: 'anthropic', name: 'Anthropic', model: 'claude-sonnet-4', requests: '5,284', latency: '438 ms', status: 'healthy', color: '#d97757', initial: 'A' },
+  { id: 'google', name: 'Google', model: 'gemini-2.5-pro', requests: '2,870', latency: '512 ms', status: 'healthy', color: '#83b7ff', initial: 'G' },
+  { id: 'ollama', name: 'Ollama', model: 'qwen3-coder', requests: '1,417', latency: '92 ms', status: 'degraded', color: '#e2bd52', initial: 'L' },
 ];
 
 const chartValues: Record<Range, Record<Metric, number[]>> = {
@@ -199,9 +202,9 @@ function TrafficChart() {
 
 function LiveTraffic() {
   const traffic = [
-    { path: '/v1/chat/completions', provider: 'Anthropic', model: 'claude-sonnet-4', latency: '438 ms', status: '200', color: '#d97757' },
-    { path: '/v1/responses', provider: 'OpenAI', model: 'gpt-4.1-mini', latency: '286 ms', status: '200', color: '#6fdb9b' },
-    { path: '/v1/chat/completions', provider: 'Ollama', model: 'qwen3-coder', latency: '92 ms', status: '200', color: '#e2bd52' },
+    { path: '/v1/chat/completions', providerId: 'anthropic', provider: 'Anthropic', model: 'claude-sonnet-4', latency: '438 ms', status: '200', color: '#d97757' },
+    { path: '/v1/responses', providerId: 'openai', provider: 'OpenAI', model: 'gpt-4.1-mini', latency: '286 ms', status: '200', color: '#6fdb9b' },
+    { path: '/v1/chat/completions', providerId: 'ollama', provider: 'Ollama', model: 'qwen3-coder', latency: '92 ms', status: '200', color: '#e2bd52' },
   ];
 
   return (
@@ -219,9 +222,7 @@ function LiveTraffic() {
       <div className="mt-5 divide-y divide-line/70">
         {traffic.map((item, index) => (
           <div key={`${item.path}-${index}`} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
-            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-line bg-bg-soft font-mono text-[9px] font-semibold" style={{ color: item.color }}>
-              {item.provider.slice(0, 1)}
-            </span>
+            <ProviderMark logo={getProviderLogo(item.providerId)} initial={item.provider.slice(0, 1)} color={item.color} className="h-7 w-7 rounded-lg text-[9px]" />
             <div className="min-w-0 flex-1">
               <p className="truncate font-mono text-[10px] text-muted">{item.path}</p>
               <p className="mt-1 truncate text-xs font-medium">{item.provider} <span className="muted font-normal">· {item.model}</span></p>
@@ -273,9 +274,7 @@ function ProviderHealth() {
               <tr key={provider.name} className="border-b border-line/70 last:border-0 hover:bg-surface-2/30">
                 <td className="px-4 py-3.5 sm:px-5">
                   <div className="flex items-center gap-2.5">
-                    <span className="grid h-7 w-7 place-items-center rounded-lg text-[10px] font-bold" style={{ background: `${provider.color}18`, color: provider.color }}>
-                      {provider.initial}
-                    </span>
+                    <ProviderMark logo={getProviderLogo(provider.id)} initial={provider.initial} color={provider.color} className="h-7 w-7 rounded-lg text-[10px]" />
                     <span className="text-xs font-semibold">{provider.name}</span>
                   </div>
                 </td>

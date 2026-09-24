@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
+import { ProviderMark } from '../components/ProviderMark';
 import { getProviderById } from '../data/providers';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
 
@@ -176,7 +177,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
         <a href="#/providers" className="btn-quiet -ml-2 mb-4 !px-2 !py-1.5 text-xs"><ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />Back to providers</a>
         <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
           <div className="flex min-w-0 items-start gap-3.5 sm:gap-4">
-            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border text-sm font-bold" style={{ borderColor: `${provider.color}35`, background: `${provider.color}14`, color: provider.color }}>{provider.initial}</span>
+            <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-12 w-12 rounded-xl text-sm" />
             <div className="min-w-0"><div className="flex flex-wrap items-center gap-2.5"><h2 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{provider.name}</h2><span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[9px] ${meta.className}`}><span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />{meta.label}</span></div><p className="muted mt-1 text-sm">{provider.description}</p></div>
           </div>
           <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={testConnection} disabled={testingConnection} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test connection'}</button><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2.5 !text-xs"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
