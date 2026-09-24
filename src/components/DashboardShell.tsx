@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   Menu,
   Network,
+  PanelLeftClose,
   PanelLeftOpen,
   Route as RouteIcon,
   ScrollText,
@@ -105,6 +106,7 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
             {collapsed && <PanelLeftOpen className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />}
           </span>
           {!collapsed && <span>Omni<span className="muted font-normal">Hilbras</span></span>}
+          {!collapsed && <PanelLeftClose className="ml-1 h-4 w-4 shrink-0 text-muted transition-colors group-hover:text-gold-text" aria-hidden="true" />}
         </button>
         <button type="button" onClick={onClose} aria-label="Close navigation" className="muted grid h-8 w-8 place-items-center rounded-lg hover:bg-surface hover:text-gold-text lg:hidden">
           <X className="h-4 w-4" aria-hidden="true" />
