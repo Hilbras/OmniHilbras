@@ -17,7 +17,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 
 ### Phase 1: SDK foundation
 
-- [ ] Task 1: Create the SDK package and normalized contracts.
+- [x] Task 1: Create the SDK package and normalized contracts.
   - Acceptance: strict TypeScript types exist for chat, streaming, models, capabilities, errors, and secret lookup.
   - Verify: package typecheck passes and public exports are documented by types.
   - Files: `packages/omnihilbras-sdk/package.json`, `tsconfig.json`, `src/types.ts`, `src/errors.ts`, `src/secret-store.ts`, `src/index.ts`.
