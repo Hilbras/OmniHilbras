@@ -23,7 +23,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
   - Files: `packages/omnihilbras-sdk/package.json`, `tsconfig.json`, `src/types.ts`, `src/errors.ts`, `src/secret-store.ts`, `src/index.ts`.
   - Scope: Small.
 
-- [ ] Task 2: Add transport, streaming, and provider registry.
+- [x] Task 2: Add transport, streaming, and provider registry.
   - Acceptance: fetch transport supports JSON, SSE streams, timeouts, cancellation, and normalized errors; registry resolves adapters by ID.
   - Verify: focused unit tests pass with fake fetch implementations.
   - Files: `src/transport.ts`, `src/registry.ts`, `src/streaming.ts`, tests.
@@ -32,9 +32,9 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 
 ### Checkpoint: SDK foundation
 
-- [ ] SDK package builds independently.
-- [ ] No real credentials are required for tests.
-- [ ] Existing frontend typecheck/build still passes.
+- [x] SDK package builds independently.
+- [x] No real credentials are required for tests.
+- [x] Existing frontend typecheck/build still passes.
 
 ### Phase 2: Provider adapters
 

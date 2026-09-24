@@ -6,7 +6,7 @@
   - Files: `packages/omnihilbras-sdk/package.json`, `tsconfig.json`, `src/types.ts`, `src/errors.ts`, `src/secret-store.ts`, `src/index.ts`.
   - Scope: Small.
 
-- [ ] Task 2: Add transport, streaming, and provider registry.
+- [x] Task 2: Add transport, streaming, and provider registry.
   - Acceptance: fetch transport supports JSON, SSE streams, timeouts, cancellation, and normalized errors; registry resolves adapters by ID.
   - Verify: focused unit tests pass with fake fetch implementations.
   - Files: `src/transport.ts`, `src/registry.ts`, `src/streaming.ts`, tests.
