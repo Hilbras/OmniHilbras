@@ -2,13 +2,14 @@ import { ArrowUpRight, CheckCircle2, CircleAlert, Clock3, Cpu, KeyRound, Server,
 import { ProviderMark } from './ProviderMark';
 
 export type ProviderStatus = 'connected' | 'attention' | 'available';
-export type ProviderGroup = 'oauth' | 'free-tier' | 'hosted' | 'local' | 'custom';
+export type ProviderGroup = 'oauth' | 'api-key' | 'free-tier' | 'hosted' | 'local' | 'custom';
 export type ProviderCardMode = 'simple' | 'advanced';
 
-export const providerGroupOrder: ProviderGroup[] = ['oauth', 'hosted', 'free-tier', 'local', 'custom'];
+export const providerGroupOrder: ProviderGroup[] = ['oauth', 'api-key', 'hosted', 'free-tier', 'local', 'custom'];
 
 export const providerGroupLabels: Record<ProviderGroup, string> = {
   oauth: 'OAuth Providers',
+  'api-key': 'API Key Providers',
   'free-tier': 'Free Tier Providers',
   hosted: 'Hosted API Providers',
   local: 'Local Providers',
@@ -67,8 +68,9 @@ function SimpleProviderCard({ provider, detailHref, onManage, onConnect, simpleE
   const statusLabel = connected ? (simpleEnabled ? '1 Connected' : 'Disabled') : attention ? 'Needs attention' : 'No connections';
 
   return (
-    <article className="group flex min-h-[84px] items-center justify-between gap-3 rounded-xl border border-line bg-surface-2/75 p-3 transition-colors hover:border-line-strong hover:bg-surface-2">
-      <a href={detailHref} className="flex min-w-0 items-center gap-3">
+    <article className="group relative isolate flex min-h-[84px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-line bg-surface-2/75 p-3 transition-colors hover:border-line-strong hover:bg-surface-2">
+      <a href={detailHref} aria-label={`Open ${provider.name} provider`} className="absolute inset-0 z-0 rounded-xl" />
+      <div className="pointer-events-none relative z-10 flex min-w-0 items-center gap-3">
         <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-10 w-10 shrink-0 rounded-xl" />
         <span className="min-w-0">
           <span className="block truncate text-sm font-semibold text-text transition-colors group-hover:text-gold-text">{provider.name}</span>
@@ -77,15 +79,15 @@ function SimpleProviderCard({ provider, detailHref, onManage, onConnect, simpleE
             {statusLabel}
           </span>
         </span>
-      </a>
+      </div>
       {connected ? (
-        <button type="button" role="switch" aria-checked={simpleEnabled} aria-label={`${simpleEnabled ? 'Disable' : 'Enable'} ${provider.name}`} onClick={() => onToggle?.(!simpleEnabled)} disabled={!onToggle} className={`relative h-6 w-11 shrink-0 rounded-full p-1 transition-colors ${simpleEnabled ? 'bg-[#f0643b]' : 'bg-line-strong'} disabled:cursor-not-allowed disabled:opacity-60`}>
+        <button type="button" role="switch" aria-checked={simpleEnabled} aria-label={`${simpleEnabled ? 'Disable' : 'Enable'} ${provider.name}`} onClick={() => onToggle?.(!simpleEnabled)} disabled={!onToggle} className={`relative z-20 h-6 w-11 shrink-0 rounded-full p-1 opacity-100 transition-[colors,opacity] sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 ${simpleEnabled ? 'bg-[#f0643b]' : 'bg-line-strong'} disabled:cursor-not-allowed disabled:opacity-60`}>
           <span className={`block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${simpleEnabled ? 'translate-x-5' : 'translate-x-0'}`} aria-hidden="true" />
         </button>
       ) : attention ? (
-        <button type="button" onClick={onManage} className="btn-quiet shrink-0 !px-2 !py-1.5 !text-[11px]">Review</button>
+        <button type="button" onClick={onManage} className="btn-quiet relative z-20 shrink-0 !px-2 !py-1.5 !text-[11px]">Review</button>
       ) : (
-        <button type="button" onClick={onConnect} className="btn-quiet shrink-0 !px-2 !py-1.5 !text-[11px]">Connect</button>
+        <button type="button" onClick={onConnect} className="btn-quiet relative z-20 shrink-0 !px-2 !py-1.5 !text-[11px]">Connect</button>
       )}
     </article>
   );

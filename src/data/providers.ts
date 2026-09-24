@@ -115,7 +115,7 @@ export const providerCatalog: ProviderRecord[] = [
     name: 'OpenRouter',
     description: 'One connection for a broad catalog of hosted models and providers.',
     category: 'Model catalog',
-    group: 'free-tier',
+    group: 'api-key',
     status: 'available',
     auth: 'API key',
     models: '—',

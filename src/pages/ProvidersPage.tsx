@@ -33,7 +33,8 @@ function matchesStatus(status: ProviderStatus, filter: Filter) {
 function groupForNewProvider(providerId: string, auth: string): ProviderGroup {
   if (providerId === 'custom') return 'custom';
   if (providerId === 'ollama' || auth === 'No key') return 'local';
-  if (providerId === 'mistral' || providerId === 'openrouter') return 'free-tier';
+  if (providerId === 'openrouter') return 'api-key';
+  if (providerId === 'mistral') return 'free-tier';
   return 'hosted';
 }
 
