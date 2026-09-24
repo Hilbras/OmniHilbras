@@ -27,7 +27,7 @@
   - Depends on: Task 3.
   - Scope: Small/medium.
 
-- [ ] Task 5: Implement the native Anthropic adapter.
+- [x] Task 5: Implement the native Anthropic adapter.
   - Acceptance: Messages API conversion, system instructions, version headers, model listing, and native SSE event conversion are isolated in the adapter.
   - Verify: adapter tests cover text/tool responses, errors, and stream events.
   - Files: `src/adapters/anthropic.ts`, tests.
