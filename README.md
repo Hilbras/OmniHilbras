@@ -6,10 +6,17 @@ The first slice focuses on the product story and visual language: a warm editori
 surface, gold routing accents, a live gateway preview, and a responsive light/dark
 theme inspired by the Hilbras Code design system.
 
-The local dashboard overview is available at `/dashboard.html`, provider
-management is available at `/providers.html`, and routing policies are available
-at `/routing.html`. All dashboard surfaces use preview data until the gateway API
-is connected.
+The local dashboard is a client-side app at `/dashboard.html`. Its routes are
+hash-based so they work on any static host without server rewrites:
+
+- `#/overview`
+- `#/providers`
+- `#/providers/:providerId`
+- `#/routing`
+
+The standalone HTML entry files remain available as direct-entry fallbacks, but
+internal dashboard navigation no longer reloads the document. All dashboard
+surfaces use preview data until the gateway API is connected.
 
 ## Scripts
 

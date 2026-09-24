@@ -24,7 +24,7 @@ import { DashboardShell } from '../components/DashboardShell';
 import { getProviderById } from '../data/providers';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
 
-const fallbackProvider: ProviderRecord = {
+export const fallbackProvider: ProviderRecord = {
   id: 'custom',
   name: 'Custom provider',
   description: 'An OpenAI-compatible provider connected to the local gateway.',
@@ -108,7 +108,7 @@ function AddModelForm({ onAdd }: { onAdd: (model: string) => void }) {
   );
 }
 
-function ProviderDetailContent({ provider }: { provider: ProviderRecord }) {
+export function ProviderDetailContent({ provider }: { provider: ProviderRecord }) {
   const [addOpen, setAddOpen] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionAdded, setConnectionAdded] = useState(provider.status !== 'available');
@@ -173,7 +173,7 @@ function ProviderDetailContent({ provider }: { provider: ProviderRecord }) {
   return (
     <>
       <div className="mb-6">
-        <a href="/providers.html" className="btn-quiet -ml-2 mb-4 !px-2 !py-1.5 text-xs"><ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />Back to providers</a>
+        <a href="#/providers" className="btn-quiet -ml-2 mb-4 !px-2 !py-1.5 text-xs"><ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />Back to providers</a>
         <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
           <div className="flex min-w-0 items-start gap-3.5 sm:gap-4">
             <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border text-sm font-bold" style={{ borderColor: `${provider.color}35`, background: `${provider.color}14`, color: provider.color }}>{provider.initial}</span>
@@ -210,7 +210,7 @@ function ProviderDetailContent({ provider }: { provider: ProviderRecord }) {
         <section className="card min-w-0 p-4 sm:p-5" aria-labelledby="policy-title">
           <div className="flex items-center gap-2"><span className="grid h-8 w-8 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><SlidersHorizontal className="h-4 w-4" aria-hidden="true" /></span><div><h2 id="policy-title" className="text-sm font-semibold">Routing policy</h2><p className="muted mt-0.5 text-xs">How this provider participates.</p></div></div>
           <label className="mt-6 block"><span className="mono-label mb-2 block">Strategy</span><select value={strategy} onChange={(event) => { setStrategy(event.target.value); flash(`Policy changed to ${event.target.value}.`); }} className="input !py-2.5 !text-xs"><option value="balanced">Balanced · quality and cost</option><option value="fast">Fastest response</option><option value="cheap">Lowest cost</option><option value="private">Prefer private routes</option></select></label>
-          <div className="mt-5 space-y-3 border-t border-line pt-5"><div className="flex items-center justify-between text-xs"><span className="muted">Endpoint</span><a href="#endpoint" className="max-w-[180px] truncate font-mono text-[10px] text-gold-text hover:underline">{provider.endpoint}</a></div><div className="flex items-center justify-between text-xs"><span className="muted">Priority</span><span className="font-mono text-[10px]">#1</span></div><div className="flex items-center justify-between text-xs"><span className="muted">Credentials</span><span className="flex items-center gap-1.5 font-mono text-[10px] text-success"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />local only</span></div></div>
+          <div className="mt-5 space-y-3 border-t border-line pt-5"><div className="flex items-center justify-between text-xs"><span className="muted">Endpoint</span><button type="button" onClick={() => document.getElementById('endpoint')?.scrollIntoView({ behavior: 'smooth' })} className="max-w-[180px] truncate text-left font-mono text-[10px] text-gold-text hover:underline">{provider.endpoint}</button></div><div className="flex items-center justify-between text-xs"><span className="muted">Priority</span><span className="font-mono text-[10px]">#1</span></div><div className="flex items-center justify-between text-xs"><span className="muted">Credentials</span><span className="flex items-center gap-1.5 font-mono text-[10px] text-success"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />local only</span></div></div>
           <div className="mt-5 rounded-lg border border-gold/20 bg-gold-soft/45 p-3 text-[11px] leading-relaxed text-muted"><Sparkles className="mr-1 inline h-3.5 w-3.5 text-gold-text" aria-hidden="true" />Policy changes are preview-only until the local gateway API is connected.</div>
         </section>
       </div>

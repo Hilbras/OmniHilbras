@@ -27,9 +27,9 @@ type SidebarItem = {
 };
 
 const primaryItems: SidebarItem[] = [
-  { label: 'Overview', icon: LayoutDashboard, href: '/dashboard.html#overview', page: 'overview' },
-  { label: 'Providers', icon: Network, href: '/providers.html', page: 'providers' },
-  { label: 'Routing', icon: RouteIcon, href: '/routing.html', page: 'routing' },
+  { label: 'Overview', icon: LayoutDashboard, href: '#/overview', page: 'overview' },
+  { label: 'Providers', icon: Network, href: '#/providers', page: 'providers' },
+  { label: 'Routing', icon: RouteIcon, href: '#/routing', page: 'routing' },
   { label: 'API keys', icon: KeyRound, disabled: true },
 ];
 
@@ -125,7 +125,7 @@ function Sidebar({ onClose, activePage }: { onClose: () => void; activePage: Das
         </div>
 
         <div className="mt-8 border-t border-line/70 pt-5">
-          <a href={activePage === 'overview' ? '#quick-start' : '/dashboard.html#quick-start'} onClick={onClose} className="group block rounded-xl border border-gold/25 bg-gold-soft/60 p-3.5 transition-colors hover:border-gold/50">
+          <a href="#/overview" onClick={onClose} className="group block rounded-xl border border-gold/25 bg-gold-soft/60 p-3.5 transition-colors hover:border-gold/50">
             <div className="flex items-center gap-2 text-xs font-semibold text-gold-text">
               <Boxes className="h-3.5 w-3.5" aria-hidden="true" />
               Connect a provider
@@ -203,7 +203,7 @@ export function DashboardShell({
               <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />
               All systems operational
             </span>
-            <a href={activePage === 'overview' ? '#request-log' : '#providers'} aria-label={activePage === 'overview' ? 'Jump to recent activity' : 'Jump to provider list'} className="muted hidden h-9 w-9 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text sm:grid">
+            <a href="#/overview" aria-label="Go to dashboard overview" className="muted hidden h-9 w-9 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text sm:grid">
               <Gauge className="h-[17px] w-[17px]" aria-hidden="true" />
             </a>
             <ThemeToggle />

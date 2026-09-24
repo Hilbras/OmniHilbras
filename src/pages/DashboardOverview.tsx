@@ -234,7 +234,7 @@ function LiveTraffic() {
         ))}
       </div>
 
-      <a href="#request-log" className="btn-quiet mt-5 w-full justify-center border border-line text-xs">
+      <a href="#/overview" onClick={(event) => { event.preventDefault(); document.getElementById('request-log')?.scrollIntoView({ behavior: 'smooth' }); }} className="btn-quiet mt-5 w-full justify-center border border-line text-xs">
         View recent activity
         <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
       </a>
@@ -250,7 +250,7 @@ function ProviderHealth() {
           <h2 id="provider-health-title" className="text-sm font-semibold">Provider health</h2>
           <p className="muted mt-1 text-xs">Every route OmniHilbras can currently reach</p>
         </div>
-        <a href="#quick-start" className="btn-ghost !px-3 !py-2 !text-xs">
+        <a href="#/providers" className="btn-ghost !px-3 !py-2 !text-xs">
           <Plus className="h-3.5 w-3.5" aria-hidden="true" />
           Add provider
         </a>
@@ -300,7 +300,7 @@ function ProviderHealth() {
       </div>
       <div className="flex items-center justify-between border-t border-line px-4 py-3 sm:px-5">
         <span className="muted flex items-center gap-1.5 text-[11px]"><CircleAlert className="h-3.5 w-3.5 text-gold" aria-hidden="true" />1 provider needs attention</span>
-        <a href="#quick-start" className="btn-quiet !px-2 !py-1 text-[11px]">Manage providers <ArrowUpRight className="h-3 w-3" aria-hidden="true" /></a>
+        <a href="#/providers" className="btn-quiet !px-2 !py-1 text-[11px]">Manage providers <ArrowUpRight className="h-3 w-3" aria-hidden="true" /></a>
       </div>
     </section>
   );
@@ -399,7 +399,7 @@ function OverviewHeader() {
           <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
           {refreshing ? 'Refreshing' : 'Refresh'}
         </button>
-        <a href="#quick-start" className="btn-gold !px-3 !py-2.5 !text-xs">
+        <a href="#/providers" className="btn-gold !px-3 !py-2.5 !text-xs">
           <Plus className="h-3.5 w-3.5" aria-hidden="true" />
           Connect provider
         </a>
@@ -408,44 +408,46 @@ function OverviewHeader() {
   );
 }
 
-export default function DashboardOverview() {
+export function DashboardOverviewContent() {
   return (
-    <DashboardShell>
-      <div id="overview">
-        <OverviewHeader />
+    <div id="overview">
+      <OverviewHeader />
 
-        <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Gateway summary">
-          <StatCard label="Requests today" value="18,492" change="12.8%" icon={Activity} />
-          <StatCard label="Success rate" value="99.98%" change="0.04%" icon={CheckCircle2} tone="green" />
-          <StatCard label="Avg. latency" value="412 ms" change="8.1%" icon={Clock3} tone="blue" />
-          <StatCard label="Est. spend" value="$42.18" change="4.6%" icon={DollarSign} tone="orange" />
-        </section>
+      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Gateway summary">
+        <StatCard label="Requests today" value="18,492" change="12.8%" icon={Activity} />
+        <StatCard label="Success rate" value="99.98%" change="0.04%" icon={CheckCircle2} tone="green" />
+        <StatCard label="Avg. latency" value="412 ms" change="8.1%" icon={Clock3} tone="blue" />
+        <StatCard label="Est. spend" value="$42.18" change="4.6%" icon={DollarSign} tone="orange" />
+      </section>
 
-        <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
-          <TrafficChart />
-          <LiveTraffic />
-        </div>
-
-        <div className="mt-5">
-          <ProviderHealth />
-        </div>
-
-        <div className="mt-5 grid gap-5 lg:grid-cols-2">
-          <QuickStart />
-          <RecentActivity />
-        </div>
-
-        <div className="mt-5 flex flex-col items-start justify-between gap-3 rounded-xl border border-gold/20 bg-gold-soft/45 px-4 py-3.5 sm:flex-row sm:items-center sm:px-5">
-          <div className="flex items-start gap-3">
-            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-gold-text" aria-hidden="true" />
-            <div>
-              <p className="text-xs font-semibold">This dashboard is showing preview data.</p>
-              <p className="muted mt-1 text-[11px]">Connect the gateway API to replace these values with live local metrics.</p>
-            </div>
-          </div>
-          <span className="font-mono text-[10px] text-gold-text">v0.1 · local preview</span>
-        </div>
+      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+        <TrafficChart />
+        <LiveTraffic />
       </div>
-    </DashboardShell>
+
+      <div className="mt-5">
+        <ProviderHealth />
+      </div>
+
+      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+        <QuickStart />
+        <RecentActivity />
+      </div>
+
+      <div className="mt-5 flex flex-col items-start justify-between gap-3 rounded-xl border border-gold/20 bg-gold-soft/45 px-4 py-3.5 sm:flex-row sm:items-center sm:px-5">
+        <div className="flex items-start gap-3">
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-gold-text" aria-hidden="true" />
+          <div>
+            <p className="text-xs font-semibold">This dashboard is showing preview data.</p>
+            <p className="muted mt-1 text-[11px]">Connect the gateway API to replace these values with live local metrics.</p>
+          </div>
+        </div>
+        <span className="font-mono text-[10px] text-gold-text">v0.1 · local preview</span>
+      </div>
+    </div>
   );
+}
+
+export default function DashboardOverview() {
+  return <DashboardShell><DashboardOverviewContent /></DashboardShell>;
 }

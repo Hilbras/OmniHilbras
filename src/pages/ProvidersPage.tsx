@@ -42,7 +42,7 @@ function SummaryCard({ label, value, detail, icon: Icon, tone }: { label: string
   );
 }
 
-export default function ProvidersPage() {
+export function ProvidersContent() {
   const [providers, setProviders] = useState(providerCatalog);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -104,7 +104,7 @@ export default function ProvidersPage() {
   }
 
   return (
-    <DashboardShell activePage="providers" pageTitle="Providers" pageDescription="Connect and manage the routes behind your gateway">
+    <>
       <div id="providers">
         <div className="mb-6 flex flex-col justify-between gap-5 sm:mb-8 sm:flex-row sm:items-end">
           <div>
@@ -146,7 +146,7 @@ export default function ProvidersPage() {
               </div>
             </div>
 
-            {filteredProviders.length > 0 ? <div className="grid gap-4 p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-3">{filteredProviders.map((provider) => { const detailHref = `/provider.html?provider=${encodeURIComponent(provider.catalogId ?? provider.id)}`; return <ProviderCard key={provider.id} provider={provider} detailHref={detailHref} onManage={() => { window.location.href = detailHref; }} onConnect={() => openAdd(provider.id)} />; })}</div> : <div className="px-5 py-14 text-center"><Search className="mx-auto h-7 w-7 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No providers found</p><p className="muted mt-1 text-xs">Try a different search or status filter.</p></div>}
+            {filteredProviders.length > 0 ? <div className="grid gap-4 p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-3">{filteredProviders.map((provider) => { const detailHref = `#/providers/${encodeURIComponent(provider.catalogId ?? provider.id)}`; return <ProviderCard key={provider.id} provider={provider} detailHref={detailHref} onManage={() => { window.location.hash = detailHref; }} onConnect={() => openAdd(provider.id)} />; })}</div> : <div className="px-5 py-14 text-center"><Search className="mx-auto h-7 w-7 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No providers found</p><p className="muted mt-1 text-xs">Try a different search or status filter.</p></div>}
           </div>
         </section>
 
@@ -157,6 +157,10 @@ export default function ProvidersPage() {
       </div>
 
       <AddProviderModal open={addOpen} initialProviderId={initialProviderId} onClose={() => { setAddOpen(false); setInitialProviderId(undefined); }} onSave={handleSave} />
-    </DashboardShell>
+    </>
   );
+}
+
+export default function ProvidersPage() {
+  return <DashboardShell activePage="providers" pageTitle="Providers" pageDescription="Connect and manage the routes behind your gateway"><ProvidersContent /></DashboardShell>;
 }
