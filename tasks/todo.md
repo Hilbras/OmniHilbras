@@ -48,7 +48,7 @@
   - Depends on: Tasks 3–6.
   - Scope: Medium.
 
-- [ ] Task 8: Add local HTTP routes and streaming responses.
+- [x] Task 8: Add local HTTP routes and streaming responses.
   - Acceptance: `/health`, `/v1/models`, and `/v1/chat/completions` support JSON and SSE with consistent error envelopes.
   - Verify: integration tests use fake adapters and never contact real providers.
   - Files: `apps/gateway/src/server.ts`, routes, tests, package scripts.

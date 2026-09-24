@@ -81,7 +81,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
   - Depends on: Tasks 3–6.
   - Scope: Medium.
 
-- [ ] Task 8: Add local HTTP routes and streaming responses.
+- [x] Task 8: Add local HTTP routes and streaming responses.
   - Acceptance: `/health`, `/v1/models`, and `/v1/chat/completions` support JSON and SSE with consistent error envelopes.
   - Verify: integration tests use fake adapters and never contact real providers.
   - Files: `apps/gateway/src/server.ts`, routes, tests, package scripts.
@@ -90,9 +90,9 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 
 ### Checkpoint: Local vertical slice
 
-- [ ] Gateway starts on `127.0.0.1:8787`.
-- [ ] A fake transport can exercise every route without credentials.
-- [ ] Timeouts, cancellation, and secret redaction are verified.
+- [x] Gateway starts on `127.0.0.1:8787`.
+- [x] A fake transport can exercise every route without credentials.
+- [x] Timeouts, cancellation, and secret redaction are verified.
 
 ### Phase 4: Dashboard integration
 

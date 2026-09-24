@@ -23,6 +23,38 @@ surfaces use preview data until the gateway API is connected.
 ```bash
 pnpm install
 pnpm dev
+pnpm dev:gateway
 pnpm build
 pnpm typecheck
+pnpm test:sdk
+pnpm test:gateway
 ```
+
+## Local Gateway
+
+The first backend slice lives in `apps/gateway` and uses the shared SDK in
+`packages/omnihilbras-sdk`.
+
+```bash
+pnpm dev:gateway
+```
+
+The local server binds to `127.0.0.1:8787` by default. Configure credentials
+through environment variables; they are read server-side and are never logged.
+
+```bash
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
+GEMINI_API_KEY=...
+OMNIHILBRAS_COMPATIBLE_API_KEY=...
+```
+
+Available routes:
+
+- `GET /health`
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `POST /v1/chat/completions` with `stream: true` for SSE
+
+Use the `x-omnihilbras-provider` header to select a configured provider, for
+example `x-omnihilbras-provider: anthropic`.

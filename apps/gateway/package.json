@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "dev": "pnpm build && node dist/main.js",
+    "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm --filter @omnihilbras/sdk build && pnpm build && node --test test/*.test.js"
   },

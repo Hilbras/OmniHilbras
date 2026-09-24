@@ -5,9 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:gateway": "pnpm --filter @omnihilbras/gateway dev",
     "build": "vite build",
+    "build:sdk": "pnpm --filter @omnihilbras/sdk build",
+    "build:gateway": "pnpm --filter @omnihilbras/gateway build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:sdk": "pnpm --filter @omnihilbras/sdk test",
+    "test:gateway": "pnpm --filter @omnihilbras/gateway test"
   },
   "dependencies": {
     "lucide-react": "^1.47.0",

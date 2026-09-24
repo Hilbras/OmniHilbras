@@ -8,6 +8,7 @@ import {
   type ProviderCredential,
   type SecretStore,
 } from '@omnihilbras/sdk';
+import { GatewayService } from './service.js';
 
 export type GatewayConfig = {
   host: string;
@@ -99,6 +100,11 @@ export function createProviderRegistry(config: GatewayConfig, transport = new Fe
     },
   }, { transport }));
   return registry;
+}
+
+export function createGatewayService(config: GatewayConfig = loadGatewayConfig(), env: Readonly<Record<string, string | undefined>> = process.env) {
+  const secretStore = new EnvironmentSecretStore(env);
+  return new GatewayService(createProviderRegistry(config), secretStore);
 }
 
 function providerEnvKey(providerId: string) {
