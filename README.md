@@ -19,7 +19,9 @@ internal dashboard navigation no longer reloads the document. All dashboard
 surfaces use the local gateway when it is running. OpenRouter is the first
 provider with a live connection flow: the dashboard sends a candidate key only
 to the loopback gateway, which validates it against OpenRouter and stores it in
-an encrypted local vault. OpenRouter currently uses the single-slot Single Add
+an encrypted local vault. The connection dialog also lets you choose whether
+Save imports free models or all text models; model IDs are persisted separately
+from the credential. OpenRouter currently uses the single-slot Single Add
 flow; other provider connection forms remain preview-only.
 
 ## Scripts
@@ -84,9 +86,17 @@ Available routes:
 - `GET /v1/connections`
 - `POST /v1/connections/openrouter/check`
 - `PUT /v1/connections/openrouter`
+- `POST /v1/connections/:id/models`
 - `DELETE /v1/connections/:id`
 - `POST /v1/chat/completions`
 - `POST /v1/chat/completions` with `stream: true` for SSE
+
+OpenRouter model import is controlled by the dialog toggle. Free mode keeps
+only discovered models whose OpenRouter `pricing.prompt` and
+`pricing.completion` values are zero; disabled mode imports all text models
+returned by OpenRouter. Manually added model IDs are tracked separately and
+remain in the catalog when the connection is re-saved with either policy. The
+model endpoint accepts validated model IDs for adding custom entries later.
 
 Use the `x-omnihilbras-provider` header to select a configured provider, for
 example `x-omnihilbras-provider: anthropic`.

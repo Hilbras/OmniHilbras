@@ -175,6 +175,7 @@ test('local gateway returns structured validation errors', async (t) => {
 
 test('local gateway validates OpenRouter credentials before saving them', async (t) => {
   const calls = [];
+  const discovered = [];
   const store = new InMemoryConnectionStore();
   const adapter = {
     id: 'openrouter',
@@ -182,6 +183,10 @@ test('local gateway validates OpenRouter credentials before saving them', async 
     capabilities: { models: true },
     async listModels() {
       return [];
+    },
+    async discoverModels(_context, options) {
+      discovered.push(options.policy);
+      return options.policy === 'free' ? [{ id: 'vendor/free-model', providerId: 'openrouter' }] : [{ id: 'vendor/all-model', providerId: 'openrouter' }];
     },
     async validateCredential(credential) {
       calls.push(credential?.type === 'api-key' ? credential.value : undefined);
@@ -209,12 +214,15 @@ test('local gateway validates OpenRouter credentials before saving them', async 
   const save = await fetch(`${baseUrl}/v1/connections/openrouter`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ apiKey: 'valid-key', name: 'OpenRouter local', priority: 1, proxyPool: 'none' }),
+    body: JSON.stringify({ apiKey: 'valid-key', name: 'OpenRouter local', priority: 1, proxyPool: 'none', modelPolicy: 'free' }),
   });
   assert.equal(save.status, 200);
   const savedBody = await save.text();
   assert.equal(savedBody.includes('valid-key'), false);
   assert.equal(JSON.parse(savedBody).connection.hasCredential, true);
+  assert.equal(JSON.parse(savedBody).connection.modelPolicy, 'free');
+  assert.deepEqual(JSON.parse(savedBody).connection.modelIds, ['vendor/free-model']);
+  assert.deepEqual(discovered, ['free']);
   assert.deepEqual(calls, ['valid-key', 'valid-key']);
 
   const list = await fetch(`${baseUrl}/v1/connections`);
@@ -223,14 +231,51 @@ test('local gateway validates OpenRouter credentials before saving them', async 
   assert.equal(listBody.includes('valid-key'), false);
   assert.equal(JSON.parse(listBody).data.length, 1);
 
+  const addModels = await fetch(`${baseUrl}/v1/connections/openrouter/models`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ modelIds: ['~vendor/custom-model'] }),
+  });
+  assert.equal(addModels.status, 200);
+  const addedConnection = JSON.parse(await addModels.text()).connection;
+  assert.deepEqual(addedConnection.modelIds, ['vendor/free-model', '~vendor/custom-model']);
+  assert.deepEqual(addedConnection.customModelIds, ['~vendor/custom-model']);
+
+  const invalidModels = await fetch(`${baseUrl}/v1/connections/openrouter/models`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ modelIds: ['bad model'] }),
+  });
+  assert.equal(invalidModels.status, 400);
+
+  const editSave = await fetch(`${baseUrl}/v1/connections/openrouter`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ apiKey: 'valid-key', name: 'Renamed OpenRouter', modelPolicy: 'free' }),
+  });
+  assert.equal(editSave.status, 200);
+  const editedConnection = (await editSave.json()).connection;
+  assert.deepEqual(editedConnection.modelIds, ['vendor/free-model', '~vendor/custom-model']);
+  assert.deepEqual(editedConnection.customModelIds, ['~vendor/custom-model']);
+
+  await store.save({ id: 'acme', providerId: 'acme', name: 'Acme', endpoint: 'https://api.openai.com/v1', priority: 1, proxyPool: 'none' }, { type: 'api-key', value: 'acme-key' });
+  const dynamicModels = await fetch(`${baseUrl}/v1/connections/acme/models`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ modelIds: ['acme/model'] }),
+  });
+  assert.equal(dynamicModels.status, 200);
+  assert.deepEqual((await dynamicModels.json()).connection.modelIds, ['acme/model']);
+
   const invalidSave = await fetch(`${baseUrl}/v1/connections/openrouter`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ apiKey: 'invalid', name: 'Invalid', priority: 1, proxyPool: 'none' }),
   });
   assert.equal(invalidSave.status, 401);
-  assert.deepEqual(calls, ['valid-key', 'valid-key', 'invalid']);
-  assert.deepEqual(await store.list(), [JSON.parse(savedBody).connection]);
+  assert.deepEqual(calls, ['valid-key', 'valid-key', 'valid-key', 'invalid']);
+  assert.deepEqual(discovered, ['free', 'free']);
+  assert.deepEqual((await store.list())[0].modelIds, ['vendor/free-model', '~vendor/custom-model']);
 
   const endpointOverride = await fetch(`${baseUrl}/v1/connections/openrouter`, {
     method: 'PUT',

@@ -22,6 +22,9 @@ export type GatewayConnection = {
   proxyPool: string;
   enabled: boolean;
   hasCredential: boolean;
+  modelPolicy: 'free' | 'all';
+  modelIds: string[];
+  customModelIds: string[];
   createdAt: string;
   updatedAt: string;
 };
@@ -39,6 +42,7 @@ export type OpenRouterConnectionInput = {
   priority: number;
   proxyPool: string;
   enabled?: boolean;
+  modelPolicy: 'free' | 'all';
 };
 
 const gatewayBaseUrl = normalizeGatewayBaseUrl(import.meta.env.VITE_GATEWAY_URL ?? 'http://127.0.0.1:8787');
@@ -83,6 +87,15 @@ export function saveOpenRouterConnection(input: OpenRouterConnectionInput, signa
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
+    ...(signal ? { signal } : {}),
+  }).then((body) => body.connection);
+}
+
+export function addGatewayConnectionModels(connectionId: string, modelIds: string[], signal?: AbortSignal) {
+  return requestJson<{ connection: GatewayConnection }>(`/v1/connections/${encodeURIComponent(connectionId)}/models`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ modelIds }),
     ...(signal ? { signal } : {}),
   }).then((body) => body.connection);
 }

@@ -70,6 +70,7 @@ function mergeGatewayConnections(providers: ProviderRecord[], connections: Gatew
     if (!connection) return provider;
     const providerHealth = healthByProvider.get(connection.providerId);
     const liveHealthy = providerHealth?.status === 'healthy';
+    const modelIds = connection.modelIds ?? [];
     return {
       ...provider,
       status: connection.hasCredential && connection.enabled && providerHealth?.status !== 'unavailable' && providerHealth?.status !== 'degraded' ? 'connected' : 'attention',
@@ -77,7 +78,8 @@ function mergeGatewayConnections(providers: ProviderRecord[], connections: Gatew
       lastUsed: liveHealthy ? 'just now' : 'saved locally',
       latency: providerHealth?.latencyMs === undefined ? '—' : `${providerHealth.latencyMs} ms`,
       health: liveHealthy ? 100 : 0,
-      models: liveHealthy ? 'Key verified' : connection.hasCredential ? 'Health pending' : '—',
+      models: modelIds.length > 0 ? `${modelIds.length} models · ${connection.modelPolicy === 'free' ? 'free import' : 'all import'}` : connection.hasCredential ? 'No imported models' : '—',
+      modelList: modelIds,
     } satisfies ProviderRecord;
   });
 }
@@ -103,6 +105,7 @@ export function ProvidersContent() {
   const [disabledProviderIds, setDisabledProviderIds] = useState<Set<string>>(() => new Set());
   const [addOpen, setAddOpen] = useState(false);
   const [initialProviderId, setInitialProviderId] = useState<string | undefined>();
+  const [initialModelPolicy, setInitialModelPolicy] = useState<'free' | 'all'>();
   const [testingAll, setTestingAll] = useState(false);
   const [gatewayConnections, setGatewayConnections] = useState<GatewayConnection[]>([]);
   const [notice, setNotice] = useState('');
@@ -137,6 +140,7 @@ export function ProvidersContent() {
 
   function openAdd(providerId?: string) {
     setInitialProviderId(providerId);
+    setInitialModelPolicy(providerId ? gatewayConnections.find((connection) => connection.providerId === providerId)?.modelPolicy : undefined);
     setAddOpen(true);
   }
 
@@ -155,6 +159,7 @@ export function ProvidersContent() {
     setProviders((current) => [...added.map((provider, index) => recordForNewProvider(provider, index)), ...current]);
     setAddOpen(false);
     setInitialProviderId(undefined);
+    setInitialModelPolicy(undefined);
     setNotice(`${added.length} ${added.length === 1 ? 'connection was' : 'connections were'} added to the local provider list.`);
     window.setTimeout(() => setNotice(''), 3500);
   }
@@ -167,12 +172,14 @@ export function ProvidersContent() {
         apiKey,
         priority: newProvider.priority ?? 1,
         proxyPool: newProvider.proxyPool ?? 'none',
+        modelPolicy: newProvider.modelPolicy ?? 'all',
       });
       setGatewayConnections((current) => [...current.filter((item) => item.providerId !== connection.providerId), connection]);
       setProviders((current) => mergeGatewayConnections(current, [connection]));
       setAddOpen(false);
       setInitialProviderId(undefined);
-      setNotice('OpenRouter connection saved securely on this machine.');
+      setInitialModelPolicy(undefined);
+      setNotice(`OpenRouter connection saved with ${connection.modelIds.length} models (${connection.modelPolicy === 'free' ? 'free import' : 'all import'}).`);
       window.setTimeout(() => setNotice(''), 3500);
       return;
     }
@@ -201,7 +208,7 @@ export function ProvidersContent() {
   function renderProviderCard(provider: ProviderRecord) {
     const detailHref = `#/providers/${encodeURIComponent(provider.catalogId ?? provider.id)}`;
     const simpleEnabled = provider.status === 'connected' && !disabledProviderIds.has(provider.id);
-    return <ProviderCard key={provider.id} provider={provider} detailHref={detailHref} mode={cardMode} simpleEnabled={simpleEnabled} onToggle={(enabled) => toggleProvider(provider.id, enabled)} onManage={() => { window.location.hash = detailHref; }} onConnect={() => openAdd(provider.id)} />;
+    return <ProviderCard key={provider.id} provider={provider} detailHref={detailHref} mode={cardMode} simpleEnabled={simpleEnabled} onToggle={(enabled) => toggleProvider(provider.id, enabled)} onManage={() => { window.location.hash = detailHref; }} onConnect={() => openAdd(provider.catalogId ?? provider.id)} />;
   }
 
   return (
@@ -279,7 +286,7 @@ export function ProvidersContent() {
         </div>
       </div>
 
-      <AddProviderModal open={addOpen} initialProviderId={initialProviderId} onClose={() => { setAddOpen(false); setInitialProviderId(undefined); }} onSave={handleSave} onSaveMany={handleSaveMany} />
+      <AddProviderModal open={addOpen} initialProviderId={initialProviderId} initialModelPolicy={initialModelPolicy} onClose={() => { setAddOpen(false); setInitialProviderId(undefined); setInitialModelPolicy(undefined); }} onSave={handleSave} onSaveMany={handleSaveMany} />
     </>
   );
 }

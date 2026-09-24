@@ -1,4 +1,4 @@
-import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type Model, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@omnihilbras/sdk';
+import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@omnihilbras/sdk';
 import type { ConnectionInput, ConnectionRecord, ConnectionStore } from './connections.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -16,6 +16,8 @@ export type GatewayConnectionValidation = {
   checkedAt: string;
   latencyMs?: number;
 };
+
+const connectionMutationLock = 'connection-mutations';
 
 export class GatewayService {
   private readonly connectionLocks = new Map<string, Promise<void>>();
@@ -70,11 +72,18 @@ export class GatewayService {
 
   async saveConnection(input: ConnectionInput, credential: ProviderCredential, signal?: AbortSignal): Promise<ConnectionRecord> {
     if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
-    return this.withProviderLock(input.providerId, async () => {
+    return this.withProviderLock(connectionMutationLock, async () => {
       await this.validateConnectionCredentialUnlocked(input.providerId, credential, signal);
+      let saveInput = input;
+      if (input.modelPolicy) {
+        const discoveredModelIds = await this.discoverConnectionModels(input.providerId, credential, input.modelPolicy, signal);
+        const existing = (await this.connectionStore!.list()).find((connection) => (input.id ? connection.id === input.id : connection.providerId === input.providerId));
+        const customModelIds = input.customModelIds ?? existing?.customModelIds ?? [];
+        saveInput = { ...input, modelIds: [...discoveredModelIds, ...customModelIds], customModelIds };
+      }
       if (signal?.aborted) throw new ProviderError('CANCELLED', 'The connection save was cancelled.', { providerId: input.providerId });
       try {
-        return await this.connectionStore!.save(input, credential);
+        return await this.connectionStore!.save(saveInput, credential);
       } catch (error) {
         if (error instanceof ProviderError) throw error;
         throw new ProviderError('CONFIGURATION_ERROR', 'The local connection could not be saved.', { cause: error });
@@ -86,10 +95,21 @@ export class GatewayService {
     return this.connectionStore?.list() ?? [];
   }
 
+  async addConnectionModels(connectionId: string, modelIds: string[]) {
+    if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
+    return this.withProviderLock(connectionMutationLock, async () => {
+      const connection = await this.connectionStore!.updateModels(connectionId, modelIds);
+      if (!connection) throw new ProviderError('NOT_FOUND', 'The local connection was not found.');
+      return connection;
+    });
+  }
+
   async removeConnection(connectionId: string) {
     if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
-    const removed = await this.connectionStore.remove(connectionId);
-    if (!removed) throw new ProviderError('NOT_FOUND', 'The local connection was not found.');
+    return this.withProviderLock(connectionMutationLock, async () => {
+      const removed = await this.connectionStore!.remove(connectionId);
+      if (!removed) throw new ProviderError('NOT_FOUND', 'The local connection was not found.');
+    });
   }
 
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
@@ -102,6 +122,18 @@ export class GatewayService {
     const adapter = this.requireAdapter(providerId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
     yield* adapter.streamChat(request, await this.context(adapter.id, signal));
+  }
+
+  private async discoverConnectionModels(providerId: string, credential: ProviderCredential, policy: ModelImportPolicy, signal?: AbortSignal) {
+    const adapter = this.requireAdapter(providerId);
+    const context: ProviderRequestContext = { credential, ...(signal ? { signal } : {}) };
+    const models = adapter.discoverModels
+      ? await adapter.discoverModels(context, { policy })
+      : policy === 'all' && adapter.listModels && adapter.capabilities.models === true
+        ? await adapter.listModels(context)
+        : undefined;
+    if (!models) throw notSupported(adapter, policy === 'free' ? 'free model discovery' : 'model discovery');
+    return models.map((model) => model.id);
   }
 
   private async validateConnectionCredentialUnlocked(providerId: string, credential: ProviderCredential, signal?: AbortSignal): Promise<GatewayConnectionValidation> {

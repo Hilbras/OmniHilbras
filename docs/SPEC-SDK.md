@@ -93,6 +93,7 @@ Provider URLs are adapter-owned trusted configuration in local mode. Before expo
 - Uses the authenticated `GET /api/v1/key` metadata route for credential checks; an unauthenticated model catalog request is not sufficient validation.
 - Rejects management keys that cannot be used for inference.
 - Overrides health checking so revoked credentials become unavailable instead of relying on the public model list.
+- Model import supports `free` and `all` policies. Free mode requires both provider-reported prompt and completion pricing to be zero; all mode imports the text model catalog.
 
 ### Other and future providers
 
@@ -108,7 +109,8 @@ The first local gateway exposes:
 - `GET /v1/models` — normalized models from configured adapters.
 - `GET /v1/connections` — connection metadata without credentials.
 - `POST /v1/connections/openrouter/check` — validate a candidate OpenRouter key without saving it.
-- `PUT /v1/connections/openrouter` — validate again, then upsert the single local OpenRouter connection.
+- `PUT /v1/connections/openrouter` — validate again, discover the selected model policy, then upsert the single local OpenRouter connection.
+- `POST /v1/connections/:id/models` — add validated model IDs to a saved connection.
 - `DELETE /v1/connections/:id` — remove a local connection.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
 - `POST /v1/chat/completions` with `stream: true` — normalized SSE chunks.
@@ -129,8 +131,12 @@ Gateway errors use one shape:
 
 Connection-management responses are metadata-only and use `Cache-Control: no-store`.
 The OpenRouter Save route always performs a fresh server-side validation before
-writing the credential. Connection metadata is kept in a separate JSON file;
-credentials are encrypted with AES-256-GCM in a separate vault file. The default
+writing the credential, discovers the requested model policy, and writes the
+validated model IDs to connection metadata. Manually added model IDs are kept
+separately so a later re-import does not erase them; the policy describes the
+discovery filter, not the total catalog. Connection metadata is kept in a
+separate JSON file; credentials are encrypted with AES-256-GCM in a separate
+vault file. The default
 vault directory is `$XDG_CONFIG_HOME/omnihilbras` (or `~/.config/omnihilbras`),
 with `0700` directory and `0600` file permissions. A generated local key file is
 supported for first-run convenience; deployments that need stronger key custody

@@ -22,7 +22,7 @@ import {
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
-import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
 
@@ -56,6 +56,10 @@ function statusMeta(status: ProviderStatus) {
   return { label: 'Not connected', className: 'border-line-strong bg-surface-2 text-muted', dot: 'bg-muted' };
 }
 
+function modelReference(providerId: string, model: string) {
+  return providerId === 'openrouter' ? model : `${providerId}/${model}`;
+}
+
 function DetailStat({ label, value, icon: Icon, tone = 'muted' }: { label: string; value: string; icon: typeof Activity; tone?: 'muted' | 'green' | 'gold' | 'blue' }) {
   const toneClass = { muted: 'text-muted', green: 'text-success', gold: 'text-gold-text', blue: 'text-[#5d98e8]' }[tone];
   return <div className="rounded-xl border border-line bg-bg-soft/70 p-3.5"><Icon className={`h-4 w-4 ${toneClass}`} aria-hidden="true" /><p className="muted mt-3 text-[10px] uppercase tracking-[0.1em]">{label}</p><p className="mt-1 truncate font-mono text-sm font-semibold">{value}</p></div>;
@@ -75,6 +79,7 @@ function ConnectionRow({ provider, connection, healthy, testing, onTest, onEdit 
             <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[9px] ${healthy ? 'border-success/20 bg-success/10 text-success' : 'border-gold/30 bg-gold-soft text-gold-text'}`}><span className={`h-1.5 w-1.5 rounded-full ${healthy ? 'bg-success' : 'bg-gold'}`} />{healthy ? 'healthy' : 'health pending'}</span>
             <span className="rounded-full border border-line-strong px-2 py-0.5 font-mono text-[9px] text-muted">{provider.auth}</span>
             <span className="font-mono text-[10px] text-muted">priority #{priority}</span>
+            {connection && <span className="rounded-full border border-line-strong px-2 py-0.5 font-mono text-[9px] text-muted">{connection.modelPolicy === 'free' ? 'free import' : 'all import'}</span>}
           </div>
           <p className="muted mt-2 truncate font-mono text-[10px]">{endpoint}</p>
         </div>
@@ -94,7 +99,7 @@ function ModelRow({ model, providerId, onCopy, onTest, testing, testState }: { m
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? 'border-danger/25 bg-danger/10 text-danger' : 'border-line bg-surface text-muted'}`}>
           {testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
         </span>
-        <div className="min-w-0"><p className="truncate text-xs font-semibold">{model}</p><code className="mt-1 block truncate font-mono text-[10px] text-muted">{providerId}/{model}</code></div>
+        <div className="min-w-0"><p className="truncate text-xs font-semibold">{model}</p><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code></div>
       </div>
       <div className="flex items-center gap-1.5">
         <button type="button" onClick={onCopy} aria-label={`Copy ${model} model ID`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-gold-text"><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>
@@ -104,12 +109,29 @@ function ModelRow({ model, providerId, onCopy, onTest, testing, testState }: { m
   );
 }
 
-function AddModelForm({ onAdd }: { onAdd: (model: string) => void }) {
+function AddModelForm({ onAdd, providerId }: { onAdd: (model: string) => void | Promise<void>; providerId: string }) {
   const [model, setModel] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  async function submit() {
+    const value = model.trim();
+    if (!value || adding) return;
+    setAdding(true);
+    try {
+      await onAdd(value);
+      setModel('');
+    } catch {
+      // The page-level callback presents the actionable error and keeps the input for retry.
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  const placeholder = providerId === 'openrouter' ? 'e.g. openai/gpt-4.1-mini' : 'e.g. gpt-4.1-mini';
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-      <label className="block flex-1"><span className="mono-label mb-2 block">Add custom model ID</span><input value={model} onChange={(event) => setModel(event.target.value)} placeholder="e.g. gpt-4.1-mini" className="input font-mono !text-xs" onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); if (model.trim()) { onAdd(model.trim()); setModel(''); } } }} /></label>
-      <button type="button" onClick={() => { if (model.trim()) { onAdd(model.trim()); setModel(''); } }} disabled={!model.trim()} className="btn-ghost !px-3 !py-2.5 !text-xs"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add model</button>
+      <label className="block flex-1"><span className="mono-label mb-2 block">Add custom model ID</span><input value={model} onChange={(event) => setModel(event.target.value)} placeholder={placeholder} disabled={adding} className="input font-mono !text-xs disabled:cursor-not-allowed disabled:opacity-60" onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submit(); } }} /></label>
+      <button type="button" onClick={() => { void submit(); }} disabled={!model.trim() || adding} aria-busy={adding} className="btn-ghost !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-50"><Plus className="h-3.5 w-3.5" aria-hidden="true" />{adding ? 'Adding' : 'Add model'}</button>
     </div>
   );
 }
@@ -142,7 +164,8 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       .catch(() => undefined);
     return () => { active = false; };
   }, [provider.id]);
-  const allModels = useMemo(() => [...provider.modelList, ...customModels], [customModels, provider.modelList]);
+  const importedModels = connection?.modelIds ?? provider.modelList;
+  const allModels = useMemo(() => [...new Set([...importedModels, ...customModels])], [customModels, importedModels]);
 
   function flash(message: string, tone: 'success' | 'error' = 'success') {
     setNotice(message);
@@ -167,6 +190,8 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   }
 
   async function handleAddConnection(newProvider: NewProvider, apiKey?: string) {
+    let savedModelCount: number | undefined;
+    let savedModelPolicy: 'free' | 'all' | undefined;
     if (newProvider.providerId === 'openrouter') {
       if (!apiKey) throw new Error('Enter the OpenRouter API key before saving.');
       const savedConnection = await saveOpenRouterConnection({
@@ -174,13 +199,16 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
         apiKey,
         priority: newProvider.priority ?? 1,
         proxyPool: newProvider.proxyPool ?? 'none',
+        modelPolicy: newProvider.modelPolicy ?? 'all',
       });
       setConnection(savedConnection);
+      savedModelCount = savedConnection.modelIds.length;
+      savedModelPolicy = savedConnection.modelPolicy;
       setConnectionHealthy(false);
     }
     setConnectionAdded(true);
     setAddOpen(false);
-    flash(newProvider.providerId === 'openrouter' ? 'OpenRouter connection saved securely.' : `${newProvider.name} connection added.`);
+    flash(newProvider.providerId === 'openrouter' ? `OpenRouter saved with ${savedModelCount ?? 0} models (${savedModelPolicy === 'free' ? 'free import' : 'all import'}).` : `${newProvider.name} connection added.`);
   }
 
   function handleAddConnections(newProviders: NewProvider[]) {
@@ -189,12 +217,29 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     flash(`${newProviders.length} ${newProviders.length === 1 ? 'connection' : 'connections'} added.`);
   }
 
-  function addModel(model: string) {
+  async function addModel(model: string) {
     if (allModels.includes(model)) {
       flash('That model is already in the list.');
       return;
     }
-    setCustomModels((current) => [...current, model]);
+    if (provider.id === 'openrouter' && !connection) {
+      const message = 'Connect OpenRouter before adding a model to its saved catalog.';
+      flash(message, 'error');
+      throw new Error(message);
+    }
+    let persisted = false;
+    if (provider.id === 'openrouter' && connection) {
+      try {
+        const updated = await addGatewayConnectionModels(connection.id, [model]);
+        setConnection(updated);
+        persisted = true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'The model could not be saved.';
+        flash(message, 'error');
+        throw error instanceof Error ? error : new Error(message);
+      }
+    }
+    if (!persisted) setCustomModels((current) => [...current, model]);
     flash(`${model} added to the provider catalog.`);
   }
 
@@ -211,7 +256,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   async function copyModel(model: string) {
     if (!navigator.clipboard) return;
     try {
-      await navigator.clipboard.writeText(`${provider.id}/${model}`);
+      await navigator.clipboard.writeText(modelReference(provider.id, model));
       setCopiedModel(model);
       window.setTimeout(() => setCopiedModel(null), 1600);
     } catch {
@@ -252,8 +297,8 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
         <section className="card min-w-0 p-4 sm:p-5" aria-labelledby="models-title">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div><h2 id="models-title" className="text-sm font-semibold">Available models</h2><p className="muted mt-1 text-xs">Models currently exposed by this provider route.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{allModels.length} models</span></div>
           <div className="mt-5 space-y-2">{allModels.length > 0 ? allModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => testModel(model)} testing={testingModel === model} testState={modelTests[model] ?? 'idle'} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No models discovered</p><p className="muted mt-1 text-xs">Connect the provider or add a custom model ID below.</p></div>}</div>
-          <div className="mt-5 border-t border-line pt-5"><AddModelForm onAdd={addModel} /></div>
-          {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {provider.id}/{copiedModel}</p>}
+          <div className="mt-5 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>
+          {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {modelReference(provider.id, copiedModel)}</p>}
         </section>
 
         <section className="card min-w-0 p-4 sm:p-5" aria-labelledby="policy-title">
@@ -266,7 +311,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
 
       <section id="endpoint" className="card mt-5 p-4 sm:p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-sm font-semibold">Endpoint details</h2><p className="muted mt-1 text-xs">The base URL OmniHilbras will use for this provider.</p></div><code className="max-w-full overflow-x-auto rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-muted sm:max-w-[420px]">{connection?.endpoint ?? provider.endpoint}</code></div></section>
 
-      <AddProviderModal open={addOpen} initialProviderId={provider.id} onClose={() => setAddOpen(false)} onSave={handleAddConnection} onSaveMany={handleAddConnections} />
+      <AddProviderModal open={addOpen} initialProviderId={provider.id} initialModelPolicy={connection?.modelPolicy} onClose={() => setAddOpen(false)} onSave={handleAddConnection} onSaveMany={handleAddConnections} />
     </>
   );
 }

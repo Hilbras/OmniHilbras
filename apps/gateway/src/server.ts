@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { ProviderError, canonicalLoopbackHost, isLoopbackHostname, publicProviderMessage, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ProviderCredential, type ToolDefinition } from '@omnihilbras/sdk';
+import { ProviderError, canonicalLoopbackHost, isLoopbackHostname, publicProviderMessage, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ModelImportPolicy, type ProviderCredential, type ToolDefinition } from '@omnihilbras/sdk';
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './config.js';
 import type { ConnectionStore } from './connections.js';
 import type { GatewayService } from './service.js';
@@ -123,6 +123,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (request.method === 'POST' && url.pathname.startsWith('/v1/connections/') && url.pathname.endsWith('/models')) {
+      const encodedConnectionId = url.pathname.slice('/v1/connections/'.length, -'/models'.length);
+      const connectionId = decodeConnectionId(encodedConnectionId);
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['modelIds']);
+      const modelIds = parseModelIds(body.modelIds);
+      const connection = await service.addConnectionModels(connectionId, modelIds);
+      sendJson(response, 200, { connection }, origin);
+      return;
+    }
+
     if (request.method === 'DELETE' && url.pathname.startsWith('/v1/connections/')) {
       const connectionId = decodeConnectionId(url.pathname.slice('/v1/connections/'.length));
       await service.removeConnection(connectionId);
@@ -160,6 +172,7 @@ type OpenRouterConnectionRequest = {
   priority: number;
   proxyPool: string;
   enabled?: boolean;
+  modelPolicy: ModelImportPolicy;
   credential: ProviderCredential;
 };
 
@@ -175,10 +188,11 @@ function parseApiKey(body: unknown) {
 
 function parseOpenRouterConnectionRequest(body: unknown): OpenRouterConnectionRequest {
   if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
-  assertOnlyFields(body, ['apiKey', 'name', 'priority', 'proxyPool', 'enabled']);
+  assertOnlyFields(body, ['apiKey', 'name', 'priority', 'proxyPool', 'enabled', 'modelPolicy']);
   const name = parseBoundedString(body.name, 'name', 120);
   const priority = body.priority === undefined ? 1 : parsePriority(body.priority);
   const proxyPool = body.proxyPool === undefined ? 'none' : parseBoundedString(body.proxyPool, 'proxyPool', 128, true);
+  const modelPolicy = parseModelPolicy(body.modelPolicy);
   if (body.enabled !== undefined && typeof body.enabled !== 'boolean') throw invalidRequest('enabled must be a boolean.');
   return {
     id: 'openrouter',
@@ -187,6 +201,7 @@ function parseOpenRouterConnectionRequest(body: unknown): OpenRouterConnectionRe
     endpoint: openRouterEndpoint,
     priority,
     proxyPool,
+    modelPolicy,
     ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
     credential: parseApiKey(body),
   };
@@ -212,6 +227,27 @@ function parseBoundedString(value: unknown, field: string, maxLength: number, al
 function parsePriority(value: unknown) {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 1000) throw invalidRequest('priority must be an integer from 1 to 1000.');
   return value;
+}
+
+function parseModelPolicy(value: unknown): ModelImportPolicy {
+  if (value === undefined) return 'all';
+  if (value !== 'free' && value !== 'all') throw invalidRequest('modelPolicy must be free or all.');
+  return value;
+}
+
+function parseModelIds(value: unknown) {
+  if (!Array.isArray(value) || value.length === 0) throw invalidRequest('modelIds must be a non-empty array.');
+  const modelIds: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== 'string' || item !== item.trim() || !/^[a-z0-9~][a-z0-9._:/~-]{0,255}$/i.test(item)) throw invalidRequest('modelIds contains an invalid model ID.');
+    if (seen.has(item)) continue;
+    seen.add(item);
+    modelIds.push(item);
+    if (modelIds.length > 2_000) throw invalidRequest('modelIds must contain at most 2,000 unique entries.');
+  }
+  if (modelIds.length === 0) throw invalidRequest('modelIds must contain at least one unique model ID.');
+  return modelIds;
 }
 
 function decodeConnectionId(value: string) {

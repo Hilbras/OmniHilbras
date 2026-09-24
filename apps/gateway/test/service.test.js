@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { InMemorySecretStore, ProviderRegistry } from '@omnihilbras/sdk';
+import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@omnihilbras/sdk';
 import { createProviderRegistry, EnvironmentSecretStore, GatewayService, InMemoryConnectionStore, loadGatewayConfig, startGatewayServer } from '../dist/index.js';
 
 test('gateway config loads local defaults and environment credentials', async () => {
@@ -119,4 +119,54 @@ test('saved connection credentials take precedence over environment fallback', a
   assert.deepEqual(await store.get('openrouter'), { type: 'api-key', value: 'environment-key' });
   await service.saveConnection({ providerId: 'openrouter', name: 'Saved', endpoint: 'https://openrouter.ai/api/v1', priority: 1, proxyPool: 'none' }, { type: 'api-key', value: 'saved-key' });
   assert.deepEqual(await store.get('openrouter'), { type: 'api-key', value: 'saved-key' });
+});
+
+test('GatewayService applies free-only and all-model import policies before saving', async () => {
+  const discovered = [];
+  const adapter = {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    capabilities: {},
+    async validateCredential() {},
+    async discoverModels(_context, options) {
+      discovered.push(options.policy);
+      return options.policy === 'free' ? [{ id: 'vendor/free', providerId: 'openrouter' }] : [{ id: 'vendor/all', providerId: 'openrouter' }];
+    },
+  };
+  const store = new InMemoryConnectionStore();
+  const service = new GatewayService(new ProviderRegistry().register(adapter), store, store);
+  const base = { providerId: 'openrouter', name: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1', priority: 1, proxyPool: 'none' };
+
+  const free = await service.saveConnection({ ...base, modelPolicy: 'free' }, { type: 'api-key', value: 'free-key' });
+  await service.addConnectionModels('openrouter', ['vendor/custom']);
+  const all = await service.saveConnection({ ...base, name: 'Renamed', modelPolicy: 'all' }, { type: 'api-key', value: 'all-key' });
+
+  assert.deepEqual(free.modelIds, ['vendor/free']);
+  assert.deepEqual(all.modelIds, ['vendor/all', 'vendor/custom']);
+  assert.deepEqual(all.customModelIds, ['vendor/custom']);
+  assert.deepEqual(discovered, ['free', 'all']);
+});
+
+test('model discovery failure leaves the existing connection unchanged', async () => {
+  let failDiscovery = false;
+  const adapter = {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    capabilities: {},
+    async validateCredential() {},
+    async discoverModels() {
+      if (failDiscovery) throw new ProviderError('PROVIDER_UNAVAILABLE', 'Model discovery failed.', { providerId: 'openrouter' });
+      return [{ id: 'vendor/original', providerId: 'openrouter' }];
+    },
+  };
+  const store = new InMemoryConnectionStore();
+  const service = new GatewayService(new ProviderRegistry().register(adapter), store, store);
+  const input = { providerId: 'openrouter', name: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1', priority: 1, proxyPool: 'none', modelPolicy: 'all' };
+  await service.saveConnection(input, { type: 'api-key', value: 'original-key' });
+
+  failDiscovery = true;
+  await assert.rejects(() => service.saveConnection({ ...input, name: 'Replacement' }, { type: 'api-key', value: 'replacement-key' }));
+
+  assert.deepEqual(await store.get('openrouter'), { type: 'api-key', value: 'original-key' });
+  assert.deepEqual((await store.list())[0].modelIds, ['vendor/original']);
 });

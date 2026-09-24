@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:
 import { chmod, lstat, mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { assertSafeProviderRequestUrl, type ProviderCredential, type ProviderId, type SecretStore } from '@omnihilbras/sdk';
+import { assertSafeProviderRequestUrl, type ModelImportPolicy, type ProviderCredential, type ProviderId, type SecretStore } from '@omnihilbras/sdk';
 
 export type ConnectionRecord = {
   id: string;
@@ -13,6 +13,9 @@ export type ConnectionRecord = {
   proxyPool: string;
   enabled: boolean;
   hasCredential: boolean;
+  modelPolicy: ModelImportPolicy;
+  modelIds: string[];
+  customModelIds: string[];
   createdAt: string;
   updatedAt: string;
 };
@@ -25,6 +28,9 @@ export type ConnectionInput = {
   priority: number;
   proxyPool: string;
   enabled?: boolean;
+  modelPolicy?: ModelImportPolicy;
+  modelIds?: string[];
+  customModelIds?: string[];
 };
 
 export interface WritableSecretStore extends SecretStore {
@@ -35,6 +41,7 @@ export interface WritableSecretStore extends SecretStore {
 export interface ConnectionStore extends WritableSecretStore {
   list(): Promise<ConnectionRecord[]>;
   save(input: ConnectionInput, credential: ProviderCredential): Promise<ConnectionRecord>;
+  updateModels(connectionId: string, modelIds: string[]): Promise<ConnectionRecord | undefined>;
   remove(connectionId: string): Promise<boolean>;
 }
 
@@ -104,6 +111,7 @@ export class InMemoryConnectionStore implements ConnectionStore {
     if (!existing && this.connections.size >= maxConnections) throw new Error('The local connection limit has been reached.');
 
     const now = new Date().toISOString();
+    const modelLists = mergeModelLists(normalized.modelIds ?? existing?.modelIds, normalized.customModelIds ?? existing?.customModelIds);
     const record: ConnectionRecord = {
       id,
       providerId: normalized.providerId,
@@ -113,12 +121,25 @@ export class InMemoryConnectionStore implements ConnectionStore {
       proxyPool: normalized.proxyPool,
       enabled: normalized.enabled ?? existing?.enabled ?? true,
       hasCredential: credential.type === 'api-key',
+      modelPolicy: normalized.modelPolicy ?? existing?.modelPolicy ?? 'all',
+      modelIds: modelLists.modelIds,
+      customModelIds: modelLists.customModelIds,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
     this.connections.set(id, record);
     this.credentials.set(normalized.providerId, cloneCredential(credential));
     return cloneRecord(record);
+  }
+
+  async updateModels(connectionId: string, modelIds: string[]) {
+    const record = this.connections.get(connectionId);
+    if (!record) return undefined;
+    const merged = mergeAddedModelIds(record, modelIds);
+    if (!merged) return cloneRecord(record);
+    const updated = { ...record, ...merged, updatedAt: new Date().toISOString() };
+    this.connections.set(connectionId, updated);
+    return cloneRecord(updated);
   }
 
   async remove(connectionId: string) {
@@ -143,6 +164,7 @@ export class LocalConnectionStore implements ConnectionStore {
   private readonly configuredMasterKey?: Buffer;
   private credentials = new Map<ProviderId, ProviderCredential>();
   private connections = new Map<string, ConnectionRecord>();
+  private mutationQueue: Promise<void> = Promise.resolve();
   private loadPromise?: Promise<void>;
 
   constructor(options: LocalConnectionStoreOptions = {}) {
@@ -155,38 +177,44 @@ export class LocalConnectionStore implements ConnectionStore {
   }
 
   async get(providerId: ProviderId) {
+    await this.mutationQueue;
     await this.ensureLoaded();
     return this.credentials.get(providerId) ?? this.fallback?.get(providerId);
   }
 
   async set(providerId: ProviderId, credential: ProviderCredential) {
-    await this.ensureLoaded();
-    const previous = this.credentials.get(providerId);
-    this.credentials.set(providerId, cloneCredential(credential));
-    try {
-      await this.persistSecrets();
-    } catch (error) {
-      if (previous) this.credentials.set(providerId, previous);
-      else this.credentials.delete(providerId);
-      throw error;
-    }
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = this.credentials.get(providerId);
+      this.credentials.set(providerId, cloneCredential(credential));
+      try {
+        await this.persistSecrets();
+      } catch (error) {
+        if (previous) this.credentials.set(providerId, previous);
+        else this.credentials.delete(providerId);
+        throw error;
+      }
+    });
   }
 
   async delete(providerId: ProviderId) {
-    await this.ensureLoaded();
-    const previous = this.credentials.get(providerId);
-    const deleted = this.credentials.delete(providerId);
-    if (!deleted) return false;
-    try {
-      await this.persistSecrets();
-    } catch (error) {
-      if (previous) this.credentials.set(providerId, previous);
-      throw error;
-    }
-    return true;
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = this.credentials.get(providerId);
+      const deleted = this.credentials.delete(providerId);
+      if (!deleted) return false;
+      try {
+        await this.persistSecrets();
+      } catch (error) {
+        if (previous) this.credentials.set(providerId, previous);
+        throw error;
+      }
+      return true;
+    });
   }
 
   async list() {
+    await this.mutationQueue;
     await this.ensureLoaded();
     return [...this.connections.values()]
       .map((connection) => cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.providerId) }))
@@ -194,64 +222,107 @@ export class LocalConnectionStore implements ConnectionStore {
   }
 
   async save(input: ConnectionInput, credential: ProviderCredential) {
-    const normalized = normalizeInput(input);
-    await this.ensureLoaded();
-    const id = normalized.id ?? this.findIdForProvider(normalized.providerId) ?? normalized.providerId;
-    const existing = this.connections.get(id);
-    if (existing && existing.providerId !== normalized.providerId) throw new Error('Connection ID is already used by another provider.');
-    if (!existing && this.connections.size >= maxConnections) throw new Error('The local connection limit has been reached.');
+    return this.withMutation(async () => {
+      const normalized = normalizeInput(input);
+      await this.ensureLoaded();
+      const id = normalized.id ?? this.findIdForProvider(normalized.providerId) ?? normalized.providerId;
+      const existing = this.connections.get(id);
+      if (existing && existing.providerId !== normalized.providerId) throw new Error('Connection ID is already used by another provider.');
+      if (!existing && this.connections.size >= maxConnections) throw new Error('The local connection limit has been reached.');
 
-    const previousCredential = this.credentials.get(normalized.providerId);
-    const previousConnections = new Map(this.connections);
-    const now = new Date().toISOString();
-    const record: ConnectionRecord = {
-      id,
-      providerId: normalized.providerId,
-      name: normalized.name,
-      endpoint: normalized.endpoint,
-      priority: normalized.priority,
-      proxyPool: normalized.proxyPool,
-      enabled: normalized.enabled ?? existing?.enabled ?? true,
-      hasCredential: credential.type === 'api-key',
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-    };
+      const previousCredential = this.credentials.get(normalized.providerId);
+      const previousConnections = new Map(this.connections);
+      const now = new Date().toISOString();
+      const modelLists = mergeModelLists(normalized.modelIds ?? existing?.modelIds, normalized.customModelIds ?? existing?.customModelIds);
+      const record: ConnectionRecord = {
+        id,
+        providerId: normalized.providerId,
+        name: normalized.name,
+        endpoint: normalized.endpoint,
+        priority: normalized.priority,
+        proxyPool: normalized.proxyPool,
+        enabled: normalized.enabled ?? existing?.enabled ?? true,
+        hasCredential: credential.type === 'api-key',
+        modelPolicy: normalized.modelPolicy ?? existing?.modelPolicy ?? 'all',
+        modelIds: modelLists.modelIds,
+        customModelIds: modelLists.customModelIds,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      };
 
-    this.credentials.set(normalized.providerId, cloneCredential(credential));
-    this.connections.set(id, record);
-    try {
-      await this.persistSecrets();
-      await this.persistMetadata();
-    } catch (error) {
-      this.connections = previousConnections;
-      if (previousCredential) this.credentials.set(normalized.providerId, previousCredential);
-      else this.credentials.delete(normalized.providerId);
-      await this.persistSecrets().catch(() => undefined);
-      await this.persistMetadata().catch(() => undefined);
-      throw error;
-    }
-    return cloneRecord(record);
+      this.credentials.set(normalized.providerId, cloneCredential(credential));
+      this.connections.set(id, record);
+      try {
+        await this.persistSecrets();
+        await this.persistMetadata();
+      } catch (error) {
+        this.connections = previousConnections;
+        if (previousCredential) this.credentials.set(normalized.providerId, previousCredential);
+        else this.credentials.delete(normalized.providerId);
+        await this.persistSecrets().catch(() => undefined);
+        await this.persistMetadata().catch(() => undefined);
+        throw error;
+      }
+      return cloneRecord(record);
+    });
+  }
+
+  async updateModels(connectionId: string, modelIds: string[]) {
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const record = this.connections.get(connectionId);
+      if (!record) return undefined;
+      const merged = mergeAddedModelIds(record, modelIds);
+      if (!merged) return cloneRecord(record);
+      const previous = record;
+      const updated = { ...record, ...merged, updatedAt: new Date().toISOString() };
+      this.connections.set(connectionId, updated);
+      try {
+        await this.persistMetadata();
+      } catch (error) {
+        this.connections.set(connectionId, previous);
+        await this.persistMetadata().catch(() => undefined);
+        throw error;
+      }
+      return cloneRecord(updated);
+    });
   }
 
   async remove(connectionId: string) {
-    await this.ensureLoaded();
-    const record = this.connections.get(connectionId);
-    if (!record) return false;
-    const previousCredential = this.credentials.get(record.providerId);
-    const previousConnections = new Map(this.connections);
-    this.connections.delete(connectionId);
-    this.credentials.delete(record.providerId);
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const record = this.connections.get(connectionId);
+      if (!record) return false;
+      const previousCredential = this.credentials.get(record.providerId);
+      const previousConnections = new Map(this.connections);
+      this.connections.delete(connectionId);
+      this.credentials.delete(record.providerId);
+      try {
+        await this.persistSecrets();
+        await this.persistMetadata();
+      } catch (error) {
+        this.connections = previousConnections;
+        if (previousCredential) this.credentials.set(record.providerId, previousCredential);
+        await this.persistSecrets().catch(() => undefined);
+        await this.persistMetadata().catch(() => undefined);
+        throw error;
+      }
+      return true;
+    });
+  }
+
+  private async withMutation<T>(operation: () => Promise<T>) {
+    const previous = this.mutationQueue;
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    this.mutationQueue = current;
+    await previous;
     try {
-      await this.persistSecrets();
-      await this.persistMetadata();
-    } catch (error) {
-      this.connections = previousConnections;
-      if (previousCredential) this.credentials.set(record.providerId, previousCredential);
-      await this.persistSecrets().catch(() => undefined);
-      await this.persistMetadata().catch(() => undefined);
-      throw error;
+      return await operation();
+    } finally {
+      release();
+      if (this.mutationQueue === current) this.mutationQueue = Promise.resolve();
     }
-    return true;
   }
 
   private findIdForProvider(providerId: ProviderId) {
@@ -292,6 +363,7 @@ export class LocalConnectionStore implements ConnectionStore {
 
   private async persistMetadata() {
     const payload = JSON.stringify({ version: metadataVersion, connections: [...this.connections.values()] } satisfies MetadataEnvelope, null, 2) + '\n';
+    if (Buffer.byteLength(payload, 'utf8') > maxMetadataBytes) throw new Error('Local connection metadata exceeds the size limit.');
     await atomicWrite(this.metadataPath, payload);
   }
 
@@ -364,7 +436,47 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
   if (!Number.isInteger(input.priority) || input.priority < 1 || input.priority > 1000) throw new Error('Connection priority must be an integer from 1 to 1000.');
   const proxyPool = input.proxyPool.trim();
   if (proxyPool.length > 128 || /[\r\n\0]/.test(proxyPool)) throw new Error('Proxy pool name is invalid.');
-  return { id: input.id, providerId, name, endpoint, priority: input.priority, proxyPool, ...(input.enabled === undefined ? {} : { enabled: input.enabled }) };
+  if (input.modelPolicy !== undefined && input.modelPolicy !== 'free' && input.modelPolicy !== 'all') throw new Error('Model import policy is invalid.');
+  const modelIds = input.modelIds === undefined ? undefined : normalizeModelIds(input.modelIds);
+  const customModelIds = input.customModelIds === undefined ? undefined : normalizeModelIds(input.customModelIds);
+  return { id: input.id, providerId, name, endpoint, priority: input.priority, proxyPool, ...(input.enabled === undefined ? {} : { enabled: input.enabled }), ...(input.modelPolicy === undefined ? {} : { modelPolicy: input.modelPolicy }), ...(modelIds === undefined ? {} : { modelIds }), ...(customModelIds === undefined ? {} : { customModelIds }) };
+}
+
+function normalizeModelIds(values: string[]) {
+  if (!Array.isArray(values)) throw new Error('Model IDs must be an array.');
+  const modelIds: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== 'string') throw new Error('Model IDs must be strings.');
+    const modelId = value.trim();
+    if (!isSafeModelId(modelId)) throw new Error('Model ID contains unsupported characters.');
+    if (seen.has(modelId)) continue;
+    seen.add(modelId);
+    modelIds.push(modelId);
+    if (modelIds.length > 2_000) throw new Error('The model list is too large.');
+  }
+  return modelIds;
+}
+
+function mergeModelLists(modelIds: string[] | undefined, customModelIds: string[] | undefined) {
+  const custom = normalizeModelIds(customModelIds ?? []);
+  const all = normalizeModelIds([...(modelIds ?? []), ...custom]);
+  return { modelIds: all, customModelIds: custom };
+}
+
+function mergeAddedModelIds(record: ConnectionRecord, additions: string[]) {
+  const normalizedAdditions = normalizeModelIds(additions);
+  const existing = new Set(record.modelIds);
+  const newAdditions = normalizedAdditions.filter((modelId) => !existing.has(modelId));
+  if (newAdditions.length === 0) return undefined;
+  return {
+    modelIds: normalizeModelIds([...record.modelIds, ...newAdditions]),
+    customModelIds: normalizeModelIds([...record.customModelIds, ...newAdditions]),
+  };
+}
+
+function isSafeModelId(value: string) {
+  return value.length > 0 && value.length <= 256 && /^[a-z0-9~][a-z0-9._:/~-]*$/i.test(value);
 }
 
 function parseMetadata(value: string | undefined) {
@@ -391,8 +503,14 @@ function parseRecord(value: unknown): ConnectionRecord {
   if (!isRecord(value) || typeof value.id !== 'string' || typeof value.providerId !== 'string' || typeof value.name !== 'string' || typeof value.endpoint !== 'string' || typeof value.priority !== 'number' || !Number.isInteger(value.priority) || typeof value.proxyPool !== 'string' || typeof value.enabled !== 'boolean' || typeof value.hasCredential !== 'boolean' || typeof value.createdAt !== 'string' || typeof value.updatedAt !== 'string') {
     throw new Error('Local connection metadata contains an invalid record.');
   }
-  const input = normalizeInput({ id: value.id, providerId: value.providerId, name: value.name, endpoint: value.endpoint, priority: value.priority, proxyPool: value.proxyPool, enabled: value.enabled });
-  return { id: input.id!, providerId: input.providerId, name: input.name, endpoint: input.endpoint, priority: input.priority, proxyPool: input.proxyPool, enabled: value.enabled, hasCredential: value.hasCredential, createdAt: value.createdAt, updatedAt: value.updatedAt };
+  if (value.modelPolicy !== undefined && value.modelPolicy !== 'free' && value.modelPolicy !== 'all') throw new Error('Local connection metadata contains an invalid model policy.');
+  if (value.modelIds !== undefined && !Array.isArray(value.modelIds)) throw new Error('Local connection metadata contains an invalid model list.');
+  if (value.customModelIds !== undefined && !Array.isArray(value.customModelIds)) throw new Error('Local connection metadata contains an invalid custom model list.');
+  const modelIds = value.modelIds === undefined ? [] : normalizeModelIds(value.modelIds);
+  const customModelIds = value.customModelIds === undefined ? [] : normalizeModelIds(value.customModelIds);
+  const modelLists = mergeModelLists(modelIds, customModelIds);
+  const input = normalizeInput({ id: value.id, providerId: value.providerId, name: value.name, endpoint: value.endpoint, priority: value.priority, proxyPool: value.proxyPool, enabled: value.enabled, modelPolicy: value.modelPolicy === undefined ? 'all' : value.modelPolicy, modelIds: modelLists.modelIds, customModelIds: modelLists.customModelIds });
+  return { id: input.id!, providerId: input.providerId, name: input.name, endpoint: input.endpoint, priority: input.priority, proxyPool: input.proxyPool, enabled: value.enabled, hasCredential: value.hasCredential, modelPolicy: input.modelPolicy ?? 'all', modelIds: input.modelIds ?? [], customModelIds: input.customModelIds ?? [], createdAt: value.createdAt, updatedAt: value.updatedAt };
 }
 
 function parseCredentials(value: unknown) {
@@ -491,7 +609,7 @@ function cloneCredential(credential: ProviderCredential): ProviderCredential {
 }
 
 function cloneRecord(record: ConnectionRecord): ConnectionRecord {
-  return { ...record };
+  return { ...record, modelIds: [...record.modelIds], customModelIds: [...record.customModelIds] };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

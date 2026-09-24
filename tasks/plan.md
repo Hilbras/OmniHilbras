@@ -134,9 +134,32 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Save performs a second validation before persistence.
 - [x] Existing gateway routes and frontend build remain green.
 
+### Phase 4c: Model import and catalog
+
+- [x] Task 9d: Add model discovery and import policy to OpenRouter connections.
+  - Acceptance: Save accepts a free-only/all-models policy, fetches models server-side with the saved credential, filters free models by provider pricing, validates IDs, persists the selected model list, and preserves manually added IDs across re-imports.
+  - Verify: adapter/service/gateway tests cover pricing parsing, both policies, malformed provider responses, metadata limits, concurrent mutations, and no-secret responses.
+  - Files: `packages/omnihilbras-sdk/src/adapters/openrouter.ts`, `apps/gateway/src/service.ts`, `apps/gateway/src/server.ts`, tests.
+  - Depends on: Tasks 9a–9c.
+  - Scope: Medium.
+
+- [x] Task 9e: Add model import controls and model catalog persistence to the dashboard.
+  - Acceptance: OpenRouter connection dialog has an active/inactive free-model import toggle; Save triggers the correct import; detail pages show imported models and persist custom model IDs only after the gateway confirms them.
+  - Verify: typecheck/build and browser smoke test for both toggle states, edit-policy preservation, and failed/successful model additions.
+  - Files: `src/components/AddProviderModal.tsx`, `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, `src/pages/ProvidersPage.tsx`.
+  - Depends on: Task 9d.
+  - Scope: Medium.
+
+### Checkpoint: Model import
+
+- [x] Free-model filtering uses provider pricing, not model-name heuristics.
+- [x] Model IDs are validated and persisted without credentials.
+- [x] Custom model additions survive re-imports and failed additions remain retryable.
+- [x] Save remains atomic: failed discovery does not replace a valid connection.
+
 ### Phase 5: Cloud readiness
 
-- [ ] Task 11: Define cloud integration boundaries.
+- [ ] Task 10: Define cloud integration boundaries.
   - Acceptance: auth context, tenant context, remote `SecretStore`, and deployment configuration are represented by interfaces without implementing cloud infrastructure.
   - Verify: typecheck and architecture review.
   - Files: SDK/gateway interfaces and documentation.

@@ -32,6 +32,7 @@ export type NewProvider = {
   hasKey: boolean;
   priority?: number;
   proxyPool?: string;
+  modelPolicy?: 'free' | 'all';
 };
 
 type AddMode = 'single' | 'bulk';
@@ -40,12 +41,13 @@ type TestState = 'idle' | 'success' | 'error';
 type AddProviderModalProps = {
   open: boolean;
   initialProviderId?: string;
+  initialModelPolicy?: 'free' | 'all';
   onClose: () => void;
   onSave: (provider: NewProvider, apiKey?: string) => void | Promise<void>;
   onSaveMany?: (providers: NewProvider[]) => void | Promise<void>;
 };
 
-export function AddProviderModal({ open, initialProviderId, onClose, onSave, onSaveMany }: AddProviderModalProps) {
+export function AddProviderModal({ open, initialProviderId, initialModelPolicy, onClose, onSave, onSaveMany }: AddProviderModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const testTimerRef = useRef<number | null>(null);
@@ -58,6 +60,7 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
   const [endpoint, setEndpoint] = useState(providerOptions[0].defaultEndpoint ?? '');
   const [priority, setPriority] = useState('1');
   const [proxyPool, setProxyPool] = useState('none');
+  const [importFreeModels, setImportFreeModels] = useState(true);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testState, setTestState] = useState<TestState>('idle');
@@ -93,6 +96,11 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
       previousFocusRef.current = null;
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setImportFreeModels(initialModelPolicy !== 'all');
+  }, [open, initialModelPolicy]);
 
   useEffect(() => {
     if (!open) return;
@@ -214,6 +222,7 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
         hasKey: Boolean(apiKey.trim()),
         priority: Number(priority) || 1,
         proxyPool,
+        ...(selected.id === 'openrouter' ? { modelPolicy: importFreeModels ? 'free' as const : 'all' as const } : {}),
       }, selected.id === 'openrouter' ? apiKey : undefined);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'The connection could not be saved.');
@@ -276,6 +285,18 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
                       </button>
                     </div>
                     {testState === 'success' && <p role="status" className="mt-2 flex items-center gap-1.5 text-[11px] text-success"><CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />{selected.id === 'openrouter' ? 'Key verified by the local gateway' : 'Key looks valid'}</p>}
+                  </div>
+                )}
+
+                {selected.id === 'openrouter' && (
+                  <div className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-line bg-bg-soft/55 px-3.5 py-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold">Import free models</p>
+                      <p className="muted mt-1 text-[11px] leading-relaxed">{importFreeModels ? 'Save will import models with zero prompt and completion pricing.' : 'Save will import all text models available from OpenRouter.'}</p>
+                    </div>
+                    <button type="button" role="switch" aria-checked={importFreeModels} aria-label="Import free OpenRouter models" disabled={saving || testing} onClick={() => setImportFreeModels((current) => !current)} className={`relative h-6 w-11 shrink-0 rounded-full p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${importFreeModels ? 'bg-[#f0643b]' : 'bg-line-strong'}`}>
+                      <span className={`block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${importFreeModels ? 'translate-x-5' : 'translate-x-0'}`} aria-hidden="true" />
+                    </button>
                   </div>
                 )}
 

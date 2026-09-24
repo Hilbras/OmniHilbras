@@ -132,6 +132,12 @@ export type ProviderHealth = {
   checkedAt: string;
 };
 
+export type ModelImportPolicy = 'free' | 'all';
+
+export type ModelImportOptions = {
+  policy: ModelImportPolicy;
+};
+
 export type CredentialValidation = {
   status: 'valid';
   checkedAt: string;
@@ -147,5 +153,7 @@ export type ProviderAdapter = {
   streamChat?: (request: ChatRequest, context?: ProviderRequestContext) => AsyncIterable<ChatChunk>;
   /** Performs a provider-specific, side-effect-free credential check. */
   validateCredential?: (credential: ProviderCredential | undefined, context?: ProviderRequestContext) => Promise<CredentialValidation | void>;
+  /** Discovers models for a connection import policy. */
+  discoverModels?: (context: ProviderRequestContext | undefined, options: ModelImportOptions) => Promise<readonly Model[]>;
   healthCheck?: (context?: ProviderRequestContext) => Promise<ProviderHealth>;
 };
