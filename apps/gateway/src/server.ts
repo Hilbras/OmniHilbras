@@ -82,7 +82,7 @@ async function handleChat(request: IncomingMessage, response: ServerResponse, se
   const controller = new AbortController();
   const abort = () => controller.abort();
   request.once('aborted', abort);
-  request.once('close', () => {
+  response.once('close', () => {
     if (!response.writableEnded) controller.abort();
   });
 

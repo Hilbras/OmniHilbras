@@ -104,8 +104,8 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     this.name = config.name;
     this.baseUrl = normalizeBaseUrl(config.baseUrl, config.id);
     this.auth = {
-      header: config.auth?.header,
-      prefix: config.auth?.prefix,
+      header: config.auth?.header ?? (config.auth?.required === false ? undefined : 'Authorization'),
+      prefix: config.auth?.prefix ?? (config.auth?.header ? undefined : 'Bearer'),
       required: config.auth?.required ?? true,
     };
     this.modelsPath = config.modelsPath ?? '/models';

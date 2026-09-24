@@ -78,6 +78,13 @@ test('OpenAI-compatible adapter lists models and normalizes stream chunks', asyn
   assert.deepEqual(chunks[1].usage, { inputTokens: 3, outputTokens: 2, totalTokens: 5 });
 });
 
+test('OpenAI-compatible adapter defaults to bearer authentication', async () => {
+  const transport = createTransport();
+  const adapter = new OpenAICompatibleAdapter({ id: 'acme', name: 'Acme', baseUrl: 'https://api.acme.test/v1' }, { transport });
+  await adapter.chat({ model: 'acme-1', messages: [{ role: 'user', content: 'Hello' }] }, { credential: { type: 'api-key', value: 'secret' } });
+  assert.equal(transport.calls[0].headers.Authorization, 'Bearer secret');
+});
+
 test('OpenAI-compatible adapter requires credentials when configured', async () => {
   const adapter = createAdapter(createTransport());
 
