@@ -34,7 +34,7 @@
   - Depends on: Task 2.
   - Scope: Medium.
 
-- [ ] Task 6: Implement the native Gemini adapter.
+- [x] Task 6: Implement the native Gemini adapter.
   - Acceptance: `generateContent`, model listing, authentication, request conversion, and streaming conversion are isolated in the adapter.
   - Verify: adapter tests cover candidate content, safety metadata, errors, and stream chunks.
   - Files: `src/adapters/gemini.ts`, tests.
