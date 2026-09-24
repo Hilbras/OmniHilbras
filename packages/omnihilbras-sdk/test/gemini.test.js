@@ -53,6 +53,32 @@ test('GeminiAdapter converts system instructions, generation config, and respons
   assert.deepEqual(response.usage, { inputTokens: 4, outputTokens: 3, totalTokens: 7 });
 });
 
+test('GeminiAdapter preserves function names across tool continuations', async () => {
+  const transport = createTransport();
+  const adapter = new GeminiAdapter({ transport });
+  await adapter.chat({
+    model: 'gemini-2.5-flash',
+    messages: [
+      { role: 'user', content: 'Look it up' },
+      { role: 'assistant', content: null, toolCalls: [{ id: 'call-1', type: 'function', function: { name: 'lookup', arguments: '{"q":"x"}' } }] },
+      { role: 'tool', toolCallId: 'call-1', content: 'result' },
+    ],
+  }, { credential: { type: 'api-key', value: 'gemini-test' } });
+
+  const body = JSON.parse(transport.calls[0].body);
+  assert.equal(body.contents.at(-1).parts[0].functionResponse.name, 'lookup');
+});
+
+test('GeminiAdapter represents blocked prompts as content-filter responses', async () => {
+  const transport = createTransport({
+    request: async () => ({ status: 200, headers: new Headers(), data: { promptFeedback: { blockReason: 'SAFETY' } } }),
+  });
+  const adapter = new GeminiAdapter({ transport });
+  const response = await adapter.chat({ model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'Blocked' }] }, { credential: { type: 'api-key', value: 'gemini-test' } });
+  assert.equal(response.message.content, null);
+  assert.equal(response.finishReason, 'content_filter');
+});
+
 test('GeminiAdapter lists models and normalizes streaming chunks', async () => {
   const transport = createTransport({
     request: async () => ({ status: 200, headers: new Headers(), data: { models: [{ name: 'models/gemini-2.5-flash', displayName: 'Gemini Flash', inputTokenLimit: 1048576, supportedGenerationMethods: ['generateContent'] }] } }),
@@ -64,7 +90,7 @@ test('GeminiAdapter lists models and normalizes streaming chunks', async () => {
     chunks.push(chunk);
   }
 
-  assert.deepEqual(models, [{ id: 'gemini-2.5-flash', providerId: 'gemini', displayName: 'Gemini Flash', contextWindow: 1048576, capabilities: { chat: true } }]);
+  assert.deepEqual(models, [{ id: 'gemini-2.5-flash', providerId: 'gemini', displayName: 'Gemini Flash', contextWindow: 1048576, capabilities: { chat: true, streaming: false } }]);
   assert.equal(transport.calls[1].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse');
   assert.deepEqual(chunks.map((chunk) => chunk.delta.content), ['Hi', ' there']);
   assert.equal(chunks.at(-1).finishReason, 'stop');

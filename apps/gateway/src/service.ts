@@ -34,7 +34,7 @@ export class GatewayService {
 
   async listAllModels(signal?: AbortSignal): Promise<GatewayModelList> {
     const results = await Promise.all(this.registry.list().map(async (adapter) => {
-      if (!adapter.listModels) return { providerId: adapter.id, models: [], unavailable: { providerId: adapter.id, code: 'NOT_SUPPORTED' } };
+      if (!adapter.listModels || adapter.capabilities.models !== true) return { providerId: adapter.id, models: [], unavailable: { providerId: adapter.id, code: 'NOT_SUPPORTED' } };
       try {
         return { providerId: adapter.id, models: await adapter.listModels(await this.context(adapter.id, signal)), unavailable: undefined };
       } catch (error) {
@@ -49,18 +49,19 @@ export class GatewayService {
 
   async listModels(providerId: string, signal?: AbortSignal) {
     const adapter = this.requireAdapter(providerId);
-    if (!adapter.listModels) throw notSupported(adapter, 'models');
+    if (!adapter.listModels || adapter.capabilities.models !== true) throw notSupported(adapter, 'models');
     return adapter.listModels(await this.context(adapter.id, signal));
   }
 
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
     const adapter = this.requireAdapter(providerId);
+    if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
     return adapter.chat(request, await this.context(adapter.id, signal));
   }
 
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal): AsyncIterable<ChatChunk> {
     const adapter = this.requireAdapter(providerId);
-    if (!adapter.streamChat) throw notSupported(adapter, 'streaming');
+    if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
     yield* adapter.streamChat(request, await this.context(adapter.id, signal));
   }
 

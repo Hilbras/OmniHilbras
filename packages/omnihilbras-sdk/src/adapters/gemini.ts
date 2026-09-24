@@ -1,6 +1,7 @@
 import { ProviderError } from '../errors.js';
 import { parseSseJson, parseSseStream } from '../streaming.js';
 import { FetchHttpTransport, type HttpTransport } from '../transport.js';
+import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../url.js';
 import type {
   ChatChunk,
   ChatMessage,
@@ -41,6 +42,8 @@ type GeminiCandidate = {
 
 type GeminiResponse = {
   candidates?: GeminiCandidate[];
+  promptFeedback?: { blockReason?: string };
+  error?: { code?: number; status?: string; message?: string };
   usageMetadata?: {
     promptTokenCount?: number;
     candidatesTokenCount?: number;
@@ -70,16 +73,17 @@ export class GeminiAdapter implements ProviderAdapter {
   private readonly transport: HttpTransport;
 
   constructor(options: GeminiAdapterOptions = {}) {
-    this.baseUrl = normalizeBaseUrl(options.baseUrl ?? defaultBaseUrl);
-    this.defaultHeaders = options.headers ?? {};
+    this.baseUrl = normalizeProviderBaseUrl(options.baseUrl ?? defaultBaseUrl, this.id);
+    this.defaultHeaders = sanitizeProviderHeaders(options.headers, this.id);
     this.transport = options.transport ?? new FetchHttpTransport({ timeoutMs: options.timeoutMs });
   }
 
   async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
-    const url = new URL('models', `${this.baseUrl}/`);
+    const url = new URL(this.url('models'));
     url.searchParams.set('pageSize', '1000');
     const response = await this.transport.request<GeminiModelList>({
       method: 'GET',
+      providerId: this.id,
       url: url.toString(),
       headers: this.requestHeaders(context.credential, 'application/json'),
       ...(context.signal ? { signal: context.signal } : {}),
@@ -88,13 +92,13 @@ export class GeminiAdapter implements ProviderAdapter {
     if (!Array.isArray(models)) throw invalidResponse(this.id, 'Gemini model list is missing models.');
 
     return models.flatMap((model) => {
-      if (!model.name) return [];
+      if (!model.name || !model.supportedGenerationMethods?.includes('generateContent')) return [];
       return [{
         id: model.name.replace(/^models\//, ''),
         providerId: this.id,
         displayName: model.displayName,
         contextWindow: model.inputTokenLimit,
-        capabilities: model.supportedGenerationMethods?.includes('generateContent') ? { chat: true } : undefined,
+        capabilities: { chat: true, streaming: model.supportedGenerationMethods.includes('streamGenerateContent') },
       }];
     });
   }
@@ -102,6 +106,7 @@ export class GeminiAdapter implements ProviderAdapter {
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
     const response = await this.transport.request<GeminiResponse>({
       method: 'POST',
+      providerId: this.id,
       url: this.modelUrl(request.model, 'generateContent').toString(),
       headers: this.requestHeaders(context.credential, 'application/json'),
       body: JSON.stringify(this.toRequestBody(request)),
@@ -115,20 +120,39 @@ export class GeminiAdapter implements ProviderAdapter {
     url.searchParams.set('alt', 'sse');
     const events = this.transport.stream({
       method: 'POST',
+      providerId: this.id,
       url: url.toString(),
       headers: this.requestHeaders(context.credential, 'text/event-stream'),
       body: JSON.stringify(this.toRequestBody(request)),
       ...(context.signal ? { signal: context.signal } : {}),
     });
 
+    let sawPayload = false;
     for await (const event of parseSseStream(events)) {
       const payload = parseSseJson<GeminiStreamChunk>(event, this.id);
       if (!payload) continue;
+      sawPayload = true;
+      if (payload.error) {
+        throw new ProviderError('PROVIDER_REQUEST_FAILED', 'The Gemini stream returned an error.', { providerId: this.id });
+      }
+
       const candidate = payload.candidates?.[0];
+      if (!candidate && payload.promptFeedback?.blockReason) {
+        yield {
+          id: `stream-${request.model}`,
+          providerId: this.id,
+          model: request.model,
+          delta: {},
+          finishReason: 'content_filter',
+        };
+        continue;
+      }
+
       const parts = candidate?.content?.parts ?? [];
       const text = parts.filter((part) => part.text !== undefined).map((part) => part.text ?? '').join('');
       const toolCalls = parts.flatMap((part, partIndex) => part.functionCall ? [{
         index: partIndex,
+        id: `gemini-${partIndex}-${part.functionCall.name ?? 'tool'}`,
         function: {
           name: part.functionCall.name ?? '',
           arguments: JSON.stringify(part.functionCall.args ?? {}),
@@ -151,6 +175,10 @@ export class GeminiAdapter implements ProviderAdapter {
         };
       }
     }
+
+    if (!sawPayload) {
+      throw new ProviderError('INVALID_RESPONSE', 'The Gemini stream returned no response data.', { providerId: this.id });
+    }
   }
 
   async healthCheck(context: ProviderRequestContext = {}) {
@@ -163,15 +191,20 @@ export class GeminiAdapter implements ProviderAdapter {
     }
   }
 
+  private url(path: string) {
+    return resolveProviderUrl(this.baseUrl, path, this.id);
+  }
+
   private modelUrl(model: string, method: string) {
     const modelName = model.replace(/^models\//, '');
-    return new URL(`models/${encodeURIComponent(modelName)}:${method}`, `${this.baseUrl}/`);
+    return new URL(resolveProviderUrl(this.baseUrl, `models/${encodeURIComponent(modelName)}:${method}`, this.id));
   }
 
   private requestHeaders(credential: ProviderCredential | undefined, accept: string) {
     if (credential?.type !== 'api-key') {
       throw new ProviderError('AUTHENTICATION_FAILED', `Missing API key for provider ${this.id}.`, { providerId: this.id });
     }
+    assertSafeProviderHeaderValue('x-goog-api-key', credential.value, this.id);
     return {
       accept,
       ...this.defaultHeaders,
@@ -181,15 +214,23 @@ export class GeminiAdapter implements ProviderAdapter {
   }
 
   private toRequestBody(request: ChatRequest) {
+    assertNoProviderOptions(request, this.id);
     const system = request.messages.filter((message) => message.role === 'system').map((message) => contentToText(message.content)).filter(Boolean).join('\n\n');
+    const toolNames = new Map<string, string>();
+    for (const message of request.messages) {
+      if (message.role === 'assistant') {
+        for (const toolCall of message.toolCalls ?? []) toolNames.set(toolCall.id, toolCall.function.name);
+      }
+    }
     const body: Record<string, unknown> = {
-      contents: request.messages.filter((message) => message.role !== 'system').map(toGeminiContent),
+      contents: request.messages.filter((message) => message.role !== 'system').map((message) => toGeminiContent(message, toolNames)),
     };
     if (system) body.systemInstruction = { role: 'user', parts: [{ text: system }] };
     const generationConfig: Record<string, unknown> = {};
     if (request.temperature !== undefined) generationConfig.temperature = request.temperature;
     if (request.topP !== undefined) generationConfig.topP = request.topP;
     if (request.maxOutputTokens !== undefined) generationConfig.maxOutputTokens = request.maxOutputTokens;
+    if (request.stop !== undefined) generationConfig.stopSequences = [...request.stop];
     if (Object.keys(generationConfig).length > 0) body.generationConfig = generationConfig;
     if (request.tools !== undefined) body.tools = [{ functionDeclarations: request.tools.map(toGeminiTool) }];
     return body;
@@ -197,12 +238,18 @@ export class GeminiAdapter implements ProviderAdapter {
 
   private toChatResponse(response: GeminiResponse, requestedModel: string): ChatResponse {
     const candidate = response.candidates?.[0];
-    const parts = candidate?.content?.parts;
+    if (!candidate && response.promptFeedback?.blockReason) return contentFilterResponse(this.id, requestedModel);
+    if (!candidate) throw invalidResponse(this.id, 'Gemini response is missing a candidate.');
+
+    const parts = candidate.content?.parts;
     if (!Array.isArray(parts)) throw invalidResponse(this.id, 'Gemini response is missing candidate parts.');
 
     const text = parts.filter((part) => part.text !== undefined).map((part) => part.text ?? '').join('');
-    const toolCalls = parts.flatMap((part) => part.functionCall ? [normalizeToolCall(part.functionCall)] : []);
-    if (!text && toolCalls.length === 0) throw invalidResponse(this.id, 'Gemini response did not contain text or a function call.');
+    const toolCalls = parts.flatMap((part, index) => part.functionCall ? [normalizeToolCall(part.functionCall, index)] : []);
+    if (!text && toolCalls.length === 0) {
+      if (candidate.finishReason && isSafetyFinishReason(candidate.finishReason)) return contentFilterResponse(this.id, requestedModel);
+      throw invalidResponse(this.id, 'Gemini response did not contain text or a function call.');
+    }
 
     return {
       id: `gemini-${requestedModel}`,
@@ -214,17 +261,25 @@ export class GeminiAdapter implements ProviderAdapter {
         content: text || null,
         ...(toolCalls.length ? { toolCalls } : {}),
       },
-      finishReason: normalizeFinishReason(candidate?.finishReason),
+      finishReason: normalizeFinishReason(candidate.finishReason),
       ...(response.usageMetadata ? { usage: normalizeUsage(response.usageMetadata) } : {}),
     };
   }
 }
 
-function toGeminiContent(message: ChatMessage) {
+function assertNoProviderOptions(request: ChatRequest, providerId: string) {
+  if (request.providerOptions && Object.keys(request.providerOptions).length > 0) {
+    throw new ProviderError('INVALID_REQUEST', `Provider options are not supported by ${providerId} yet.`, { providerId });
+  }
+}
+
+function toGeminiContent(message: ChatMessage, toolNames: Map<string, string>) {
   if (message.role === 'tool') {
+    const name = message.name ?? (message.toolCallId ? toolNames.get(message.toolCallId) : undefined);
+    if (!name) throw new ProviderError('INVALID_REQUEST', 'Gemini tool results must include a function name.', { providerId: 'gemini' });
     return {
       role: 'user',
-      parts: [{ functionResponse: { name: message.name ?? message.toolCallId ?? 'tool', response: { content: contentToText(message.content) } } }],
+      parts: [{ functionResponse: { name, response: { content: contentToText(message.content) } } }],
     };
   }
 
@@ -266,8 +321,9 @@ function parseToolArguments(value: string): unknown {
   }
 }
 
-function normalizeToolCall(toolCall: { name?: string; args?: unknown }): ToolCall {
-  return { id: '', type: 'function', function: { name: toolCall.name ?? '', arguments: JSON.stringify(toolCall.args ?? {}) } };
+function normalizeToolCall(toolCall: { name?: string; args?: unknown }, index: number): ToolCall {
+  const name = toolCall.name ?? '';
+  return { id: `gemini-${index}-${name || 'tool'}`, type: 'function', function: { name, arguments: JSON.stringify(toolCall.args ?? {}) } };
 }
 
 function normalizeFinishReason(reason: string | null | undefined): FinishReason {
@@ -275,7 +331,10 @@ function normalizeFinishReason(reason: string | null | undefined): FinishReason 
     case 'STOP': return 'stop';
     case 'MAX_TOKENS': return 'length';
     case 'SAFETY':
-    case 'RECITATION': return 'content_filter';
+    case 'RECITATION':
+    case 'PROHIBITED_CONTENT':
+    case 'BLOCKLIST':
+    case 'SPII': return 'content_filter';
     case 'TOOL_CALL': return 'tool_calls';
     default: return reason ? 'other' : 'other';
   }
@@ -289,14 +348,19 @@ function normalizeUsage(usage: NonNullable<GeminiResponse['usageMetadata']>): To
   };
 }
 
-function normalizeBaseUrl(baseUrl: string) {
-  try {
-    const url = new URL(baseUrl);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Unsupported protocol');
-    return url.toString().replace(/\/$/, '');
-  } catch (error) {
-    throw new ProviderError('CONFIGURATION_ERROR', 'Invalid Gemini base URL.', { providerId: 'gemini', cause: error });
-  }
+function isSafetyFinishReason(reason: string) {
+  return ['SAFETY', 'RECITATION', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII'].includes(reason);
+}
+
+function contentFilterResponse(providerId: string, model: string): ChatResponse {
+  return {
+    id: `gemini-${model}`,
+    providerId,
+    model,
+    createdAt: new Date().toISOString(),
+    message: { role: 'assistant', content: null },
+    finishReason: 'content_filter',
+  };
 }
 
 function invalidResponse(providerId: string, message: string) {

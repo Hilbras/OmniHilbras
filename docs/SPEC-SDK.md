@@ -35,6 +35,7 @@ sdk-core → provider-openai-compatible → provider-openai → provider-anthrop
 - Package manager: pnpm workspaces.
 - SDK code is runtime-agnostic and uses standard `fetch` and Web Streams.
 - The first gateway binds to `127.0.0.1:8787` and has no authentication in local mode.
+- Local mode rejects non-loopback binds and wildcard CORS; browser access uses an explicit dashboard-origin allowlist.
 - Credentials are injected through a `SecretStore` boundary; the first implementation reads environment variables and never logs secret values.
 - The SDK does not require a web framework. The local gateway starts with a small Node HTTP adapter and keeps the service layer framework-independent.
 - Provider-native payloads stay inside adapters. The normalized SDK contract is the only contract shared by the gateway and routing code.
@@ -53,7 +54,7 @@ The core package exposes:
 - `HttpTransport` for timeout, cancellation, JSON requests, and streamed responses.
 - `SecretStore` for credential lookup; adapters receive credentials only for the duration of a request.
 
-The normalized contract must be provider-neutral. Provider-specific options are namespaced under `providerOptions` and validated by the adapter that owns them.
+The normalized contract must be provider-neutral. Provider-specific options are namespaced under `providerOptions` and validated by the adapter that owns them; options that an adapter does not implement are rejected rather than silently discarded.
 
 ## First Provider Behavior
 
@@ -106,7 +107,8 @@ Gateway errors use one shape:
     "code": "PROVIDER_REQUEST_FAILED",
     "message": "The provider request failed.",
     "provider": "anthropic",
-    "details": {}
+    "status": 502,
+    "retryable": true
   }
 }
 ```

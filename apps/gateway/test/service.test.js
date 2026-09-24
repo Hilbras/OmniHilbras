@@ -16,10 +16,32 @@ test('gateway config loads local defaults and environment credentials', async ()
 
   assert.equal(config.host, '127.0.0.1');
   assert.equal(config.port, 9000);
+  assert.deepEqual(config.corsOrigins, ['http://localhost:5173', 'http://127.0.0.1:5173']);
   assert.equal(config.compatible.authRequired, true);
   assert.deepEqual(await secretStore.get('openai'), { type: 'api-key', value: 'openai-secret' });
   assert.deepEqual(await secretStore.get('openai-compatible'), { type: 'api-key', value: 'local-secret' });
   assert.equal(await secretStore.get('gemini'), undefined);
+});
+
+test('gateway config rejects non-loopback hosts and wildcard CORS', () => {
+  assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_HOST: '0.0.0.0' }), /loopback/);
+  assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_CORS_ORIGINS: '*' }), /wildcard/);
+});
+
+test('gateway config uses the custom compatible provider credential and paths', async () => {
+  const config = loadGatewayConfig({
+    OMNIHILBRAS_COMPATIBLE_PROVIDER_ID: 'acme',
+    ACME_API_KEY: 'acme-secret',
+    OMNIHILBRAS_COMPATIBLE_MODELS_PATH: '/catalog',
+    OMNIHILBRAS_COMPATIBLE_CHAT_PATH: '/generate',
+  });
+  const secretStore = new EnvironmentSecretStore({ ACME_API_KEY: 'acme-secret' });
+
+  assert.equal(config.compatible.id, 'acme');
+  assert.equal(config.compatible.authRequired, true);
+  assert.equal(config.compatible.modelsPath, '/catalog');
+  assert.equal(config.compatible.chatPath, '/generate');
+  assert.deepEqual(await secretStore.get('acme'), { type: 'api-key', value: 'acme-secret' });
 });
 
 test('gateway config registers all four provider adapters', () => {

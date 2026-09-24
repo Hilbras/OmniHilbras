@@ -1,17 +1,31 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { ProviderError, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ToolDefinition } from '@omnihilbras/sdk';
-import { createGatewayService, loadGatewayConfig, type GatewayConfig } from './config.js';
+import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './config.js';
 import type { GatewayService } from './service.js';
 
 export type GatewayServerOptions = {
+  /** Backwards-compatible single-origin option for tests and embedders. */
   corsOrigin?: string;
+  /** Exact browser origins allowed to call the local gateway. */
+  corsOrigins?: string[];
   maxBodyBytes?: number;
 };
 
+const defaultCorsOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+
 export function createGatewayServer(service: GatewayService, options: GatewayServerOptions = {}) {
+  const corsOrigins = resolveCorsOrigins(options);
   return createServer((request, response) => {
-    void handleRequest(request, response, service, options).catch((error) => {
-      sendError(response, error, options.corsOrigin ?? '*');
+    const requestOrigin = getRequestOrigin(request);
+    if (requestOrigin && !corsOrigins.includes(requestOrigin)) {
+      sendJson(response, 403, { error: { code: 'CORS_ORIGIN_DENIED', message: 'This browser origin is not allowed.' } });
+      return;
+    }
+
+    const responseOrigin = requestOrigin && corsOrigins.includes(requestOrigin) ? requestOrigin : undefined;
+    setCors(response, responseOrigin);
+    void handleRequest(request, response, service, options, responseOrigin).catch((error) => {
+      sendError(response, error);
     });
   });
 }
@@ -20,10 +34,15 @@ export async function startGatewayServer(options: {
   config?: GatewayConfig;
   env?: Readonly<Record<string, string | undefined>>;
   corsOrigin?: string;
+  corsOrigins?: string[];
 } = {}) {
   const config = options.config ?? loadGatewayConfig(options.env);
+  assertLoopbackHost(config.host);
   const service = createGatewayService(config, options.env);
-  const server = createGatewayServer(service, { corsOrigin: options.corsOrigin });
+  const server = createGatewayServer(service, {
+    ...(options.corsOrigin ? { corsOrigin: options.corsOrigin } : {}),
+    ...(options.corsOrigins ? { corsOrigins: options.corsOrigins } : options.corsOrigin ? {} : { corsOrigins: config.corsOrigins }),
+  });
 
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
@@ -42,52 +61,57 @@ export async function startGatewayServer(options: {
   return { config, server, service };
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions) {
-  const origin = options.corsOrigin ?? '*';
-  setCors(response, origin);
-  if (request.method === 'OPTIONS') {
-    response.writeHead(204);
-    response.end();
-    return;
-  }
+async function handleRequest(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const onResponseClose = () => {
+    if (!response.writableEnded) controller.abort();
+  };
+  request.once('aborted', abort);
+  response.once('close', onResponseClose);
 
-  const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
-  if (request.method === 'GET' && url.pathname === '/health') {
-    sendJson(response, 200, { service: 'omnihilbras-gateway', ...(await service.health()) }, origin);
-    return;
-  }
+  try {
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204);
+      response.end();
+      return;
+    }
 
-  if (request.method === 'GET' && url.pathname === '/v1/models') {
-    const result = await service.listAllModels();
-    sendJson(response, 200, {
-      object: 'list',
-      data: result.models.map(toOpenAIModel),
-      unavailable: result.unavailable,
-    }, origin);
-    return;
-  }
+    const url = new URL(request.url ?? '/', 'http://localhost');
+    if (request.method === 'GET' && url.pathname === '/health') {
+      sendJson(response, 200, { service: 'omnihilbras-gateway', ...(await service.health(controller.signal)) }, origin);
+      return;
+    }
 
-  if (request.method === 'POST' && url.pathname === '/v1/chat/completions') {
-    await handleChat(request, response, service, options, origin);
-    return;
-  }
+    if (request.method === 'GET' && url.pathname === '/v1/models') {
+      const result = await service.listAllModels(controller.signal);
+      sendJson(response, 200, {
+        object: 'list',
+        data: result.models.map(toOpenAIModel),
+        unavailable: result.unavailable,
+      }, origin);
+      return;
+    }
 
-  sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Route not found.' } }, origin);
+    if (request.method === 'POST' && url.pathname === '/v1/chat/completions') {
+      await handleChat(request, response, service, options, origin, controller.signal);
+      return;
+    }
+
+    sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Route not found.' } }, origin);
+  } finally {
+    request.off('aborted', abort);
+    response.off('close', onResponseClose);
+  }
 }
 
-async function handleChat(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string) {
+async function handleChat(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
   const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
   const chatRequest = parseChatRequest(body);
   const providerId = getProviderId(request, body);
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  request.once('aborted', abort);
-  response.once('close', () => {
-    if (!response.writableEnded) controller.abort();
-  });
 
   if (!chatRequest.stream) {
-    const result = await service.chat(providerId, chatRequest, controller.signal);
+    const result = await service.chat(providerId, chatRequest, signal);
     sendJson(response, 200, toOpenAICompletion(result), origin);
     return;
   }
@@ -96,19 +120,21 @@ async function handleChat(request: IncomingMessage, response: ServerResponse, se
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-cache',
     connection: 'keep-alive',
-    'access-control-allow-origin': origin,
+    ...(origin ? { 'access-control-allow-origin': origin } : {}),
   });
   response.flushHeaders();
 
   try {
-    for await (const chunk of service.streamChat(providerId, chatRequest, controller.signal)) {
-      response.write(`data: ${JSON.stringify(toOpenAIChunk(chunk))}\n\n`);
+    for await (const chunk of service.streamChat(providerId, chatRequest, signal)) {
+      await writeStreamData(response, `data: ${JSON.stringify(toOpenAIChunk(chunk))}\n\n`, signal);
     }
-    response.write('data: [DONE]\n\n');
+    await writeStreamData(response, 'data: [DONE]\n\n', signal);
     response.end();
   } catch (error) {
-    response.write(`event: error\ndata: ${JSON.stringify(toErrorEnvelope(error))}\n\n`);
-    response.end();
+    if (!response.destroyed && !signal.aborted) {
+      await writeStreamData(response, `event: error\ndata: ${JSON.stringify(toErrorEnvelope(error))}\n\n`, signal).catch(() => undefined);
+      response.end();
+    }
   }
 }
 
@@ -118,30 +144,49 @@ function parseChatRequest(body: unknown): ChatRequest {
   if (!Array.isArray(body.messages) || body.messages.length === 0) throw invalidRequest('messages must be a non-empty array.');
 
   const messages = body.messages.map((message) => parseMessage(message));
-  const request: ChatRequest = {
-    model: body.model,
+  const stream = parseOptionalBoolean(body.stream, 'stream');
+  const temperature = parseOptionalNumber(body.temperature, 'temperature', 0, 2);
+  const topP = parseOptionalNumber(body.top_p, 'top_p', 0, 1);
+  const maxOutputTokens = parseMaxTokens(body);
+  const stop = parseStop(body);
+  const tools = parseTools(body.tools);
+  const providerOptions = body.provider_options === undefined ? undefined : parseProviderOptions(body.provider_options);
+
+  return {
+    model: body.model.trim(),
     messages,
-    ...(typeof body.stream === 'boolean' ? { stream: body.stream } : {}),
-    ...(typeof body.temperature === 'number' ? { temperature: body.temperature } : {}),
-    ...(typeof body.top_p === 'number' ? { topP: body.top_p } : {}),
-    ...(parseMaxTokens(body) !== undefined ? { maxOutputTokens: parseMaxTokens(body) } : {}),
-    ...(parseStop(body) !== undefined ? { stop: parseStop(body) } : {}),
-    ...(Array.isArray(body.tools) ? { tools: body.tools.map(parseTool) } : {}),
-    ...(isRecord(body.provider_options) ? { providerOptions: body.provider_options } : {}),
+    ...(stream !== undefined ? { stream } : {}),
+    ...(temperature !== undefined ? { temperature } : {}),
+    ...(topP !== undefined ? { topP } : {}),
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+    ...(stop !== undefined ? { stop } : {}),
+    ...(tools ? { tools } : {}),
+    ...(providerOptions ? { providerOptions } : {}),
   };
-  return request;
 }
 
 function parseMessage(value: unknown): ChatMessage {
   if (!isRecord(value) || (value.role !== 'system' && value.role !== 'user' && value.role !== 'assistant' && value.role !== 'tool')) {
     throw invalidRequest('Each message must have a valid role.');
   }
-  const content = parseContent(value.content);
+
+  const toolCalls = value.tool_calls === undefined ? undefined : parseToolCalls(value.tool_calls);
+  if (toolCalls && value.role !== 'assistant') throw invalidRequest('Only assistant messages may contain tool calls.');
+  if (value.name !== undefined && typeof value.name !== 'string') throw invalidRequest('Message name must be a string.');
+  if (value.tool_call_id !== undefined && typeof value.tool_call_id !== 'string') throw invalidRequest('tool_call_id must be a string.');
+  if (value.role === 'tool' && (typeof value.tool_call_id !== 'string' || !value.tool_call_id.trim())) {
+    throw invalidRequest('Tool messages must include tool_call_id.');
+  }
+  const content = value.content === undefined && value.role === 'assistant' && toolCalls?.length
+    ? null
+    : parseContent(value.content);
+
   return {
     role: value.role,
     content,
     ...(typeof value.name === 'string' ? { name: value.name } : {}),
     ...(typeof value.tool_call_id === 'string' ? { toolCallId: value.tool_call_id } : {}),
+    ...(toolCalls ? { toolCalls } : {}),
   };
 }
 
@@ -152,15 +197,42 @@ function parseContent(value: unknown): MessageContent {
     if (!isRecord(part)) throw invalidRequest('Message content parts must be objects.');
     if (part.type === 'text' && typeof part.text === 'string') return { type: 'text' as const, text: part.text };
     if (part.type === 'image_url' && isRecord(part.image_url) && typeof part.image_url.url === 'string') {
-      return { type: 'image_url' as const, imageUrl: { url: part.image_url.url, ...(part.image_url.detail === 'low' || part.image_url.detail === 'high' ? { detail: part.image_url.detail } : {}) } };
+      const url = parseImageUrl(part.image_url.url);
+      const detail = part.image_url.detail;
+      if (detail !== undefined && detail !== 'auto' && detail !== 'low' && detail !== 'high') {
+        throw invalidRequest('Image detail must be auto, low, or high.');
+      }
+      return { type: 'image_url' as const, imageUrl: { url, ...(detail ? { detail } : {}) } };
     }
     throw invalidRequest('Message content contains an unsupported part.');
   });
 }
 
+function parseToolCalls(value: unknown): NonNullable<ChatMessage['toolCalls']> {
+  if (!Array.isArray(value) || value.length === 0) throw invalidRequest('tool_calls must be a non-empty array.');
+  return value.map((call) => {
+    if (!isRecord(call) || call.type !== 'function' || typeof call.id !== 'string' || !call.id.trim() || !isRecord(call.function) || typeof call.function.name !== 'string' || !call.function.name.trim() || typeof call.function.arguments !== 'string') {
+      throw invalidRequest('Each tool call must include an id, function name, and arguments.');
+    }
+    try {
+      JSON.parse(call.function.arguments);
+    } catch {
+      throw invalidRequest('Tool call arguments must contain valid JSON.');
+    }
+    return {
+      id: call.id,
+      type: 'function' as const,
+      function: { name: call.function.name, arguments: call.function.arguments },
+    };
+  });
+}
+
 function parseTool(value: unknown): ToolDefinition {
-  if (!isRecord(value) || !isRecord(value.function) || typeof value.function.name !== 'string' || !isRecord(value.function.parameters)) {
+  if (!isRecord(value) || value.type !== 'function' || !isRecord(value.function) || typeof value.function.name !== 'string' || !value.function.name.trim() || !isRecord(value.function.parameters)) {
     throw invalidRequest('Each tool must contain a function name and parameters.');
+  }
+  if (value.function.description !== undefined && typeof value.function.description !== 'string') {
+    throw invalidRequest('Tool descriptions must be strings.');
   }
   return {
     name: value.function.name,
@@ -169,21 +241,75 @@ function parseTool(value: unknown): ToolDefinition {
   };
 }
 
+function parseTools(value: unknown): ToolDefinition[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0) throw invalidRequest('tools must be a non-empty array.');
+  return value.map(parseTool);
+}
+
+function parseProviderOptions(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) throw invalidRequest('provider_options must be an object.');
+  return value;
+}
+
 function parseMaxTokens(body: Record<string, unknown>) {
-  const value = body.max_completion_tokens ?? body.max_tokens;
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+  const hasCompletionTokens = body.max_completion_tokens !== undefined;
+  const hasLegacyTokens = body.max_tokens !== undefined;
+  if (hasCompletionTokens && hasLegacyTokens) throw invalidRequest('Use only one of max_tokens or max_completion_tokens.');
+  const value = hasCompletionTokens ? body.max_completion_tokens : body.max_tokens;
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) throw invalidRequest('max_tokens must be a positive integer.');
+  return value;
 }
 
 function parseStop(body: Record<string, unknown>) {
-  if (typeof body.stop === 'string') return [body.stop];
-  if (Array.isArray(body.stop) && body.stop.every((value) => typeof value === 'string')) return body.stop;
-  return undefined;
+  if (body.stop === undefined) return undefined;
+  if (typeof body.stop === 'string') {
+    if (!body.stop) throw invalidRequest('stop must not be empty.');
+    return [body.stop];
+  }
+  if (!Array.isArray(body.stop) || body.stop.length === 0 || !body.stop.every((value) => typeof value === 'string' && value.length > 0)) {
+    throw invalidRequest('stop must be a string or a non-empty array of strings.');
+  }
+  return body.stop;
+}
+
+function parseOptionalBoolean(value: unknown, name: string) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') throw invalidRequest(`${name} must be a boolean.`);
+  return value;
+}
+
+function parseOptionalNumber(value: unknown, name: string, minimum: number, maximum: number) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) {
+    throw invalidRequest(`${name} must be a finite number between ${minimum} and ${maximum}.`);
+  }
+  return value;
+}
+
+function parseImageUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'data:') {
+      if (!value.startsWith('data:image/')) throw new Error('Only image data URLs are supported.');
+    } else if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      throw new Error('Unsupported image URL protocol.');
+    }
+    return value;
+  } catch (error) {
+    throw invalidRequest('Image URLs must be valid http(s) or image data URLs.');
+  }
 }
 
 function getProviderId(request: IncomingMessage, body: unknown) {
   const header = request.headers['x-omnihilbras-provider'];
+  if (Array.isArray(header)) throw invalidRequest('x-omnihilbras-provider must be a single value.');
   if (typeof header === 'string' && header.trim()) return header.trim();
-  if (isRecord(body) && typeof body.provider === 'string' && body.provider.trim()) return body.provider.trim();
+  if (isRecord(body) && body.provider !== undefined) {
+    if (typeof body.provider !== 'string' || !body.provider.trim()) throw invalidRequest('provider must be a non-empty string.');
+    return body.provider.trim();
+  }
   return 'openai';
 }
 
@@ -250,30 +376,92 @@ function toOpenAIModel(model: Model) {
   return { id: model.id, object: 'model', owned_by: model.providerId, ...(model.displayName ? { display_name: model.displayName } : {}), ...(model.contextWindow ? { context_window: model.contextWindow } : {}) };
 }
 
-function setCors(response: ServerResponse, origin: string) {
-  response.setHeader('access-control-allow-origin', origin);
-  response.setHeader('access-control-allow-headers', 'content-type, x-omnihilbras-provider');
-  response.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
+async function writeStreamData(response: ServerResponse, data: string, signal: AbortSignal) {
+  if (signal.aborted || response.destroyed || response.writableEnded) {
+    throw new ProviderError('CANCELLED', 'The client closed the response stream.', { cause: signal.reason });
+  }
+  if (response.write(data)) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      response.off('drain', onDrain);
+      response.off('close', onClose);
+      response.off('error', onError);
+      signal.removeEventListener('abort', onAbort);
+    };
+    const onDrain = () => {
+      cleanup();
+      resolve();
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new ProviderError('CANCELLED', 'The client closed the response stream.'));
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(new ProviderError('CANCELLED', 'The response stream was cancelled.', { cause: signal.reason }));
+    };
+    response.once('drain', onDrain);
+    response.once('close', onClose);
+    response.once('error', onError);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
-function sendJson(response: ServerResponse, status: number, body: unknown, origin: string) {
+function resolveCorsOrigins(options: GatewayServerOptions) {
+  const configured = options.corsOrigins ?? (options.corsOrigin ? [options.corsOrigin] : defaultCorsOrigins);
+  const origins = [...new Set(configured.map((origin) => origin.trim()).filter(Boolean))];
+  if (origins.includes('*')) throw new Error('Wildcard CORS is not allowed for the local gateway.');
+  return origins;
+}
+
+function getRequestOrigin(request: IncomingMessage) {
+  const origin = request.headers.origin;
+  return typeof origin === 'string' ? origin : undefined;
+}
+
+function setCors(response: ServerResponse, origin: string | undefined) {
+  if (origin) response.setHeader('access-control-allow-origin', origin);
+  response.setHeader('access-control-allow-headers', 'content-type, x-omnihilbras-provider');
+  response.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
+  response.setHeader('vary', 'Origin');
+}
+
+function sendJson(response: ServerResponse, status: number, body: unknown, origin?: string) {
   const payload = JSON.stringify(body);
-  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(payload), 'access-control-allow-origin': origin });
+  if (origin) response.setHeader('access-control-allow-origin', origin);
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(payload),
+  });
   response.end(payload);
 }
 
-function sendError(response: ServerResponse, error: unknown, origin: string) {
+function sendError(response: ServerResponse, error: unknown) {
+  if (response.destroyed) return;
   if (response.headersSent) {
     response.end();
     return;
   }
   const envelope = toErrorEnvelope(error);
-  sendJson(response, statusForError(error), envelope, origin);
+  sendJson(response, statusForError(error), envelope);
 }
 
 function toErrorEnvelope(error: unknown) {
   if (error instanceof ProviderError) {
-    return { error: { code: error.code, message: error.message, ...(error.providerId ? { provider: error.providerId } : {}) } };
+    return {
+      error: {
+        code: error.code,
+        message: error.message,
+        ...(error.providerId ? { provider: error.providerId } : {}),
+        ...(error.statusCode ? { status: error.statusCode } : {}),
+        ...(error.retryable ? { retryable: true } : {}),
+      },
+    };
   }
   return { error: { code: 'INTERNAL_ERROR', message: 'The gateway encountered an unexpected error.' } };
 }
@@ -283,6 +471,7 @@ function statusForError(error: unknown) {
   if (error.code === 'INVALID_REQUEST') return 400;
   if (error.code === 'AUTHENTICATION_FAILED') return 401;
   if (error.code === 'NOT_SUPPORTED') return 501;
+  if (error.code === 'NOT_FOUND') return 404;
   if (error.code === 'RATE_LIMITED') return 429;
   if (error.code === 'PROVIDER_TIMEOUT') return 504;
   if (error.code === 'CANCELLED') return 499;

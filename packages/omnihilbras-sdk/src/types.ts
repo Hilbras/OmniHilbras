@@ -64,7 +64,6 @@ export type ChatRequest = {
   stream?: boolean;
   tools?: readonly ToolDefinition[];
   providerOptions?: Record<string, unknown>;
-  metadata?: Record<string, string>;
 };
 
 export type TokenUsage = {
@@ -138,7 +137,7 @@ export type ProviderAdapter = {
   readonly name: string;
   readonly capabilities: ProviderCapabilities;
   listModels?: (context?: ProviderRequestContext) => Promise<readonly Model[]>;
-  chat: (request: ChatRequest, context?: ProviderRequestContext) => Promise<ChatResponse>;
+  chat?: (request: ChatRequest, context?: ProviderRequestContext) => Promise<ChatResponse>;
   streamChat?: (request: ChatRequest, context?: ProviderRequestContext) => AsyncIterable<ChatChunk>;
   healthCheck?: (context?: ProviderRequestContext) => Promise<ProviderHealth>;
 };

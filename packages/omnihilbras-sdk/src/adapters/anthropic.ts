@@ -1,6 +1,7 @@
 import { ProviderError } from '../errors.js';
 import { parseSseJson, parseSseStream } from '../streaming.js';
 import { FetchHttpTransport, type HttpTransport } from '../transport.js';
+import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../url.js';
 import type {
   ChatChunk,
   ChatMessage,
@@ -88,18 +89,19 @@ export class AnthropicAdapter implements ProviderAdapter {
   private readonly transport: HttpTransport;
 
   constructor(options: AnthropicAdapterOptions = {}) {
-    this.baseUrl = normalizeBaseUrl(options.baseUrl ?? 'https://api.anthropic.com');
+    this.baseUrl = normalizeProviderBaseUrl(options.baseUrl ?? 'https://api.anthropic.com', this.id);
     this.apiVersion = options.apiVersion ?? defaultApiVersion;
     this.defaultMaxTokens = options.defaultMaxTokens ?? defaultMaxTokens;
-    this.defaultHeaders = options.headers ?? {};
+    this.defaultHeaders = sanitizeProviderHeaders(options.headers, this.id);
     this.transport = options.transport ?? new FetchHttpTransport({ timeoutMs: options.timeoutMs });
   }
 
   async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
-    const url = new URL('v1/models', `${this.baseUrl}/`);
+    const url = new URL(this.url('v1/models'));
     url.searchParams.set('limit', '1000');
     const response = await this.transport.request<AnthropicModelList>({
       method: 'GET',
+      providerId: this.id,
       url: url.toString(),
       headers: this.requestHeaders(context.credential, 'application/json'),
       ...(context.signal ? { signal: context.signal } : {}),
@@ -118,6 +120,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
     const response = await this.transport.request<AnthropicMessageResponse>({
       method: 'POST',
+      providerId: this.id,
       url: this.url('v1/messages'),
       headers: this.requestHeaders(context.credential, 'application/json'),
       body: JSON.stringify(this.toRequestBody(request, false)),
@@ -129,6 +132,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
     const events = this.transport.stream({
       method: 'POST',
+      providerId: this.id,
       url: this.url('v1/messages'),
       headers: this.requestHeaders(context.credential, 'text/event-stream'),
       body: JSON.stringify(this.toRequestBody(request, true)),
@@ -137,15 +141,22 @@ export class AnthropicAdapter implements ProviderAdapter {
     const toolBlocks = new Map<number, { id?: string; name?: string }>();
     let responseId = `stream-${request.model}`;
     let responseModel = request.model;
+    let sawPayload = false;
+    let sawMessageStop = false;
 
     for await (const event of parseSseStream(events)) {
       const payload = parseSseJson<AnthropicStreamEvent>(event, this.id);
       if (!payload) continue;
+      sawPayload = true;
       if (event.event === 'error' || payload.type === 'error') {
-        throw new ProviderError('PROVIDER_REQUEST_FAILED', payload.error?.message ?? 'Anthropic stream returned an error.', {
+        throw new ProviderError('PROVIDER_REQUEST_FAILED', 'The Anthropic stream returned an error.', {
           providerId: this.id,
-          details: payload.error,
         });
+      }
+
+      if (payload.type === 'message_stop') {
+        sawMessageStop = true;
+        continue;
       }
 
       if (payload.type === 'message_start') {
@@ -200,6 +211,10 @@ export class AnthropicAdapter implements ProviderAdapter {
         }
       }
     }
+
+    if (!sawPayload || !sawMessageStop) {
+      throw new ProviderError('INVALID_RESPONSE', 'The Anthropic stream ended before completion.', { providerId: this.id });
+    }
   }
 
   async healthCheck(context: ProviderRequestContext = {}) {
@@ -213,13 +228,14 @@ export class AnthropicAdapter implements ProviderAdapter {
   }
 
   private url(path: string) {
-    return new URL(path.replace(/^\/+/, ''), `${this.baseUrl}/`).toString();
+    return resolveProviderUrl(this.baseUrl, path, this.id);
   }
 
   private requestHeaders(credential: ProviderCredential | undefined, accept: string) {
     if (credential?.type !== 'api-key') {
       throw new ProviderError('AUTHENTICATION_FAILED', `Missing API key for provider ${this.id}.`, { providerId: this.id });
     }
+    assertSafeProviderHeaderValue('x-api-key', credential.value, this.id);
     return {
       accept,
       ...this.defaultHeaders,
@@ -230,6 +246,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   }
 
   private toRequestBody(request: ChatRequest, stream: boolean) {
+    assertNoProviderOptions(request, this.id);
     const system = request.messages.filter((message) => message.role === 'system').map((message) => contentToText(message.content)).filter(Boolean).join('\n\n');
     const messages = request.messages.filter((message) => message.role !== 'system').map(toAnthropicMessage);
     const body: Record<string, unknown> = {
@@ -252,7 +269,20 @@ export class AnthropicAdapter implements ProviderAdapter {
 
     const text = blocks.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('');
     const toolCalls = blocks.filter((block) => block.type === 'tool_use').map(normalizeToolUse);
-    if (!text && toolCalls.length === 0) throw invalidResponse(this.id, 'Anthropic response did not contain text or tool use.');
+    if (!text && toolCalls.length === 0) {
+      if (response.stop_reason === 'refusal') {
+        return {
+          id: response.id ?? `response-${requestedModel}`,
+          providerId: this.id,
+          model: response.model ?? requestedModel,
+          createdAt: new Date().toISOString(),
+          message: { role: 'assistant', content: null },
+          finishReason: 'content_filter',
+          ...(response.usage ? { usage: normalizeUsage(response.usage) } : {}),
+        };
+      }
+      throw invalidResponse(this.id, 'Anthropic response did not contain text or tool use.');
+    }
 
     return {
       id: response.id ?? `response-${requestedModel}`,
@@ -267,6 +297,12 @@ export class AnthropicAdapter implements ProviderAdapter {
       finishReason: normalizeFinishReason(response.stop_reason),
       ...(response.usage ? { usage: normalizeUsage(response.usage) } : {}),
     };
+  }
+}
+
+function assertNoProviderOptions(request: ChatRequest, providerId: string) {
+  if (request.providerOptions && Object.keys(request.providerOptions).length > 0) {
+    throw new ProviderError('INVALID_REQUEST', `Provider options are not supported by ${providerId} yet.`, { providerId });
   }
 }
 
@@ -330,16 +366,6 @@ function normalizeFinishReason(reason: string | null | undefined): FinishReason 
 
 function normalizeUsage(usage: { input_tokens?: number; output_tokens?: number }): TokenUsage {
   return { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens };
-}
-
-function normalizeBaseUrl(baseUrl: string) {
-  try {
-    const url = new URL(baseUrl);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Unsupported protocol');
-    return url.toString().replace(/\/$/, '');
-  } catch (error) {
-    throw new ProviderError('CONFIGURATION_ERROR', 'Invalid Anthropic base URL.', { providerId: 'anthropic', cause: error });
-  }
 }
 
 function invalidResponse(providerId: string, message: string) {

@@ -60,6 +60,16 @@ test('AnthropicAdapter converts system messages, tools, and responses', async ()
   assert.deepEqual(response.usage, { inputTokens: 4, outputTokens: 3 });
 });
 
+test('AnthropicAdapter represents a refusal as a content-filter response', async () => {
+  const transport = createTransport({
+    request: async () => ({ status: 200, headers: new Headers(), data: { id: 'msg-refusal', model: 'claude-sonnet-4', content: [], stop_reason: 'refusal' } }),
+  });
+  const adapter = new AnthropicAdapter({ transport });
+  const response = await adapter.chat({ model: 'claude-sonnet-4', messages: [{ role: 'user', content: 'Hello' }] }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  assert.equal(response.message.content, null);
+  assert.equal(response.finishReason, 'content_filter');
+});
+
 test('AnthropicAdapter normalizes native SSE events and tool deltas', async () => {
   const transport = createTransport({
     stream: async function* () {
@@ -70,6 +80,7 @@ test('AnthropicAdapter normalizes native SSE events and tool deltas', async () =
       yield 'event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool-1","name":"lookup"}}\n\n';
       yield 'event: content_block_delta\ndata: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"q\\":\\"x\\"}"}}\n\n';
       yield 'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":9}}\n\n';
+      yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n';
     },
   });
   const adapter = new AnthropicAdapter({ transport });

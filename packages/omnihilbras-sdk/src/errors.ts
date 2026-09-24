@@ -1,5 +1,6 @@
 export type ProviderErrorCode =
   | 'NOT_SUPPORTED'
+  | 'NOT_FOUND'
   | 'INVALID_REQUEST'
   | 'AUTHENTICATION_FAILED'
   | 'RATE_LIMITED'
@@ -36,13 +37,15 @@ export class ProviderError extends Error {
   }
 
   toJSON() {
+    // Provider error payloads may contain credentials or prompt data. Keep the
+    // public JSON shape deliberately small; callers can inspect the original
+    // error in-process when they own the adapter.
     return {
       code: this.code,
       message: this.message,
       providerId: this.providerId,
       statusCode: this.statusCode,
       retryable: this.retryable,
-      details: this.details,
     };
   }
 }

@@ -1,6 +1,7 @@
 import { ProviderError } from '../errors.js';
 import { parseSseJson, parseSseStream } from '../streaming.js';
 import { FetchHttpTransport, type HttpTransport } from '../transport.js';
+import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../url.js';
 import type {
   ChatChunk,
   ChatMessage,
@@ -102,15 +103,19 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   constructor(config: OpenAICompatibleAdapterConfig, options: OpenAICompatibleAdapterOptions = {}) {
     this.id = config.id;
     this.name = config.name;
-    this.baseUrl = normalizeBaseUrl(config.baseUrl, config.id);
+    this.baseUrl = normalizeProviderBaseUrl(config.baseUrl, config.id);
+    const authHeader = config.auth?.header ?? (config.auth?.required === false ? undefined : 'Authorization');
+    const authPrefix = config.auth?.prefix ?? (config.auth?.header ? undefined : 'Bearer');
+    if (authHeader) assertSafeProviderHeaderName(authHeader, config.id, { allowCredential: true });
+    if (authPrefix && /[\r\n\0]/.test(authPrefix)) throw new ProviderError('CONFIGURATION_ERROR', `Authentication prefix is unsafe for provider ${config.id}.`, { providerId: config.id });
     this.auth = {
-      header: config.auth?.header ?? (config.auth?.required === false ? undefined : 'Authorization'),
-      prefix: config.auth?.prefix ?? (config.auth?.header ? undefined : 'Bearer'),
+      header: authHeader,
+      prefix: authPrefix,
       required: config.auth?.required ?? true,
     };
     this.modelsPath = config.modelsPath ?? '/models';
     this.chatPath = config.chatPath ?? '/chat/completions';
-    this.headers = config.headers ?? {};
+    this.headers = sanitizeProviderHeaders(config.headers, config.id);
     this.maxTokensField = config.maxTokensField ?? 'max_tokens';
     this.capabilities = {
       chat: true,
@@ -124,6 +129,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
     const response = await this.transport.request<OpenAIModelList>({
       method: 'GET',
+      providerId: this.id,
       url: this.url(this.modelsPath),
       headers: this.requestHeaders(context.credential, 'application/json'),
       ...(context.signal ? { signal: context.signal } : {}),
@@ -137,6 +143,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
     const response = await this.transport.request<OpenAIResponse>({
       method: 'POST',
+      providerId: this.id,
       url: this.url(this.chatPath),
       headers: this.requestHeaders(context.credential, 'application/json'),
       body: JSON.stringify(this.toRequestBody(request, false)),
@@ -148,15 +155,23 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
     const events = this.transport.stream({
       method: 'POST',
+      providerId: this.id,
       url: this.url(this.chatPath),
       headers: this.requestHeaders(context.credential, 'text/event-stream'),
       body: JSON.stringify(this.toRequestBody(request, true)),
       ...(context.signal ? { signal: context.signal } : {}),
     });
 
+    let sawPayload = false;
+    let sawDone = false;
     for await (const event of parseSseStream(events)) {
+      if (event.data.trim() === '[DONE]') {
+        sawDone = true;
+        break;
+      }
       const payload = parseSseJson<OpenAIStreamChunk>(event, this.id);
       if (!payload) continue;
+      sawPayload = true;
       if (payload.error) throw providerStreamError(this.id, payload.error);
 
       const choice = payload.choices?.[0];
@@ -175,6 +190,10 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       };
       yield chunk;
     }
+
+    if (!sawPayload || !sawDone) {
+      throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before completion.', { providerId: this.id });
+    }
   }
 
   async healthCheck(context: ProviderRequestContext = {}) {
@@ -188,15 +207,17 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   }
 
   private url(path: string) {
-    return new URL(path.replace(/^\/+/, ''), `${this.baseUrl}/`).toString();
+    return resolveProviderUrl(this.baseUrl, path, this.id);
   }
 
   private requestHeaders(credential: ProviderCredential | undefined, accept: string) {
     const headers: Record<string, string> = {
       accept,
       ...this.headers,
+      'content-type': 'application/json',
     };
     if (credential?.type === 'api-key' && this.auth.header) {
+      assertSafeProviderHeaderValue(this.auth.header, credential.value, this.id);
       headers[this.auth.header] = this.auth.prefix ? `${this.auth.prefix} ${credential.value}` : credential.value;
     } else if (this.auth.required) {
       throw new ProviderError('AUTHENTICATION_FAILED', `Missing API key for provider ${this.id}.`, { providerId: this.id });
@@ -205,6 +226,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   }
 
   private toRequestBody(request: ChatRequest, stream: boolean) {
+    assertNoProviderOptions(request, this.id);
     const body: Record<string, unknown> = {
       model: request.model,
       messages: request.messages.map(toOpenAIMessage),
@@ -238,16 +260,6 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   }
 }
 
-function normalizeBaseUrl(baseUrl: string, providerId: string) {
-  try {
-    const url = new URL(baseUrl);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Unsupported protocol');
-    return url.toString().replace(/\/$/, '');
-  } catch (error) {
-    throw new ProviderError('CONFIGURATION_ERROR', `Invalid base URL for provider ${providerId}.`, { providerId, cause: error });
-  }
-}
-
 function toOpenAIMessage(message: ChatMessage) {
   return {
     role: message.role,
@@ -260,7 +272,9 @@ function toOpenAIMessage(message: ChatMessage) {
 
 function toOpenAIContent(content: MessageContent) {
   if (content === null || typeof content === 'string') return content;
-  return content.map((part) => part.type === 'text' ? { type: 'text', text: part.text } : part);
+  return content.map((part) => part.type === 'text'
+    ? { type: 'text', text: part.text }
+    : { type: 'image_url', image_url: part.imageUrl });
 }
 
 function toOpenAITool(tool: ToolDefinition) {
@@ -309,9 +323,14 @@ function normalizeUsage(usage: NonNullable<OpenAIResponse['usage']>): TokenUsage
   };
 }
 
-function providerStreamError(providerId: string, error: unknown) {
-  const message = error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' ? error.message : 'Provider stream returned an error.';
-  return new ProviderError('PROVIDER_REQUEST_FAILED', message, { providerId, details: error });
+function assertNoProviderOptions(request: ChatRequest, providerId: string) {
+  if (request.providerOptions && Object.keys(request.providerOptions).length > 0) {
+    throw new ProviderError('INVALID_REQUEST', `Provider options are not supported by ${providerId} yet.`, { providerId });
+  }
+}
+
+function providerStreamError(providerId: string, _error: unknown) {
+  return new ProviderError('PROVIDER_REQUEST_FAILED', 'The provider stream returned an error.', { providerId });
 }
 
 function invalidResponse(providerId: string, message: string) {

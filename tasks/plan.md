@@ -93,6 +93,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Gateway starts on `127.0.0.1:8787`.
 - [x] A fake transport can exercise every route without credentials.
 - [x] Timeouts, cancellation, and secret redaction are verified.
+- [x] Local hardening rejects non-loopback binds, wildcard CORS, unsafe redirects, and raw provider error bodies.
 
 ### Phase 4: Dashboard integration
 

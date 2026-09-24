@@ -11,6 +11,12 @@ export class ProviderRegistry {
     if (this.adapters.has(adapter.id)) {
       throw new ProviderError('CONFIGURATION_ERROR', `Provider adapter already registered: ${adapter.id}.`);
     }
+    if (adapter.capabilities.streaming === true && typeof adapter.streamChat !== 'function') {
+      throw new ProviderError('CONFIGURATION_ERROR', `Provider adapter enables streaming without streamChat: ${adapter.id}.`, { providerId: adapter.id });
+    }
+    if (adapter.capabilities.models === true && typeof adapter.listModels !== 'function') {
+      throw new ProviderError('CONFIGURATION_ERROR', `Provider adapter enables models without listModels: ${adapter.id}.`, { providerId: adapter.id });
+    }
     this.adapters.set(adapter.id, adapter);
     return this;
   }
@@ -26,7 +32,7 @@ export class ProviderRegistry {
   require(providerId: ProviderId) {
     const adapter = this.get(providerId);
     if (!adapter) {
-      throw new ProviderError('CONFIGURATION_ERROR', `Provider adapter is not registered: ${providerId}.`, {
+      throw new ProviderError('NOT_FOUND', `Provider adapter is not registered: ${providerId}.`, {
         providerId,
       });
     }

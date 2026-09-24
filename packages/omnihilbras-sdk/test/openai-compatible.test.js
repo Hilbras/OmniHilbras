@@ -44,6 +44,7 @@ test('OpenAI-compatible adapter maps chat requests and responses', async () => {
   assert.equal(transport.calls.length, 1);
   assert.equal(transport.calls[0].url, 'https://api.acme.test/v1/chat/completions');
   assert.equal(transport.calls[0].headers['X-API-Key'], 'secret');
+  assert.equal(transport.calls[0].headers['content-type'], 'application/json');
   assert.deepEqual(JSON.parse(transport.calls[0].body), {
     model: 'acme-1',
     messages: [{ role: 'user', content: 'Hello' }],
@@ -78,11 +79,46 @@ test('OpenAI-compatible adapter lists models and normalizes stream chunks', asyn
   assert.deepEqual(chunks[1].usage, { inputTokens: 3, outputTokens: 2, totalTokens: 5 });
 });
 
+test('OpenAI-compatible adapter uses custom paths and exact image wire parts', async () => {
+  const transport = createTransport();
+  const adapter = createAdapter(transport, { modelsPath: '/catalog', chatPath: '/generate' });
+  await adapter.chat({
+    model: 'acme-1',
+    messages: [{ role: 'user', content: [{ type: 'image_url', imageUrl: { url: 'https://cdn.example/image.png', detail: 'auto' } }] }],
+  }, { credential: { type: 'api-key', value: 'secret' } });
+
+  assert.equal(transport.calls[0].url, 'https://api.acme.test/v1/generate');
+  assert.deepEqual(JSON.parse(transport.calls[0].body).messages[0].content, [{ type: 'image_url', image_url: { url: 'https://cdn.example/image.png', detail: 'auto' } }]);
+});
+
+test('OpenAI-compatible adapter rejects a stream that ends before DONE', async () => {
+  const transport = createTransport({
+    stream: async function* () {
+      yield 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n';
+    },
+  });
+  const adapter = createAdapter(transport);
+
+  await assert.rejects(async () => {
+    for await (const _chunk of adapter.streamChat({ model: 'acme-1', messages: [{ role: 'user', content: 'Hi' }] }, { credential: { type: 'api-key', value: 'secret' } })) {
+      // consume the stream
+    }
+  }, (error) => error instanceof ProviderError && error.code === 'INVALID_RESPONSE');
+});
+
 test('OpenAI-compatible adapter defaults to bearer authentication', async () => {
   const transport = createTransport();
   const adapter = new OpenAICompatibleAdapter({ id: 'acme', name: 'Acme', baseUrl: 'https://api.acme.test/v1' }, { transport });
   await adapter.chat({ model: 'acme-1', messages: [{ role: 'user', content: 'Hello' }] }, { credential: { type: 'api-key', value: 'secret' } });
   assert.equal(transport.calls[0].headers.Authorization, 'Bearer secret');
+});
+
+test('OpenAI-compatible adapter rejects unsupported provider options', async () => {
+  const adapter = createAdapter(createTransport());
+  await assert.rejects(
+    adapter.chat({ model: 'acme-1', messages: [{ role: 'user', content: 'Hello' }], providerOptions: { unsupported: true } }, { credential: { type: 'api-key', value: 'secret' } }),
+    (error) => error instanceof ProviderError && error.code === 'INVALID_REQUEST',
+  );
 });
 
 test('OpenAI-compatible adapter requires credentials when configured', async () => {

@@ -6,6 +6,9 @@ import {
   ProviderRegistry,
   parseSseJson,
   parseSseStream,
+  normalizeProviderBaseUrl,
+  resolveProviderUrl,
+  sanitizeProviderHeaders,
 } from '../dist/index.js';
 
 test('FetchHttpTransport parses JSON responses', async () => {
@@ -34,6 +37,47 @@ test('FetchHttpTransport normalizes provider HTTP errors', async () => {
     transport.request({ method: 'GET', url: 'https://provider.test/models' }),
     (error) => error instanceof ProviderError && error.code === 'AUTHENTICATION_FAILED' && error.statusCode === 401,
   );
+});
+
+test('provider errors and serialized errors do not disclose response secrets', async () => {
+  const secret = 'sk-super-secret-value';
+  const transport = new FetchHttpTransport({
+    fetch: async () => new Response(JSON.stringify({ error: { message: `Invalid API key: ${secret}` } }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
+    }),
+  });
+
+  await assert.rejects(
+    transport.request({ method: 'GET', url: 'https://provider.test/models', providerId: 'acme' }),
+    (error) => {
+      assert.ok(error instanceof ProviderError);
+      assert.equal(error.providerId, 'acme');
+      assert.equal(error.message.includes(secret), false);
+      assert.equal(JSON.stringify(error).includes(secret), false);
+      return true;
+    },
+  );
+
+  const detailedError = new ProviderError('PROVIDER_REQUEST_FAILED', 'Safe message', { details: { secret } });
+  assert.equal(JSON.stringify(detailedError).includes(secret), false);
+});
+
+test('FetchHttpTransport refuses redirects and validates provider URLs', async () => {
+  let requestInit;
+  const transport = new FetchHttpTransport({
+    fetch: async (_input, init) => {
+      requestInit = init;
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  await transport.request({ method: 'GET', url: 'https://provider.test/health' });
+  assert.equal(requestInit.redirect, 'error');
+  assert.throws(() => normalizeProviderBaseUrl('http://remote.example/v1', 'acme'), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
+  assert.throws(() => resolveProviderUrl('https://provider.test/v1', '../outside', 'acme'), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
+  assert.equal(resolveProviderUrl('https://provider.test/v1', 'models', 'acme'), 'https://provider.test/v1/models');
+  assert.throws(() => sanitizeProviderHeaders({ authorization: 'Bearer secret' }, 'acme'), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
+  assert.throws(() => sanitizeProviderHeaders({ 'x-test': 'safe\r\nInjected' }, 'acme'), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
 });
 
 test('FetchHttpTransport exposes streamed text and maps timeouts', async () => {
@@ -77,6 +121,8 @@ test('ProviderRegistry resolves capabilities without provider-specific logic', (
   assert.equal(registry.get('test-provider'), adapter);
   assert.equal(registry.supports('test-provider', 'chat'), true);
   assert.equal(registry.supports('test-provider', 'streaming'), false);
+  registry.register({ id: 'search-provider', name: 'Search provider', capabilities: { search: true } });
+  assert.equal(registry.supports('search-provider', 'search'), true);
   assert.throws(() => registry.register(adapter), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
-  assert.throws(() => registry.require('missing'), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
+  assert.throws(() => registry.require('missing'), (error) => error instanceof ProviderError && error.code === 'NOT_FOUND');
 });
