@@ -31,6 +31,7 @@ export const fallbackProvider: ProviderRecord = {
   name: 'Custom provider',
   description: 'An OpenAI-compatible provider connected to the local gateway.',
   category: 'Custom endpoint',
+  group: 'custom',
   status: 'available',
   auth: 'API key',
   models: '—',

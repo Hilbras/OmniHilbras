@@ -2,6 +2,18 @@ import { ArrowUpRight, CheckCircle2, CircleAlert, Clock3, Cpu, KeyRound, Server,
 import { ProviderMark } from './ProviderMark';
 
 export type ProviderStatus = 'connected' | 'attention' | 'available';
+export type ProviderGroup = 'oauth' | 'free-tier' | 'hosted' | 'local' | 'custom';
+export type ProviderCardMode = 'simple' | 'advanced';
+
+export const providerGroupOrder: ProviderGroup[] = ['oauth', 'hosted', 'free-tier', 'local', 'custom'];
+
+export const providerGroupLabels: Record<ProviderGroup, string> = {
+  oauth: 'OAuth Providers',
+  'free-tier': 'Free Tier Providers',
+  hosted: 'Hosted API Providers',
+  local: 'Local Providers',
+  custom: 'Custom Endpoints',
+};
 
 export type ProviderRecord = {
   id: string;
@@ -9,6 +21,7 @@ export type ProviderRecord = {
   name: string;
   description: string;
   category: string;
+  group: ProviderGroup;
   status: ProviderStatus;
   auth: string;
   models: string;
@@ -48,7 +61,38 @@ function statusMeta(status: ProviderStatus) {
   };
 }
 
-export function ProviderCard({ provider, detailHref, onManage, onConnect }: { provider: ProviderRecord; detailHref: string; onManage: () => void; onConnect: () => void }) {
+function SimpleProviderCard({ provider, detailHref, onManage, onConnect, simpleEnabled, onToggle }: { provider: ProviderRecord; detailHref: string; onManage: () => void; onConnect: () => void; simpleEnabled: boolean; onToggle?: (enabled: boolean) => void }) {
+  const connected = provider.status === 'connected';
+  const attention = provider.status === 'attention';
+  const statusLabel = connected ? (simpleEnabled ? '1 Connected' : 'Disabled') : attention ? 'Needs attention' : 'No connections';
+
+  return (
+    <article className="group flex min-h-[84px] items-center justify-between gap-3 rounded-xl border border-line bg-surface-2/75 p-3 transition-colors hover:border-line-strong hover:bg-surface-2">
+      <a href={detailHref} className="flex min-w-0 items-center gap-3">
+        <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-10 w-10 shrink-0 rounded-xl" />
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-semibold text-text transition-colors group-hover:text-gold-text">{provider.name}</span>
+          <span className={`mt-1 flex items-center gap-1.5 text-[11px] ${connected && simpleEnabled ? 'text-success' : attention ? 'text-gold-text' : 'text-muted'}`}>
+            {connected && simpleEnabled && <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />}
+            {statusLabel}
+          </span>
+        </span>
+      </a>
+      {connected ? (
+        <button type="button" role="switch" aria-checked={simpleEnabled} aria-label={`${simpleEnabled ? 'Disable' : 'Enable'} ${provider.name}`} onClick={() => onToggle?.(!simpleEnabled)} disabled={!onToggle} className={`relative h-6 w-11 shrink-0 rounded-full p-1 transition-colors ${simpleEnabled ? 'bg-[#f0643b]' : 'bg-line-strong'} disabled:cursor-not-allowed disabled:opacity-60`}>
+          <span className={`block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${simpleEnabled ? 'translate-x-5' : 'translate-x-0'}`} aria-hidden="true" />
+        </button>
+      ) : attention ? (
+        <button type="button" onClick={onManage} className="btn-quiet shrink-0 !px-2 !py-1.5 !text-[11px]">Review</button>
+      ) : (
+        <button type="button" onClick={onConnect} className="btn-quiet shrink-0 !px-2 !py-1.5 !text-[11px]">Connect</button>
+      )}
+    </article>
+  );
+}
+
+export function ProviderCard({ provider, detailHref, onManage, onConnect, mode = 'advanced', simpleEnabled = provider.status === 'connected', onToggle }: { provider: ProviderRecord; detailHref: string; onManage: () => void; onConnect: () => void; mode?: ProviderCardMode; simpleEnabled?: boolean; onToggle?: (enabled: boolean) => void }) {
+  if (mode === 'simple') return <SimpleProviderCard provider={provider} detailHref={detailHref} onManage={onManage} onConnect={onConnect} simpleEnabled={simpleEnabled} onToggle={onToggle} />;
   const status = statusMeta(provider.status);
   const StatusIcon = status.icon;
   const isAvailable = provider.status === 'available';
