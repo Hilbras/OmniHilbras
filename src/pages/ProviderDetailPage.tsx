@@ -148,6 +148,12 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     flash(`${newProvider.name} connection added.`);
   }
 
+  function handleAddConnections(newProviders: NewProvider[]) {
+    setConnectionAdded(true);
+    setAddOpen(false);
+    flash(`${newProviders.length} ${newProviders.length === 1 ? 'connection' : 'connections'} added.`);
+  }
+
   function addModel(model: string) {
     if (allModels.includes(model)) {
       flash('That model is already in the list.');
@@ -225,7 +231,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
 
       <section id="endpoint" className="card mt-5 p-4 sm:p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-sm font-semibold">Endpoint details</h2><p className="muted mt-1 text-xs">The base URL OmniHilbras will use for this provider.</p></div><code className="max-w-full overflow-x-auto rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-muted sm:max-w-[420px]">{provider.endpoint}</code></div></section>
 
-      <AddProviderModal open={addOpen} initialProviderId={provider.id} onClose={() => setAddOpen(false)} onSave={handleAddConnection} />
+      <AddProviderModal open={addOpen} initialProviderId={provider.id} onClose={() => setAddOpen(false)} onSave={handleAddConnection} onSaveMany={handleAddConnections} />
     </>
   );
 }

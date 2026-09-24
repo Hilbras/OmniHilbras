@@ -30,6 +30,29 @@ function matchesStatus(status: ProviderStatus, filter: Filter) {
   return status === filter;
 }
 
+function recordForNewProvider(newProvider: NewProvider, index = 0): ProviderRecord {
+  const option = providerOptions.find((item) => item.id === newProvider.providerId) ?? providerOptions[0];
+  return {
+    id: `${option.id}-${Date.now()}-${index}`,
+    catalogId: option.id,
+    name: newProvider.name,
+    description: option.description,
+    category: option.id === 'custom' ? 'Custom endpoint' : option.auth === 'No key' ? 'Local runtime' : 'New connection',
+    status: 'connected',
+    auth: option.auth,
+    models: 'Pending sync',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'just now',
+    health: 100,
+    color: option.color,
+    initial: option.initial,
+    logo: option.logo,
+    endpoint: newProvider.endpoint,
+    modelList: [],
+  };
+}
+
 function SummaryCard({ label, value, detail, icon: Icon, tone }: { label: string; value: string; detail: string; icon: typeof Activity; tone: string }) {
   return (
     <article className="card min-w-0 p-4 sm:p-5">
@@ -68,32 +91,20 @@ export function ProvidersContent() {
     setAddOpen(true);
   }
 
-  function handleSave(newProvider: NewProvider) {
-    const option = providerOptions.find((item) => item.id === newProvider.providerId) ?? providerOptions[0];
-    const record: ProviderRecord = {
-      id: `${option.id}-${Date.now()}`,
-      catalogId: option.id,
-      name: newProvider.name,
-      description: option.description,
-      category: option.id === 'custom' ? 'Custom endpoint' : option.auth === 'No key' ? 'Local runtime' : 'New connection',
-      status: 'connected',
-      auth: option.auth,
-      models: 'Pending sync',
-      latency: '—',
-      requests: '0',
-      lastUsed: 'just now',
-      health: 100,
-      color: option.color,
-      initial: option.initial,
-      logo: option.logo,
-      endpoint: newProvider.endpoint,
-      modelList: [],
-    };
-    setProviders((current) => [record, ...current]);
+  function finishAdd(added: NewProvider[]) {
+    setProviders((current) => [...added.map((provider, index) => recordForNewProvider(provider, index)), ...current]);
     setAddOpen(false);
     setInitialProviderId(undefined);
-    setNotice(`${newProvider.name} was added to the local provider list.`);
+    setNotice(`${added.length} ${added.length === 1 ? 'connection was' : 'connections were'} added to the local provider list.`);
     window.setTimeout(() => setNotice(''), 3500);
+  }
+
+  function handleSave(newProvider: NewProvider) {
+    finishAdd([newProvider]);
+  }
+
+  function handleSaveMany(newProviders: NewProvider[]) {
+    finishAdd(newProviders);
   }
 
   async function testAll() {
@@ -163,7 +174,7 @@ export function ProvidersContent() {
         </div>
       </div>
 
-      <AddProviderModal open={addOpen} initialProviderId={initialProviderId} onClose={() => { setAddOpen(false); setInitialProviderId(undefined); }} onSave={handleSave} />
+      <AddProviderModal open={addOpen} initialProviderId={initialProviderId} onClose={() => { setAddOpen(false); setInitialProviderId(undefined); }} onSave={handleSave} onSaveMany={handleSaveMany} />
     </>
   );
 }
