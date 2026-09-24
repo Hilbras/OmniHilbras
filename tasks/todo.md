@@ -62,21 +62,21 @@
   - Depends on: Task 8.
   - Scope: Small/medium.
 
-- [ ] Task 9a: Add a secure local connection store.
+- [x] Task 9a: Add a secure local connection store.
   - Acceptance: connection metadata is stored separately from encrypted credentials; files use restrictive permissions and an injectable in-memory implementation supports tests.
   - Verify: focused storage tests cover encryption-at-rest, round trips, atomic writes, and no plaintext secret in the metadata file.
   - Files: `apps/gateway/src/connections.ts`, gateway tests.
   - Depends on: Task 7.
   - Scope: Medium.
 
-- [ ] Task 9b: Add OpenRouter validation and save routes.
+- [x] Task 9b: Add OpenRouter validation and save routes.
   - Acceptance: the gateway validates credentials against OpenRouter on both Check and Save, stores only a valid key, and returns metadata without secrets.
   - Verify: gateway integration tests use a fake provider transport and assert validation-before-save, status codes, and redaction.
   - Files: `apps/gateway/src/config.ts`, `src/service.ts`, `src/server.ts`, gateway tests.
   - Depends on: Tasks 9a and 8.
   - Scope: Medium.
 
-- [ ] Task 9c: Connect the dashboard modal to the connection API.
+- [x] Task 9c: Connect the dashboard modal to the connection API.
   - Acceptance: OpenRouter Check and Save call the loopback gateway, errors remain in the dialog, and saved connection metadata is reflected without browser secret storage.
   - Verify: typecheck/build, gateway tests, and browser smoke test.
   - Files: `src/lib/gatewayClient.ts`, `src/components/AddProviderModal.tsx`, `src/pages/ProvidersPage.tsx`, `src/pages/ProviderDetailPage.tsx`.
