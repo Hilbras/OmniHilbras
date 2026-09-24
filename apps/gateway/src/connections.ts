@@ -56,7 +56,24 @@ const secretEnvelopeVersion = 1;
 const maxMetadataBytes = 256 * 1024;
 const maxSecretEnvelopeBytes = 1024 * 1024;
 const maxConnections = 100;
+const maxDiscoveredModelIds = 2_000;
+const maxCustomModelIds = 2_000;
+const maxConnectionModelIds = maxDiscoveredModelIds + maxCustomModelIds;
 const credentialAad = Buffer.from('omnihilbras-credentials-v1');
+
+export class ConnectionModelLimitError extends Error {
+  constructor(message = 'The model catalog exceeds its configured limit.') {
+    super(message);
+    this.name = 'ConnectionModelLimitError';
+  }
+}
+
+export class ConnectionMetadataLimitError extends Error {
+  constructor(message = 'The local connection metadata exceeds the size limit.') {
+    super(message);
+    this.name = 'ConnectionMetadataLimitError';
+  }
+}
 
 type EncryptedSecretEnvelope = {
   version: number;
@@ -363,7 +380,7 @@ export class LocalConnectionStore implements ConnectionStore {
 
   private async persistMetadata() {
     const payload = JSON.stringify({ version: metadataVersion, connections: [...this.connections.values()] } satisfies MetadataEnvelope, null, 2) + '\n';
-    if (Buffer.byteLength(payload, 'utf8') > maxMetadataBytes) throw new Error('Local connection metadata exceeds the size limit.');
+    if (Buffer.byteLength(payload, 'utf8') > maxMetadataBytes) throw new ConnectionMetadataLimitError();
     await atomicWrite(this.metadataPath, payload);
   }
 
@@ -442,7 +459,7 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
   return { id: input.id, providerId, name, endpoint, priority: input.priority, proxyPool, ...(input.enabled === undefined ? {} : { enabled: input.enabled }), ...(input.modelPolicy === undefined ? {} : { modelPolicy: input.modelPolicy }), ...(modelIds === undefined ? {} : { modelIds }), ...(customModelIds === undefined ? {} : { customModelIds }) };
 }
 
-function normalizeModelIds(values: string[]) {
+function normalizeModelIds(values: string[], limit = maxConnectionModelIds) {
   if (!Array.isArray(values)) throw new Error('Model IDs must be an array.');
   const modelIds: string[] = [];
   const seen = new Set<string>();
@@ -453,25 +470,25 @@ function normalizeModelIds(values: string[]) {
     if (seen.has(modelId)) continue;
     seen.add(modelId);
     modelIds.push(modelId);
-    if (modelIds.length > 2_000) throw new Error('The model list is too large.');
+    if (modelIds.length > limit) throw new ConnectionModelLimitError();
   }
   return modelIds;
 }
 
 function mergeModelLists(modelIds: string[] | undefined, customModelIds: string[] | undefined) {
-  const custom = normalizeModelIds(customModelIds ?? []);
-  const all = normalizeModelIds([...(modelIds ?? []), ...custom]);
+  const custom = normalizeModelIds(customModelIds ?? [], maxCustomModelIds);
+  const all = normalizeModelIds([...(modelIds ?? []), ...custom], maxConnectionModelIds);
   return { modelIds: all, customModelIds: custom };
 }
 
 function mergeAddedModelIds(record: ConnectionRecord, additions: string[]) {
-  const normalizedAdditions = normalizeModelIds(additions);
+  const normalizedAdditions = normalizeModelIds(additions, maxCustomModelIds);
   const existing = new Set(record.modelIds);
   const newAdditions = normalizedAdditions.filter((modelId) => !existing.has(modelId));
   if (newAdditions.length === 0) return undefined;
   return {
-    modelIds: normalizeModelIds([...record.modelIds, ...newAdditions]),
-    customModelIds: normalizeModelIds([...record.customModelIds, ...newAdditions]),
+    modelIds: normalizeModelIds([...record.modelIds, ...newAdditions], maxConnectionModelIds),
+    customModelIds: normalizeModelIds([...record.customModelIds, ...newAdditions], maxCustomModelIds),
   };
 }
 
@@ -506,8 +523,8 @@ function parseRecord(value: unknown): ConnectionRecord {
   if (value.modelPolicy !== undefined && value.modelPolicy !== 'free' && value.modelPolicy !== 'all') throw new Error('Local connection metadata contains an invalid model policy.');
   if (value.modelIds !== undefined && !Array.isArray(value.modelIds)) throw new Error('Local connection metadata contains an invalid model list.');
   if (value.customModelIds !== undefined && !Array.isArray(value.customModelIds)) throw new Error('Local connection metadata contains an invalid custom model list.');
-  const modelIds = value.modelIds === undefined ? [] : normalizeModelIds(value.modelIds);
-  const customModelIds = value.customModelIds === undefined ? [] : normalizeModelIds(value.customModelIds);
+  const modelIds = value.modelIds === undefined ? [] : normalizeModelIds(value.modelIds, maxConnectionModelIds);
+  const customModelIds = value.customModelIds === undefined ? [] : normalizeModelIds(value.customModelIds, maxCustomModelIds);
   const modelLists = mergeModelLists(modelIds, customModelIds);
   const input = normalizeInput({ id: value.id, providerId: value.providerId, name: value.name, endpoint: value.endpoint, priority: value.priority, proxyPool: value.proxyPool, enabled: value.enabled, modelPolicy: value.modelPolicy === undefined ? 'all' : value.modelPolicy, modelIds: modelLists.modelIds, customModelIds: modelLists.customModelIds });
   return { id: input.id!, providerId: input.providerId, name: input.name, endpoint: input.endpoint, priority: input.priority, proxyPool: input.proxyPool, enabled: value.enabled, hasCredential: value.hasCredential, modelPolicy: input.modelPolicy ?? 'all', modelIds: input.modelIds ?? [], customModelIds: input.customModelIds ?? [], createdAt: value.createdAt, updatedAt: value.updatedAt };

@@ -93,7 +93,7 @@ Provider URLs are adapter-owned trusted configuration in local mode. Before expo
 - Uses the authenticated `GET /api/v1/key` metadata route for credential checks; an unauthenticated model catalog request is not sufficient validation.
 - Rejects management keys that cannot be used for inference.
 - Overrides health checking so revoked credentials become unavailable instead of relying on the public model list.
-- Model import supports `free` and `all` policies. Free mode requires both provider-reported prompt and completion pricing to be zero; all mode imports the text model catalog.
+- Model import supports `free` and `all` policies and defaults to `free` when the request omits a policy. Free mode requires both provider-reported prompt and completion pricing to be zero; all mode imports the text model catalog.
 
 ### Other and future providers
 

@@ -147,6 +147,17 @@ test('GatewayService applies free-only and all-model import policies before savi
   assert.deepEqual(discovered, ['free', 'all']);
 });
 
+test('model capacity conflicts are reported as invalid requests', async () => {
+  const store = new InMemoryConnectionStore();
+  const service = new GatewayService(new ProviderRegistry(), store, store);
+  await store.save({ id: 'openrouter', providerId: 'openrouter', name: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1', priority: 1, proxyPool: 'none', modelIds: Array.from({ length: 2_000 }, (_, index) => `vendor/model-${index}`), customModelIds: Array.from({ length: 2_000 }, (_, index) => `custom/model-${index}`) }, { type: 'api-key', value: 'capacity-key' });
+
+  await assert.rejects(
+    () => service.addConnectionModels('openrouter', ['vendor/new-model']),
+    (error) => error instanceof ProviderError && error.code === 'INVALID_REQUEST',
+  );
+});
+
 test('model discovery failure leaves the existing connection unchanged', async () => {
   let failDiscovery = false;
   const adapter = {

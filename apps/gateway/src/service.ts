@@ -1,5 +1,5 @@
 import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@omnihilbras/sdk';
-import type { ConnectionInput, ConnectionRecord, ConnectionStore } from './connections.js';
+import { ConnectionMetadataLimitError, ConnectionModelLimitError, type ConnectionInput, type ConnectionRecord, type ConnectionStore } from './connections.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
   providerId: string;
@@ -86,6 +86,7 @@ export class GatewayService {
         return await this.connectionStore!.save(saveInput, credential);
       } catch (error) {
         if (error instanceof ProviderError) throw error;
+        if (error instanceof ConnectionModelLimitError || error instanceof ConnectionMetadataLimitError) throw new ProviderError('INVALID_REQUEST', error.message, { cause: error });
         throw new ProviderError('CONFIGURATION_ERROR', 'The local connection could not be saved.', { cause: error });
       }
     });
@@ -98,9 +99,15 @@ export class GatewayService {
   async addConnectionModels(connectionId: string, modelIds: string[]) {
     if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
     return this.withProviderLock(connectionMutationLock, async () => {
-      const connection = await this.connectionStore!.updateModels(connectionId, modelIds);
-      if (!connection) throw new ProviderError('NOT_FOUND', 'The local connection was not found.');
-      return connection;
+      try {
+        const connection = await this.connectionStore!.updateModels(connectionId, modelIds);
+        if (!connection) throw new ProviderError('NOT_FOUND', 'The local connection was not found.');
+        return connection;
+      } catch (error) {
+        if (error instanceof ProviderError) throw error;
+        if (error instanceof ConnectionModelLimitError || error instanceof ConnectionMetadataLimitError) throw new ProviderError('INVALID_REQUEST', error.message, { cause: error });
+        throw new ProviderError('CONFIGURATION_ERROR', 'The local model catalog could not be saved.', { cause: error });
+      }
     });
   }
 

@@ -57,13 +57,14 @@ test('local connection store handles duplicate and overflow model additions atom
   t.after(() => rm(directory, { recursive: true, force: true }));
   const store = new LocalConnectionStore({ directory, masterKey: Buffer.alloc(32, 11) });
   const modelIds = Array.from({ length: 2_000 }, (_, index) => `vendor/model-${index}`);
-  const record = await store.save({ ...connectionInput, modelIds }, { type: 'api-key', value: 'limit-secret' });
+  const customModelIds = Array.from({ length: 2_000 }, (_, index) => `custom/model-${index}`);
+  const record = await store.save({ ...connectionInput, modelIds, customModelIds }, { type: 'api-key', value: 'limit-secret' });
 
   const duplicate = await store.updateModels('openrouter', ['vendor/model-0']);
   assert.equal(duplicate.updatedAt, record.updatedAt);
-  assert.deepEqual(duplicate.customModelIds, []);
-  await assert.rejects(() => store.updateModels('openrouter', ['vendor/new-model']), /model list is too large/);
-  assert.deepEqual((await store.list())[0].modelIds, modelIds);
+  assert.deepEqual(duplicate.customModelIds, customModelIds);
+  await assert.rejects(() => store.updateModels('openrouter', ['vendor/new-model']), /model catalog exceeds/);
+  assert.deepEqual((await store.list())[0].modelIds, [...modelIds, ...customModelIds]);
 });
 
 test('local connection store serializes concurrent model additions', async (t) => {

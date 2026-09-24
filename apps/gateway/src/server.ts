@@ -230,7 +230,7 @@ function parsePriority(value: unknown) {
 }
 
 function parseModelPolicy(value: unknown): ModelImportPolicy {
-  if (value === undefined) return 'all';
+  if (value === undefined) return 'free';
   if (value !== 'free' && value !== 'all') throw invalidRequest('modelPolicy must be free or all.');
   return value;
 }

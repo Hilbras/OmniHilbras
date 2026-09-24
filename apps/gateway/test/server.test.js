@@ -214,7 +214,7 @@ test('local gateway validates OpenRouter credentials before saving them', async 
   const save = await fetch(`${baseUrl}/v1/connections/openrouter`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ apiKey: 'valid-key', name: 'OpenRouter local', priority: 1, proxyPool: 'none', modelPolicy: 'free' }),
+    body: JSON.stringify({ apiKey: 'valid-key', name: 'OpenRouter local', priority: 1, proxyPool: 'none' }),
   });
   assert.equal(save.status, 200);
   const savedBody = await save.text();

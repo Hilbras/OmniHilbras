@@ -91,8 +91,9 @@ Available routes:
 - `POST /v1/chat/completions`
 - `POST /v1/chat/completions` with `stream: true` for SSE
 
-OpenRouter model import is controlled by the dialog toggle. Free mode keeps
-only discovered models whose OpenRouter `pricing.prompt` and
+OpenRouter model import is controlled by the dialog toggle and defaults to
+free mode when an API client omits the policy. Free mode keeps only discovered
+models whose OpenRouter `pricing.prompt` and
 `pricing.completion` values are zero; disabled mode imports all text models
 returned by OpenRouter. Manually added model IDs are tracked separately and
 remain in the catalog when the connection is re-saved with either policy. The
