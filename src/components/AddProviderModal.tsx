@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, CheckCircle2, ChevronDown, CircleAlert, LoaderCircle, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { getProviderLogo } from '../data/providers';
+import { checkOpenRouterConnection } from '../lib/gatewayClient';
 
 export type ProviderOption = {
   id: string;
@@ -40,14 +41,15 @@ type AddProviderModalProps = {
   open: boolean;
   initialProviderId?: string;
   onClose: () => void;
-  onSave: (provider: NewProvider) => void;
-  onSaveMany?: (providers: NewProvider[]) => void;
+  onSave: (provider: NewProvider, apiKey?: string) => void | Promise<void>;
+  onSaveMany?: (providers: NewProvider[]) => void | Promise<void>;
 };
 
 export function AddProviderModal({ open, initialProviderId, onClose, onSave, onSaveMany }: AddProviderModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const testTimerRef = useRef<number | null>(null);
+  const checkAbortRef = useRef<AbortController | null>(null);
   const [selectedId, setSelectedId] = useState(initialProviderId ?? 'openai');
   const [mode, setMode] = useState<AddMode>('single');
   const [name, setName] = useState('');
@@ -57,6 +59,7 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
   const [priority, setPriority] = useState('1');
   const [proxyPool, setProxyPool] = useState('none');
   const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [testState, setTestState] = useState<TestState>('idle');
   const [error, setError] = useState('');
 
@@ -72,6 +75,7 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
     setPriority('1');
     setProxyPool('none');
     setTesting(false);
+    setSaving(false);
     setTestState('idle');
     setError('');
   }, [open, initialProviderId]);
@@ -86,6 +90,8 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
       document.body.style.overflow = previousOverflow;
       if (testTimerRef.current !== null) window.clearTimeout(testTimerRef.current);
       testTimerRef.current = null;
+      checkAbortRef.current?.abort();
+      checkAbortRef.current = null;
       previousFocusRef.current?.focus({ preventScroll: true });
       previousFocusRef.current = null;
     };
@@ -111,14 +117,20 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
   const title = `Add ${selected.name} ${requiresKey ? 'API Key' : 'Connection'}`;
 
   function selectProvider(id: string) {
+    if (testTimerRef.current !== null) window.clearTimeout(testTimerRef.current);
+    testTimerRef.current = null;
+    checkAbortRef.current?.abort();
+    checkAbortRef.current = null;
     const option = providerOptions.find((item) => item.id === id) ?? providerOptions[0];
     setSelectedId(option.id);
+    if (option.id === 'openrouter') setMode('single');
+    setApiKey('');
     setEndpoint(option.defaultEndpoint ?? '');
     setTestState('idle');
     setError('');
   }
 
-  function testConnection() {
+  async function testConnection() {
     if (mode === 'single' && requiresKey && !apiKey.trim()) {
       setError('Add an API key before checking this connection.');
       return;
@@ -130,58 +142,75 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
     setError('');
     setTesting(true);
     setTestState('idle');
-    testTimerRef.current = window.setTimeout(() => {
-      testTimerRef.current = null;
+    const controller = new AbortController();
+    checkAbortRef.current = controller;
+    try {
+      if (selected.id === 'openrouter') {
+        await checkOpenRouterConnection(apiKey, controller.signal);
+        setTestState('success');
+      } else {
+        await new Promise<void>((resolve) => {
+          testTimerRef.current = window.setTimeout(() => {
+            testTimerRef.current = null;
+            setTestState('success');
+            resolve();
+          }, 850);
+        });
+      }
+    } catch (testError) {
+      if (!controller.signal.aborted) {
+        setTestState('error');
+        setError(testError instanceof Error ? testError.message : 'The local gateway could not verify this connection.');
+      }
+    } finally {
+      if (checkAbortRef.current === controller) checkAbortRef.current = null;
       setTesting(false);
-      setTestState('success');
-    }, 850);
+    }
   }
 
-  function submit(event: React.FormEvent<HTMLFormElement>) {
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (mode === 'bulk') {
-      const entries = bulkText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-      if (entries.length === 0) {
-        setError('Add at least one key before saving the batch.');
+    if (saving) return;
+    setError('');
+    setSaving(true);
+    try {
+      if (mode === 'bulk') {
+        if (selected.id === 'openrouter') throw new Error('OpenRouter connections are saved one at a time. Use Single Add for this provider.');
+        const entries = bulkText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        if (entries.length === 0) throw new Error('Add at least one key before saving the batch.');
+        const providers = entries.map((entry, index) => {
+          const separator = entry.indexOf('|');
+          const entryName = separator > 0 ? entry.slice(0, separator).trim() : '';
+          return {
+            providerId: selected.id,
+            name: entryName || name.trim() || `${selected.name} ${index + 1}`,
+            endpoint: endpoint.trim(),
+            hasKey: true,
+            priority: Number(priority) || 1,
+            proxyPool,
+          };
+        });
+        if (onSaveMany) await onSaveMany(providers);
+        else await onSave(providers[0]);
         return;
       }
-      const providers = entries.map((entry, index) => {
-        const separator = entry.indexOf('|');
-        const entryName = separator > 0 ? entry.slice(0, separator).trim() : '';
-        return {
-          providerId: selected.id,
-          name: entryName || name.trim() || `${selected.name} ${index + 1}`,
-          endpoint: endpoint.trim(),
-          hasKey: true,
-          priority: Number(priority) || 1,
-          proxyPool,
-        };
-      });
-      if (onSaveMany) onSaveMany(providers);
-      else onSave(providers[0]);
-      return;
-    }
 
-    if (!name.trim()) {
-      setError('Give this connection a name so you can recognize it later.');
-      return;
+      if (!name.trim()) throw new Error('Give this connection a name so you can recognize it later.');
+      if (requiresKey && !apiKey.trim()) throw new Error('Add an API key before saving this connection.');
+      if (showsEndpoint && !endpoint.trim()) throw new Error('Add the local endpoint before saving this connection.');
+      await onSave({
+        providerId: selected.id,
+        name: name.trim(),
+        endpoint: endpoint.trim(),
+        hasKey: Boolean(apiKey.trim()),
+        priority: Number(priority) || 1,
+        proxyPool,
+      }, selected.id === 'openrouter' ? apiKey : undefined);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'The connection could not be saved.');
+    } finally {
+      setSaving(false);
     }
-    if (requiresKey && !apiKey.trim()) {
-      setError('Add an API key before saving this connection.');
-      return;
-    }
-    if (showsEndpoint && !endpoint.trim()) {
-      setError('Add the local endpoint before saving this connection.');
-      return;
-    }
-    onSave({
-      providerId: selected.id,
-      name: name.trim(),
-      endpoint: endpoint.trim(),
-      hasKey: Boolean(apiKey.trim()),
-      priority: Number(priority) || 1,
-      proxyPool,
-    });
   }
 
   // Keep the fixed overlay at the viewport root; route transitions use transforms.
@@ -202,7 +231,7 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
             <p id="add-provider-description" className="sr-only">Add a local provider connection and choose its routing settings.</p>
             <div className="mb-5 flex gap-2" role="tablist" aria-label="Connection add mode">
               <button type="button" role="tab" aria-selected={mode === 'single'} onClick={() => { setMode('single'); setTestState('idle'); setError(''); }} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${mode === 'single' ? 'bg-gold-soft text-gold-text ring-1 ring-gold/30' : 'text-muted hover:bg-bg-soft hover:text-text'}`}>Single</button>
-              <button type="button" role="tab" aria-selected={mode === 'bulk'} onClick={() => { setMode('bulk'); setTestState('idle'); setError(''); }} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${mode === 'bulk' ? 'bg-gold-soft text-gold-text ring-1 ring-gold/30' : 'text-muted hover:bg-bg-soft hover:text-text'}`}>Bulk Add</button>
+              <button type="button" role="tab" aria-selected={mode === 'bulk'} disabled={selected.id === 'openrouter'} onClick={() => { setMode('bulk'); setTestState('idle'); setError(''); }} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${mode === 'bulk' ? 'bg-gold-soft text-gold-text ring-1 ring-gold/30' : 'text-muted hover:bg-bg-soft hover:text-text'}`}>Bulk Add</button>
             </div>
 
             {mode === 'single' ? (
@@ -230,14 +259,14 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
                     <div className="flex gap-2">
                       <div className="relative min-w-0 flex-1">
                         <LockKeyhole className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
-                        <input id="connection-api-key" type="password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setTestState('idle'); setError(''); }} placeholder="Paste a provider key" className="input !h-11 !w-full !rounded-lg !border-line !bg-surface-2 !pl-10 !pr-3 !text-sm" autoComplete="off" />
+                        <input id="connection-api-key" type="password" value={apiKey} onChange={(event) => { checkAbortRef.current?.abort(); checkAbortRef.current = null; if (testTimerRef.current !== null) window.clearTimeout(testTimerRef.current); testTimerRef.current = null; setApiKey(event.target.value); setTestState('idle'); setError(''); }} placeholder="Paste a provider key" className="input !h-11 !w-full !rounded-lg !border-line !bg-surface-2 !pl-10 !pr-3 !text-sm" autoComplete="off" />
                       </div>
-                      <button type="button" onClick={testConnection} disabled={testing || !apiKey.trim()} className="btn-ghost !h-11 !w-[78px] !rounded-lg !px-2 !text-xs disabled:cursor-not-allowed disabled:opacity-45">
+                      <button type="button" onClick={testConnection} disabled={testing || saving || !apiKey.trim()} className="btn-ghost !h-11 !w-[78px] !rounded-lg !px-2 !text-xs disabled:cursor-not-allowed disabled:opacity-45">
                         {testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Check className="h-3.5 w-3.5" aria-hidden="true" />}
                         {testing ? 'Checking' : 'Check'}
                       </button>
                     </div>
-                    {testState === 'success' && <p role="status" className="mt-2 flex items-center gap-1.5 text-[11px] text-success"><CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />Key looks valid</p>}
+                    {testState === 'success' && <p role="status" className="mt-2 flex items-center gap-1.5 text-[11px] text-success"><CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />{selected.id === 'openrouter' ? 'Key verified by the local gateway' : 'Key looks valid'}</p>}
                   </div>
                 )}
 
@@ -265,7 +294,7 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
                 </div>
 
                 <p className="mt-3 text-[11px] leading-relaxed text-muted">No active proxy pools available. Create one in Proxy Pools first.</p>
-                <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gold-text" aria-hidden="true" />Preview mode: keys are not sent or persisted until local credential storage is connected.</p>
+                <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gold-text" aria-hidden="true" />{selected.id === 'openrouter' ? 'OpenRouter keys are checked by the loopback gateway and stored encrypted on this machine.' : 'Preview mode: this provider connection is not sent to the gateway yet.'}</p>
               </>
             ) : (
               <div>
@@ -288,8 +317,8 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
           </div>
 
           <div className="flex shrink-0 gap-2 border-t border-line bg-surface px-4 py-3">
-            <button type="submit" disabled={!canSave || testing} className="btn-gold !h-10 !flex-1 !rounded-lg !px-3 !text-xs disabled:cursor-not-allowed disabled:opacity-40">{mode === 'bulk' ? 'Add All Keys' : 'Save'}</button>
-            <button type="button" onClick={onClose} className="btn-ghost !h-10 !flex-1 !rounded-lg !px-3 !text-xs">Cancel</button>
+            <button type="submit" disabled={!canSave || testing || saving} className="btn-gold !h-10 !flex-1 !rounded-lg !px-3 !text-xs disabled:cursor-not-allowed disabled:opacity-40">{saving ? 'Saving' : mode === 'bulk' ? 'Add All Keys' : 'Save'}</button>
+            <button type="button" onClick={onClose} disabled={saving} className="btn-ghost !h-10 !flex-1 !rounded-lg !px-3 !text-xs disabled:cursor-not-allowed disabled:opacity-40">Cancel</button>
           </div>
         </form>
       </div>

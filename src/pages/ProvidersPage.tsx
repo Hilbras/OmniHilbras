@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   CheckCircle2,
@@ -13,7 +13,7 @@ import {
 import { AddProviderModal, providerOptions, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderCard, providerGroupLabels, providerGroupOrder, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
-import { getGatewayHealth } from '../lib/gatewayClient';
+import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection } from '../lib/gatewayClient';
 import { providerCatalog } from '../data/providers';
 
 type Filter = 'all' | 'connected' | 'attention' | 'available';
@@ -62,6 +62,23 @@ function recordForNewProvider(newProvider: NewProvider, index = 0): ProviderReco
   };
 }
 
+function mergeGatewayConnections(providers: ProviderRecord[], connections: GatewayConnection[]) {
+  const next = [...providers];
+  for (const connection of connections) {
+    const index = next.findIndex((provider) => provider.catalogId === connection.providerId || provider.id === connection.providerId);
+    if (index < 0) continue;
+    next[index] = {
+      ...next[index],
+      status: connection.hasCredential ? 'connected' : 'attention',
+      endpoint: connection.endpoint,
+      lastUsed: 'just now',
+      health: connection.hasCredential ? 100 : 0,
+      models: connection.hasCredential ? 'Key verified' : '—',
+    };
+  }
+  return next;
+}
+
 function SummaryCard({ label, value, detail, icon: Icon, tone }: { label: string; value: string; detail: string; icon: typeof Activity; tone: string }) {
   return (
     <article className="card min-w-0 p-4 sm:p-5">
@@ -85,6 +102,16 @@ export function ProvidersContent() {
   const [initialProviderId, setInitialProviderId] = useState<string | undefined>();
   const [testingAll, setTestingAll] = useState(false);
   const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    void listGatewayConnections()
+      .then((connections) => {
+        if (active) setProviders((current) => mergeGatewayConnections(current, connections));
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
 
   const connectedCount = providers.filter((provider) => provider.status === 'connected').length;
   const attentionCount = providers.filter((provider) => provider.status === 'attention').length;
@@ -124,7 +151,22 @@ export function ProvidersContent() {
     window.setTimeout(() => setNotice(''), 3500);
   }
 
-  function handleSave(newProvider: NewProvider) {
+  async function handleSave(newProvider: NewProvider, apiKey?: string) {
+    if (newProvider.providerId === 'openrouter') {
+      if (!apiKey) throw new Error('Enter the OpenRouter API key before saving.');
+      const connection = await saveOpenRouterConnection({
+        name: newProvider.name,
+        apiKey,
+        priority: newProvider.priority ?? 1,
+        proxyPool: newProvider.proxyPool ?? 'none',
+      });
+      setProviders((current) => mergeGatewayConnections(current, [connection]));
+      setAddOpen(false);
+      setInitialProviderId(undefined);
+      setNotice('OpenRouter connection saved securely on this machine.');
+      window.setTimeout(() => setNotice(''), 3500);
+      return;
+    }
     finishAdd([newProvider]);
   }
 
@@ -222,7 +264,7 @@ export function ProvidersContent() {
         </section>
 
         <div className="mt-5 flex flex-col items-start justify-between gap-3 rounded-xl border border-gold/20 bg-gold-soft/45 px-4 py-3.5 sm:flex-row sm:items-center sm:px-5">
-          <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-gold-text" aria-hidden="true" /><div><p className="text-xs font-semibold">Local credentials stay local.</p><p className="muted mt-1 text-[11px]">This preview does not send provider keys anywhere. The real gateway will encrypt and manage them on your machine.</p></div></div>
+          <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-gold-text" aria-hidden="true" /><div><p className="text-xs font-semibold">Local credentials stay local.</p><p className="muted mt-1 text-[11px]">OpenRouter keys are validated by the loopback gateway and stored in the local encrypted vault.</p></div></div>
           <span className="font-mono text-[10px] text-gold-text">BYOK · local mode</span>
         </div>
       </div>
