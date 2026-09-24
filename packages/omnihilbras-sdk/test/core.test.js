@@ -61,6 +61,7 @@ test('provider errors and serialized errors do not disclose response secrets', a
 
   const detailedError = new ProviderError('PROVIDER_REQUEST_FAILED', 'Safe message', { details: { secret } });
   assert.equal(JSON.stringify(detailedError).includes(secret), false);
+  assert.equal(JSON.stringify({ ...detailedError }).includes(secret), false);
 });
 
 test('FetchHttpTransport refuses redirects and validates provider URLs', async () => {
@@ -74,10 +75,36 @@ test('FetchHttpTransport refuses redirects and validates provider URLs', async (
   await transport.request({ method: 'GET', url: 'https://provider.test/health' });
   assert.equal(requestInit.redirect, 'error');
   assert.throws(() => normalizeProviderBaseUrl('http://remote.example/v1', 'acme'), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
+  assert.throws(() => normalizeProviderBaseUrl('https://10.0.0.1/v1', 'acme'), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
   assert.throws(() => resolveProviderUrl('https://provider.test/v1', '../outside', 'acme'), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
+  assert.throws(() => resolveProviderUrl('http://remote.example/v1', 'models', 'acme'), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
   assert.equal(resolveProviderUrl('https://provider.test/v1', 'models', 'acme'), 'https://provider.test/v1/models');
   assert.throws(() => sanitizeProviderHeaders({ authorization: 'Bearer secret' }, 'acme'), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
   assert.throws(() => sanitizeProviderHeaders({ 'x-test': 'safe\r\nInjected' }, 'acme'), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
+});
+
+test('FetchHttpTransport caps response and stream sizes', async () => {
+  const responseTransport = new FetchHttpTransport({
+    maxResponseBytes: 4,
+    fetch: async () => new Response('123456', { status: 200, headers: { 'content-type': 'text/plain' } }),
+  });
+  await assert.rejects(responseTransport.request({ method: 'GET', url: 'https://provider.test/large' }), (error) => error instanceof ProviderError && error.code === 'INVALID_RESPONSE');
+
+  const streamTransport = new FetchHttpTransport({
+    maxStreamBytes: 4,
+    fetch: async () => new Response('123456', { status: 200, headers: { 'content-type': 'text/plain' } }),
+  });
+  await assert.rejects(async () => {
+    for await (const _chunk of streamTransport.stream({ method: 'GET', url: 'https://provider.test/stream' })) {
+      // consume the stream
+    }
+  }, (error) => error instanceof ProviderError && error.code === 'INVALID_RESPONSE');
+
+  await assert.rejects(async () => {
+    for await (const _event of parseSseStream((async function* () { yield `data: ${'x'.repeat(20)}\n\n`; })(), { maxEventBytes: 8 })) {
+      // consume the stream
+    }
+  }, (error) => error instanceof ProviderError && error.code === 'INVALID_RESPONSE');
 });
 
 test('FetchHttpTransport exposes streamed text and maps timeouts', async () => {
@@ -105,6 +132,18 @@ test('FetchHttpTransport exposes streamed text and maps timeouts', async () => {
     timeoutTransport.request({ method: 'GET', url: 'https://provider.test/slow' }),
     (error) => error instanceof ProviderError && error.code === 'PROVIDER_TIMEOUT',
   );
+
+  const streamDurationTransport = new FetchHttpTransport({
+    maxStreamDurationMs: 5,
+    fetch: async (_input, init) => new Promise((_, reject) => {
+      init.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    }),
+  });
+  await assert.rejects(async () => {
+    for await (const _chunk of streamDurationTransport.stream({ method: 'GET', url: 'https://provider.test/stream' })) {
+      // consume the stream
+    }
+  }, (error) => error instanceof ProviderError && error.code === 'PROVIDER_TIMEOUT');
 });
 
 test('ProviderRegistry resolves capabilities without provider-specific logic', () => {

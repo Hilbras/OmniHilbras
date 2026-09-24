@@ -51,10 +51,12 @@ The core package exposes:
 - `ProviderCapabilities` to describe which operations a provider supports; unsupported operations return a typed `NOT_SUPPORTED` error.
 - `ProviderRegistry` for adapter lookup and capability checks without provider-specific conditionals in the gateway.
 - `ProviderError` with stable machine-readable codes and provider metadata.
-- `HttpTransport` for timeout, cancellation, JSON requests, and streamed responses.
+- `HttpTransport` for timeout, cancellation, JSON requests, and streamed responses. It is a trusted adapter transport, not an arbitrary tenant URL fetcher.
 - `SecretStore` for credential lookup; adapters receive credentials only for the duration of a request.
 
 The normalized contract must be provider-neutral. Provider-specific options are namespaced under `providerOptions` and validated by the adapter that owns them; options that an adapter does not implement are rejected rather than silently discarded.
+
+Provider URLs are adapter-owned trusted configuration in local mode. Before exposing tenant-provided endpoints to a cloud gateway, add an explicit hostname allowlist and DNS-rebinding policy.
 
 ## First Provider Behavior
 

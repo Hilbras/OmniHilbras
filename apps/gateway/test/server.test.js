@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { InMemorySecretStore, ProviderRegistry } from '@omnihilbras/sdk';
+import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@omnihilbras/sdk';
 import { createGatewayServer } from '../dist/index.js';
 import { GatewayService } from '../dist/index.js';
 
-function createService(onChat) {
+function createService(onChat, chatError) {
   const adapter = {
     id: 'fake',
     name: 'Fake provider',
@@ -17,6 +17,7 @@ function createService(onChat) {
     },
     async chat(request) {
       onChat?.(request);
+      if (chatError) throw chatError;
       return { id: 'response-1', providerId: 'fake', model: request.model, createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'Hello from gateway' }, finishReason: 'stop', usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } };
     },
     async *streamChat(request) {
@@ -78,6 +79,21 @@ test('local gateway restricts browser origins to the configured allowlist', asyn
   assert.equal(denied.status, 403);
   assert.equal(denied.headers.get('access-control-allow-origin'), null);
   assert.deepEqual(await denied.json(), { error: { code: 'CORS_ORIGIN_DENIED', message: 'This browser origin is not allowed.' } });
+
+  const crossSite = await fetch(`${baseUrl}/health`, { headers: { 'sec-fetch-site': 'cross-site' } });
+  assert.equal(crossSite.status, 403);
+  assert.equal((await crossSite.json()).error.code, 'CROSS_SITE_REQUEST_DENIED');
+
+  const nonJsonPost = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'text/plain' },
+    body: JSON.stringify({ model: 'fake-1', messages: [{ role: 'user', content: 'Hi' }] }),
+  });
+  assert.equal(nonJsonPost.status, 415);
+  assert.equal((await nonJsonPost.json()).error.code, 'UNSUPPORTED_MEDIA_TYPE');
+
+  const cliHealth = await fetch(`${baseUrl}/health`);
+  assert.equal(cliHealth.status, 200);
 });
 
 test('local gateway strictly validates fields and preserves assistant tool calls', async (t) => {
@@ -87,6 +103,8 @@ test('local gateway strictly validates fields and preserves assistant tool calls
     { model: 'fake-1', temperature: 3, messages: [{ role: 'user', content: 'Hi' }] },
     { model: 'fake-1', messages: [{ role: 'tool', content: 'result' }] },
     { model: 'fake-1', messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'javascript:alert(1)' } }] }] },
+    { model: 'fake-1', messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://127.0.0.1/private.png' } }] }] },
+    { model: 'fake-1', messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/svg+xml,<svg></svg>' } }] }] },
   ];
   for (const payload of invalidPayloads) {
     const response = await fetch(`${baseUrl}/v1/chat/completions`, {
@@ -122,6 +140,20 @@ test('local gateway strictly validates fields and preserves assistant tool calls
   });
   assert.equal(missingProvider.status, 404);
   assert.equal((await missingProvider.json()).error.provider, 'missing');
+});
+
+test('local gateway redacts third-party adapter error messages', async (t) => {
+  const secret = 'provider-response-secret';
+  const baseUrl = await startServer(t, createService(undefined, new ProviderError('PROVIDER_REQUEST_FAILED', `Provider leaked ${secret}`, { details: { secret } })));
+  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-omnihilbras-provider': 'fake' },
+    body: JSON.stringify({ model: 'fake-1', messages: [{ role: 'user', content: 'Hi' }] }),
+  });
+  const text = await response.text();
+  assert.equal(response.status, 502);
+  assert.equal(text.includes(secret), false);
+  assert.match(text, /provider request failed/i);
 });
 
 test('local gateway returns structured validation errors', async (t) => {

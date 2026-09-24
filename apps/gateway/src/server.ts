@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { ProviderError, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ToolDefinition } from '@omnihilbras/sdk';
+import { ProviderError, canonicalLoopbackHost, isLoopbackHostname, publicProviderMessage, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ToolDefinition } from '@omnihilbras/sdk';
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './config.js';
 import type { GatewayService } from './service.js';
 
@@ -21,9 +21,17 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
       sendJson(response, 403, { error: { code: 'CORS_ORIGIN_DENIED', message: 'This browser origin is not allowed.' } });
       return;
     }
+    if (isCrossSiteRequest(request)) {
+      sendJson(response, 403, { error: { code: 'CROSS_SITE_REQUEST_DENIED', message: 'Cross-site requests are not allowed.' } });
+      return;
+    }
 
     const responseOrigin = requestOrigin && corsOrigins.includes(requestOrigin) ? requestOrigin : undefined;
     setCors(response, responseOrigin);
+    if (request.method === 'POST' && !isJsonRequest(request)) {
+      sendJson(response, 415, { error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'POST requests must use application/json.' } }, responseOrigin);
+      return;
+    }
     void handleRequest(request, response, service, options, responseOrigin).catch((error) => {
       sendError(response, error);
     });
@@ -38,6 +46,7 @@ export async function startGatewayServer(options: {
 } = {}) {
   const config = options.config ?? loadGatewayConfig(options.env);
   assertLoopbackHost(config.host);
+  const bindHost = canonicalLoopbackHost(config.host);
   const service = createGatewayService(config, options.env);
   const server = createGatewayServer(service, {
     ...(options.corsOrigin ? { corsOrigin: options.corsOrigin } : {}),
@@ -55,7 +64,7 @@ export async function startGatewayServer(options: {
     };
     server.once('error', onError);
     server.once('listening', onListening);
-    server.listen(config.port, config.host);
+    server.listen(config.port, bindHost);
   });
 
   return { config, server, service };
@@ -292,14 +301,27 @@ function parseImageUrl(value: string) {
   try {
     const url = new URL(value);
     if (url.protocol === 'data:') {
-      if (!value.startsWith('data:image/')) throw new Error('Only image data URLs are supported.');
-    } else if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-      throw new Error('Unsupported image URL protocol.');
+      if (!/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/]+={0,2}$/i.test(value)) throw new Error('Only base64 image data URLs are supported.');
+      return value;
+    }
+    if (url.protocol !== 'https:' || url.username || url.password || isLoopbackHostname(url.hostname) || isPrivateHostname(url.hostname)) {
+      throw new Error('Unsafe image URL.');
     }
     return value;
-  } catch (error) {
-    throw invalidRequest('Image URLs must be valid http(s) or image data URLs.');
+  } catch {
+    throw invalidRequest('Image URLs must be HTTPS image URLs or base64 image data URLs.');
   }
+}
+
+function isPrivateHostname(hostname: string) {
+  const normalized = hostname.toLowerCase();
+  if (normalized.endsWith('.local') || normalized.endsWith('.internal')) return true;
+  const parts = normalized.split('.');
+  if (parts.length !== 4 || parts.some((part) => !/^(0|[1-9]\d{0,2})$/.test(part) || Number(part) > 255)) return false;
+  const numbers = parts.map(Number);
+  const first = numbers[0] ?? -1;
+  const second = numbers[1] ?? -1;
+  return first === 10 || first === 127 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168) || (first === 169 && second === 254) || first === 0;
 }
 
 function getProviderId(request: IncomingMessage, body: unknown) {
@@ -424,10 +446,20 @@ function getRequestOrigin(request: IncomingMessage) {
   return typeof origin === 'string' ? origin : undefined;
 }
 
+function isCrossSiteRequest(request: IncomingMessage) {
+  return request.headers['sec-fetch-site'] === 'cross-site';
+}
+
+function isJsonRequest(request: IncomingMessage) {
+  const contentType = request.headers['content-type'];
+  return typeof contentType === 'string' && (contentType.split(';', 1)[0] ?? '').trim().toLowerCase() === 'application/json';
+}
+
 function setCors(response: ServerResponse, origin: string | undefined) {
   if (origin) response.setHeader('access-control-allow-origin', origin);
   response.setHeader('access-control-allow-headers', 'content-type, x-omnihilbras-provider');
   response.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
+  response.setHeader('x-content-type-options', 'nosniff');
   response.setHeader('vary', 'Origin');
 }
 
@@ -456,7 +488,7 @@ function toErrorEnvelope(error: unknown) {
     return {
       error: {
         code: error.code,
-        message: error.message,
+        message: error.publicMessage ?? publicProviderMessage(error.code),
         ...(error.providerId ? { provider: error.providerId } : {}),
         ...(error.statusCode ? { status: error.statusCode } : {}),
         ...(error.retryable ? { retryable: true } : {}),
@@ -480,7 +512,7 @@ function statusForError(error: unknown) {
 }
 
 function invalidRequest(message: string) {
-  return new ProviderError('INVALID_REQUEST', message);
+  return new ProviderError('INVALID_REQUEST', message, { publicMessage: message });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

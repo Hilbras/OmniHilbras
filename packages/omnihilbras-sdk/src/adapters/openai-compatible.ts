@@ -163,6 +163,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     });
 
     let sawPayload = false;
+    let sawMeaningfulPayload = false;
     let sawDone = false;
     for await (const event of parseSseStream(events)) {
       if (event.data.trim() === '[DONE]') {
@@ -176,6 +177,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
 
       const choice = payload.choices?.[0];
       const delta = choice?.delta;
+      if (delta?.role || delta?.content || delta?.tool_calls?.length || choice?.finish_reason || payload.usage) sawMeaningfulPayload = true;
       const chunk: ChatChunk = {
         id: payload.id ?? `stream-${request.model}`,
         providerId: this.id,
@@ -191,7 +193,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       yield chunk;
     }
 
-    if (!sawPayload || !sawDone) {
+    if (!sawPayload || !sawMeaningfulPayload || !sawDone) {
       throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before completion.', { providerId: this.id });
     }
   }

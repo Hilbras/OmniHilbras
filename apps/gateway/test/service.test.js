@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { InMemorySecretStore, ProviderRegistry } from '@omnihilbras/sdk';
-import { createProviderRegistry, EnvironmentSecretStore, GatewayService, loadGatewayConfig } from '../dist/index.js';
+import { createProviderRegistry, EnvironmentSecretStore, GatewayService, loadGatewayConfig, startGatewayServer } from '../dist/index.js';
 
 test('gateway config loads local defaults and environment credentials', async () => {
   const config = loadGatewayConfig({
@@ -25,7 +25,21 @@ test('gateway config loads local defaults and environment credentials', async ()
 
 test('gateway config rejects non-loopback hosts and wildcard CORS', () => {
   assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_HOST: '0.0.0.0' }), /loopback/);
+  assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_HOST: '127.999.999.999' }), /loopback/);
+  assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_HOST: '127.000.000.001' }), /loopback/);
   assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_CORS_ORIGINS: '*' }), /wildcard/);
+  assert.equal(loadGatewayConfig({ OMNIHILBRAS_HOST: 'localhost' }).host, '127.0.0.1');
+  assert.equal(loadGatewayConfig({ OMNIHILBRAS_HOST: '[::1]' }).host, '::1');
+});
+
+test('startGatewayServer canonicalizes and binds a loopback address', async (t) => {
+  const config = loadGatewayConfig({ OMNIHILBRAS_HOST: 'localhost' });
+  const instance = await startGatewayServer({ config: { ...config, port: 0 } });
+  t.after(() => instance.server.close());
+  const address = instance.server.address();
+  assert.equal(instance.config.host, '127.0.0.1');
+  assert.equal(typeof address, 'object');
+  assert.equal(address.address, '127.0.0.1');
 });
 
 test('gateway config uses the custom compatible provider credential and paths', async () => {

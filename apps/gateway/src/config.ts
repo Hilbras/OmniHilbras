@@ -5,6 +5,7 @@ import {
   OpenAIAdapter,
   OpenAICompatibleAdapter,
   ProviderRegistry,
+  canonicalLoopbackHost,
   isLoopbackHostname,
   type ProviderCredential,
   type SecretStore,
@@ -54,7 +55,7 @@ export class EnvironmentSecretStore implements SecretStore {
 }
 
 export function loadGatewayConfig(env: Readonly<Record<string, string | undefined>> = process.env): GatewayConfig {
-  const host = env.OMNIHILBRAS_HOST ?? '127.0.0.1';
+  const host = canonicalLoopbackHost(env.OMNIHILBRAS_HOST ?? '127.0.0.1');
   assertLoopbackHost(host);
   const compatibleId = env.OMNIHILBRAS_COMPATIBLE_PROVIDER_ID ?? 'openai-compatible';
   const compatibleCredential = env[providerEnvKey(compatibleId)]

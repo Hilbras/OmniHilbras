@@ -128,6 +128,7 @@ export class GeminiAdapter implements ProviderAdapter {
     });
 
     let sawPayload = false;
+    let sawFinishReason = false;
     for await (const event of parseSseStream(events)) {
       const payload = parseSseJson<GeminiStreamChunk>(event, this.id);
       if (!payload) continue;
@@ -139,6 +140,7 @@ export class GeminiAdapter implements ProviderAdapter {
       const candidate = payload.candidates?.[0];
       if (!candidate) {
         if (payload.promptFeedback?.blockReason) {
+          sawFinishReason = true;
           yield {
             id: `stream-${request.model}`,
             providerId: this.id,
@@ -154,6 +156,7 @@ export class GeminiAdapter implements ProviderAdapter {
       const parts = candidate.content?.parts;
       if (!Array.isArray(parts)) {
         if (candidate.finishReason && isSafetyFinishReason(candidate.finishReason)) {
+          sawFinishReason = true;
           yield {
             id: `stream-${request.model}`,
             providerId: this.id,
@@ -177,6 +180,7 @@ export class GeminiAdapter implements ProviderAdapter {
       }] : []);
       const usage = payload.usageMetadata ? normalizeUsage(payload.usageMetadata) : undefined;
       const finishReason = candidate?.finishReason ? normalizeFinishReason(candidate.finishReason) : undefined;
+      if (finishReason) sawFinishReason = true;
 
       if (text || toolCalls.length || usage || finishReason) {
         yield {
@@ -193,7 +197,7 @@ export class GeminiAdapter implements ProviderAdapter {
       }
     }
 
-    if (!sawPayload) {
+    if (!sawPayload || !sawFinishReason) {
       throw new ProviderError('INVALID_RESPONSE', 'The Gemini stream returned no response data.', { providerId: this.id });
     }
   }
@@ -313,8 +317,9 @@ function toGeminiParts(content: MessageContent): GeminiPart[] {
   return content.map((part) => {
     if (part.type === 'text') return { text: part.text };
     if (part.imageUrl.url.startsWith('data:')) {
-      const match = part.imageUrl.url.match(/^data:([^;]+);base64,(.+)$/);
-      if (match) return { inlineData: { mimeType: match[1], data: match[2] } };
+      const match = part.imageUrl.url.match(/^data:([^;]+);base64,(.+)$/i);
+      if (!match) throw new ProviderError('INVALID_REQUEST', 'Gemini image data URLs must be base64 encoded.', { providerId: 'gemini' });
+      return { inlineData: { mimeType: match[1], data: match[2] } };
     }
     return { fileData: { mimeType: 'image/*', fileUri: part.imageUrl.url } };
   });

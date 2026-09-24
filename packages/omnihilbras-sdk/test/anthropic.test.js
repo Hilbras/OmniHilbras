@@ -94,6 +94,36 @@ test('AnthropicAdapter normalizes native SSE events and tool deltas', async () =
   assert.equal(chunks.at(-1).finishReason, 'tool_calls');
 });
 
+test('AnthropicAdapter converts base64 image data URLs to native image blocks', async () => {
+  const transport = createTransport();
+  const adapter = new AnthropicAdapter({ transport });
+  await adapter.chat({
+    model: 'claude-sonnet-4',
+    messages: [{ role: 'user', content: [{ type: 'image_url', imageUrl: { url: 'data:image/png;base64,aGVsbG8=' } }] }],
+  }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  const body = JSON.parse(transport.calls[0].body);
+  assert.deepEqual(body.messages[0].content[0], { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' } });
+});
+
+test('AnthropicAdapter stops consuming after message_stop', async () => {
+  const transport = createTransport({
+    stream: async function* () {
+      yield 'event: message_start\ndata: {"type":"message_start","message":{"id":"msg-stop","model":"claude-sonnet-4"}}\n\n';
+      yield 'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n';
+      yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n';
+      yield 'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"late"}}\n\n';
+    },
+  });
+  const adapter = new AnthropicAdapter({ transport });
+  const chunks = [];
+  for await (const chunk of adapter.streamChat({ model: 'claude-sonnet-4', messages: [{ role: 'user', content: 'Hi' }] }, { credential: { type: 'api-key', value: 'sk-ant-test' } })) chunks.push(chunk);
+  assert.equal(chunks.some((chunk) => chunk.delta.content === 'late'), false);
+});
+
+test('AnthropicAdapter rejects unsafe API version values', () => {
+  assert.throws(() => new AnthropicAdapter({ apiVersion: '2023-06-01\r\nInjected' }), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
+});
+
 test('AnthropicAdapter requires an API key', async () => {
   const adapter = new AnthropicAdapter({ transport: createTransport() });
 

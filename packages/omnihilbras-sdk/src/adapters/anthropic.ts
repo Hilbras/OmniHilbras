@@ -91,6 +91,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   constructor(options: AnthropicAdapterOptions = {}) {
     this.baseUrl = normalizeProviderBaseUrl(options.baseUrl ?? 'https://api.anthropic.com', this.id);
     this.apiVersion = options.apiVersion ?? defaultApiVersion;
+    assertSafeProviderHeaderValue('anthropic-version', this.apiVersion, this.id);
     this.defaultMaxTokens = options.defaultMaxTokens ?? defaultMaxTokens;
     this.defaultHeaders = sanitizeProviderHeaders(options.headers, this.id);
     this.transport = options.transport ?? new FetchHttpTransport({ timeoutMs: options.timeoutMs });
@@ -142,6 +143,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     let responseId = `stream-${request.model}`;
     let responseModel = request.model;
     let sawPayload = false;
+    let sawFinishReason = false;
     let sawMessageStop = false;
 
     for await (const event of parseSseStream(events)) {
@@ -156,7 +158,7 @@ export class AnthropicAdapter implements ProviderAdapter {
 
       if (payload.type === 'message_stop') {
         sawMessageStop = true;
-        continue;
+        break;
       }
 
       if (payload.type === 'message_start') {
@@ -198,6 +200,7 @@ export class AnthropicAdapter implements ProviderAdapter {
 
       if (payload.type === 'message_delta') {
         const finishReason = payload.delta?.stop_reason ? normalizeFinishReason(payload.delta.stop_reason) : undefined;
+        if (finishReason) sawFinishReason = true;
         const usage = payload.usage ? normalizeUsage(payload.usage) : undefined;
         if (finishReason || usage) {
           yield {
@@ -212,7 +215,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       }
     }
 
-    if (!sawPayload || !sawMessageStop) {
+    if (!sawPayload || !sawFinishReason || !sawMessageStop) {
       throw new ProviderError('INVALID_RESPONSE', 'The Anthropic stream ended before completion.', { providerId: this.id });
     }
   }
@@ -325,9 +328,12 @@ function toAnthropicMessage(message: ChatMessage) {
 function toAnthropicContent(content: MessageContent): Array<Record<string, unknown>> {
   if (typeof content === 'string') return [{ type: 'text', text: content }];
   if (content === null) return [];
-  return content.map((part) => part.type === 'text'
-    ? { type: 'text', text: part.text }
-    : { type: 'image', source: { type: 'url', url: part.imageUrl.url } });
+  return content.map((part) => {
+    if (part.type === 'text') return { type: 'text', text: part.text };
+    const dataUrl = part.imageUrl.url.match(/^data:([^;]+);base64,(.+)$/i);
+    if (dataUrl) return { type: 'image', source: { type: 'base64', media_type: dataUrl[1], data: dataUrl[2] } };
+    return { type: 'image', source: { type: 'url', url: part.imageUrl.url } };
+  });
 }
 
 function contentToText(content: MessageContent) {

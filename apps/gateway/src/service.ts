@@ -78,5 +78,6 @@ export class GatewayService {
 }
 
 function notSupported(adapter: ProviderAdapter, capability: string) {
-  return new ProviderError('NOT_SUPPORTED', `${adapter.name} does not support ${capability}.`, { providerId: adapter.id });
+  const message = `${adapter.name} does not support ${capability}.`;
+  return new ProviderError('NOT_SUPPORTED', message, { providerId: adapter.id, publicMessage: message });
 }

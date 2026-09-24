@@ -91,6 +91,21 @@ test('OpenAI-compatible adapter uses custom paths and exact image wire parts', a
   assert.deepEqual(JSON.parse(transport.calls[0].body).messages[0].content, [{ type: 'image_url', image_url: { url: 'https://cdn.example/image.png', detail: 'auto' } }]);
 });
 
+test('OpenAI-compatible adapter rejects an empty completed stream', async () => {
+  const transport = createTransport({
+    stream: async function* () {
+      yield 'data: {}\n\ndata: [DONE]\n\n';
+    },
+  });
+  const adapter = createAdapter(transport);
+
+  await assert.rejects(async () => {
+    for await (const _chunk of adapter.streamChat({ model: 'acme-1', messages: [{ role: 'user', content: 'Hi' }] }, { credential: { type: 'api-key', value: 'secret' } })) {
+      // consume the stream
+    }
+  }, (error) => error instanceof ProviderError && error.code === 'INVALID_RESPONSE');
+});
+
 test('OpenAI-compatible adapter rejects a stream that ends before DONE', async () => {
   const transport = createTransport({
     stream: async function* () {

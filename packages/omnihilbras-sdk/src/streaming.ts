@@ -6,16 +6,25 @@ export type SseEvent = {
   id?: string;
 };
 
-export async function* parseSseStream(source: AsyncIterable<string>): AsyncIterable<SseEvent> {
+export type SseParseOptions = {
+  maxEventBytes?: number;
+};
+
+const defaultMaxEventBytes = 1024 * 1024;
+
+export async function* parseSseStream(source: AsyncIterable<string>, options: SseParseOptions = {}): AsyncIterable<SseEvent> {
+  const maxEventBytes = options.maxEventBytes ?? defaultMaxEventBytes;
   let buffer = '';
   let dataLines: string[] = [];
   let eventName: string | undefined;
   let eventId: string | undefined;
+  let eventBytes = 0;
 
   const dispatch = (): SseEvent | undefined => {
     if (dataLines.length === 0) {
       eventName = undefined;
       eventId = undefined;
+      eventBytes = 0;
       return undefined;
     }
 
@@ -27,6 +36,7 @@ export async function* parseSseStream(source: AsyncIterable<string>): AsyncItera
     dataLines = [];
     eventName = undefined;
     eventId = undefined;
+    eventBytes = 0;
     return event;
   };
 
@@ -39,7 +49,11 @@ export async function* parseSseStream(source: AsyncIterable<string>): AsyncItera
     let value = separator === -1 ? '' : line.slice(separator + 1);
     if (value.startsWith(' ')) value = value.slice(1);
 
-    if (field === 'data') dataLines.push(value);
+    if (field === 'data') {
+      eventBytes += value.length + 1;
+      if (eventBytes > maxEventBytes) throw new ProviderError('INVALID_RESPONSE', 'Provider stream event exceeded the configured size limit.');
+      dataLines.push(value);
+    }
     if (field === 'event') eventName = value;
     if (field === 'id') eventId = value;
     return undefined;
@@ -47,6 +61,9 @@ export async function* parseSseStream(source: AsyncIterable<string>): AsyncItera
 
   for await (const chunk of source) {
     buffer += chunk;
+    if (buffer.length > maxEventBytes && !buffer.includes('\n')) {
+      throw new ProviderError('INVALID_RESPONSE', 'Provider stream event exceeded the configured size limit.');
+    }
     let newlineIndex = buffer.indexOf('\n');
     while (newlineIndex !== -1) {
       const line = buffer.slice(0, newlineIndex).replace(/\r$/, '');

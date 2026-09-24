@@ -1,4 +1,5 @@
 import { isProviderError, ProviderError } from './errors.js';
+import { assertSafeProviderRequestUrl } from './url.js';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -19,6 +20,11 @@ export type HttpResponse<T> = {
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+/**
+ * Low-level transport for adapter-owned, trusted provider configuration.
+ * It is not an arbitrary user-URL fetcher; cloud tenant endpoints require an
+ * additional allowlist and DNS-rebinding policy before exposure.
+ */
 export interface HttpTransport {
   request<T>(request: HttpRequest): Promise<HttpResponse<T>>;
   stream(request: HttpRequest): AsyncIterable<string>;
@@ -28,6 +34,9 @@ export type FetchHttpTransportOptions = {
   fetch?: FetchLike;
   timeoutMs?: number;
   streamIdleTimeoutMs?: number;
+  maxResponseBytes?: number;
+  maxStreamBytes?: number;
+  maxStreamDurationMs?: number;
 };
 
 type RequestLifecycle = {
@@ -38,11 +47,17 @@ type RequestLifecycle = {
 };
 
 const defaultTimeoutMs = 30_000;
+const defaultMaxResponseBytes = 10 * 1024 * 1024;
+const defaultMaxStreamBytes = 50 * 1024 * 1024;
+const defaultMaxStreamDurationMs = 10 * 60 * 1000;
 
 export class FetchHttpTransport implements HttpTransport {
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
   private readonly streamIdleTimeoutMs: number;
+  private readonly maxResponseBytes: number;
+  private readonly maxStreamBytes: number;
+  private readonly maxStreamDurationMs: number;
 
   constructor(options: FetchHttpTransportOptions = {}) {
     const fetchImpl = options.fetch ?? globalThis.fetch;
@@ -53,9 +68,13 @@ export class FetchHttpTransport implements HttpTransport {
     this.fetchImpl = fetchImpl;
     this.timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? options.timeoutMs ?? defaultTimeoutMs;
+    this.maxResponseBytes = options.maxResponseBytes ?? defaultMaxResponseBytes;
+    this.maxStreamBytes = options.maxStreamBytes ?? defaultMaxStreamBytes;
+    this.maxStreamDurationMs = options.maxStreamDurationMs ?? defaultMaxStreamDurationMs;
   }
 
   async request<T>(request: HttpRequest): Promise<HttpResponse<T>> {
+    assertSafeProviderRequestUrl(request.url, request.providerId ?? 'provider');
     const lifecycle = createRequestLifecycle(request.signal, this.timeoutMs);
 
     try {
@@ -66,11 +85,11 @@ export class FetchHttpTransport implements HttpTransport {
         redirect: 'error',
         signal: lifecycle.signal,
       });
-      const data = await parseResponse<T>(response);
-
       if (!response.ok) {
-        throw providerErrorFromResponse(response, data, request.providerId);
+        await response.body?.cancel();
+        throw providerErrorFromResponse(response, undefined, request.providerId);
       }
+      const data = await parseResponse<T>(response, this.maxResponseBytes);
 
       return { status: response.status, headers: response.headers, data };
     } catch (error) {
@@ -81,7 +100,8 @@ export class FetchHttpTransport implements HttpTransport {
   }
 
   async *stream(request: HttpRequest): AsyncIterable<string> {
-    const lifecycle = createRequestLifecycle(request.signal, this.streamIdleTimeoutMs);
+    assertSafeProviderRequestUrl(request.url, request.providerId ?? 'provider');
+    const lifecycle = createRequestLifecycle(request.signal, this.streamIdleTimeoutMs, this.maxStreamDurationMs);
 
     try {
       const response = await this.fetchImpl(request.url, {
@@ -93,8 +113,8 @@ export class FetchHttpTransport implements HttpTransport {
       });
 
       if (!response.ok) {
-        const body = await response.text();
-        throw providerErrorFromResponse(response, body, request.providerId);
+        await response.body?.cancel();
+        throw providerErrorFromResponse(response, undefined, request.providerId);
       }
 
       if (!response.body) {
@@ -103,6 +123,7 @@ export class FetchHttpTransport implements HttpTransport {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let totalBytes = 0;
 
       try {
         while (true) {
@@ -114,6 +135,10 @@ export class FetchHttpTransport implements HttpTransport {
             return;
           }
 
+          totalBytes += result.value.byteLength;
+          if (totalBytes > this.maxStreamBytes) {
+            throw new ProviderError('INVALID_RESPONSE', 'Provider response stream exceeded the configured size limit.');
+          }
           const text = decoder.decode(result.value, { stream: true });
           if (text) yield text;
         }
@@ -133,10 +158,11 @@ export class FetchHttpTransport implements HttpTransport {
   }
 }
 
-function createRequestLifecycle(externalSignal: AbortSignal | undefined, timeoutMs: number): RequestLifecycle {
+function createRequestLifecycle(externalSignal: AbortSignal | undefined, timeoutMs: number, maxDurationMs = 0): RequestLifecycle {
   const controller = new AbortController();
   let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let durationTimer: ReturnType<typeof setTimeout> | undefined;
 
   const abortFromExternalSignal = () => {
     controller.abort(externalSignal?.reason);
@@ -159,6 +185,12 @@ function createRequestLifecycle(externalSignal: AbortSignal | undefined, timeout
     externalSignal.addEventListener('abort', abortFromExternalSignal, { once: true });
   }
   resetTimeout();
+  if (maxDurationMs > 0 && !controller.signal.aborted) {
+    durationTimer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, maxDurationMs);
+  }
 
   return {
     signal: controller.signal,
@@ -166,15 +198,16 @@ function createRequestLifecycle(externalSignal: AbortSignal | undefined, timeout
     resetTimeout,
     cleanup: () => {
       if (timer) clearTimeout(timer);
+      if (durationTimer) clearTimeout(durationTimer);
       externalSignal?.removeEventListener('abort', abortFromExternalSignal);
     },
   };
 }
 
-async function parseResponse<T>(response: Response): Promise<T> {
+async function parseResponse<T>(response: Response, maxBytes: number): Promise<T> {
   if (response.status === 204) return undefined as T;
 
-  const text = await response.text();
+  const text = await readResponseText(response, maxBytes);
   if (!text) return undefined as T;
 
   try {
@@ -185,6 +218,30 @@ async function parseResponse<T>(response: Response): Promise<T> {
       statusCode: response.status,
       cause: error,
     });
+  }
+}
+
+async function readResponseText(response: Response, maxBytes: number) {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let text = '';
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) return text + decoder.decode();
+      totalBytes += result.value.byteLength;
+      if (totalBytes > maxBytes) throw new ProviderError('INVALID_RESPONSE', 'Provider response exceeded the configured size limit.');
+      text += decoder.decode(result.value, { stream: true });
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // The provider may have already closed the response.
+    }
+    reader.releaseLock();
   }
 }
 
