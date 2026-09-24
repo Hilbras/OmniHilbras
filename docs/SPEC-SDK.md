@@ -212,6 +212,20 @@ The existing Vite commands must continue to build the frontend successfully.
 - [ ] The dashboard can use the local gateway without a document reload.
 - [ ] Cloud-specific concerns are represented by interfaces but are not implemented in the first slice.
 
+## Protocol References
+
+The initial adapter implementations are based on these official references:
+
+- Node Fetch and Web Streams: https://nodejs.org/api/globals.html#globalfetch
+- OpenAI Chat Completions: https://platform.openai.com/docs/api-reference/chat/create
+- OpenAI model listing and bearer authentication: https://developers.openai.com/api/reference/resources/models/methods/list
+- Anthropic Messages API: https://platform.claude.com/docs/en/api/messages
+- Anthropic streaming events: https://platform.claude.com/docs/en/build-with-claude/streaming
+- Gemini GenerateContent: https://ai.google.dev/api/generate-content
+- Gemini model listing: https://ai.google.dev/api/models
+
+Provider APIs change independently, so each adapter's request and response conversion must be updated and fixture-tested when its provider changes.
+
 ## Open Questions
 
 - Should the first gateway implementation use only Node's HTTP primitives, or add a framework after the first vertical slice? **Recommendation: Node primitives first.**
