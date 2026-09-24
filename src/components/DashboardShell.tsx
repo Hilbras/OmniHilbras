@@ -183,7 +183,7 @@ export function DashboardShell({
   }, [collapsed]);
 
   return (
-    <div className="dashboard-shell page-enter min-h-screen bg-bg text-text">
+    <div className="dashboard-shell min-h-screen bg-bg text-text">
       {mobileOpen && <button type="button" aria-label="Close dashboard navigation" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] lg:hidden" />}
 
       <div className={`fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
