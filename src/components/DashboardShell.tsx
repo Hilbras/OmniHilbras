@@ -97,7 +97,7 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
         <button
           type="button"
           onClick={() => { onClose(); onToggleCollapse(); }}
-          className={`group flex items-center gap-2.5 rounded-lg p-1 text-[15px] font-semibold tracking-tight transition-colors hover:bg-surface ${collapsed ? 'justify-center' : ''}`}
+          className={`group flex items-center gap-2.5 rounded-lg p-1 text-[15px] font-semibold tracking-tight transition-colors hover:bg-surface ${collapsed ? 'justify-center' : 'flex-1 justify-between'}`}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
@@ -106,7 +106,7 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
             {collapsed && <PanelLeftOpen className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />}
           </span>
           {!collapsed && <span>Omni<span className="muted font-normal">Hilbras</span></span>}
-          {!collapsed && <PanelLeftClose className="ml-1 h-4 w-4 shrink-0 text-muted transition-colors group-hover:text-gold-text" aria-hidden="true" />}
+          {!collapsed && <PanelLeftClose className="ml-auto h-4 w-4 shrink-0 text-muted transition-colors group-hover:text-gold-text" aria-hidden="true" />}
         </button>
         <button type="button" onClick={onClose} aria-label="Close navigation" className="muted grid h-8 w-8 place-items-center rounded-lg hover:bg-surface hover:text-gold-text lg:hidden">
           <X className="h-4 w-4" aria-hidden="true" />
