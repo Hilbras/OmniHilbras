@@ -109,13 +109,20 @@ export function removeGatewayConnection(connectionId: string, signal?: AbortSign
 
 async function requestJson<T>(path: string, init: RequestInit = {}) {
   if (!gatewayBaseUrl) throw new Error('Gateway URL must target a loopback address.');
-  const response = await fetch(`${gatewayBaseUrl}${path}`, {
-    cache: 'no-store',
-    credentials: 'omit',
-    redirect: 'error',
-    ...init,
-    headers: { accept: 'application/json', ...init.headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${gatewayBaseUrl}${path}`, {
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error',
+      ...init,
+      headers: { accept: 'application/json', ...init.headers },
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    if (error instanceof TypeError) throw new Error(`Could not reach the local gateway at ${gatewayBaseUrl}. Start it with pnpm dev:gateway.`);
+    throw error;
+  }
   const body = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
   if (!response.ok) throw new Error(body?.error?.message ?? `Gateway request failed with status ${response.status}.`);
   return body as T;
