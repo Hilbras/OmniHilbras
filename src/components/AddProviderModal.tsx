@@ -113,6 +113,7 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave }: {
     onSave({ providerId: selected.id, name: name.trim(), endpoint: endpoint.trim(), hasKey: Boolean(apiKey.trim()) });
   }
 
+  // Keep the fixed overlay at the viewport root; route transitions use transforms.
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-3 backdrop-blur-sm sm:p-5" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="add-provider-title" aria-describedby="add-provider-description" className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-line bg-bg shadow-2xl outline-none sm:max-h-[calc(100dvh-2.5rem)]">
