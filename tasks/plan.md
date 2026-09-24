@@ -68,13 +68,13 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 
 ### Checkpoint: Provider adapters
 
-- [ ] All four adapters pass fixture-based tests.
-- [ ] Provider-specific payloads do not leak into shared gateway types.
-- [ ] Existing frontend build remains green.
+- [x] All four adapters pass fixture-based tests.
+- [x] Provider-specific payloads do not leak into shared gateway types.
+- [x] Existing frontend build remains green.
 
 ### Phase 3: Local gateway
 
-- [ ] Task 7: Add gateway service and configuration.
+- [x] Task 7: Add gateway service and configuration.
   - Acceptance: local configuration loads provider credentials/endpoints through `SecretStore` and builds a provider registry without provider conditionals in the service.
   - Verify: configuration and service unit tests pass with fake adapters.
   - Files: `apps/gateway/src/config.ts`, `src/service.ts`, tests.

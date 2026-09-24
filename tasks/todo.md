@@ -41,7 +41,7 @@
   - Depends on: Task 2.
   - Scope: Medium.
 
-- [ ] Task 7: Add gateway service and configuration.
+- [x] Task 7: Add gateway service and configuration.
   - Acceptance: local configuration loads provider credentials/endpoints through `SecretStore` and builds a provider registry without provider conditionals in the service.
   - Verify: configuration and service unit tests pass with fake adapters.
   - Files: `apps/gateway/src/config.ts`, `src/service.ts`, tests.
