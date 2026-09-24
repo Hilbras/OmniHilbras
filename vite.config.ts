@@ -13,6 +13,7 @@ export default defineConfig({
         main: new URL('./index.html', import.meta.url).pathname,
         dashboard: new URL('./dashboard.html', import.meta.url).pathname,
         providers: new URL('./providers.html', import.meta.url).pathname,
+        provider: new URL('./provider.html', import.meta.url).pathname,
       },
     },
   },

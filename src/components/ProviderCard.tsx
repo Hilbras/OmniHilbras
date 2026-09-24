@@ -4,6 +4,7 @@ export type ProviderStatus = 'connected' | 'attention' | 'available';
 
 export type ProviderRecord = {
   id: string;
+  catalogId?: string;
   name: string;
   description: string;
   category: string;
@@ -45,7 +46,7 @@ function statusMeta(status: ProviderStatus) {
   };
 }
 
-export function ProviderCard({ provider, onManage, onConnect }: { provider: ProviderRecord; onManage: () => void; onConnect: () => void }) {
+export function ProviderCard({ provider, detailHref, onManage, onConnect }: { provider: ProviderRecord; detailHref: string; onManage: () => void; onConnect: () => void }) {
   const status = statusMeta(provider.status);
   const StatusIcon = status.icon;
   const isAvailable = provider.status === 'available';
@@ -58,7 +59,7 @@ export function ProviderCard({ provider, onManage, onConnect }: { provider: Prov
             {provider.initial}
           </span>
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold">{provider.name}</h2>
+            <a href={detailHref} className="truncate text-sm font-semibold transition-colors hover:text-gold-text">{provider.name}</a>
             <p className="muted mt-1 truncate text-[11px]">{provider.category}</p>
           </div>
         </div>

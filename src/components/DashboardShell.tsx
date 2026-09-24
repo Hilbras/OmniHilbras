@@ -166,7 +166,7 @@ export function DashboardShell({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <div className="dashboard-shell min-h-screen bg-bg text-text">
+    <div className="dashboard-shell page-enter min-h-screen bg-bg text-text">
       {mobileOpen && (
         <button
           type="button"

@@ -387,6 +387,55 @@
     pointer-events: none;
   }
 
+/* ------------------------------------------------------------------ *
+ * Page transitions — a small cross-document lift/fade plus a gentle
+ * mount reveal for the first paint of each static entry.
+ * ------------------------------------------------------------------ */
+@keyframes page-fade-out {
+  to {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.995);
+  }
+}
+
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: page-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root) {
+    animation: page-fade-out 180ms ease both;
+  }
+
+  ::view-transition-new(root) {
+    animation: page-fade-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter {
+    animation: none;
+  }
+}
+
 @keyframes route-travel {
   0% {
     opacity: 0;

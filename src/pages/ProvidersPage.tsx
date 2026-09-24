@@ -9,133 +9,11 @@ import {
   Search,
   Server,
   ShieldCheck,
-  X,
 } from 'lucide-react';
 import { AddProviderModal, providerOptions, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderCard, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
-
-const initialProviders: ProviderRecord[] = [
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    description: 'GPT, Responses, embeddings, and audio through the official API.',
-    category: 'Multi-model provider',
-    status: 'connected',
-    auth: 'API key',
-    models: '42 models',
-    latency: '286 ms',
-    requests: '8,921',
-    lastUsed: '12 sec ago',
-    health: 100,
-    color: '#6fdb9b',
-    initial: 'O',
-    endpoint: 'https://api.openai.com/v1',
-    modelList: ['gpt-4.1-mini', 'gpt-4.1', 'text-embedding-3-small'],
-  },
-  {
-    id: 'anthropic',
-    name: 'Anthropic',
-    description: 'Claude models with reliable tool use and long-context support.',
-    category: 'Multi-model provider',
-    status: 'connected',
-    auth: 'API key',
-    models: '12 models',
-    latency: '438 ms',
-    requests: '5,284',
-    lastUsed: '18 sec ago',
-    health: 100,
-    color: '#d97757',
-    initial: 'A',
-    endpoint: 'https://api.anthropic.com/v1',
-    modelList: ['claude-sonnet-4', 'claude-opus-4', 'claude-haiku-3-5'],
-  },
-  {
-    id: 'google',
-    name: 'Google',
-    description: 'Gemini models for multimodal reasoning and fast developer workflows.',
-    category: 'Multi-model provider',
-    status: 'connected',
-    auth: 'API key',
-    models: '28 models',
-    latency: '512 ms',
-    requests: '2,870',
-    lastUsed: '41 sec ago',
-    health: 98,
-    color: '#83b7ff',
-    initial: 'G',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta',
-    modelList: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-embedding-001'],
-  },
-  {
-    id: 'ollama',
-    name: 'Ollama',
-    description: 'Private local inference for coding models and offline development.',
-    category: 'Local runtime',
-    status: 'attention',
-    auth: 'No key',
-    models: '6 models',
-    latency: '92 ms',
-    requests: '1,417',
-    lastUsed: '2 min ago',
-    health: 72,
-    color: '#e2bd52',
-    initial: 'L',
-    endpoint: 'http://localhost:11434/v1',
-    modelList: ['qwen3-coder', 'llama3.2', 'nomic-embed-text'],
-  },
-  {
-    id: 'mistral',
-    name: 'Mistral',
-    description: 'Efficient open and hosted models for fast, focused responses.',
-    category: 'Multi-model provider',
-    status: 'available',
-    auth: 'API key',
-    models: '—',
-    latency: '—',
-    requests: '0',
-    lastUsed: 'never',
-    health: 0,
-    color: '#f97316',
-    initial: 'M',
-    endpoint: 'https://api.mistral.ai/v1',
-    modelList: [],
-  },
-  {
-    id: 'openrouter',
-    name: 'OpenRouter',
-    description: 'One connection for a broad catalog of hosted models and providers.',
-    category: 'Model catalog',
-    status: 'available',
-    auth: 'API key',
-    models: '—',
-    latency: '—',
-    requests: '0',
-    lastUsed: 'never',
-    health: 0,
-    color: '#b995e8',
-    initial: 'R',
-    endpoint: 'https://openrouter.ai/api/v1',
-    modelList: [],
-  },
-  {
-    id: 'custom',
-    name: 'Custom endpoint',
-    description: 'Connect any OpenAI-compatible gateway, proxy, or local server.',
-    category: 'Custom endpoint',
-    status: 'available',
-    auth: 'API key',
-    models: '—',
-    latency: '—',
-    requests: '0',
-    lastUsed: 'never',
-    health: 0,
-    color: '#9c9584',
-    initial: 'C',
-    endpoint: 'http://localhost:8000/v1',
-    modelList: [],
-  },
-];
+import { providerCatalog } from '../data/providers';
 
 type Filter = 'all' | 'connected' | 'attention' | 'available';
 
@@ -164,52 +42,12 @@ function SummaryCard({ label, value, detail, icon: Icon, tone }: { label: string
   );
 }
 
-function ProviderDetails({ provider, onClose }: { provider: ProviderRecord; onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/55 p-0 backdrop-blur-sm sm:items-center sm:p-5" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div role="dialog" aria-modal="true" aria-labelledby="provider-detail-title" className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-t-2xl border border-line bg-bg shadow-2xl sm:rounded-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-xl border text-xs font-bold" style={{ borderColor: `${provider.color}35`, background: `${provider.color}14`, color: provider.color }}>{provider.initial}</span>
-            <div>
-              <h2 id="provider-detail-title" className="text-lg font-semibold tracking-tight">{provider.name}</h2>
-              <p className="muted mt-1 text-xs">{provider.category}</p>
-            </div>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close provider details" className="muted grid h-9 w-9 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text"><X className="h-4 w-4" aria-hidden="true" /></button>
-        </div>
-        <div className="space-y-5 px-5 py-5 sm:px-6 sm:py-6">
-          <p className="muted text-sm leading-relaxed">{provider.description}</p>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {[
-              ['Status', provider.status === 'available' ? 'Available' : provider.status === 'attention' ? 'Attention' : 'Healthy'],
-              ['Auth', provider.auth],
-              ['Latency', provider.latency],
-              ['Requests', provider.requests],
-            ].map(([label, value]) => <div key={label} className="rounded-lg border border-line bg-bg-soft p-3"><span className="mono-label block">{label}</span><strong className="mt-1 block truncate font-mono text-xs">{value}</strong></div>)}
-          </div>
-          <div>
-            <span className="mono-label">Endpoint</span>
-            <code className="mt-2 block overflow-x-auto rounded-lg border border-line bg-bg-soft px-3 py-2.5 font-mono text-[11px] text-muted">{provider.endpoint}</code>
-          </div>
-          <div>
-            <span className="mono-label">Models</span>
-            {provider.modelList.length > 0 ? <div className="mt-2 flex flex-wrap gap-2">{provider.modelList.map((model) => <span key={model} className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{model}</span>)}</div> : <p className="muted mt-2 text-xs">Models will appear after the first connection sync.</p>}
-          </div>
-          <div className="flex justify-end border-t border-line pt-5"><button type="button" onClick={onClose} className="btn-ghost">Done</button></div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function ProvidersPage() {
-  const [providers, setProviders] = useState(initialProviders);
+  const [providers, setProviders] = useState(providerCatalog);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [addOpen, setAddOpen] = useState(false);
   const [initialProviderId, setInitialProviderId] = useState<string | undefined>();
-  const [selectedProvider, setSelectedProvider] = useState<ProviderRecord | null>(null);
   const [testingAll, setTestingAll] = useState(false);
   const [notice, setNotice] = useState('');
 
@@ -233,6 +71,7 @@ export default function ProvidersPage() {
     const option = providerOptions.find((item) => item.id === newProvider.providerId) ?? providerOptions[0];
     const record: ProviderRecord = {
       id: `${option.id}-${Date.now()}`,
+      catalogId: option.id,
       name: newProvider.name,
       description: option.description,
       category: option.id === 'custom' ? 'Custom endpoint' : option.auth === 'No key' ? 'Local runtime' : 'New connection',
@@ -307,7 +146,7 @@ export default function ProvidersPage() {
               </div>
             </div>
 
-            {filteredProviders.length > 0 ? <div className="grid gap-4 p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-3">{filteredProviders.map((provider) => <ProviderCard key={provider.id} provider={provider} onManage={() => setSelectedProvider(provider)} onConnect={() => openAdd(provider.id)} />)}</div> : <div className="px-5 py-14 text-center"><Search className="mx-auto h-7 w-7 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No providers found</p><p className="muted mt-1 text-xs">Try a different search or status filter.</p></div>}
+            {filteredProviders.length > 0 ? <div className="grid gap-4 p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-3">{filteredProviders.map((provider) => { const detailHref = `/provider.html?provider=${encodeURIComponent(provider.catalogId ?? provider.id)}`; return <ProviderCard key={provider.id} provider={provider} detailHref={detailHref} onManage={() => { window.location.href = detailHref; }} onConnect={() => openAdd(provider.id)} />; })}</div> : <div className="px-5 py-14 text-center"><Search className="mx-auto h-7 w-7 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No providers found</p><p className="muted mt-1 text-xs">Try a different search or status filter.</p></div>}
           </div>
         </section>
 
@@ -318,7 +157,6 @@ export default function ProvidersPage() {
       </div>
 
       <AddProviderModal open={addOpen} initialProviderId={initialProviderId} onClose={() => { setAddOpen(false); setInitialProviderId(undefined); }} onSave={handleSave} />
-      {selectedProvider && <ProviderDetails provider={selectedProvider} onClose={() => setSelectedProvider(null)} />}
     </DashboardShell>
   );
 }

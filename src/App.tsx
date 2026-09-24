@@ -525,7 +525,7 @@ function ClosingCta() {
 function App() {
   return (
     <MotionConfig reducedMotion="user">
-      <div className="min-h-screen overflow-x-clip">
+      <div className="page-enter min-h-screen overflow-x-clip">
         <ParticleBackground />
         <Navbar />
 
