@@ -38,7 +38,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 
 ### Phase 2: Provider adapters
 
-- [ ] Task 3: Implement the generic OpenAI-compatible adapter.
+- [x] Task 3: Implement the generic OpenAI-compatible adapter.
   - Acceptance: configurable base URL, auth header, model path, chat path, JSON responses, and SSE streaming normalize correctly.
   - Verify: fixture-based contract tests cover success, HTTP errors, malformed responses, and stream termination.
   - Files: `src/adapters/openai-compatible.ts`, fixtures/tests.
