@@ -94,29 +94,22 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
   return (
     <aside className={`dashboard-sidebar flex h-full w-[252px] shrink-0 flex-col border-r border-line bg-bg-soft/90 backdrop-blur-xl transition-[width] duration-200 ${collapsed ? 'lg:w-[76px]' : 'lg:w-[252px]'}`}>
       <div className={`flex items-center gap-1 pb-4 pt-5 ${collapsed ? 'justify-center px-2' : 'justify-between px-5'}`}>
-        <a href="/" onClick={onClose} className={`flex items-center gap-2.5 text-[15px] font-semibold tracking-tight ${collapsed ? 'justify-center' : ''}`} aria-label="OmniHilbras home">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] border border-gold/25 bg-gold-soft text-lg text-gold-text" aria-hidden="true">◈</span>
+        <button
+          type="button"
+          onClick={() => { onClose(); onToggleCollapse(); }}
+          className={`group flex items-center gap-2.5 rounded-lg p-1 text-[15px] font-semibold tracking-tight transition-colors hover:bg-surface ${collapsed ? 'justify-center' : ''}`}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          <span className="relative grid h-8 w-8 shrink-0 place-items-center rounded-[10px] border border-gold/25 bg-gold-soft text-lg text-gold-text" aria-hidden="true">
+            <span className="transition-opacity group-hover:opacity-0">◈</span>
+            {collapsed ? <PanelLeftOpen className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" /> : <PanelLeftClose className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />}
+          </span>
           {!collapsed && <span>Omni<span className="muted font-normal">Hilbras</span></span>}
-        </a>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="muted hidden h-8 w-8 place-items-center rounded-lg hover:bg-surface hover:text-gold-text lg:grid"
-          >
-            {collapsed ? <PanelLeftOpen className="h-4 w-4" aria-hidden="true" /> : <PanelLeftClose className="h-4 w-4" aria-hidden="true" />}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close navigation"
-            className="muted grid h-8 w-8 place-items-center rounded-lg hover:bg-surface hover:text-gold-text lg:hidden"
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-          </button>
-        </div>
+        </button>
+        <button type="button" onClick={onClose} aria-label="Close navigation" className="muted grid h-8 w-8 place-items-center rounded-lg hover:bg-surface hover:text-gold-text lg:hidden">
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
       </div>
 
       <div className={`mx-4 mb-5 rounded-xl border border-success/20 bg-success/10 ${collapsed ? 'flex justify-center p-2.5' : 'p-3'}`} title={collapsed ? 'Gateway online · localhost:8787' : undefined} aria-label={collapsed ? 'Gateway online' : undefined}>
