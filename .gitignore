@@ -6,3 +6,9 @@ dist
 .env
 .env.*
 !.env.example
+
+# Local gateway connection metadata and encrypted credential material.
+connections.json
+secrets.enc.json
+secrets.key
+.omnihilbras/

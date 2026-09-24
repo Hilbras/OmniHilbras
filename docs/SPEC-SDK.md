@@ -17,6 +17,7 @@ The first vertical slice must prove the architecture with native OpenAI, Anthrop
 | `provider-anthropic` | Native Anthropic Messages API conversion and streaming | `sdk-core` |
 | `provider-gemini` | Native Gemini generate/stream API conversion and models | `sdk-core` |
 | `provider-openai-compatible` | Configurable adapter for providers exposing an OpenAI-like API | `sdk-core` |
+| `provider-openrouter` | OpenAI-compatible data APIs plus authenticated key validation | `sdk-core` |
 | `gateway-local` | Loopback HTTP server, health, model listing, chat, and SSE streaming | `sdk-core` and provider adapters |
 | `dashboard-integration` | Replace preview provider actions with local gateway calls | `gateway-local` |
 | `gateway-cloud` | Authentication, tenancy, remote secret storage, and hosted deployment | `gateway-local`; later phase |
@@ -36,11 +37,11 @@ sdk-core → provider-openai-compatible → provider-openai → provider-anthrop
 - SDK code is runtime-agnostic and uses standard `fetch` and Web Streams.
 - The first gateway binds to `127.0.0.1:8787` and has no authentication in local mode.
 - Local mode rejects non-loopback binds and wildcard CORS; browser access uses an explicit dashboard-origin allowlist.
-- Credentials are injected through a `SecretStore` boundary; the first implementation reads environment variables and never logs secret values.
+- Credentials are injected through a `SecretStore` boundary; the first implementation reads environment variables and, for the OpenRouter local flow, persists a validated key in an encrypted gateway-owned vault. Secret values are never logged or returned by the API.
 - The SDK does not require a web framework. The local gateway starts with a small Node HTTP adapter and keeps the service layer framework-independent.
 - Provider-native payloads stay inside adapters. The normalized SDK contract is the only contract shared by the gateway and routing code.
 - The gateway's first public HTTP routes are OpenAI-compatible for client convenience, but adapters are not required to use OpenAI's wire format.
-- The first implementation slice contains the four adapters below; the capability-based extension path remains part of the contract, but no additional fake provider is required in this slice.
+- The first implementation slice contains the four core adapters below, plus the real OpenRouter adapter needed for the initial connection-management flow; the capability-based extension path remains part of the contract, and no fake provider is required.
 
 ## SDK Contract
 
@@ -86,6 +87,13 @@ Provider URLs are adapter-owned trusted configuration in local mode. Before expo
 - No provider-specific assumptions beyond the OpenAI-compatible protocol.
 - Safe URL and header configuration; no arbitrary credential forwarding.
 
+### OpenRouter
+
+- Uses the OpenAI-compatible model, chat, and streaming protocol.
+- Uses the authenticated `GET /api/v1/key` metadata route for credential checks; an unauthenticated model catalog request is not sufficient validation.
+- Rejects management keys that cannot be used for inference.
+- Overrides health checking so revoked credentials become unavailable instead of relying on the public model list.
+
 ### Other and future providers
 
 The three native adapters are not an exhaustive list. A provider that does not speak the OpenAI, Anthropic, or Gemini protocol gets its own adapter implementing the capability it supports. For example, a search provider implements a search capability, an image provider implements an image capability, and a speech provider implements audio capabilities. The shared registry and gateway do not need to change when a new provider or capability is added.
@@ -98,6 +106,10 @@ The first local gateway exposes:
 
 - `GET /health` — gateway and configured adapter health.
 - `GET /v1/models` — normalized models from configured adapters.
+- `GET /v1/connections` — connection metadata without credentials.
+- `POST /v1/connections/openrouter/check` — validate a candidate OpenRouter key without saving it.
+- `PUT /v1/connections/openrouter` — validate again, then upsert the single local OpenRouter connection.
+- `DELETE /v1/connections/:id` — remove a local connection.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
 - `POST /v1/chat/completions` with `stream: true` — normalized SSE chunks.
 
@@ -114,6 +126,16 @@ Gateway errors use one shape:
   }
 }
 ```
+
+Connection-management responses are metadata-only and use `Cache-Control: no-store`.
+The OpenRouter Save route always performs a fresh server-side validation before
+writing the credential. Connection metadata is kept in a separate JSON file;
+credentials are encrypted with AES-256-GCM in a separate vault file. The default
+vault directory is `$XDG_CONFIG_HOME/omnihilbras` (or `~/.config/omnihilbras`),
+with `0700` directory and `0600` file permissions. A generated local key file is
+supported for first-run convenience; deployments that need stronger key custody
+should provide `OMNIHILBRAS_MASTER_KEY` or replace the store with an OS keychain.
+Encryption at rest does not protect against a compromised same-user process.
 
 The gateway must validate request boundaries, apply request timeouts, never return raw secrets, and preserve provider error codes in structured metadata.
 
@@ -207,7 +229,7 @@ The existing Vite commands must continue to build the frontend successfully.
 
 - [ ] A TypeScript SDK package builds independently of the React app.
 - [ ] The SDK exposes stable normalized types and a provider registry.
-- [ ] Four adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management.
 - [ ] A provider with a different protocol can be added through a capability-specific adapter without modifying the gateway core.
 - [ ] Native streaming works through one normalized `AsyncIterable<ChatChunk>` contract.
 - [ ] Provider errors have stable codes and never expose secrets.
@@ -227,6 +249,7 @@ The initial adapter implementations are based on these official references:
 - Anthropic streaming events: https://platform.claude.com/docs/en/build-with-claude/streaming
 - Gemini GenerateContent: https://ai.google.dev/api/generate-content
 - Gemini model listing: https://ai.google.dev/api/models
+- OpenRouter API-key metadata: https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key
 
 Provider APIs change independently, so each adapter's request and response conversion must be updated and fixture-tested when its provider changes.
 

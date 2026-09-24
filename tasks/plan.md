@@ -98,15 +98,45 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 ### Phase 4: Dashboard integration
 
 - [x] Task 9: Connect provider health actions to the local gateway.
-  - Acceptance: provider health testing calls the local gateway and surfaces structured success/error states; credential persistence remains preview-only until a secret-management endpoint exists.
+  - Acceptance: provider health testing calls the local gateway and surfaces structured success/error states; credential persistence remains preview-only for providers without a management endpoint.
   - Verify: browser smoke test and frontend build/typecheck pass.
   - Files: `src/lib/gatewayClient.ts`, `src/pages/ProvidersPage.tsx`, `src/pages/ProviderDetailPage.tsx`.
   - Depends on: Task 8.
   - Scope: Small/medium.
 
+### Phase 4b: Local provider connections
+
+- [ ] Task 9a: Add a secure local connection store.
+  - Acceptance: connection metadata is stored separately from encrypted credentials; files use restrictive permissions and an injectable in-memory implementation supports tests.
+  - Verify: focused storage tests cover encryption-at-rest, round trips, atomic writes, and no plaintext secret in the metadata file.
+  - Files: `apps/gateway/src/connections.ts`, gateway tests.
+  - Depends on: Task 7.
+  - Scope: Medium.
+
+- [ ] Task 9b: Add OpenRouter validation and save routes.
+  - Acceptance: the gateway validates credentials against OpenRouter on both Check and Save, stores only a valid key, and returns metadata without secrets.
+  - Verify: gateway integration tests use a fake provider transport and assert validation-before-save, status codes, and redaction.
+  - Files: `apps/gateway/src/config.ts`, `src/service.ts`, `src/server.ts`, gateway tests.
+  - Depends on: Tasks 9a and 8.
+  - Scope: Medium.
+
+- [ ] Task 9c: Connect the dashboard modal to the connection API.
+  - Acceptance: OpenRouter Check and Save call the loopback gateway, errors remain in the dialog, and saved connection metadata is reflected without browser secret storage.
+  - Verify: typecheck/build, gateway tests, and browser smoke test.
+  - Files: `src/lib/gatewayClient.ts`, `src/components/AddProviderModal.tsx`, `src/pages/ProvidersPage.tsx`, `src/pages/ProviderDetailPage.tsx`.
+  - Depends on: Task 9b.
+  - Scope: Medium.
+
+### Checkpoint: Local connection flow
+
+- [ ] OpenRouter keys are never written to browser storage.
+- [ ] Check performs a real gateway-side provider request.
+- [ ] Save performs a second validation before persistence.
+- [ ] Existing gateway routes and frontend build remain green.
+
 ### Phase 5: Cloud readiness
 
-- [ ] Task 10: Define cloud integration boundaries.
+- [ ] Task 11: Define cloud integration boundaries.
   - Acceptance: auth context, tenant context, remote `SecretStore`, and deployment configuration are represented by interfaces without implementing cloud infrastructure.
   - Verify: typecheck and architecture review.
   - Files: SDK/gateway interfaces and documentation.
