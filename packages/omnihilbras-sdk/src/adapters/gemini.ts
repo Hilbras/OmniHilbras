@@ -137,18 +137,35 @@ export class GeminiAdapter implements ProviderAdapter {
       }
 
       const candidate = payload.candidates?.[0];
-      if (!candidate && payload.promptFeedback?.blockReason) {
-        yield {
-          id: `stream-${request.model}`,
-          providerId: this.id,
-          model: request.model,
-          delta: {},
-          finishReason: 'content_filter',
-        };
-        continue;
+      if (!candidate) {
+        if (payload.promptFeedback?.blockReason) {
+          yield {
+            id: `stream-${request.model}`,
+            providerId: this.id,
+            model: request.model,
+            delta: {},
+            finishReason: 'content_filter',
+          };
+          continue;
+        }
+        throw invalidResponse(this.id, 'Gemini stream response is missing a candidate.');
       }
 
-      const parts = candidate?.content?.parts ?? [];
+      const parts = candidate.content?.parts;
+      if (!Array.isArray(parts)) {
+        if (candidate.finishReason && isSafetyFinishReason(candidate.finishReason)) {
+          yield {
+            id: `stream-${request.model}`,
+            providerId: this.id,
+            model: request.model,
+            delta: {},
+            finishReason: 'content_filter',
+          };
+          continue;
+        }
+        throw invalidResponse(this.id, 'Gemini stream response is missing candidate parts.');
+      }
+
       const text = parts.filter((part) => part.text !== undefined).map((part) => part.text ?? '').join('');
       const toolCalls = parts.flatMap((part, partIndex) => part.functionCall ? [{
         index: partIndex,

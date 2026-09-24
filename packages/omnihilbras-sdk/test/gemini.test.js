@@ -96,6 +96,21 @@ test('GeminiAdapter lists models and normalizes streaming chunks', async () => {
   assert.equal(chunks.at(-1).finishReason, 'stop');
 });
 
+test('GeminiAdapter rejects malformed stream payloads', async () => {
+  const transport = createTransport({
+    stream: async function* () {
+      yield 'data: {}\n\n';
+    },
+  });
+  const adapter = new GeminiAdapter({ transport });
+
+  await assert.rejects(async () => {
+    for await (const _chunk of adapter.streamChat({ model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'Hi' }] }, { credential: { type: 'api-key', value: 'gemini-test' } })) {
+      // consume the stream
+    }
+  }, (error) => error instanceof ProviderError && error.code === 'INVALID_RESPONSE');
+});
+
 test('GeminiAdapter requires an API key', async () => {
   const adapter = new GeminiAdapter({ transport: createTransport() });
 
