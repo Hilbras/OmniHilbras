@@ -7,4 +7,12 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  build: {
+    rollupOptions: {
+      input: {
+        main: new URL('./index.html', import.meta.url).pathname,
+        dashboard: new URL('./dashboard.html', import.meta.url).pathname,
+      },
+    },
+  },
 });

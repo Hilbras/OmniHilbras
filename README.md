@@ -6,6 +6,9 @@ The first slice focuses on the product story and visual language: a warm editori
 surface, gold routing accents, a live gateway preview, and a responsive light/dark
 theme inspired by the Hilbras Code design system.
 
+The local dashboard overview is available at `/dashboard.html`. It uses preview
+metrics until the gateway API is connected.
+
 ## Scripts
 
 ```bash

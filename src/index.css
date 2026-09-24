@@ -348,6 +348,45 @@
   }
 }
 
+  /* ---------------------------------------------------------------- *
+   * Dashboard shell — compact control-room surface built from the
+   * same tokens as the marketing page.
+   * ---------------------------------------------------------------- */
+  .dashboard-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  .dashboard-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .dashboard-scroll::-webkit-scrollbar-thumb {
+    border: 0;
+    border-radius: 999px;
+    background: var(--line-strong);
+  }
+
+  .dashboard-header {
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--line) 35%, transparent);
+  }
+
+  .dashboard-grid-bg {
+    background-color: var(--bg);
+    background-image: linear-gradient(to right, color-mix(in srgb, var(--line) 32%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in srgb, var(--line) 32%, transparent) 1px, transparent 1px);
+    background-position: center top;
+    background-size: 48px 48px;
+  }
+
+  .dashboard-grid-bg::before {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 70% 36% at 50% 0%, var(--gold-soft), transparent 72%);
+    content: '';
+    pointer-events: none;
+  }
+
 @keyframes route-travel {
   0% {
     opacity: 0;

@@ -5,6 +5,7 @@ const footerGroups = [
       ['#product', 'Product'],
       ['#how-it-works', 'How it works'],
       ['#docs', 'Documentation'],
+      ['/dashboard.html', 'Dashboard'],
     ],
   },
   {

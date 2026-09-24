@@ -7,6 +7,7 @@ const links = [
   { href: '#product', label: 'Product' },
   { href: '#how-it-works', label: 'How it works' },
   { href: '#docs', label: 'Docs' },
+  { href: '/dashboard.html', label: 'Dashboard' },
 ] as const;
 
 export function Navbar() {
@@ -37,7 +38,7 @@ export function Navbar() {
           </span>
         </a>
 
-        <div className="absolute top-1/2 left-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-1 whitespace-nowrap md:flex">
+        <div className="absolute top-1/2 left-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-1 whitespace-nowrap lg:flex">
           {links.map((link) => (
             <a
               key={link.href}
@@ -50,8 +51,8 @@ export function Navbar() {
         </div>
 
         <div className="ml-auto flex items-center gap-2.5">
-          <a href="#docs" className="btn-quiet hidden sm:inline-flex">
-            Read the docs
+          <a href="/dashboard.html" className="btn-quiet hidden xl:inline-flex">
+            Open dashboard
           </a>
           <a href="#start" className="btn-gold hidden sm:inline-flex">
             Get started
@@ -63,7 +64,7 @@ export function Navbar() {
             aria-label={mobileOpen ? 'Close navigation menu' : 'Open navigation menu'}
             aria-expanded={mobileOpen}
             onClick={() => setMobileOpen((open) => !open)}
-            className="muted grid h-9 w-9 place-items-center rounded-lg transition-colors hover:bg-bg-soft hover:text-gold-text md:hidden"
+            className="muted grid h-9 w-9 place-items-center rounded-lg transition-colors hover:bg-bg-soft hover:text-gold-text lg:hidden"
           >
             {mobileOpen ? <X className="h-5 w-5" aria-hidden="true" /> : <Menu className="h-5 w-5" aria-hidden="true" />}
           </button>
@@ -77,7 +78,7 @@ export function Navbar() {
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="overflow-hidden border-t border-line bg-bg-soft/95 md:hidden"
+            className="overflow-hidden border-t border-line bg-bg-soft/95 lg:hidden"
           >
             <div className="mx-auto flex max-w-6xl flex-col px-5 py-3">
               {links.map((link) => (
