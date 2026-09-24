@@ -101,12 +101,12 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
+          {!collapsed && <PanelLeftClose className="h-4 w-4 shrink-0 text-muted transition-colors group-hover:text-gold-text" aria-hidden="true" />}
           <span className="relative grid h-8 w-8 shrink-0 place-items-center rounded-[10px] border border-gold/25 bg-gold-soft text-lg text-gold-text" aria-hidden="true">
             <span className={collapsed ? 'transition-opacity group-hover:opacity-0' : ''}>◈</span>
             {collapsed && <PanelLeftOpen className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />}
           </span>
           {!collapsed && <span>Omni<span className="muted font-normal">Hilbras</span></span>}
-          {!collapsed && <PanelLeftClose className="ml-1 h-4 w-4 shrink-0 text-muted transition-colors group-hover:text-gold-text" aria-hidden="true" />}
         </button>
         <button type="button" onClick={onClose} aria-label="Close navigation" className="muted grid h-8 w-8 place-items-center rounded-lg hover:bg-surface hover:text-gold-text lg:hidden">
           <X className="h-4 w-4" aria-hidden="true" />
