@@ -22,6 +22,7 @@ import {
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
+import { getGatewayHealth } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
 
@@ -127,12 +128,18 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     window.setTimeout(() => setNotice(''), 3200);
   }
 
-  function testConnection() {
+  async function testConnection() {
     setTestingConnection(true);
-    window.setTimeout(() => {
+    try {
+      const health = await getGatewayHealth();
+      const providerHealth = health.providers.find((item) => item.providerId === provider.id);
+      if (!providerHealth || providerHealth.status !== 'healthy') throw new Error(`${provider.name} is not connected to the local gateway.`);
+      flash(`${provider.name} connection is healthy.`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'The local gateway could not verify this connection.');
+    } finally {
       setTestingConnection(false);
-      flash('Connection test passed. The route is healthy.');
-    }, 850);
+    }
   }
 
   function handleAddConnection(newProvider: NewProvider) {

@@ -96,12 +96,12 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 
 ### Phase 4: Dashboard integration
 
-- [ ] Task 9: Connect provider actions to the local gateway.
-  - Acceptance: provider test/add flows call the local API and surface structured success/error states without sending preview-only fake responses.
+- [x] Task 9: Connect provider health actions to the local gateway.
+  - Acceptance: provider health testing calls the local gateway and surfaces structured success/error states; credential persistence remains preview-only until a secret-management endpoint exists.
   - Verify: browser smoke test and frontend build/typecheck pass.
-  - Files: dashboard API client and provider pages.
+  - Files: `src/lib/gatewayClient.ts`, `src/pages/ProvidersPage.tsx`, `src/pages/ProviderDetailPage.tsx`.
   - Depends on: Task 8.
-  - Scope: Medium.
+  - Scope: Small/medium.
 
 ### Phase 5: Cloud readiness
 

@@ -13,6 +13,7 @@ import {
 import { AddProviderModal, providerOptions, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderCard, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
+import { getGatewayHealth } from '../lib/gatewayClient';
 import { providerCatalog } from '../data/providers';
 
 type Filter = 'all' | 'connected' | 'attention' | 'available';
@@ -95,13 +96,18 @@ export function ProvidersContent() {
     window.setTimeout(() => setNotice(''), 3500);
   }
 
-  function testAll() {
+  async function testAll() {
     setTestingAll(true);
-    window.setTimeout(() => {
+    try {
+      const health = await getGatewayHealth();
+      const healthyCount = health.providers.filter((provider) => provider.status === 'healthy').length;
+      setNotice(`${healthyCount} of ${health.providers.length} provider connections are healthy.`);
+    } catch {
+      setNotice('Local gateway unavailable. Start it with pnpm dev:gateway.');
+    } finally {
       setTestingAll(false);
-      setNotice(`${connectedCount + attentionCount} provider connections responded.`);
       window.setTimeout(() => setNotice(''), 3500);
-    }, 900);
+    }
   }
 
   return (
