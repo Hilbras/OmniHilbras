@@ -98,6 +98,7 @@ export function ProviderCard({ provider, detailHref, onManage, onConnect, mode =
   const status = statusMeta(provider.status);
   const StatusIcon = status.icon;
   const isAvailable = provider.status === 'available';
+  const hasLiveHealth = provider.health > 0;
 
   return (
     <article className="card group flex min-w-0 flex-col overflow-hidden transition-transform duration-200 hover:-translate-y-0.5">
@@ -129,11 +130,11 @@ export function ProviderCard({ provider, detailHref, onManage, onConnect, mode =
           </div>
         </div>
 
-        {provider.status !== 'available' && (
+        {provider.status !== 'available' && hasLiveHealth && (
           <div className="mt-5">
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="muted text-[10px]">Route health</span>
-              <span className={`font-mono text-[10px] ${provider.status === 'connected' ? 'text-success' : 'text-gold-text'}`}>{provider.health}%</span>
+              <span className={`font-mono text-[10px] ${provider.status === 'connected' ? 'text-success' : 'text-gold-text'}`}>{hasLiveHealth ? `${provider.health}%` : 'Not checked'}</span>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-line/70">
               <div className={`h-full rounded-full ${provider.status === 'connected' ? 'bg-success' : 'bg-gold'}`} style={{ width: `${provider.health}%` }} />

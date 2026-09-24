@@ -135,7 +135,7 @@ vault directory is `$XDG_CONFIG_HOME/omnihilbras` (or `~/.config/omnihilbras`),
 with `0700` directory and `0600` file permissions. A generated local key file is
 supported for first-run convenience; deployments that need stronger key custody
 should provide `OMNIHILBRAS_MASTER_KEY` or replace the store with an OS keychain.
-Encryption at rest does not protect against a compromised same-user process.
+Encryption at rest does not protect against a compromised same-user process. On startup, credentials without a matching credential-bearing metadata record are discarded before the gateway can use them, preventing an interrupted two-file write from activating an unlisted key.
 
 The gateway must validate request boundaries, apply request timeouts, never return raw secrets, and preserve provider error codes in structured metadata.
 

@@ -276,6 +276,15 @@ export class LocalConnectionStore implements ConnectionStore {
     ]);
     this.connections = parseMetadata(metadataText);
     this.credentials = secretText ? await this.decryptSecrets(secretText) : new Map<ProviderId, ProviderCredential>();
+    const listedProviders = new Set([...this.connections.values()].filter((connection) => connection.hasCredential).map((connection) => connection.providerId));
+    let discardedOrphans = false;
+    for (const providerId of this.credentials.keys()) {
+      if (!listedProviders.has(providerId)) {
+        this.credentials.delete(providerId);
+        discardedOrphans = true;
+      }
+    }
+    if (discardedOrphans) await this.persistSecrets();
     for (const connection of this.connections.values()) {
       if (!this.credentials.has(connection.providerId)) connection.hasCredential = false;
     }

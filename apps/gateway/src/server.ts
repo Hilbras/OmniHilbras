@@ -23,7 +23,10 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
       sendJson(response, 403, { error: { code: 'CORS_ORIGIN_DENIED', message: 'This browser origin is not allowed.' } });
       return;
     }
-    if (isCrossSiteRequest(request)) {
+    // Chromium may classify loopback host aliases (localhost -> 127.0.0.1)
+    // as cross-site. The exact Origin allowlist is the authorization check;
+    // an allowlisted dashboard origin is safe to accept here.
+    if (isCrossSiteRequest(request) && (!requestOrigin || !corsOrigins.includes(requestOrigin))) {
       sendJson(response, 403, { error: { code: 'CROSS_SITE_REQUEST_DENIED', message: 'Cross-site requests are not allowed.' } });
       return;
     }

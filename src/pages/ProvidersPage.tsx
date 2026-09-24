@@ -13,7 +13,7 @@ import {
 import { AddProviderModal, providerOptions, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderCard, providerGroupLabels, providerGroupOrder, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
-import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection } from '../lib/gatewayClient';
+import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection, type GatewayHealth } from '../lib/gatewayClient';
 import { providerCatalog } from '../data/providers';
 
 type Filter = 'all' | 'connected' | 'attention' | 'available';
@@ -62,21 +62,24 @@ function recordForNewProvider(newProvider: NewProvider, index = 0): ProviderReco
   };
 }
 
-function mergeGatewayConnections(providers: ProviderRecord[], connections: GatewayConnection[]) {
-  const next = [...providers];
-  for (const connection of connections) {
-    const index = next.findIndex((provider) => provider.catalogId === connection.providerId || provider.id === connection.providerId);
-    if (index < 0) continue;
-    next[index] = {
-      ...next[index],
-      status: connection.hasCredential ? 'connected' : 'attention',
+function mergeGatewayConnections(providers: ProviderRecord[], connections: GatewayConnection[], health?: GatewayHealth) {
+  const connectionByProvider = new Map(connections.map((connection) => [connection.providerId, connection]));
+  const healthByProvider = new Map(health?.providers.map((provider) => [provider.providerId, provider]));
+  return providers.map((provider) => {
+    const connection = connectionByProvider.get(provider.catalogId ?? provider.id);
+    if (!connection) return provider;
+    const providerHealth = healthByProvider.get(connection.providerId);
+    const liveHealthy = providerHealth?.status === 'healthy';
+    return {
+      ...provider,
+      status: connection.hasCredential && connection.enabled && providerHealth?.status !== 'unavailable' && providerHealth?.status !== 'degraded' ? 'connected' : 'attention',
       endpoint: connection.endpoint,
-      lastUsed: 'just now',
-      health: connection.hasCredential ? 100 : 0,
-      models: connection.hasCredential ? 'Key verified' : '—',
-    };
-  }
-  return next;
+      lastUsed: liveHealthy ? 'just now' : 'saved locally',
+      latency: providerHealth?.latencyMs === undefined ? '—' : `${providerHealth.latencyMs} ms`,
+      health: liveHealthy ? 100 : 0,
+      models: liveHealthy ? 'Key verified' : connection.hasCredential ? 'Health pending' : '—',
+    } satisfies ProviderRecord;
+  });
 }
 
 function SummaryCard({ label, value, detail, icon: Icon, tone }: { label: string; value: string; detail: string; icon: typeof Activity; tone: string }) {
@@ -101,13 +104,18 @@ export function ProvidersContent() {
   const [addOpen, setAddOpen] = useState(false);
   const [initialProviderId, setInitialProviderId] = useState<string | undefined>();
   const [testingAll, setTestingAll] = useState(false);
+  const [gatewayConnections, setGatewayConnections] = useState<GatewayConnection[]>([]);
   const [notice, setNotice] = useState('');
 
   useEffect(() => {
     let active = true;
     void listGatewayConnections()
-      .then((connections) => {
-        if (active) setProviders((current) => mergeGatewayConnections(current, connections));
+      .then(async (connections) => {
+        let health: GatewayHealth | undefined;
+        try { health = await getGatewayHealth(); } catch { /* metadata can load before health */ }
+        if (!active) return;
+        setGatewayConnections(connections);
+        setProviders((current) => mergeGatewayConnections(current, connections, health));
       })
       .catch(() => undefined);
     return () => { active = false; };
@@ -160,6 +168,7 @@ export function ProvidersContent() {
         priority: newProvider.priority ?? 1,
         proxyPool: newProvider.proxyPool ?? 'none',
       });
+      setGatewayConnections((current) => [...current.filter((item) => item.providerId !== connection.providerId), connection]);
       setProviders((current) => mergeGatewayConnections(current, [connection]));
       setAddOpen(false);
       setInitialProviderId(undefined);
@@ -178,6 +187,7 @@ export function ProvidersContent() {
     setTestingAll(true);
     try {
       const health = await getGatewayHealth();
+      setProviders((current) => mergeGatewayConnections(current, gatewayConnections, health));
       const healthyCount = health.providers.filter((provider) => provider.status === 'healthy').length;
       setNotice(`${healthyCount} of ${health.providers.length} provider connections are healthy.`);
     } catch {

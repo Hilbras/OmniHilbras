@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
@@ -47,6 +47,19 @@ test('local connection store fails closed when the master key is wrong', async (
   const wrongKeyStore = new LocalConnectionStore({ directory, masterKey: Buffer.alloc(32, 8) });
   await assert.rejects(() => wrongKeyStore.get('openrouter'));
   assert.equal((await readFile(join(directory, 'connections.json'), 'utf8')).includes('test-secret'), false);
+});
+
+test('local connection store discards credentials without a metadata record', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-orphan-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalConnectionStore({ directory, masterKey: Buffer.alloc(32, 9) });
+  await store.save(connectionInput, { type: 'api-key', value: 'orphan-secret' });
+  await writeFile(join(directory, 'connections.json'), JSON.stringify({ version: 1, connections: [] }) + '\n');
+
+  const reopened = new LocalConnectionStore({ directory, masterKey: Buffer.alloc(32, 9) });
+  assert.deepEqual(await reopened.list(), []);
+  assert.equal(await reopened.get('openrouter'), undefined);
+  assert.equal((await readFile(join(directory, 'secrets.enc.json'), 'utf8')).includes('orphan-secret'), false);
 });
 
 test('in-memory connection store keeps metadata and credentials available to the gateway', async () => {

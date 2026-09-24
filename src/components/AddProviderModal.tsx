@@ -88,10 +88,7 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
     dialogRef.current?.focus({ preventScroll: true });
     return () => {
       document.body.style.overflow = previousOverflow;
-      if (testTimerRef.current !== null) window.clearTimeout(testTimerRef.current);
-      testTimerRef.current = null;
-      checkAbortRef.current?.abort();
-      checkAbortRef.current = null;
+      cancelPendingCheck();
       previousFocusRef.current?.focus({ preventScroll: true });
       previousFocusRef.current = null;
     };
@@ -116,11 +113,16 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
   const canSave = mode === 'single' ? hasSingleConnection : Boolean(bulkText.trim());
   const title = `Add ${selected.name} ${requiresKey ? 'API Key' : 'Connection'}`;
 
-  function selectProvider(id: string) {
+  function cancelPendingCheck() {
+    const controller = checkAbortRef.current;
+    checkAbortRef.current = null;
+    controller?.abort();
     if (testTimerRef.current !== null) window.clearTimeout(testTimerRef.current);
     testTimerRef.current = null;
-    checkAbortRef.current?.abort();
-    checkAbortRef.current = null;
+  }
+
+  function selectProvider(id: string) {
+    cancelPendingCheck();
     const option = providerOptions.find((item) => item.id === id) ?? providerOptions[0];
     setSelectedId(option.id);
     if (option.id === 'openrouter') setMode('single');
@@ -149,8 +151,15 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
         await checkOpenRouterConnection(apiKey, controller.signal);
         setTestState('success');
       } else {
-        await new Promise<void>((resolve) => {
+        await new Promise<void>((resolve, reject) => {
+          const onAbort = () => {
+            if (testTimerRef.current !== null) window.clearTimeout(testTimerRef.current);
+            testTimerRef.current = null;
+            reject(new DOMException('The connection check was cancelled.', 'AbortError'));
+          };
+          controller.signal.addEventListener('abort', onAbort, { once: true });
           testTimerRef.current = window.setTimeout(() => {
+            controller.signal.removeEventListener('abort', onAbort);
             testTimerRef.current = null;
             setTestState('success');
             resolve();
@@ -259,7 +268,7 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
                     <div className="flex gap-2">
                       <div className="relative min-w-0 flex-1">
                         <LockKeyhole className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
-                        <input id="connection-api-key" type="password" value={apiKey} onChange={(event) => { checkAbortRef.current?.abort(); checkAbortRef.current = null; if (testTimerRef.current !== null) window.clearTimeout(testTimerRef.current); testTimerRef.current = null; setApiKey(event.target.value); setTestState('idle'); setError(''); }} placeholder="Paste a provider key" className="input !h-11 !w-full !rounded-lg !border-line !bg-surface-2 !pl-10 !pr-3 !text-sm" autoComplete="off" />
+                        <input id="connection-api-key" type="password" value={apiKey} onChange={(event) => { cancelPendingCheck(); setApiKey(event.target.value); setTestState('idle'); setError(''); }} placeholder="Paste a provider key" className="input !h-11 !w-full !rounded-lg !border-line !bg-surface-2 !pl-10 !pr-3 !text-sm" autoComplete="off" />
                       </div>
                       <button type="button" onClick={testConnection} disabled={testing || saving || !apiKey.trim()} className="btn-ghost !h-11 !w-[78px] !rounded-lg !px-2 !text-xs disabled:cursor-not-allowed disabled:opacity-45">
                         {testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Check className="h-3.5 w-3.5" aria-hidden="true" />}

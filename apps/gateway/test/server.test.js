@@ -85,6 +85,10 @@ test('local gateway restricts browser origins to the configured allowlist', asyn
   assert.equal(crossSite.status, 403);
   assert.equal((await crossSite.json()).error.code, 'CROSS_SITE_REQUEST_DENIED');
 
+  const allowlistedCrossSite = await fetch(`${baseUrl}/health`, { headers: { origin: 'http://localhost:5173', 'sec-fetch-site': 'cross-site' } });
+  assert.equal(allowlistedCrossSite.status, 200);
+  assert.equal(allowlistedCrossSite.headers.get('access-control-allow-origin'), 'http://localhost:5173');
+
   const nonJsonPost = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'text/plain' },

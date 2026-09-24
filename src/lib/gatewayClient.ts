@@ -41,7 +41,24 @@ export type OpenRouterConnectionInput = {
   enabled?: boolean;
 };
 
-const gatewayBaseUrl = (import.meta.env.VITE_GATEWAY_URL ?? 'http://127.0.0.1:8787').replace(/\/$/, '');
+const gatewayBaseUrl = normalizeGatewayBaseUrl(import.meta.env.VITE_GATEWAY_URL ?? 'http://127.0.0.1:8787');
+
+function normalizeGatewayBaseUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    const loopback = hostname === 'localhost' || hostname === '::1' || isLoopbackIpv4(hostname);
+    if (!loopback || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') return '';
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
+function isLoopbackIpv4(hostname: string) {
+  const parts = hostname.split('.');
+  return parts.length === 4 && parts[0] === '127' && parts.every((part) => /^(0|[1-9]\d{0,2})$/.test(part) && Number(part) <= 255);
+}
 
 export async function getGatewayHealth(signal?: AbortSignal) {
   return requestJson<GatewayHealth>('/health', { signal });
@@ -78,9 +95,11 @@ export function removeGatewayConnection(connectionId: string, signal?: AbortSign
 }
 
 async function requestJson<T>(path: string, init: RequestInit = {}) {
+  if (!gatewayBaseUrl) throw new Error('Gateway URL must target a loopback address.');
   const response = await fetch(`${gatewayBaseUrl}${path}`, {
     cache: 'no-store',
     credentials: 'omit',
+    redirect: 'error',
     ...init,
     headers: { accept: 'application/json', ...init.headers },
   });
