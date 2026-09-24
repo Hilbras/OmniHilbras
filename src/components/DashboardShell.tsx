@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 
-type DashboardPage = 'overview' | 'providers';
+type DashboardPage = 'overview' | 'providers' | 'routing';
 
 type SidebarItem = {
   label: string;
@@ -29,7 +29,7 @@ type SidebarItem = {
 const primaryItems: SidebarItem[] = [
   { label: 'Overview', icon: LayoutDashboard, href: '/dashboard.html#overview', page: 'overview' },
   { label: 'Providers', icon: Network, href: '/providers.html', page: 'providers' },
-  { label: 'Routing', icon: RouteIcon, disabled: true },
+  { label: 'Routing', icon: RouteIcon, href: '/routing.html', page: 'routing' },
   { label: 'API keys', icon: KeyRound, disabled: true },
 ];
 

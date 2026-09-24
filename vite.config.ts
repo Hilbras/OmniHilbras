@@ -14,6 +14,7 @@ export default defineConfig({
         dashboard: new URL('./dashboard.html', import.meta.url).pathname,
         providers: new URL('./providers.html', import.meta.url).pathname,
         provider: new URL('./provider.html', import.meta.url).pathname,
+        routing: new URL('./routing.html', import.meta.url).pathname,
       },
     },
   },
