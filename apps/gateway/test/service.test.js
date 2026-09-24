@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { InMemorySecretStore, ProviderRegistry } from '@omnihilbras/sdk';
-import { createProviderRegistry, EnvironmentSecretStore, GatewayService, loadGatewayConfig, startGatewayServer } from '../dist/index.js';
+import { createProviderRegistry, EnvironmentSecretStore, GatewayService, InMemoryConnectionStore, loadGatewayConfig, startGatewayServer } from '../dist/index.js';
 
 test('gateway config loads local defaults and environment credentials', async () => {
   const config = loadGatewayConfig({
@@ -28,6 +28,7 @@ test('gateway config rejects non-loopback hosts and wildcard CORS', () => {
   assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_HOST: '127.999.999.999' }), /loopback/);
   assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_HOST: '127.000.000.001' }), /loopback/);
   assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_CORS_ORIGINS: '*' }), /wildcard/);
+  assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_MASTER_KEY: 'not-a-32-byte-key' }), /32 bytes/);
   assert.equal(loadGatewayConfig({ OMNIHILBRAS_HOST: 'localhost' }).host, '127.0.0.1');
   assert.equal(loadGatewayConfig({ OMNIHILBRAS_HOST: '[::1]' }).host, '::1');
 });
@@ -58,7 +59,7 @@ test('gateway config uses the custom compatible provider credential and paths', 
   assert.deepEqual(await secretStore.get('acme'), { type: 'api-key', value: 'acme-secret' });
 });
 
-test('gateway config registers all four provider adapters', () => {
+test('gateway config registers all provider adapters', () => {
   const config = loadGatewayConfig({});
   const transport = {
     async request() {
@@ -68,7 +69,7 @@ test('gateway config registers all four provider adapters', () => {
   };
   const registry = createProviderRegistry(config, transport);
 
-  assert.deepEqual(registry.list().map((adapter) => adapter.id), ['openai', 'anthropic', 'gemini', 'openai-compatible']);
+  assert.deepEqual(registry.list().map((adapter) => adapter.id), ['openai', 'anthropic', 'gemini', 'openrouter', 'openai-compatible']);
 });
 
 test('GatewayService stays provider-neutral while delegating calls', async () => {
@@ -102,4 +103,20 @@ test('GatewayService stays provider-neutral while delegating calls', async () =>
   assert.deepEqual(models.models, [{ id: 'fake-1', providerId: 'fake' }]);
   assert.equal(response.message.content, 'fake-secret');
   assert.equal(chunks[0].delta.content, 'stream');
+});
+
+test('saved connection credentials take precedence over environment fallback', async () => {
+  const adapter = {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    capabilities: {},
+    async validateCredential() {},
+  };
+  const fallback = new EnvironmentSecretStore({ OPENROUTER_API_KEY: 'environment-key' });
+  const store = new InMemoryConnectionStore(fallback);
+  const service = new GatewayService(new ProviderRegistry().register(adapter), store, store);
+
+  assert.deepEqual(await store.get('openrouter'), { type: 'api-key', value: 'environment-key' });
+  await service.saveConnection({ providerId: 'openrouter', name: 'Saved', endpoint: 'https://openrouter.ai/api/v1', priority: 1, proxyPool: 'none' }, { type: 'api-key', value: 'saved-key' });
+  assert.deepEqual(await store.get('openrouter'), { type: 'api-key', value: 'saved-key' });
 });

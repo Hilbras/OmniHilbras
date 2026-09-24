@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { ProviderError, canonicalLoopbackHost, isLoopbackHostname, publicProviderMessage, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ToolDefinition } from '@omnihilbras/sdk';
+import { ProviderError, canonicalLoopbackHost, isLoopbackHostname, publicProviderMessage, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ProviderCredential, type ToolDefinition } from '@omnihilbras/sdk';
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './config.js';
+import type { ConnectionStore } from './connections.js';
 import type { GatewayService } from './service.js';
 
 export type GatewayServerOptions = {
@@ -12,6 +13,7 @@ export type GatewayServerOptions = {
 };
 
 const defaultCorsOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+const maxConnectionBodyBytes = 16 * 1024;
 
 export function createGatewayServer(service: GatewayService, options: GatewayServerOptions = {}) {
   const corsOrigins = resolveCorsOrigins(options);
@@ -28,8 +30,9 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
 
     const responseOrigin = requestOrigin && corsOrigins.includes(requestOrigin) ? requestOrigin : undefined;
     setCors(response, responseOrigin);
-    if (request.method === 'POST' && !isJsonRequest(request)) {
-      sendJson(response, 415, { error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'POST requests must use application/json.' } }, responseOrigin);
+    if (request.url?.startsWith('/v1/connections')) response.setHeader('cache-control', 'no-store');
+    if ((request.method === 'POST' || request.method === 'PUT') && !isJsonRequest(request)) {
+      sendJson(response, 415, { error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'JSON requests must use application/json.' } }, responseOrigin);
       return;
     }
     void handleRequest(request, response, service, options, responseOrigin).catch((error) => {
@@ -43,11 +46,12 @@ export async function startGatewayServer(options: {
   env?: Readonly<Record<string, string | undefined>>;
   corsOrigin?: string;
   corsOrigins?: string[];
+  connectionStore?: ConnectionStore;
 } = {}) {
   const config = options.config ?? loadGatewayConfig(options.env);
   assertLoopbackHost(config.host);
   const bindHost = canonicalLoopbackHost(config.host);
-  const service = createGatewayService(config, options.env);
+  const service = createGatewayService(config, options.env, options.connectionStore);
   const server = createGatewayServer(service, {
     ...(options.corsOrigin ? { corsOrigin: options.corsOrigin } : {}),
     ...(options.corsOrigins ? { corsOrigins: options.corsOrigins } : options.corsOrigin ? {} : { corsOrigins: config.corsOrigins }),
@@ -92,6 +96,37 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (url.pathname.startsWith('/v1/connections')) response.setHeader('cache-control', 'no-store');
+
+    if (request.method === 'GET' && url.pathname === '/v1/connections') {
+      sendJson(response, 200, { object: 'list', data: await service.listConnections() }, origin);
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/connections/openrouter/check') {
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['apiKey']);
+      const credential = parseApiKey(body);
+      sendJson(response, 200, await service.validateConnectionCredential('openrouter', credential, controller.signal), origin);
+      return;
+    }
+
+    if (request.method === 'PUT' && url.pathname === '/v1/connections/openrouter') {
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
+      const { credential, ...input } = parseOpenRouterConnectionRequest(body);
+      const connection = await service.saveConnection(input, credential, controller.signal);
+      sendJson(response, 200, { connection }, origin);
+      return;
+    }
+
+    if (request.method === 'DELETE' && url.pathname.startsWith('/v1/connections/')) {
+      const connectionId = decodeConnectionId(url.pathname.slice('/v1/connections/'.length));
+      await service.removeConnection(connectionId);
+      sendJson(response, 200, { deleted: true, id: connectionId }, origin);
+      return;
+    }
+
     if (request.method === 'GET' && url.pathname === '/v1/models') {
       const result = await service.listAllModels(controller.signal);
       sendJson(response, 200, {
@@ -112,6 +147,78 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     request.off('aborted', abort);
     response.off('close', onResponseClose);
   }
+}
+
+type OpenRouterConnectionRequest = {
+  id: 'openrouter';
+  providerId: 'openrouter';
+  name: string;
+  endpoint: typeof openRouterEndpoint;
+  priority: number;
+  proxyPool: string;
+  enabled?: boolean;
+  credential: ProviderCredential;
+};
+
+const openRouterEndpoint = 'https://openrouter.ai/api/v1' as const;
+
+function parseApiKey(body: unknown) {
+  if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+  if (typeof body.apiKey !== 'string') throw invalidRequest('apiKey is required.');
+  const apiKey = body.apiKey;
+  if (!apiKey || apiKey !== apiKey.trim() || apiKey.length > 4096 || /[\r\n\0]/.test(apiKey)) throw invalidRequest('apiKey must be a non-empty safe string.');
+  return { type: 'api-key' as const, value: apiKey };
+}
+
+function parseOpenRouterConnectionRequest(body: unknown): OpenRouterConnectionRequest {
+  if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+  assertOnlyFields(body, ['apiKey', 'name', 'priority', 'proxyPool', 'enabled']);
+  const name = parseBoundedString(body.name, 'name', 120);
+  const priority = body.priority === undefined ? 1 : parsePriority(body.priority);
+  const proxyPool = body.proxyPool === undefined ? 'none' : parseBoundedString(body.proxyPool, 'proxyPool', 128, true);
+  if (body.enabled !== undefined && typeof body.enabled !== 'boolean') throw invalidRequest('enabled must be a boolean.');
+  return {
+    id: 'openrouter',
+    providerId: 'openrouter',
+    name,
+    endpoint: openRouterEndpoint,
+    priority,
+    proxyPool,
+    ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
+    credential: parseApiKey(body),
+  };
+}
+
+function assertOnlyFields(body: Record<string, unknown>, allowed: string[]) {
+  const allowedFields = new Set(allowed);
+  if (Object.keys(body).some((field) => !allowedFields.has(field))) throw invalidRequest('Request contains unsupported fields.');
+}
+
+function parseIdentifier(value: unknown, field: string) {
+  if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(value.trim())) throw invalidRequest(`${field} contains unsupported characters.`);
+  return value.trim();
+}
+
+function parseBoundedString(value: unknown, field: string, maxLength: number, allowEmpty = false) {
+  if (typeof value !== 'string') throw invalidRequest(`${field} must be a string.`);
+  const normalized = value.trim();
+  if ((!allowEmpty && !normalized) || normalized.length > maxLength || /[\r\n\0]/.test(normalized)) throw invalidRequest(`${field} is invalid.`);
+  return normalized;
+}
+
+function parsePriority(value: unknown) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 1000) throw invalidRequest('priority must be an integer from 1 to 1000.');
+  return value;
+}
+
+function decodeConnectionId(value: string) {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    throw invalidRequest('connection id is invalid.');
+  }
+  return parseIdentifier(decoded, 'connection id');
 }
 
 async function handleChat(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
@@ -458,7 +565,7 @@ function isJsonRequest(request: IncomingMessage) {
 function setCors(response: ServerResponse, origin: string | undefined) {
   if (origin) response.setHeader('access-control-allow-origin', origin);
   response.setHeader('access-control-allow-headers', 'content-type, x-omnihilbras-provider');
-  response.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
+  response.setHeader('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS');
   response.setHeader('x-content-type-options', 'nosniff');
   response.setHeader('vary', 'Origin');
 }

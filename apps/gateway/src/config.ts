@@ -4,12 +4,14 @@ import {
   GeminiAdapter,
   OpenAIAdapter,
   OpenAICompatibleAdapter,
+  OpenRouterAdapter,
   ProviderRegistry,
   canonicalLoopbackHost,
   isLoopbackHostname,
   type ProviderCredential,
   type SecretStore,
 } from '@omnihilbras/sdk';
+import { defaultConnectionDirectory, LocalConnectionStore, parseMasterKey, type ConnectionStore } from './connections.js';
 import { GatewayService } from './service.js';
 
 export type GatewayConfig = {
@@ -17,6 +19,7 @@ export type GatewayConfig = {
   port: number;
   timeoutMs: number;
   corsOrigins: string[];
+  dataDir: string;
   openai: {
     baseUrl: string;
     organization?: string;
@@ -27,6 +30,9 @@ export type GatewayConfig = {
     apiVersion?: string;
   };
   gemini: {
+    baseUrl: string;
+  };
+  openrouter: {
     baseUrl: string;
   };
   compatible: {
@@ -57,6 +63,7 @@ export class EnvironmentSecretStore implements SecretStore {
 export function loadGatewayConfig(env: Readonly<Record<string, string | undefined>> = process.env): GatewayConfig {
   const host = canonicalLoopbackHost(env.OMNIHILBRAS_HOST ?? '127.0.0.1');
   assertLoopbackHost(host);
+  parseMasterKey(env.OMNIHILBRAS_MASTER_KEY);
   const compatibleId = env.OMNIHILBRAS_COMPATIBLE_PROVIDER_ID ?? 'openai-compatible';
   const compatibleCredential = env[providerEnvKey(compatibleId)]
     ?? env.OMNIHILBRAS_COMPATIBLE_API_KEY;
@@ -66,6 +73,7 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
     port: parseInteger(env.OMNIHILBRAS_PORT, 8787, 'OMNIHILBRAS_PORT'),
     timeoutMs: parseInteger(env.OMNIHILBRAS_TIMEOUT_MS, 30_000, 'OMNIHILBRAS_TIMEOUT_MS'),
     corsOrigins: parseCorsOrigins(env.OMNIHILBRAS_CORS_ORIGINS),
+    dataDir: env.OMNIHILBRAS_DATA_DIR?.trim() || defaultConnectionDirectory(env),
     openai: {
       baseUrl: env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
       organization: env.OPENAI_ORGANIZATION,
@@ -77,6 +85,9 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
     },
     gemini: {
       baseUrl: env.GEMINI_BASE_URL ?? 'https://generativelanguage.googleapis.com/v1beta',
+    },
+    openrouter: {
+      baseUrl: 'https://openrouter.ai/api/v1',
     },
     compatible: {
       id: compatibleId,
@@ -105,6 +116,7 @@ export function createProviderRegistry(config: GatewayConfig, transport = new Fe
     transport,
   }));
   registry.register(new GeminiAdapter({ baseUrl: config.gemini.baseUrl, transport }));
+  registry.register(new OpenRouterAdapter({ baseUrl: config.openrouter.baseUrl }, { transport }));
   registry.register(new OpenAICompatibleAdapter({
     id: config.compatible.id,
     name: config.compatible.name,
@@ -120,9 +132,10 @@ export function createProviderRegistry(config: GatewayConfig, transport = new Fe
   return registry;
 }
 
-export function createGatewayService(config: GatewayConfig = loadGatewayConfig(), env: Readonly<Record<string, string | undefined>> = process.env) {
-  const secretStore = new EnvironmentSecretStore(env, config.compatible.id);
-  return new GatewayService(createProviderRegistry(config), secretStore);
+export function createGatewayService(config: GatewayConfig = loadGatewayConfig(), env: Readonly<Record<string, string | undefined>> = process.env, connectionStore?: ConnectionStore) {
+  const environmentSecretStore = new EnvironmentSecretStore(env, config.compatible.id);
+  const store = connectionStore ?? new LocalConnectionStore({ directory: config.dataDir, fallback: environmentSecretStore, masterKey: parseMasterKey(env.OMNIHILBRAS_MASTER_KEY) });
+  return new GatewayService(createProviderRegistry(config), store, store);
 }
 
 function providerEnvKey(providerId: string) {

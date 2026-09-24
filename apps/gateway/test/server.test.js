@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@omnihilbras/sdk';
+import { InMemoryConnectionStore } from '../dist/index.js';
 import { createGatewayServer } from '../dist/index.js';
 import { GatewayService } from '../dist/index.js';
 
@@ -166,4 +167,71 @@ test('local gateway returns structured validation errors', async (t) => {
 
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), { error: { code: 'INVALID_REQUEST', message: 'model is required.' } });
+});
+
+test('local gateway validates OpenRouter credentials before saving them', async (t) => {
+  const calls = [];
+  const store = new InMemoryConnectionStore();
+  const adapter = {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    capabilities: { models: true },
+    async listModels() {
+      return [];
+    },
+    async validateCredential(credential) {
+      calls.push(credential?.type === 'api-key' ? credential.value : undefined);
+      if (credential?.value === 'invalid') throw new ProviderError('AUTHENTICATION_FAILED', 'Provider authentication failed.', { providerId: 'openrouter' });
+    },
+  };
+  const service = new GatewayService(new ProviderRegistry().register(adapter), store, store);
+  const baseUrl = await startServer(t, service);
+
+  const check = await fetch(`${baseUrl}/v1/connections/openrouter/check`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ apiKey: 'valid-key' }),
+  });
+  assert.equal(check.status, 200);
+  assert.equal(check.headers.get('cache-control'), 'no-store');
+  const checkBody = await check.json();
+  assert.equal(checkBody.providerId, 'openrouter');
+  assert.equal(checkBody.valid, true);
+  assert.equal(typeof checkBody.checkedAt, 'string');
+  assert.equal(JSON.stringify(checkBody).includes('valid-key'), false);
+  assert.deepEqual(calls, ['valid-key']);
+  assert.deepEqual(await store.list(), []);
+
+  const save = await fetch(`${baseUrl}/v1/connections/openrouter`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ apiKey: 'valid-key', name: 'OpenRouter local', priority: 1, proxyPool: 'none' }),
+  });
+  assert.equal(save.status, 200);
+  const savedBody = await save.text();
+  assert.equal(savedBody.includes('valid-key'), false);
+  assert.equal(JSON.parse(savedBody).connection.hasCredential, true);
+  assert.deepEqual(calls, ['valid-key', 'valid-key']);
+
+  const list = await fetch(`${baseUrl}/v1/connections`);
+  assert.equal(list.status, 200);
+  const listBody = await list.text();
+  assert.equal(listBody.includes('valid-key'), false);
+  assert.equal(JSON.parse(listBody).data.length, 1);
+
+  const invalidSave = await fetch(`${baseUrl}/v1/connections/openrouter`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ apiKey: 'invalid', name: 'Invalid', priority: 1, proxyPool: 'none' }),
+  });
+  assert.equal(invalidSave.status, 401);
+  assert.deepEqual(calls, ['valid-key', 'valid-key', 'invalid']);
+  assert.deepEqual(await store.list(), [JSON.parse(savedBody).connection]);
+
+  const endpointOverride = await fetch(`${baseUrl}/v1/connections/openrouter`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ apiKey: 'valid-key', name: 'Unsafe endpoint', endpoint: 'https://evil.example/v1' }),
+  });
+  assert.equal(endpointOverride.status, 400);
 });
