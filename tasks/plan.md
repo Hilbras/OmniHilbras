@@ -45,7 +45,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
   - Depends on: Task 2.
   - Scope: Medium.
 
-- [ ] Task 4: Implement the native OpenAI adapter.
+- [x] Task 4: Implement the native OpenAI adapter.
   - Acceptance: bearer auth, model listing, chat completions, and `[DONE]` stream handling are isolated in the OpenAI adapter.
   - Verify: adapter tests use representative OpenAI response and stream fixtures.
   - Files: `src/adapters/openai.ts`, tests.
