@@ -205,20 +205,20 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
               <button type="button" role="tab" aria-selected={mode === 'bulk'} onClick={() => { setMode('bulk'); setTestState('idle'); setError(''); }} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${mode === 'bulk' ? 'bg-gold-soft text-gold-text ring-1 ring-gold/30' : 'text-muted hover:bg-bg-soft hover:text-text'}`}>Bulk Add</button>
             </div>
 
-            {showsProviderSelect && (
-              <label className="mb-4 block">
-                <span className="mb-2 block text-xs font-semibold">Provider</span>
-                <span className="relative block">
-                  <select value={selected.id} onChange={(event) => selectProvider(event.target.value)} className="input !h-11 !w-full !appearance-none !rounded-lg !border-line !bg-surface-2 !px-3 !pr-9 !text-sm">
-                    {providerOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
-                </span>
-              </label>
-            )}
-
             {mode === 'single' ? (
               <>
+                {showsProviderSelect && (
+                  <label className="mb-4 block">
+                    <span className="mb-2 block text-xs font-semibold">Provider</span>
+                    <span className="relative block">
+                      <select value={selected.id} onChange={(event) => selectProvider(event.target.value)} className="input !h-11 !w-full !appearance-none !rounded-lg !border-line !bg-surface-2 !px-3 !pr-9 !text-sm">
+                        {providerOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+                    </span>
+                  </label>
+                )}
+
                 <label className="block">
                   <span className="mb-2 block text-xs font-semibold">Name</span>
                   <input id="connection-name" value={name} onChange={(event) => { setName(event.target.value); setError(''); }} placeholder="Production Key" className="input !h-11 !w-full !rounded-lg !border-line !bg-surface-2 !px-3 !text-sm" />
@@ -247,39 +247,48 @@ export function AddProviderModal({ open, initialProviderId, onClose, onSave, onS
                     <input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="http://localhost:8000/v1" className="input !h-11 !w-full !rounded-lg !border-line !bg-surface-2 !px-3 !font-mono !text-xs" />
                   </label>
                 )}
+
+                <div className="mt-4 space-y-4">
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold" htmlFor="connection-priority">Priority</label>
+                    <input id="connection-priority" type="number" min={1} step={1} value={priority} onChange={(event) => setPriority(event.target.value)} className="input !h-11 !w-full !rounded-lg !border-line !bg-surface-2 !px-3 !text-sm" />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold" htmlFor="connection-proxy-pool">Proxy Pool</label>
+                    <span className="relative block">
+                      <select id="connection-proxy-pool" value={proxyPool} onChange={(event) => setProxyPool(event.target.value)} className="input !h-11 !w-full !appearance-none !rounded-lg !border-line !bg-surface-2 !px-3 !pr-9 !text-sm">
+                        <option value="none">None</option>
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+                    </span>
+                  </div>
+                </div>
+
+                <p className="mt-3 text-[11px] leading-relaxed text-muted">No active proxy pools available. Create one in Proxy Pools first.</p>
+                <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gold-text" aria-hidden="true" />Preview mode: keys are not sent or persisted until local credential storage is connected.</p>
               </>
             ) : (
               <div>
-                <label className="mb-2 block text-xs font-semibold" htmlFor="bulk-api-keys">API Keys</label>
-                <textarea id="bulk-api-keys" value={bulkText} onChange={(event) => { setBulkText(event.target.value); setError(''); }} placeholder={'name1|sk-key1\nname2|sk-key2\nsk-key-only-auto-named'} rows={6} className="input !w-full !resize-y !rounded-lg !border-line !bg-surface-2 !p-3 !font-mono !text-xs" />
-                <p className="mt-2 text-[11px] leading-relaxed text-muted">One connection per line. Use <code className="font-mono text-gold-text">name|key</code> or paste a key to auto-name it.</p>
-                <button type="button" onClick={testConnection} disabled={testing || !bulkText.trim()} className="btn-ghost mt-3 !h-9 !rounded-lg !px-3 !text-xs disabled:cursor-not-allowed disabled:opacity-45">{testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Check className="h-3.5 w-3.5" aria-hidden="true" />}{testing ? 'Checking' : 'Check batch'}</button>
+                {showsProviderSelect && (
+                  <label className="mb-4 block">
+                    <span className="mb-2 block text-xs font-semibold">Provider</span>
+                    <span className="relative block">
+                      <select value={selected.id} onChange={(event) => selectProvider(event.target.value)} className="input !h-11 !w-full !appearance-none !rounded-lg !border-line !bg-surface-2 !px-3 !pr-9 !text-sm">
+                        {providerOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
+                    </span>
+                  </label>
+                )}
+                <p className="mt-5 text-xs leading-relaxed text-muted">One key per line. Format: <code className="font-mono text-gold-text">name|apiKey</code> or just <code className="font-mono text-gold-text">apiKey</code> (auto-named by index).</p>
+                <textarea id="bulk-api-keys" aria-label="API Keys" value={bulkText} onChange={(event) => { setBulkText(event.target.value); setError(''); }} placeholder={'name1|sk-key1\nname2|sk-key2\nsk-key-only-auto-named'} rows={8} className="input !mt-3 !min-h-[160px] !w-full !resize-y !rounded-lg !border-gold/35 !bg-surface-2 !p-3 !font-mono !text-xs focus:!border-gold/70" />
               </div>
             )}
-
-            <div className="mt-4 space-y-4">
-              <div>
-                <label className="mb-2 block text-xs font-semibold" htmlFor="connection-priority">Priority</label>
-                <input id="connection-priority" type="number" min={1} step={1} value={priority} onChange={(event) => setPriority(event.target.value)} className="input !h-11 !w-full !rounded-lg !border-line !bg-surface-2 !px-3 !text-sm" />
-              </div>
-              <div>
-                <label className="mb-2 block text-xs font-semibold" htmlFor="connection-proxy-pool">Proxy Pool</label>
-                <span className="relative block">
-                  <select id="connection-proxy-pool" value={proxyPool} onChange={(event) => setProxyPool(event.target.value)} className="input !h-11 !w-full !appearance-none !rounded-lg !border-line !bg-surface-2 !px-3 !pr-9 !text-sm">
-                    <option value="none">None</option>
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden="true" />
-                </span>
-              </div>
-            </div>
-
-            <p className="mt-3 text-[11px] leading-relaxed text-muted">No active proxy pools available. Create one in Proxy Pools first.</p>
-            <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gold-text" aria-hidden="true" />Preview mode: keys are not sent or persisted until local credential storage is connected.</p>
             {error && <p role="alert" className="mt-3 flex items-center gap-1.5 text-[11px] text-danger"><CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />{error}</p>}
           </div>
 
           <div className="flex shrink-0 gap-2 border-t border-line bg-surface px-4 py-3">
-            <button type="submit" disabled={!canSave || testing} className="btn-gold !h-10 !flex-1 !rounded-lg !px-3 !text-xs disabled:cursor-not-allowed disabled:opacity-40">{mode === 'bulk' ? 'Add all' : 'Save'}</button>
+            <button type="submit" disabled={!canSave || testing} className="btn-gold !h-10 !flex-1 !rounded-lg !px-3 !text-xs disabled:cursor-not-allowed disabled:opacity-40">{mode === 'bulk' ? 'Add All Keys' : 'Save'}</button>
             <button type="button" onClick={onClose} className="btn-ghost !h-10 !flex-1 !rounded-lg !px-3 !text-xs">Cancel</button>
           </div>
         </form>
