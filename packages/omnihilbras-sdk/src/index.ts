@@ -2,6 +2,7 @@ export * from './adapters/anthropic.js';
 export * from './adapters/gemini.js';
 export * from './adapters/openai-compatible.js';
 export * from './adapters/openai.js';
+export * from './adapters/openrouter.js';
 export * from './errors.js';
 export * from './registry.js';
 export * from './secret-store.js';

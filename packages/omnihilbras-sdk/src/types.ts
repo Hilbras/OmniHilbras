@@ -132,6 +132,12 @@ export type ProviderHealth = {
   checkedAt: string;
 };
 
+export type CredentialValidation = {
+  status: 'valid';
+  checkedAt: string;
+  latencyMs?: number;
+};
+
 export type ProviderAdapter = {
   readonly id: ProviderId;
   readonly name: string;
@@ -139,5 +145,7 @@ export type ProviderAdapter = {
   listModels?: (context?: ProviderRequestContext) => Promise<readonly Model[]>;
   chat?: (request: ChatRequest, context?: ProviderRequestContext) => Promise<ChatResponse>;
   streamChat?: (request: ChatRequest, context?: ProviderRequestContext) => AsyncIterable<ChatChunk>;
+  /** Performs a provider-specific, side-effect-free credential check. */
+  validateCredential?: (credential: ProviderCredential | undefined, context?: ProviderRequestContext) => Promise<CredentialValidation | void>;
   healthCheck?: (context?: ProviderRequestContext) => Promise<ProviderHealth>;
 };
