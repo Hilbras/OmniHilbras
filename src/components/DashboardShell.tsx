@@ -16,16 +16,19 @@ import {
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 
+type DashboardPage = 'overview' | 'providers';
+
 type SidebarItem = {
   label: string;
   icon: typeof LayoutDashboard;
   href?: string;
+  page?: DashboardPage;
   disabled?: boolean;
 };
 
 const primaryItems: SidebarItem[] = [
-  { label: 'Overview', icon: LayoutDashboard, href: '#overview' },
-  { label: 'Providers', icon: Network, disabled: true },
+  { label: 'Overview', icon: LayoutDashboard, href: '/dashboard.html#overview', page: 'overview' },
+  { label: 'Providers', icon: Network, href: '/providers.html', page: 'providers' },
   { label: 'Routing', icon: RouteIcon, disabled: true },
   { label: 'API keys', icon: KeyRound, disabled: true },
 ];
@@ -36,8 +39,9 @@ const insightItems: SidebarItem[] = [
   { label: 'Settings', icon: Settings2, disabled: true },
 ];
 
-function SidebarLink({ item, onNavigate }: { item: SidebarItem; onNavigate: () => void }) {
+function SidebarLink({ item, activePage, onNavigate }: { item: SidebarItem; activePage: DashboardPage; onNavigate: () => void }) {
   const Icon = item.icon;
+  const isActive = item.page === activePage;
   const baseClass =
     'group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors';
 
@@ -59,15 +63,20 @@ function SidebarLink({ item, onNavigate }: { item: SidebarItem; onNavigate: () =
   }
 
   return (
-    <a href={item.href} onClick={onNavigate} className={`${baseClass} bg-gold-soft text-gold-text`} aria-current="page">
+    <a
+      href={item.href}
+      onClick={onNavigate}
+      className={`${baseClass} ${isActive ? 'bg-gold-soft text-gold-text' : 'text-muted hover:bg-surface hover:text-text'}`}
+      aria-current={isActive ? 'page' : undefined}
+    >
       <Icon className="h-[17px] w-[17px] shrink-0" aria-hidden="true" />
       <span className="flex-1">{item.label}</span>
-      <ChevronRight className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />
+      {isActive && <ChevronRight className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />}
     </a>
   );
 }
 
-function Sidebar({ onClose }: { onClose: () => void }) {
+function Sidebar({ onClose, activePage }: { onClose: () => void; activePage: DashboardPage }) {
   return (
     <aside className="dashboard-sidebar flex h-full w-[252px] shrink-0 flex-col border-r border-line bg-bg-soft/90 backdrop-blur-xl">
       <div className="flex items-center justify-between px-5 pb-4 pt-5">
@@ -104,19 +113,19 @@ function Sidebar({ onClose }: { onClose: () => void }) {
         <p className="mono-label px-3 pb-2">Workspace</p>
         <div className="space-y-1">
           {primaryItems.map((item) => (
-            <SidebarLink key={item.label} item={item} onNavigate={onClose} />
+            <SidebarLink key={item.label} item={item} activePage={activePage} onNavigate={onClose} />
           ))}
         </div>
 
         <p className="mono-label px-3 pb-2 pt-7">Insights</p>
         <div className="space-y-1">
           {insightItems.map((item) => (
-            <SidebarLink key={item.label} item={item} onNavigate={onClose} />
+            <SidebarLink key={item.label} item={item} activePage={activePage} onNavigate={onClose} />
           ))}
         </div>
 
         <div className="mt-8 border-t border-line/70 pt-5">
-          <a href="#quick-start" onClick={onClose} className="group block rounded-xl border border-gold/25 bg-gold-soft/60 p-3.5 transition-colors hover:border-gold/50">
+          <a href={activePage === 'overview' ? '#quick-start' : '/dashboard.html#quick-start'} onClick={onClose} className="group block rounded-xl border border-gold/25 bg-gold-soft/60 p-3.5 transition-colors hover:border-gold/50">
             <div className="flex items-center gap-2 text-xs font-semibold text-gold-text">
               <Boxes className="h-3.5 w-3.5" aria-hidden="true" />
               Connect a provider
@@ -143,7 +152,17 @@ function Sidebar({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function DashboardShell({ children }: { children: ReactNode }) {
+export function DashboardShell({
+  children,
+  activePage = 'overview',
+  pageTitle = 'Overview',
+  pageDescription = 'Your gateway at a glance',
+}: {
+  children: ReactNode;
+  activePage?: DashboardPage;
+  pageTitle?: string;
+  pageDescription?: string;
+}) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
@@ -158,7 +177,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       )}
 
       <div className={`fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <Sidebar onClose={() => setMobileOpen(false)} />
+        <Sidebar onClose={() => setMobileOpen(false)} activePage={activePage} />
       </div>
 
       <div className="min-h-screen min-w-0 lg:pl-[252px]">
@@ -174,7 +193,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             </button>
             <div className="min-w-0">
               <p className="mono-label hidden sm:block">Workspace / Local instance</p>
-              <h1 className="truncate text-lg font-semibold tracking-tight sm:mt-0.5 sm:text-xl">Overview</h1>
+              <h1 className="truncate text-lg font-semibold tracking-tight sm:mt-0.5 sm:text-xl">{pageTitle}</h1>
+              <p className="muted hidden truncate text-xs sm:block">{pageDescription}</p>
             </div>
           </div>
 
@@ -183,7 +203,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />
               All systems operational
             </span>
-            <a href="#request-log" aria-label="Jump to recent activity" className="muted hidden h-9 w-9 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text sm:grid">
+            <a href={activePage === 'overview' ? '#request-log' : '#providers'} aria-label={activePage === 'overview' ? 'Jump to recent activity' : 'Jump to provider list'} className="muted hidden h-9 w-9 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text sm:grid">
               <Gauge className="h-[17px] w-[17px]" aria-hidden="true" />
             </a>
             <ThemeToggle />
