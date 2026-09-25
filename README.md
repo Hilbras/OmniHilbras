@@ -1,12 +1,16 @@
 # OmniHilbras
 
-A landing page for **OmniHilbras**, an intelligent, self-hostable AI gateway.
+A self-hosted, local-first AI gateway: one OpenAI-compatible endpoint in front of
+every provider, with API keys, routing, and per-connection reliability.
 
-The first slice focuses on the product story and visual language: a warm editorial
-surface, gold routing accents, a live gateway preview, and a responsive light/dark
-theme inspired by the Hilbras Code design system.
+**Current version: 0.1.1** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+[npm](https://www.npmjs.com/package/@hilbras/omnihilbras)
 
-The local dashboard is one React Router app mounted at `/dashboard`:
+```bash
+npm i @hilbras/omnihilbras
+```
+
+The dashboard is one React Router app mounted at `/dashboard`:
 
 - `/dashboard/overview`
 - `/dashboard/providers`
@@ -31,6 +35,20 @@ Save imports free models or all text models; model IDs are persisted separately
 from the credential. Any other provider can be added with a base URL through
 `PUT /v1/connections/:id`.
 
+## Releases
+
+The version tracks the size of the change. Every release is tagged on GitHub and
+published to npm as `@hilbras/omnihilbras`.
+
+| Change | Bump | Example |
+| --- | --- | --- |
+| Big — breaking API, removed or renamed public surface, behavior a consumer must adapt to | `x.0.0` | `0.1.1` → `1.0.0` |
+| Medium — new capability, route, option, or page; backward compatible | `0.x.0` | `0.1.1` → `0.2.0` |
+| Small — fix, refinement, docs, or internal cleanup | `0.0.x` | `0.1.1` → `0.1.2` |
+
+`@hilbras/omnihilbras` is this project. It is unrelated to `@hilbras/sdk`, which
+is a separate package under the same npm scope.
+
 ## Scripts
 
 ```bash
@@ -39,8 +57,7 @@ pnpm dev
 pnpm dev:gateway
 pnpm build
 pnpm typecheck
-pnpm test:sdk
-pnpm test:gateway
+pnpm test
 ```
 
 ## Local Gateway

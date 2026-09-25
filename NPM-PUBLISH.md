@@ -5,7 +5,14 @@ with `@hilbras/sdk`, which is a separate, unrelated project.
 
 ## Status
 
-`@hilbras/omnihilbras@0.1.0` is published (GitHub tag `v0.1.0`).
+`@hilbras/omnihilbras@0.1.1` is published (GitHub tag `v0.1.1`).
+
+## Version bumps
+
+Pick the bump by the size of the change: breaking → `x.0.0`, new capability →
+`0.x.0`, fix or docs → `0.0.x`. Bump the version in `package.json`,
+`packages/omnihilbras-sdk/package.json`, and `apps/gateway/package.json`
+together, then tag `v<version>` and publish.
 
 ## Publish a new version
 
