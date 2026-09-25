@@ -70,6 +70,22 @@ test('local gateway exposes health, models, chat, and streaming', async (t) => {
   assert.match(streamBody, /data: \[DONE\]/);
 });
 
+test('model test requests use the selected provider and a bounded real chat call', async (t) => {
+  let received;
+  const baseUrl = await startServer(t, createService((request) => { received = request; }));
+  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-omnihilbras-provider': 'fake' },
+    body: JSON.stringify({ model: 'fake-1', max_tokens: 16, stream: false, messages: [{ role: 'user', content: 'Reply with exactly OK.' }] }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(received.model, 'fake-1');
+  assert.equal(received.maxOutputTokens, 16);
+  assert.equal(received.stream, false);
+  assert.equal((await response.json()).choices[0].message.content, 'Hello from gateway');
+});
+
 test('local gateway restricts browser origins to the configured allowlist', async (t) => {
   const baseUrl = await startServer(t);
   const allowed = await fetch(`${baseUrl}/health`, { headers: { origin: 'http://localhost:5173' } });

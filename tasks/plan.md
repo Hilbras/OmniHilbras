@@ -157,6 +157,21 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Custom model additions survive re-imports and failed additions remain retryable.
 - [x] Save remains atomic: failed discovery does not replace a valid connection.
 
+### Phase 4d: Real provider and model tests
+
+- [x] Task 9f: Replace preview model tests with real gateway chat checks.
+  - Acceptance: provider tests use live adapter health, model tests send a bounded real chat completion with the saved credential, and latency/success/error states come from the gateway response.
+  - Verify: gateway contract test covers provider selection and max-token budget; typecheck/build and browser smoke test cover the real request path.
+  - Files: `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, `apps/gateway/test/server.test.js`, docs.
+  - Depends on: Task 9e.
+  - Scope: Small/medium.
+
+### Checkpoint: Real tests
+
+- [x] Model Test no longer uses a client-side timer or synthetic success.
+- [x] Tests use the saved gateway credential and never expose it to the browser provider call.
+- [x] Test failures and timeouts are visible per model.
+
 ### Phase 5: Cloud readiness
 
 - [ ] Task 10: Define cloud integration boundaries.

@@ -36,6 +36,14 @@ export type GatewayConnectionValidation = {
   latencyMs?: number;
 };
 
+export type GatewayModelTestResult = {
+  model: string;
+  provider: string;
+  content: string;
+  finishReason?: string;
+  latencyMs: number;
+};
+
 export type OpenRouterConnectionInput = {
   name: string;
   apiKey: string;
@@ -91,6 +99,37 @@ export function saveOpenRouterConnection(input: OpenRouterConnectionInput, signa
   }).then((body) => body.connection);
 }
 
+export async function testGatewayModel(providerId: string, model: string, signal?: AbortSignal) {
+  const startedAt = Date.now();
+  const body = await requestJson<unknown>('/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-omnihilbras-provider': providerId,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: 'Reply with exactly OK.' }],
+      max_tokens: 16,
+      stream: false,
+    }),
+    ...(signal ? { signal } : {}),
+  });
+  if (!isRecord(body) || body.object !== 'chat.completion' || !Array.isArray(body.choices)) {
+    throw new Error('The gateway returned an invalid model test response.');
+  }
+  const choice = body.choices[0];
+  if (!isRecord(choice) || !isRecord(choice.message)) throw new Error('The gateway returned an invalid model test response.');
+  const content = choice.message.content;
+  return {
+    model: typeof body.model === 'string' ? body.model : model,
+    provider: typeof body.provider === 'string' ? body.provider : providerId,
+    content: typeof content === 'string' ? content : '',
+    ...(typeof choice.finish_reason === 'string' ? { finishReason: choice.finish_reason } : {}),
+    latencyMs: Math.max(0, Date.now() - startedAt),
+  } satisfies GatewayModelTestResult;
+}
+
 export function addGatewayConnectionModels(connectionId: string, modelIds: string[], signal?: AbortSignal) {
   return requestJson<{ connection: GatewayConnection }>(`/v1/connections/${encodeURIComponent(connectionId)}/models`, {
     method: 'POST',
@@ -105,6 +144,10 @@ export function removeGatewayConnection(connectionId: string, signal?: AbortSign
     method: 'DELETE',
     ...(signal ? { signal } : {}),
   });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 async function requestJson<T>(path: string, init: RequestInit = {}) {

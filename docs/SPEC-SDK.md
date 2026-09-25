@@ -114,6 +114,8 @@ The first local gateway exposes:
 - `DELETE /v1/connections/:id` — remove a local connection.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
 - `POST /v1/chat/completions` with `stream: true` — normalized SSE chunks.
+- The dashboard provider test uses live adapter health; each model test uses a bounded real chat completion through the same route.
+
 
 Gateway errors use one shape:
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   ArrowLeft,
@@ -22,7 +22,7 @@ import {
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
-import { addGatewayConnectionModels, getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, testGatewayModel, type GatewayConnection } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
 
@@ -60,6 +60,8 @@ function modelReference(providerId: string, model: string) {
   return providerId === 'openrouter' ? model : `${providerId}/${model}`;
 }
 
+type ModelTestState = 'idle' | 'testing' | 'ok' | 'error';
+
 function DetailStat({ label, value, icon: Icon, tone = 'muted' }: { label: string; value: string; icon: typeof Activity; tone?: 'muted' | 'green' | 'gold' | 'blue' }) {
   const toneClass = { muted: 'text-muted', green: 'text-success', gold: 'text-gold-text', blue: 'text-[#5d98e8]' }[tone];
   return <div className="rounded-xl border border-line bg-bg-soft/70 p-3.5"><Icon className={`h-4 w-4 ${toneClass}`} aria-hidden="true" /><p className="muted mt-3 text-[10px] uppercase tracking-[0.1em]">{label}</p><p className="mt-1 truncate font-mono text-sm font-semibold">{value}</p></div>;
@@ -85,25 +87,25 @@ function ConnectionRow({ provider, connection, healthy, testing, onTest, onEdit 
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <button type="button" onClick={onTest} disabled={testing} className="btn-ghost !px-3 !py-2 !text-xs">{testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testing ? 'Testing' : 'Test'}</button>
+        <button type="button" onClick={onTest} disabled={testing} className="btn-ghost !px-3 !py-2 !text-xs">{testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testing ? 'Testing' : 'Test provider'}</button>
         <button type="button" onClick={onEdit} className="btn-quiet !px-2 !py-2 text-xs"><SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />Edit</button>
       </div>
     </div>
   );
 }
 
-function ModelRow({ model, providerId, onCopy, onTest, testing, testState }: { model: string; providerId: string; onCopy: () => void; onTest: () => void; testing: boolean; testState: 'idle' | 'testing' | 'ok' | 'error' }) {
+function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testState, testDetail }: { model: string; providerId: string; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testDetail?: string }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-line bg-bg-soft/45 p-3.5 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-3">
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? 'border-danger/25 bg-danger/10 text-danger' : 'border-line bg-surface text-muted'}`}>
           {testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
         </span>
-        <div className="min-w-0"><p className="truncate text-xs font-semibold">{model}</p><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code></div>
+        <div className="min-w-0"><p className="truncate text-xs font-semibold">{model}</p><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code>{testDetail && <p title={testDetail} className={`mt-1 truncate text-[10px] ${testState === 'error' ? 'text-danger' : 'text-success'}`}>{testDetail}</p>}</div>
       </div>
       <div className="flex items-center gap-1.5">
         <button type="button" onClick={onCopy} aria-label={`Copy ${model} model ID`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-gold-text"><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>
-        <button type="button" onClick={onTest} disabled={testing} className="btn-quiet !px-2 !py-2 text-[11px]">{testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Zap className="h-3.5 w-3.5" aria-hidden="true" />}Test</button>
+        <button type="button" onClick={onTest} disabled={disabled || testing} aria-label={`Test ${model}`} aria-busy={testing} className="btn-quiet !px-2 !py-2 text-[11px]">{testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Zap className="h-3.5 w-3.5" aria-hidden="true" />}{testing ? 'Testing' : 'Test'}</button>
       </div>
     </div>
   );
@@ -143,7 +145,9 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const [connectionHealthy, setConnectionHealthy] = useState(false);
   const [connectionAdded, setConnectionAdded] = useState(provider.status !== 'available');
   const [testingModel, setTestingModel] = useState<string | null>(null);
-  const [modelTests, setModelTests] = useState<Record<string, 'idle' | 'testing' | 'ok' | 'error'>>({});
+  const [modelTests, setModelTests] = useState<Record<string, ModelTestState>>({});
+  const [modelTestDetails, setModelTestDetails] = useState<Record<string, string>>({});
+  const modelTestAbortRef = useRef<AbortController | null>(null);
   const [customModels, setCustomModels] = useState<string[]>([]);
   const [strategy, setStrategy] = useState('balanced');
   const [notice, setNotice] = useState('');
@@ -164,6 +168,8 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       .catch(() => undefined);
     return () => { active = false; };
   }, [provider.id]);
+  useEffect(() => () => modelTestAbortRef.current?.abort(), []);
+
   const importedModels = connection?.modelIds ?? provider.modelList;
   const allModels = useMemo(() => [...new Set([...importedModels, ...customModels])], [customModels, importedModels]);
 
@@ -174,6 +180,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   }
 
   async function testConnection() {
+    if (testingConnection || testingModel) return;
     setTestingConnection(true);
     try {
       const health = await getGatewayHealth();
@@ -181,7 +188,8 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       const healthy = providerHealth?.status === 'healthy';
       setConnectionHealthy(healthy);
       if (!healthy) throw new Error(`${provider.name} is not connected to the local gateway.`);
-      flash(`${provider.name} connection is healthy.`);
+      const latency = providerHealth?.latencyMs === undefined ? '' : ` in ${providerHealth.latencyMs} ms`;
+      flash(`${provider.name} provider is healthy${latency}.`);
     } catch (error) {
       flash(error instanceof Error ? error.message : 'The local gateway could not verify this connection.', 'error');
     } finally {
@@ -243,14 +251,36 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     flash(`${model} added to the provider catalog.`);
   }
 
-  function testModel(model: string) {
-    if (testingModel) return;
+  async function testModel(model: string) {
+    if (testingModel || testingConnection) return;
+    const controller = new AbortController();
+    modelTestAbortRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 30_000);
     setTestingModel(model);
     setModelTests((current) => ({ ...current, [model]: 'testing' }));
-    window.setTimeout(() => {
+    setModelTestDetails((current) => {
+      const next = { ...current };
+      delete next[model];
+      return next;
+    });
+    try {
+      const result = await testGatewayModel(provider.id, model, controller.signal);
+      const preview = result.content.trim().replace(/\s+/g, ' ').slice(0, 80);
+      const detail = `Responded in ${result.latencyMs} ms${preview ? `: ${preview}` : ''}`;
       setModelTests((current) => ({ ...current, [model]: 'ok' }));
+      setModelTestDetails((current) => ({ ...current, [model]: detail }));
+      setConnectionHealthy(true);
+      flash(`${model} responded successfully in ${result.latencyMs} ms.`);
+    } catch (error) {
+      const detail = controller.signal.aborted ? 'Model test timed out or was cancelled.' : error instanceof Error ? error.message : 'The model test failed.';
+      setModelTests((current) => ({ ...current, [model]: 'error' }));
+      setModelTestDetails((current) => ({ ...current, [model]: detail }));
+      flash(detail, 'error');
+    } finally {
+      window.clearTimeout(timeout);
+      if (modelTestAbortRef.current === controller) modelTestAbortRef.current = null;
       setTestingModel(null);
-    }, 700);
+    }
   }
 
   async function copyModel(model: string) {
@@ -273,7 +303,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
             <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-12 w-12 rounded-xl text-sm" />
             <div className="min-w-0"><div className="flex flex-wrap items-center gap-2.5"><h2 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{provider.name}</h2><span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[9px] ${meta.className}`}><span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />{meta.label}</span></div><p className="muted mt-1 text-sm">{provider.description}</p></div>
           </div>
-          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={testConnection} disabled={testingConnection} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test connection'}</button><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2.5 !text-xs"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
+          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={testConnection} disabled={testingConnection || testingModel !== null} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2.5 !text-xs"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
         </div>
       </div>
 
@@ -289,14 +319,14 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       <section className="card mt-5 overflow-hidden" aria-labelledby="connections-title">
         <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:p-5"><div><h2 id="connections-title" className="text-sm font-semibold">Connections</h2><p className="muted mt-1 text-xs">Credentials and endpoints used by this provider.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{connectionAdded ? '1 connection' : 'No connection'}</span></div>
         <div className="p-4 sm:p-5">
-          {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} testing={testingConnection} onTest={testConnection} onEdit={() => setAddOpen(true)} /> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">Add an API key or point OmniHilbras at a local endpoint.</p></div></div><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2 !text-xs">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div>}
+          {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} testing={testingConnection || testingModel !== null} onTest={testConnection} onEdit={() => setAddOpen(true)} /> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">Add an API key or point OmniHilbras at a local endpoint.</p></div></div><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2 !text-xs">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div>}
         </div>
       </section>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
         <section className="card min-w-0 p-4 sm:p-5" aria-labelledby="models-title">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div><h2 id="models-title" className="text-sm font-semibold">Available models</h2><p className="muted mt-1 text-xs">Models currently exposed by this provider route.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{allModels.length} models</span></div>
-          <div className="mt-5 space-y-2">{allModels.length > 0 ? allModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => testModel(model)} testing={testingModel === model} testState={modelTests[model] ?? 'idle'} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No models discovered</p><p className="muted mt-1 text-xs">Connect the provider or add a custom model ID below.</p></div>}</div>
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div><h2 id="models-title" className="text-sm font-semibold">Available models</h2><p className="muted mt-1 text-xs">Models currently exposed by this provider route. Test sends one real minimal request.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{allModels.length} models</span></div>
+          <div className="mt-5 space-y-2">{allModels.length > 0 ? allModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingModel === model} disabled={testingModel !== null || testingConnection} testState={modelTests[model] ?? 'idle'} testDetail={modelTestDetails[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No models discovered</p><p className="muted mt-1 text-xs">Connect the provider or add a custom model ID below.</p></div>}</div>
           <div className="mt-5 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>
           {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {modelReference(provider.id, copiedModel)}</p>}
         </section>

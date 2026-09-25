@@ -97,6 +97,13 @@
   - Depends on: Task 9d.
   - Scope: Medium.
 
+- [x] Task 9f: Replace preview model tests with real gateway chat checks.
+  - Acceptance: provider tests use live adapter health, model tests send a bounded real chat completion with the saved credential, and latency/success/error states come from the gateway response.
+  - Verify: gateway contract test covers provider selection and max-token budget; typecheck/build and browser smoke test cover the real request path.
+  - Files: `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, `apps/gateway/test/server.test.js`, docs.
+  - Depends on: Task 9e.
+  - Scope: Small/medium.
+
 - [ ] Task 10: Define cloud integration boundaries.
   - Acceptance: auth context, tenant context, remote `SecretStore`, and deployment configuration are represented by interfaces without implementing cloud infrastructure.
   - Verify: typecheck and architecture review.

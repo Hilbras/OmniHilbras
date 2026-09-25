@@ -99,5 +99,11 @@ returned by OpenRouter. Manually added model IDs are tracked separately and
 remain in the catalog when the connection is re-saved with either policy. The
 model endpoint accepts validated model IDs for adding custom entries later.
 
+Provider **Test provider** checks live adapter health through `GET /health`. Each
+model **Test** button sends one real, bounded chat completion through
+`POST /v1/chat/completions` using the saved gateway credential. The test prompt
+is fixed and limited to 16 output tokens, but it can still consume provider
+quota or credits.
+
 Use the `x-omnihilbras-provider` header to select a configured provider, for
 example `x-omnihilbras-provider: anthropic`.
