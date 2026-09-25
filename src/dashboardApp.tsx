@@ -1,4 +1,4 @@
-import { HashRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { DashboardShell } from './components/DashboardShell';
 import { getProviderById } from './data/providers';
 import { ApiKeysContent } from './pages/ApiKeysPage';
@@ -7,22 +7,8 @@ import { ProviderDetailContent, fallbackProvider } from './pages/ProviderDetailP
 import { ProvidersContent } from './pages/ProvidersPage';
 import { RoutingContent } from './pages/RoutingPage';
 
-function initialRoute() {
-  const { pathname, search } = window.location;
-  if (pathname.endsWith('/providers.html')) return '/providers';
-  if (pathname.endsWith('/provider.html')) {
-    const providerId = new URLSearchParams(search).get('provider') || 'custom';
-    return `/providers/${encodeURIComponent(providerId)}`;
-  }
-  if (pathname.endsWith('/routing.html')) return '/routing';
-  return '/overview';
-}
-
-function ensureInitialHashRoute() {
-  if (window.location.hash.startsWith('#/')) return;
-  const route = initialRoute();
-  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${route}`);
-}
+/** Public path the dashboard is served under. Every route hangs off it. */
+const dashboardBase = '/dashboard';
 
 function ProviderRoute() {
   const { providerId } = useParams();
@@ -70,6 +56,11 @@ function DashboardRoutes() {
 }
 
 export default function DashboardApp() {
-  ensureInitialHashRoute();
-  return <HashRouter><DashboardRoutes /></HashRouter>;
+  // The SPA is mounted at /dashboard, so the router is baselined there and
+  // every route is a real path: /dashboard/providers/openrouter.
+  return (
+    <BrowserRouter basename={dashboardBase}>
+      <DashboardRoutes />
+    </BrowserRouter>
+  );
 }

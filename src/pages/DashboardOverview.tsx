@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Activity,
   ArrowUpRight,
@@ -22,6 +23,7 @@ import {
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { getProviderLogo } from '../data/providers';
+import { dashboardRoutes } from '../lib/routes';
 
 type Range = '24h' | '7d' | '30d';
 type Metric = 'requests' | 'latency' | 'cost';
@@ -235,7 +237,7 @@ function LiveTraffic() {
         ))}
       </div>
 
-      <a href="#/overview" onClick={(event) => { event.preventDefault(); document.getElementById('request-log')?.scrollIntoView({ behavior: 'smooth' }); }} className="btn-quiet mt-5 w-full justify-center border border-line text-xs">
+      <a href="#request-log" onClick={(event) => { event.preventDefault(); document.getElementById('request-log')?.scrollIntoView({ behavior: 'smooth' }); }} className="btn-quiet mt-5 w-full justify-center border border-line text-xs">
         View recent activity
         <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
       </a>
@@ -251,10 +253,10 @@ function ProviderHealth() {
           <h2 id="provider-health-title" className="text-sm font-semibold">Provider health</h2>
           <p className="muted mt-1 text-xs">Every route OmniHilbras can currently reach</p>
         </div>
-        <a href="#/providers" className="btn-ghost !px-3 !py-2 !text-xs">
+        <Link to={dashboardRoutes.providers} className="btn-ghost !px-3 !py-2 !text-xs">
           <Plus className="h-3.5 w-3.5" aria-hidden="true" />
           Add provider
-        </a>
+        </Link>
       </div>
 
       <div className="overflow-x-auto">
@@ -299,7 +301,7 @@ function ProviderHealth() {
       </div>
       <div className="flex items-center justify-between border-t border-line px-4 py-3 sm:px-5">
         <span className="muted flex items-center gap-1.5 text-[11px]"><CircleAlert className="h-3.5 w-3.5 text-gold" aria-hidden="true" />1 provider needs attention</span>
-        <a href="#/providers" className="btn-quiet !px-2 !py-1 text-[11px]">Manage providers <ArrowUpRight className="h-3 w-3" aria-hidden="true" /></a>
+        <Link to={dashboardRoutes.providers} className="btn-quiet !px-2 !py-1 text-[11px]">Manage providers <ArrowUpRight className="h-3 w-3" aria-hidden="true" /></Link>
       </div>
     </section>
   );
@@ -398,10 +400,10 @@ function OverviewHeader() {
           <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
           {refreshing ? 'Refreshing' : 'Refresh'}
         </button>
-        <a href="#/providers" className="btn-gold !px-3 !py-2.5 !text-xs">
+        <Link to={dashboardRoutes.providers} className="btn-gold !px-3 !py-2.5 !text-xs">
           <Plus className="h-3.5 w-3.5" aria-hidden="true" />
           Connect provider
-        </a>
+        </Link>
       </div>
     </div>
   );

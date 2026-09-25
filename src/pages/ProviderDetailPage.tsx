@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Activity,
   ArrowLeft,
@@ -19,6 +20,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  X,
   Zap,
 } from 'lucide-react';
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
@@ -26,6 +28,7 @@ import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { addGatewayConnectionModels, getGatewayHealth, getGatewayRoutingState, listGatewayConnections, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, type GatewayConnection, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
+import { dashboardRoutes } from '../lib/routes';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
 
 export const fallbackProvider: ProviderRecord = {
@@ -97,12 +100,28 @@ function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest,
   );
 }
 
+const concurrencyOptions = [1, 2, 4, 8, 16];
+
+function omitKey(record: Record<string, string>, key: string) {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
+
+function omitNumberKey(record: Record<string, number>, key: string) {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
+
 function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testState, testError, testLatencyMs }: { model: string; providerId: string; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testError?: string; testLatencyMs?: number }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-line bg-bg-soft/45 p-3.5 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-3">
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? 'border-danger/25 bg-danger/10 text-danger' : 'border-line bg-surface text-muted'}`}>
-          {testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
+          {testing ? <LoaderCircle className="h-4 w-4 animate-spin text-gold-text" aria-hidden="true" /> : testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
         </span>
         <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><p className="truncate text-xs font-semibold">{model}</p>{testLatencyMs !== undefined && testState === 'ok' && <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms</span>}{testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}</div><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code></div>
       </div>
@@ -204,11 +223,15 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const [connectionHealthy, setConnectionHealthy] = useState(false);
   const [connectionPingMs, setConnectionPingMs] = useState<number | undefined>();
   const [connectionAdded, setConnectionAdded] = useState(provider.status !== 'available');
-  const [testingModel, setTestingModel] = useState<string | null>(null);
+  const [testingModels, setTestingModels] = useState<string[]>([]);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | undefined>();
+  const [concurrency, setConcurrency] = useState(4);
   const [modelTests, setModelTests] = useState<Record<string, ModelTestState>>({});
   const [modelTestErrors, setModelTestErrors] = useState<Record<string, string>>({});
   const [modelTestLatencies, setModelTestLatencies] = useState<Record<string, number>>({});
   const modelTestAbortRef = useRef<AbortController | null>(null);
+  const bulkAbortRef = useRef<AbortController | null>(null);
+  const bulkRunRef = useRef(false);
   const scrollAnchorRef = useRef<number | null>(null);
   const [customModels, setCustomModels] = useState<string[]>([]);
   const [strategy, setStrategy] = useState('balanced');
@@ -231,7 +254,10 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       .catch(() => undefined);
     return () => { active = false; };
   }, [provider.id]);
-  useEffect(() => () => modelTestAbortRef.current?.abort(), []);
+  useEffect(() => () => {
+    modelTestAbortRef.current?.abort();
+    bulkAbortRef.current?.abort();
+  }, []);
   useEffect(() => {
     if (provider.id !== 'openrouter') return;
     let active = true;
@@ -241,11 +267,16 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     return () => { active = false; };
   }, [provider.id]);
   useLayoutEffect(() => {
+    // A bulk run updates state many times per second. Restoring the anchor on
+    // every update would fight the user, so the browser anchors normally there.
+    if (bulkRunRef.current) return;
     if (scrollAnchorRef.current !== null) window.scrollTo(0, scrollAnchorRef.current);
-  }, [connectionPingMs, modelTestErrors, modelTestLatencies, modelTests, notice, testingModel]);
+  }, [connectionPingMs, modelTestErrors, modelTestLatencies, modelTests, notice, testingModels]);
 
   const importedModels = connection?.modelIds ?? provider.modelList;
   const allModels = useMemo(() => [...new Set([...importedModels, ...customModels])], [customModels, importedModels]);
+  const testing = testingModels.length > 0;
+  const testingSet = useMemo(() => new Set(testingModels), [testingModels]);
 
   function flash(message: string, tone: 'success' | 'error' = 'success') {
     scrollAnchorRef.current = window.scrollY;
@@ -255,7 +286,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   }
 
   async function testConnection() {
-    if (testingConnection || testingModel) return;
+    if (testingConnection || testing) return;
     scrollAnchorRef.current = window.scrollY;
     setTestingConnection(true);
     try {
@@ -329,39 +360,97 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   }
 
   async function testModel(model: string) {
-    if (testingModel || testingConnection) return;
+    if (testing || testingConnection) return;
     scrollAnchorRef.current = window.scrollY;
     const controller = new AbortController();
     modelTestAbortRef.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), 30_000);
-    setTestingModel(model);
-    setModelTests((current) => ({ ...current, [model]: 'testing' }));
-    setModelTestErrors((current) => {
-      const next = { ...current };
-      delete next[model];
-      return next;
-    });
-    setModelTestLatencies((current) => {
-      const next = { ...current };
-      delete next[model];
-      return next;
-    });
+    setTestingModels([model]);
     try {
-      const result = await testGatewayModel(provider.id, model, controller.signal);
+      const outcome = await runModelTest(model, controller.signal);
+      if (!outcome.ok) flash(outcome.message, 'error');
+    } finally {
+      window.clearTimeout(timeout);
+      if (modelTestAbortRef.current === controller) modelTestAbortRef.current = null;
+      setTestingModels([]);
+    }
+  }
+
+  /**
+   * One bounded real request, shared by the single-model button and the bulk
+   * run so both produce identical results and per-model state.
+   */
+  async function runModelTest(model: string, signal: AbortSignal) {
+    setModelTests((current) => ({ ...current, [model]: 'testing' }));
+    setModelTestErrors((current) => omitKey(current, model));
+    setModelTestLatencies((current) => omitNumberKey(current, model));
+    try {
+      const result = await testGatewayModel(provider.id, model, signal);
       setModelTests((current) => ({ ...current, [model]: 'ok' }));
       setModelTestLatencies((current) => ({ ...current, [model]: result.latencyMs }));
       setConnectionHealthy(true);
       setConnectionPingMs(result.latencyMs);
+      return { ok: true as const, latencyMs: result.latencyMs, message: '' };
     } catch (error) {
-      const message = controller.signal.aborted ? 'Model test timed out or was cancelled.' : error instanceof Error ? error.message : 'The model test failed.';
+      const message = signal.aborted ? 'Model test timed out or was cancelled.' : error instanceof Error ? error.message : 'The model test failed.';
       setModelTests((current) => ({ ...current, [model]: 'error' }));
       setModelTestErrors((current) => ({ ...current, [model]: message }));
-      flash(message, 'error');
-    } finally {
-      window.clearTimeout(timeout);
-      if (modelTestAbortRef.current === controller) modelTestAbortRef.current = null;
-      setTestingModel(null);
+      return { ok: false as const, latencyMs: 0, message };
     }
+  }
+
+  /**
+   * Sends one real request per model through a bounded worker pool, so several
+   * models are in flight at once without tripping the provider rate limit.
+   * Every model gets the same result a single test would produce.
+   */
+  async function testAllModels() {
+    if (testing || testingConnection || allModels.length === 0) return;
+    scrollAnchorRef.current = window.scrollY;
+    bulkRunRef.current = true;
+    const controller = new AbortController();
+    bulkAbortRef.current = controller;
+    const queue = [...allModels];
+    const total = queue.length;
+    const latencies: number[] = [];
+    const failures: string[] = [];
+    let done = 0;
+    setTestingModels(queue);
+    setBulkProgress({ done, total });
+
+    const worker = async () => {
+      while (queue.length > 0 && !controller.signal.aborted) {
+        const model = queue.shift();
+        if (model === undefined) return;
+        const outcome = await runModelTest(model, controller.signal);
+        done += 1;
+        if (outcome.ok) latencies.push(outcome.latencyMs);
+        else failures.push(model);
+        setBulkProgress({ done, total });
+      }
+    };
+
+    try {
+      await Promise.all(Array.from({ length: Math.min(concurrency, total) }, () => worker()));
+      if (controller.signal.aborted) {
+        flash(`Stopped after ${done} of ${total} models.`, 'error');
+        return;
+      }
+      const median = latencies.length > 0 ? [...latencies].sort((left, right) => left - right)[Math.floor(latencies.length / 2)]! : undefined;
+      const latencyText = median === undefined ? '' : ` · median ${median} ms`;
+      const failureText = failures.length > 0 ? ` · ${failures.length} failed` : '';
+      flash(`${latencies.length} of ${total} models healthy${latencyText}${failureText}.`, failures.length > 0 ? 'error' : 'success');
+    } finally {
+      bulkRunRef.current = false;
+      if (bulkAbortRef.current === controller) bulkAbortRef.current = null;
+      setTestingModels([]);
+      setBulkProgress(undefined);
+    }
+  }
+
+  function stopTesting() {
+    modelTestAbortRef.current?.abort();
+    bulkAbortRef.current?.abort();
   }
 
   async function saveResilience(next: GatewayResilience) {
@@ -390,13 +479,13 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   return (
     <>
       <div className="mb-6">
-        <a href="#/providers" className="btn-quiet -ml-2 mb-4 !px-2 !py-1.5 text-xs"><ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />Back to providers</a>
+        <Link to={dashboardRoutes.providers} className="btn-quiet -ml-2 mb-4 !px-2 !py-1.5 text-xs"><ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />Back to providers</Link>
         <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
           <div className="flex min-w-0 items-start gap-3.5 sm:gap-4">
             <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-12 w-12 rounded-xl text-sm" />
             <div className="min-w-0"><div className="flex flex-wrap items-center gap-2.5"><h2 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{provider.name}</h2><span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[9px] ${meta.className}`}><span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />{meta.label}</span></div><p className="muted mt-1 text-sm">{provider.description}</p></div>
           </div>
-          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={testConnection} disabled={testingConnection || testingModel !== null} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2.5 !text-xs"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
+          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={testConnection} disabled={testingConnection || testing} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2.5 !text-xs"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
         </div>
       </div>
 
@@ -412,14 +501,46 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       <section className="card mt-5 overflow-hidden" aria-labelledby="connections-title">
         <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:p-5"><div><h2 id="connections-title" className="text-sm font-semibold">Connections</h2><p className="muted mt-1 text-xs">Credentials and endpoints used by this provider.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{connectionAdded ? '1 connection' : 'No connection'}</span></div>
         <div className="p-4 sm:p-5">
-          {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} pingMs={connectionPingMs} testing={testingConnection || testingModel !== null} onTest={testConnection} onEdit={() => setAddOpen(true)} /> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">Add an API key or point OmniHilbras at a local endpoint.</p></div></div><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2 !text-xs">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div>}
+          {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} pingMs={connectionPingMs} testing={testingConnection || testing} onTest={testConnection} onEdit={() => setAddOpen(true)} /> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">Add an API key or point OmniHilbras at a local endpoint.</p></div></div><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2 !text-xs">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div>}
         </div>
       </section>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
         <section className="card min-w-0 p-4 sm:p-5" aria-labelledby="models-title">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div><h2 id="models-title" className="text-sm font-semibold">Available models</h2><p className="muted mt-1 text-xs">Models currently exposed by this provider route. Test sends one real minimal request.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{allModels.length} models</span></div>
-          <div className="mt-5 space-y-2">{allModels.length > 0 ? allModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingModel === model} disabled={testingModel !== null || testingConnection} testState={modelTests[model] ?? 'idle'} testError={modelTestErrors[model]} testLatencyMs={modelTestLatencies[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No models discovered</p><p className="muted mt-1 text-xs">Connect the provider or add a custom model ID below.</p></div>}</div>
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+            <div><h2 id="models-title" className="text-sm font-semibold">Available models</h2><p className="muted mt-1 text-xs">Models currently exposed by this provider route. Test sends one real minimal request.</p></div>
+            <div className="flex flex-wrap items-center gap-2">
+              {bulkProgress && (
+                <span className="flex items-center gap-1.5 rounded-full border border-gold/25 bg-gold-soft px-2.5 py-1 font-mono text-[10px] text-gold-text" role="status">
+                  <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden="true" />
+                  {bulkProgress.done}/{bulkProgress.total}
+                </span>
+              )}
+              <label className="flex items-center gap-1.5">
+                <span className="sr-only">Concurrent model tests</span>
+                <select
+                  value={concurrency}
+                  onChange={(event) => setConcurrency(Number(event.target.value))}
+                  disabled={testing}
+                  className="input !h-8 !w-[4.5rem] !py-1 !text-[11px]"
+                >
+                  {concurrencyOptions.map((option) => <option key={option} value={option}>{option} at a time</option>)}
+                </select>
+              </label>
+              {testing ? (
+                <button type="button" onClick={stopTesting} className="btn-ghost !px-3 !py-2 !text-xs">
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  Stop
+                </button>
+              ) : (
+                <button type="button" onClick={() => void testAllModels()} disabled={testingConnection || allModels.length === 0} className="btn-gold !px-3 !py-2 !text-xs">
+                  <Zap className="h-3.5 w-3.5" aria-hidden="true" />
+                  Test all
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="mt-5 space-y-2">{allModels.length > 0 ? allModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingSet.has(model)} disabled={testing || testingConnection} testState={modelTests[model] ?? 'idle'} testError={modelTestErrors[model]} testLatencyMs={modelTestLatencies[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No models discovered</p><p className="muted mt-1 text-xs">Connect the provider or add a custom model ID below.</p></div>}</div>
           <div className="mt-5 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>
           {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {modelReference(provider.id, copiedModel)}</p>}
         </section>

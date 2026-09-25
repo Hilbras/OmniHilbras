@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import {
   BarChart3,
   Boxes,
@@ -17,28 +18,30 @@ import {
   X,
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
+import { dashboardRoutes } from '../lib/routes';
 
 type DashboardPage = 'overview' | 'providers' | 'routing' | 'keys';
 
 type SidebarItem = {
   label: string;
   icon: typeof LayoutDashboard;
-  href?: string;
-  page?: DashboardPage;
-  disabled?: boolean;
+  to: string;
+  page: DashboardPage;
+  /** A route that does not exist yet renders as a disabled "soon" entry. */
+  pending?: boolean;
 };
 
 const primaryItems: SidebarItem[] = [
-  { label: 'Overview', icon: LayoutDashboard, href: '#/overview', page: 'overview' },
-  { label: 'Providers', icon: Network, href: '#/providers', page: 'providers' },
-  { label: 'Routing', icon: RouteIcon, href: '#/routing', page: 'routing' },
-  { label: 'API keys', icon: KeyRound, href: '#/keys', page: 'keys' },
+  { label: 'Overview', icon: LayoutDashboard, to: dashboardRoutes.overview, page: 'overview' },
+  { label: 'Providers', icon: Network, to: dashboardRoutes.providers, page: 'providers' },
+  { label: 'Routing', icon: RouteIcon, to: dashboardRoutes.routing, page: 'routing' },
+  { label: 'API keys', icon: KeyRound, to: dashboardRoutes.keys, page: 'keys' },
 ];
 
 const insightItems: SidebarItem[] = [
-  { label: 'Usage', icon: BarChart3, disabled: true },
-  { label: 'Request log', icon: ScrollText, disabled: true },
-  { label: 'Settings', icon: Settings2, disabled: true },
+  { label: 'Usage', icon: BarChart3, to: '/usage', page: 'overview', pending: true },
+  { label: 'Request log', icon: ScrollText, to: '/request-log', page: 'overview', pending: true },
+  { label: 'Settings', icon: Settings2, to: '/settings', page: 'overview', pending: true },
 ];
 
 const sidebarStorageKey = 'omnihilbras-sidebar-collapsed';
@@ -58,7 +61,7 @@ function SidebarLink({ item, activePage, collapsed, onNavigate }: { item: Sideba
     ? 'group flex w-full items-center justify-center rounded-lg px-2 py-2.5 text-left transition-colors'
     : 'group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors';
 
-  if (item.disabled) {
+  if (item.pending) {
     return (
       <button
         type="button"
@@ -75,8 +78,8 @@ function SidebarLink({ item, activePage, collapsed, onNavigate }: { item: Sideba
   }
 
   return (
-    <a
-      href={item.href}
+    <Link
+      to={item.to}
       onClick={onNavigate}
       className={`${baseClass} ${isActive ? 'bg-gold-soft text-gold-text' : 'text-muted hover:bg-surface hover:text-text'}`}
       aria-current={isActive ? 'page' : undefined}
@@ -86,7 +89,7 @@ function SidebarLink({ item, activePage, collapsed, onNavigate }: { item: Sideba
       <Icon className="h-[17px] w-[17px] shrink-0" aria-hidden="true" />
       {!collapsed && <span className="flex-1">{item.label}</span>}
       {!collapsed && isActive && <ChevronRight className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />}
-    </a>
+    </Link>
   );
 }
 
@@ -138,14 +141,14 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
         </div>
 
         <div className={`mt-8 border-t border-line/70 pt-5 ${collapsed ? 'px-1' : ''}`}>
-          <a href="#/overview" onClick={onClose} className={`group block rounded-xl border border-gold/25 bg-gold-soft/60 transition-colors hover:border-gold/50 ${collapsed ? 'flex justify-center p-3' : 'p-3.5'}`} title={collapsed ? 'Connect a provider' : undefined} aria-label={collapsed ? 'Connect a provider' : undefined}>
+          <Link to={dashboardRoutes.overview} onClick={onClose} className={`group block rounded-xl border border-gold/25 bg-gold-soft/60 transition-colors hover:border-gold/50 ${collapsed ? 'flex justify-center p-3' : 'p-3.5'}`} title={collapsed ? 'Connect a provider' : undefined} aria-label={collapsed ? 'Connect a provider' : undefined}>
             <div className={`items-center gap-2 text-xs font-semibold text-gold-text ${collapsed ? 'flex justify-center' : 'flex'}`}>
               <Boxes className="h-3.5 w-3.5" aria-hidden="true" />
               {!collapsed && 'Connect a provider'}
             </div>
             {!collapsed && <p className="muted mt-1.5 text-[11px] leading-relaxed">Bring your first route online in under a minute.</p>}
             {!collapsed && <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-gold-text">Quick setup <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" aria-hidden="true" /></span>}
-          </a>
+          </Link>
         </div>
       </nav>
 
@@ -199,7 +202,7 @@ export function DashboardShell({
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <span className="hidden items-center gap-2 rounded-full border border-success/25 bg-success/10 px-2.5 py-1.5 text-[11px] font-medium text-success md:flex"><span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />All systems operational</span>
-            <a href="#/overview" aria-label="Go to dashboard overview" className="muted hidden h-9 w-9 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text sm:grid"><Gauge className="h-[17px] w-[17px]" aria-hidden="true" /></a>
+            <Link to={dashboardRoutes.overview} aria-label="Go to dashboard overview" className="muted hidden h-9 w-9 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text sm:grid"><Gauge className="h-[17px] w-[17px]" aria-hidden="true" /></Link>
             <ThemeToggle />
             <span className="grid h-8 w-8 place-items-center rounded-full border border-gold/30 bg-gold-soft text-[10px] font-bold text-gold-text" aria-label="Local workspace">OH</span>
           </div>

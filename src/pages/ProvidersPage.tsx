@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Activity,
   CheckCircle2,
@@ -14,6 +15,7 @@ import { AddProviderModal, providerOptions, type NewProvider } from '../componen
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderCard, providerGroupLabels, providerGroupOrder, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
 import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection, type GatewayHealth } from '../lib/gatewayClient';
+import { providerRoute } from '../lib/routes';
 import { providerCatalog } from '../data/providers';
 
 type Filter = 'all' | 'connected' | 'attention' | 'available';
@@ -98,6 +100,7 @@ function SummaryCard({ label, value, detail, icon: Icon, tone }: { label: string
 }
 
 export function ProvidersContent() {
+  const navigate = useNavigate();
   const [providers, setProviders] = useState(providerCatalog);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -206,9 +209,9 @@ export function ProvidersContent() {
   }
 
   function renderProviderCard(provider: ProviderRecord) {
-    const detailHref = `#/providers/${encodeURIComponent(provider.catalogId ?? provider.id)}`;
+    const detailTo = providerRoute(provider.catalogId ?? provider.id);
     const simpleEnabled = provider.status === 'connected' && !disabledProviderIds.has(provider.id);
-    return <ProviderCard key={provider.id} provider={provider} detailHref={detailHref} mode={cardMode} simpleEnabled={simpleEnabled} onToggle={(enabled) => toggleProvider(provider.id, enabled)} onManage={() => { window.location.hash = detailHref; }} onConnect={() => openAdd(provider.catalogId ?? provider.id)} />;
+    return <ProviderCard key={provider.id} provider={provider} detailTo={detailTo} mode={cardMode} simpleEnabled={simpleEnabled} onToggle={(enabled) => toggleProvider(provider.id, enabled)} onManage={() => navigate(detailTo)} onConnect={() => openAdd(provider.catalogId ?? provider.id)} />;
   }
 
   return (

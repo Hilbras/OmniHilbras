@@ -1,0 +1,6 @@
+# The dashboard is a single-page app mounted at /dashboard.
+/dashboard/*  /dashboard.html  200
+/dashboard.html  /dashboard/overview  301
+/providers.html  /dashboard/providers  301
+/provider.html  /dashboard/providers  301
+/routing.html  /dashboard/routing  301

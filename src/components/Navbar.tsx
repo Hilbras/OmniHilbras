@@ -7,7 +7,7 @@ const links = [
   { href: '#product', label: 'Product' },
   { href: '#how-it-works', label: 'How it works' },
   { href: '#docs', label: 'Docs' },
-  { href: '/dashboard.html', label: 'Dashboard' },
+  { href: '/dashboard', label: 'Dashboard' },
 ] as const;
 
 export function Navbar() {
@@ -51,7 +51,7 @@ export function Navbar() {
         </div>
 
         <div className="ml-auto flex items-center gap-2.5">
-          <a href="/dashboard.html" className="btn-quiet hidden xl:inline-flex">
+          <a href="/dashboard" className="btn-quiet hidden xl:inline-flex">
             Open dashboard
           </a>
           <a href="#start" className="btn-gold hidden sm:inline-flex">

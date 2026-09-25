@@ -6,23 +6,30 @@ The first slice focuses on the product story and visual language: a warm editori
 surface, gold routing accents, a live gateway preview, and a responsive light/dark
 theme inspired by the Hilbras Code design system.
 
-The local dashboard is a client-side app at `/dashboard.html`. Its routes are
-hash-based so they work on any static host without server rewrites:
+The local dashboard is one React Router app mounted at `/dashboard`:
 
-- `#/overview`
-- `#/providers`
-- `#/providers/:providerId`
-- `#/routing`
+- `/dashboard/overview`
+- `/dashboard/providers`
+- `/dashboard/providers/:providerId`
+- `/dashboard/routing`
+- `/dashboard/keys`
 
-The standalone HTML entry files remain available as direct-entry fallbacks, but
-internal dashboard navigation no longer reloads the document. All dashboard
-surfaces use the local gateway when it is running. OpenRouter is the first
-provider with a live connection flow: the dashboard sends a candidate key only
-to the loopback gateway, which validates it against OpenRouter and stores it in
-an encrypted local vault. The connection dialog also lets you choose whether
+Navigation is client-side, so switching views never reloads the document. The
+marketing page stays at `/`. A static host must send every `/dashboard/*` request
+to `dashboard.html`; `public/_redirects` covers Netlify and Cloudflare Pages, and
+the equivalent rule for other servers is:
+
+```nginx
+location /dashboard { try_files $uri /dashboard.html; }
+```
+
+All dashboard surfaces use the local gateway when it is running. OpenRouter is the
+first provider with a live connection flow: the dashboard sends a candidate key
+only to the loopback gateway, which validates it against OpenRouter and stores it
+in an encrypted local vault. The connection dialog also lets you choose whether
 Save imports free models or all text models; model IDs are persisted separately
-from the credential. OpenRouter currently uses the single-slot Single Add
-flow; other provider connection forms remain preview-only.
+from the credential. Any other provider can be added with a base URL through
+`PUT /v1/connections/:id`.
 
 ## Scripts
 

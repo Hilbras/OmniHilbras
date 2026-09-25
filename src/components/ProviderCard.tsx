@@ -1,4 +1,5 @@
 import { ArrowUpRight, CheckCircle2, CircleAlert, Clock3, Cpu, KeyRound, Server, Zap } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { ProviderMark } from './ProviderMark';
 
 export type ProviderStatus = 'connected' | 'attention' | 'available';
@@ -62,14 +63,14 @@ function statusMeta(status: ProviderStatus) {
   };
 }
 
-function SimpleProviderCard({ provider, detailHref, onManage, onConnect, simpleEnabled, onToggle }: { provider: ProviderRecord; detailHref: string; onManage: () => void; onConnect: () => void; simpleEnabled: boolean; onToggle?: (enabled: boolean) => void }) {
+function SimpleProviderCard({ provider, detailTo, onManage, onConnect, simpleEnabled, onToggle }: { provider: ProviderRecord; detailTo: string; onManage: () => void; onConnect: () => void; simpleEnabled: boolean; onToggle?: (enabled: boolean) => void }) {
   const connected = provider.status === 'connected';
   const attention = provider.status === 'attention';
   const statusLabel = connected ? (simpleEnabled ? '1 Connected' : 'Disabled') : attention ? 'Needs attention' : 'No connections';
 
   return (
     <article className="group relative isolate flex min-h-[84px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-line bg-surface-2/75 p-3 transition-colors hover:border-line-strong hover:bg-surface-2">
-      <a href={detailHref} aria-label={`Open ${provider.name} provider`} className="absolute inset-0 z-0 rounded-xl" />
+      <Link to={detailTo} aria-label={`Open ${provider.name} provider`} className="absolute inset-0 z-0 rounded-xl" />
       <div className="pointer-events-none relative z-10 flex min-w-0 items-center gap-3">
         <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-10 w-10 shrink-0 rounded-xl" />
         <span className="min-w-0">
@@ -93,8 +94,8 @@ function SimpleProviderCard({ provider, detailHref, onManage, onConnect, simpleE
   );
 }
 
-export function ProviderCard({ provider, detailHref, onManage, onConnect, mode = 'advanced', simpleEnabled = provider.status === 'connected', onToggle }: { provider: ProviderRecord; detailHref: string; onManage: () => void; onConnect: () => void; mode?: ProviderCardMode; simpleEnabled?: boolean; onToggle?: (enabled: boolean) => void }) {
-  if (mode === 'simple') return <SimpleProviderCard provider={provider} detailHref={detailHref} onManage={onManage} onConnect={onConnect} simpleEnabled={simpleEnabled} onToggle={onToggle} />;
+export function ProviderCard({ provider, detailTo, onManage, onConnect, mode = 'advanced', simpleEnabled = provider.status === 'connected', onToggle }: { provider: ProviderRecord; detailTo: string; onManage: () => void; onConnect: () => void; mode?: ProviderCardMode; simpleEnabled?: boolean; onToggle?: (enabled: boolean) => void }) {
+  if (mode === 'simple') return <SimpleProviderCard provider={provider} detailTo={detailTo} onManage={onManage} onConnect={onConnect} simpleEnabled={simpleEnabled} onToggle={onToggle} />;
   const status = statusMeta(provider.status);
   const StatusIcon = status.icon;
   const isAvailable = provider.status === 'available';
@@ -106,7 +107,7 @@ export function ProviderCard({ provider, detailHref, onManage, onConnect, mode =
         <div className="flex min-w-0 items-center gap-3">
           <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-10 w-10 rounded-xl" />
           <div className="min-w-0">
-            <a href={detailHref} className="truncate text-sm font-semibold transition-colors hover:text-gold-text">{provider.name}</a>
+            <Link to={detailTo} className="truncate text-sm font-semibold transition-colors hover:text-gold-text">{provider.name}</Link>
             <p className="muted mt-1 truncate text-[11px]">{provider.category}</p>
           </div>
         </div>

@@ -125,6 +125,20 @@
   - Depends on: Task 9h.
   - Scope: Medium.
 
+- [x] Task 9j: Test every model concurrently from the provider page.
+  - Acceptance: a Test all control sends one real bounded request per model through a bounded worker pool, with selectable concurrency, live progress, per-model results identical to a single test, a Stop control, and a summary with median latency and failure count.
+  - Verify: browser smoke test covers the progress indicator, bounded in-flight count, per-model ping badges, and the completion summary.
+  - Files: `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`.
+  - Depends on: Task 9f.
+  - Scope: Small/medium.
+
+- [x] Task 9k: Collapse the dashboard into one React Router entry.
+  - Acceptance: the dashboard is a single app mounted at `/dashboard` with real paths, the duplicate `provider.html`, `providers.html`, and `routing.html` entries are removed, navigation uses `Link`, and old `.html` URLs redirect to their replacement.
+  - Verify: typecheck/build, dev-server rewrite, redirect table, and browser navigation between routes.
+  - Files: `src/dashboardApp.tsx`, `src/components/DashboardShell.tsx`, `src/components/ProviderCard.tsx`, `src/pages/ProvidersPage.tsx`, `src/pages/DashboardOverview.tsx`, `src/pages/ProviderDetailPage.tsx`, `src/lib/routes.ts`, `vite.config.ts`, `public/_redirects`, docs.
+  - Depends on: Task 9g.
+  - Scope: Small/medium.
+
 - [ ] Task 10: Define cloud integration boundaries.
   - Acceptance: auth context, tenant context, remote `SecretStore`, and deployment configuration are represented by interfaces without implementing cloud infrastructure.
   - Verify: typecheck and architecture review.
