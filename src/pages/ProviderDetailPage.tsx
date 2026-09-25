@@ -67,7 +67,7 @@ function DetailStat({ label, value, icon: Icon, tone = 'muted' }: { label: strin
   return <div className="rounded-xl border border-line bg-bg-soft/70 p-3.5"><Icon className={`h-4 w-4 ${toneClass}`} aria-hidden="true" /><p className="muted mt-3 text-[10px] uppercase tracking-[0.1em]">{label}</p><p className="mt-1 truncate font-mono text-sm font-semibold">{value}</p></div>;
 }
 
-function ConnectionRow({ provider, connection, healthy, testing, onTest, onEdit }: { provider: ProviderRecord; connection?: GatewayConnection; healthy: boolean; testing: boolean; onTest: () => void; onEdit: () => void }) {
+function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest, onEdit }: { provider: ProviderRecord; connection?: GatewayConnection; healthy: boolean; pingMs?: number; testing: boolean; onTest: () => void; onEdit: () => void }) {
   const connectionName = connection?.name ?? provider.name;
   const endpoint = connection?.endpoint ?? provider.endpoint;
   const priority = connection?.priority ?? 1;
@@ -79,6 +79,7 @@ function ConnectionRow({ provider, connection, healthy, testing, onTest, onEdit 
           <p className="truncate text-sm font-semibold">{connectionName} · local connection</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[9px] ${healthy ? 'border-success/20 bg-success/10 text-success' : 'border-gold/30 bg-gold-soft text-gold-text'}`}><span className={`h-1.5 w-1.5 rounded-full ${healthy ? 'bg-success' : 'bg-gold'}`} />{healthy ? 'healthy' : 'health pending'}</span>
+            {pingMs !== undefined && <span className="inline-flex items-center gap-1 rounded-full border border-line-strong bg-surface px-2 py-0.5 font-mono text-[9px] text-muted"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {pingMs} ms</span>}
             <span className="rounded-full border border-line-strong px-2 py-0.5 font-mono text-[9px] text-muted">{provider.auth}</span>
             <span className="font-mono text-[10px] text-muted">priority #{priority}</span>
             {connection && <span className="rounded-full border border-line-strong px-2 py-0.5 font-mono text-[9px] text-muted">{connection.modelPolicy === 'free' ? 'free import' : 'all import'}</span>}
@@ -94,14 +95,14 @@ function ConnectionRow({ provider, connection, healthy, testing, onTest, onEdit 
   );
 }
 
-function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testState, testDetail }: { model: string; providerId: string; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testDetail?: string }) {
+function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testState, testDetail, testLatencyMs }: { model: string; providerId: string; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testDetail?: string; testLatencyMs?: number }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-line bg-bg-soft/45 p-3.5 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-3">
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? 'border-danger/25 bg-danger/10 text-danger' : 'border-line bg-surface text-muted'}`}>
           {testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
         </span>
-        <div className="min-w-0"><p className="truncate text-xs font-semibold">{model}</p><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code>{testDetail && <p title={testDetail} className={`mt-1 truncate text-[10px] ${testState === 'error' ? 'text-danger' : 'text-success'}`}>{testDetail}</p>}</div>
+        <div className="min-w-0"><p className="truncate text-xs font-semibold">{model}</p><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code>{testLatencyMs !== undefined && testState === 'ok' && <span className="mt-1 inline-flex items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms</span>}{testDetail && <p title={testDetail} className={`mt-1 truncate text-[10px] ${testState === 'error' ? 'text-danger' : 'text-success'}`}>{testDetail}</p>}</div>
       </div>
       <div className="flex items-center gap-1.5">
         <button type="button" onClick={onCopy} aria-label={`Copy ${model} model ID`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-gold-text"><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>
@@ -143,10 +144,12 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const [testingConnection, setTestingConnection] = useState(false);
   const [connection, setConnection] = useState<GatewayConnection | undefined>();
   const [connectionHealthy, setConnectionHealthy] = useState(false);
+  const [connectionPingMs, setConnectionPingMs] = useState<number | undefined>();
   const [connectionAdded, setConnectionAdded] = useState(provider.status !== 'available');
   const [testingModel, setTestingModel] = useState<string | null>(null);
   const [modelTests, setModelTests] = useState<Record<string, ModelTestState>>({});
   const [modelTestDetails, setModelTestDetails] = useState<Record<string, string>>({});
+  const [modelTestLatencies, setModelTestLatencies] = useState<Record<string, number>>({});
   const modelTestAbortRef = useRef<AbortController | null>(null);
   const [customModels, setCustomModels] = useState<string[]>([]);
   const [strategy, setStrategy] = useState('balanced');
@@ -187,6 +190,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       const providerHealth = health.providers.find((item) => item.providerId === provider.id);
       const healthy = providerHealth?.status === 'healthy';
       setConnectionHealthy(healthy);
+      setConnectionPingMs(healthy ? providerHealth?.latencyMs : undefined);
       if (!healthy) throw new Error(`${provider.name} is not connected to the local gateway.`);
       const latency = providerHealth?.latencyMs === undefined ? '' : ` in ${providerHealth.latencyMs} ms`;
       flash(`${provider.name} provider is healthy${latency}.`);
@@ -263,13 +267,20 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       delete next[model];
       return next;
     });
+    setModelTestLatencies((current) => {
+      const next = { ...current };
+      delete next[model];
+      return next;
+    });
     try {
       const result = await testGatewayModel(provider.id, model, controller.signal);
       const preview = result.content.trim().replace(/\s+/g, ' ').slice(0, 80);
       const detail = `Responded in ${result.latencyMs} ms${preview ? `: ${preview}` : ''}`;
       setModelTests((current) => ({ ...current, [model]: 'ok' }));
       setModelTestDetails((current) => ({ ...current, [model]: detail }));
+      setModelTestLatencies((current) => ({ ...current, [model]: result.latencyMs }));
       setConnectionHealthy(true);
+      setConnectionPingMs(result.latencyMs);
       flash(`${model} responded successfully in ${result.latencyMs} ms.`);
     } catch (error) {
       const detail = controller.signal.aborted ? 'Model test timed out or was cancelled.' : error instanceof Error ? error.message : 'The model test failed.';
@@ -312,21 +323,21 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <DetailStat label="Connections" value={connectionAdded ? '1 active' : '0'} icon={KeyRound} tone={connectionAdded ? 'green' : 'muted'} />
         <DetailStat label="Models" value={allModels.length > 0 ? String(allModels.length) : '—'} icon={Cpu} tone="blue" />
-        <DetailStat label="Latency" value={connectionHealthy ? 'Checked just now' : provider.latency} icon={Clock3} tone="gold" />
+        <DetailStat label="Latency" value={connectionPingMs === undefined ? (connectionHealthy ? 'Checked just now' : provider.latency) : `${connectionPingMs} ms`} icon={Clock3} tone="gold" />
         <DetailStat label="Route health" value={connectionHealthy ? '100%' : connectionAdded ? 'Pending' : '—'} icon={Activity} tone={connectionHealthy ? 'green' : connectionAdded ? 'gold' : 'muted'} />
       </div>
 
       <section className="card mt-5 overflow-hidden" aria-labelledby="connections-title">
         <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:p-5"><div><h2 id="connections-title" className="text-sm font-semibold">Connections</h2><p className="muted mt-1 text-xs">Credentials and endpoints used by this provider.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{connectionAdded ? '1 connection' : 'No connection'}</span></div>
         <div className="p-4 sm:p-5">
-          {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} testing={testingConnection || testingModel !== null} onTest={testConnection} onEdit={() => setAddOpen(true)} /> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">Add an API key or point OmniHilbras at a local endpoint.</p></div></div><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2 !text-xs">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div>}
+          {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} pingMs={connectionPingMs} testing={testingConnection || testingModel !== null} onTest={testConnection} onEdit={() => setAddOpen(true)} /> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">Add an API key or point OmniHilbras at a local endpoint.</p></div></div><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2 !text-xs">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div>}
         </div>
       </section>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
         <section className="card min-w-0 p-4 sm:p-5" aria-labelledby="models-title">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div><h2 id="models-title" className="text-sm font-semibold">Available models</h2><p className="muted mt-1 text-xs">Models currently exposed by this provider route. Test sends one real minimal request.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{allModels.length} models</span></div>
-          <div className="mt-5 space-y-2">{allModels.length > 0 ? allModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingModel === model} disabled={testingModel !== null || testingConnection} testState={modelTests[model] ?? 'idle'} testDetail={modelTestDetails[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No models discovered</p><p className="muted mt-1 text-xs">Connect the provider or add a custom model ID below.</p></div>}</div>
+          <div className="mt-5 space-y-2">{allModels.length > 0 ? allModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingModel === model} disabled={testingModel !== null || testingConnection} testState={modelTests[model] ?? 'idle'} testDetail={modelTestDetails[model]} testLatencyMs={modelTestLatencies[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No models discovered</p><p className="muted mt-1 text-xs">Connect the provider or add a custom model ID below.</p></div>}</div>
           <div className="mt-5 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>
           {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {modelReference(provider.id, copiedModel)}</p>}
         </section>
