@@ -63,11 +63,16 @@ export function clineHeaders(token: string, extra: Record<string, string> = {}, 
   };
 }
 
-export function buildClineAuthorizeUrl(redirectUri: string, authorizeUrl: string = CLINE_OAUTH.authorizeUrl) {
+/**
+ * Builds the Cline sign-in URL. `state` is echoed back on the callback, so the
+ * gateway can tell its own sign-in apart from a replayed or forged one.
+ */
+export function buildClineAuthorizeUrl(redirectUri: string, state?: string, authorizeUrl: string = CLINE_OAUTH.authorizeUrl) {
   const url = new URL(authorizeUrl);
   url.searchParams.set('client_type', CLINE_OAUTH.clientType);
   url.searchParams.set('callback_url', redirectUri);
   url.searchParams.set('redirect_uri', redirectUri);
+  if (state) url.searchParams.set('state', state);
   return url.toString();
 }
 

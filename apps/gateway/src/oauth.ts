@@ -11,16 +11,113 @@ import {
 } from '@hilbras/omnihilbras';
 
 /**
- * Cline has no browser callback we can own, so the dashboard asks the user to
- * paste what the browser ends up with. The gateway only accepts a loopback
- * callback so a pasted redirect can never point somewhere else.
+ * Cline signs in through a browser redirect to a loopback address this gateway
+ * owns, so the whole flow can complete on its own: the user approves in the
+ * browser, the callback lands here, and the dashboard only has to notice the
+ * result. The redirect is required to be loopback, so a callback can never be
+ * pointed somewhere else.
  */
 export const clineCallbackPath = '/v1/oauth/cline/callback';
+
+/** How long a started sign-in stays usable before it is discarded. */
+export const clineSessionTtlMs = 5 * 60_000;
 
 export type ClineAuthorizeResult = {
   authUrl: string;
   redirectUri: string;
 };
+
+export type ClineSessionStatus = {
+  status: 'pending' | 'connected' | 'failed' | 'expired';
+  /** Present once the sign-in succeeded. Contains no secrets. */
+  connection?: { id: string; providerId: string; name: string; modelIds: string[] };
+  /** Present once the sign-in failed. */
+  error?: string;
+};
+
+type ClineSession = {
+  id: string;
+  /** Single-use CSRF value echoed back by the provider. Cleared once consumed. */
+  state?: string;
+  redirectUri: string;
+  createdAt: number;
+  expiresAt: number;
+  result: ClineSessionStatus;
+};
+
+function randomToken(bytes: number) {
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(bytes))).toString('base64url');
+}
+
+/**
+ * Tracks in-flight sign-ins. A session is addressed by an unguessable id and
+ * carries a single-use `state`, so a callback that did not come from a sign-in
+ * this gateway started is rejected instead of exchanging an attacker's code into
+ * the user's vault.
+ */
+export class ClineSessionStore {
+  private readonly sessions = new Map<string, ClineSession>();
+  private readonly now: () => number;
+
+  constructor(options: { now?: () => number } = {}) {
+    this.now = options.now ?? (() => Date.now());
+  }
+
+  start(redirectUri: string) {
+    this.prune();
+    const id = randomToken(32);
+    const session: ClineSession = {
+      id,
+      state: randomToken(32),
+      redirectUri,
+      createdAt: this.now(),
+      expiresAt: this.now() + clineSessionTtlMs,
+      result: { status: 'pending' },
+    };
+    this.sessions.set(id, session);
+    return { sessionId: id, state: session.state as string };
+  }
+
+  /** Reads a session without letting it be used twice. */
+  get(sessionId: string): ClineSessionStatus | undefined {
+    this.prune();
+    const session = this.sessions.get(sessionId);
+    if (!session) return undefined;
+    if (this.now() >= session.expiresAt) return { status: 'expired' };
+    return session.result;
+  }
+
+  /**
+   * Claims the `state` a callback carries. Returns nothing when the value is
+   * unknown, already used, or expired, so a replayed callback cannot re-run the
+   * exchange.
+   */
+  claim(state: string): ClineSession | undefined {
+    this.prune();
+    for (const session of this.sessions.values()) {
+      if (session.state !== state) continue;
+      // Single use: the state is spent whether or not the exchange succeeds.
+      delete session.state;
+      return session;
+    }
+    return undefined;
+  }
+
+  resolve(sessionId: string, result: ClineSessionStatus) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.result = result;
+    // A finished sign-in is kept only long enough for the dashboard to read it.
+    session.expiresAt = Math.min(session.expiresAt, this.now() + 60_000);
+  }
+
+  private prune() {
+    const now = this.now();
+    for (const [id, session] of this.sessions) {
+      if (now >= session.expiresAt) this.sessions.delete(id);
+    }
+  }
+}
 
 export type ClineExchangeInput = {
   code: string;
@@ -63,9 +160,9 @@ export function extractClineCode(input: ClineExchangeInput) {
   return raw;
 }
 
-export function beginClineAuthorization(redirectUri: string): ClineAuthorizeResult {
+export function beginClineAuthorization(redirectUri: string, state?: string): ClineAuthorizeResult {
   assertLoopbackCallback(redirectUri);
-  return { authUrl: buildClineAuthorizeUrl(redirectUri), redirectUri };
+  return { authUrl: buildClineAuthorizeUrl(redirectUri, state), redirectUri };
 }
 
 /**

@@ -219,6 +219,7 @@ function AddModelForm({ onAdd, providerId }: { onAdd: (model: string) => void | 
 
 export function ProviderDetailContent({ provider }: { provider: ProviderRecord }) {
   const [addOpen, setAddOpen] = useState(false);
+  const [signInWindow, setSignInWindow] = useState<Window | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
   const [connection, setConnection] = useState<GatewayConnection | undefined>();
   const [connectionHealthy, setConnectionHealthy] = useState(false);
@@ -278,6 +279,18 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const allModels = useMemo(() => [...new Set([...importedModels, ...customModels])], [customModels, importedModels]);
   const testing = testingModels.length > 0;
   const isOauth = provider.auth === 'OAuth';
+
+  // Browsers only allow window.open inside the click that granted the gesture,
+  // so the tab is opened blank here and the dialog navigates it once the
+  // gateway hands back the sign-in URL.
+  function openAddConnection() {
+    if (isOauth) {
+      setSignInWindow(window.open('about:blank', '_blank'));
+    } else {
+      setSignInWindow(null);
+    }
+    setAddOpen(true);
+  }
   const testingSet = useMemo(() => new Set(testingModels), [testingModels]);
 
   function flash(message: string, tone: 'success' | 'error' = 'success') {
@@ -487,7 +500,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
             <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-12 w-12 rounded-xl text-sm" />
             <div className="min-w-0"><div className="flex flex-wrap items-center gap-2.5"><h2 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{provider.name}</h2><span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[9px] ${meta.className}`}><span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />{meta.label}</span></div><p className="muted mt-1 text-sm">{provider.description}</p></div>
           </div>
-          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={testConnection} disabled={testingConnection || testing} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2.5 !text-xs"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
+          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={testConnection} disabled={testingConnection || testing} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={openAddConnection} className="btn-gold !px-3 !py-2.5 !text-xs"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
         </div>
       </div>
 
@@ -503,7 +516,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       <section className="card mt-5 overflow-hidden" aria-labelledby="connections-title">
         <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:p-5"><div><h2 id="connections-title" className="text-sm font-semibold">Connections</h2><p className="muted mt-1 text-xs">Credentials and endpoints used by this provider.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{connectionAdded ? '1 connection' : 'No connection'}</span></div>
         <div className="p-4 sm:p-5">
-          {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} pingMs={connectionPingMs} testing={testingConnection || testing} onTest={testConnection} onEdit={() => setAddOpen(true)} /> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">Add an API key or point OmniHilbras at a local endpoint.</p></div></div><button type="button" onClick={() => setAddOpen(true)} className="btn-gold !px-3 !py-2 !text-xs">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div>}
+          {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} pingMs={connectionPingMs} testing={testingConnection || testing} onTest={testConnection} onEdit={openAddConnection} /> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">Add an API key or point OmniHilbras at a local endpoint.</p></div></div><button type="button" onClick={openAddConnection} className="btn-gold !px-3 !py-2 !text-xs">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div>}
         </div>
       </section>
 
@@ -563,7 +576,8 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
         <OauthConnectDialog
           providerId={provider.id}
           providerName={provider.name}
-          onClose={() => setAddOpen(false)}
+          signInWindow={signInWindow}
+          onClose={() => { setAddOpen(false); setSignInWindow(null); }}
           onConnected={async (saved) => {
             setConnection(saved);
             setConnectionAdded(true);

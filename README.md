@@ -43,19 +43,24 @@ The providers page groups cards as **OAuth Providers**, **API Key Providers**,
 ## Cline Sign-In
 
 Cline is reached through an OAuth authorization-code flow instead of a pasted API
-key. On its provider page, **Add connection** opens a two-step dialog: open the
-sign-in URL, then paste what the browser ends up with.
+key. On its provider page, **Add connection** opens the sign-in in your browser
+and waits there — there is normally nothing to paste.
 
-Cline redirects to a loopback address, so the gateway serves the callback page at
-`GET /v1/oauth/cline/callback`. That page only shows the code — it creates no
-token and stores nothing. Paste the callback URL, a `code#state` pair, or a bare
-code back into the dialog, and the gateway exchanges it, proves the token against
-Cline with a real request, imports the model catalog, and only then saves the
-connection encrypted in the local vault.
+The gateway starts the sign-in and hands back a session and a single-use `state`.
+Cline redirects the browser to `GET /v1/oauth/cline/callback` on the gateway's own
+loopback address, where the gateway exchanges the code, proves the token against
+Cline with a real request, imports the model catalog, and saves the connection
+encrypted in the local vault. The dashboard learns the outcome by polling
+`GET /v1/oauth/cline/session/:id`, so the flow finishes on its own.
 
 An expired access token is renewed automatically before use, and the renewed
 token is written back to the vault. If a sign-in cannot be renewed, the provider
 tells you to sign in again instead of failing quietly.
+
+A paste field is still available in the same dialog for the case where the
+provider does not hand the code to a browser redirect. It accepts a callback URL,
+a `code#state` pair, or a bare code, and takes the same route to a saved
+connection.
 
 ## Releases
 

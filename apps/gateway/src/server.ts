@@ -199,18 +199,45 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/cline/start') {
+      // The 415 guard above already required a JSON content type.
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['redirectUri']);
+      const redirectUri = typeof body.redirectUri === 'string' ? body.redirectUri : defaultClineRedirect(options.publicBaseUrl);
+      sendJson(response, 201, service.startClineSignIn(redirectUri), origin);
+      return;
+    }
+
     if (request.method === 'GET' && url.pathname === '/v1/oauth/cline/authorize') {
       const redirectUri = url.searchParams.get('redirect_uri') ?? defaultClineRedirect(options.publicBaseUrl);
       sendJson(response, 200, service.beginClineAuthorization(redirectUri), origin);
       return;
     }
 
-    // The provider sends the browser here after sign-in. It shows the code and
-    // nothing else: no token is created, exchanged, or stored from this page.
-    if (request.method === 'GET' && url.pathname === '/v1/oauth/cline/callback') {
+    // Where Cline sends the browser after the user approves. This is the only
+    // route exempt from the cross-site guard: a top-level navigation from the
+    // provider carries `sec-fetch-site: cross-site` and no Origin.
+    if (request.method === 'GET' && url.pathname === clineCallbackPath) {
       const code = url.searchParams.get('code') ?? '';
-      const problem = url.searchParams.get('error');
-      sendHtml(response, 200, clineCallbackPage(code, problem), origin);
+      const state = url.searchParams.get('state') ?? '';
+      const providerError = url.searchParams.get('error');
+      const outcome = code || providerError
+        ? await service.completeClineSignIn({ state, code, ...(providerError ? { providerError } : {}) }, controller.signal)
+        : { ok: false, message: 'This callback carried neither an authorization code nor an error. Start the sign-in again.' };
+      sendHtml(response, 200, clineCallbackPage(outcome.ok, outcome.message), origin);
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/cline/session/')) {
+      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/cline/session/'.length)).trim();
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
+      const status = service.clineSignInStatus(sessionId);
+      if (!status) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
+        return;
+      }
+      sendJson(response, 200, status, origin);
       return;
     }
 
@@ -891,47 +918,41 @@ function escapeHtml(value: string) {
 }
 
 /**
- * The page Cline lands on after sign-in. It shows the authorization code so the
- * user can paste it back into the dashboard, and does nothing else: no token
- * is exchanged and nothing is stored from here.
+ * The page Cline lands on after the user approves. The gateway has already
+ * exchanged the code and saved the connection by the time this renders, so the
+ * page only reports the outcome and never shows a credential.
  *
- * The code is only reflected when it matches the shape an authorization code
- * can have. That charset contains no markup characters, so the page cannot be
- * used to inject content into an origin that holds the local API keys.
+ * It lives on the origin that also holds the local API keys, so it gets no
+ * script, no framing, and nothing that could be reflected into the page.
  */
-function clineCallbackPage(code: string, providerError: string | null) {
-  const reflectable = /^[A-Za-z0-9._~+/=%-]{1,4096}$/;
-  const showCode = code.length > 0 && reflectable.test(code);
-  const body = providerError
-    ? `<p class="bad">Cline reported <code>${escapeHtml(providerError.slice(0, 120))}</code>. Close this tab and start again.</p>`
-    : showCode
-      ? `<p class="lead">Copy this code and paste it into the OmniHilbras Cline dialog.</p>
-         <input class="box" type="text" value="${escapeHtml(code)}" readonly spellcheck="false" aria-label="Authorization code" />
-         <p class="note">Click the field, press <kbd>Ctrl</kbd>+<kbd>A</kbd> (or <kbd>Cmd</kbd>+<kbd>A</kbd>), then copy. Nothing has been saved yet — the code is exchanged only when you paste it.</p>`
-      : `<p class="bad">This callback has no authorization code. Close this tab and start the sign-in again.</p>`;
-
+function clineCallbackPage(ok: boolean, message: string) {
+  // The message is plain text and is escaped below. This charset is a second
+  // line of defence: it admits the punctuation a real outcome message needs and
+  // nothing that could become markup.
+  const safeMessage = /^[A-Za-z0-9 _.,:;'()@/+-]{1,200}$/.test(message) ? message : 'The sign-in could not be completed.';
   return `<!doctype html>
 <html lang="en">
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex, nofollow" />
-<title>Cline sign-in complete</title>
+<title>${ok ? 'Cline connected' : 'Cline sign-in failed'}</title>
 <style>
   body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0b0d10; color: #e6e8eb;
          font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { width: min(560px, calc(100% - 2rem)); }
-  h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
-  .lead { margin: 0 0 1rem; color: #aeb4bb; }
-  .box { width: 100%; padding: .7rem .8rem; border-radius: 8px; border: 1px solid #2a2f36; background: #14181d;
-         color: #e6e8eb; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .note { margin: 1rem 0 0; color: #8b9299; font-size: 12px; }
-  .bad { color: #f08a8a; }
-  kbd { border: 1px solid #2a2f36; border-radius: 4px; padding: 0 .25rem; font: inherit; font-size: 11px; }
-  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  main { width: min(520px, calc(100% - 2rem)); text-align: center; }
+  .mark { width: 44px; height: 44px; margin: 0 auto 1rem; border-radius: 50%; display: grid; place-items: center;
+          font-size: 22px; border: 1px solid #2a2f36; }
+  .ok .mark { background: #10261b; border-color: #1f4d33; color: #7cc7a1; }
+  .bad .mark { background: #2a1416; border-color: #4d2024; color: #f08a8a; }
+  h1 { font-size: 1.2rem; margin: 0 0 .5rem; }
+  p { margin: 0; color: #aeb4bb; }
+  .note { margin-top: 1.5rem; color: #8b9299; font-size: 12px; }
 </style>
-<main>
-  <h1>Cline sign-in complete</h1>
-  ${body}
+<main class="${ok ? 'ok' : 'bad'}">
+  <div class="mark" aria-hidden="true">${ok ? '&#10003;' : '!'}</div>
+  <h1>${ok ? 'Cline connected' : 'Cline sign-in failed'}</h1>
+  <p>${escapeHtml(safeMessage)}</p>
+  <p class="note">${ok ? 'You can close this tab and go back to OmniHilbras.' : 'Go back to OmniHilbras and start the sign-in again.'}</p>
 </main>
 </html>`;
 }

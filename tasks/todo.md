@@ -140,11 +140,18 @@
   - Scope: Small/medium.
 
 - [x] Task 9l: Implement the Cline OAuth sign-in flow.
-  - Acceptance: the Cline card's Add connection opens a two-step sign-in dialog backed by a real gateway flow — `GET /v1/oauth/cline/authorize` returns a sign-in URL with a loopback callback, `GET /v1/oauth/cline/callback` serves a page that displays the code and stores nothing, and `POST /v1/oauth/cline/exchange` accepts a callback URL, `code#state` pair, or bare code, proves the token with a real account request, imports the model catalog, and only then saves an encrypted `oauth` credential. An expired token is renewed before use and the renewed token is written back to the vault.
-  - Verify: 27 new tests cover loopback enforcement, the three pasted shapes, embedded-token decoding, one-shot refresh with persistence, `workos:` prefixing that leaves non-JWT keys verbatim, the callback page refusing to reflect markup, cross-site requests still blocked on every other route, a rejected code storing nothing, and an unreachable token endpoint not being misreported as a bad sign-in. Browser smoke test covers the dialog, the enabled/disabled Connect control, and the real error from Cline's token endpoint.
-  - Files: `packages/omnihilbras-sdk/src/adapters/cline.ts`, `src/types.ts`, `src/index.ts`, `test/cline.test.js`, `apps/gateway/src/oauth.ts`, `src/service.ts`, `src/server.ts`, `src/connections.ts`, `test/oauth.test.js`, `test/oauth-routes.test.js`, `src/components/OauthConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, `src/data/providers.ts`, docs.
+  - Acceptance: the Cline card's Add connection opens the sign-in in the browser and finishes on its own — `POST /v1/oauth/cline/start` mints a single-use `state` and a session, Cline redirects the browser to `GET /v1/oauth/cline/callback`, the gateway claims the state, proves the token with a real account request, imports the model catalog, and saves an encrypted `oauth` credential. The dashboard learns the outcome by polling `GET /v1/oauth/cline/session/:id`. `POST /v1/oauth/cline/exchange` stays as the fallback for a provider that does not hand the code to a browser redirect. An expired token is renewed before use and written back to the vault.
+  - Verify: 38 gateway tests cover the session lifecycle, single-use state, replay and forged-state refusal, the full browser round trip, a provider error with markup, a rejected code reaching the dashboard instead of a timeout, and the cross-site exemption staying narrow. 6 SDK tests cover `workos:` prefixing that leaves non-JWT keys verbatim, one-shot refresh with persistence, and missing-token handling. Browser check confirms the tab opens on Cline's real sign-in page, the dialog centres, and a real rejected code reports `Cline did not accept that sign-in. Try again.` with no connection stored.
+  - Files: `packages/omnihilbras-sdk/src/adapters/cline.ts`, `src/types.ts`, `src/index.ts`, `test/cline.test.js`, `apps/gateway/src/oauth.ts`, `src/service.ts`, `src/server.ts`, `src/connections.ts`, `test/oauth.test.js`, `test/oauth-routes.test.js`, `test/cline-sessions.test.js`, `src/components/OauthConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, `src/data/providers.ts`, docs.
   - Depends on: Task 9g.
   - Scope: Medium.
+
+- [x] Task 9m: Centre the OAuth dialog and open the browser from the click.
+  - Acceptance: the dialog renders through `createPortal` into `document.body` so it centres like the API-key dialog, and the sign-in tab is opened inside the click handler that starts the flow, because a browser only permits `window.open` during a user gesture.
+  - Verify: the dialog's DOM depth drops from inside the transformed page container to a direct child of `body`; the browser opens a tab on `authkit.cline.bot` from a single click on Add connection.
+  - Files: `src/components/OauthConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, `docs/SPEC-SDK.md`.
+  - Depends on: Task 9l.
+  - Scope: Small.
 
 - [ ] Task 10: Define cloud integration boundaries.
   - Acceptance: auth context, tenant context, remote `SecretStore`, and deployment configuration are represented by interfaces without implementing cloud infrastructure.

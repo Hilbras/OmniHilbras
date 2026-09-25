@@ -118,8 +118,10 @@ The first local gateway exposes:
 - `DELETE /v1/keys/:id` — revoke a key.
 - `PUT /v1/connections/:id/resilience` — update one connection's retry, timeout, and rate-limit budget.
 - `GET /v1/routing` — live routing state: budgets, recent failures and successes, ejection, last latency, last error.
+- `POST /v1/oauth/cline/start` — begin a sign-in; returns the sign-in URL, a session id, and a single-use `state`.
 - `GET /v1/oauth/cline/authorize` — build the Cline sign-in URL for a loopback callback.
-- `GET /v1/oauth/cline/callback` — the page Cline redirects the browser to; it displays the authorization code and stores nothing.
+- `GET /v1/oauth/cline/callback` — where the provider redirects the browser; completes the exchange and reports the outcome.
+- `GET /v1/oauth/cline/session/:id` — whether a started sign-in is pending, connected, failed, or expired.
 - `POST /v1/oauth/cline/exchange` — exchange a pasted callback URL or code, prove the token against Cline, then save the connection.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
@@ -209,27 +211,43 @@ encrypted exactly like an API key. `value` is the access token as issued; the
 `workos:` prefix Cline requires is a wire detail the adapter adds per request and
 never persists.
 
-**The flow.** Cline has no callback the gateway can own, so the user signs in and
-pastes the result back:
+**The flow.** Cline redirects the browser to a loopback address the gateway
+owns, so the sign-in completes on its own and there is normally nothing to paste:
 
-1. `GET /v1/oauth/cline/authorize` returns a sign-in URL whose `redirect_uri`
-   and `callback_url` are a loopback URL. A non-loopback redirect is refused, so
-   a pasted callback can never point somewhere else.
-2. Cline redirects the browser to `GET /v1/oauth/cline/callback`, a page the
-   gateway serves. It only displays the code. This is the one route exempt from
-   the cross-site guard, because a top-level navigation from the provider sends
-   `sec-fetch-site: cross-site` and no `Origin`; the page carries `no-store`, a
-   `default-src 'none'` policy, and reflects the code only when it matches the
-   charset an authorization code can have.
-3. The dashboard pastes the callback URL, a `code#state` pair, or a bare code to
-   `POST /v1/oauth/cline/exchange`. Cline sometimes encodes the tokens inside the
-   code as base64 JSON, so that is read directly; otherwise the code is exchanged
-   at the token endpoint.
+1. `POST /v1/oauth/cline/start` records a session, mints a 256-bit `state`, and
+   returns a sign-in URL whose `redirect_uri` and `callback_url` are a loopback
+   URL and whose `state` the provider echoes back. A non-loopback redirect is
+   refused, so a callback can never be pointed somewhere else.
+2. The dashboard opens that URL in a tab. The tab is opened blank inside the
+   click that started the flow, because a browser only allows `window.open`
+   during a user gesture, and the dialog navigates it once the URL exists.
+3. The user approves in the browser. Cline redirects to
+   `GET /v1/oauth/cline/callback`, which is the one route exempt from the
+   cross-site guard, because a top-level navigation from the provider sends
+   `sec-fetch-site: cross-site` and no `Origin`. The route claims the `state`,
+   which is single-use, so a replayed or forged callback is refused instead of
+   exchanging an attacker's code into the user's vault.
 4. The exchange proves the token with a real `GET /v1/users/me` before anything
    is written, then discovers the model catalog and saves the connection. A
    rejected code is reported as an authentication failure; an unreachable token
    endpoint stays an upstream failure, so an outage is never misreported as a
    bad sign-in.
+5. The outcome is recorded on the session, and the dashboard learns it by
+   polling `GET /v1/oauth/cline/session/:id`. A session lives five minutes, so a
+   sign-in cannot be resumed after the user has walked away, and a finished
+   session is dropped a minute later. The status carries the connection and an
+   error message, never a credential.
+
+The callback page reports the outcome and shows no code, because by the time it
+renders the exchange has already happened. It lives on the origin that also holds
+the local API keys, so it carries `no-store`, `Referrer-Policy: no-referrer`, a
+`default-src 'none'` policy with no script, and a message that is both
+HTML-escaped and restricted to a plain-text charset.
+
+`POST /v1/oauth/cline/exchange` remains as the fallback for a provider that does
+not hand the code to a browser redirect. It accepts a callback URL, a
+`code#state` pair, or a bare code, and Cline sometimes encodes the tokens inside
+the code as base64 JSON, which is read directly instead of exchanged.
 
 **Refresh.** The adapter renews an expired access token before use, within a
 60-second skew, one refresh at a time so concurrent requests share it. The
@@ -391,7 +409,10 @@ The existing Vite commands must continue to build the frontend successfully.
 - Validate all external input and provider responses.
 - Keep credentials behind `SecretStore`.
 - Add tests before expanding provider behavior.
-- Preserve the existing frontend build and hash-based navigation.
+- Render every dialog through `createPortal` into `document.body`. The page
+  container animates with `transform`, and a `transform` on an ancestor makes
+  `position: fixed` resolve against that ancestor instead of the viewport, so an
+  in-tree dialog lands at the bottom of the page rather than centred.
 
 ### Ask first
 

@@ -1,7 +1,7 @@
 import { CLINE_OAUTH, FetchHttpTransport, OpenAICompatibleAdapter, ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
-import { beginClineAuthorization, createClineAdapter, exchangeClineCode, toClineCredential } from './oauth.js';
+import { ClineSessionStore, beginClineAuthorization, createClineAdapter, exchangeClineCode, toClineCredential } from './oauth.js';
 import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -102,6 +102,7 @@ export class GatewayService {
   private readonly dynamicAdapters = new Map<string, { endpoint: string; adapter: ProviderAdapter }>();
   private readonly transport: HttpTransport;
   private cline?: ProviderAdapter;
+  private readonly clineSessions = new ClineSessionStore();
   private readonly providerHealth: HealthRegistry;
   private readonly rateLimiter: SlidingWindowRateLimiter;
   private readonly rateLimitWaitMs = new Map<string, number>();
@@ -317,8 +318,55 @@ export class GatewayService {
     }, credential, signal);
   }
 
-  beginClineAuthorization(redirectUri: string) {
-    return beginClineAuthorization(redirectUri);
+  /**
+   * Starts a Cline sign-in and returns the URL to send the browser to. The
+   * session id is how the dashboard learns the outcome; the `state` is what the
+   * callback must echo back.
+   */
+  startClineSignIn(redirectUri: string) {
+    const { sessionId, state } = this.clineSessions.start(redirectUri);
+    return { ...this.beginClineAuthorization(redirectUri, state), sessionId, state };
+  }
+
+  /**
+   * Finishes a sign-in the browser delivered: exchanges the code, proves the
+   * token against Cline, imports the catalog, then records the result on the
+   * session so the dashboard can pick it up. The session is resolved either way,
+   * so a failure is reported instead of leaving the dashboard waiting.
+   */
+  async completeClineSignIn(input: { state: string; code: string; providerError?: string }, signal?: AbortSignal): Promise<{ ok: boolean; message: string; connection?: ConnectionRecord }> {
+    const session = this.clineSessions.claim(input.state);
+    if (!session) {
+      return { ok: false, message: 'This sign-in link is unknown, already used, or expired. Start again from OmniHilbras.' };
+    }
+    if (input.providerError) {
+      // The provider's error code comes back through the query string, so it is
+      // reduced to a short token before it reaches a message.
+      const code = input.providerError.replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 60);
+      const message = `Cline reported ${code || 'an error'}.`;
+      this.clineSessions.resolve(session.id, { status: 'failed', error: message });
+      return { ok: false, message };
+    }
+    try {
+      const connection = await this.connectCline({ code: input.code, redirectUri: session.redirectUri }, signal);
+      this.clineSessions.resolve(session.id, {
+        status: 'connected',
+        connection: { id: connection.id, providerId: connection.providerId, name: connection.name, modelIds: connection.modelIds },
+      });
+      return { ok: true, message: `Connected to ${connection.name} with ${connection.modelIds.length} models.`, connection };
+    } catch (error) {
+      const message = error instanceof ProviderError ? (error.publicMessage ?? error.message) : 'The sign-in could not be completed.';
+      this.clineSessions.resolve(session.id, { status: 'failed', error: message });
+      return { ok: false, message };
+    }
+  }
+
+  clineSignInStatus(sessionId: string) {
+    return this.clineSessions.get(sessionId);
+  }
+
+  beginClineAuthorization(redirectUri: string, state?: string) {
+    return beginClineAuthorization(redirectUri, state);
   }
 
   /** The Cline adapter, wired so a refreshed token is written back to the vault. */

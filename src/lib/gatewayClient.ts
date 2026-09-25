@@ -211,6 +211,33 @@ export type GatewayOauthAuthorization = {
   redirectUri: string;
 };
 
+export type GatewayOauthSignIn = GatewayOauthAuthorization & {
+  sessionId: string;
+  /** Echoed back on the callback so the gateway can recognise its own sign-in. */
+  state: string;
+};
+
+export type GatewayOauthSignInStatus = {
+  status: 'pending' | 'connected' | 'failed' | 'expired';
+  connection?: GatewayConnection;
+  error?: string;
+};
+
+/** Starts a sign-in and returns the URL to send the browser to. */
+export function startGatewayOauthSignIn(providerId: string, signal?: AbortSignal) {
+  return requestJson<GatewayOauthSignIn>(`/v1/oauth/${encodeURIComponent(providerId)}/start`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+    ...(signal ? { signal } : {}),
+  });
+}
+
+/** Whether a sign-in started earlier has finished, and how it went. */
+export function getClineSignInStatus(sessionId: string, signal?: AbortSignal) {
+  return requestJson<GatewayOauthSignInStatus>(`/v1/oauth/cline/session/${encodeURIComponent(sessionId)}`, { signal });
+}
+
 export function getGatewayOauthAuthorization(providerId: string, signal?: AbortSignal) {
   return requestJson<GatewayOauthAuthorization>(`/v1/oauth/${encodeURIComponent(providerId)}/authorize`, { signal });
 }
