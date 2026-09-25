@@ -95,14 +95,14 @@ function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest,
   );
 }
 
-function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testState, testDetail, testLatencyMs }: { model: string; providerId: string; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testDetail?: string; testLatencyMs?: number }) {
+function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testState, testError, testLatencyMs }: { model: string; providerId: string; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testError?: string; testLatencyMs?: number }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-line bg-bg-soft/45 p-3.5 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-3">
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? 'border-danger/25 bg-danger/10 text-danger' : 'border-line bg-surface text-muted'}`}>
           {testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
         </span>
-        <div className="min-w-0"><p className="truncate text-xs font-semibold">{model}</p><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code>{testLatencyMs !== undefined && testState === 'ok' && <span className="mt-1 inline-flex items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms</span>}{testDetail && <p title={testDetail} className={`mt-1 truncate text-[10px] ${testState === 'error' ? 'text-danger' : 'text-success'}`}>{testDetail}</p>}</div>
+        <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><p className="truncate text-xs font-semibold">{model}</p>{testLatencyMs !== undefined && testState === 'ok' && <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms</span>}{testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}</div><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code></div>
       </div>
       <div className="flex items-center gap-1.5">
         <button type="button" onClick={onCopy} aria-label={`Copy ${model} model ID`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-gold-text"><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>
@@ -148,7 +148,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const [connectionAdded, setConnectionAdded] = useState(provider.status !== 'available');
   const [testingModel, setTestingModel] = useState<string | null>(null);
   const [modelTests, setModelTests] = useState<Record<string, ModelTestState>>({});
-  const [modelTestDetails, setModelTestDetails] = useState<Record<string, string>>({});
+  const [modelTestErrors, setModelTestErrors] = useState<Record<string, string>>({});
   const [modelTestLatencies, setModelTestLatencies] = useState<Record<string, number>>({});
   const modelTestAbortRef = useRef<AbortController | null>(null);
   const scrollAnchorRef = useRef<number | null>(null);
@@ -175,7 +175,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   useEffect(() => () => modelTestAbortRef.current?.abort(), []);
   useLayoutEffect(() => {
     if (scrollAnchorRef.current !== null) window.scrollTo(0, scrollAnchorRef.current);
-  }, [connectionPingMs, modelTestDetails, modelTestLatencies, modelTests, notice, testingModel]);
+  }, [connectionPingMs, modelTestErrors, modelTestLatencies, modelTests, notice, testingModel]);
 
   const importedModels = connection?.modelIds ?? provider.modelList;
   const allModels = useMemo(() => [...new Set([...importedModels, ...customModels])], [customModels, importedModels]);
@@ -269,7 +269,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     const timeout = window.setTimeout(() => controller.abort(), 30_000);
     setTestingModel(model);
     setModelTests((current) => ({ ...current, [model]: 'testing' }));
-    setModelTestDetails((current) => {
+    setModelTestErrors((current) => {
       const next = { ...current };
       delete next[model];
       return next;
@@ -281,19 +281,15 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     });
     try {
       const result = await testGatewayModel(provider.id, model, controller.signal);
-      const preview = result.content.trim().replace(/\s+/g, ' ').slice(0, 80);
-      const detail = `Responded in ${result.latencyMs} ms${preview ? `: ${preview}` : ''}`;
       setModelTests((current) => ({ ...current, [model]: 'ok' }));
-      setModelTestDetails((current) => ({ ...current, [model]: detail }));
       setModelTestLatencies((current) => ({ ...current, [model]: result.latencyMs }));
       setConnectionHealthy(true);
       setConnectionPingMs(result.latencyMs);
-      flash(`${model} responded successfully in ${result.latencyMs} ms.`);
     } catch (error) {
-      const detail = controller.signal.aborted ? 'Model test timed out or was cancelled.' : error instanceof Error ? error.message : 'The model test failed.';
+      const message = controller.signal.aborted ? 'Model test timed out or was cancelled.' : error instanceof Error ? error.message : 'The model test failed.';
       setModelTests((current) => ({ ...current, [model]: 'error' }));
-      setModelTestDetails((current) => ({ ...current, [model]: detail }));
-      flash(detail, 'error');
+      setModelTestErrors((current) => ({ ...current, [model]: message }));
+      flash(message, 'error');
     } finally {
       window.clearTimeout(timeout);
       if (modelTestAbortRef.current === controller) modelTestAbortRef.current = null;
@@ -344,7 +340,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
         <section className="card min-w-0 p-4 sm:p-5" aria-labelledby="models-title">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div><h2 id="models-title" className="text-sm font-semibold">Available models</h2><p className="muted mt-1 text-xs">Models currently exposed by this provider route. Test sends one real minimal request.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{allModels.length} models</span></div>
-          <div className="mt-5 space-y-2">{allModels.length > 0 ? allModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingModel === model} disabled={testingModel !== null || testingConnection} testState={modelTests[model] ?? 'idle'} testDetail={modelTestDetails[model]} testLatencyMs={modelTestLatencies[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No models discovered</p><p className="muted mt-1 text-xs">Connect the provider or add a custom model ID below.</p></div>}</div>
+          <div className="mt-5 space-y-2">{allModels.length > 0 ? allModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingModel === model} disabled={testingModel !== null || testingConnection} testState={modelTests[model] ?? 'idle'} testError={modelTestErrors[model]} testLatencyMs={modelTestLatencies[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No models discovered</p><p className="muted mt-1 text-xs">Connect the provider or add a custom model ID below.</p></div>}</div>
           <div className="mt-5 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>
           {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {modelReference(provider.id, copiedModel)}</p>}
         </section>
