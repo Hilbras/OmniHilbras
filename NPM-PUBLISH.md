@@ -1,45 +1,42 @@
-# Publish @omnihilbras/hilbras to npm
+# Publishing @hilbras/omnihilbras
 
-Run these yourself in a terminal. I cannot: npm is not authenticated here
-(401), and I will not handle your npm credentials or OTP.
+The SDK is published to npm as **`@hilbras/omnihilbras`**. Do not confuse it
+with `@hilbras/sdk`, which is a separate, unrelated project.
 
-## 1. Log in (interactive, opens a browser)
+## Status
 
-    npm login
+`@hilbras/omnihilbras@0.1.0` is published (GitHub tag `v0.1.0`).
 
-Use the account that should own the package. If the `@omnihilbras` scope does
-not exist on npm yet, npm will ask you to create that org, or you can publish as
-its first member. A free account can publish public scoped packages, but the
-scope has to exist first: https://www.npmjs.com/org/create
+## Publish a new version
 
-## 2. Confirm who you are
+1. Bump the version in `packages/omnihilbras-sdk/package.json`.
+2. Build and verify:
 
-    npm whoami
+   ```bash
+   pnpm install
+   pnpm typecheck
+   pnpm test
+   pnpm build
+   ```
 
-## 3. Publish from the SDK directory
+3. Commit, tag, and push.
+4. Publish:
 
-    cd packages/omnihilbras-sdk
-    npm publish --access public
+   ```bash
+   cd packages/omnihilbras-sdk
+   npm publish --access public
+   ```
 
-`prepublishOnly` rebuilds the SDK first, so the tarball always matches source.
-If your account has 2FA enabled, npm asks for a one-time password
-(`npm token create` also works with a token + `npm otp`).
+`prepublishOnly` rebuilds the SDK, so the tarball always matches source.
 
-## 4. Verify
+## Verify
 
-    npm view @omnihilbras/hilbras version
-    npm view @omnihilbras/hilbras dist-tags
+```bash
+npm view @hilbras/omnihilbras version
+npm i @hilbras/omnihilbras
+node -e "import('@hilbras/omnihilbras').then(m => console.log(Object.keys(m).length, 'exports'))"
+```
 
-    # in a scratch project
-    npm i @omnihilbras/hilbras
-    node -e "import('@omnihilbras/hilbras').then(m => console.log(Object.keys(m).length, 'exports'))"
-
-## If a name problem comes up
-
-`@omnihilbras/hilbras` and the unscoped `omnihilbras-sdk` were both confirmed
-free at the time of release. npm names cannot be reused once published, so if
-`npm publish` complains about the scope, stop and pick one before retrying:
-
-- keep `@omnihilbras/hilbras` and create the npm org, or
-- switch the name in `packages/omnihilbras-sdk/package.json` (and the
-  `workspace:*` dependency in `apps/gateway/package.json`) to `omnihilbras-sdk`.
+A newly published version can take a few minutes to appear on the read path
+even though `npm publish` already reported success; the registry search index
+updates first.

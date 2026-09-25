@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@omnihilbras/hilbras';
+import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@hilbras/omnihilbras';
 import { createGatewayService, createProviderRegistry, EnvironmentSecretStore, GatewayService, InMemoryConnectionStore, loadGatewayConfig, startGatewayServer } from '../dist/index.js';
 
 test('gateway config loads local defaults and environment credentials', async () => {

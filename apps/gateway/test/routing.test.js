@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@omnihilbras/hilbras';
+import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@hilbras/omnihilbras';
 import { GatewayService, InMemoryConnectionStore, InMemoryApiKeyStore, createGatewayServer, HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, resolveRoute } from '../dist/index.js';
 
 function chattyAdapter(id, behavior = {}) {

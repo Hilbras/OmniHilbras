@@ -1,4 +1,4 @@
-# @omnihilbras/hilbras
+# @hilbras/omnihilbras
 
 Typed provider SDK for the [OmniHilbras](https://github.com/Hilbras/OmniHilbras)
 gateway. One normalized contract for chat, streaming, model listing, and
@@ -6,7 +6,7 @@ capabilities across OpenAI, Anthropic, Gemini, OpenRouter, and any
 OpenAI-compatible endpoint.
 
 ```bash
-npm i @omnihilbras/hilbras
+npm i @hilbras/omnihilbras
 ```
 
 Requires Node.js 20 or newer. Ships ESM only.
@@ -14,7 +14,7 @@ Requires Node.js 20 or newer. Ships ESM only.
 ## Quick start
 
 ```ts
-import { AnthropicAdapter, FetchHttpTransport, GeminiAdapter, OpenAIAdapter, ProviderRegistry } from '@omnihilbras/hilbras';
+import { AnthropicAdapter, FetchHttpTransport, GeminiAdapter, OpenAIAdapter, ProviderRegistry } from '@hilbras/omnihilbras';
 
 const registry = new ProviderRegistry();
 registry.register(new OpenAIAdapter({ baseUrl: 'https://api.openai.com/v1' }));

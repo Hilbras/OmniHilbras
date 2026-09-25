@@ -1,4 +1,4 @@
-import { ProviderError } from '@omnihilbras/hilbras';
+import { ProviderError } from '@hilbras/omnihilbras';
 import type { ConnectionRecord, ResilienceSettings } from './connections.js';
 
 /** Why a candidate was skipped, so the gateway can explain the decision. */

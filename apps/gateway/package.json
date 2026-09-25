@@ -4,14 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter @omnihilbras/hilbras build && tsc -p tsconfig.json",
+    "build": "pnpm --filter @hilbras/omnihilbras build && tsc -p tsconfig.json",
     "dev": "pnpm build && node dist/main.js",
     "start": "node dist/main.js",
-    "typecheck": "pnpm --filter @omnihilbras/hilbras build && tsc -p tsconfig.json --noEmit",
-    "test": "pnpm --filter @omnihilbras/hilbras build && pnpm build && node --test test/*.test.js"
+    "typecheck": "pnpm --filter @hilbras/omnihilbras build && tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @hilbras/omnihilbras build && pnpm build && node --test test/*.test.js"
   },
   "dependencies": {
-    "@omnihilbras/hilbras": "workspace:*"
+    "@hilbras/omnihilbras": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
