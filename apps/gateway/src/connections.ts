@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
-import { chmod, lstat, mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { assertSafeProviderRequestUrl, type ModelImportPolicy, type ProviderCredential, type ProviderId, type SecretStore } from '@omnihilbras/sdk';
+import { atomicWrite, defaultStateDirectory, ensureSecureDirectory, isNodeError, readOptionalFile, readOptionalText } from './secure-store.js';
 
 export type ConnectionRecord = {
   id: string;
@@ -89,8 +89,7 @@ type MetadataEnvelope = {
 };
 
 export function defaultConnectionDirectory(env: Readonly<Record<string, string | undefined>> = process.env) {
-  const configHome = env.XDG_CONFIG_HOME?.trim();
-  return join(configHome || join(homedir(), '.config'), 'omnihilbras');
+  return defaultStateDirectory(env);
 }
 
 export function parseMasterKey(value: string | undefined) {
@@ -422,7 +421,7 @@ export class LocalConnectionStore implements ConnectionStore {
     const configured = parseMasterKey(process.env.OMNIHILBRAS_MASTER_KEY);
     if (configured) return configured;
     await ensureSecureDirectory(this.directory);
-    const existing = await readOptionalBuffer(this.keyPath, 128);
+    const existing = await readOptionalFile(this.keyPath, 128);
     if (existing) {
       const text = existing.toString('utf8').trim();
       if (!text) throw new Error('Local credential key file is empty.');
@@ -555,54 +554,6 @@ function parseEncryptedSecretEnvelope(value: string): EncryptedSecretEnvelope {
   return parsed as EncryptedSecretEnvelope;
 }
 
-async function ensureSecureDirectory(directory: string) {
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const info = await lstat(directory);
-  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Local credential directory is not a regular directory.');
-  await chmod(directory, 0o700);
-}
-
-async function atomicWrite(filePath: string, value: string) {
-  await ensureSecureDirectory(dirname(filePath));
-  const existing = await lstat(filePath).catch((error: unknown) => {
-    if (isNodeError(error) && error.code === 'ENOENT') return undefined;
-    throw error;
-  });
-  if (existing?.isSymbolicLink()) throw new Error('Refusing to write through a symbolic link.');
-  const temporaryPath = `${filePath}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
-  let handle;
-  try {
-    handle = await open(temporaryPath, 'wx', 0o600);
-    await handle.writeFile(value, 'utf8');
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    await rename(temporaryPath, filePath);
-    await chmod(filePath, 0o600);
-  } finally {
-    await handle?.close().catch(() => undefined);
-    await unlink(temporaryPath).catch(() => undefined);
-  }
-}
-
-async function readOptionalText(filePath: string, maxBytes: number) {
-  const value = await readOptionalBuffer(filePath, maxBytes);
-  return value?.toString('utf8');
-}
-
-async function readOptionalBuffer(filePath: string, maxBytes: number) {
-  let info;
-  try {
-    info = await lstat(filePath);
-  } catch (error) {
-    if (isNodeError(error) && error.code === 'ENOENT') return undefined;
-    throw error;
-  }
-  if (info.isSymbolicLink() || !info.isFile()) throw new Error('Local credential file is not a regular file.');
-  if (info.size > maxBytes) throw new Error('Local credential file is too large.');
-  return readFile(filePath);
-}
-
 function decodeConfiguredMasterKey(value: string) {
   if (/^[0-9a-f]{64}$/i.test(value)) return Buffer.from(value, 'hex');
   return Buffer.from(value, 'base64');
@@ -631,8 +582,4 @@ function cloneRecord(record: ConnectionRecord): ConnectionRecord {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && 'code' in error;
 }

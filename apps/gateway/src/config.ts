@@ -11,6 +11,7 @@ import {
   type ProviderCredential,
   type SecretStore,
 } from '@omnihilbras/sdk';
+import { LocalApiKeyStore, type ApiKeyStore } from './api-keys.js';
 import { defaultConnectionDirectory, LocalConnectionStore, parseMasterKey, type ConnectionStore } from './connections.js';
 import { GatewayService } from './service.js';
 
@@ -132,10 +133,11 @@ export function createProviderRegistry(config: GatewayConfig, transport = new Fe
   return registry;
 }
 
-export function createGatewayService(config: GatewayConfig = loadGatewayConfig(), env: Readonly<Record<string, string | undefined>> = process.env, connectionStore?: ConnectionStore) {
+export function createGatewayService(config: GatewayConfig = loadGatewayConfig(), env: Readonly<Record<string, string | undefined>> = process.env, connectionStore?: ConnectionStore, apiKeyStore?: ApiKeyStore) {
   const environmentSecretStore = new EnvironmentSecretStore(env, config.compatible.id);
   const store = connectionStore ?? new LocalConnectionStore({ directory: config.dataDir, fallback: environmentSecretStore, masterKey: parseMasterKey(env.OMNIHILBRAS_MASTER_KEY) });
-  return new GatewayService(createProviderRegistry(config), store, store);
+  const keys = apiKeyStore ?? new LocalApiKeyStore({ directory: config.dataDir });
+  return new GatewayService(createProviderRegistry(config), store, store, keys);
 }
 
 function providerEnvKey(providerId: string) {

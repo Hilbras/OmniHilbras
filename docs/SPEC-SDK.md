@@ -112,6 +112,11 @@ The first local gateway exposes:
 - `PUT /v1/connections/openrouter` — validate again, discover the selected model policy, then upsert the single local OpenRouter connection.
 - `POST /v1/connections/:id/models` — add validated model IDs to a saved connection.
 - `DELETE /v1/connections/:id` — remove a local connection.
+- `GET /v1/keys` — gateway key metadata plus the enforcement flag; never returns a secret.
+- `POST /v1/keys` — mint a key; the response is the only time the secret is returned.
+- `PATCH /v1/keys/:id` — pause or resume a key.
+- `DELETE /v1/keys/:id` — revoke a key.
+- `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
 - `POST /v1/chat/completions` with `stream: true` — normalized SSE chunks.
 - The dashboard provider test uses live adapter health; each model test uses a bounded real chat completion through the same route.
@@ -146,6 +151,30 @@ should provide `OMNIHILBRAS_MASTER_KEY` or replace the store with an OS keychain
 Encryption at rest does not protect against a compromised same-user process. On startup, credentials without a matching credential-bearing metadata record are discarded before the gateway can use them, preventing an interrupted two-file write from activating an unlisted key.
 
 The gateway must validate request boundaries, apply request timeouts, never return raw secrets, and preserve provider error codes in structured metadata.
+
+## Gateway API Keys
+
+Keys authorize access to the LLM surface only; connection and key management stay
+reachable from the local dashboard. The contract:
+
+- A key is `ohk_` plus 32 random bytes in base64url. Only its SHA-256 hash is
+  persisted, so the secret is unrecoverable after creation and rotation means
+  creating a replacement.
+- Presented keys arrive in `Authorization: Bearer <key>`, `x-api-key`, or
+  `x-goog-api-key`. Query-string keys are rejected so secrets stay out of logs
+  and shell history.
+- Hashes are compared in constant time across every stored key, and paused or
+  deleted keys fail immediately.
+- Enforcement defaults to on and guards `GET /v1/models` and
+  `POST /v1/chat/completions`. Requests carrying an allowlisted dashboard
+  `Origin` are exempt: they are already protected by the origin allowlist and
+  the cross-site request check, and the dashboard must keep working without
+  holding a key. Anything else — CLI tools, IDE extensions, scripts — must
+  present a key while enforcement is on.
+- `AUTHENTICATION_FAILED` maps to `401` with a `WWW-Authenticate: Bearer`
+  challenge and an actionable message.
+- `lastUsedAt` is best effort: it is written at most once per 30 seconds so
+  request handling never blocks on disk.
 
 ## Project Structure
 

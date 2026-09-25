@@ -1,6 +1,7 @@
 import { HashRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { DashboardShell } from './components/DashboardShell';
 import { getProviderById } from './data/providers';
+import { ApiKeysContent } from './pages/ApiKeysPage';
 import { DashboardOverviewContent } from './pages/DashboardOverview';
 import { ProviderDetailContent, fallbackProvider } from './pages/ProviderDetailPage';
 import { ProvidersContent } from './pages/ProvidersPage';
@@ -29,13 +30,27 @@ function ProviderRoute() {
   return <ProviderDetailContent provider={provider} />;
 }
 
+const activePageTitles = {
+  overview: 'Overview',
+  providers: 'Providers',
+  routing: 'Routing',
+  keys: 'API keys',
+} as const;
+
+const pageDescriptions = {
+  overview: 'Your gateway at a glance',
+  providers: 'Connect and manage the routes behind your gateway',
+  routing: 'Policies, fallbacks, and request flow',
+  keys: 'Keys that authorize access to your local gateway',
+} as const;
+
 function DashboardRoutes() {
   const location = useLocation();
   const isProviderDetail = location.pathname.startsWith('/providers/');
-  const activePage = location.pathname.startsWith('/providers') ? 'providers' : location.pathname.startsWith('/routing') ? 'routing' : 'overview';
+  const activePage = location.pathname.startsWith('/providers') ? 'providers' : location.pathname.startsWith('/routing') ? 'routing' : location.pathname.startsWith('/keys') ? 'keys' : 'overview';
   const provider = isProviderDetail ? getProviderById(location.pathname.split('/').filter(Boolean).at(-1)) : undefined;
-  const pageTitle = provider?.name ?? (activePage === 'providers' ? 'Providers' : activePage === 'routing' ? 'Routing' : 'Overview');
-  const pageDescription = provider ? 'Provider connection details' : activePage === 'providers' ? 'Connect and manage the routes behind your gateway' : activePage === 'routing' ? 'Policies, fallbacks, and request flow' : 'Your gateway at a glance';
+  const pageTitle = provider?.name ?? activePageTitles[activePage];
+  const pageDescription = provider ? 'Provider connection details' : pageDescriptions[activePage];
 
   return (
     <DashboardShell activePage={activePage} pageTitle={pageTitle} pageDescription={pageDescription}>
@@ -46,6 +61,7 @@ function DashboardRoutes() {
           <Route path="/providers" element={<ProvidersContent />} />
           <Route path="/providers/:providerId" element={<ProviderRoute />} />
           <Route path="/routing" element={<RoutingContent />} />
+          <Route path="/keys" element={<ApiKeysContent />} />
           <Route path="*" element={<Navigate to="/overview" replace />} />
         </Routes>
       </div>

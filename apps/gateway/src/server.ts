@@ -14,6 +14,8 @@ export type GatewayServerOptions = {
 
 const defaultCorsOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
 const maxConnectionBodyBytes = 16 * 1024;
+const maxKeyBodyBytes = 4 * 1024;
+const maxPresentedKeyLength = 512;
 
 export function createGatewayServer(service: GatewayService, options: GatewayServerOptions = {}) {
   const corsOrigins = resolveCorsOrigins(options);
@@ -31,14 +33,15 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
       return;
     }
 
+    const trustedDashboardRequest = Boolean(requestOrigin) && corsOrigins.includes(requestOrigin as string);
     const responseOrigin = requestOrigin && corsOrigins.includes(requestOrigin) ? requestOrigin : undefined;
     setCors(response, responseOrigin);
-    if (request.url?.startsWith('/v1/connections')) response.setHeader('cache-control', 'no-store');
-    if ((request.method === 'POST' || request.method === 'PUT') && !isJsonRequest(request)) {
+    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings')) response.setHeader('cache-control', 'no-store');
+    if ((request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') && !isJsonRequest(request)) {
       sendJson(response, 415, { error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'JSON requests must use application/json.' } }, responseOrigin);
       return;
     }
-    void handleRequest(request, response, service, options, responseOrigin).catch((error) => {
+    void handleRequest(request, response, service, options, responseOrigin, trustedDashboardRequest).catch((error) => {
       sendError(response, error);
     });
   });
@@ -77,7 +80,7 @@ export async function startGatewayServer(options: {
   return { config, server, service };
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined) {
+async function handleRequest(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, trustedDashboardRequest: boolean) {
   const controller = new AbortController();
   const abort = () => controller.abort();
   const onResponseClose = () => {
@@ -140,6 +143,53 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       await service.removeConnection(connectionId);
       sendJson(response, 200, { deleted: true, id: connectionId }, origin);
       return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/v1/keys') {
+      sendJson(response, 200, { object: 'list', ...(await service.listApiKeys()) }, origin);
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/keys') {
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxKeyBodyBytes));
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['name']);
+      const created = await service.createApiKey(parseBoundedString(body.name, 'name', 80));
+      sendJson(response, 201, { apiKey: created.record, key: created.key }, origin);
+      return;
+    }
+
+    if (request.method === 'PUT' && url.pathname === '/v1/settings/require-api-key') {
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxKeyBodyBytes));
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['requireApiKey']);
+      if (typeof body.requireApiKey !== 'boolean') throw invalidRequest('requireApiKey must be a boolean.');
+      sendJson(response, 200, { requireApiKey: await service.setRequireApiKey(body.requireApiKey) }, origin);
+      return;
+    }
+
+    if (request.method === 'PATCH' && url.pathname.startsWith('/v1/keys/')) {
+      const apiKeyId = decodeApiKeyId(url.pathname.slice('/v1/keys/'.length));
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxKeyBodyBytes));
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['enabled']);
+      if (typeof body.enabled !== 'boolean') throw invalidRequest('enabled must be a boolean.');
+      sendJson(response, 200, { apiKey: await service.setApiKeyEnabled(apiKeyId, body.enabled) }, origin);
+      return;
+    }
+
+    if (request.method === 'DELETE' && url.pathname.startsWith('/v1/keys/')) {
+      const apiKeyId = decodeApiKeyId(url.pathname.slice('/v1/keys/'.length));
+      await service.removeApiKey(apiKeyId);
+      sendJson(response, 200, { deleted: true, id: apiKeyId }, origin);
+      return;
+    }
+
+    // The LLM surface is the only authenticated part of the gateway. Requests
+    // from the allowlisted dashboard origin are local administration traffic
+    // and stay reachable so the dashboard can keep testing models.
+    if (isPublicLlmRoute(request.method, url.pathname) && !trustedDashboardRequest) {
+      await service.authorizePublicRequest(extractApiKey(request));
     }
 
     if (request.method === 'GET' && url.pathname === '/v1/models') {
@@ -258,6 +308,36 @@ function decodeConnectionId(value: string) {
     throw invalidRequest('connection id is invalid.');
   }
   return parseIdentifier(decoded, 'connection id');
+}
+
+function decodeApiKeyId(value: string) {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    throw invalidRequest('API key id is invalid.');
+  }
+  if (!/^key_[A-Za-z0-9_-]{1,32}$/.test(decoded)) throw invalidRequest('API key id is invalid.');
+  return decoded;
+}
+
+function isPublicLlmRoute(method: string | undefined, pathname: string) {
+  return (method === 'GET' && pathname === '/v1/models') || (method === 'POST' && pathname === '/v1/chat/completions');
+}
+
+/** Accepts the same headers OpenAI, Anthropic, and Gemini clients already send. */
+function extractApiKey(request: IncomingMessage) {
+  const authorization = request.headers.authorization;
+  if (typeof authorization === 'string') {
+    const bearer = /^Bearer[ ]+(.+)$/i.exec(authorization.trim());
+    const value = bearer?.[1]?.trim();
+    return value && value.length <= maxPresentedKeyLength ? value : undefined;
+  }
+  for (const header of ['x-api-key', 'x-goog-api-key']) {
+    const value = request.headers[header];
+    if (typeof value === 'string' && value.trim() && value.trim().length <= maxPresentedKeyLength) return value.trim();
+  }
+  return undefined;
 }
 
 async function handleChat(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
@@ -603,8 +683,8 @@ function isJsonRequest(request: IncomingMessage) {
 
 function setCors(response: ServerResponse, origin: string | undefined) {
   if (origin) response.setHeader('access-control-allow-origin', origin);
-  response.setHeader('access-control-allow-headers', 'content-type, x-omnihilbras-provider');
-  response.setHeader('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  response.setHeader('access-control-allow-headers', 'content-type, x-omnihilbras-provider, authorization, x-api-key, x-goog-api-key');
+  response.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   response.setHeader('x-content-type-options', 'nosniff');
   response.setHeader('vary', 'Origin');
 }
@@ -625,8 +705,11 @@ function sendError(response: ServerResponse, error: unknown) {
     response.end();
     return;
   }
-  const envelope = toErrorEnvelope(error);
-  sendJson(response, statusForError(error), envelope);
+  const status = statusForError(error);
+  if (status === 401 && !response.hasHeader('www-authenticate')) {
+    response.setHeader('www-authenticate', 'Bearer realm="omnihilbras"');
+  }
+  sendJson(response, status, toErrorEnvelope(error));
 }
 
 function toErrorEnvelope(error: unknown) {

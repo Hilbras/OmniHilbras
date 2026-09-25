@@ -88,8 +88,43 @@ Available routes:
 - `PUT /v1/connections/openrouter`
 - `POST /v1/connections/:id/models`
 - `DELETE /v1/connections/:id`
+- `GET /v1/keys`
+- `POST /v1/keys`
+- `PATCH /v1/keys/:id`
+- `DELETE /v1/keys/:id`
+- `PUT /v1/settings/require-api-key`
 - `POST /v1/chat/completions`
 - `POST /v1/chat/completions` with `stream: true` for SSE
+
+## API Keys
+
+The **API keys** dashboard page issues keys for clients that call this gateway
+(CLI tools, IDE extensions, scripts). Each key is shown exactly once in the
+create dialog; the gateway keeps only a SHA-256 hash in
+`$XDG_CONFIG_HOME/omnihilbras/api-keys.json` (mode `0600`), so a key cannot be
+displayed again and a lost key must be replaced.
+
+```bash
+# create a key (the response contains the only copy of the secret)
+curl -X POST http://127.0.0.1:8787/v1/keys \
+  -H 'content-type: application/json' \
+  -d '{"name":"CLI tools"}'
+
+# call the gateway
+curl http://127.0.0.1:8787/v1/models \
+  -H "Authorization: Bearer ohk_..."
+```
+
+Keys are accepted as `Authorization: Bearer <key>`, `x-api-key: <key>`, or
+`x-goog-api-key: <key>` so existing OpenAI, Anthropic, and Gemini clients work
+unchanged. They are never read from the query string.
+
+Enforcement is **on by default** and applies to `GET /v1/models` and
+`POST /v1/chat/completions`. Requests from an allowlisted dashboard origin stay
+exempt so the dashboard can keep testing models; every other client must present
+a valid, unpaused key. The toggle on the API keys page, or
+`PUT /v1/settings/require-api-key`, turns enforcement off. Pausing or deleting
+a key takes effect on the next request.
 
 OpenRouter model import is controlled by the dialog toggle and defaults to
 free mode when an API client omits the policy. Free mode keeps only discovered

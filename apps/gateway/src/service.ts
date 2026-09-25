@@ -1,4 +1,5 @@
 import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@omnihilbras/sdk';
+import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, type ConnectionInput, type ConnectionRecord, type ConnectionStore } from './connections.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -17,7 +18,15 @@ export type GatewayConnectionValidation = {
   latencyMs?: number;
 };
 
+export type GatewayApiKeyList = {
+  keys: ApiKeyRecord[];
+  requireApiKey: boolean;
+};
+
 const connectionMutationLock = 'connection-mutations';
+const apiKeyMutationLock = 'api-key-mutations';
+const missingApiKeyMessage = 'This gateway requires an API key. Create one on the API keys page and send it as "Authorization: Bearer <key>".';
+const invalidApiKeyMessage = 'The API key is invalid or paused.';
 
 export class GatewayService {
   private readonly connectionLocks = new Map<string, Promise<void>>();
@@ -26,6 +35,7 @@ export class GatewayService {
     readonly registry: ProviderRegistry,
     private readonly secretStore: SecretStore,
     private readonly connectionStore?: ConnectionStore,
+    private readonly apiKeyStore?: ApiKeyStore,
   ) {}
 
   async health(signal?: AbortSignal): Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> {
@@ -119,6 +129,46 @@ export class GatewayService {
     });
   }
 
+  async listApiKeys(): Promise<GatewayApiKeyList> {
+    if (!this.apiKeyStore) return { keys: [], requireApiKey: false };
+    const [keys, requireApiKey] = await Promise.all([this.apiKeyStore.list(), this.apiKeyStore.isEnforced()]);
+    return { keys, requireApiKey };
+  }
+
+  async createApiKey(name: string): Promise<CreatedApiKey> {
+    return this.withApiKeyMutation(() => this.apiKeyStore!.create(name));
+  }
+
+  async setApiKeyEnabled(id: string, enabled: boolean) {
+    return this.withApiKeyMutation(async () => {
+      const record = await this.apiKeyStore!.setEnabled(id, enabled);
+      if (!record) throw new ProviderError('NOT_FOUND', 'The API key was not found.');
+      return record;
+    });
+  }
+
+  async removeApiKey(id: string) {
+    return this.withApiKeyMutation(async () => {
+      const removed = await this.apiKeyStore!.remove(id);
+      if (!removed) throw new ProviderError('NOT_FOUND', 'The API key was not found.');
+    });
+  }
+
+  async setRequireApiKey(value: boolean) {
+    return this.withApiKeyMutation(() => this.apiKeyStore!.setEnforced(value));
+  }
+
+  /**
+   * Guards the public LLM surface. Callers that are already trusted local
+   * administration surfaces (the dashboard) must not call this.
+   */
+  async authorizePublicRequest(presentedKey: string | undefined) {
+    // Embedders and unit tests construct the service without key storage.
+    if (!this.apiKeyStore || !(await this.apiKeyStore.isEnforced())) return;
+    if (!presentedKey) throw new ProviderError('AUTHENTICATION_FAILED', missingApiKeyMessage, { publicMessage: missingApiKeyMessage });
+    if (!(await this.apiKeyStore.authenticate(presentedKey))) throw new ProviderError('AUTHENTICATION_FAILED', invalidApiKeyMessage, { publicMessage: invalidApiKeyMessage });
+  }
+
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
     const adapter = this.requireAdapter(providerId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
@@ -149,6 +199,19 @@ export class GatewayService {
     if (!adapter.validateCredential) throw notSupported(adapter, 'credential validation');
     const result = await adapter.validateCredential(credential, context);
     return { providerId, valid: true, checkedAt: result?.checkedAt ?? new Date().toISOString(), ...(result?.latencyMs === undefined ? {} : { latencyMs: result.latencyMs }) };
+  }
+
+  private async withApiKeyMutation<T>(operation: () => Promise<T>) {
+    if (!this.apiKeyStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local API key storage is not configured.');
+    return this.withProviderLock(apiKeyMutationLock, async () => {
+      try {
+        return await operation();
+      } catch (error) {
+        if (error instanceof ProviderError) throw error;
+        if (error instanceof ApiKeyLimitError) throw new ProviderError('INVALID_REQUEST', error.message, { cause: error });
+        throw new ProviderError('CONFIGURATION_ERROR', 'The local API key store could not be updated.', { cause: error });
+      }
+    });
   }
 
   private async withProviderLock<T>(providerId: string, operation: () => Promise<T>) {

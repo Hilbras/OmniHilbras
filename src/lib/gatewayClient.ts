@@ -53,6 +53,21 @@ export type OpenRouterConnectionInput = {
   modelPolicy: 'free' | 'all';
 };
 
+export type GatewayApiKey = {
+  id: string;
+  name: string;
+  prefix: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string;
+};
+
+export type GatewayApiKeyList = {
+  keys: GatewayApiKey[];
+  requireApiKey: boolean;
+};
+
 const gatewayBaseUrl = normalizeGatewayBaseUrl(import.meta.env.VITE_GATEWAY_URL ?? 'http://127.0.0.1:8787');
 
 function normalizeGatewayBaseUrl(value: string) {
@@ -144,6 +159,45 @@ export function removeGatewayConnection(connectionId: string, signal?: AbortSign
     method: 'DELETE',
     ...(signal ? { signal } : {}),
   });
+}
+
+export function listGatewayApiKeys(signal?: AbortSignal) {
+  return requestJson<GatewayApiKeyList & { object: 'list' }>('/v1/keys', { signal }).then((body) => ({ keys: body.keys, requireApiKey: body.requireApiKey }));
+}
+
+/** The returned `key` is the only time the gateway will ever hand out the secret. */
+export function createGatewayApiKey(name: string, signal?: AbortSignal) {
+  return requestJson<{ apiKey: GatewayApiKey; key: string }>('/v1/keys', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+    ...(signal ? { signal } : {}),
+  }).then((body) => ({ apiKey: body.apiKey, key: body.key }));
+}
+
+export function setGatewayApiKeyEnabled(id: string, enabled: boolean, signal?: AbortSignal) {
+  return requestJson<{ apiKey: GatewayApiKey }>(`/v1/keys/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+    ...(signal ? { signal } : {}),
+  }).then((body) => body.apiKey);
+}
+
+export function removeGatewayApiKey(id: string, signal?: AbortSignal) {
+  return requestJson<{ deleted: true; id: string }>(`/v1/keys/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    ...(signal ? { signal } : {}),
+  });
+}
+
+export function setGatewayRequireApiKey(requireApiKey: boolean, signal?: AbortSignal) {
+  return requestJson<{ requireApiKey: boolean }>('/v1/settings/require-api-key', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ requireApiKey }),
+    ...(signal ? { signal } : {}),
+  }).then((body) => body.requireApiKey);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

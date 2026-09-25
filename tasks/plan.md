@@ -172,6 +172,22 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Tests use the saved gateway credential and never expose it to the browser provider call.
 - [x] Test failures and timeouts are visible per model.
 
+### Phase 4e: Gateway API keys
+
+- [x] Task 9g: Add gateway API keys and the dashboard keys page.
+  - Acceptance: the gateway mints, pauses, revokes, and authenticates client keys; only hashes are stored; enforcement guards the LLM surface with a dashboard exemption; the dashboard page manages keys without browser secret storage.
+  - Verify: gateway store and route tests cover hash-at-rest, one-time reveal, constant-time auth, paused-key rejection, enforcement toggling, and origin exemption; typecheck/build and browser smoke test cover the create/pause/delete flow.
+  - Files: `apps/gateway/src/api-keys.ts`, `src/secure-store.ts`, `src/service.ts`, `src/server.ts`, `src/config.ts`, `test/api-keys.test.js`, `src/pages/ApiKeysPage.tsx`, `src/lib/gatewayClient.ts`, `src/components/DashboardShell.tsx`, `src/dashboardApp.tsx`, docs.
+  - Depends on: Task 9f.
+  - Scope: Medium.
+
+### Checkpoint: Gateway API keys
+
+- [x] Key secrets are shown once and stored only as SHA-256 hashes.
+- [x] `GET /v1/models` and `POST /v1/chat/completions` reject anonymous clients by default.
+- [x] The dashboard keeps working without holding a key.
+- [x] Existing connection routes, model tests, and builds remain green.
+
 ### Phase 5: Cloud readiness
 
 - [ ] Task 10: Define cloud integration boundaries.
