@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@omnihilbras/sdk';
+import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@omnihilbras/hilbras';
 import { InMemoryConnectionStore } from '../dist/index.js';
 import { createGatewayServer } from '../dist/index.js';
 import { GatewayService } from '../dist/index.js';

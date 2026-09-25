@@ -10,7 +10,7 @@ import {
   isLoopbackHostname,
   type ProviderCredential,
   type SecretStore,
-} from '@omnihilbras/sdk';
+} from '@omnihilbras/hilbras';
 import { LocalApiKeyStore, type ApiKeyStore } from './api-keys.js';
 import { defaultConnectionDirectory, LocalConnectionStore, parseMasterKey, type ConnectionStore } from './connections.js';
 import { GatewayService } from './service.js';

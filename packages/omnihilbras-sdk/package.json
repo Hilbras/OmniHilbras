@@ -1,7 +1,29 @@
 {
-  "name": "@omnihilbras/sdk",
+  "name": "@omnihilbras/hilbras",
   "version": "0.1.0",
-  "private": true,
+  "description": "Typed provider SDK for the OmniHilbras gateway: normalized chat, streaming, model listing, and capability contracts for OpenAI, Anthropic, Gemini, and OpenAI-compatible providers.",
+  "license": "MIT",
+  "author": "Hilbras",
+  "homepage": "https://github.com/Hilbras/OmniHilbras#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hilbras/OmniHilbras.git",
+    "directory": "packages/omnihilbras-sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/Hilbras/OmniHilbras/issues"
+  },
+  "keywords": [
+    "omnihilbras",
+    "ai-gateway",
+    "llm",
+    "openai",
+    "anthropic",
+    "gemini",
+    "openrouter",
+    "provider-abstraction",
+    "streaming"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,12 +34,21 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node --test test/*.test.js"
+    "test": "pnpm build && node --test test/*.test.js",
+    "prepublishOnly": "pnpm build"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",

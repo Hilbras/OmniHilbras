@@ -8,14 +8,14 @@
     "dev:gateway": "pnpm --filter @omnihilbras/gateway dev",
     "build": "pnpm build:frontend && pnpm build:sdk && pnpm build:gateway",
     "build:frontend": "vite build",
-    "build:sdk": "pnpm --filter @omnihilbras/sdk build",
+    "build:sdk": "pnpm --filter @omnihilbras/hilbras build",
     "build:gateway": "pnpm --filter @omnihilbras/gateway build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && pnpm typecheck:sdk && pnpm typecheck:gateway",
-    "typecheck:sdk": "pnpm --filter @omnihilbras/sdk typecheck",
+    "typecheck:sdk": "pnpm --filter @omnihilbras/hilbras typecheck",
     "typecheck:gateway": "pnpm --filter @omnihilbras/gateway typecheck",
     "test": "pnpm test:sdk && pnpm test:gateway",
-    "test:sdk": "pnpm --filter @omnihilbras/sdk test",
+    "test:sdk": "pnpm --filter @omnihilbras/hilbras test",
     "test:gateway": "pnpm --filter @omnihilbras/gateway test"
   },
   "dependencies": {

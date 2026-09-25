@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
-import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@omnihilbras/sdk';
+import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@omnihilbras/hilbras';
 import { ApiKeyLimitError, GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore, LocalApiKeyStore, createGatewayServer } from '../dist/index.js';
 
 function fakeAdapter(seen) {

@@ -51,7 +51,7 @@ importers:
 
   apps/gateway:
     dependencies:
-      '@omnihilbras/sdk':
+      '@omnihilbras/hilbras':
         specifier: workspace:*
         version: link:../../packages/omnihilbras-sdk
     devDependencies:
