@@ -20,6 +20,11 @@ export type GatewayResilience = {
   maxRetries: number;
   /** Requests allowed per minute. 0 disables the limit. */
   requestsPerMinute: number;
+  /**
+   * Delay before a second connection is raced against the first. 0 disables
+   * hedging. Only sent when another connection can serve the same model.
+   */
+  hedgeAfterMs: number;
 };
 
 export type GatewayConnection = {

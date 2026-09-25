@@ -178,6 +178,22 @@ reachable from the local dashboard. The contract:
 - `lastUsedAt` is best effort: it is written at most once per 30 seconds so
   request handling never blocks on disk.
 
+## Additional Providers
+
+A connection is not limited to the built-in adapters. `PUT
+/v1/connections/:id` accepts any provider ID with a caller-supplied `endpoint`,
+and the gateway builds an `OpenAICompatibleAdapter` for it on demand, cached by
+endpoint. That covers Ollama, vLLM, LM Studio, Together, Groq, and any other
+OpenAI-compatible server without a code change, and the request still uses the
+shared transport and the encrypted credential vault. `POST
+/v1/connections/:id/check` validates a candidate key against a registered
+provider before saving.
+
+Endpoints go through `assertSafeProviderRequestUrl`, so a caller cannot point a
+connection at a credential-bearing URL. A provider without a `validateCredential`
+capability is saved without a pre-flight check and validated on first use, since
+probing every provider costs a real request.
+
 ## Model Routing and the Client Catalog
 
 A plain OpenAI-compatible client must work with only a base URL, a key, and a
@@ -199,10 +215,10 @@ Disabled or credential-less connections take part in neither.
 ## Connection Reliability
 
 Every connection stores a `resilience` block: `maxRetries` (0–5, default 1),
-`timeoutMs` (0–600000, default 0 for the shared default), and
-`requestsPerMinute` (0–100000, default 0 for unlimited). Settings are validated
-at the store boundary and exposed through `PUT /v1/connections/:id/resilience`;
-unspecified fields keep their current value.
+`timeoutMs` (0–600000, default 0 for the shared default), `requestsPerMinute`
+(0–100000, default 0 for unlimited), and `hedgeAfterMs` (0–30000, default 0 for
+off). Settings are validated at the store boundary and exposed through `PUT
+/v1/connections/:id/resilience`; unspecified fields keep their current value.
 
 Behavior when serving a request:
 
@@ -219,6 +235,14 @@ Behavior when serving a request:
 - Rate limiting uses a sliding window per connection, so a burst cannot
   straddle a minute boundary and double the effective rate. A limited
   connection hands the request to the next route.
+- Hedging: when the leading candidate has `hedgeAfterMs` set and another
+  candidate can serve the same model, a second request is started after that
+  delay while the leader is still in flight. The first success wins and every
+  other in-flight request is aborted. The gateway returns as soon as a winner
+  exists rather than waiting for the cancelled losers, and the abandoned
+  attempts are reported in the trace with `CANCELLED` so a client can see the
+  hedge happened. A hedge is never sent when there is no second eligible
+  candidate, and a fast leader is never raced.
 - Streaming decides its route before the first byte is written, so a stream that
   cannot start returns a normal JSON error. Once bytes are sent, a failure is
   reported as a stream error rather than silently restarting on another route.

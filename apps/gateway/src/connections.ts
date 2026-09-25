@@ -29,6 +29,12 @@ export type ResilienceSettings = {
   maxRetries: number;
   /** Requests allowed per minute. 0 disables the limit for this connection. */
   requestsPerMinute: number;
+  /**
+   * Delay before a second connection is raced against the first. 0 disables
+   * hedging. The hedge is only sent when another candidate can serve the model,
+   * so a single connection never pays for it.
+   */
+  hedgeAfterMs: number;
 };
 
 export type ConnectionInput = {
@@ -49,12 +55,14 @@ export const defaultResilienceSettings: ResilienceSettings = {
   timeoutMs: 0,
   maxRetries: 1,
   requestsPerMinute: 0,
+  hedgeAfterMs: 0,
 };
 
 export const resilienceLimits = {
   timeoutMs: { min: 0, max: 600_000 },
   maxRetries: { min: 0, max: 5 },
   requestsPerMinute: { min: 0, max: 100_000 },
+  hedgeAfterMs: { min: 0, max: 30_000 },
 } as const;
 
 export interface WritableSecretStore extends SecretStore {
@@ -525,10 +533,12 @@ export function normalizeResilienceSettings(value: Partial<ResilienceSettings>):
   const timeoutMs = read('timeoutMs', 'timeoutMs');
   const maxRetries = read('maxRetries', 'maxRetries');
   const requestsPerMinute = read('requestsPerMinute', 'requestsPerMinute');
+  const hedgeAfterMs = read('hedgeAfterMs', 'hedgeAfterMs');
   return {
     timeoutMs: timeoutMs ?? defaultResilienceSettings.timeoutMs,
     maxRetries: maxRetries ?? defaultResilienceSettings.maxRetries,
     requestsPerMinute: requestsPerMinute ?? defaultResilienceSettings.requestsPerMinute,
+    hedgeAfterMs: hedgeAfterMs ?? defaultResilienceSettings.hedgeAfterMs,
   };
 }
 

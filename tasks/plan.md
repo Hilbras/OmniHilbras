@@ -198,12 +198,22 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] A client needs only a base URL, key, and model ID: routing resolves the provider from the saved catalog and `/v1/models` advertises the saved catalog.
 - [x] Existing connection routes, model tests, and builds remain green.
 
+### Phase 4g: Latency and additional providers
+
+- [x] Task 9i: Add hedged requests and on-demand provider adapters.
+  - Acceptance: a slow leading connection is raced against the next eligible one and the first reply wins with the loser cancelled; no hedge is sent when a fast leader answers or no second candidate exists; any provider can be added with a caller-supplied endpoint and served through an on-demand OpenAI-compatible adapter.
+  - Verify: routing tests cover hedge-wins, fast-leader-not-hedged, single-candidate skip, leader-wins, failed-race fallback, and on-demand adapter resolution; live check against a deliberately slow endpoint measures the latency difference and the attempt trace.
+  - Files: `apps/gateway/src/service.ts`, `src/connections.ts`, `src/server.ts`, `test/routing.test.js`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, docs.
+  - Depends on: Task 9h.
+  - Scope: Medium.
+
 ### Checkpoint: Connection reliability
 
-- [x] Retries, deadlines, and rate limits are per-connection and validated at the store boundary.
+- [x] Retries, deadlines, rate limits, and hedge delays are per-connection and validated at the store boundary.
 - [x] Retryable failures fail over; auth and validation failures do not.
 - [x] A failed connection is ejected and rejoins without a restart.
 - [x] Streaming never restarts a request that already sent bytes.
+- [x] A slow leader is raced and the hedge wins measurably faster.
 
 ### Phase 5: Cloud readiness
 

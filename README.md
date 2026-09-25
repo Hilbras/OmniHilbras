@@ -151,12 +151,12 @@ a key takes effect on the next request.
 
 ## Connection Reliability
 
-Each connection carries its own retry, timeout, and rate-limit budget, editable
-under **Reliability** on the provider page or through
+Each connection carries its own retry, timeout, rate-limit, and hedge budget,
+editable under **Reliability** on the provider page or through
 `PUT /v1/connections/:id/resilience`:
 
 ```json
-{ "maxRetries": 2, "timeoutMs": 25000, "requestsPerMinute": 60 }
+{ "maxRetries": 2, "timeoutMs": 25000, "requestsPerMinute": 60, "hedgeAfterMs": 400 }
 ```
 
 - **`maxRetries`** (0–5, default 1) — extra attempts on the same connection.
@@ -165,12 +165,21 @@ under **Reliability** on the provider page or through
   hang a request.
 - **`requestsPerMinute`** (0–100000, default 0 = unlimited) — sliding window per
   connection. Exceeding it hands the request to the next route.
+- **`hedgeAfterMs`** (0–30000, default 0 = off) — if this connection has not
+  answered in time, the next eligible connection is raced against it and the
+  first reply wins. The loser is cancelled, so its tokens are normally not
+  billed. Nothing is sent when no other connection can serve the model, so a
+  single connection never pays the extra cost.
 
 A retryable failure (timeout, rate limit, provider unavailable) spends the retry
 budget, then falls through to the next connection by priority. Auth failures and
 invalid requests are never retried — repeating them cannot help. Streaming
 fails over only before the first chunk is sent; a mid-stream failure is reported
 rather than silently restarting.
+
+Measured on a deliberately slow local endpoint racing OpenRouter, with hedging
+off the request took 2550 ms, and with a 400 ms hedge it took 1267–1773 ms and
+was served by OpenRouter while the slow route was cancelled.
 
 After `OMNIHILBRAS_FAILURE_THRESHOLD` consecutive failures (default 3) a
 connection is ejected from routing. It rejoins automatically after a 30 second

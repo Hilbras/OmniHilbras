@@ -1,4 +1,4 @@
-import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@omnihilbras/sdk';
+import { OpenAICompatibleAdapter, ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@omnihilbras/sdk';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
@@ -96,6 +96,7 @@ const invalidApiKeyMessage = 'The API key is invalid or paused.';
 
 export class GatewayService {
   private readonly connectionLocks = new Map<string, Promise<void>>();
+  private readonly dynamicAdapters = new Map<string, { endpoint: string; adapter: ProviderAdapter }>();
   private readonly providerHealth: HealthRegistry;
   private readonly rateLimiter: SlidingWindowRateLimiter;
   private readonly rateLimitWaitMs = new Map<string, number>();
@@ -139,7 +140,7 @@ export class GatewayService {
 
   /** Polls every configured adapter and folds the result into routing state. */
   async refreshHealth(signal?: AbortSignal): Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> {
-    const providers = await Promise.all(this.registry.list().map(async (adapter) => {
+    const providers = await Promise.all((await this.activeAdapters()).map(async (adapter) => {
       if (!adapter.healthCheck) return { providerId: adapter.id, status: 'unavailable' as const, checkedAt: new Date().toISOString(), message: 'Health checks are not supported.' };
       const startedAt = Date.now();
       try {
@@ -180,6 +181,22 @@ export class GatewayService {
     return this.refreshHealth(signal);
   }
 
+  /**
+   * Adapters that can actually serve traffic: registered ones plus an
+   * OpenAI-compatible adapter per saved connection endpoint.
+   */
+  private async activeAdapters(): Promise<ProviderAdapter[]> {
+    const adapters = new Map(this.registry.list().map((adapter) => [adapter.id, adapter]));
+    for (const connection of await this.listConnections()) {
+      if (adapters.has(connection.providerId)) continue;
+      const cached = this.dynamicAdapters.get(connection.providerId);
+      adapters.set(connection.providerId, cached && cached.endpoint === connection.endpoint
+        ? cached.adapter
+        : new OpenAICompatibleAdapter({ id: connection.providerId, name: connection.name, baseUrl: connection.endpoint }));
+    }
+    return [...adapters.values()];
+  }
+
   async listAllModels(signal?: AbortSignal): Promise<GatewayModelList> {
     const connections = (await this.listConnections()).filter((connection) => connection.enabled && connection.hasCredential);
     if (connections.length > 0) {
@@ -217,7 +234,10 @@ export class GatewayService {
     const connections = (await this.listConnections()).filter((connection) => connection.enabled && connection.hasCredential);
     const owners = [...new Set(connections.filter((connection) => connection.modelIds.includes(modelId)).map((connection) => connection.providerId))];
     if (owners.length === 1) return owners[0]!;
-    if (owners.length > 1) return this.registry.list().find((adapter) => owners.includes(adapter.id) && adapter.capabilities.chat === true)?.id ?? owners[0]!;
+    if (owners.length > 1) {
+      const chatCapable = (await this.activeAdapters()).find((adapter) => owners.includes(adapter.id) && adapter.capabilities.chat === true);
+      return chatCapable?.id ?? owners[0]!;
+    }
     if (connections.length === 1) return connections[0]!.providerId;
     return defaultProviderId;
   }
@@ -234,11 +254,18 @@ export class GatewayService {
 
   async saveConnection(input: ConnectionInput, credential: ProviderCredential, signal?: AbortSignal): Promise<ConnectionRecord> {
     if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
+    // An unregistered provider is configuration for a custom endpoint, which is
+    // validated when it is first used rather than at save time.
+    this.registry.get(input.providerId);
     return this.withProviderLock(connectionMutationLock, async () => {
-      await this.validateConnectionCredentialUnlocked(input.providerId, credential, signal);
+      // Not every provider can be probed without spending a request, so a
+      // capability without a validator is saved without a pre-flight check.
+      if (this.registry.get(input.providerId)?.validateCredential) {
+        await this.validateConnectionCredentialUnlocked(input.providerId, credential, signal);
+      }
       let saveInput = input;
       if (input.modelPolicy) {
-        const discoveredModelIds = await this.discoverConnectionModels(input.providerId, credential, input.modelPolicy, signal);
+        const discoveredModelIds = await this.discoverConnectionModels(input.providerId, credential, input.modelPolicy, signal, { endpoint: input.endpoint, name: input.name });
         const existing = (await this.connectionStore!.list()).find((connection) => (input.id ? connection.id === input.id : connection.providerId === input.providerId));
         const customModelIds = input.customModelIds ?? existing?.customModelIds ?? [];
         saveInput = { ...input, modelIds: [...discoveredModelIds, ...customModelIds], customModelIds };
@@ -337,13 +364,13 @@ export class GatewayService {
   }
 
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
-    const adapter = this.requireAdapter(providerId);
+    const adapter = await this.resolveAdapter(providerId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
     return adapter.chat(request, await this.context(adapter.id, signal));
   }
 
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal): AsyncIterable<ChatChunk> {
-    const adapter = this.requireAdapter(providerId);
+    const adapter = await this.resolveAdapter(providerId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
     yield* adapter.streamChat(request, await this.context(adapter.id, signal));
   }
@@ -356,9 +383,17 @@ export class GatewayService {
     const decision = await this.planRoute(request.model, explicitProviderId);
     if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
     const attempts: GatewayFailoverAttempt[] = [];
-    let lastError: unknown;
+    const race = await this.tryHedgedRace(decision.candidates, request, signal);
+    if (race) {
+      attempts.push(...race.attempts);
+      if (race.response) return { response: race.response, attempts };
+      // The race found no winner; continue down the normal chain.
+    }
+    const racedProviders = new Set(race?.attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.providerId));
+    let lastError: unknown = race?.lastError;
 
     for (const candidate of decision.candidates) {
+      if (racedProviders.has(candidate.providerId)) continue;
       for (let attempt = 1; attempt <= candidate.resilience.maxRetries + 1; attempt += 1) {
         if (signal?.aborted) throw new ProviderError('CANCELLED', 'The request was cancelled.', { cause: signal.reason });
         const startedAt = Date.now();
@@ -375,15 +410,128 @@ export class GatewayService {
           const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
           this.providerHealth.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.');
           attempts.push({ providerId: candidate.providerId, attempt, ok: false, latencyMs, errorCode: code });
-          lastError = error;
           // A per-connection limit should hand off to the next route, not retry here.
           if (error instanceof ProviderError && error.code === 'RATE_LIMITED' && attempts.length > 1) break;
           if (!isRetryableFailure(error)) throw attachAttempts(error, attempts);
+          lastError = error;
           if (signal?.aborted) break;
         }
       }
     }
     throw attachAttempts(lastError, attempts);
+  }
+
+  /**
+   * Races the leading candidates when a hedge delay is configured. The first
+   * successful reply wins and the losers are aborted, so the client waits for
+   * the fastest route instead of the first-priority one. A hedge is only sent
+   * while the leader is still in flight and another candidate can serve the
+   * model, so a single connection never pays the extra cost.
+   */
+  private async tryHedgedRace(candidates: RouteCandidate[], request: ChatRequest, signal: AbortSignal | undefined) {
+    const [leader, ...rest] = candidates;
+    if (!leader || rest.length === 0 || leader.resilience.hedgeAfterMs <= 0) return undefined;
+
+    type Outcome = { candidate: RouteCandidate; ok: boolean; latencyMs: number; response?: ChatResponse; error?: unknown };
+    const attempts: GatewayFailoverAttempt[] = [];
+    const inflight: Array<{ candidate: RouteCandidate; abort: () => void; done: Promise<Outcome>; startedAt: number }> = [];
+    const settled = new Set<Promise<Outcome>>();
+    const started = new Set<RouteCandidate>();
+    let winner: Outcome | undefined;
+    let lastError: unknown;
+    let onChange: () => void = () => undefined;
+    const resetChange = () => new Promise<void>((resolve) => { onChange = resolve; });
+
+    const start = (candidate: RouteCandidate) => {
+      started.add(candidate);
+      const controller = new AbortController();
+      const startedAt = Date.now();
+      const done = this.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.chat(candidate.providerId, request, deadline))
+        .then(
+          (response): Outcome => ({ candidate, ok: true, latencyMs: Date.now() - startedAt, response }),
+          (error: unknown): Outcome => ({ candidate, ok: false, latencyMs: Date.now() - startedAt, error }),
+        )
+        .then((outcome) => {
+          settled.add(done);
+          const code = outcome.ok ? undefined : outcome.error instanceof ProviderError ? outcome.error.code : 'PROVIDER_REQUEST_FAILED';
+          if (outcome.ok) {
+            this.providerHealth.recordSuccess(candidate.providerId, outcome.latencyMs);
+            this.rateLimiter.record(candidate.connectionId);
+          } else {
+            this.providerHealth.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.');
+          }
+          attempts.push({ providerId: candidate.providerId, attempt: 1, ok: outcome.ok, latencyMs: outcome.latencyMs, ...(code ? { errorCode: code } : {}) });
+          if (outcome.ok) {
+            if (!winner) {
+              winner = outcome;
+              // A faster route answered: stop paying for the others. The
+              // abandoned attempts are recorded now so the client can see that
+              // a hedge was fired and won.
+              for (const other of inflight) {
+                if (other.candidate === candidate) continue;
+                other.abort();
+                if (!settled.has(other.done)) {
+                  attempts.push({ providerId: other.candidate.providerId, attempt: 1, ok: false, latencyMs: Date.now() - other.startedAt, errorCode: 'CANCELLED' });
+                }
+              }
+            }
+          } else {
+            lastError = outcome.error;
+          }
+          onChange();
+          return outcome;
+        });
+      inflight.push({ candidate, done, startedAt, abort: () => controller.abort(new ProviderError('CANCELLED', 'A faster provider answered this request.')) });
+      return done;
+    };
+
+    start(leader);
+    let hedgePending = true;
+    const hedgeTimer = setInterval(() => {
+      if (winner || signal?.aborted) {
+        clearInterval(hedgeTimer);
+        hedgePending = false;
+        return;
+      }
+      // Only hedge while the leader is still in flight.
+      if (settled.size > 0) {
+        clearInterval(hedgeTimer);
+        hedgePending = false;
+        return;
+      }
+      const next = rest.find((candidate) => !started.has(candidate));
+      if (next) {
+        start(next);
+        onChange();
+      } else {
+        clearInterval(hedgeTimer);
+        hedgePending = false;
+      }
+    }, leader.resilience.hedgeAfterMs);
+    hedgeTimer.unref?.();
+
+    // Wait for the first success, or until every candidate has been tried.
+    while (!winner) {
+      const running = inflight.filter((handle) => !settled.has(handle.done));
+      if (running.length === 0) {
+        if (hedgePending) {
+          // The hedge timer decides whether another candidate is worth starting.
+          await resetChange();
+          continue;
+        }
+        break;
+      }
+      await resetChange();
+    }
+    clearInterval(hedgeTimer);
+    if (winner) {
+      // Return immediately: the losers were aborted and their own bookkeeping
+      // continues in the background. Waiting for them would reintroduce the
+      // leader's latency, which is exactly what hedging exists to avoid.
+      return { response: winner.response!, attempts, lastError };
+    }
+    await Promise.allSettled(inflight.map((handle) => handle.done));
+    return attempts.length === 0 ? undefined : { response: undefined, attempts, lastError };
   }
 
   /** Streaming cannot retry after bytes are sent, so failover only covers the first chunk. */
@@ -504,8 +652,8 @@ export class GatewayService {
     }
   }
 
-  private async discoverConnectionModels(providerId: string, credential: ProviderCredential, policy: ModelImportPolicy, signal?: AbortSignal) {
-    const adapter = this.requireAdapter(providerId);
+  private async discoverConnectionModels(providerId: string, credential: ProviderCredential, policy: ModelImportPolicy, signal?: AbortSignal, pendingEndpoint?: { endpoint: string; name: string }) {
+    const adapter = await this.resolveAdapter(providerId, pendingEndpoint);
     const context: ProviderRequestContext = { credential, ...(signal ? { signal } : {}) };
     const models = adapter.discoverModels
       ? await adapter.discoverModels(context, { policy })
@@ -553,6 +701,27 @@ export class GatewayService {
 
   private requireAdapter(providerId: string): ProviderAdapter {
     return this.registry.require(providerId);
+  }
+
+  /**
+   * Resolves the adapter for a provider, building one on demand for a saved
+   * connection that has no registered adapter. That is what lets any
+   * OpenAI-compatible endpoint added through the dashboard serve traffic, using
+   * the same transport and credential vault as the built-in adapters.
+   */
+  private async resolveAdapter(providerId: string, pendingEndpoint?: { endpoint: string; name: string }): Promise<ProviderAdapter> {
+    const registered = this.registry.get(providerId);
+    if (registered) return registered;
+    // A connection being saved is not in the store yet, so the caller can pass
+    // the endpoint it is about to use.
+    const connection = (await this.listConnections()).find((item) => item.providerId === providerId);
+    const endpoint = pendingEndpoint ?? (connection ? { endpoint: connection.endpoint, name: connection.name } : undefined);
+    if (!endpoint) return this.registry.require(providerId);
+    const cached = this.dynamicAdapters.get(providerId);
+    if (cached && cached.endpoint === endpoint.endpoint) return cached.adapter;
+    const adapter = new OpenAICompatibleAdapter({ id: providerId, name: endpoint.name, baseUrl: endpoint.endpoint });
+    this.dynamicAdapters.set(providerId, { endpoint: endpoint.endpoint, adapter });
+    return adapter;
   }
 
   private async context(providerId: string, signal?: AbortSignal): Promise<ProviderRequestContext> {

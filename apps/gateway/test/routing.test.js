@@ -285,7 +285,7 @@ test('resilience settings persist and validate at the store boundary', async () 
   const store = new InMemoryConnectionStore();
   await store.save(connectionInput('primary', { resilience: { timeoutMs: 5_000, maxRetries: 2, requestsPerMinute: 30 } }), { type: 'api-key', value: 'secret' });
   const [saved] = await store.list();
-  assert.deepEqual(saved.resilience, { timeoutMs: 5_000, maxRetries: 2, requestsPerMinute: 30 });
+  assert.deepEqual(saved.resilience, { timeoutMs: 5_000, maxRetries: 2, requestsPerMinute: 30, hedgeAfterMs: 0 });
 
   const updated = await store.updateResilience('primary', { maxRetries: 4 });
   assert.equal(updated.resilience.maxRetries, 4);
@@ -313,6 +313,136 @@ test('the sliding window limiter does not allow a double burst across a minute',
   now = 500_000;
   limiter.prune();
   assert.equal(limiter.check('a', 2), 0);
+});
+
+test('a slow leader is hedged and the faster route wins', async () => {
+  const calls = [];
+  const slow = chattyAdapter('slow', {
+    calls,
+    fail: async (id) => {
+      if (id === 'slow') await new Promise((resolve) => setTimeout(resolve, 300));
+    },
+  });
+  const fast = chattyAdapter('fast', { calls });
+  const store = await storeWith([{ id: 'slow', priority: 1, resilience: { maxRetries: 0, hedgeAfterMs: 30 } }, { id: 'fast', priority: 2 }]);
+  const service = buildService([slow, fast], store);
+
+  const startedAt = Date.now();
+  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined);
+  const elapsed = Date.now() - startedAt;
+
+  assert.equal(response.providerId, 'fast', 'the hedge wins when it is faster');
+  assert.equal(response.message.content, 'hello from fast');
+  assert.ok(elapsed < 250, `the client waited for the hedge, not the leader (${elapsed} ms)`);
+  assert.equal(calls.filter((call) => call.provider === 'fast').length, 1, 'exactly one hedge is sent');
+  const won = attempts.find((attempt) => attempt.ok);
+  assert.equal(won.providerId, 'fast', 'the winning attempt is in the trace');
+  const abandoned = attempts.find((attempt) => attempt.providerId === 'slow');
+  assert.equal(abandoned.ok, false, 'the abandoned leader appears in the trace');
+  assert.equal(abandoned.errorCode, 'CANCELLED', 'the leader is reported as cancelled, not failed');
+});
+
+test('a fast leader is never hedged', async () => {
+  const calls = [];
+  const quick = chattyAdapter('quick', { calls });
+  const backup = chattyAdapter('backup', { calls });
+  const store = await storeWith([{ id: 'quick', priority: 1, resilience: { maxRetries: 0, hedgeAfterMs: 200 } }, { id: 'backup', priority: 2 }]);
+  const service = buildService([quick, backup], store);
+
+  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined);
+  assert.equal(response.providerId, 'quick');
+  assert.equal(calls.filter((call) => call.provider === 'backup').length, 0, 'the backup is never contacted');
+  assert.equal(attempts.length, 1, 'a single attempt needs no trace');
+});
+
+test('hedging is skipped when only one connection can serve the model', async () => {
+  const calls = [];
+  const only = chattyAdapter('only', { calls, fail: async (id) => { if (id === 'only') await new Promise((resolve) => setTimeout(resolve, 120)); } });
+  const other = chattyAdapter('other', { calls });
+  const store = await storeWith([
+    { id: 'only', priority: 1, modelIds: ['shared/model'], resilience: { maxRetries: 0, hedgeAfterMs: 20 } },
+    { id: 'other', priority: 2, modelIds: ['other/model'] },
+  ]);
+  const service = buildService([only, other], store);
+
+  const { response } = await service.chatWithFailover(chatRequest, undefined);
+  assert.equal(response.providerId, 'only');
+  assert.equal(calls.filter((call) => call.provider === 'other').length, 0, 'an unrelated provider is not raced in');
+});
+
+test('a hedged request still returns the leader when it wins', async () => {
+  const calls = [];
+  const leader = chattyAdapter('leader', {
+    calls,
+    fail: async (id) => {
+      if (id === 'leader') await new Promise((resolve) => setTimeout(resolve, 150));
+    },
+  });
+  const backup = chattyAdapter('backup', { calls, fail: async (id) => { if (id === 'backup') await new Promise((resolve) => setTimeout(resolve, 400)); } });
+  const store = await storeWith([{ id: 'leader', priority: 1, resilience: { maxRetries: 0, hedgeAfterMs: 30 } }, { id: 'backup', priority: 2 }]);
+  const service = buildService([leader, backup], store);
+
+  const { response } = await service.chatWithFailover(chatRequest, undefined);
+  assert.equal(response.providerId, 'leader');
+  assert.equal(response.message.content, 'hello from leader');
+});
+
+test('both hedged routes failing falls through to the chain', async () => {
+  const calls = [];
+  const slowFail = chattyAdapter('slowfail', {
+    calls,
+    fail: async (id) => {
+      if (id === 'slowfail') {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        throw new ProviderError('PROVIDER_UNAVAILABLE', 'down', { retryable: true });
+      }
+    },
+  });
+  const hedgeFail = chattyAdapter('hedgefail', { calls, fail: async (id) => { if (id === 'hedgefail') throw new ProviderError('PROVIDER_UNAVAILABLE', 'down', { retryable: true }); } });
+  const last = chattyAdapter('last', { calls });
+  const store = await storeWith([
+    { id: 'slowfail', priority: 1, resilience: { maxRetries: 0, hedgeAfterMs: 20 } },
+    { id: 'hedgefail', priority: 2, resilience: { maxRetries: 0 } },
+    { id: 'last', priority: 3, resilience: { maxRetries: 0 } },
+  ]);
+  const service = buildService([slowFail, hedgeFail, last], store);
+
+  const { response } = await service.chatWithFailover(chatRequest, undefined);
+  assert.equal(response.providerId, 'last', 'the chain continues after a failed race');
+});
+
+test('a saved connection without a registered adapter can still serve traffic', async () => {
+  // An empty registry: the connection endpoint must be resolved on demand.
+  const store = new InMemoryConnectionStore();
+  await store.save({
+    id: 'ollama',
+    providerId: 'ollama',
+    name: 'Local Ollama',
+    // A loopback port with nothing listening, so the request fails fast at the
+    // transport rather than hanging the test.
+    endpoint: 'http://127.0.0.1:9/v1',
+    priority: 1,
+    proxyPool: 'none',
+    modelIds: ['llama3.2'],
+    resilience: { maxRetries: 0, timeoutMs: 500 },
+  }, { type: 'api-key', value: 'ollama' });
+  const service = new GatewayService(new ProviderRegistry(), new InMemorySecretStore({ ollama: { type: 'api-key', value: 'ollama' } }), store, new InMemoryApiKeyStore());
+
+  // The adapter is built from the saved endpoint, so capability checks pass
+  // without a registry entry. The point is that routing and adapter resolution
+  // happened rather than failing with "provider not registered".
+  let failure;
+  try {
+    await service.chatWithFailover({ model: 'llama3.2', messages: [] }, undefined);
+  } catch (error) {
+    failure = error;
+  }
+  assert.ok(failure instanceof ProviderError, `expected a ProviderError, got ${failure}`);
+  assert.doesNotMatch(failure.message, /not registered/i);
+  assert.match(failure.code, /PROVIDER|UNAVAILABLE|TIMEOUT/);
+
+  const routing = await service.describeRouting();
+  assert.equal(routing.connections[0].providerId, 'ollama');
 });
 
 test('retryable classification keeps permanent failures out of the retry loop', () => {
@@ -369,10 +499,10 @@ test('the gateway reports failover attempts and accepts resilience updates over 
   const updated = await fetch(`${baseUrl}/v1/connections/primary/resilience`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ maxRetries: 3, requestsPerMinute: 120, timeoutMs: 15_000 }),
+    body: JSON.stringify({ maxRetries: 3, requestsPerMinute: 120, timeoutMs: 15_000, hedgeAfterMs: 400 }),
   });
   assert.equal(updated.status, 200);
-  assert.deepEqual((await updated.json()).connection.resilience, { timeoutMs: 15_000, maxRetries: 3, requestsPerMinute: 120 });
+  assert.deepEqual((await updated.json()).connection.resilience, { timeoutMs: 15_000, maxRetries: 3, requestsPerMinute: 120, hedgeAfterMs: 400 });
 
   const invalid = await fetch(`${baseUrl}/v1/connections/primary/resilience`, {
     method: 'PUT',
@@ -380,6 +510,13 @@ test('the gateway reports failover attempts and accepts resilience updates over 
     body: JSON.stringify({ maxRetries: 99 }),
   });
   assert.equal(invalid.status, 400);
+
+  const invalidHedge = await fetch(`${baseUrl}/v1/connections/primary/resilience`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ hedgeAfterMs: 60_000 }),
+  });
+  assert.equal(invalidHedge.status, 400);
 
   const empty = await fetch(`${baseUrl}/v1/connections/primary/resilience`, {
     method: 'PUT',

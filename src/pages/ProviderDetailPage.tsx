@@ -116,7 +116,7 @@ function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testSt
 
 function isValidResilience(value: GatewayResilience) {
   const inRange = (input: number, min: number, max: number) => Number.isInteger(input) && input >= min && input <= max;
-  return inRange(value.maxRetries, 0, 5) && inRange(value.timeoutMs, 0, 600_000) && inRange(value.requestsPerMinute, 0, 100_000);
+  return inRange(value.hedgeAfterMs, 0, 30_000) && inRange(value.maxRetries, 0, 5) && inRange(value.timeoutMs, 0, 600_000) && inRange(value.requestsPerMinute, 0, 100_000);
 }
 
 function ResiliencePanel({ connection, routingState, onSave }: { connection: GatewayConnection; routingState?: GatewayRoutingState; onSave: (next: GatewayResilience) => void | Promise<void> }) {
@@ -128,9 +128,11 @@ function ResiliencePanel({ connection, routingState, onSave }: { connection: Gat
     setDraft(connection.resilience);
   }, [connection.resilience]);
 
-  const summary = connection.resilience.timeoutMs > 0
-    ? `${Math.round(connection.resilience.timeoutMs / 1000)}s timeout · ${connection.resilience.maxRetries} ${connection.resilience.maxRetries === 1 ? 'retry' : 'retries'}`
-    : `${connection.resilience.maxRetries} ${connection.resilience.maxRetries === 1 ? 'retry' : 'retries'} · shared timeout`;
+  const summary = [
+    connection.resilience.hedgeAfterMs > 0 ? `hedge ${Math.round(connection.resilience.hedgeAfterMs / 100) / 10}s` : undefined,
+    connection.resilience.timeoutMs > 0 ? `${Math.round(connection.resilience.timeoutMs / 1000)}s timeout` : undefined,
+    `${connection.resilience.maxRetries} ${connection.resilience.maxRetries === 1 ? 'retry' : 'retries'}`,
+  ].filter(Boolean).join(' · ');
 
   return (
     <div className="mt-5 border-t border-line pt-5">
@@ -146,17 +148,21 @@ function ResiliencePanel({ connection, routingState, onSave }: { connection: Gat
       {open && (
         <div className="mt-4 space-y-3">
           <p className="muted text-[11px] leading-relaxed">OmniHilbras retries a failed request here, then falls through to the next connection by priority. Requests without a valid key are never retried.</p>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="block"><span className="mono-label mb-1.5 block">Hedge after (ms)</span><input type="number" min={0} max={30000} step={100} value={draft.hedgeAfterMs} onChange={(event) => setDraft((current) => ({ ...current, hedgeAfterMs: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
             <label className="block"><span className="mono-label mb-1.5 block">Retries</span><input type="number" min={0} max={5} value={draft.maxRetries} onChange={(event) => setDraft((current) => ({ ...current, maxRetries: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
             <label className="block"><span className="mono-label mb-1.5 block">Timeout (ms)</span><input type="number" min={0} max={600000} step={1000} value={draft.timeoutMs} onChange={(event) => setDraft((current) => ({ ...current, timeoutMs: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
             <label className="block"><span className="mono-label mb-1.5 block">Requests / min</span><input type="number" min={0} max={100000} value={draft.requestsPerMinute} onChange={(event) => setDraft((current) => ({ ...current, requestsPerMinute: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
           </div>
+          <p className="muted text-[11px] leading-relaxed">{draft.hedgeAfterMs > 0
+            ? `If this connection has not answered in ${draft.hedgeAfterMs} ms, the next eligible connection is raced against it and the first reply wins. The loser is cancelled, so its tokens are usually not billed.`
+            : 'Set a hedge delay to race a second connection when this one is slow. With a single connection nothing is sent, so there is no extra cost.'}</p>
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => { void onSave(draft); }} disabled={!isValidResilience(draft)} className="btn-gold !px-3 !py-2 !text-xs disabled:opacity-60">Save reliability</button>
             <button type="button" onClick={() => setDraft(connection.resilience)} className="btn-quiet !px-2 !py-2 !text-xs">Reset</button>
             {live && <span className="muted ml-auto font-mono text-[10px]">{live.failures ? `${live.failures} recent failures` : `${live.successes ?? 0} successes`}</span>}
           </div>
-          {!isValidResilience(draft) && <p className="text-[11px] text-danger">Retries 0–5, timeout 0–600000 ms, requests per minute 0–100000.</p>}
+          {!isValidResilience(draft) && <p className="text-[11px] text-danger">Hedge 0–30000 ms, retries 0–5, timeout 0–600000 ms, requests per minute 0–100000.</p>}
           {live?.lastError && <p className="muted truncate font-mono text-[10px]" title={live.lastError}>last error: {live.lastError}</p>}
         </div>
       )}

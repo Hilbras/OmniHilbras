@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { ProviderError, canonicalLoopbackHost, isLoopbackHostname, publicProviderMessage, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ModelImportPolicy, type ProviderCredential, type ToolDefinition } from '@omnihilbras/sdk';
+import { ProviderError, assertSafeProviderRequestUrl, canonicalLoopbackHost, isLoopbackHostname, publicProviderMessage, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ModelImportPolicy, type ProviderCredential, type ToolDefinition } from '@omnihilbras/sdk';
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './config.js';
 import type { ApiKeyStore } from './api-keys.js';
 import type { ConnectionStore } from './connections.js';
@@ -132,12 +132,34 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    // Any other provider: the endpoint and paths are caller-supplied, so this
+    // covers Anthropic, Gemini, Ollama, and arbitrary OpenAI-compatible servers.
+    if (request.method === 'PUT' && url.pathname.startsWith('/v1/connections/') && !url.pathname.endsWith('/models') && !url.pathname.endsWith('/resilience')) {
+      const providerId = decodeProviderId(url.pathname.slice('/v1/connections/'.length));
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
+      const { credential, ...input } = parseGenericConnectionRequest(body, providerId);
+      const connection = await service.saveConnection(input, credential, controller.signal);
+      sendJson(response, 200, { connection }, origin);
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname.endsWith('/check') && url.pathname.startsWith('/v1/connections/')) {
+      const providerId = decodeProviderId(url.pathname.slice('/v1/connections/'.length, -'/check'.length));
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['apiKey', 'endpoint']);
+      const credential = parseApiKey(body);
+      if (typeof body.endpoint === 'string' && body.endpoint.trim()) assertSafeEndpoint(body.endpoint.trim(), providerId);
+      sendJson(response, 200, await service.validateConnectionCredential(providerId, credential, controller.signal), origin);
+      return;
+    }
+
     if (request.method === 'PUT' && url.pathname.endsWith('/resilience') && url.pathname.startsWith('/v1/connections/')) {
       const encodedConnectionId = url.pathname.slice('/v1/connections/'.length, -'/resilience'.length);
       const connectionId = decodeConnectionId(encodedConnectionId);
       const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
       if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
-      assertOnlyFields(body, ['timeoutMs', 'maxRetries', 'requestsPerMinute']);
+      assertOnlyFields(body, ['timeoutMs', 'maxRetries', 'requestsPerMinute', 'hedgeAfterMs']);
       const connection = await service.updateConnectionResilience(connectionId, parseResilienceInput(body));
       sendJson(response, 200, { connection }, origin);
       return;
@@ -307,11 +329,53 @@ function parseModelPolicy(value: unknown): ModelImportPolicy {
   return value;
 }
 
+function decodeProviderId(value: string) {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    throw invalidRequest('provider id is invalid.');
+  }
+  return parseIdentifier(decoded, 'provider id');
+}
+
+function assertSafeEndpoint(endpoint: string, providerId: string) {
+  assertSafeProviderRequestUrl(endpoint, providerId);
+}
+
+/**
+ * Connection input for any provider other than OpenRouter. The endpoint is
+ * required so the adapter can be pointed at a real server, and the model
+ * policy is optional so a caller can save before importing a catalog.
+ */
+function parseGenericConnectionRequest(body: unknown, providerId: string): { providerId: string; name: string; endpoint: string; priority: number; proxyPool: string; enabled?: boolean; modelPolicy?: ModelImportPolicy; credential: ProviderCredential } {
+  if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+  assertOnlyFields(body, ['apiKey', 'name', 'endpoint', 'priority', 'proxyPool', 'enabled', 'modelPolicy', 'resilience']);
+  const endpoint = body.endpoint === undefined ? '' : parseBoundedString(body.endpoint, 'endpoint', 2048);
+  if (!endpoint) throw invalidRequest('endpoint is required.');
+  assertSafeEndpoint(endpoint, providerId);
+  const name = body.name === undefined ? providerId : parseBoundedString(body.name, 'name', 120);
+  const priority = body.priority === undefined ? 1 : parsePriority(body.priority);
+  const proxyPool = body.proxyPool === undefined ? 'none' : parseBoundedString(body.proxyPool, 'proxyPool', 128, true);
+  if (body.enabled !== undefined && typeof body.enabled !== 'boolean') throw invalidRequest('enabled must be a boolean.');
+  return {
+    providerId,
+    name,
+    endpoint,
+    priority,
+    proxyPool,
+    ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
+    ...(body.modelPolicy === undefined ? {} : { modelPolicy: parseModelPolicy(body.modelPolicy) }),
+    credential: parseApiKey(body),
+  };
+}
+
 function parseResilienceInput(body: Record<string, unknown>) {
-  const resilience: { timeoutMs?: number; maxRetries?: number; requestsPerMinute?: number } = {};
+  const resilience: { timeoutMs?: number; maxRetries?: number; requestsPerMinute?: number; hedgeAfterMs?: number } = {};
   if (body.timeoutMs !== undefined) resilience.timeoutMs = parseBoundedInteger(body.timeoutMs, 'timeoutMs', 0, 600_000);
   if (body.maxRetries !== undefined) resilience.maxRetries = parseBoundedInteger(body.maxRetries, 'maxRetries', 0, 5);
   if (body.requestsPerMinute !== undefined) resilience.requestsPerMinute = parseBoundedInteger(body.requestsPerMinute, 'requestsPerMinute', 0, 100_000);
+  if (body.hedgeAfterMs !== undefined) resilience.hedgeAfterMs = parseBoundedInteger(body.hedgeAfterMs, 'hedgeAfterMs', 0, 30_000);
   if (Object.keys(resilience).length === 0) throw invalidRequest('At least one resilience field is required.');
   return resilience;
 }
