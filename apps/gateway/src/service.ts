@@ -1,6 +1,7 @@
 import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@omnihilbras/sdk';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
-import { ConnectionMetadataLimitError, ConnectionModelLimitError, type ConnectionInput, type ConnectionRecord, type ConnectionStore } from './connections.js';
+import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
+import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
   providerId: string;
@@ -26,34 +27,157 @@ export type GatewayApiKeyList = {
 const connectionMutationLock = 'connection-mutations';
 const apiKeyMutationLock = 'api-key-mutations';
 const defaultProviderId = 'openai';
+/** Consecutive failures before routing stops sending traffic to a connection. */
+const defaultFailureThreshold = 3;
+/** How often background health polling runs. 0 disables it. */
+const defaultHealthIntervalMs = 60_000;
+
+export type GatewayFailoverAttempt = {
+  providerId: string;
+  attempt: number;
+  ok: boolean;
+  latencyMs: number;
+  errorCode?: string;
+};
+
+export type GatewayChatOutcome = {
+  response: ChatResponse;
+  attempts: GatewayFailoverAttempt[];
+};
+
+export type GatewayStreamOutcome = {
+  chunks: AsyncIterable<ChatChunk>;
+  attempts: GatewayFailoverAttempt[];
+};
+
+export type GatewayServiceOptions = {
+  /** Consecutive failures before a connection stops receiving traffic. */
+  failureThreshold?: number;
+  /** How long an ejected connection waits before one probe request. */
+  recoveryCooldownMs?: number;
+  /** Injectable clock for the rate limiter and recovery cooldown. */
+  now?: () => number;
+};
+
+/** Error codes that mean "this request can never succeed on this route". */
+const terminalRouteCodes = new Set(['INVALID_REQUEST', 'AUTHENTICATION_FAILED', 'NOT_SUPPORTED', 'NOT_FOUND']);
+
+function noRouteAvailable(skipped: Array<{ providerId: string; reason: string }>) {
+  const detail = skipped.length > 0 ? ` Skipped: ${skipped.map((entry) => `${entry.providerId} (${entry.reason})`).join(', ')}.` : '';
+  return new ProviderError('PROVIDER_UNAVAILABLE', `${noCandidateMessage}${detail}`, { retryable: true, publicMessage: `${noCandidateMessage}${detail}` });
+}
+
+function attachAttempts(error: unknown, attempts: GatewayFailoverAttempt[]) {
+  const failedProviders = [...new Set(attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.providerId))];
+  if (error instanceof ProviderError) {
+    // A single route keeps the adapter's own redacted public message, so existing
+    // error semantics do not change when failover never engaged.
+    if (failedProviders.length <= 1) {
+      const suffix = failedProviders.length === 1 ? ` Tried: ${failedProviders[0]}.` : '';
+      return new ProviderError(error.code, `${error.message}${suffix}`, {
+        ...(error.providerId ? { providerId: error.providerId } : {}),
+        ...(error.statusCode ? { statusCode: error.statusCode } : {}),
+        retryable: error.retryable,
+        ...(error.publicMessage ? { publicMessage: `${error.publicMessage}${suffix}` } : {}),
+        cause: error,
+      });
+    }
+    if (terminalRouteCodes.has(error.code)) {
+      return new ProviderError(error.code, `${error.message} Tried: ${failedProviders.join(', ')}.`, { ...(error.providerId ? { providerId: error.providerId } : {}), ...(error.statusCode ? { statusCode: error.statusCode } : {}), retryable: error.retryable, cause: error });
+    }
+    const message = `Every provider route failed. Tried: ${failedProviders.join(', ')}.`;
+    return new ProviderError('PROVIDER_UNAVAILABLE', message, { retryable: true, publicMessage: message, cause: error });
+  }
+  const message = `Every provider route failed.${failedProviders.length > 0 ? ` Tried: ${failedProviders.join(', ')}.` : ''}`;
+  return new ProviderError('PROVIDER_REQUEST_FAILED', message, { retryable: true, publicMessage: message, cause: error });
+}
 const missingApiKeyMessage = 'This gateway requires an API key. Create one on the API keys page and send it as "Authorization: Bearer <key>".';
 const invalidApiKeyMessage = 'The API key is invalid or paused.';
 
 export class GatewayService {
   private readonly connectionLocks = new Map<string, Promise<void>>();
+  private readonly providerHealth: HealthRegistry;
+  private readonly rateLimiter: SlidingWindowRateLimiter;
+  private readonly rateLimitWaitMs = new Map<string, number>();
+  private failureThreshold = defaultFailureThreshold;
+  private healthIntervalMs = defaultHealthIntervalMs;
+  private healthTimer?: NodeJS.Timeout;
 
   constructor(
     readonly registry: ProviderRegistry,
     private readonly secretStore: SecretStore,
     private readonly connectionStore?: ConnectionStore,
     private readonly apiKeyStore?: ApiKeyStore,
-  ) {}
+    options: GatewayServiceOptions = {},
+  ) {
+    if (options.failureThreshold !== undefined) this.failureThreshold = options.failureThreshold;
+    const now = options.now ?? (() => Date.now());
+    this.providerHealth = new HealthRegistry(now, options.recoveryCooldownMs);
+    this.rateLimiter = new SlidingWindowRateLimiter(now);
+  }
 
-  async health(signal?: AbortSignal): Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> {
+  /** How often background health polling runs. 0 keeps polling off. */
+  setHealthInterval(intervalMs: number) {
+    this.healthIntervalMs = intervalMs;
+    if (this.healthTimer) this.startHealthMonitor();
+  }
+
+  /** Starts background health polling so routing reflects reality without a request. */
+  startHealthMonitor(intervalMs = this.healthIntervalMs) {
+    this.stopHealthMonitor();
+    this.healthIntervalMs = intervalMs;
+    if (intervalMs <= 0) return;
+    this.healthTimer = setInterval(() => { void this.refreshHealth(); }, intervalMs);
+    this.healthTimer.unref?.();
+    void this.refreshHealth();
+  }
+
+  stopHealthMonitor() {
+    if (this.healthTimer) clearInterval(this.healthTimer);
+    this.healthTimer = undefined;
+  }
+
+  /** Polls every configured adapter and folds the result into routing state. */
+  async refreshHealth(signal?: AbortSignal): Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> {
     const providers = await Promise.all(this.registry.list().map(async (adapter) => {
       if (!adapter.healthCheck) return { providerId: adapter.id, status: 'unavailable' as const, checkedAt: new Date().toISOString(), message: 'Health checks are not supported.' };
+      const startedAt = Date.now();
       try {
         const health = await adapter.healthCheck(await this.context(adapter.id, signal));
+        this.providerHealth.recordSuccess(adapter.id, health.latencyMs ?? Date.now() - startedAt, health.checkedAt);
         return { providerId: adapter.id, ...health };
       } catch {
+        this.providerHealth.recordFailure(adapter.id, 'PROVIDER_UNAVAILABLE', 'The provider health check failed.');
         return { providerId: adapter.id, status: 'unavailable' as const, checkedAt: new Date().toISOString() };
       }
     }));
-    return {
-      status: providers.some((provider) => provider.status !== 'healthy') ? 'degraded' : 'ok',
+    const result = {
+      status: providers.some((provider) => provider.status !== 'healthy') ? 'degraded' as const : 'ok' as const,
       checkedAt: new Date().toISOString(),
       providers,
     };
+    this.rateLimiter.prune();
+    return result;
+  }
+
+  /** Live routing state for the dashboard. */
+  async describeRouting() {
+    const connections = await this.listConnections();
+    return {
+      failureThreshold: this.failureThreshold,
+      connections: connections.map((connection) => ({
+        connectionId: connection.id,
+        providerId: connection.providerId,
+        enabled: connection.enabled,
+        hasCredential: connection.hasCredential,
+        resilience: connection.resilience,
+        ...(this.providerHealth.snapshot(connection.providerId, this.failureThreshold) ?? {}),
+      })),
+    };
+  }
+
+  async health(signal?: AbortSignal): Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> {
+    return this.refreshHealth(signal);
   }
 
   async listAllModels(signal?: AbortSignal): Promise<GatewayModelList> {
@@ -197,6 +321,21 @@ export class GatewayService {
     if (!(await this.apiKeyStore.authenticate(presentedKey))) throw new ProviderError('AUTHENTICATION_FAILED', invalidApiKeyMessage, { publicMessage: invalidApiKeyMessage });
   }
 
+  async updateConnectionResilience(connectionId: string, resilience: Partial<ResilienceSettings>) {
+    if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
+    return this.withProviderLock(connectionMutationLock, async () => {
+      try {
+        const connection = await this.connectionStore!.updateResilience(connectionId, resilience);
+        if (!connection) throw new ProviderError('NOT_FOUND', 'The local connection was not found.');
+        return connection;
+      } catch (error) {
+        if (error instanceof ProviderError) throw error;
+        if (error instanceof ConnectionMetadataLimitError) throw new ProviderError('INVALID_REQUEST', error.message, { cause: error });
+        throw new ProviderError('CONFIGURATION_ERROR', 'The connection settings could not be saved.', { cause: error });
+      }
+    });
+  }
+
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
     const adapter = this.requireAdapter(providerId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
@@ -207,6 +346,162 @@ export class GatewayService {
     const adapter = this.requireAdapter(providerId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
     yield* adapter.streamChat(request, await this.context(adapter.id, signal));
+  }
+
+  /**
+   * Serves one request across a failover chain: each candidate gets its own
+   * retry budget, and a retryable failure moves on to the next connection.
+   */
+  async chatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal): Promise<GatewayChatOutcome> {
+    const decision = await this.planRoute(request.model, explicitProviderId);
+    if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
+    const attempts: GatewayFailoverAttempt[] = [];
+    let lastError: unknown;
+
+    for (const candidate of decision.candidates) {
+      for (let attempt = 1; attempt <= candidate.resilience.maxRetries + 1; attempt += 1) {
+        if (signal?.aborted) throw new ProviderError('CANCELLED', 'The request was cancelled.', { cause: signal.reason });
+        const startedAt = Date.now();
+        try {
+          this.enforceRateLimit(candidate);
+          const response = await this.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.chat(candidate.providerId, request, deadline));
+          const latencyMs = Date.now() - startedAt;
+          this.providerHealth.recordSuccess(candidate.providerId, latencyMs);
+          this.rateLimiter.record(candidate.connectionId);
+          attempts.push({ providerId: candidate.providerId, attempt, ok: true, latencyMs });
+          return { response, attempts };
+        } catch (error) {
+          const latencyMs = Date.now() - startedAt;
+          const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
+          this.providerHealth.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.');
+          attempts.push({ providerId: candidate.providerId, attempt, ok: false, latencyMs, errorCode: code });
+          lastError = error;
+          // A per-connection limit should hand off to the next route, not retry here.
+          if (error instanceof ProviderError && error.code === 'RATE_LIMITED' && attempts.length > 1) break;
+          if (!isRetryableFailure(error)) throw attachAttempts(error, attempts);
+          if (signal?.aborted) break;
+        }
+      }
+    }
+    throw attachAttempts(lastError, attempts);
+  }
+
+  /** Streaming cannot retry after bytes are sent, so failover only covers the first chunk. */
+  async streamChatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal): Promise<GatewayStreamOutcome> {
+    const decision = await this.planRoute(request.model, explicitProviderId);
+    if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
+    const attempts: GatewayFailoverAttempt[] = [];
+    let lastError: unknown;
+
+    for (const candidate of decision.candidates) {
+      const startedAt = Date.now();
+      let opening: ChatChunk | undefined;
+      let rest: AsyncIterator<ChatChunk> | undefined;
+      try {
+        this.enforceRateLimit(candidate);
+        const opened = await this.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, async (deadline) => {
+          const source = this.streamChat(candidate.providerId, request, deadline)[Symbol.asyncIterator]();
+          const first = await source.next();
+          if (first.done) throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before producing a chunk.');
+          // The deadline has passed; the rest of the stream continues without it.
+          const remainder = (async function* (): AsyncGenerator<ChatChunk> {
+            while (true) {
+              const next = await source.next();
+              if (next.done) return;
+              yield next.value;
+            }
+          })();
+          return { first: first.value, remainder };
+        });
+        opening = opened.first;
+        rest = opened.remainder[Symbol.asyncIterator]();
+      } catch (error) {
+        const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
+        this.providerHealth.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.');
+        attempts.push({ providerId: candidate.providerId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
+        lastError = error;
+        if (!isRetryableFailure(error) || signal?.aborted) break;
+        continue;
+      }
+      this.rateLimiter.record(candidate.connectionId);
+      attempts.push({ providerId: candidate.providerId, attempt: 1, ok: true, latencyMs: Date.now() - startedAt });
+      const settled = opening;
+      return {
+        attempts,
+        chunks: (async function* (self: GatewayService) {
+          if (settled) yield settled;
+          try {
+            while (true) {
+              const next = await rest!.next();
+              if (next.done) return;
+              yield next.value;
+            }
+          } finally {
+            self.providerHealth.recordSuccess(candidate.providerId, Date.now() - startedAt);
+          }
+        })(this),
+      };
+    }
+    throw attachAttempts(lastError, attempts);
+  }
+
+  private async planRoute(model: string, explicitProviderId?: string) {
+    const connections = await this.listConnections();
+    const decision = resolveRoute({
+      connections,
+      model,
+      ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
+      health: this.providerHealth,
+      failureThreshold: this.failureThreshold,
+      rateLimitWaitMs: this.rateLimitWaitMs,
+    });
+    if (decision.candidates.length > 0) return decision;
+    // Without connection metadata there is nothing to route on, so an embedded
+    // service still serves the requested provider directly.
+    if (connections.length === 0) {
+      const providerId = explicitProviderId ?? defaultProviderId;
+      this.requireAdapter(providerId);
+      return { ...decision, candidates: [{ providerId, connectionId: `unmanaged:${providerId}`, priority: 0, resilience: { ...defaultResilienceSettings } }] };
+    }
+    return decision;
+  }
+
+  private enforceRateLimit(candidate: RouteCandidate) {
+    const waitMs = this.rateLimiter.check(candidate.connectionId, candidate.resilience.requestsPerMinute);
+    this.rateLimitWaitMs.set(candidate.connectionId, waitMs);
+    if (waitMs > 0) {
+      throw new ProviderError('RATE_LIMITED', `This connection reached its limit of ${candidate.resilience.requestsPerMinute} requests per minute.`, {
+        providerId: candidate.providerId,
+        retryable: true,
+      });
+    }
+  }
+
+  /**
+   * Applies a per-connection deadline without leaking timers: the timeout aborts
+   * the provider call, and the timer is always released once the call settles.
+   */
+  private async withDeadline<T>(signal: AbortSignal | undefined, timeoutMs: number, providerId: string, run: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
+    if (timeoutMs <= 0) return run(signal);
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(signal?.reason);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // The deadline is enforced here rather than trusted to the adapter, so a
+    // provider that ignores the abort signal still cannot hang the request.
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new ProviderError('PROVIDER_TIMEOUT', `The provider did not respond within ${timeoutMs} ms.`, { providerId, retryable: true }));
+      }, timeoutMs);
+      timer.unref?.();
+    });
+    try {
+      return await Promise.race([run(controller.signal), deadline]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    }
   }
 
   private async discoverConnectionModels(providerId: string, credential: ProviderCredential, policy: ModelImportPolicy, signal?: AbortSignal) {

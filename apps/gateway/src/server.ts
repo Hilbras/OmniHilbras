@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { ProviderError, canonicalLoopbackHost, isLoopbackHostname, publicProviderMessage, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ModelImportPolicy, type ProviderCredential, type ToolDefinition } from '@omnihilbras/sdk';
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './config.js';
+import type { ApiKeyStore } from './api-keys.js';
 import type { ConnectionStore } from './connections.js';
 import type { GatewayService } from './service.js';
 
@@ -53,15 +54,20 @@ export async function startGatewayServer(options: {
   corsOrigin?: string;
   corsOrigins?: string[];
   connectionStore?: ConnectionStore;
+  apiKeyStore?: ApiKeyStore;
+  healthIntervalMs?: number;
 } = {}) {
   const config = options.config ?? loadGatewayConfig(options.env);
   assertLoopbackHost(config.host);
   const bindHost = canonicalLoopbackHost(config.host);
-  const service = createGatewayService(config, options.env, options.connectionStore);
+  const service = createGatewayService(config, options.env, options.connectionStore, options.apiKeyStore);
+  service.setHealthInterval(options.healthIntervalMs ?? config.healthIntervalMs);
   const server = createGatewayServer(service, {
     ...(options.corsOrigin ? { corsOrigin: options.corsOrigin } : {}),
     ...(options.corsOrigins ? { corsOrigins: options.corsOrigins } : options.corsOrigin ? {} : { corsOrigins: config.corsOrigins }),
   });
+
+  service.startHealthMonitor();
 
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
@@ -123,6 +129,22 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const { credential, ...input } = parseOpenRouterConnectionRequest(body);
       const connection = await service.saveConnection(input, credential, controller.signal);
       sendJson(response, 200, { connection }, origin);
+      return;
+    }
+
+    if (request.method === 'PUT' && url.pathname.endsWith('/resilience') && url.pathname.startsWith('/v1/connections/')) {
+      const encodedConnectionId = url.pathname.slice('/v1/connections/'.length, -'/resilience'.length);
+      const connectionId = decodeConnectionId(encodedConnectionId);
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['timeoutMs', 'maxRetries', 'requestsPerMinute']);
+      const connection = await service.updateConnectionResilience(connectionId, parseResilienceInput(body));
+      sendJson(response, 200, { connection }, origin);
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/v1/routing') {
+      sendJson(response, 200, await service.describeRouting(), origin);
       return;
     }
 
@@ -285,6 +307,22 @@ function parseModelPolicy(value: unknown): ModelImportPolicy {
   return value;
 }
 
+function parseResilienceInput(body: Record<string, unknown>) {
+  const resilience: { timeoutMs?: number; maxRetries?: number; requestsPerMinute?: number } = {};
+  if (body.timeoutMs !== undefined) resilience.timeoutMs = parseBoundedInteger(body.timeoutMs, 'timeoutMs', 0, 600_000);
+  if (body.maxRetries !== undefined) resilience.maxRetries = parseBoundedInteger(body.maxRetries, 'maxRetries', 0, 5);
+  if (body.requestsPerMinute !== undefined) resilience.requestsPerMinute = parseBoundedInteger(body.requestsPerMinute, 'requestsPerMinute', 0, 100_000);
+  if (Object.keys(resilience).length === 0) throw invalidRequest('At least one resilience field is required.');
+  return resilience;
+}
+
+function parseBoundedInteger(value: unknown, field: string, minimum: number, maximum: number) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum || value > maximum) {
+    throw invalidRequest(`${field} must be an integer from ${minimum} to ${maximum}.`);
+  }
+  return value;
+}
+
 function parseModelIds(value: unknown) {
   if (!Array.isArray(value) || value.length === 0) throw invalidRequest('modelIds must be a non-empty array.');
   const modelIds: string[] = [];
@@ -343,14 +381,17 @@ function extractApiKey(request: IncomingMessage) {
 async function handleChat(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
   const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
   const chatRequest = parseChatRequest(body);
-  const providerId = await service.resolveProviderId(chatRequest.model, getExplicitProviderId(request, body));
+  const explicitProviderId = getExplicitProviderId(request, body);
 
   if (!chatRequest.stream) {
-    const result = await service.chat(providerId, chatRequest, signal);
-    sendJson(response, 200, toOpenAICompletion(result), origin);
+    const { response: completion, attempts } = await service.chatWithFailover(chatRequest, explicitProviderId, signal);
+    sendJson(response, 200, { ...toOpenAICompletion(completion), ...(attempts.length > 1 ? { gateway: { attempts: attempts.map(toPublicAttempt) } } : {}) }, origin);
     return;
   }
 
+  // The failover decision is made before any byte is written, so a stream that
+  // cannot start returns a normal JSON error instead of a truncated SSE body.
+  const outcome = await service.streamChatWithFailover(chatRequest, explicitProviderId, signal);
   response.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-cache',
@@ -360,7 +401,7 @@ async function handleChat(request: IncomingMessage, response: ServerResponse, se
   response.flushHeaders();
 
   try {
-    for await (const chunk of service.streamChat(providerId, chatRequest, signal)) {
+    for await (const chunk of outcome.chunks) {
       await writeStreamData(response, `data: ${JSON.stringify(toOpenAIChunk(chunk))}\n\n`, signal);
     }
     await writeStreamData(response, 'data: [DONE]\n\n', signal);
@@ -371,6 +412,10 @@ async function handleChat(request: IncomingMessage, response: ServerResponse, se
       response.end();
     }
   }
+}
+
+function toPublicAttempt(attempt: { providerId: string; attempt: number; ok: boolean; latencyMs: number; errorCode?: string }) {
+  return { provider: attempt.providerId, attempt: attempt.attempt, ok: attempt.ok, latencyMs: attempt.latencyMs, ...(attempt.errorCode ? { error: attempt.errorCode } : {}) };
 }
 
 function parseChatRequest(body: unknown): ChatRequest {

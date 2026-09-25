@@ -74,6 +74,10 @@ OMNIHILBRAS_COMPATIBLE_API_KEY=...
 # Optional local connection settings:
 OMNIHILBRAS_DATA_DIR=...
 OMNIHILBRAS_MASTER_KEY=...
+# Optional reliability tuning (per-connection budgets are set in the dashboard):
+OMNIHILBRAS_HEALTH_INTERVAL_MS=60000
+OMNIHILBRAS_FAILURE_THRESHOLD=3
+OMNIHILBRAS_RECOVERY_COOLDOWN_MS=30000
 # Optional custom OpenAI-compatible paths:
 OMNIHILBRAS_COMPATIBLE_MODELS_PATH=/models
 OMNIHILBRAS_COMPATIBLE_CHAT_PATH=/chat/completions
@@ -88,6 +92,8 @@ Available routes:
 - `PUT /v1/connections/openrouter`
 - `POST /v1/connections/:id/models`
 - `DELETE /v1/connections/:id`
+- `PUT /v1/connections/:id/resilience`
+- `GET /v1/routing`
 - `GET /v1/keys`
 - `POST /v1/keys`
 - `PATCH /v1/keys/:id`
@@ -142,6 +148,48 @@ exempt so the dashboard can keep testing models; every other client must present
 a valid, unpaused key. The toggle on the API keys page, or
 `PUT /v1/settings/require-api-key`, turns enforcement off. Pausing or deleting
 a key takes effect on the next request.
+
+## Connection Reliability
+
+Each connection carries its own retry, timeout, and rate-limit budget, editable
+under **Reliability** on the provider page or through
+`PUT /v1/connections/:id/resilience`:
+
+```json
+{ "maxRetries": 2, "timeoutMs": 25000, "requestsPerMinute": 60 }
+```
+
+- **`maxRetries`** (0–5, default 1) — extra attempts on the same connection.
+- **`timeoutMs`** (0–600000, default 0 = shared default) — per-request deadline,
+  enforced by the gateway so a provider that ignores cancellation still cannot
+  hang a request.
+- **`requestsPerMinute`** (0–100000, default 0 = unlimited) — sliding window per
+  connection. Exceeding it hands the request to the next route.
+
+A retryable failure (timeout, rate limit, provider unavailable) spends the retry
+budget, then falls through to the next connection by priority. Auth failures and
+invalid requests are never retried — repeating them cannot help. Streaming
+fails over only before the first chunk is sent; a mid-stream failure is reported
+rather than silently restarting.
+
+After `OMNIHILBRAS_FAILURE_THRESHOLD` consecutive failures (default 3) a
+connection is ejected from routing. It rejoins automatically after a 30 second
+cooldown, so a recovered provider returns without a restart. Background health
+polling (`OMNIHILBRAS_HEALTH_INTERVAL_MS`, default 60000) marks unhealthy
+providers independently of live traffic.
+
+When failover actually engages, a non-streaming response carries the attempt
+trace so a client can see what happened:
+
+```json
+"gateway": { "attempts": [
+  { "provider": "openrouter", "attempt": 1, "ok": false, "error": "PROVIDER_TIMEOUT" },
+  { "provider": "backup", "attempt": 1, "ok": true, "latencyMs": 812 }
+] }
+```
+
+`GET /v1/routing` reports live state: per-connection budgets, recent failures
+and successes, ejection, last latency, and the last error.
 
 OpenRouter model import is controlled by the dialog toggle and defaults to
 free mode when an API client omits the policy. Free mode keeps only discovered

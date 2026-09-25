@@ -116,6 +116,8 @@ The first local gateway exposes:
 - `POST /v1/keys` — mint a key; the response is the only time the secret is returned.
 - `PATCH /v1/keys/:id` — pause or resume a key.
 - `DELETE /v1/keys/:id` — revoke a key.
+- `PUT /v1/connections/:id/resilience` — update one connection's retry, timeout, and rate-limit budget.
+- `GET /v1/routing` — live routing state: budgets, recent failures and successes, ejection, last latency, last error.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
 - `POST /v1/chat/completions` with `stream: true` — normalized SSE chunks.
@@ -193,6 +195,43 @@ model ID. That constrains two behaviors:
   not import.
 
 Disabled or credential-less connections take part in neither.
+
+## Connection Reliability
+
+Every connection stores a `resilience` block: `maxRetries` (0–5, default 1),
+`timeoutMs` (0–600000, default 0 for the shared default), and
+`requestsPerMinute` (0–100000, default 0 for unlimited). Settings are validated
+at the store boundary and exposed through `PUT /v1/connections/:id/resilience`;
+unspecified fields keep their current value.
+
+Behavior when serving a request:
+
+- Candidates are ordered by priority, then name, and a candidate must own the
+  model unless the caller pinned a provider explicitly.
+- A retryable failure — timeout, rate limit, provider unavailable, or a
+  provider-marked retryable error — spends that connection's retry budget and
+  then moves to the next candidate. `INVALID_REQUEST`, `AUTHENTICATION_FAILED`,
+  `NOT_SUPPORTED`, `NOT_FOUND`, and `CANCELLED` are terminal: they are neither
+  retried nor failed over, because another connection cannot fix them.
+- The per-request deadline is enforced by the gateway, not delegated to the
+  adapter, so a provider that ignores its abort signal still cannot hold a
+  request open.
+- Rate limiting uses a sliding window per connection, so a burst cannot
+  straddle a minute boundary and double the effective rate. A limited
+  connection hands the request to the next route.
+- Streaming decides its route before the first byte is written, so a stream that
+  cannot start returns a normal JSON error. Once bytes are sent, a failure is
+  reported as a stream error rather than silently restarting on another route.
+- After `failureThreshold` consecutive failures a connection is ejected. It is
+  eligible again after a recovery cooldown, so no restart is needed to bring a
+  recovered provider back.
+- `GET /health` folds live request outcomes into the polled result, and
+  background polling can do the same on an interval. `GET /v1/routing` exposes
+  the resulting state for the dashboard.
+- A non-streaming response includes a `gateway.attempts` trace only when more
+  than one attempt was made, so single-route responses are unchanged. Error
+  redaction still applies: the aggregate message names providers, never
+  third-party response content.
 
 ## Project Structure
 

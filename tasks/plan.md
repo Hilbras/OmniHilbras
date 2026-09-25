@@ -181,6 +181,15 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
   - Depends on: Task 9f.
   - Scope: Medium.
 
+### Phase 4f: Connection reliability
+
+- [x] Task 9h: Add per-connection retry, timeout, rate limits, and health-based failover.
+  - Acceptance: each connection stores a validated resilience budget; retryable failures retry then fail over by priority; terminal failures never retry; per-request deadlines and per-connection rate limits are enforced by the gateway; failing connections are ejected and recover automatically; the dashboard exposes the controls and live state.
+  - Verify: routing tests cover retry-then-failover, terminal-error short-circuiting, timeout and rate-limit handoff, ejection with cooldown recovery, streaming failover before the first chunk, and background health polling; HTTP tests cover the attempt trace and resilience route; browser smoke test covers the Reliability panel.
+  - Files: `apps/gateway/src/routing.ts`, `src/service.ts`, `src/connections.ts`, `src/server.ts`, `src/config.ts`, `test/routing.test.js`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, docs.
+  - Depends on: Task 9g.
+  - Scope: Medium.
+
 ### Checkpoint: Gateway API keys
 
 - [x] Key secrets are shown once and stored only as SHA-256 hashes.
@@ -188,6 +197,13 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] The dashboard keeps working without holding a key.
 - [x] A client needs only a base URL, key, and model ID: routing resolves the provider from the saved catalog and `/v1/models` advertises the saved catalog.
 - [x] Existing connection routes, model tests, and builds remain green.
+
+### Checkpoint: Connection reliability
+
+- [x] Retries, deadlines, and rate limits are per-connection and validated at the store boundary.
+- [x] Retryable failures fail over; auth and validation failures do not.
+- [x] A failed connection is ejected and rejoins without a restart.
+- [x] Streaming never restarts a request that already sent bytes.
 
 ### Phase 5: Cloud readiness
 

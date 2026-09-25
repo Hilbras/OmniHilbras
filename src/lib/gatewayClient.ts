@@ -13,6 +13,15 @@ export type GatewayHealth = {
   providers: GatewayProviderHealth[];
 };
 
+export type GatewayResilience = {
+  /** Per-request budget in ms. 0 uses the shared default. */
+  timeoutMs: number;
+  /** Extra attempts after the first failure. */
+  maxRetries: number;
+  /** Requests allowed per minute. 0 disables the limit. */
+  requestsPerMinute: number;
+};
+
 export type GatewayConnection = {
   id: string;
   providerId: string;
@@ -25,8 +34,26 @@ export type GatewayConnection = {
   modelPolicy: 'free' | 'all';
   modelIds: string[];
   customModelIds: string[];
+  resilience: GatewayResilience;
   createdAt: string;
   updatedAt: string;
+};
+
+export type GatewayRoutingState = {
+  failureThreshold: number;
+  connections: Array<{
+    connectionId: string;
+    providerId: string;
+    enabled: boolean;
+    hasCredential: boolean;
+    resilience: GatewayResilience;
+    failures?: number;
+    successes?: number;
+    ejected?: boolean;
+    lastCheckedAt?: string;
+    lastLatencyMs?: number;
+    lastError?: string;
+  }>;
 };
 
 export type GatewayConnectionValidation = {
@@ -152,6 +179,19 @@ export function addGatewayConnectionModels(connectionId: string, modelIds: strin
     body: JSON.stringify({ modelIds }),
     ...(signal ? { signal } : {}),
   }).then((body) => body.connection);
+}
+
+export function updateGatewayConnectionResilience(connectionId: string, resilience: Partial<GatewayResilience>, signal?: AbortSignal) {
+  return requestJson<{ connection: GatewayConnection }>(`/v1/connections/${encodeURIComponent(connectionId)}/resilience`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(resilience),
+    ...(signal ? { signal } : {}),
+  }).then((body) => body.connection);
+}
+
+export function getGatewayRoutingState(signal?: AbortSignal) {
+  return requestJson<GatewayRoutingState>('/v1/routing', { signal });
 }
 
 export function removeGatewayConnection(connectionId: string, signal?: AbortSignal) {

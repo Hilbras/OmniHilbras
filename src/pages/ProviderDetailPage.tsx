@@ -5,6 +5,8 @@ import {
   ArrowUpRight,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   CircleAlert,
   Clock3,
   Copy,
@@ -22,7 +24,7 @@ import {
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
-import { addGatewayConnectionModels, getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, testGatewayModel, type GatewayConnection } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, getGatewayHealth, getGatewayRoutingState, listGatewayConnections, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, type GatewayConnection, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
 
@@ -112,6 +114,56 @@ function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testSt
   );
 }
 
+function isValidResilience(value: GatewayResilience) {
+  const inRange = (input: number, min: number, max: number) => Number.isInteger(input) && input >= min && input <= max;
+  return inRange(value.maxRetries, 0, 5) && inRange(value.timeoutMs, 0, 600_000) && inRange(value.requestsPerMinute, 0, 100_000);
+}
+
+function ResiliencePanel({ connection, routingState, onSave }: { connection: GatewayConnection; routingState?: GatewayRoutingState; onSave: (next: GatewayResilience) => void | Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<GatewayResilience>(connection.resilience);
+  const live = routingState?.connections.find((item) => item.providerId === connection.providerId);
+
+  useEffect(() => {
+    setDraft(connection.resilience);
+  }, [connection.resilience]);
+
+  const summary = connection.resilience.timeoutMs > 0
+    ? `${Math.round(connection.resilience.timeoutMs / 1000)}s timeout · ${connection.resilience.maxRetries} ${connection.resilience.maxRetries === 1 ? 'retry' : 'retries'}`
+    : `${connection.resilience.maxRetries} ${connection.resilience.maxRetries === 1 ? 'retry' : 'retries'} · shared timeout`;
+
+  return (
+    <div className="mt-5 border-t border-line pt-5">
+      <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} className="flex w-full items-center justify-between gap-3 text-left">
+        <span className="text-xs font-semibold">Reliability</span>
+        <span className="flex items-center gap-2">
+          {live?.ejected && <span className="rounded-full border border-danger/25 bg-danger/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wide text-danger">ejected</span>}
+          <span className="muted font-mono text-[10px]">{summary}</span>
+          {open ? <ChevronDown className="h-3.5 w-3.5 text-muted" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5 text-muted" aria-hidden="true" />}
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-4 space-y-3">
+          <p className="muted text-[11px] leading-relaxed">OmniHilbras retries a failed request here, then falls through to the next connection by priority. Requests without a valid key are never retried.</p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="block"><span className="mono-label mb-1.5 block">Retries</span><input type="number" min={0} max={5} value={draft.maxRetries} onChange={(event) => setDraft((current) => ({ ...current, maxRetries: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
+            <label className="block"><span className="mono-label mb-1.5 block">Timeout (ms)</span><input type="number" min={0} max={600000} step={1000} value={draft.timeoutMs} onChange={(event) => setDraft((current) => ({ ...current, timeoutMs: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
+            <label className="block"><span className="mono-label mb-1.5 block">Requests / min</span><input type="number" min={0} max={100000} value={draft.requestsPerMinute} onChange={(event) => setDraft((current) => ({ ...current, requestsPerMinute: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => { void onSave(draft); }} disabled={!isValidResilience(draft)} className="btn-gold !px-3 !py-2 !text-xs disabled:opacity-60">Save reliability</button>
+            <button type="button" onClick={() => setDraft(connection.resilience)} className="btn-quiet !px-2 !py-2 !text-xs">Reset</button>
+            {live && <span className="muted ml-auto font-mono text-[10px]">{live.failures ? `${live.failures} recent failures` : `${live.successes ?? 0} successes`}</span>}
+          </div>
+          {!isValidResilience(draft) && <p className="text-[11px] text-danger">Retries 0–5, timeout 0–600000 ms, requests per minute 0–100000.</p>}
+          {live?.lastError && <p className="muted truncate font-mono text-[10px]" title={live.lastError}>last error: {live.lastError}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AddModelForm({ onAdd, providerId }: { onAdd: (model: string) => void | Promise<void>; providerId: string }) {
   const [model, setModel] = useState('');
   const [adding, setAdding] = useState(false);
@@ -157,6 +209,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const [notice, setNotice] = useState('');
   const [noticeError, setNoticeError] = useState(false);
   const [copiedModel, setCopiedModel] = useState<string | null>(null);
+  const [routingState, setRoutingState] = useState<GatewayRoutingState | undefined>();
   const meta = statusMeta(connectionAdded ? (provider.id === 'openrouter' && !connectionHealthy ? 'attention' : provider.status === 'available' ? 'connected' : provider.status) : 'available');
 
   useEffect(() => {
@@ -173,6 +226,14 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     return () => { active = false; };
   }, [provider.id]);
   useEffect(() => () => modelTestAbortRef.current?.abort(), []);
+  useEffect(() => {
+    if (provider.id !== 'openrouter') return;
+    let active = true;
+    void getGatewayRoutingState()
+      .then((state) => { if (active) setRoutingState(state); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [provider.id]);
   useLayoutEffect(() => {
     if (scrollAnchorRef.current !== null) window.scrollTo(0, scrollAnchorRef.current);
   }, [connectionPingMs, modelTestErrors, modelTestLatencies, modelTests, notice, testingModel]);
@@ -297,6 +358,18 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     }
   }
 
+  async function saveResilience(next: GatewayResilience) {
+    if (!connection) return;
+    try {
+      const updated = await updateGatewayConnectionResilience(connection.id, next);
+      setConnection(updated);
+      setRoutingState(await getGatewayRoutingState().catch(() => routingState));
+      flash('Reliability settings saved.');
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'The reliability settings could not be saved.', 'error');
+    }
+  }
+
   async function copyModel(model: string) {
     if (!navigator.clipboard) return;
     try {
@@ -349,6 +422,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
           <div className="flex items-center gap-2"><span className="grid h-8 w-8 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><SlidersHorizontal className="h-4 w-4" aria-hidden="true" /></span><div><h2 id="policy-title" className="text-sm font-semibold">Routing policy</h2><p className="muted mt-0.5 text-xs">How this provider participates.</p></div></div>
           <label className="mt-6 block"><span className="mono-label mb-2 block">Strategy</span><select value={strategy} onChange={(event) => { setStrategy(event.target.value); flash(`Policy changed to ${event.target.value}.`); }} className="input !py-2.5 !text-xs"><option value="balanced">Balanced · quality and cost</option><option value="fast">Fastest response</option><option value="cheap">Lowest cost</option><option value="private">Prefer private routes</option></select></label>
           <div className="mt-5 space-y-3 border-t border-line pt-5"><div className="flex items-center justify-between text-xs"><span className="muted">Endpoint</span><button type="button" onClick={() => document.getElementById('endpoint')?.scrollIntoView({ behavior: 'smooth' })} className="max-w-[180px] truncate text-left font-mono text-[10px] text-gold-text hover:underline">{connection?.endpoint ?? provider.endpoint}</button></div><div className="flex items-center justify-between text-xs"><span className="muted">Priority</span><span className="font-mono text-[10px]">#{connection?.priority ?? 1}</span></div><div className="flex items-center justify-between text-xs"><span className="muted">Credentials</span><span className="flex items-center gap-1.5 font-mono text-[10px] text-success"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />local only</span></div></div>
+          {connection && <ResiliencePanel connection={connection} routingState={routingState} onSave={saveResilience} />}
           <div className="mt-5 rounded-lg border border-gold/20 bg-gold-soft/45 p-3 text-[11px] leading-relaxed text-muted"><Sparkles className="mr-1 inline h-3.5 w-3.5 text-gold-text" aria-hidden="true" />{provider.id === 'openrouter' ? 'OpenRouter credentials are managed by the local gateway.' : 'Policy changes are preview-only until a provider management API is connected.'}</div>
         </section>
       </div>

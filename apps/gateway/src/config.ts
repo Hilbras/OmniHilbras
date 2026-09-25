@@ -19,6 +19,12 @@ export type GatewayConfig = {
   host: string;
   port: number;
   timeoutMs: number;
+  /** Background provider health polling interval. 0 disables polling. */
+  healthIntervalMs: number;
+  /** Consecutive failures before a connection stops receiving traffic. */
+  failureThreshold: number;
+  /** How long an ejected connection waits before one probe request. */
+  recoveryCooldownMs: number;
   corsOrigins: string[];
   dataDir: string;
   openai: {
@@ -73,6 +79,9 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
     host,
     port: parseInteger(env.OMNIHILBRAS_PORT, 8787, 'OMNIHILBRAS_PORT'),
     timeoutMs: parseInteger(env.OMNIHILBRAS_TIMEOUT_MS, 30_000, 'OMNIHILBRAS_TIMEOUT_MS'),
+    healthIntervalMs: parseNonNegativeInteger(env.OMNIHILBRAS_HEALTH_INTERVAL_MS, 60_000, 'OMNIHILBRAS_HEALTH_INTERVAL_MS', 3_600_000),
+    failureThreshold: parseNonNegativeInteger(env.OMNIHILBRAS_FAILURE_THRESHOLD, 3, 'OMNIHILBRAS_FAILURE_THRESHOLD', 100),
+    recoveryCooldownMs: parseNonNegativeInteger(env.OMNIHILBRAS_RECOVERY_COOLDOWN_MS, 30_000, 'OMNIHILBRAS_RECOVERY_COOLDOWN_MS', 3_600_000),
     corsOrigins: parseCorsOrigins(env.OMNIHILBRAS_CORS_ORIGINS),
     dataDir: env.OMNIHILBRAS_DATA_DIR?.trim() || defaultConnectionDirectory(env),
     openai: {
@@ -137,7 +146,10 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
   const environmentSecretStore = new EnvironmentSecretStore(env, config.compatible.id);
   const store = connectionStore ?? new LocalConnectionStore({ directory: config.dataDir, fallback: environmentSecretStore, masterKey: parseMasterKey(env.OMNIHILBRAS_MASTER_KEY) });
   const keys = apiKeyStore ?? new LocalApiKeyStore({ directory: config.dataDir });
-  return new GatewayService(createProviderRegistry(config), store, store, keys);
+  return new GatewayService(createProviderRegistry(config), store, store, keys, {
+    failureThreshold: config.failureThreshold,
+    recoveryCooldownMs: config.recoveryCooldownMs,
+  });
 }
 
 function providerEnvKey(providerId: string) {
@@ -148,6 +160,14 @@ function parseInteger(value: string | undefined, fallback: number, name: string)
   if (value === undefined) return fallback;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${name} must be a positive integer.`);
+  return parsed;
+}
+
+/** Like `parseInteger`, but 0 is a meaningful value: it disables polling. */
+function parseNonNegativeInteger(value: string | undefined, fallback: number, name: string, maximum: number) {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > maximum) throw new Error(`${name} must be an integer from 0 to ${maximum}.`);
   return parsed;
 }
 

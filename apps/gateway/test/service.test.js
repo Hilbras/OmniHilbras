@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@omnihilbras/sdk';
-import { createProviderRegistry, EnvironmentSecretStore, GatewayService, InMemoryConnectionStore, loadGatewayConfig, startGatewayServer } from '../dist/index.js';
+import { createGatewayService, createProviderRegistry, EnvironmentSecretStore, GatewayService, InMemoryConnectionStore, loadGatewayConfig, startGatewayServer } from '../dist/index.js';
 
 test('gateway config loads local defaults and environment credentials', async () => {
   const config = loadGatewayConfig({
@@ -21,6 +21,22 @@ test('gateway config loads local defaults and environment credentials', async ()
   assert.deepEqual(await secretStore.get('openai'), { type: 'api-key', value: 'openai-secret' });
   assert.deepEqual(await secretStore.get('openai-compatible'), { type: 'api-key', value: 'local-secret' });
   assert.equal(await secretStore.get('gemini'), undefined);
+});
+
+test('gateway config reads reliability tuning from the environment', () => {
+  const defaults = loadGatewayConfig({});
+  assert.equal(defaults.host, '127.0.0.1');
+  assert.equal(defaults.healthIntervalMs, 60_000);
+  assert.equal(defaults.failureThreshold, 3);
+  assert.equal(defaults.recoveryCooldownMs, 30_000);
+
+  const tuned = loadGatewayConfig({ OMNIHILBRAS_HEALTH_INTERVAL_MS: '5000', OMNIHILBRAS_FAILURE_THRESHOLD: '5', OMNIHILBRAS_RECOVERY_COOLDOWN_MS: '1500' });
+  assert.deepEqual([tuned.healthIntervalMs, tuned.failureThreshold, tuned.recoveryCooldownMs], [5_000, 5, 1_500]);
+
+  assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_FAILURE_THRESHOLD: 'soon' }), /OMNIHILBRAS_FAILURE_THRESHOLD/);
+  assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_RECOVERY_COOLDOWN_MS: '-1' }), /OMNIHILBRAS_RECOVERY_COOLDOWN_MS/);
+  assert.throws(() => loadGatewayConfig({ OMNIHILBRAS_HEALTH_INTERVAL_MS: '99999999' }), /OMNIHILBRAS_HEALTH_INTERVAL_MS/);
+  assert.equal(loadGatewayConfig({ OMNIHILBRAS_HEALTH_INTERVAL_MS: '0' }).healthIntervalMs, 0, '0 disables polling');
 });
 
 test('gateway config rejects non-loopback hosts and wildcard CORS', () => {

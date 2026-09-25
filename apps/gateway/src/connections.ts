@@ -16,8 +16,19 @@ export type ConnectionRecord = {
   modelPolicy: ModelImportPolicy;
   modelIds: string[];
   customModelIds: string[];
+  resilience: ResilienceSettings;
   createdAt: string;
   updatedAt: string;
+};
+
+/** Per-connection limits applied to every request routed through it. */
+export type ResilienceSettings = {
+  /** Per-request budget for this connection. 0 keeps the shared default. */
+  timeoutMs: number;
+  /** Extra attempts after the first failure. Failures that cannot succeed on a retry are not repeated. */
+  maxRetries: number;
+  /** Requests allowed per minute. 0 disables the limit for this connection. */
+  requestsPerMinute: number;
 };
 
 export type ConnectionInput = {
@@ -31,7 +42,20 @@ export type ConnectionInput = {
   modelPolicy?: ModelImportPolicy;
   modelIds?: string[];
   customModelIds?: string[];
+  resilience?: Partial<ResilienceSettings>;
 };
+
+export const defaultResilienceSettings: ResilienceSettings = {
+  timeoutMs: 0,
+  maxRetries: 1,
+  requestsPerMinute: 0,
+};
+
+export const resilienceLimits = {
+  timeoutMs: { min: 0, max: 600_000 },
+  maxRetries: { min: 0, max: 5 },
+  requestsPerMinute: { min: 0, max: 100_000 },
+} as const;
 
 export interface WritableSecretStore extends SecretStore {
   set(providerId: ProviderId, credential: ProviderCredential): Promise<void>;
@@ -42,6 +66,7 @@ export interface ConnectionStore extends WritableSecretStore {
   list(): Promise<ConnectionRecord[]>;
   save(input: ConnectionInput, credential: ProviderCredential): Promise<ConnectionRecord>;
   updateModels(connectionId: string, modelIds: string[]): Promise<ConnectionRecord | undefined>;
+  updateResilience(connectionId: string, resilience: Partial<ResilienceSettings>): Promise<ConnectionRecord | undefined>;
   remove(connectionId: string): Promise<boolean>;
 }
 
@@ -126,23 +151,7 @@ export class InMemoryConnectionStore implements ConnectionStore {
     if (existing && existing.providerId !== normalized.providerId) throw new Error('Connection ID is already used by another provider.');
     if (!existing && this.connections.size >= maxConnections) throw new Error('The local connection limit has been reached.');
 
-    const now = new Date().toISOString();
-    const modelLists = mergeModelLists(normalized.modelIds ?? existing?.modelIds, normalized.customModelIds ?? existing?.customModelIds);
-    const record: ConnectionRecord = {
-      id,
-      providerId: normalized.providerId,
-      name: normalized.name,
-      endpoint: normalized.endpoint,
-      priority: normalized.priority,
-      proxyPool: normalized.proxyPool,
-      enabled: normalized.enabled ?? existing?.enabled ?? true,
-      hasCredential: credential.type === 'api-key',
-      modelPolicy: normalized.modelPolicy ?? existing?.modelPolicy ?? 'all',
-      modelIds: modelLists.modelIds,
-      customModelIds: modelLists.customModelIds,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-    };
+    const record = buildRecord({ ...normalized, id }, existing, credential.type === 'api-key');
     this.connections.set(id, record);
     this.credentials.set(normalized.providerId, cloneCredential(credential));
     return cloneRecord(record);
@@ -158,6 +167,14 @@ export class InMemoryConnectionStore implements ConnectionStore {
     return cloneRecord(updated);
   }
 
+  async updateResilience(connectionId: string, resilience: Partial<ResilienceSettings>) {
+    const record = this.connections.get(connectionId);
+    if (!record) return undefined;
+    const updated = { ...record, resilience: normalizeResilienceSettings({ ...record.resilience, ...resilience }) };
+    this.connections.set(connectionId, updated);
+    return cloneRecord(updated);
+  }
+
   async remove(connectionId: string) {
     const record = this.connections.get(connectionId);
     if (!record) return false;
@@ -169,6 +186,28 @@ export class InMemoryConnectionStore implements ConnectionStore {
   private findIdForProvider(providerId: ProviderId) {
     return [...this.connections.values()].find((connection) => connection.providerId === providerId)?.id;
   }
+}
+
+function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefined, hasCredential: boolean): ConnectionRecord {
+  const normalized = normalizeInput(input);
+  const now = new Date().toISOString();
+  const modelLists = mergeModelLists(normalized.modelIds ?? existing?.modelIds, normalized.customModelIds ?? existing?.customModelIds);
+  return {
+    id: input.id!,
+    providerId: normalized.providerId,
+    name: normalized.name,
+    endpoint: normalized.endpoint,
+    priority: normalized.priority,
+    proxyPool: normalized.proxyPool,
+    enabled: normalized.enabled ?? existing?.enabled ?? true,
+    hasCredential,
+    modelPolicy: normalized.modelPolicy ?? existing?.modelPolicy ?? 'all',
+    modelIds: modelLists.modelIds,
+    customModelIds: modelLists.customModelIds,
+    resilience: { ...defaultResilienceSettings, ...existing?.resilience, ...normalized.resilience },
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
 }
 
 export class LocalConnectionStore implements ConnectionStore {
@@ -248,23 +287,7 @@ export class LocalConnectionStore implements ConnectionStore {
 
       const previousCredential = this.credentials.get(normalized.providerId);
       const previousConnections = new Map(this.connections);
-      const now = new Date().toISOString();
-      const modelLists = mergeModelLists(normalized.modelIds ?? existing?.modelIds, normalized.customModelIds ?? existing?.customModelIds);
-      const record: ConnectionRecord = {
-        id,
-        providerId: normalized.providerId,
-        name: normalized.name,
-        endpoint: normalized.endpoint,
-        priority: normalized.priority,
-        proxyPool: normalized.proxyPool,
-        enabled: normalized.enabled ?? existing?.enabled ?? true,
-        hasCredential: credential.type === 'api-key',
-        modelPolicy: normalized.modelPolicy ?? existing?.modelPolicy ?? 'all',
-        modelIds: modelLists.modelIds,
-        customModelIds: modelLists.customModelIds,
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
-      };
+      const record = buildRecord({ ...normalized, id }, existing, credential.type === 'api-key');
 
       this.credentials.set(normalized.providerId, cloneCredential(credential));
       this.connections.set(id, record);
@@ -292,6 +315,25 @@ export class LocalConnectionStore implements ConnectionStore {
       if (!merged) return cloneRecord(record);
       const previous = record;
       const updated = { ...record, ...merged, updatedAt: new Date().toISOString() };
+      this.connections.set(connectionId, updated);
+      try {
+        await this.persistMetadata();
+      } catch (error) {
+        this.connections.set(connectionId, previous);
+        await this.persistMetadata().catch(() => undefined);
+        throw error;
+      }
+      return cloneRecord(updated);
+    });
+  }
+
+  async updateResilience(connectionId: string, resilience: Partial<ResilienceSettings>) {
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const record = this.connections.get(connectionId);
+      if (!record) return undefined;
+      const previous = record;
+      const updated = { ...record, resilience: normalizeResilienceSettings({ ...record.resilience, ...resilience }), updatedAt: new Date().toISOString() };
       this.connections.set(connectionId, updated);
       try {
         await this.persistMetadata();
@@ -455,7 +497,39 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
   if (input.modelPolicy !== undefined && input.modelPolicy !== 'free' && input.modelPolicy !== 'all') throw new Error('Model import policy is invalid.');
   const modelIds = input.modelIds === undefined ? undefined : normalizeModelIds(input.modelIds);
   const customModelIds = input.customModelIds === undefined ? undefined : normalizeModelIds(input.customModelIds);
-  return { id: input.id, providerId, name, endpoint, priority: input.priority, proxyPool, ...(input.enabled === undefined ? {} : { enabled: input.enabled }), ...(input.modelPolicy === undefined ? {} : { modelPolicy: input.modelPolicy }), ...(modelIds === undefined ? {} : { modelIds }), ...(customModelIds === undefined ? {} : { customModelIds }) };
+  return {
+    id: input.id,
+    providerId,
+    name,
+    endpoint,
+    priority: input.priority,
+    proxyPool,
+    ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+    ...(input.modelPolicy === undefined ? {} : { modelPolicy: input.modelPolicy }),
+    ...(modelIds === undefined ? {} : { modelIds }),
+    ...(customModelIds === undefined ? {} : { customModelIds }),
+    ...(input.resilience === undefined ? {} : { resilience: normalizeResilienceSettings(input.resilience) }),
+  };
+}
+
+export function normalizeResilienceSettings(value: Partial<ResilienceSettings>): ResilienceSettings {
+  const read = (field: keyof ResilienceSettings, label: string) => {
+    const raw = value[field];
+    if (raw === undefined) return undefined;
+    const limit = resilienceLimits[field];
+    if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < limit.min || raw > limit.max) {
+      throw new Error(`resilience.${label} must be an integer from ${limit.min} to ${limit.max}.`);
+    }
+    return raw;
+  };
+  const timeoutMs = read('timeoutMs', 'timeoutMs');
+  const maxRetries = read('maxRetries', 'maxRetries');
+  const requestsPerMinute = read('requestsPerMinute', 'requestsPerMinute');
+  return {
+    timeoutMs: timeoutMs ?? defaultResilienceSettings.timeoutMs,
+    maxRetries: maxRetries ?? defaultResilienceSettings.maxRetries,
+    requestsPerMinute: requestsPerMinute ?? defaultResilienceSettings.requestsPerMinute,
+  };
 }
 
 function normalizeModelIds(values: string[], limit = maxConnectionModelIds) {
@@ -525,8 +599,35 @@ function parseRecord(value: unknown): ConnectionRecord {
   const modelIds = value.modelIds === undefined ? [] : normalizeModelIds(value.modelIds, maxConnectionModelIds);
   const customModelIds = value.customModelIds === undefined ? [] : normalizeModelIds(value.customModelIds, maxCustomModelIds);
   const modelLists = mergeModelLists(modelIds, customModelIds);
-  const input = normalizeInput({ id: value.id, providerId: value.providerId, name: value.name, endpoint: value.endpoint, priority: value.priority, proxyPool: value.proxyPool, enabled: value.enabled, modelPolicy: value.modelPolicy === undefined ? 'all' : value.modelPolicy, modelIds: modelLists.modelIds, customModelIds: modelLists.customModelIds });
-  return { id: input.id!, providerId: input.providerId, name: input.name, endpoint: input.endpoint, priority: input.priority, proxyPool: input.proxyPool, enabled: value.enabled, hasCredential: value.hasCredential, modelPolicy: input.modelPolicy ?? 'all', modelIds: input.modelIds ?? [], customModelIds: input.customModelIds ?? [], createdAt: value.createdAt, updatedAt: value.updatedAt };
+  const input = normalizeInput({
+    id: value.id,
+    providerId: value.providerId,
+    name: value.name,
+    endpoint: value.endpoint,
+    priority: value.priority,
+    proxyPool: value.proxyPool,
+    enabled: value.enabled,
+    modelPolicy: value.modelPolicy === undefined ? 'all' : value.modelPolicy,
+    modelIds: modelLists.modelIds,
+    customModelIds: modelLists.customModelIds,
+    ...(value.resilience === undefined ? {} : { resilience: value.resilience as Partial<ResilienceSettings> }),
+  });
+  return {
+    id: input.id!,
+    providerId: input.providerId,
+    name: input.name,
+    endpoint: input.endpoint,
+    priority: input.priority,
+    proxyPool: input.proxyPool,
+    enabled: value.enabled,
+    hasCredential: value.hasCredential,
+    modelPolicy: input.modelPolicy ?? 'all',
+    modelIds: input.modelIds ?? [],
+    customModelIds: input.customModelIds ?? [],
+    resilience: normalizeResilienceSettings(input.resilience ?? {}),
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+  };
 }
 
 function parseCredentials(value: unknown) {
@@ -577,7 +678,7 @@ function cloneCredential(credential: ProviderCredential): ProviderCredential {
 }
 
 function cloneRecord(record: ConnectionRecord): ConnectionRecord {
-  return { ...record, modelIds: [...record.modelIds], customModelIds: [...record.customModelIds] };
+  return { ...record, modelIds: [...record.modelIds], customModelIds: [...record.customModelIds], resilience: { ...record.resilience } };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
