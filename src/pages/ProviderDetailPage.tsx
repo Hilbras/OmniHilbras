@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   ArrowLeft,
@@ -151,6 +151,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const [modelTestDetails, setModelTestDetails] = useState<Record<string, string>>({});
   const [modelTestLatencies, setModelTestLatencies] = useState<Record<string, number>>({});
   const modelTestAbortRef = useRef<AbortController | null>(null);
+  const scrollAnchorRef = useRef<number | null>(null);
   const [customModels, setCustomModels] = useState<string[]>([]);
   const [strategy, setStrategy] = useState('balanced');
   const [notice, setNotice] = useState('');
@@ -172,11 +173,15 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     return () => { active = false; };
   }, [provider.id]);
   useEffect(() => () => modelTestAbortRef.current?.abort(), []);
+  useLayoutEffect(() => {
+    if (scrollAnchorRef.current !== null) window.scrollTo(0, scrollAnchorRef.current);
+  }, [connectionPingMs, modelTestDetails, modelTestLatencies, modelTests, notice, testingModel]);
 
   const importedModels = connection?.modelIds ?? provider.modelList;
   const allModels = useMemo(() => [...new Set([...importedModels, ...customModels])], [customModels, importedModels]);
 
   function flash(message: string, tone: 'success' | 'error' = 'success') {
+    scrollAnchorRef.current = window.scrollY;
     setNotice(message);
     setNoticeError(tone === 'error');
     window.setTimeout(() => setNotice(''), 3200);
@@ -184,6 +189,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
 
   async function testConnection() {
     if (testingConnection || testingModel) return;
+    scrollAnchorRef.current = window.scrollY;
     setTestingConnection(true);
     try {
       const health = await getGatewayHealth();
@@ -257,6 +263,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
 
   async function testModel(model: string) {
     if (testingModel || testingConnection) return;
+    scrollAnchorRef.current = window.scrollY;
     const controller = new AbortController();
     modelTestAbortRef.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), 30_000);
