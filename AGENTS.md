@@ -55,6 +55,11 @@ that is not on `main`.
   `docs/SPEC-SDK.md`.
 - The dashboard has one React Router entry at `/dashboard`. Do not add
   `*.html` entry files or hash routes.
+- A provider card in `src/data/providers.ts` is catalog metadata. Before a card
+  claims a working connection, the gateway must be able to serve that provider:
+  a card with no connection stays `status: 'available'` with `—` metrics, and an
+  auth mode with no flow behind it (currently `OAuth`) must disable Save in
+  `AddProviderModal` and say so.
 
 ## Commands
 

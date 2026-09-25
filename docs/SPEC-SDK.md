@@ -212,6 +212,19 @@ model ID. That constrains two behaviors:
 
 Disabled or credential-less connections take part in neither.
 
+## Provider Catalog and Auth Modes
+
+`src/data/providers.ts` is catalog metadata, not a connection registry. A card
+lists a provider, its auth mode, and its group, and stays `available` with `—`
+metrics until a gateway connection backs it. The dashboard only reports a
+provider as connected when a saved connection and a health result say so.
+
+An auth mode without a flow behind it is presented as unavailable rather than
+faked. `OAuth` currently has no sign-in implementation: the add-connection dialog
+hides the API key field, disables Save, and states that the sign-in flow does not
+exist yet, so no connection can be invented for a provider the gateway cannot
+call.
+
 ## Connection Reliability
 
 Every connection stores a `resilience` block: `maxRetries` (0–5, default 1),

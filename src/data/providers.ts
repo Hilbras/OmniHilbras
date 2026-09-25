@@ -7,6 +7,7 @@ export const providerLogoMap = {
   ollama: '/providers/ollama.png',
   mistral: '/providers/mistral.png',
   openrouter: '/providers/openrouter.png',
+  cline: '/providers/cline.png',
 } as const;
 
 export function getProviderLogo(id: string | null | undefined) {
@@ -15,6 +16,25 @@ export function getProviderLogo(id: string | null | undefined) {
 }
 
 export const providerCatalog: ProviderRecord[] = [
+  {
+    id: 'cline',
+    name: 'Cline',
+    description: 'VS Code coding agent. Point it at this gateway to use your connected models.',
+    category: 'Coding agent',
+    group: 'oauth',
+    status: 'available',
+    auth: 'OAuth',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#7cc7a1',
+    initial: 'C',
+    logo: providerLogoMap.cline,
+    endpoint: 'http://127.0.0.1:8787/v1',
+    modelList: [],
+  },
   {
     id: 'openai',
     name: 'OpenAI',

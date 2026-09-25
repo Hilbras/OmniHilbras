@@ -23,6 +23,7 @@ export const providerOptions: ProviderOption[] = [
   { id: 'mistral', name: 'Mistral', description: 'Efficient hosted models', auth: 'API key', color: '#f97316', initial: 'M', logo: getProviderLogo('mistral'), defaultEndpoint: 'https://api.mistral.ai/v1' },
   { id: 'openrouter', name: 'OpenRouter', description: 'Many models through one API', auth: 'API key', color: '#b995e8', initial: 'R', logo: getProviderLogo('openrouter'), defaultEndpoint: 'https://openrouter.ai/api/v1' },
   { id: 'custom', name: 'Custom endpoint', description: 'Any OpenAI-compatible server', auth: 'API key', color: '#9c9584', initial: 'C', defaultEndpoint: 'http://localhost:8000/v1' },
+  { id: 'cline', name: 'Cline', description: 'VS Code coding agent', auth: 'OAuth', color: '#7cc7a1', initial: 'C', logo: getProviderLogo('cline'), defaultEndpoint: 'http://127.0.0.1:8787/v1' },
 ];
 
 export type NewProvider = {
@@ -114,12 +115,15 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
   if (!open) return null;
 
   const selected = providerOptions.find((item) => item.id === selectedId) ?? providerOptions[0];
-  const requiresKey = selected.auth !== 'No key';
+  // An OAuth provider has no key to paste, and no sign-in flow exists yet, so
+  // the dialog explains that instead of pretending a connection can be saved.
+  const isOAuth = selected.auth === 'OAuth';
+  const requiresKey = selected.auth !== 'No key' && !isOAuth;
   const showsProviderSelect = !initialProviderId;
   const showsEndpoint = selected.id === 'custom' || selected.id === 'ollama';
   const hasSingleConnection = Boolean(name.trim() && (!requiresKey || apiKey.trim()) && (!showsEndpoint || endpoint.trim()));
-  const canSave = mode === 'single' ? hasSingleConnection : Boolean(bulkText.trim());
-  const title = `Add ${selected.name} ${requiresKey ? 'API Key' : 'Connection'}`;
+  const canSave = !isOAuth && (mode === 'single' ? hasSingleConnection : Boolean(bulkText.trim()));
+  const title = isOAuth ? `Connect ${selected.name}` : `Add ${selected.name} ${requiresKey ? 'API Key' : 'Connection'}`;
 
   function cancelPendingCheck() {
     const controller = checkAbortRef.current;
@@ -270,6 +274,13 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
                   <span className="mb-2 block text-xs font-semibold">Name</span>
                   <input id="connection-name" value={name} onChange={(event) => { setName(event.target.value); setError(''); }} placeholder="Production Key" className="input !h-11 !w-full !rounded-lg !border-line !bg-surface-2 !px-3 !text-sm" />
                 </label>
+
+                {isOAuth && (
+                  <div className="mt-4 rounded-lg border border-gold/25 bg-gold-soft/55 p-3">
+                    <p className="text-xs font-semibold text-gold-text">OAuth sign-in is not wired up yet</p>
+                    <p className="muted mt-1 text-[11px] leading-relaxed">{selected.name} is listed so its connection can be designed. Until the sign-in flow exists there is nothing to save, and the gateway cannot call it.</p>
+                  </div>
+                )}
 
                 {requiresKey && (
                   <div className="mt-4">

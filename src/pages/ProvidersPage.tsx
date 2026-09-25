@@ -37,6 +37,7 @@ function groupForNewProvider(providerId: string, auth: string): ProviderGroup {
   if (providerId === 'ollama' || auth === 'No key') return 'local';
   if (providerId === 'openrouter') return 'api-key';
   if (providerId === 'mistral') return 'free-tier';
+  if (auth === 'OAuth') return 'oauth';
   return 'hosted';
 }
 

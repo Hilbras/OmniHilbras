@@ -3,7 +3,7 @@
 A self-hosted, local-first AI gateway: one OpenAI-compatible endpoint in front of
 every provider, with API keys, routing, and per-connection reliability.
 
-**Current version: 0.1.1** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 0.2.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras)
 
 ```bash
@@ -35,6 +35,13 @@ Save imports free models or all text models; model IDs are persisted separately
 from the credential. Any other provider can be added with a base URL through
 `PUT /v1/connections/:id`.
 
+The providers page groups cards as **OAuth Providers**, **API Key Providers**,
+**Hosted API Providers**, **Free Tier Providers**, **Local Providers**, and
+**Custom Endpoints**. A card is catalog metadata: it shows `—` metrics and
+`No connections` until a real connection exists behind it. Cline currently sits
+in the OAuth group with no sign-in flow, so its dialog explains that rather than
+offering a Save that cannot work.
+
 ## Releases
 
 The version tracks the size of the change. Every release is tagged on GitHub and
@@ -42,9 +49,9 @@ published to npm as `@hilbras/omnihilbras`.
 
 | Change | Bump | Example |
 | --- | --- | --- |
-| Big — breaking API, removed or renamed public surface, behavior a consumer must adapt to | `x.0.0` | `0.1.1` → `1.0.0` |
-| Medium — new capability, route, option, or page; backward compatible | `0.x.0` | `0.1.1` → `0.2.0` |
-| Small — fix, refinement, docs, or internal cleanup | `0.0.x` | `0.1.1` → `0.1.2` |
+| Big — breaking API, removed or renamed public surface, behavior a consumer must adapt to | `x.0.0` | `0.2.0` → `1.0.0` |
+| Medium — new capability, route, option, or page; backward compatible | `0.x.0` | `0.2.0` → `0.3.0` |
+| Small — fix, refinement, docs, or internal cleanup | `0.0.x` | `0.2.0` → `0.2.1` |
 
 `@hilbras/omnihilbras` is this project. It is unrelated to `@hilbras/sdk`, which
 is a separate package under the same npm scope.

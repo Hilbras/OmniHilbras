@@ -5,7 +5,7 @@ with `@hilbras/sdk`, which is a separate, unrelated project.
 
 ## Status
 
-`@hilbras/omnihilbras@0.1.1` is published (GitHub tag `v0.1.1`).
+`@hilbras/omnihilbras@0.2.0` is published (GitHub tag `v0.2.0`).
 
 ## Version bumps
 
