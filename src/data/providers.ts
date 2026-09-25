@@ -19,7 +19,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'cline',
     name: 'Cline',
-    description: 'VS Code coding agent. Point it at this gateway to use your connected models.',
+    description: 'VS Code coding agent. Sign in with your Cline account to serve its models here.',
     category: 'Coding agent',
     group: 'oauth',
     status: 'available',

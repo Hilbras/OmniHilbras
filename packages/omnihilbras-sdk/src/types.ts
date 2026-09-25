@@ -117,6 +117,12 @@ export type ProviderCapabilities = Partial<Record<ProviderCapability, boolean>>;
 
 export type ProviderCredential =
   | { type: 'api-key'; value: string }
+  /**
+   * A token obtained through an OAuth authorization-code flow. `value` is the
+   * current access token; `refreshToken` and `expiresAt` let an adapter renew it
+   * without asking the user to sign in again.
+   */
+  | { type: 'oauth'; value: string; refreshToken?: string; expiresAt?: string; email?: string }
   | { type: 'none' };
 
 export type ProviderRequestContext = {

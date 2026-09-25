@@ -159,7 +159,7 @@ export class InMemoryConnectionStore implements ConnectionStore {
     if (existing && existing.providerId !== normalized.providerId) throw new Error('Connection ID is already used by another provider.');
     if (!existing && this.connections.size >= maxConnections) throw new Error('The local connection limit has been reached.');
 
-    const record = buildRecord({ ...normalized, id }, existing, credential.type === 'api-key');
+    const record = buildRecord({ ...normalized, id }, existing, credential.type !== 'none');
     this.connections.set(id, record);
     this.credentials.set(normalized.providerId, cloneCredential(credential));
     return cloneRecord(record);
@@ -295,7 +295,7 @@ export class LocalConnectionStore implements ConnectionStore {
 
       const previousCredential = this.credentials.get(normalized.providerId);
       const previousConnections = new Map(this.connections);
-      const record = buildRecord({ ...normalized, id }, existing, credential.type === 'api-key');
+      const record = buildRecord({ ...normalized, id }, existing, credential.type !== 'none');
 
       this.credentials.set(normalized.providerId, cloneCredential(credential));
       this.connections.set(id, record);
@@ -644,10 +644,30 @@ function parseCredentials(value: unknown) {
   if (!isRecord(value)) throw new Error('Encrypted credential payload has an unsupported format.');
   const credentials = new Map<ProviderId, ProviderCredential>();
   for (const [providerId, credential] of Object.entries(value)) {
-    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(providerId) || !isRecord(credential) || credential.type !== 'api-key' || typeof credential.value !== 'string' || !credential.value || /[\r\n\0]/.test(credential.value)) {
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(providerId) || !isRecord(credential) || typeof credential.value !== 'string' || !credential.value || /[\r\n\0]/.test(credential.value)) {
       throw new Error('Encrypted credential payload contains an invalid credential.');
     }
-    credentials.set(providerId, { type: 'api-key', value: credential.value });
+    if (credential.type === 'api-key') {
+      credentials.set(providerId, { type: 'api-key', value: credential.value });
+      continue;
+    }
+    if (credential.type === 'oauth') {
+      const { refreshToken, expiresAt, email } = credential;
+      if ((refreshToken !== undefined && (typeof refreshToken !== 'string' || !refreshToken))
+        || (expiresAt !== undefined && (typeof expiresAt !== 'string' || !expiresAt))
+        || (email !== undefined && typeof email !== 'string')) {
+        throw new Error('Encrypted credential payload contains an invalid OAuth credential.');
+      }
+      credentials.set(providerId, {
+        type: 'oauth',
+        value: credential.value,
+        ...(typeof refreshToken === 'string' ? { refreshToken } : {}),
+        ...(typeof expiresAt === 'string' ? { expiresAt } : {}),
+        ...(typeof email === 'string' ? { email } : {}),
+      });
+      continue;
+    }
+    throw new Error('Encrypted credential payload contains an invalid credential.');
   }
   return credentials;
 }
@@ -684,7 +704,17 @@ function decodeBase64(value: string, expectedLength: number | undefined, label: 
 }
 
 function cloneCredential(credential: ProviderCredential): ProviderCredential {
-  return credential.type === 'api-key' ? { type: 'api-key', value: credential.value } : { type: 'none' };
+  if (credential.type === 'api-key') return { type: 'api-key', value: credential.value };
+  if (credential.type === 'oauth') {
+    return {
+      type: 'oauth',
+      value: credential.value,
+      ...(credential.refreshToken ? { refreshToken: credential.refreshToken } : {}),
+      ...(credential.expiresAt ? { expiresAt: credential.expiresAt } : {}),
+      ...(credential.email ? { email: credential.email } : {}),
+    };
+  }
+  return { type: 'none' };
 }
 
 function cloneRecord(record: ConnectionRecord): ConnectionRecord {

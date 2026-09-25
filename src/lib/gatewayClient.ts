@@ -206,6 +206,25 @@ export function removeGatewayConnection(connectionId: string, signal?: AbortSign
   });
 }
 
+export type GatewayOauthAuthorization = {
+  authUrl: string;
+  redirectUri: string;
+};
+
+export function getGatewayOauthAuthorization(providerId: string, signal?: AbortSignal) {
+  return requestJson<GatewayOauthAuthorization>(`/v1/oauth/${encodeURIComponent(providerId)}/authorize`, { signal });
+}
+
+/** Exchanges what the user pasted for tokens, then saves the connection. */
+export function connectGatewayOauthProvider(providerId: string, input: { code: string; redirectUri?: string; name?: string }, signal?: AbortSignal) {
+  return requestJson<{ connection: GatewayConnection }>(`/v1/oauth/${encodeURIComponent(providerId)}/exchange`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+    ...(signal ? { signal } : {}),
+  }).then((body) => body.connection);
+}
+
 export function listGatewayApiKeys(signal?: AbortSignal) {
   return requestJson<GatewayApiKeyList & { object: 'list' }>('/v1/keys', { signal }).then((body) => ({ keys: body.keys, requireApiKey: body.requireApiKey }));
 }

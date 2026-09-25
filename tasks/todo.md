@@ -139,6 +139,13 @@
   - Depends on: Task 9g.
   - Scope: Small/medium.
 
+- [x] Task 9l: Implement the Cline OAuth sign-in flow.
+  - Acceptance: the Cline card's Add connection opens a two-step sign-in dialog backed by a real gateway flow — `GET /v1/oauth/cline/authorize` returns a sign-in URL with a loopback callback, `GET /v1/oauth/cline/callback` serves a page that displays the code and stores nothing, and `POST /v1/oauth/cline/exchange` accepts a callback URL, `code#state` pair, or bare code, proves the token with a real account request, imports the model catalog, and only then saves an encrypted `oauth` credential. An expired token is renewed before use and the renewed token is written back to the vault.
+  - Verify: 27 new tests cover loopback enforcement, the three pasted shapes, embedded-token decoding, one-shot refresh with persistence, `workos:` prefixing that leaves non-JWT keys verbatim, the callback page refusing to reflect markup, cross-site requests still blocked on every other route, a rejected code storing nothing, and an unreachable token endpoint not being misreported as a bad sign-in. Browser smoke test covers the dialog, the enabled/disabled Connect control, and the real error from Cline's token endpoint.
+  - Files: `packages/omnihilbras-sdk/src/adapters/cline.ts`, `src/types.ts`, `src/index.ts`, `test/cline.test.js`, `apps/gateway/src/oauth.ts`, `src/service.ts`, `src/server.ts`, `src/connections.ts`, `test/oauth.test.js`, `test/oauth-routes.test.js`, `src/components/OauthConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, `src/data/providers.ts`, docs.
+  - Depends on: Task 9g.
+  - Scope: Medium.
+
 - [ ] Task 10: Define cloud integration boundaries.
   - Acceptance: auth context, tenant context, remote `SecretStore`, and deployment configuration are represented by interfaces without implementing cloud infrastructure.
   - Verify: typecheck and architecture review.

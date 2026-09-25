@@ -1,6 +1,7 @@
-import { OpenAICompatibleAdapter, ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, FetchHttpTransport, OpenAICompatibleAdapter, ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
+import { beginClineAuthorization, createClineAdapter, exchangeClineCode, toClineCredential } from './oauth.js';
 import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -57,6 +58,8 @@ export type GatewayServiceOptions = {
   recoveryCooldownMs?: number;
   /** Injectable clock for the rate limiter and recovery cooldown. */
   now?: () => number;
+  /** Shared transport, so provider and OAuth requests use one configured client. */
+  transport?: HttpTransport;
 };
 
 /** Error codes that mean "this request can never succeed on this route". */
@@ -97,6 +100,8 @@ const invalidApiKeyMessage = 'The API key is invalid or paused.';
 export class GatewayService {
   private readonly connectionLocks = new Map<string, Promise<void>>();
   private readonly dynamicAdapters = new Map<string, { endpoint: string; adapter: ProviderAdapter }>();
+  private readonly transport: HttpTransport;
+  private cline?: ProviderAdapter;
   private readonly providerHealth: HealthRegistry;
   private readonly rateLimiter: SlidingWindowRateLimiter;
   private readonly rateLimitWaitMs = new Map<string, number>();
@@ -112,6 +117,7 @@ export class GatewayService {
     options: GatewayServiceOptions = {},
   ) {
     if (options.failureThreshold !== undefined) this.failureThreshold = options.failureThreshold;
+    this.transport = options.transport ?? new FetchHttpTransport();
     const now = options.now ?? (() => Date.now());
     this.providerHealth = new HealthRegistry(now, options.recoveryCooldownMs);
     this.rateLimiter = new SlidingWindowRateLimiter(now);
@@ -186,8 +192,14 @@ export class GatewayService {
    * OpenAI-compatible adapter per saved connection endpoint.
    */
   private async activeAdapters(): Promise<ProviderAdapter[]> {
+    const connections = await this.listConnections();
     const adapters = new Map(this.registry.list().map((adapter) => [adapter.id, adapter]));
-    for (const connection of await this.listConnections()) {
+    // Cline has no static configuration, so it is only polled once a saved
+    // connection with a credential exists.
+    if (connections.some((connection) => connection.providerId === 'cline' && connection.hasCredential)) {
+      adapters.set('cline', this.clineAdapter());
+    }
+    for (const connection of connections) {
       if (adapters.has(connection.providerId)) continue;
       const cached = this.dynamicAdapters.get(connection.providerId);
       adapters.set(connection.providerId, cached && cached.endpoint === connection.endpoint
@@ -262,6 +274,9 @@ export class GatewayService {
       // capability without a validator is saved without a pre-flight check.
       if (this.registry.get(input.providerId)?.validateCredential) {
         await this.validateConnectionCredentialUnlocked(input.providerId, credential, signal);
+      } else if (input.providerId === 'cline') {
+        // Cline is not in the registry; its adapter is resolved on demand.
+        await (await this.resolveAdapter('cline')).validateCredential!(credential, signal ? { signal } : {});
       }
       let saveInput = input;
       if (input.modelPolicy) {
@@ -279,6 +294,44 @@ export class GatewayService {
         throw new ProviderError('CONFIGURATION_ERROR', 'The local connection could not be saved.', { cause: error });
       }
     });
+  }
+
+  /**
+   * Completes a Cline sign-in: exchanges what the user pasted for tokens,
+   * proves them against Cline, and only then stores the connection.
+   */
+  async connectCline(input: { code: string; callback?: string; redirectUri: string; name?: string; priority?: number }, signal?: AbortSignal): Promise<ConnectionRecord> {
+    if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
+    const tokens = await exchangeClineCode(input, this.transport, signal);
+    const credential = toClineCredential(tokens);
+    // `saveConnection` proves the token against Cline and imports the catalog
+    // before anything reaches the vault, so nothing is stored on a bad sign-in.
+    return this.saveConnection({
+      id: 'cline',
+      providerId: 'cline',
+      name: input.name?.trim() || (tokens.email ? `Cline (${tokens.email})` : 'Cline'),
+      endpoint: CLINE_OAUTH.apiBaseUrl,
+      priority: input.priority ?? 1,
+      proxyPool: 'none',
+      modelPolicy: 'all',
+    }, credential, signal);
+  }
+
+  beginClineAuthorization(redirectUri: string) {
+    return beginClineAuthorization(redirectUri);
+  }
+
+  /** The Cline adapter, wired so a refreshed token is written back to the vault. */
+  clineAdapter(): ProviderAdapter {
+    if (!this.cline) {
+      this.cline = createClineAdapter({
+        transport: this.transport,
+        onTokensRefreshed: async (tokens) => {
+          await this.connectionStore?.set('cline', toClineCredential(tokens));
+        },
+      });
+    }
+    return this.cline;
   }
 
   async listConnections() {
@@ -710,6 +763,7 @@ export class GatewayService {
    * the same transport and credential vault as the built-in adapters.
    */
   private async resolveAdapter(providerId: string, pendingEndpoint?: { endpoint: string; name: string }): Promise<ProviderAdapter> {
+    if (providerId === 'cline') return this.clineAdapter();
     const registered = this.registry.get(providerId);
     if (registered) return registered;
     // A connection being saved is not in the store yet, so the caller can pass

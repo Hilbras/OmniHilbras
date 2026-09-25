@@ -24,6 +24,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
+import { OauthConnectDialog } from '../components/OauthConnectDialog';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { addGatewayConnectionModels, getGatewayHealth, getGatewayRoutingState, listGatewayConnections, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, type GatewayConnection, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
@@ -276,6 +277,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const importedModels = connection?.modelIds ?? provider.modelList;
   const allModels = useMemo(() => [...new Set([...importedModels, ...customModels])], [customModels, importedModels]);
   const testing = testingModels.length > 0;
+  const isOauth = provider.auth === 'OAuth';
   const testingSet = useMemo(() => new Set(testingModels), [testingModels]);
 
   function flash(message: string, tone: 'success' | 'error' = 'success') {
@@ -556,7 +558,21 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
 
       <section id="endpoint" className="card mt-5 p-4 sm:p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-sm font-semibold">Endpoint details</h2><p className="muted mt-1 text-xs">The base URL OmniHilbras will use for this provider.</p></div><code className="max-w-full overflow-x-auto rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-muted sm:max-w-[420px]">{connection?.endpoint ?? provider.endpoint}</code></div></section>
 
-      <AddProviderModal open={addOpen} initialProviderId={provider.id} initialModelPolicy={connection?.modelPolicy} onClose={() => setAddOpen(false)} onSave={handleAddConnection} onSaveMany={handleAddConnections} />
+      <AddProviderModal open={addOpen && !isOauth} initialProviderId={provider.id} initialModelPolicy={connection?.modelPolicy} onClose={() => setAddOpen(false)} onSave={handleAddConnection} onSaveMany={handleAddConnections} />
+      {isOauth && addOpen && (
+        <OauthConnectDialog
+          providerId={provider.id}
+          providerName={provider.name}
+          onClose={() => setAddOpen(false)}
+          onConnected={async (saved) => {
+            setConnection(saved);
+            setConnectionAdded(true);
+            setConnectionHealthy(false);
+            flash(`Signed in to ${provider.name} with ${saved.modelIds.length} models.`);
+            void getGatewayRoutingState().then(setRoutingState).catch(() => undefined);
+          }}
+        />
+      )}
     </>
   );
 }

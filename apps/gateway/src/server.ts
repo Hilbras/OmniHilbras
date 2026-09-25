@@ -3,6 +3,7 @@ import { ProviderError, assertSafeProviderRequestUrl, canonicalLoopbackHost, isL
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './config.js';
 import type { ApiKeyStore } from './api-keys.js';
 import type { ConnectionStore } from './connections.js';
+import { clineCallbackPath } from './oauth.js';
 import type { GatewayService } from './service.js';
 
 export type GatewayServerOptions = {
@@ -11,6 +12,11 @@ export type GatewayServerOptions = {
   /** Exact browser origins allowed to call the local gateway. */
   corsOrigins?: string[];
   maxBodyBytes?: number;
+  /**
+   * Where the gateway itself is reachable on loopback. Used to build the OAuth
+   * callback the provider redirects the browser to.
+   */
+  publicBaseUrl?: string;
 };
 
 const defaultCorsOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
@@ -29,7 +35,10 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     // Chromium may classify loopback host aliases (localhost -> 127.0.0.1)
     // as cross-site. The exact Origin allowlist is the authorization check;
     // an allowlisted dashboard origin is safe to accept here.
-    if (isCrossSiteRequest(request) && (!requestOrigin || !corsOrigins.includes(requestOrigin))) {
+    // The OAuth callback is the one exception: it is a top-level navigation
+    // from the provider, so it carries `sec-fetch-site: cross-site` and no
+    // Origin at all. It only displays the code the browser already holds.
+    if (!isOauthCallbackNavigation(request) && isCrossSiteRequest(request) && (!requestOrigin || !corsOrigins.includes(requestOrigin))) {
       sendJson(response, 403, { error: { code: 'CROSS_SITE_REQUEST_DENIED', message: 'Cross-site requests are not allowed.' } });
       return;
     }
@@ -65,6 +74,7 @@ export async function startGatewayServer(options: {
   const server = createGatewayServer(service, {
     ...(options.corsOrigin ? { corsOrigin: options.corsOrigin } : {}),
     ...(options.corsOrigins ? { corsOrigins: options.corsOrigins } : options.corsOrigin ? {} : { corsOrigins: config.corsOrigins }),
+    publicBaseUrl: `http://${config.host}:${config.port}`,
   });
 
   service.startHealthMonitor();
@@ -186,6 +196,36 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const connectionId = decodeConnectionId(url.pathname.slice('/v1/connections/'.length));
       await service.removeConnection(connectionId);
       sendJson(response, 200, { deleted: true, id: connectionId }, origin);
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/v1/oauth/cline/authorize') {
+      const redirectUri = url.searchParams.get('redirect_uri') ?? defaultClineRedirect(options.publicBaseUrl);
+      sendJson(response, 200, service.beginClineAuthorization(redirectUri), origin);
+      return;
+    }
+
+    // The provider sends the browser here after sign-in. It shows the code and
+    // nothing else: no token is created, exchanged, or stored from this page.
+    if (request.method === 'GET' && url.pathname === '/v1/oauth/cline/callback') {
+      const code = url.searchParams.get('code') ?? '';
+      const problem = url.searchParams.get('error');
+      sendHtml(response, 200, clineCallbackPage(code, problem), origin);
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/cline/exchange') {
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxKeyBodyBytes));
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['code', 'callback', 'redirectUri', 'name', 'priority']);
+      const connection = await service.connectCline({
+        code: parseBoundedString(body.code ?? body.callback ?? '', 'code', 8192),
+        ...(typeof body.callback === 'string' ? { callback: body.callback } : {}),
+        redirectUri: typeof body.redirectUri === 'string' ? body.redirectUri : defaultClineRedirect(options.publicBaseUrl),
+        ...(typeof body.name === 'string' ? { name: body.name } : {}),
+        ...(body.priority === undefined ? {} : { priority: parsePriority(body.priority) }),
+      }, controller.signal);
+      sendJson(response, 201, { connection }, origin);
       return;
     }
 
@@ -782,8 +822,24 @@ function getRequestOrigin(request: IncomingMessage) {
   return typeof origin === 'string' ? origin : undefined;
 }
 
+/**
+ * Cline redirects the browser to a loopback address, so the callback is a page
+ * the gateway serves itself. It only shows the code for the user to copy back
+ * into the dashboard; it never stores a token on its own.
+ */
+function defaultClineRedirect(publicBaseUrl: string | undefined) {
+  return `${publicBaseUrl ?? 'http://127.0.0.1:8787'}/v1/oauth/cline/callback`;
+}
+
 function isCrossSiteRequest(request: IncomingMessage) {
   return request.headers['sec-fetch-site'] === 'cross-site';
+}
+
+/** The single GET navigation the OAuth provider is allowed to redirect to. */
+function isOauthCallbackNavigation(request: IncomingMessage) {
+  if (request.method !== 'GET') return false;
+  const path = (request.url ?? '').split('?', 1)[0];
+  return path === clineCallbackPath;
 }
 
 function isJsonRequest(request: IncomingMessage) {
@@ -807,6 +863,77 @@ function sendJson(response: ServerResponse, status: number, body: unknown, origi
     'content-length': Buffer.byteLength(payload),
   });
   response.end(payload);
+}
+
+function sendHtml(response: ServerResponse, status: number, html: string, origin?: string) {
+  if (origin) response.setHeader('access-control-allow-origin', origin);
+  response.writeHead(status, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': Buffer.byteLength(html),
+    // This page lives on the origin that also holds credentials, so it gets no
+    // script, no framing, and no caching of the code it displays.
+    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'",
+    'cache-control': 'no-store',
+    'referrer-policy': 'no-referrer',
+    'x-content-type-options': 'nosniff',
+  });
+  response.end(html);
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character] as string);
+}
+
+/**
+ * The page Cline lands on after sign-in. It shows the authorization code so the
+ * user can paste it back into the dashboard, and does nothing else: no token
+ * is exchanged and nothing is stored from here.
+ *
+ * The code is only reflected when it matches the shape an authorization code
+ * can have. That charset contains no markup characters, so the page cannot be
+ * used to inject content into an origin that holds the local API keys.
+ */
+function clineCallbackPage(code: string, providerError: string | null) {
+  const reflectable = /^[A-Za-z0-9._~+/=%-]{1,4096}$/;
+  const showCode = code.length > 0 && reflectable.test(code);
+  const body = providerError
+    ? `<p class="bad">Cline reported <code>${escapeHtml(providerError.slice(0, 120))}</code>. Close this tab and start again.</p>`
+    : showCode
+      ? `<p class="lead">Copy this code and paste it into the OmniHilbras Cline dialog.</p>
+         <input class="box" type="text" value="${escapeHtml(code)}" readonly spellcheck="false" aria-label="Authorization code" />
+         <p class="note">Click the field, press <kbd>Ctrl</kbd>+<kbd>A</kbd> (or <kbd>Cmd</kbd>+<kbd>A</kbd>), then copy. Nothing has been saved yet — the code is exchanged only when you paste it.</p>`
+      : `<p class="bad">This callback has no authorization code. Close this tab and start the sign-in again.</p>`;
+
+  return `<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Cline sign-in complete</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0b0d10; color: #e6e8eb;
+         font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { width: min(560px, calc(100% - 2rem)); }
+  h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+  .lead { margin: 0 0 1rem; color: #aeb4bb; }
+  .box { width: 100%; padding: .7rem .8rem; border-radius: 8px; border: 1px solid #2a2f36; background: #14181d;
+         color: #e6e8eb; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .note { margin: 1rem 0 0; color: #8b9299; font-size: 12px; }
+  .bad { color: #f08a8a; }
+  kbd { border: 1px solid #2a2f36; border-radius: 4px; padding: 0 .25rem; font: inherit; font-size: 11px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+<main>
+  <h1>Cline sign-in complete</h1>
+  ${body}
+</main>
+</html>`;
 }
 
 function sendError(response: ServerResponse, error: unknown) {

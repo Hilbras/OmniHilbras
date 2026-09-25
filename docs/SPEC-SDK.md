@@ -118,6 +118,9 @@ The first local gateway exposes:
 - `DELETE /v1/keys/:id` — revoke a key.
 - `PUT /v1/connections/:id/resilience` — update one connection's retry, timeout, and rate-limit budget.
 - `GET /v1/routing` — live routing state: budgets, recent failures and successes, ejection, last latency, last error.
+- `GET /v1/oauth/cline/authorize` — build the Cline sign-in URL for a loopback callback.
+- `GET /v1/oauth/cline/callback` — the page Cline redirects the browser to; it displays the authorization code and stores nothing.
+- `POST /v1/oauth/cline/exchange` — exchange a pasted callback URL or code, prove the token against Cline, then save the connection.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
 - `POST /v1/chat/completions` with `stream: true` — normalized SSE chunks.
@@ -194,6 +197,49 @@ connection at a credential-bearing URL. A provider without a `validateCredential
 capability is saved without a pre-flight check and validated on first use, since
 probing every provider costs a real request.
 
+## OAuth Connections
+
+Cline is reached through an OAuth authorization-code flow rather than a pasted
+API key, and it is the only provider whose wire format is not plain
+OpenAI-compatible.
+
+**The credential.** `ProviderCredential` gains an `oauth` variant:
+`{ type: 'oauth', value, refreshToken?, expiresAt?, email? }`. It is stored and
+encrypted exactly like an API key. `value` is the access token as issued; the
+`workos:` prefix Cline requires is a wire detail the adapter adds per request and
+never persists.
+
+**The flow.** Cline has no callback the gateway can own, so the user signs in and
+pastes the result back:
+
+1. `GET /v1/oauth/cline/authorize` returns a sign-in URL whose `redirect_uri`
+   and `callback_url` are a loopback URL. A non-loopback redirect is refused, so
+   a pasted callback can never point somewhere else.
+2. Cline redirects the browser to `GET /v1/oauth/cline/callback`, a page the
+   gateway serves. It only displays the code. This is the one route exempt from
+   the cross-site guard, because a top-level navigation from the provider sends
+   `sec-fetch-site: cross-site` and no `Origin`; the page carries `no-store`, a
+   `default-src 'none'` policy, and reflects the code only when it matches the
+   charset an authorization code can have.
+3. The dashboard pastes the callback URL, a `code#state` pair, or a bare code to
+   `POST /v1/oauth/cline/exchange`. Cline sometimes encodes the tokens inside the
+   code as base64 JSON, so that is read directly; otherwise the code is exchanged
+   at the token endpoint.
+4. The exchange proves the token with a real `GET /v1/users/me` before anything
+   is written, then discovers the model catalog and saves the connection. A
+   rejected code is reported as an authentication failure; an unreachable token
+   endpoint stays an upstream failure, so an outage is never misreported as a
+   bad sign-in.
+
+**Refresh.** The adapter renews an expired access token before use, within a
+60-second skew, one refresh at a time so concurrent requests share it. The
+renewed token is handed back through `onTokensRefreshed`, which the gateway wires
+to the vault, so a refresh is persisted instead of repeated per request.
+
+**Token prefixing.** Cline accepts WorkOS JWTs only with an explicit `workos:`
+prefix, and rejects non-JWT ClinePass keys (`clp_…`) that carry one. The adapter
+applies the prefix only to JWT-shaped tokens and sends everything else verbatim.
+
 ## Model Routing and the Client Catalog
 
 A plain OpenAI-compatible client must work with only a base URL, a key, and a
@@ -220,10 +266,15 @@ metrics until a gateway connection backs it. The dashboard only reports a
 provider as connected when a saved connection and a health result say so.
 
 An auth mode without a flow behind it is presented as unavailable rather than
-faked. `OAuth` currently has no sign-in implementation: the add-connection dialog
-hides the API key field, disables Save, and states that the sign-in flow does not
-exist yet, so no connection can be invented for a provider the gateway cannot
-call.
+faked. A provider is added from its own detail page, where the dialog matches the
+auth mode: an API-key provider asks for a key, and an `OAuth` provider opens the
+sign-in dialog instead. An auth mode with neither flow stays unaddable, so no
+connection can be invented for a provider the gateway cannot call.
+
+Cline is the one implemented `OAuth` mode, and it has a working sign-in flow; see
+[OAuth Connections](#oauth-connections). Its card still reads `available` with
+`—` metrics until a connection is actually saved, because catalog metadata is not
+evidence of a connection.
 
 ## Connection Reliability
 

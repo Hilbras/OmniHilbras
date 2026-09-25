@@ -38,9 +38,24 @@ from the credential. Any other provider can be added with a base URL through
 The providers page groups cards as **OAuth Providers**, **API Key Providers**,
 **Hosted API Providers**, **Free Tier Providers**, **Local Providers**, and
 **Custom Endpoints**. A card is catalog metadata: it shows `—` metrics and
-`No connections` until a real connection exists behind it. Cline currently sits
-in the OAuth group with no sign-in flow, so its dialog explains that rather than
-offering a Save that cannot work.
+`No connections` until a real connection exists behind it.
+
+## Cline Sign-In
+
+Cline is reached through an OAuth authorization-code flow instead of a pasted API
+key. On its provider page, **Add connection** opens a two-step dialog: open the
+sign-in URL, then paste what the browser ends up with.
+
+Cline redirects to a loopback address, so the gateway serves the callback page at
+`GET /v1/oauth/cline/callback`. That page only shows the code — it creates no
+token and stores nothing. Paste the callback URL, a `code#state` pair, or a bare
+code back into the dialog, and the gateway exchanges it, proves the token against
+Cline with a real request, imports the model catalog, and only then saves the
+connection encrypted in the local vault.
+
+An expired access token is renewed automatically before use, and the renewed
+token is written back to the vault. If a sign-in cannot be renewed, the provider
+tells you to sign in again instead of failing quietly.
 
 ## Releases
 
