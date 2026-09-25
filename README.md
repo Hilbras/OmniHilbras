@@ -119,6 +119,23 @@ Keys are accepted as `Authorization: Bearer <key>`, `x-api-key: <key>`, or
 `x-goog-api-key: <key>` so existing OpenAI, Anthropic, and Gemini clients work
 unchanged. They are never read from the query string.
 
+### Pointing a code agent at the gateway
+
+A client needs three values and nothing else: the base URL, the key, and a model
+ID. Point the agent at `http://127.0.0.1:8787/v1`, paste the key as its API key,
+and pick any model from `GET /v1/models`.
+
+The model list is the saved connection catalog, not the provider's full
+inventory, so agents only see models you actually imported (your 21 free
+OpenRouter models, for example) and never a paid model you did not choose.
+Requests are routed to the connection that owns the requested model, so no
+provider header is required. `x-omnihilbras-provider: <id>` still overrides that
+choice when you want to pin a route.
+
+`POST /v1/chat/completions` accepts `stream: true` and OpenAI-style `tools`, so
+streaming and tool-calling agents work. `/v1/models` needs the key while
+enforcement is on.
+
 Enforcement is **on by default** and applies to `GET /v1/models` and
 `POST /v1/chat/completions`. Requests from an allowlisted dashboard origin stay
 exempt so the dashboard can keep testing models; every other client must present

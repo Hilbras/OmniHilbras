@@ -343,7 +343,7 @@ function extractApiKey(request: IncomingMessage) {
 async function handleChat(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
   const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
   const chatRequest = parseChatRequest(body);
-  const providerId = getProviderId(request, body);
+  const providerId = await service.resolveProviderId(chatRequest.model, getExplicitProviderId(request, body));
 
   if (!chatRequest.stream) {
     const result = await service.chat(providerId, chatRequest, signal);
@@ -550,7 +550,8 @@ function isPrivateHostname(hostname: string) {
   return first === 10 || first === 127 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168) || (first === 169 && second === 254) || first === 0;
 }
 
-function getProviderId(request: IncomingMessage, body: unknown) {
+/** Returns the provider the caller asked for, or undefined to let the catalog decide. */
+function getExplicitProviderId(request: IncomingMessage, body: unknown) {
   const header = request.headers['x-omnihilbras-provider'];
   if (Array.isArray(header)) throw invalidRequest('x-omnihilbras-provider must be a single value.');
   if (typeof header === 'string' && header.trim()) return header.trim();
@@ -558,7 +559,7 @@ function getProviderId(request: IncomingMessage, body: unknown) {
     if (typeof body.provider !== 'string' || !body.provider.trim()) throw invalidRequest('provider must be a non-empty string.');
     return body.provider.trim();
   }
-  return 'openai';
+  return undefined;
 }
 
 async function readJsonBody(request: IncomingMessage, maxBytes: number) {

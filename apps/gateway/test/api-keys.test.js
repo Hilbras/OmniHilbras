@@ -4,25 +4,29 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@omnihilbras/sdk';
-import { ApiKeyLimitError, GatewayService, InMemoryApiKeyStore, LocalApiKeyStore, createGatewayServer } from '../dist/index.js';
+import { ApiKeyLimitError, GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore, LocalApiKeyStore, createGatewayServer } from '../dist/index.js';
 
-function createService(apiKeyStore) {
-  const adapter = {
+function fakeAdapter(seen) {
+  return {
     id: 'fake',
     name: 'Fake provider',
     capabilities: { chat: true, streaming: false, models: true },
     async listModels() {
-      return [{ id: 'fake-1', providerId: 'fake', displayName: 'Fake One' }];
+      return [{ id: 'fake-1', providerId: 'fake', displayName: 'Fake One' }, { id: 'paid/never-imported', providerId: 'fake', displayName: 'Paid Model' }];
     },
     async chat(request) {
+      seen?.push(request.model);
       return { id: 'response-1', providerId: 'fake', model: request.model, createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'Hello from gateway' }, finishReason: 'stop' };
     },
   };
-  return new GatewayService(new ProviderRegistry().register(adapter), new InMemorySecretStore({ fake: { type: 'api-key', value: 'secret' } }), undefined, apiKeyStore);
 }
 
-async function startServer(t, apiKeyStore = new InMemoryApiKeyStore()) {
-  const server = createGatewayServer(createService(apiKeyStore), { corsOrigin: 'http://localhost:5173' });
+function createService(apiKeyStore, connectionStore, seen) {
+  return new GatewayService(new ProviderRegistry().register(fakeAdapter(seen)), new InMemorySecretStore({ fake: { type: 'api-key', value: 'secret' } }), connectionStore, apiKeyStore);
+}
+
+async function startServer(t, apiKeyStore = new InMemoryApiKeyStore(), connectionStore, seen) {
+  const server = createGatewayServer(createService(apiKeyStore, connectionStore, seen), { corsOrigin: 'http://localhost:5173' });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const address = server.address();
@@ -233,4 +237,76 @@ test('the gateway service exposes a typed error for key storage problems', async
   await assert.rejects(() => service.createApiKey('Local CLI'), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
   await service.authorizePublicRequest(undefined);
   assert.deepEqual(await service.listApiKeys(), { keys: [], requireApiKey: false });
+});
+
+/** A saved connection whose provider is the registered `fake` adapter. */
+async function connectionStoreWithCatalog(modelIds, overrides = {}) {
+  const store = new InMemoryConnectionStore();
+  await store.save({
+    id: 'fake',
+    providerId: 'fake',
+    name: 'Fake local',
+    endpoint: 'https://api.example.com/v1',
+    priority: 1,
+    proxyPool: 'none',
+    modelIds,
+    ...overrides,
+  }, { type: 'api-key', value: 'secret' });
+  return store;
+}
+
+function agentChat(baseUrl, model, headers = {}) {
+  return fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Hello' }] }),
+  });
+}
+
+test('a plain client with only a key and a model ID is routed to the saved catalog', async (t) => {
+  const seen = [];
+  const store = await connectionStoreWithCatalog(['stealth/space-bunny-alpha', 'qwen/qwen3.8-27b:free']);
+  const baseUrl = await startServer(t, new InMemoryApiKeyStore(), store, seen);
+  const created = await createKey(baseUrl);
+
+  // No x-omnihilbras-provider header and no body provider field: the catalog decides.
+  const imported = await agentChat(baseUrl, 'stealth/space-bunny-alpha', { authorization: `Bearer ${created.key}` });
+  assert.equal(imported.status, 200);
+  assert.equal((await imported.json()).provider, 'fake');
+  assert.deepEqual(seen, ['stealth/space-bunny-alpha'], 'the model ID reaches the provider untouched');
+
+  const unlisted = await agentChat(baseUrl, 'paid/never-imported', { authorization: `Bearer ${created.key}` });
+  assert.equal(unlisted.status, 200, 'a single connection serves any model the provider knows');
+});
+
+test('an explicit provider header still overrides the catalog', async (t) => {
+  const store = await connectionStoreWithCatalog(['stealth/space-bunny-alpha']);
+  const baseUrl = await startServer(t, new InMemoryApiKeyStore(), store, []);
+  const created = await createKey(baseUrl);
+
+  const response = await chat(baseUrl, { authorization: `Bearer ${created.key}`, 'x-omnihilbras-provider': 'fake' });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.provider, 'fake');
+  assert.equal(body.model, 'fake-1', 'the header decides the provider, so the default model is used');
+});
+
+test('the model catalog only advertises saved, credentialed models', async (t) => {
+  const store = await connectionStoreWithCatalog(['stealth/space-bunny-alpha', 'qwen/qwen3.8-27b:free']);
+  const baseUrl = await startServer(t, new InMemoryApiKeyStore(), store, []);
+  const created = await createKey(baseUrl);
+
+  const listed = await (await fetch(`${baseUrl}/v1/models`, { headers: { authorization: `Bearer ${created.key}` } })).json();
+  assert.deepEqual(listed.data.map((model) => model.id), ['stealth/space-bunny-alpha', 'qwen/qwen3.8-27b:free']);
+  assert.deepEqual(listed.data.map((model) => model.owned_by), ['fake', 'fake']);
+  assert.deepEqual(listed.unavailable, []);
+});
+
+test('paused and credential-less connections are excluded from routing and the catalog', async (t) => {
+  const store = await connectionStoreWithCatalog(['stealth/space-bunny-alpha'], { enabled: false });
+  const baseUrl = await startServer(t, new InMemoryApiKeyStore(), store, []);
+  const created = await createKey(baseUrl);
+
+  const listed = await (await fetch(`${baseUrl}/v1/models`, { headers: { authorization: `Bearer ${created.key}` } })).json();
+  assert.deepEqual(listed.data.map((model) => model.id), ['fake-1', 'paid/never-imported'], 'a disabled connection falls back to live provider listing');
 });

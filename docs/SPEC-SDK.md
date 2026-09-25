@@ -176,6 +176,24 @@ reachable from the local dashboard. The contract:
 - `lastUsedAt` is best effort: it is written at most once per 30 seconds so
   request handling never blocks on disk.
 
+## Model Routing and the Client Catalog
+
+A plain OpenAI-compatible client must work with only a base URL, a key, and a
+model ID. That constrains two behaviors:
+
+- **Routing.** `POST /v1/chat/completions` resolves the provider in this order:
+  an explicit `x-omnihilbras-provider` header or `provider` body field, then the
+  saved connection catalog that lists the requested model, then the single
+  enabled credentialed connection, then the `openai` default. Resolution is
+  provider-neutral and reads connection metadata only; it never inspects a model
+  name for provider hints.
+- **Catalog.** `GET /v1/models` advertises the saved model IDs of enabled,
+  credentialed connections. Live provider listing remains the fallback only when
+  no such connection exists, so clients never see paid models the operator did
+  not import.
+
+Disabled or credential-less connections take part in neither.
+
 ## Project Structure
 
 ```text

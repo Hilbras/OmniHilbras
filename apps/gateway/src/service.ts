@@ -25,6 +25,7 @@ export type GatewayApiKeyList = {
 
 const connectionMutationLock = 'connection-mutations';
 const apiKeyMutationLock = 'api-key-mutations';
+const defaultProviderId = 'openai';
 const missingApiKeyMessage = 'This gateway requires an API key. Create one on the API keys page and send it as "Authorization: Bearer <key>".';
 const invalidApiKeyMessage = 'The API key is invalid or paused.';
 
@@ -56,6 +57,16 @@ export class GatewayService {
   }
 
   async listAllModels(signal?: AbortSignal): Promise<GatewayModelList> {
+    const connections = (await this.listConnections()).filter((connection) => connection.enabled && connection.hasCredential);
+    if (connections.length > 0) {
+      // Advertise the saved catalog so clients only see models this gateway
+      // actually routes, instead of a provider's full paid inventory.
+      return {
+        models: connections.flatMap((connection) => connection.modelIds.map((id) => ({ id, providerId: connection.providerId } satisfies Model))),
+        unavailable: [],
+      };
+    }
+
     const results = await Promise.all(this.registry.list().map(async (adapter) => {
       if (!adapter.listModels || adapter.capabilities.models !== true) return { providerId: adapter.id, models: [], unavailable: { providerId: adapter.id, code: 'NOT_SUPPORTED' } };
       try {
@@ -68,6 +79,23 @@ export class GatewayService {
       models: results.flatMap((result) => result.models),
       unavailable: results.flatMap((result) => result.unavailable ? [result.unavailable] : []),
     };
+  }
+
+  /**
+   * Resolves which provider should serve a model. An explicit request wins;
+   * otherwise the saved connection catalog decides, so a plain OpenAI-compatible
+   * client only needs a base URL, a key, and a model ID.
+   */
+  async resolveProviderId(model: string, explicitProviderId?: string) {
+    if (explicitProviderId) return explicitProviderId;
+    const modelId = model.trim();
+    if (!modelId) return defaultProviderId;
+    const connections = (await this.listConnections()).filter((connection) => connection.enabled && connection.hasCredential);
+    const owners = [...new Set(connections.filter((connection) => connection.modelIds.includes(modelId)).map((connection) => connection.providerId))];
+    if (owners.length === 1) return owners[0]!;
+    if (owners.length > 1) return this.registry.list().find((adapter) => owners.includes(adapter.id) && adapter.capabilities.chat === true)?.id ?? owners[0]!;
+    if (connections.length === 1) return connections[0]!.providerId;
+    return defaultProviderId;
   }
 
   async listModels(providerId: string, signal?: AbortSignal) {

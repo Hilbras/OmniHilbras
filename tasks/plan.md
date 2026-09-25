@@ -186,6 +186,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Key secrets are shown once and stored only as SHA-256 hashes.
 - [x] `GET /v1/models` and `POST /v1/chat/completions` reject anonymous clients by default.
 - [x] The dashboard keeps working without holding a key.
+- [x] A client needs only a base URL, key, and model ID: routing resolves the provider from the saved catalog and `/v1/models` advertises the saved catalog.
 - [x] Existing connection routes, model tests, and builds remain green.
 
 ### Phase 5: Cloud readiness
