@@ -1,5 +1,5 @@
 import { ProviderError } from '../errors.js';
-import { FetchHttpTransport, type HttpTransport } from '../transport.js';
+import { FetchHttpTransport, type HttpResponse, type HttpTransport } from '../transport.js';
 import { assertSafeProviderHeaderValue, assertSafeProviderRequestUrl, normalizeProviderBaseUrl, resolveProviderUrl } from '../url.js';
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterConfig } from './openai-compatible.js';
 import type { CredentialValidation, Model, ModelImportOptions, ProviderCredential, ProviderRequestContext } from '../types.js';
@@ -53,16 +53,25 @@ export class OpenRouterAdapter extends OpenAICompatibleAdapter {
       throw new ProviderError('AUTHENTICATION_FAILED', 'An OpenRouter API key is required.', { providerId: this.id, publicMessage: 'An OpenRouter API key is required.' });
     }
     assertSafeProviderHeaderValue('Authorization', credential.value, this.id);
-    const response = await this.validationTransport.request<OpenRouterKeyResponse>({
-      method: 'GET',
-      providerId: this.id,
-      url: resolveProviderUrl(this.validationBaseUrl, '/key', this.id),
-      headers: {
-        accept: 'application/json',
-        Authorization: `Bearer ${credential.value}`,
-      },
-      ...(context.signal ? { signal: context.signal } : {}),
-    });
+    let response: HttpResponse<OpenRouterKeyResponse>;
+    try {
+      response = await this.validationTransport.request<OpenRouterKeyResponse>({
+        method: 'GET',
+        providerId: this.id,
+        url: resolveProviderUrl(this.validationBaseUrl, '/key', this.id),
+        headers: {
+          accept: 'application/json',
+          Authorization: `Bearer ${credential.value}`,
+        },
+        ...(context.signal ? { signal: context.signal } : {}),
+      });
+    } catch (error) {
+      if (error instanceof ProviderError && error.code === 'AUTHENTICATION_FAILED') {
+        const message = 'OpenRouter rejected this API key. Use a valid inference key, not a management key, and try again.';
+        throw new ProviderError('AUTHENTICATION_FAILED', message, { providerId: this.id, statusCode: error.statusCode, publicMessage: message, cause: error });
+      }
+      throw error;
+    }
     const data = response.data?.data;
     if (!data || typeof data !== 'object' || typeof data.label !== 'string' || typeof data.is_management_key !== 'boolean') {
       throw new ProviderError('INVALID_RESPONSE', 'OpenRouter returned an invalid key response.', { providerId: this.id, publicMessage: 'OpenRouter returned an invalid key response.' });

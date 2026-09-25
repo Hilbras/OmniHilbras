@@ -29,6 +29,24 @@ test('OpenRouter validates credentials through the key metadata endpoint', async
   assert.equal(transport.calls[0].headers.accept, 'application/json');
 });
 
+test('OpenRouter explains rejected keys without exposing them', async () => {
+  const secret = 'sk-or-rejected-secret';
+  const transport = {
+    async request() {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'Provider authentication failed.', { providerId: 'openrouter', statusCode: 401 });
+    },
+    async *stream() {
+      throw new Error('stream should not be used for credential validation');
+    },
+  };
+  const adapter = new OpenRouterAdapter({}, { transport });
+
+  await assert.rejects(
+    adapter.validateCredential({ type: 'api-key', value: secret }),
+    (error) => error instanceof ProviderError && error.code === 'AUTHENTICATION_FAILED' && error.toJSON().message.includes('management key') && !error.toJSON().message.includes(secret),
+  );
+});
+
 test('OpenRouter health uses authenticated key metadata rather than models', async () => {
   const transport = createTransport({ data: { label: 'local test', is_management_key: false } });
   const adapter = new OpenRouterAdapter({}, { transport });
