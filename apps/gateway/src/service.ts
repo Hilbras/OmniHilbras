@@ -1,7 +1,7 @@
 import { CLINE_OAUTH, FetchHttpTransport, OpenAICompatibleAdapter, ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
-import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, toClineCredential } from './oauth.js';
+import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -363,7 +363,12 @@ export class GatewayService {
       });
       return { ok: true, message: `Connected to ${connection.name} with ${connection.modelIds.length} models.`, connection };
     } catch (error) {
-      const message = error instanceof ProviderError ? (error.publicMessage ?? error.message) : 'The sign-in could not be completed.';
+      // Prefer the provider's own words over a generic failure, so the operator
+      // can see why Cline turned the sign-in away.
+      const reason = error instanceof ProviderError ? providerSaid(error) : undefined;
+      const message = error instanceof ProviderError
+        ? [error.publicMessage ?? error.message, reason].filter(Boolean).join(' ')
+        : 'The sign-in could not be completed.';
       this.clineSessions.resolve(session.id, { status: 'failed', error: message });
       return { ok: false, message };
     }

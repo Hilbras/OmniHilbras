@@ -18,9 +18,21 @@ import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model,
 export const CLINE_OAUTH = {
   appBaseUrl: 'https://app.cline.bot',
   apiBaseUrl: 'https://api.cline.bot',
+  /**
+   * Cline serves its whole API under `/api/v1`. The adapter's base URL has to
+   * include that prefix, otherwise the generic `models` path resolves to
+   * `api.cline.bot/models`, which is not an endpoint Cline serves.
+   */
+  apiBasePath: 'https://api.cline.bot/api/v1',
   authorizeUrl: 'https://api.cline.bot/api/v1/auth/authorize',
   tokenUrl: 'https://api.cline.bot/api/v1/auth/token',
   refreshUrl: 'https://api.cline.bot/api/v1/auth/refresh',
+  modelsUrl: 'https://api.cline.bot/api/v1/models',
+  /**
+   * The catalog is public: it answers 200 to an unauthenticated request, so it
+   * cannot be used to check a token. This endpoint does check, and is what a
+   * sign-in is proved against.
+   */
   accountUrl: 'https://api.cline.bot/api/v1/users/me',
   clientType: 'extension',
 } as const;
@@ -127,11 +139,25 @@ export function decodeClineCode(code: string): ClineTokens | undefined {
   return undefined;
 }
 
-function toIsoString(value: string | number) {
-  if (typeof value === 'number') return new Date(value).toISOString();
+/**
+ * Cline reports the expiry as epoch seconds, the same unit a JWT `exp` uses,
+ * but not always: a value already in milliseconds must not be rescaled. Getting
+ * this wrong yields a 1970 timestamp, which makes a valid token look expired
+ * and sends every request down a refresh that then fails.
+ */
+export function clineExpiryToIso(value: string | number): string | undefined {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return undefined;
+    // Any plausible millisecond timestamp is above 1e12; seconds are far below.
+    const ms = value < 1e12 ? value * 1000 : value;
+    const asDate = new Date(ms);
+    return Number.isNaN(asDate.getTime()) ? undefined : asDate.toISOString();
+  }
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
+
+const toIsoString = clineExpiryToIso;
 
 export class ClineAdapter implements ProviderAdapter {
   readonly id = 'cline';
@@ -147,7 +173,7 @@ export class ClineAdapter implements ProviderAdapter {
   constructor(options: ClineAdapterOptions = {}) {
     this.transport = options.transport ?? new FetchHttpTransport();
     this.delegate = new OpenAICompatibleAdapter(
-      { id: 'cline', name: 'Cline', baseUrl: CLINE_OAUTH.apiBaseUrl, auth: { header: 'Authorization', prefix: 'Bearer' } },
+      { id: 'cline', name: 'Cline', baseUrl: CLINE_OAUTH.apiBasePath, auth: { header: 'Authorization', prefix: 'Bearer' } },
       { transport: this.transport },
     );
     this.onTokensRefreshed = options.onTokensRefreshed;
@@ -156,9 +182,9 @@ export class ClineAdapter implements ProviderAdapter {
   }
 
   /**
-   * Confirms a token against the Cline account endpoint. This is a real
-   * request, so a bad token costs nothing but a 401 and a good one proves the
-   * connection works.
+   * Confirms a token against the account endpoint, which is the one Cline
+   * endpoint that actually checks it: the model catalog answers 200 to an
+   * unauthenticated request, so it cannot tell a good token from a bad one.
    */
   async validateCredential(credential: ProviderCredential | undefined, context: ProviderRequestContext = {}): Promise<CredentialValidation> {
     const resolved = await this.currentCredential(credential, context.signal);
@@ -200,7 +226,10 @@ export class ClineAdapter implements ProviderAdapter {
 
   private needsRefresh(credential: ProviderCredential): credential is Extract<ProviderCredential, { type: 'oauth' }> {
     if (credential.type !== 'oauth' || !credential.refreshToken || !credential.expiresAt) return false;
-    const expiresAt = new Date(credential.expiresAt).getTime();
+    // Normalised rather than handed to `new Date` directly: an epoch-seconds
+    // value read as milliseconds lands in 1970, and a perfectly valid token
+    // would then be refreshed on every single request.
+    const expiresAt = new Date(clineExpiryToIso(credential.expiresAt) ?? Number.NaN).getTime();
     return Number.isFinite(expiresAt) && expiresAt - this.refreshSkewMs <= Date.now();
   }
 

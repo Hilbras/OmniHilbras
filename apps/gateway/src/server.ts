@@ -932,7 +932,11 @@ function clineCallbackPage(ok: boolean, message: string) {
   // The message is plain text and is escaped below. This charset is a second
   // line of defence: it admits the punctuation a real outcome message needs and
   // nothing that could become markup.
-  const safeMessage = /^[A-Za-z0-9 _.,:;'()@/+-]{1,200}$/.test(message) ? message : 'The sign-in could not be completed.';
+  // A provider's own wording can carry characters the outcome message does not,
+  // so it is rendered as text with quotes preserved rather than filtered away.
+  const safeMessage = /^[\S ]{1,300}$/.test(message) && !/[<>]/.test(message)
+    ? message
+    : 'The sign-in could not be completed.';
   return `<!doctype html>
 <html lang="en">
 <meta charset="utf-8" />

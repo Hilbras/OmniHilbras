@@ -387,3 +387,27 @@ test('a token endpoint that is simply unreachable is not reported as a rejected 
   assert.equal(response.status, 502);
   assert.deepEqual(await wired.listConnections(), []);
 });
+
+test("the provider's own reason reaches the operator", async (t) => {
+  const service = createService();
+  service.connectCline = async () => {
+    const { ProviderError } = await import('@hilbras/omnihilbras');
+    // What the transport produces for a 4xx that carries a reason.
+    throw new ProviderError('PROVIDER_REQUEST_FAILED', 'The provider rejected the request.', {
+      providerId: 'cline',
+      statusCode: 400,
+      details: { providerMessage: 'redirect_uri does not match the registered callback' },
+    });
+  };
+  const baseUrl = await startServer(t, service);
+  const started = await startSignIn(baseUrl);
+  const page = await fetch(`${baseUrl}/v1/oauth/cline/callback/${started.sessionId}?code=granted`, {
+    headers: { 'sec-fetch-site': 'cross-site' },
+  });
+  const html = await page.text();
+  assert.match(html, /redirect_uri does not match/, 'the real reason is shown, not just a generic failure');
+
+  const status = await (await fetch(`${baseUrl}/v1/oauth/cline/session/${started.sessionId}`)).json();
+  assert.equal(status.status, 'failed');
+  assert.match(status.error, /redirect_uri does not match/);
+});

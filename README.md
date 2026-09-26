@@ -67,6 +67,11 @@ provider does not hand the code to a browser redirect. It accepts a callback URL
 a `code#state` pair, or a bare code, and takes the same route to a saved
 connection.
 
+Cline serves its API under `https://api.cline.bot/api/v1`, and its model catalog
+is public while `/api/v1/users/me` is the endpoint that actually checks a token —
+so a sign-in is proved against the account endpoint and the catalog is only ever
+read. If a sign-in is refused, the callback page reports what Cline said.
+
 ## Releases
 
 The version tracks the size of the change. Every release is tagged on GitHub and

@@ -278,6 +278,32 @@ to the vault, so a refresh is persisted instead of repeated per request.
 prefix, and rejects non-JWT ClinePass keys (`clp_…`) that carry one. The adapter
 applies the prefix only to JWT-shaped tokens and sends everything else verbatim.
 
+**Expiry units.** Cline reports the expiry in epoch seconds, the unit a JWT `exp`
+uses, and not always in milliseconds. A seconds value handed straight to `new Date`
+lands in 1970, which makes a valid token look expired and sends every request down
+a refresh that then fails. Both the decoder and the adapter's refresh check
+normalise the unit, so a value below `1e12` is read as seconds.
+
+### Cline endpoints
+
+Cline serves its whole API under `/api/v1`, so the adapter's base URL is
+`https://api.cline.bot/api/v1`. Getting that wrong is silent and fatal: the
+generic `models` path then resolves to `api.cline.bot/models`, which Cline
+answers with `401 Unauthorized: Please make sure you're using the latest version
+of Cline and re-authenticate your Cline account.` — an error that reads like a
+credential problem rather than a wrong URL.
+
+Two of these endpoints are deliberately used for different jobs:
+
+| Endpoint | Authenticates? | Used for |
+| --- | --- | --- |
+| `GET /api/v1/users/me` | yes, `401` without a valid token | proving a sign-in before it is stored |
+| `GET /api/v1/models` | **no, `200` to an unauthenticated request** | the model catalog and chat traffic |
+
+The catalog is public, so it cannot tell a good token from a bad one and is never
+used as the credential check. A sign-in is proved against the account endpoint,
+which is the only one that actually checks.
+
 ## Model Routing and the Client Catalog
 
 A plain OpenAI-compatible client must work with only a base URL, a key, and a

@@ -3,6 +3,7 @@ import {
   ClineAdapter,
   ProviderError,
   buildClineAuthorizeUrl,
+  clineExpiryToIso,
   clineHeaders,
   decodeClineCode,
   type ClineTokens,
@@ -194,6 +195,17 @@ export function extractClineCode(input: ClineExchangeInput) {
   return raw;
 }
 
+/**
+ * What Cline said, when it said something. A provider that answers 4xx with a
+ * reason is the difference between a diagnosable integration bug and a generic
+ * failure the operator cannot act on.
+ */
+export function providerSaid(error: unknown): string | undefined {
+  if (!(error instanceof ProviderError)) return undefined;
+  const details = error.details as { providerMessage?: string } | undefined;
+  return typeof details?.providerMessage === 'string' ? details.providerMessage : undefined;
+}
+
 export function beginClineAuthorization(redirectUri: string, state?: string): ClineAuthorizeResult {
   assertLoopbackCallback(redirectUri);
   return { authUrl: buildClineAuthorizeUrl(redirectUri, state), redirectUri };
@@ -225,9 +237,10 @@ export async function exchangeClineCode(input: ClineExchangeInput, transport: Ht
     // A code Cline will not accept is an authentication problem the user can
     // fix by signing in again. A network failure is not, so that stays as-is.
     if (error instanceof ProviderError && (error.code === 'PROVIDER_UNAVAILABLE' || error.code === 'PROVIDER_TIMEOUT' || error.code === 'CANCELLED')) throw error;
-    throw new ProviderError('AUTHENTICATION_FAILED', 'Cline did not accept that sign-in. Try again.', {
+    const detail = providerSaid(error);
+    throw new ProviderError('AUTHENTICATION_FAILED', `Cline did not accept that sign-in. Try again.${detail ? ` (${detail})` : ''}`, {
       providerId: 'cline',
-      publicMessage: 'Cline did not accept that sign-in. Try again.',
+      publicMessage: `Cline did not accept that sign-in. Try again.${detail ? ` ${detail}` : ''}`,
       cause: error,
     });
   }
@@ -250,7 +263,7 @@ export async function exchangeClineCode(input: ClineExchangeInput, transport: Ht
     ...(typeof (payload.refreshToken ?? payload.refresh_token ?? payload.data?.refreshToken) === 'string'
       ? { refreshToken: (payload.refreshToken ?? payload.refresh_token ?? payload.data?.refreshToken) as string }
       : {}),
-    ...(expires === undefined ? {} : { expiresAt: typeof expires === 'number' ? new Date(expires).toISOString() : expires }),
+    ...(expires === undefined ? {} : { expiresAt: clineExpiryToIso(expires) }),
     ...(typeof payload.data?.userInfo?.email === 'string' ? { email: payload.data.userInfo.email } : {}),
   };
 }
