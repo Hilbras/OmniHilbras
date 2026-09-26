@@ -363,7 +363,18 @@ shipped with a flow makes every other provider report "No connection" on a fresh
 load, however it was added, which reads as data loss rather than as a display
 bug.
 
-The providers page searches models as well as provider names. A model matches on
+A provider page filters its own model list. A provider can carry hundreds of
+models — Cline alone contributes 458 — so searching within one provider is the
+only practical way to find one. The field sits directly above the list, matches
+the whole model ID and the part after the vendor prefix, shows `Showing N of M`,
+and has a clear control. An empty result says how many models were searched, so
+"no match" is distinguishable from "nothing imported".
+
+`Test all` acts on the models the list is showing and says so — `Test 8 shown`
+when a filter is active — rather than quietly running a bulk test over the whole
+catalog the operator cannot see.
+
+The providers page also searches models as well as provider names. A model matches on
 its whole ID and on the part after the vendor prefix, so `claude-sonnet` finds
 `anthropic/claude-sonnet-5`. Only imported models are searchable — a connection's
 `modelIds` or a catalog entry — and a model hit keeps its provider card visible so

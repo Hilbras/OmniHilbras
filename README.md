@@ -42,15 +42,18 @@ The providers page groups cards as **OAuth Providers**, **API Key Providers**,
 
 ## Searching Models
 
-The providers page searches models as well as provider names. Type part of a model
-ID and it matches both the full ID and the name after the vendor prefix, so
-`claude-sonnet` finds `anthropic/claude-sonnet-5`.
+**On a provider page**, a search box sits directly above the model list. It matches
+the full model ID and the name after the vendor prefix, so `claude-sonnet` finds
+`anthropic/claude-sonnet-5` in a list of 458. The header shows how many of the
+total are listed, and **Test all** tests what you are looking at — the button
+reads `Test 8 shown` when a filter is active — rather than the whole catalog.
 
-Results are grouped by provider and say whether that provider is actually serving
-the model — `serving`, `saved · needs attention`, or `not connected`. A saved
-connection is never shown as "not connected", because that hides a credential you
-have actually saved. Only imported models are searchable, so connect a provider
-first.
+**On the providers page**, the same search also spans providers. It reports which
+providers serve a model and says whether each is actually serving it — `serving`,
+`saved · needs attention`, or `not connected`. A saved connection is never shown
+as "not connected", because that hides a credential you have actually saved.
+
+Only imported models are searchable, so connect a provider first.
 
 ## Cline Sign-In
 

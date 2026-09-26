@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 9s: Filter models inside a provider page.
+  - Acceptance: every provider page has a search box above its model list that matches the full model ID and the part after the vendor prefix, shows `Showing N of M`, distinguishes no-match from nothing-imported, and has a clear control. `Test all` operates on the listed models and says `Test N shown` when a filter is active.
+  - Verify: browser check on the Cline page with 458 real models — `claude-sonnet` narrows to 8 rows, the bulk button reads `Test 8 shown`, a nonsense query shows "Nothing in 458 models matches", and the clear control resets. 0 console errors.
+  - Files: `src/pages/ProviderDetailPage.tsx`, docs.
+  - Depends on: Task 9r.
+  - Scope: Small.
+
 - [x] Task 9r: Read connections back from the gateway after a sign-in, and guard required fields.
   - Acceptance: a completed sign-in re-reads the authoritative record from the connections route instead of adopting the sign-in payload, and the resilience panel falls back to defaults rather than reading a required field unguarded.
   - Verify: browser check with a connected Cline account renders the provider page with 0 console errors, and every former unguarded read of `connection.resilience` now goes through one guarded local.

@@ -16,6 +16,7 @@ import {
   LoaderCircle,
   Plus,
   RefreshCw,
+  Search,
   Server,
   ShieldCheck,
   SlidersHorizontal,
@@ -243,6 +244,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const bulkRunRef = useRef(false);
   const scrollAnchorRef = useRef<number | null>(null);
   const [customModels, setCustomModels] = useState<string[]>([]);
+  const [modelQuery, setModelQuery] = useState('');
   const [strategy, setStrategy] = useState('balanced');
   const [notice, setNotice] = useState('');
   const [noticeError, setNoticeError] = useState(false);
@@ -285,6 +287,22 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
 
   const importedModels = connection?.modelIds ?? provider.modelList;
   const allModels = useMemo(() => [...new Set([...importedModels, ...customModels])], [customModels, importedModels]);
+
+  /**
+   * Filters this provider's models. A query matches the whole ID and the part
+   * after the vendor prefix, so `claude-sonnet` finds `anthropic/claude-sonnet-5`.
+   * A provider can carry hundreds of models, so this is the only practical way
+   * to find one.
+   */
+  const normalizedModelQuery = modelQuery.trim().toLowerCase();
+  const visibleModels = useMemo(() => {
+    if (!normalizedModelQuery) return allModels;
+    return allModels.filter((model) => {
+      const id = model.toLowerCase();
+      const leaf = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
+      return id.includes(normalizedModelQuery) || leaf.includes(normalizedModelQuery);
+    });
+  }, [allModels, normalizedModelQuery]);
   const testing = testingModels.length > 0;
   const isOauth = provider.auth === 'OAuth';
 
@@ -428,12 +446,13 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
    * Every model gets the same result a single test would produce.
    */
   async function testAllModels() {
-    if (testing || testingConnection || allModels.length === 0) return;
+    // Queues what the list shows, so filtering to three models tests three.
+    if (testing || testingConnection || visibleModels.length === 0) return;
     scrollAnchorRef.current = window.scrollY;
     bulkRunRef.current = true;
     const controller = new AbortController();
     bulkAbortRef.current = controller;
-    const queue = [...allModels];
+    const queue = [...visibleModels];
     const total = queue.length;
     const latencies: number[] = [];
     const failures: string[] = [];
@@ -531,7 +550,13 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
         <section className="card min-w-0 p-4 sm:p-5" aria-labelledby="models-title">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-            <div><h2 id="models-title" className="text-sm font-semibold">Available models</h2><p className="muted mt-1 text-xs">Models currently exposed by this provider route. Test sends one real minimal request.</p></div>
+            <div>
+              <h2 id="models-title" className="text-sm font-semibold">Available models</h2>
+              <p className="muted mt-1 text-xs">
+                Models currently exposed by this provider route. Test sends one real minimal request.
+                {normalizedModelQuery && <> Showing {visibleModels.length} of {allModels.length}.</>}
+              </p>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               {bulkProgress && (
                 <span className="flex items-center gap-1.5 rounded-full border border-gold/25 bg-gold-soft px-2.5 py-1 font-mono text-[10px] text-gold-text" role="status">
@@ -556,14 +581,34 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
                   Stop
                 </button>
               ) : (
-                <button type="button" onClick={() => void testAllModels()} disabled={testingConnection || allModels.length === 0} className="btn-gold !px-3 !py-2 !text-xs">
+                <button type="button" onClick={() => void testAllModels()} disabled={testingConnection || visibleModels.length === 0} className="btn-gold !px-3 !py-2 !text-xs">
                   <Zap className="h-3.5 w-3.5" aria-hidden="true" />
-                  Test all
+                  {normalizedModelQuery ? `Test ${visibleModels.length} shown` : 'Test all'}
                 </button>
               )}
             </div>
           </div>
-          <div className="mt-5 space-y-2">{allModels.length > 0 ? allModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingSet.has(model)} disabled={testing || testingConnection} testState={modelTests[model] ?? 'idle'} testError={modelTestErrors[model]} testLatencyMs={modelTestLatencies[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No models discovered</p><p className="muted mt-1 text-xs">Connect the provider or add a custom model ID below.</p></div>}</div>
+          <div className="mt-4">
+            <label className="relative block">
+              <span className="sr-only">Search {provider.name} models</span>
+              <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-muted" aria-hidden="true" />
+              <input
+                value={modelQuery}
+                onChange={(event) => setModelQuery(event.target.value)}
+                placeholder={`Search ${provider.name} models`}
+                aria-label={`Search ${provider.name} models`}
+                className="input !h-9 !w-full !py-2 !pl-9 !pr-8 !text-xs"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              {normalizedModelQuery && (
+                <button type="button" onClick={() => setModelQuery('')} aria-label="Clear model search" title="Clear search" className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 text-muted transition-colors hover:text-text">
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              )}
+            </label>
+          </div>
+          <div className="mt-3 space-y-2">{visibleModels.length > 0 ? visibleModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingSet.has(model)} disabled={testing || testingConnection} testState={modelTests[model] ?? 'idle'} testError={modelTestErrors[model]} testLatencyMs={modelTestLatencies[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{normalizedModelQuery ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{normalizedModelQuery ? <>Nothing in {allModels.length} models matches &ldquo;{modelQuery.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}</div>
           <div className="mt-5 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>
           {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {modelReference(provider.id, copiedModel)}</p>}
         </section>
