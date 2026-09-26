@@ -42,6 +42,7 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
   const pollRef = useRef<number | null>(null);
   const timeoutRef = useRef<number | null>(null);
+  const missedPollsRef = useRef(0);
   const signInWindowRef = useRef<Window | null>(signInWindow ?? null);
   const settledRef = useRef(false);
 
@@ -86,6 +87,7 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
     setPhase('starting');
     setMessage('Opening the sign-in page…');
     setError('');
+    missedPollsRef.current = 0;
     try {
       const signIn = await startGatewayOauthSignIn(providerId);
       if (settledRef.current) return;
@@ -106,6 +108,7 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
       pollRef.current = window.setInterval(() => {
         void getClineSignInStatus(signIn.sessionId).then((status) => {
           if (settledRef.current) return;
+          missedPollsRef.current = 0;
           if (status.status === 'pending') return;
           settledRef.current = true;
           stopWaiting();
@@ -120,8 +123,16 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
           setError(status.error ?? (status.status === 'expired'
             ? 'The sign-in expired. Start again.'
             : 'The sign-in did not complete.'));
-        }).catch(() => {
-          // A dropped poll is not a failed sign-in; the next tick tries again.
+        }).catch((pollError: unknown) => {
+          // A single dropped poll is not a failed sign-in, so the next tick tries
+          // again. Several in a row means the gateway is gone, and saying so
+          // beats leaving the dialog waiting out its full timeout.
+          missedPollsRef.current += 1;
+          if (missedPollsRef.current < 3) return;
+          settledRef.current = true;
+          stopWaiting();
+          setPhase('failed');
+          setError(pollError instanceof Error ? pollError.message : 'The local gateway stopped responding.');
         });
       }, pollIntervalMs);
     } catch (startError) {
