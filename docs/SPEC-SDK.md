@@ -240,6 +240,18 @@ connections route returns. A trimmed subset looks sufficient and is not: the
 provider page reads `resilience` and `modelPolicy` off it, and a missing
 `resilience` throws on the first access and blanks the page.
 
+Two rules follow, because that page renders the resilience panel as soon as any
+connection is set — there is no intermediate state where a partial record is
+safe:
+
+- **The gateway is the source of truth.** After a sign-in the page re-reads the
+  record from the connections route rather than adopting whatever shape the
+  sign-in handed over, so a payload change cannot reach the UI.
+- **A required field is never read unguarded.** The resilience panel falls back
+  to the documented defaults when a record arrives without a resilience block,
+  so an incomplete record degrades to "no tuning" instead of throwing during
+  render. A render-time throw here takes down the whole page, not one panel.
+
 **The session id travels in the redirect path, not in `state`.** Cline hands the
 sign-in to WorkOS AuthKit, which starts a session of its own and never echoes a
 caller-supplied `state` back, so a flow correlated by `state` alone can never

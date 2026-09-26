@@ -139,19 +139,26 @@ function isValidResilience(value: GatewayResilience) {
   return inRange(value.hedgeAfterMs, 0, 30_000) && inRange(value.maxRetries, 0, 5) && inRange(value.timeoutMs, 0, 600_000) && inRange(value.requestsPerMinute, 0, 100_000);
 }
 
+/** The documented defaults, used when a record arrives without a resilience block. */
+const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, requestsPerMinute: 0, hedgeAfterMs: 0 };
+
 function ResiliencePanel({ connection, routingState, onSave }: { connection: GatewayConnection; routingState?: GatewayRoutingState; onSave: (next: GatewayResilience) => void | Promise<void> }) {
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<GatewayResilience>(connection.resilience);
+  // A resilience block is required to render this panel. Reading it unguarded
+  // meant one incomplete record threw during render and blanked the whole page,
+  // so an absent block falls back to the documented defaults instead.
+  const resilience = connection.resilience ?? DEFAULT_RESILIENCE;
+  const [draft, setDraft] = useState<GatewayResilience>(resilience);
   const live = routingState?.connections.find((item) => item.providerId === connection.providerId);
 
   useEffect(() => {
-    setDraft(connection.resilience);
-  }, [connection.resilience]);
+    setDraft(resilience);
+  }, [resilience]);
 
   const summary = [
-    connection.resilience.hedgeAfterMs > 0 ? `hedge ${Math.round(connection.resilience.hedgeAfterMs / 100) / 10}s` : undefined,
-    connection.resilience.timeoutMs > 0 ? `${Math.round(connection.resilience.timeoutMs / 1000)}s timeout` : undefined,
-    `${connection.resilience.maxRetries} ${connection.resilience.maxRetries === 1 ? 'retry' : 'retries'}`,
+    resilience.hedgeAfterMs > 0 ? `hedge ${Math.round(resilience.hedgeAfterMs / 100) / 10}s` : undefined,
+    resilience.timeoutMs > 0 ? `${Math.round(resilience.timeoutMs / 1000)}s timeout` : undefined,
+    `${resilience.maxRetries} ${resilience.maxRetries === 1 ? 'retry' : 'retries'}`,
   ].filter(Boolean).join(' · ');
 
   return (
@@ -179,7 +186,7 @@ function ResiliencePanel({ connection, routingState, onSave }: { connection: Gat
             : 'Set a hedge delay to race a second connection when this one is slow. With a single connection nothing is sent, so there is no extra cost.'}</p>
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => { void onSave(draft); }} disabled={!isValidResilience(draft)} className="btn-gold !px-3 !py-2 !text-xs disabled:opacity-60">Save reliability</button>
-            <button type="button" onClick={() => setDraft(connection.resilience)} className="btn-quiet !px-2 !py-2 !text-xs">Reset</button>
+            <button type="button" onClick={() => setDraft(resilience)} className="btn-quiet !px-2 !py-2 !text-xs">Reset</button>
             {live && <span className="muted ml-auto font-mono text-[10px]">{live.failures ? `${live.failures} recent failures` : `${live.successes ?? 0} successes`}</span>}
           </div>
           {!isValidResilience(draft) && <p className="text-[11px] text-danger">Hedge 0–30000 ms, retries 0–5, timeout 0–600000 ms, requests per minute 0–100000.</p>}
@@ -580,10 +587,18 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
           signInWindow={signInWindow}
           onClose={() => { setAddOpen(false); setSignInWindow(null); }}
           onConnected={async (saved) => {
-            setConnection(saved);
+            // The gateway is the source of truth for a connection record, so the
+            // authoritative one is read back rather than trusting whatever shape
+            // the sign-in happened to hand over. A partial record here used to
+            // reach the resilience panel and blank the page.
+            const authoritative = await listGatewayConnections()
+              .then((connections) => connections.find((item) => item.providerId === provider.id && item.hasCredential))
+              .catch(() => undefined);
+            const next = authoritative ?? saved;
+            setConnection(next);
             setConnectionAdded(true);
             setConnectionHealthy(false);
-            flash(`Signed in to ${provider.name} with ${saved.modelIds.length} models.`);
+            flash(`Signed in to ${next.name} with ${next.modelIds.length} models.`);
             void getGatewayRoutingState().then(setRoutingState).catch(() => undefined);
           }}
         />
