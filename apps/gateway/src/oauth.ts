@@ -19,6 +19,26 @@ import {
  */
 export const clineCallbackPath = '/v1/oauth/cline/callback';
 
+/**
+ * Cline hands the sign-in to WorkOS AuthKit, which starts a session of its own
+ * and does not echo a caller-supplied `state` back. So the session cannot be
+ * correlated by `state` alone: the session id travels in the *path* of the
+ * redirect, which the provider must honour verbatim in order to redirect at all.
+ *
+ * `state` is still sent, and is still checked whenever it does come back, so a
+ * provider that echoes it gets the stronger guarantee for free.
+ */
+export function clineCallbackPathFor(sessionId: string) {
+  return `${clineCallbackPath}/${sessionId}`;
+}
+
+/** Pulls the session id out of a callback path, if it carries one. */
+export function sessionIdFromCallbackPath(pathname: string): string | undefined {
+  if (!pathname.startsWith(`${clineCallbackPath}/`)) return undefined;
+  const id = pathname.slice(clineCallbackPath.length + 1);
+  return /^[A-Za-z0-9_-]{16,128}$/.test(id) ? id : undefined;
+}
+
 /** How long a started sign-in stays usable before it is discarded. */
 export const clineSessionTtlMs = 5 * 60_000;
 
@@ -42,6 +62,8 @@ type ClineSession = {
   redirectUri: string;
   createdAt: number;
   expiresAt: number;
+  /** Set once a callback has claimed this session, so it cannot be replayed. */
+  claimed?: boolean;
   result: ClineSessionStatus;
 };
 
@@ -63,19 +85,26 @@ export class ClineSessionStore {
     this.now = options.now ?? (() => Date.now());
   }
 
-  start(redirectUri: string) {
+  /**
+   * `buildRedirect` receives the freshly minted session id and returns the
+   * redirect this sign-in will use. The redirect is built from the id because
+   * the id has to travel in the redirect path, and the same value must later be
+   * sent to the token endpoint: OAuth requires the `redirect_uri` at exchange
+   * time to match the one the authorize request carried.
+   */
+  start(buildRedirect: (sessionId: string) => string) {
     this.prune();
     const id = randomToken(32);
     const session: ClineSession = {
       id,
       state: randomToken(32),
-      redirectUri,
+      redirectUri: buildRedirect(id),
       createdAt: this.now(),
       expiresAt: this.now() + clineSessionTtlMs,
       result: { status: 'pending' },
     };
     this.sessions.set(id, session);
-    return { sessionId: id, state: session.state as string };
+    return { sessionId: id, state: session.state as string, redirectUri: session.redirectUri };
   }
 
   /** Reads a session without letting it be used twice. */
@@ -88,19 +117,24 @@ export class ClineSessionStore {
   }
 
   /**
-   * Claims the `state` a callback carries. Returns nothing when the value is
-   * unknown, already used, or expired, so a replayed callback cannot re-run the
-   * exchange.
+   * Claims the session a callback belongs to. The session id in the redirect
+   * path identifies it; a `state` that comes back is cross-checked when present.
+   *
+   * Returns nothing when the session is unknown, already used, or expired, so a
+   * replayed or forged callback cannot re-run the exchange. The claim is spent
+   * whether or not the exchange then succeeds.
    */
-  claim(state: string): ClineSession | undefined {
+  claim(sessionId: string, state?: string): ClineSession | undefined {
     this.prune();
-    for (const session of this.sessions.values()) {
-      if (session.state !== state) continue;
-      // Single use: the state is spent whether or not the exchange succeeds.
-      delete session.state;
-      return session;
-    }
-    return undefined;
+    const session = this.sessions.get(sessionId);
+    if (!session || session.claimed) return undefined;
+    // A provider that echoes `state` must echo the right one.
+    if (state !== undefined && session.state !== undefined && session.state !== state) return undefined;
+    // A wrong state spends nothing, so a user whose provider crossed the value
+    // can retry; the session id is the capability, and the state only narrows it.
+    session.claimed = true;
+    delete session.state;
+    return session;
   }
 
   resolve(sessionId: string, result: ClineSessionStatus) {

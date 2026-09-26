@@ -1,7 +1,7 @@
 import { CLINE_OAUTH, FetchHttpTransport, OpenAICompatibleAdapter, ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
-import { ClineSessionStore, beginClineAuthorization, createClineAdapter, exchangeClineCode, toClineCredential } from './oauth.js';
+import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, toClineCredential } from './oauth.js';
 import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -324,8 +324,11 @@ export class GatewayService {
    * callback must echo back.
    */
   startClineSignIn(redirectUri: string) {
-    const { sessionId, state } = this.clineSessions.start(redirectUri);
-    return { ...this.beginClineAuthorization(redirectUri, state), sessionId, state };
+    // The session id goes in the redirect path, because the provider does not
+    // echo `state` back and the path is the one part it must honour verbatim.
+    // The same redirect is what gets sent to the token endpoint later.
+    const { sessionId, state, redirectUri: callback } = this.clineSessions.start((id) => redirectUri.replace(/\/v1\/oauth\/cline\/callback\/?$/, clineCallbackPathFor(id)));
+    return { ...this.beginClineAuthorization(callback, state), sessionId, state };
   }
 
   /**
@@ -334,10 +337,15 @@ export class GatewayService {
    * session so the dashboard can pick it up. The session is resolved either way,
    * so a failure is reported instead of leaving the dashboard waiting.
    */
-  async completeClineSignIn(input: { state: string; code: string; providerError?: string }, signal?: AbortSignal): Promise<{ ok: boolean; message: string; connection?: ConnectionRecord }> {
-    const session = this.clineSessions.claim(input.state);
+  async completeClineSignIn(input: { sessionId?: string; state?: string; code: string; providerError?: string }, signal?: AbortSignal): Promise<{ ok: boolean; message: string; connection?: ConnectionRecord }> {
+    if (!input.sessionId) {
+      // Without a session there is nothing safe to correlate, so the code is not
+      // exchanged. The paste box in the dashboard does not need a session.
+      return { ok: false, message: 'This callback did not identify a sign-in, so nothing was saved. Use the paste box in OmniHilbras to finish connecting.' };
+    }
+    const session = this.clineSessions.claim(input.sessionId, input.state);
     if (!session) {
-      return { ok: false, message: 'This sign-in link is unknown, already used, or expired. Start again from OmniHilbras.' };
+      return { ok: false, message: 'This sign-in has already been used or has expired. Start again from OmniHilbras.' };
     }
     if (input.providerError) {
       // The provider's error code comes back through the query string, so it is

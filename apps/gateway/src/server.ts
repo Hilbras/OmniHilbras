@@ -3,7 +3,7 @@ import { ProviderError, assertSafeProviderRequestUrl, canonicalLoopbackHost, isL
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './config.js';
 import type { ApiKeyStore } from './api-keys.js';
 import type { ConnectionStore } from './connections.js';
-import { clineCallbackPath } from './oauth.js';
+import { clineCallbackPath, sessionIdFromCallbackPath } from './oauth.js';
 import type { GatewayService } from './service.js';
 
 export type GatewayServerOptions = {
@@ -218,12 +218,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     // Where Cline sends the browser after the user approves. This is the only
     // route exempt from the cross-site guard: a top-level navigation from the
     // provider carries `sec-fetch-site: cross-site` and no Origin.
-    if (request.method === 'GET' && url.pathname === clineCallbackPath) {
+    if (request.method === 'GET' && (url.pathname === clineCallbackPath || url.pathname.startsWith(`${clineCallbackPath}/`))) {
       const code = url.searchParams.get('code') ?? '';
-      const state = url.searchParams.get('state') ?? '';
+      // The session id rides in the path. `state` is only present when the
+      // provider echoes it, which Cline's AuthKit handoff does not.
+      const sessionId = sessionIdFromCallbackPath(url.pathname);
+      const state = url.searchParams.get('state') ?? undefined;
       const providerError = url.searchParams.get('error');
       const outcome = code || providerError
-        ? await service.completeClineSignIn({ state, code, ...(providerError ? { providerError } : {}) }, controller.signal)
+        ? await service.completeClineSignIn({ code, ...(sessionId ? { sessionId } : {}), ...(state ? { state } : {}), ...(providerError ? { providerError } : {}) }, controller.signal)
         : { ok: false, message: 'This callback carried neither an authorization code nor an error. Start the sign-in again.' };
       sendHtml(response, 200, clineCallbackPage(outcome.ok, outcome.message), origin);
       return;
@@ -862,11 +865,11 @@ function isCrossSiteRequest(request: IncomingMessage) {
   return request.headers['sec-fetch-site'] === 'cross-site';
 }
 
-/** The single GET navigation the OAuth provider is allowed to redirect to. */
+/** The GET navigations the OAuth provider is allowed to redirect to. */
 function isOauthCallbackNavigation(request: IncomingMessage) {
   if (request.method !== 'GET') return false;
-  const path = (request.url ?? '').split('?', 1)[0];
-  return path === clineCallbackPath;
+  const path = (request.url ?? '').split('?', 1)[0] ?? '';
+  return path === clineCallbackPath || path.startsWith(`${clineCallbackPath}/`);
 }
 
 function isJsonRequest(request: IncomingMessage) {

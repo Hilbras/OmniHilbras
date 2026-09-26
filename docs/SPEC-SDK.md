@@ -215,18 +215,15 @@ never persists.
 owns, so the sign-in completes on its own and there is normally nothing to paste:
 
 1. `POST /v1/oauth/cline/start` records a session, mints a 256-bit `state`, and
-   returns a sign-in URL whose `redirect_uri` and `callback_url` are a loopback
-   URL and whose `state` the provider echoes back. A non-loopback redirect is
-   refused, so a callback can never be pointed somewhere else.
+   returns a sign-in URL. A non-loopback redirect is refused, so a callback can
+   never be pointed somewhere else.
 2. The dashboard opens that URL in a tab. The tab is opened blank inside the
    click that started the flow, because a browser only allows `window.open`
    during a user gesture, and the dialog navigates it once the URL exists.
-3. The user approves in the browser. Cline redirects to
-   `GET /v1/oauth/cline/callback`, which is the one route exempt from the
-   cross-site guard, because a top-level navigation from the provider sends
-   `sec-fetch-site: cross-site` and no `Origin`. The route claims the `state`,
-   which is single-use, so a replayed or forged callback is refused instead of
-   exchanging an attacker's code into the user's vault.
+3. The user approves in the browser, and Cline redirects to
+   `GET /v1/oauth/cline/callback/:sessionId`, which is the one route exempt from
+   the cross-site guard, because a top-level navigation from the provider sends
+   `sec-fetch-site: cross-site` and no `Origin`.
 4. The exchange proves the token with a real `GET /v1/users/me` before anything
    is written, then discovers the model catalog and saves the connection. A
    rejected code is reported as an authentication failure; an unreachable token
@@ -237,6 +234,29 @@ owns, so the sign-in completes on its own and there is normally nothing to paste
    sign-in cannot be resumed after the user has walked away, and a finished
    session is dropped a minute later. The status carries the connection and an
    error message, never a credential.
+
+**The session id travels in the redirect path, not in `state`.** Cline hands the
+sign-in to WorkOS AuthKit, which starts a session of its own and never echoes a
+caller-supplied `state` back, so a flow correlated by `state` alone can never
+match. The session id therefore goes in the path of `redirect_uri`, which the
+provider must honour verbatim in order to redirect at all. A `state` is still
+minted and sent, and is still checked whenever it does come back, so a provider
+that echoes it gets the stronger guarantee for free.
+
+Two invariants follow, and both are pinned by tests:
+
+- **The same redirect is used twice.** The `redirect_uri` sent to the token
+  endpoint must equal the one the authorize request carried, so the session is
+  created with its final redirect rather than patched afterwards. Getting this
+  wrong makes the provider reject an otherwise valid code.
+- **A session is claimed once.** Claiming is tracked by an explicit flag, not by
+  the absence of a `state`, because `state` is optional. A replayed or forged
+  callback is refused rather than exchanging an attacker's code into the user's
+  vault. A callback that carries a *wrong* `state` spends nothing, so a user
+  whose provider crossed the value can retry.
+
+A callback that identifies no session is not exchanged, and its message points
+at the paste box rather than only telling the user to start over.
 
 The callback page reports the outcome and shows no code, because by the time it
 renders the exchange has already happened. It lives on the origin that also holds

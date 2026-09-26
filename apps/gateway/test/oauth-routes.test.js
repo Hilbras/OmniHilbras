@@ -57,10 +57,13 @@ test('starting a sign-in hands back a session and a state carried in the URL', a
   const started = await startSignIn(baseUrl);
   assert.match(started.sessionId, /^[A-Za-z0-9_-]{20,}$/);
   assert.ok(started.state.length >= 32);
-  assert.equal(started.redirectUri, 'http://127.0.0.1:8787/v1/oauth/cline/callback');
+  // The session id rides in the redirect path, because Cline's AuthKit handoff
+  // never echoes `state` back.
+  assert.equal(started.redirectUri, `http://127.0.0.1:8787/v1/oauth/cline/callback/${started.sessionId}`);
   const url = new URL(started.authUrl);
-  assert.equal(url.searchParams.get('state'), started.state, 'the state travels to the provider and back');
+  assert.equal(url.searchParams.get('state'), started.state, 'a state is still offered');
   assert.equal(url.searchParams.get('redirect_uri'), started.redirectUri);
+  assert.equal(url.searchParams.get('callback_url'), started.redirectUri);
 
   const status = await (await fetch(`${baseUrl}/v1/oauth/cline/session/${started.sessionId}`)).json();
   assert.deepEqual(status, { status: 'pending' });
@@ -82,7 +85,7 @@ test('a browser callback finishes the sign-in with nothing to paste', async (t) 
   const baseUrl = await startServer(t, service);
   const started = await startSignIn(baseUrl);
 
-  const page = await fetch(`${baseUrl}/v1/oauth/cline/callback?code=granted&state=${encodeURIComponent(started.state)}`, {
+  const page = await fetch(`${baseUrl}/v1/oauth/cline/callback/${started.sessionId}?code=granted`, {
     headers: { 'sec-fetch-site': 'cross-site' },
   });
   assert.equal(page.status, 200);
@@ -98,6 +101,80 @@ test('a browser callback finishes the sign-in with nothing to paste', async (t) 
   assert.equal(JSON.stringify(status).toLowerCase().includes('token'), false, 'the status carries no credential');
 });
 
+test('the flow completes even when the provider never echoes the state back', async (t) => {
+  const service = createConnectedService();
+  const baseUrl = await startServer(t, service);
+  const started = await startSignIn(baseUrl);
+  assert.ok(started.state, 'a state is still sent to the provider');
+
+  // Cline hands off to WorkOS AuthKit, which drops `state`. The redirect path
+  // is the only thing that still identifies the sign-in.
+  const page = await fetch(`${baseUrl}/v1/oauth/cline/callback/${started.sessionId}?code=granted`, {
+    headers: { 'sec-fetch-site': 'cross-site' },
+  });
+  assert.match(await page.text(), /Cline connected/);
+
+  const status = await (await fetch(`${baseUrl}/v1/oauth/cline/session/${started.sessionId}`)).json();
+  assert.equal(status.status, 'connected');
+  assert.equal(status.connection.name, 'Cline (dev@example.com)');
+});
+
+test('a state that comes back must match the session in the path', async (t) => {
+  const service = createConnectedService();
+  let calls = 0;
+  service.connectCline = async () => {
+    calls += 1;
+    return { id: 'cline', providerId: 'cline', name: 'Cline', modelIds: ['m'], customModelIds: [] };
+  };
+  const baseUrl = await startServer(t, service);
+  const first = await startSignIn(baseUrl);
+  const second = await startSignIn(baseUrl);
+
+  const crossed = await fetch(`${baseUrl}/v1/oauth/cline/callback/${first.sessionId}?code=granted&state=${encodeURIComponent(second.state)}`, {
+    headers: { 'sec-fetch-site': 'cross-site' },
+  });
+  assert.match(await crossed.text(), /sign-in failed/);
+  assert.equal(calls, 0, 'a crossed state exchanges nothing');
+
+  // The mismatched attempt spent nothing, so the real callback still works.
+  const retry = await fetch(`${baseUrl}/v1/oauth/cline/callback/${first.sessionId}?code=granted&state=${encodeURIComponent(first.state)}`, {
+    headers: { 'sec-fetch-site': 'cross-site' },
+  });
+  assert.match(await retry.text(), /Cline connected/);
+  assert.equal(calls, 1);
+});
+
+test('a callback with no session at all points at the paste box', async (t) => {
+  const service = createConnectedService();
+  let calls = 0;
+  service.connectCline = async () => {
+    calls += 1;
+    return { id: 'cline', providerId: 'cline', name: 'Cline', modelIds: ['m'], customModelIds: [] };
+  };
+  const baseUrl = await startServer(t, service);
+  const page = await fetch(`${baseUrl}/v1/oauth/cline/callback?code=granted`, { headers: { 'sec-fetch-site': 'cross-site' } });
+  const html = await page.text();
+  assert.match(html, /sign-in failed/);
+  assert.match(html, /paste box/i, 'the message says how to finish instead of just failing');
+  assert.equal(calls, 0, 'a code with no session is not exchanged');
+});
+
+test('a replayed callback path is refused even with the right state', async (t) => {
+  const service = createConnectedService();
+  let calls = 0;
+  service.connectCline = async () => {
+    calls += 1;
+    return { id: 'cline', providerId: 'cline', name: 'Cline', modelIds: ['m'], customModelIds: [] };
+  };
+  const baseUrl = await startServer(t, service);
+  const started = await startSignIn(baseUrl);
+  const url = `${baseUrl}/v1/oauth/cline/callback/${started.sessionId}?code=granted&state=${encodeURIComponent(started.state)}`;
+  await fetch(url, { headers: { 'sec-fetch-site': 'cross-site' } });
+  const replay = await fetch(url, { headers: { 'sec-fetch-site': 'cross-site' } });
+  assert.match(await replay.text(), /sign-in failed/);
+  assert.equal(calls, 1, 'the code is exchanged once');
+});
+
 test('the exchange was given the redirect the sign-in started with', async (t) => {
   const service = createConnectedService();
   const seen = [];
@@ -107,17 +184,20 @@ test('the exchange was given the redirect the sign-in started with', async (t) =
   };
   const baseUrl = await startServer(t, service);
   const started = await startSignIn(baseUrl);
-  await fetch(`${baseUrl}/v1/oauth/cline/callback?code=granted&state=${encodeURIComponent(started.state)}`, { headers: { 'sec-fetch-site': 'cross-site' } });
+  await fetch(`${baseUrl}/v1/oauth/cline/callback/${started.sessionId}?code=granted`, { headers: { 'sec-fetch-site': 'cross-site' } });
   assert.equal(seen.length, 1);
   assert.equal(seen[0].code, 'granted');
+  // OAuth requires the exchange redirect_uri to equal the authorize one, so the
+  // session id in the path has to be there at exchange time too.
   assert.equal(seen[0].redirectUri, started.redirectUri);
+  assert.equal(new URL(started.authUrl).searchParams.get('redirect_uri'), seen[0].redirectUri);
 });
 
-test('a callback whose state was never issued is refused', async (t) => {
+test('a callback for a session that was never started is refused', async (t) => {
   const service = createConnectedService();
   const baseUrl = await startServer(t, service);
   const started = await startSignIn(baseUrl);
-  const page = await fetch(`${baseUrl}/v1/oauth/cline/callback?code=attacker-code&state=forged-state`, {
+  const page = await fetch(`${baseUrl}/v1/oauth/cline/callback/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?code=attacker-code`, {
     headers: { 'sec-fetch-site': 'cross-site' },
   });
   assert.match(await page.text(), /sign-in failed/);
@@ -127,27 +207,11 @@ test('a callback whose state was never issued is refused', async (t) => {
   assert.equal(status.status, 'pending');
 });
 
-test('a callback cannot be replayed once the state is spent', async (t) => {
-  const service = createConnectedService();
-  let calls = 0;
-  service.connectCline = async (input) => {
-    calls += 1;
-    return { id: 'cline', providerId: 'cline', name: 'Cline', modelIds: ['m'], customModelIds: [] };
-  };
-  const baseUrl = await startServer(t, service);
-  const started = await startSignIn(baseUrl);
-  const url = `${baseUrl}/v1/oauth/cline/callback?code=granted&state=${encodeURIComponent(started.state)}`;
-  await fetch(url, { headers: { 'sec-fetch-site': 'cross-site' } });
-  const replay = await fetch(url, { headers: { 'sec-fetch-site': 'cross-site' } });
-  assert.match(await replay.text(), /sign-in failed/);
-  assert.equal(calls, 1, 'the code is exchanged once');
-});
-
 test('a rejected code is reported to the dashboard instead of leaving it waiting', async (t) => {
   const service = createConnectedService();
   const baseUrl = await startServer(t, service);
   const started = await startSignIn(baseUrl);
-  const page = await fetch(`${baseUrl}/v1/oauth/cline/callback?code=rejected&state=${encodeURIComponent(started.state)}`, {
+  const page = await fetch(`${baseUrl}/v1/oauth/cline/callback/${started.sessionId}?code=rejected`, {
     headers: { 'sec-fetch-site': 'cross-site' },
   });
   assert.match(await page.text(), /sign-in failed/);
@@ -187,7 +251,7 @@ test('the callback page survives the cross-site navigation that reaches it', asy
   const baseUrl = await startServer(t);
   // A top-level redirect from the provider sends `sec-fetch-site: cross-site`
   // and no Origin, which every other route refuses.
-  const response = await fetch(`${baseUrl}/v1/oauth/cline/callback?code=abc123&state=unknown`, { headers: { 'sec-fetch-site': 'cross-site' } });
+  const response = await fetch(`${baseUrl}/v1/oauth/cline/callback/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?code=abc123`, { headers: { 'sec-fetch-site': 'cross-site' } });
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/);
   const html = await response.text();
@@ -203,7 +267,7 @@ test('the callback page survives the cross-site navigation that reaches it', asy
 
 test('the callback page will not reflect markup back into the page', async (t) => {
   const baseUrl = await startServer(t);
-  const response = await fetch(`${baseUrl}/v1/oauth/cline/callback?code=${encodeURIComponent('<img src=x onerror=alert(1)>')}&state=${encodeURIComponent('<script>alert(1)</script>')}`, {
+  const response = await fetch(`${baseUrl}/v1/oauth/cline/callback?code=${encodeURIComponent('<img src=x onerror=alert(1)>')}`, {
     headers: { 'sec-fetch-site': 'cross-site' },
   });
   assert.equal(response.status, 200);
@@ -216,7 +280,7 @@ test('a provider-side error is reported without leaking the code', async (t) => 
   const service = createService();
   const baseUrl = await startServer(t, service);
   const started = await startSignIn(baseUrl);
-  const response = await fetch(`${baseUrl}/v1/oauth/cline/callback?error=${encodeURIComponent('access_denied')}&state=${encodeURIComponent(started.state)}`, {
+  const response = await fetch(`${baseUrl}/v1/oauth/cline/callback/${started.sessionId}?error=${encodeURIComponent('access_denied')}`, {
     headers: { 'sec-fetch-site': 'cross-site' },
   });
   const html = await response.text();
@@ -231,7 +295,7 @@ test('a provider-side error is reported without leaking the code', async (t) => 
 test('a provider error carrying markup cannot inject into the page', async (t) => {
   const baseUrl = await startServer(t);
   const started = await startSignIn(baseUrl);
-  const response = await fetch(`${baseUrl}/v1/oauth/cline/callback?error=${encodeURIComponent('<img src=x onerror=alert(1)>')}&state=${encodeURIComponent(started.state)}`, {
+  const response = await fetch(`${baseUrl}/v1/oauth/cline/callback/${started.sessionId}?error=${encodeURIComponent('<img src=x onerror=alert(1)>')}`, {
     headers: { 'sec-fetch-site': 'cross-site' },
   });
   const html = await response.text();

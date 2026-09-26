@@ -46,12 +46,17 @@ Cline is reached through an OAuth authorization-code flow instead of a pasted AP
 key. On its provider page, **Add connection** opens the sign-in in your browser
 and waits there — there is normally nothing to paste.
 
-The gateway starts the sign-in and hands back a session and a single-use `state`.
-Cline redirects the browser to `GET /v1/oauth/cline/callback` on the gateway's own
-loopback address, where the gateway exchanges the code, proves the token against
-Cline with a real request, imports the model catalog, and saves the connection
-encrypted in the local vault. The dashboard learns the outcome by polling
+The gateway starts the sign-in and hands back a session. Cline redirects the
+browser to `GET /v1/oauth/cline/callback/:sessionId` on the gateway's own loopback
+address, where the gateway exchanges the code, proves the token against Cline with
+a real request, imports the model catalog, and saves the connection encrypted in
+the local vault. The dashboard learns the outcome by polling
 `GET /v1/oauth/cline/session/:id`, so the flow finishes on its own.
+
+The session id rides in the redirect path rather than in an OAuth `state`,
+because Cline's sign-in is handed to WorkOS AuthKit, which never echoes a
+caller-supplied `state` back. A session is used once, so a replayed or forged
+callback cannot put a code into your vault.
 
 An expired access token is renewed automatically before use, and the renewed
 token is written back to the vault. If a sign-in cannot be renewed, the provider
