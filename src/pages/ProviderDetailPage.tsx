@@ -244,12 +244,14 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const meta = statusMeta(connectionAdded ? (provider.id === 'openrouter' && !connectionHealthy ? 'attention' : provider.status === 'available' ? 'connected' : provider.status) : 'available');
 
   useEffect(() => {
-    if (provider.id !== 'openrouter') return;
+    // Any provider can have a saved connection, not just the first one that
+    // shipped with a flow. Gating this on one id made every other provider
+    // report "No connection" on a fresh load, however it was added.
     let active = true;
     void listGatewayConnections()
       .then((connections) => {
         if (!active) return;
-        const savedConnection = connections.find((item) => item.providerId === 'openrouter' && item.hasCredential);
+        const savedConnection = connections.find((item) => item.providerId === provider.id && item.hasCredential);
         setConnection(savedConnection);
         setConnectionAdded(Boolean(savedConnection));
       })
@@ -261,7 +263,6 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     bulkAbortRef.current?.abort();
   }, []);
   useEffect(() => {
-    if (provider.id !== 'openrouter') return;
     let active = true;
     void getGatewayRoutingState()
       .then((state) => { if (active) setRoutingState(state); })

@@ -232,8 +232,13 @@ owns, so the sign-in completes on its own and there is normally nothing to paste
 5. The outcome is recorded on the session, and the dashboard learns it by
    polling `GET /v1/oauth/cline/session/:id`. A session lives five minutes, so a
    sign-in cannot be resumed after the user has walked away, and a finished
-   session is dropped a minute later. The status carries the connection and an
-   error message, never a credential.
+   session is dropped a minute later. The status carries an error message or the
+   whole connection record — never a credential.
+
+A connected status carries the **complete** record, the same metadata the
+connections route returns. A trimmed subset looks sufficient and is not: the
+provider page reads `resilience` and `modelPolicy` off it, and a missing
+`resilience` throws on the first access and blanks the page.
 
 **The session id travels in the redirect path, not in `state`.** Cline hands the
 sign-in to WorkOS AuthKit, which starts a session of its own and never echoes a
@@ -339,6 +344,12 @@ Cline is the one implemented `OAuth` mode, and it has a working sign-in flow; se
 [OAuth Connections](#oauth-connections). Its card still reads `available` with
 `—` metrics until a connection is actually saved, because catalog metadata is not
 evidence of a connection.
+
+A provider page loads its saved connection for **every** provider, matched on
+`providerId` plus `hasCredential`. Restricting that to the first provider that
+shipped with a flow makes every other provider report "No connection" on a fresh
+load, however it was added, which reads as data loss rather than as a display
+bug.
 
 ## Connection Reliability
 

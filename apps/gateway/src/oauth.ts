@@ -50,10 +50,33 @@ export type ClineAuthorizeResult = {
 
 export type ClineSessionStatus = {
   status: 'pending' | 'connected' | 'failed' | 'expired';
-  /** Present once the sign-in succeeded. Contains no secrets. */
-  connection?: { id: string; providerId: string; name: string; modelIds: string[] };
+  /**
+   * The saved connection, in full. This is the same metadata-only record the
+   * connections route returns, so the dashboard can render the page straight
+   * from it. A trimmed subset would leave fields like `resilience` undefined
+   * and crash the provider page.
+   */
+  connection?: ConnectionRecordLike;
   /** Present once the sign-in failed. */
   error?: string;
+};
+
+/** The fields a connection record carries, minus nothing: it holds no secrets. */
+export type ConnectionRecordLike = {
+  id: string;
+  providerId: string;
+  name: string;
+  endpoint: string;
+  priority: number;
+  proxyPool: string;
+  enabled: boolean;
+  hasCredential: boolean;
+  modelPolicy: string;
+  modelIds: string[];
+  customModelIds: string[];
+  resilience: { timeoutMs: number; maxRetries: number; requestsPerMinute: number; hedgeAfterMs: number };
+  createdAt: string;
+  updatedAt: string;
 };
 
 type ClineSession = {

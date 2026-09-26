@@ -357,10 +357,9 @@ export class GatewayService {
     }
     try {
       const connection = await this.connectCline({ code: input.code, redirectUri: session.redirectUri }, signal);
-      this.clineSessions.resolve(session.id, {
-        status: 'connected',
-        connection: { id: connection.id, providerId: connection.providerId, name: connection.name, modelIds: connection.modelIds },
-      });
+      // The whole record, so the dashboard can render the provider page from it
+      // without a second fetch. It is metadata-only; the token stays in the vault.
+      this.clineSessions.resolve(session.id, { status: 'connected', connection });
       return { ok: true, message: `Connected to ${connection.name} with ${connection.modelIds.length} models.`, connection };
     } catch (error) {
       // Prefer the provider's own words over a generic failure, so the operator

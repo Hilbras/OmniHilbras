@@ -115,7 +115,9 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
           if (status.status === 'connected' && status.connection) {
             setPhase('connected');
             setMessage(`Connected to ${status.connection.name} with ${status.connection.modelIds.length} models.`);
-            void onConnected(status.connection as GatewayConnection);
+            // No cast: the status carries a whole connection record, and a
+            // trimmed one would leave `resilience` undefined and crash the page.
+            void onConnected(status.connection);
             window.setTimeout(onClose, 1200);
             return;
           }

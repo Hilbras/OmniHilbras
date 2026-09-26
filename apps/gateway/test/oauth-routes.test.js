@@ -45,6 +45,7 @@ function createConnectedService() {
       modelPolicy: 'all',
       modelIds: ['anthropic/claude-sonnet-4.6', 'openai/gpt-5.4'],
       customModelIds: [],
+      resilience: { timeoutMs: 0, maxRetries: 1, requestsPerMinute: 0, hedgeAfterMs: 0 },
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
@@ -99,6 +100,24 @@ test('a browser callback finishes the sign-in with nothing to paste', async (t) 
   assert.equal(status.connection.name, 'Cline (dev@example.com)');
   assert.deepEqual(status.connection.modelIds, ['anthropic/claude-sonnet-4.6', 'openai/gpt-5.4']);
   assert.equal(JSON.stringify(status).toLowerCase().includes('token'), false, 'the status carries no credential');
+});
+
+test('a connected status carries a whole connection record, not a subset', async (t) => {
+  // The provider page renders straight from this. A trimmed record leaves
+  // `resilience` undefined and the page throws on the first read of it.
+  const service = createConnectedService();
+  const baseUrl = await startServer(t, service);
+  const started = await startSignIn(baseUrl);
+  await fetch(`${baseUrl}/v1/oauth/cline/callback/${started.sessionId}?code=granted`, { headers: { 'sec-fetch-site': 'cross-site' } });
+  const { connection } = await (await fetch(`${baseUrl}/v1/oauth/cline/session/${started.sessionId}`)).json();
+
+  for (const field of ['id', 'providerId', 'name', 'endpoint', 'priority', 'proxyPool', 'enabled',
+    'hasCredential', 'modelPolicy', 'modelIds', 'customModelIds', 'resilience', 'createdAt', 'updatedAt']) {
+    assert.ok(field in connection, `${field} is present`);
+  }
+  for (const field of ['timeoutMs', 'maxRetries', 'requestsPerMinute', 'hedgeAfterMs']) {
+    assert.equal(typeof connection.resilience[field], 'number', `resilience.${field} is a number`);
+  }
 });
 
 test('the flow completes even when the provider never echoes the state back', async (t) => {
