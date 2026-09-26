@@ -28,7 +28,7 @@ import { AddProviderModal, type NewProvider } from '../components/AddProviderMod
 import { OauthConnectDialog } from '../components/OauthConnectDialog';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
-import { addGatewayConnectionModels, getGatewayHealth, getGatewayRoutingState, listGatewayConnections, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, type GatewayConnection, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, getGatewayHealth, getGatewayRoutingState, listGatewayConnections, putGatewayConnection, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, type GatewayConnection, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import { dashboardRoutes } from '../lib/routes';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
@@ -413,10 +413,8 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   }
 
   async function handleAddConnection(newProvider: NewProvider, apiKey?: string) {
-    let savedModelCount: number | undefined;
-    let savedModelPolicy: 'free' | 'all' | undefined;
+    if (!apiKey) throw new Error(`Enter the ${newProvider.name} API key before saving.`);
     if (newProvider.providerId === 'openrouter') {
-      if (!apiKey) throw new Error('Enter the OpenRouter API key before saving.');
       const savedConnection = await saveOpenRouterConnection({
         name: newProvider.name,
         apiKey,
@@ -425,13 +423,29 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
         modelPolicy: newProvider.modelPolicy ?? 'all',
       });
       setConnection(savedConnection);
-      savedModelCount = savedConnection.modelIds.length;
-      savedModelPolicy = savedConnection.modelPolicy;
+      setConnectionAdded(true);
+      setAddOpen(false);
       setConnectionHealthy(false);
+      flash(`OpenRouter saved with ${savedConnection.modelIds.length} models (${savedConnection.modelPolicy === 'free' ? 'free import' : 'all import'}).`);
+      return;
     }
+    // Every other provider is saved through the generic route, which builds an
+    // adapter for the endpoint on demand. This used to fall through and only
+    // report success: the dialog said "connection added" while nothing was
+    // written, so the card looked connected with no credential behind it.
+    const savedConnection = await putGatewayConnection(newProvider.providerId, {
+      apiKey,
+      endpoint: newProvider.endpoint,
+      name: newProvider.name,
+      priority: newProvider.priority ?? 1,
+      proxyPool: newProvider.proxyPool ?? 'none',
+      modelPolicy: newProvider.modelPolicy ?? 'all',
+    });
+    setConnection(savedConnection);
     setConnectionAdded(true);
     setAddOpen(false);
-    flash(newProvider.providerId === 'openrouter' ? `OpenRouter saved with ${savedModelCount ?? 0} models (${savedModelPolicy === 'free' ? 'free import' : 'all import'}).` : `${newProvider.name} connection added.`);
+    setConnectionHealthy(false);
+    flash(`${savedConnection.name} saved with ${savedConnection.modelIds.length} models.`);
   }
 
   function handleAddConnections(newProviders: NewProvider[]) {

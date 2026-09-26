@@ -8,6 +8,7 @@ export const providerLogoMap = {
   mistral: '/providers/mistral.png',
   openrouter: '/providers/openrouter.png',
   cline: '/providers/cline.png',
+  opencode: '/providers/opencode.png',
 } as const;
 
 export function getProviderLogo(id: string | null | undefined) {
@@ -33,6 +34,25 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'C',
     logo: providerLogoMap.cline,
     endpoint: 'http://127.0.0.1:8787/v1',
+    modelList: [],
+  },
+  {
+    id: 'opencode',
+    name: 'OpenCode Zen',
+    description: 'Curated gateway from the OpenCode team. Sign in at opencode.ai/auth for a key; you are charged per request.',
+    category: 'Multi-model provider',
+    group: 'hosted',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#8b8f96',
+    initial: 'Z',
+    logo: providerLogoMap.opencode,
+    endpoint: 'https://opencode.ai/zen/v1',
     modelList: [],
   },
   {

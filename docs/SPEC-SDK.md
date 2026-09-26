@@ -185,6 +185,20 @@ reachable from the local dashboard. The contract:
 
 ## Additional Providers
 
+### OpenCode Zen
+
+OpenCode Zen is a hosted gateway from the OpenCode team, OpenAI-compatible at
+`https://opencode.ai/zen/v1`, authenticated with a Bearer key from
+`opencode.ai/auth` and charged per request. It needs no adapter: the generic route
+serves it, and its catalog is public, so the model list imports without a
+credential.
+
+**Its API surface is mixed per model.** The published table routes GPT models to
+`/zen/v1/responses`, Anthropic-shaped models to `/zen/v1/messages`, and the rest
+to `/zen/v1/chat/completions`. The generic adapter speaks the last of those, so
+models served through the other two shapes will not answer here. Serving them
+means choosing a path per model, which this slice does not do.
+
 A connection is not limited to the built-in adapters. `PUT
 /v1/connections/:id` accepts any provider ID with a caller-supplied `endpoint`,
 and the gateway builds an `OpenAICompatibleAdapter` for it on demand, cached by
@@ -193,6 +207,20 @@ OpenAI-compatible server without a code change, and the request still uses the
 shared transport and the encrypted credential vault. `POST
 /v1/connections/:id/check` validates a candidate key against a registered
 provider before saving.
+
+The dashboard reaches that route through `putGatewayConnection`. Adding a
+provider other than OpenRouter used to report success without writing anything:
+the modal handed the API key over for OpenRouter alone, so every other provider
+reached the page with no key, and the page only implemented the OpenRouter save.
+A card could therefore look connected with no credential behind it. The key is now
+passed for any provider that asks for one, and every other provider is saved
+through the generic route.
+
+**Bulk Add remains unbacked.** It still reports the connections it parsed without
+saving them, because the generic route derives the connection id from the provider
+id, so N connections for one provider would collide. Adding several connections
+for a single provider needs an explicit id in the request, and is not done here.
+Until then the control should be read as unverified.
 
 Endpoints go through `assertSafeProviderRequestUrl`, so a caller cannot point a
 connection at a credential-bearing URL. A provider without a `validateCredential`

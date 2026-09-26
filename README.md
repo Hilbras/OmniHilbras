@@ -59,6 +59,20 @@ as "not connected", because that hides a credential you have actually saved.
 
 Only imported models are searchable, so connect a provider first.
 
+## OpenCode Zen
+
+OpenCode Zen is a hosted gateway from the OpenCode team. Get a key at
+`opencode.ai/auth`, then add **OpenCode Zen** from its provider page. The gateway
+serves it through the generic OpenAI-compatible path at
+`https://opencode.ai/zen/v1`, and the model catalog imports without a credential
+because OpenCode publishes it.
+
+One caveat worth knowing: Zen routes different models to different API shapes.
+GPT models are served from `/zen/v1/responses` and some others from
+`/zen/v1/messages`, while the rest use `/zen/v1/chat/completions`. The gateway
+speaks the last of those, so a model served through one of the other two shapes
+will not answer here even though it appears in the catalog.
+
 ## Cline Sign-In
 
 Cline is reached through an OAuth authorization-code flow instead of a pasted API

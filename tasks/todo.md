@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 9v: Add OpenCode Zen, and fix the save path that made it unreachable.
+  - Acceptance: OpenCode Zen appears in the catalog and the add-connection dialog, and saving it stores an encrypted credential and imports the live catalog through the generic route. The API key is handed to the page for any provider that asks for one, not OpenRouter alone.
+  - Verify: live against OpenCode — `PUT /v1/connections/opencode` returns a saved connection with 82 real models imported from `https://opencode.ai/zen/v1/models`, and a chat request through the gateway routes to OpenCode and returns its own 401 for a bad key. The connection is deleted afterwards so no fake credential lingers.
+  - Files: `src/data/providers.ts`, `src/components/AddProviderModal.tsx`, `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, docs.
+  - Depends on: Task 9u.
+  - Scope: Medium.
+
 - [x] Task 9u: Narrow and order the model list by test result.
   - Acceptance: a result filter (All / Untested / Passed / Failed) with a count per option, and a sort by name, fastest, or slowest. Untested models sort last in either latency order. The result filter is suspended during a bulk run so the list does not empty out from under the workers. Failures stay on their own row; there is no aggregate failure panel.
   - Verify: browser check on the OpenRouter page after a 22-model run — All=22, Untested=0, Passed=15, Failed=7, with 0 console errors; the filter narrows the list and sort control applies. On the Cline page, a search plus the Failed filter shows the 8 failing models out of 458.

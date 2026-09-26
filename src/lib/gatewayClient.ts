@@ -137,6 +137,28 @@ export function checkOpenRouterConnection(apiKey: string, signal?: AbortSignal) 
   });
 }
 
+export type GatewayConnectionInput = {
+  apiKey: string;
+  name?: string;
+  endpoint: string;
+  priority?: number;
+  proxyPool?: string;
+  modelPolicy?: 'free' | 'all';
+};
+
+/**
+ * Saves any OpenAI-compatible provider by id. The gateway builds an adapter for
+ * the endpoint on demand, so a provider needs no code change to be connectable.
+ */
+export function putGatewayConnection(providerId: string, input: GatewayConnectionInput, signal?: AbortSignal) {
+  return requestJson<{ connection: GatewayConnection }>(`/v1/connections/${encodeURIComponent(providerId)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+    ...(signal ? { signal } : {}),
+  }).then((body) => body.connection);
+}
+
 export function saveOpenRouterConnection(input: OpenRouterConnectionInput, signal?: AbortSignal) {
   return requestJson<{ connection: GatewayConnection }>('/v1/connections/openrouter', {
     method: 'PUT',

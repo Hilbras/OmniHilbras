@@ -22,6 +22,7 @@ export const providerOptions: ProviderOption[] = [
   { id: 'ollama', name: 'Ollama', description: 'Local models on your machine', auth: 'No key', color: '#e2bd52', initial: 'L', logo: getProviderLogo('ollama'), defaultEndpoint: 'http://localhost:11434/v1' },
   { id: 'mistral', name: 'Mistral', description: 'Efficient hosted models', auth: 'API key', color: '#f97316', initial: 'M', logo: getProviderLogo('mistral'), defaultEndpoint: 'https://api.mistral.ai/v1' },
   { id: 'openrouter', name: 'OpenRouter', description: 'Many models through one API', auth: 'API key', color: '#b995e8', initial: 'R', logo: getProviderLogo('openrouter'), defaultEndpoint: 'https://openrouter.ai/api/v1' },
+  { id: 'opencode', name: 'OpenCode Zen', description: 'Curated gateway, key from opencode.ai/auth', auth: 'API key', color: '#8b8f96', initial: 'Z', logo: getProviderLogo('opencode'), defaultEndpoint: 'https://opencode.ai/zen/v1' },
   { id: 'custom', name: 'Custom endpoint', description: 'Any OpenAI-compatible server', auth: 'API key', color: '#9c9584', initial: 'C', defaultEndpoint: 'http://localhost:8000/v1' },
 ];
 
@@ -223,7 +224,10 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
         priority: Number(priority) || 1,
         proxyPool,
         ...(selected.id === 'openrouter' ? { modelPolicy: importFreeModels ? 'free' as const : 'all' as const } : {}),
-      }, selected.id === 'openrouter' ? apiKey : undefined);
+        // The key is handed over for any provider that asks for one. It used to
+        // be passed for OpenRouter alone, which is why every other provider
+        // reached the page with no key and could not be saved at all.
+      }, requiresKey ? apiKey : undefined);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'The connection could not be saved.');
     } finally {
