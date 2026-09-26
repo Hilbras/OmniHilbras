@@ -295,6 +295,23 @@ to the vault, so a refresh is persisted instead of repeated per request.
 prefix, and rejects non-JWT ClinePass keys (`clp_…`) that carry one. The adapter
 applies the prefix only to JWT-shaped tokens and sends everything else verbatim.
 
+**Client identification.** Every Cline request carries the header set Cline's own
+clients send: `HTTP-Referer: https://cline.bot` (the public site, not the app
+host, because that is what Cline attributes a request by), `X-Title`, `User-Agent`,
+`X-CLIENT-TYPE`, `X-PLATFORM`, `X-PLATFORM-VERSION`, `X-CLIENT-VERSION`,
+`X-CORE-VERSION`, and `X-IS-MULTIROOT`. A request that omits them is answered with
+a 4xx that reads like a bad request rather than an unrecognised client.
+
+**The chat envelope.** A non-streaming chat completion comes back wrapped as
+`{"success":true,"data":{ …choices… }}`, and a failure as `{"success":false, …}`
+inside a 200 response. Reading the wrapper as an OpenAI response is a parse
+failure rather than a result, and the failure shape is invisible. The compatible
+adapter takes an optional `unwrapResponse` for exactly this, scoped to
+non-streaming: a provider whose *streaming* format differs needs its own adapter,
+not a hook that reshapes a live event stream. The Cline unwrapper returns the
+inner body and raises `{"success":false, …}` as a `ProviderError` carrying Cline's
+own reason.
+
 **Expiry units.** Cline reports the expiry in epoch seconds, the unit a JWT `exp`
 uses, and not always in milliseconds. A seconds value handed straight to `new Date`
 lands in 1970, which makes a valid token look expired and sends every request down

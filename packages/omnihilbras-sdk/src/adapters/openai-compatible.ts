@@ -35,6 +35,15 @@ export type OpenAICompatibleAdapterConfig = {
   headers?: Record<string, string>;
   maxTokensField?: 'max_tokens' | 'max_completion_tokens';
   capabilities?: ProviderCapabilities;
+  /**
+   * Rewrites a non-streaming response body before it is read as an OpenAI
+   * response, for a provider that wraps one. Scoped to non-streaming on purpose:
+   * a provider whose streaming format differs needs its own adapter, not a hook
+   * that silently reshapes a live event stream.
+   *
+   * May throw to turn a wrapped error envelope into a `ProviderError`.
+   */
+  unwrapResponse?: (body: unknown) => OpenAIResponse;
 };
 
 export type OpenAICompatibleAdapterOptions = {
@@ -55,7 +64,7 @@ type OpenAIChoice = {
   finish_reason?: string | null;
 };
 
-type OpenAIResponse = {
+export type OpenAIResponse = {
   id?: string;
   model?: string;
   created?: number;
@@ -96,6 +105,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   private readonly auth: Required<Pick<OpenAICompatibleAuth, 'required'>> & OpenAICompatibleAuth;
   private readonly modelsPath: string;
   private readonly chatPath: string;
+  private readonly unwrap?: OpenAICompatibleAdapterConfig['unwrapResponse'];
   private readonly headers: Record<string, string>;
   private readonly maxTokensField: 'max_tokens' | 'max_completion_tokens';
   private readonly transport: HttpTransport;
@@ -115,6 +125,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     };
     this.modelsPath = config.modelsPath ?? '/models';
     this.chatPath = config.chatPath ?? '/chat/completions';
+    this.unwrap = config.unwrapResponse;
     this.headers = sanitizeProviderHeaders(config.headers, config.id);
     this.maxTokensField = config.maxTokensField ?? 'max_tokens';
     this.capabilities = {
@@ -149,7 +160,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       body: JSON.stringify(this.toRequestBody(request, false)),
       ...(context.signal ? { signal: context.signal } : {}),
     });
-    return this.toChatResponse(response.data, request.model);
+    return this.toChatResponse(this.unwrap ? this.unwrap(response.data) : response.data, request.model);
   }
 
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {

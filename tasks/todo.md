@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 9t: Match Cline's client identification and chat envelope.
+  - Acceptance: Cline requests carry the same client-identification header set Cline's own clients send, including `HTTP-Referer: https://cline.bot`, and a non-streaming chat response wrapped in `{"success":true,"data":{…}}` is unwrapped while `{"success":false,…}` is raised with Cline's own reason.
+  - Verify: 6 new SDK tests cover the envelope shapes, a chat completion read through the envelope, the full header set, and that a caller-supplied header cannot override the token. Confirmed live that the referer alone changes Cline's answer, so the header set is not cosmetic.
+  - Files: `packages/omnihilbras-sdk/src/adapters/cline.ts`, `src/adapters/openai-compatible.ts`, `test/cline.test.js`, docs.
+  - Depends on: Task 9s.
+  - Scope: Small.
+
 - [x] Task 9s: Filter models inside a provider page.
   - Acceptance: every provider page has a search box above its model list that matches the full model ID and the part after the vendor prefix, shows `Showing N of M`, distinguishes no-match from nothing-imported, and has a clear control. `Test all` operates on the listed models and says `Test N shown` when a filter is active.
   - Verify: browser check on the Cline page with 458 real models — `claude-sonnet` narrows to 8 rows, the bulk button reads `Test 8 shown`, a nonsense query shows "Nothing in 458 models matches", and the clear control resets. 0 console errors.

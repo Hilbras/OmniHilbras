@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CLINE_OAUTH, ClineAdapter, clineExpiryToIso, decodeClineCode, providerErrorDetail, toClineAccessToken } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, ClineAdapter, clineExpiryToIso, clineHeaders, decodeClineCode, providerErrorDetail, toClineAccessToken, unwrapClineEnvelope } from '@hilbras/omnihilbras';
 
 test('WorkOS JWTs are prefixed and other tokens are left alone', () => {
   assert.equal(toClineAccessToken('eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig'), 'workos:eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig');
@@ -232,4 +232,78 @@ test('listing models goes to the /api/v1 catalog', async () => {
   const models = await adapter.listModels({ credential: { type: 'oauth', value: 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig' } });
   assert.equal(requests[0].url, 'https://api.cline.bot/api/v1/models');
   assert.equal(models.some((m) => m.id === 'anthropic/claude-sonnet-4.6'), true);
+});
+
+test('the Cline chat envelope is unwrapped to the OpenAI body', () => {
+  // Cline answers non-streaming chat as {"success":true,"data":{...choices...}}.
+  // Reading the wrapper as an OpenAI response is a parse failure, not a result.
+  const inner = { id: 'chat_1', choices: [{ message: { role: 'assistant', content: 'ok' } }] };
+  assert.deepEqual(unwrapClineEnvelope({ success: true, data: inner }), inner);
+});
+
+test('a Cline failure envelope raises the reason instead of a parse error', () => {
+  // Cline reports failures as {"success":false,...} inside a 200 response.
+  assert.throws(
+    () => unwrapClineEnvelope({ success: false, message: 'insufficient credits' }),
+    (error) => error.code === 'PROVIDER_REQUEST_FAILED' && /insufficient credits/.test(error.message),
+  );
+  assert.throws(
+    () => unwrapClineEnvelope({ success: false, error: { message: 'model not available' } }),
+    (error) => /model not available/.test(error.message),
+  );
+  assert.throws(() => unwrapClineEnvelope({ success: false }), (error) => /Cline rejected the request/.test(error.message));
+});
+
+test('a body that is not an envelope is passed through untouched', () => {
+  const plain = { id: 'chat_1', choices: [{ message: { role: 'assistant', content: 'ok' } }] };
+  assert.deepEqual(unwrapClineEnvelope(plain), plain, 'an unwrapped body still works');
+  assert.deepEqual(unwrapClineEnvelope({ success: true }), { success: true }, 'success without data is not unwrapped');
+  assert.equal(unwrapClineEnvelope(null), null);
+  assert.equal(unwrapClineEnvelope('text'), 'text');
+});
+
+test('a chat completion is read through the envelope', async () => {
+  const requests = [];
+  const adapter = new ClineAdapter({
+    transport: {
+      async request(request) {
+        requests.push(request);
+        return {
+          status: 200,
+          headers: new Headers(),
+          data: { success: true, data: { id: 'chat_1', model: 'anthropic/claude-sonnet-5', choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 } } },
+        };
+      },
+      stream() { throw new Error('not used'); },
+    },
+  });
+  const response = await adapter.chat(
+    { model: 'anthropic/claude-sonnet-5', messages: [{ role: 'user', content: 'Reply with exactly OK.' }] },
+    { credential: { type: 'oauth', value: 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig' } },
+  );
+  assert.equal(requests[0].url, 'https://api.cline.bot/api/v1/chat/completions');
+  assert.equal(response.message.content, 'OK', 'the wrapped body is read, not the envelope');
+});
+
+test('Cline requests carry the client identification its own clients send', () => {
+  // Cline attributes a request by these headers. Omitting them gets a 4xx that
+  // reads like a bad request rather than an unrecognised client, and the
+  // referer has to be the public site, not the app host.
+  const headers = clineHeaders('jwt');
+  assert.equal(headers['HTTP-Referer'], 'https://cline.bot');
+  assert.equal(headers['X-Title'], 'Cline');
+  assert.equal(headers['X-CLIENT-TYPE'], 'OmniHilbras');
+  for (const header of ['X-PLATFORM', 'X-PLATFORM-VERSION', 'X-CLIENT-VERSION', 'X-CORE-VERSION', 'X-IS-MULTIROOT']) {
+    assert.equal(typeof headers[header], 'string', `${header} is sent`);
+    assert.ok(headers[header].length > 0, `${header} is not empty`);
+  }
+  assert.equal(headers['X-IS-MULTIROOT'], 'false');
+});
+
+test('a caller-supplied header can override a default, but not the token', () => {
+  const token = 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig';
+  const headers = clineHeaders(token, { 'X-Title': 'Custom', 'x-extra': '1' });
+  assert.equal(headers['X-Title'], 'Custom');
+  assert.equal(headers['x-extra'], '1');
+  assert.equal(headers.Authorization, `Bearer workos:${token}`, 'Authorization is set last and cannot be overridden');
 });

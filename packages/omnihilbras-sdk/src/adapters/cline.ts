@@ -1,6 +1,6 @@
 import { ProviderError } from '../errors.js';
 import { FetchHttpTransport } from '../transport.js';
-import { OpenAICompatibleAdapter } from './openai-compatible.js';
+import { OpenAICompatibleAdapter, type OpenAIResponse } from './openai-compatible.js';
 import type { HttpTransport } from '../transport.js';
 import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderRequestContext } from '../types.js';
 
@@ -55,6 +55,9 @@ export type ClineAdapterOptions = {
 
 const defaultRefreshSkewMs = 60_000;
 
+/** Reported to Cline as this client's version. */
+const omnihilbrasVersion = '0.4.3';
+
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {
   const trimmed = token.trim();
@@ -66,10 +69,20 @@ export function toClineAccessToken(token: string) {
 export function clineHeaders(token: string, extra: Record<string, string> = {}, userAgent = 'omnihilbras') {
   const accessToken = toClineAccessToken(token);
   return {
-    'HTTP-Referer': CLINE_OAUTH.appBaseUrl,
+    // The public site, not the app host: this is the value Cline's own clients
+    // send, and it is what Cline attributes a request by.
+    'HTTP-Referer': 'https://cline.bot',
     'X-Title': 'Cline',
     'User-Agent': userAgent,
     'X-CLIENT-TYPE': 'OmniHilbras',
+    // Cline identifies its clients by this set. A request that omits them is
+    // answered with a 4xx that reads like a bad request rather than an
+    // unrecognised client, so all of them are sent.
+    'X-PLATFORM': process.platform || 'unknown',
+    'X-PLATFORM-VERSION': process.version || 'unknown',
+    'X-CLIENT-VERSION': omnihilbrasVersion,
+    'X-CORE-VERSION': omnihilbrasVersion,
+    'X-IS-MULTIROOT': 'false',
     ...extra,
     ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
   };
@@ -159,6 +172,38 @@ export function clineExpiryToIso(value: string | number): string | undefined {
 
 const toIsoString = clineExpiryToIso;
 
+/**
+ * Cline answers a non-streaming chat request wrapped as
+ * `{"success":true,"data":{ …choices… }}`, and a failure as
+ * `{"success":false,…}` inside a 200 response. Reading the wrapper as an OpenAI
+ * response yields a parse failure instead of the provider's own error.
+ *
+ * The success shape is unwrapped; the failure shape is turned into a
+ * `ProviderError` carrying what Cline said, so the operator sees the reason
+ * rather than "invalid response". Streaming is not wrapped and is left alone.
+ */
+/**
+ * Unwraps Cline's non-streaming chat envelope, or raises the error it carries.
+ * Returns the OpenAI-shaped body the generic adapter expects.
+ */
+export function unwrapClineEnvelope(body: unknown): OpenAIResponse {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body as OpenAIResponse;
+  const envelope = body as { success?: unknown; data?: unknown; message?: unknown; error?: unknown };
+  if (envelope.success === false) {
+    const reason = [envelope.message, envelope.error]
+      .map((value) => (typeof value === 'string' ? value : (value as { message?: string } | undefined)?.message))
+      .find((value) => typeof value === 'string' && value.trim());
+    throw new ProviderError('PROVIDER_REQUEST_FAILED', reason ? `Cline rejected the request: ${reason}` : 'Cline rejected the request.', {
+      providerId: 'cline',
+      publicMessage: reason ? `Cline rejected the request: ${reason}` : 'Cline rejected the request.',
+    });
+  }
+  if (envelope.success === true && envelope.data && typeof envelope.data === 'object' && !Array.isArray(envelope.data)) {
+    return envelope.data as OpenAIResponse;
+  }
+  return body as OpenAIResponse;
+}
+
 export class ClineAdapter implements ProviderAdapter {
   readonly id = 'cline';
   readonly name = 'Cline';
@@ -173,7 +218,13 @@ export class ClineAdapter implements ProviderAdapter {
   constructor(options: ClineAdapterOptions = {}) {
     this.transport = options.transport ?? new FetchHttpTransport();
     this.delegate = new OpenAICompatibleAdapter(
-      { id: 'cline', name: 'Cline', baseUrl: CLINE_OAUTH.apiBasePath, auth: { header: 'Authorization', prefix: 'Bearer' } },
+      {
+        id: 'cline',
+        name: 'Cline',
+        baseUrl: CLINE_OAUTH.apiBasePath,
+        auth: { header: 'Authorization', prefix: 'Bearer' },
+        unwrapResponse: unwrapClineEnvelope,
+      },
       { transport: this.transport },
     );
     this.onTokensRefreshed = options.onTokensRefreshed;
