@@ -120,7 +120,9 @@ function omitNumberKey(record: Record<string, number>, key: string) {
 
 function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testState, testError, testLatencyMs }: { model: string; providerId: string; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testError?: string; testLatencyMs?: number }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-line bg-bg-soft/45 p-3.5 sm:flex-row sm:items-center sm:justify-between">
+    <div
+      className="flex flex-col gap-3 rounded-xl border border-line bg-bg-soft/45 p-3.5 sm:flex-row sm:items-center sm:justify-between"
+    >
       <div className="flex min-w-0 items-center gap-3">
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? 'border-danger/25 bg-danger/10 text-danger' : 'border-line bg-surface text-muted'}`}>
           {testing ? <LoaderCircle className="h-4 w-4 animate-spin text-gold-text" aria-hidden="true" /> : testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
@@ -139,6 +141,23 @@ function isValidResilience(value: GatewayResilience) {
   const inRange = (input: number, min: number, max: number) => Number.isInteger(input) && input >= min && input <= max;
   return inRange(value.hedgeAfterMs, 0, 30_000) && inRange(value.maxRetries, 0, 5) && inRange(value.timeoutMs, 0, 600_000) && inRange(value.requestsPerMinute, 0, 100_000);
 }
+
+/** Narrows the model list to a test result. */
+type ResultFilter = 'all' | 'untested' | 'passed' | 'failed';
+type ModelSort = 'name' | 'fastest' | 'slowest';
+
+const resultFilterOptions: ReadonlyArray<{ value: ResultFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'untested', label: 'Untested' },
+  { value: 'passed', label: 'Passed' },
+  { value: 'failed', label: 'Failed' },
+];
+
+const modelSortOptions: ReadonlyArray<{ value: ModelSort; label: string }> = [
+  { value: 'name', label: 'Name' },
+  { value: 'fastest', label: 'Fastest first' },
+  { value: 'slowest', label: 'Slowest first' },
+];
 
 /** The documented defaults, used when a record arrives without a resilience block. */
 const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, requestsPerMinute: 0, hedgeAfterMs: 0 };
@@ -245,6 +264,8 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const scrollAnchorRef = useRef<number | null>(null);
   const [customModels, setCustomModels] = useState<string[]>([]);
   const [modelQuery, setModelQuery] = useState('');
+  const [resultFilter, setResultFilter] = useState<ResultFilter>('all');
+  const [sortBy, setSortBy] = useState<ModelSort>('name');
   const [strategy, setStrategy] = useState('balanced');
   const [notice, setNotice] = useState('');
   const [noticeError, setNoticeError] = useState(false);
@@ -295,7 +316,9 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
    * to find one.
    */
   const normalizedModelQuery = modelQuery.trim().toLowerCase();
-  const visibleModels = useMemo(() => {
+
+  /** Models matching the text query, before any result filter. */
+  const matchedModels = useMemo(() => {
     if (!normalizedModelQuery) return allModels;
     return allModels.filter((model) => {
       const id = model.toLowerCase();
@@ -303,6 +326,49 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       return id.includes(normalizedModelQuery) || leaf.includes(normalizedModelQuery);
     });
   }, [allModels, normalizedModelQuery]);
+
+  const testedCount = useMemo(
+    () => matchedModels.filter((model) => modelTests[model] === 'ok' || modelTests[model] === 'error').length,
+    [matchedModels, modelTests],
+  );
+  const passedCount = useMemo(() => matchedModels.filter((model) => modelTests[model] === 'ok').length, [matchedModels, modelTests]);
+
+  const resultCounts = useMemo(() => ({
+    all: matchedModels.length,
+    untested: matchedModels.length - testedCount,
+    passed: passedCount,
+    failed: matchedModels.length - passedCount - (matchedModels.length - testedCount),
+  }), [matchedModels.length, passedCount, testedCount]);
+
+  /**
+   * The list, narrowed by result and ordered by the chosen sort.
+   *
+   * The result filter is suspended during a bulk run. Applying it would empty the
+   * list as each model flipped to "testing", which would take the rows out from
+   * under the workers and make progress unreadable.
+   */
+  const visibleModels = useMemo(() => {
+    const bulkRunning = bulkProgress !== undefined;
+    const filtered = bulkRunning || resultFilter === 'all'
+      ? matchedModels
+      : matchedModels.filter((model) => {
+        if (resultFilter === 'untested') return modelTests[model] === undefined || modelTests[model] === 'idle';
+        if (resultFilter === 'passed') return modelTests[model] === 'ok';
+        return modelTests[model] === 'error';
+      });
+    if (sortBy === 'name') return [...filtered].sort((left, right) => left.localeCompare(right));
+    // Untested models sort last in either latency order: they have no latency,
+    // and a list of blanks at the top reads as a broken sort.
+    const withLatency = (model: string) => modelTestLatencies[model];
+    return [...filtered].sort((left, right) => {
+      const a = withLatency(left);
+      const b = withLatency(right);
+      if (a === undefined && b === undefined) return left.localeCompare(right);
+      if (a === undefined) return 1;
+      if (b === undefined) return -1;
+      return sortBy === 'fastest' ? a - b : b - a;
+    });
+  }, [bulkProgress, matchedModels, modelTestLatencies, modelTests, resultFilter, sortBy]);
   const testing = testingModels.length > 0;
   const isOauth = provider.auth === 'OAuth';
 
@@ -554,7 +620,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
               <h2 id="models-title" className="text-sm font-semibold">Available models</h2>
               <p className="muted mt-1 text-xs">
                 Models currently exposed by this provider route. Test sends one real minimal request.
-                {normalizedModelQuery && <> Showing {visibleModels.length} of {allModels.length}.</>}
+                {visibleModels.length !== matchedModels.length && <> Showing {visibleModels.length} of {matchedModels.length}.</>}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -588,8 +654,8 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
               )}
             </div>
           </div>
-          <div className="mt-4">
-            <label className="relative block">
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label className="relative block flex-1">
               <span className="sr-only">Search {provider.name} models</span>
               <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-muted" aria-hidden="true" />
               <input
@@ -606,6 +672,27 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               )}
+            </label>
+            <div className="flex shrink-0 overflow-x-auto rounded-lg border border-line bg-bg-soft p-0.5" role="tablist" aria-label="Filter models by test result">
+              {resultFilterOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={resultFilter === option.value}
+                  onClick={() => setResultFilter(option.value)}
+                  className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors ${resultFilter === option.value ? 'bg-surface text-gold-text shadow-sm' : 'text-muted hover:text-text'}`}
+                >
+                  {option.label}
+                  {resultCounts[option.value] > 0 && <span className="ml-1 font-mono opacity-70">{resultCounts[option.value]}</span>}
+                </button>
+              ))}
+            </div>
+            <label className="shrink-0">
+              <span className="sr-only">Sort models</span>
+              <select value={sortBy} onChange={(event) => setSortBy(event.target.value as ModelSort)} aria-label="Sort models" className="input !h-9 !py-1.5 !pr-7 !text-[10px]">
+                {modelSortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
             </label>
           </div>
           <div className="mt-3 space-y-2">{visibleModels.length > 0 ? visibleModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingSet.has(model)} disabled={testing || testingConnection} testState={modelTests[model] ?? 'idle'} testError={modelTestErrors[model]} testLatencyMs={modelTestLatencies[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{normalizedModelQuery ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{normalizedModelQuery ? <>Nothing in {allModels.length} models matches &ldquo;{modelQuery.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}</div>

@@ -48,6 +48,10 @@ the full model ID and the name after the vendor prefix, so `claude-sonnet` finds
 total are listed, and **Test all** tests what you are looking at — the button
 reads `Test 8 shown` when a filter is active — rather than the whole catalog.
 
+Beside it, a result filter narrows the list to **All / Untested / Passed /
+Failed** with a count on each, and a sort orders by name, fastest, or slowest.
+Untested models sort last, since they have no latency to compare.
+
 **On the providers page**, the same search also spans providers. It reports which
 providers serve a model and says whether each is actually serving it — `serving`,
 `saved · needs attention`, or `not connected`. A saved connection is never shown

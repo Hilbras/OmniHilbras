@@ -391,6 +391,19 @@ and has a clear control. An empty result says how many models were searched, so
 when a filter is active — rather than quietly running a bulk test over the whole
 catalog the operator cannot see.
 
+The model list is also narrowed and ordered by test result. A result filter
+(`All` / `Untested` / `Passed` / `Failed`) counts what it would show, and a sort
+orders by name, fastest, or slowest. Untested models sort last in either latency
+order, because they have no latency and a list of blanks at the top reads as a
+broken sort. **The result filter is suspended during a bulk run**: applying it
+would empty the list as each model flipped to testing, taking the rows out from
+under the workers and making progress unreadable.
+
+Failures stay on the row that failed. There is deliberately no aggregate failure
+panel — a failed model's reason is on its own row, and the `Failed` filter is one
+click away. A separate summary duplicates that and costs screen space on a page
+whose list is already the main content.
+
 The providers page also searches models as well as provider names. A model matches on
 its whole ID and on the part after the vendor prefix, so `claude-sonnet` finds
 `anthropic/claude-sonnet-5`. Only imported models are searchable — a connection's
