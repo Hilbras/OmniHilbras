@@ -351,6 +351,25 @@ shipped with a flow makes every other provider report "No connection" on a fresh
 load, however it was added, which reads as data loss rather than as a display
 bug.
 
+The providers page searches models as well as provider names. A model matches on
+its whole ID and on the part after the vendor prefix, so `claude-sonnet` finds
+`anthropic/claude-sonnet-5`. Only imported models are searchable — a connection's
+`modelIds` or a catalog entry — and a model hit keeps its provider card visible so
+the result is actionable. Results are grouped by provider, capped per provider,
+and labelled with whether that provider is actually serving: `serving`, `saved ·
+needs attention`, or `not connected`. A saved connection is never reported as "not
+connected", because that hides a credential the operator has.
+
+**Health is recorded from the reported status, not from the absence of a throw.**
+An adapter may return `unavailable` instead of raising, and treating that as a
+success made routing report a healthy provider with zero failures while `/health`
+said unavailable — corrupting the failure counting that drives ejection.
+
+A provider's own wording reaches the operator through `providerMessage` on the
+error envelope, but **only** for an allowlisted local dashboard origin. API
+clients get the provider-neutral message, so a provider's internal detail is never
+exposed to a consumer of the gateway endpoint.
+
 ## Connection Reliability
 
 Every connection stores a `resilience` block: `maxRetries` (0–5, default 1),

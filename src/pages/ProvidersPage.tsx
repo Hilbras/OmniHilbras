@@ -10,11 +10,13 @@ import {
   Search,
   Server,
   ShieldCheck,
+  X,
 } from 'lucide-react';
 import { AddProviderModal, providerOptions, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderCard, providerGroupLabels, providerGroupOrder, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
 import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection, type GatewayHealth } from '../lib/gatewayClient';
+import { ProviderMark } from '../components/ProviderMark';
 import { providerRoute } from '../lib/routes';
 import { providerCatalog } from '../data/providers';
 
@@ -100,6 +102,16 @@ function SummaryCard({ label, value, detail, icon: Icon, tone }: { label: string
   );
 }
 
+/** How many matching model IDs to list per provider before summarising. */
+const modelResultLimit = 12;
+
+/** `serving` only when health agrees; a saved connection is never "not connected". */
+function connectionBadge(provider: ProviderRecord, saved: boolean) {
+  if (provider.status === 'connected') return { label: 'serving', tone: 'border-success/30 bg-success/10 text-success' };
+  if (saved) return { label: 'saved · needs attention', tone: 'border-gold/30 bg-gold-soft text-gold-text' };
+  return { label: 'not connected', tone: 'border-line bg-bg-soft text-muted' };
+}
+
 export function ProvidersContent() {
   const navigate = useNavigate();
   const [providers, setProviders] = useState(providerCatalog);
@@ -128,16 +140,55 @@ export function ProvidersContent() {
     return () => { active = false; };
   }, []);
 
+  /**
+   * Whether a connection is actually saved, kept apart from the merged display
+   * status. A saved connection whose health check is failing is still saved, and
+   * reporting that as "not connected" hides the credential the operator has.
+   */
+  const savedProviderIds = useMemo(
+    () => new Set(gatewayConnections.filter((connection) => connection.hasCredential).map((connection) => connection.providerId)),
+    [gatewayConnections],
+  );
+
   const connectedCount = providers.filter((provider) => provider.status === 'connected').length;
   const attentionCount = providers.filter((provider) => provider.status === 'attention').length;
   const availableCount = providers.filter((provider) => provider.status === 'available').length;
+  const normalizedQuery = query.trim().toLowerCase();
+
+  /**
+   * Models are matched on the whole ID and on the part after the vendor prefix,
+   * so both `anthropic/claude-sonnet-4.6` and `claude-sonnet` find it. A model
+   * only counts for a provider that is actually serving it, which is why this
+   * reads the merged catalog rather than a hard-coded list.
+   */
+  const modelMatches = useMemo(() => {
+    if (!normalizedQuery) return new Map<string, { provider: ProviderRecord; models: string[] }>();
+    const byProvider = new Map<string, { provider: ProviderRecord; models: string[] }>();
+    for (const provider of providers) {
+      const models = (provider.modelList ?? []).filter((model) => {
+        const id = model.toLowerCase();
+        const leaf = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
+        return id.includes(normalizedQuery) || leaf.includes(normalizedQuery);
+      });
+      if (models.length > 0) byProvider.set(provider.id, { provider, models });
+    }
+    return byProvider;
+  }, [normalizedQuery, providers]);
+
+  const totalModelMatches = useMemo(
+    () => [...modelMatches.values()].reduce((sum, entry) => sum + entry.models.length, 0),
+    [modelMatches],
+  );
+
   const filteredProviders = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
     return providers.filter((provider) => {
-      const matchesQuery = !normalized || `${provider.name} ${provider.description} ${provider.category}`.toLowerCase().includes(normalized);
+      const matchesQuery = !normalizedQuery
+        || `${provider.name} ${provider.description} ${provider.category}`.toLowerCase().includes(normalizedQuery)
+        // A model hit keeps the provider visible, so the result is actionable.
+        || modelMatches.has(provider.id);
       return matchesQuery && matchesStatus(provider.status, filter);
     });
-  }, [filter, providers, query]);
+  }, [filter, modelMatches, normalizedQuery, providers]);
   const groupedProviders = useMemo(() => providerGroupOrder
     .map((group) => ({ group, providers: filteredProviders.filter((provider) => provider.group === group) }))
     .filter((group) => group.providers.length > 0), [filteredProviders]);
@@ -250,9 +301,20 @@ export function ProvidersContent() {
               </div>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <label className="relative block">
-                  <span className="sr-only">Search providers</span>
+                  <span className="sr-only">Search providers and models</span>
                   <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-muted" aria-hidden="true" />
-                  <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search providers" className="input !h-9 !w-full !py-2 !pl-9 !text-xs sm:!w-48" />
+                  <input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search providers or models"
+                    aria-describedby={normalizedQuery ? 'model-search-results' : undefined}
+                    className="input !h-9 !w-full !py-2 !pl-9 !pr-8 !text-xs sm:!w-64"
+                  />
+                  {normalizedQuery && (
+                    <button type="button" onClick={() => setQuery('')} aria-label="Clear search" title="Clear search" className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 text-muted transition-colors hover:text-text">
+                      <X className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  )}
                 </label>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex overflow-x-auto rounded-lg border border-line bg-bg-soft p-0.5" role="tablist" aria-label="Filter providers">
@@ -265,6 +327,60 @@ export function ProvidersContent() {
                 </div>
               </div>
             </div>
+
+            {normalizedQuery && (
+              <div id="model-search-results" role="region" aria-label="Model search results" className="border-b border-line px-4 py-4 sm:px-5">
+                <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold">
+                    {totalModelMatches > 0
+                      ? `${totalModelMatches} ${totalModelMatches === 1 ? 'model' : 'models'} across ${modelMatches.size} ${modelMatches.size === 1 ? 'provider' : 'providers'}`
+                      : 'No matching models'}
+                  </h3>
+                  <span className="muted font-mono text-[10px]">searches imported models</span>
+                </div>
+                {totalModelMatches > 0 ? (
+                  <ul className="space-y-2.5">
+                    {[...modelMatches.values()].map(({ provider, models }) => (
+                      <li key={provider.id} className="flex flex-col gap-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-5 w-5 rounded-md" />
+                          <span className="text-[11px] font-semibold">{provider.name}</span>
+                          <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${connectionBadge(provider, savedProviderIds.has(provider.id)).tone}`}>
+                            {connectionBadge(provider, savedProviderIds.has(provider.id)).label}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => navigate(providerRoute(provider.id))}
+                            className="ml-auto text-[10px] font-medium text-gold-text transition-opacity hover:opacity-70"
+                          >
+                            Open
+                          </button>
+                        </div>
+                        <ul className="flex flex-wrap gap-1.5 pl-0">
+                          {models.slice(0, modelResultLimit).map((model) => (
+                            <li key={model}>
+                              <button
+                                type="button"
+                                onClick={() => navigate(providerRoute(provider.id))}
+                                title={`${model} — open ${provider.name}`}
+                                className="max-w-[15rem] truncate rounded-md border border-line bg-bg-soft px-1.5 py-0.5 font-mono text-[10px] text-muted transition-colors hover:border-gold/40 hover:text-text"
+                              >
+                                {model}
+                              </button>
+                            </li>
+                          ))}
+                          {models.length > modelResultLimit && (
+                            <li className="muted self-center px-1 font-mono text-[10px]">+{models.length - modelResultLimit} more</li>
+                          )}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted text-[11px]">No imported model matches “{query.trim()}”. Only models from a saved connection are searchable.</p>
+                )}
+              </div>
+            )}
 
             {filteredProviders.length > 0 ? (
               <div className="space-y-6 p-4 sm:p-5">
@@ -280,7 +396,7 @@ export function ProvidersContent() {
                   </section>
                 ))}
               </div>
-            ) : <div className="px-5 py-14 text-center"><Search className="mx-auto h-7 w-7 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No providers found</p><p className="muted mt-1 text-xs">Try a different search or status filter.</p></div>}
+            ) : <div className="px-5 py-14 text-center"><Search className="mx-auto h-7 w-7 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No providers found</p><p className="muted mt-1 text-xs">{normalizedQuery ? `Nothing matches “${query.trim()}”.` : 'Try a different status filter.'}</p></div>}
           </div>
         </section>
 

@@ -152,6 +152,14 @@ export class GatewayService {
       const startedAt = Date.now();
       try {
         const health = await adapter.healthCheck(await this.context(adapter.id, signal));
+        // An adapter may report `unavailable` instead of throwing. Recording
+        // that as a success made routing report a healthy provider with zero
+        // failures while `/health` said unavailable, and it corrupted the
+        // failure counting that drives ejection.
+        if (health.status === 'unavailable') {
+          this.providerHealth.recordFailure(adapter.id, 'PROVIDER_UNAVAILABLE', health.message ?? 'The provider reported itself unavailable.');
+          return { providerId: adapter.id, ...health };
+        }
         this.providerHealth.recordSuccess(adapter.id, health.latencyMs ?? Date.now() - startedAt, health.checkedAt);
         return { providerId: adapter.id, ...health };
       } catch {

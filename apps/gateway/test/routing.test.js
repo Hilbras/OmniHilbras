@@ -529,3 +529,27 @@ test('the gateway reports failover attempts and accepts resilience updates over 
   assert.equal(routing.failureThreshold, 3);
   assert.equal(routing.connections.find((connection) => connection.providerId === 'primary').resilience.maxRetries, 3);
 });
+
+test('an adapter that reports unavailable is recorded as a failure, not a success', async () => {
+  // An adapter may report `unavailable` instead of throwing. Recording that as a
+  // success made routing show a healthy provider with zero failures while
+  // /health said unavailable, and it corrupted the counting that drives ejection.
+  const registry = new ProviderRegistry().register({
+    id: 'quiet',
+    name: 'Quiet provider',
+    capabilities: { chat: true, streaming: false, models: false },
+    async healthCheck() {
+      return { status: 'unavailable', checkedAt: new Date().toISOString(), message: 'upstream said no' };
+    },
+  });
+  const service = new GatewayService(registry, new InMemorySecretStore({}));
+
+  const health = await service.health();
+  assert.equal(health.status, 'degraded');
+  assert.equal(health.providers[0].status, 'unavailable');
+  assert.equal(health.providers[0].message, 'upstream said no', 'the reason survives');
+
+  const routing = await service.describeRouting();
+  const successesBefore = routing.providers?.quiet?.successes ?? routing.connections?.find((c) => c.providerId === 'quiet')?.successes;
+  assert.equal(successesBefore ?? 0, 0, 'an unavailable check is never a success');
+});

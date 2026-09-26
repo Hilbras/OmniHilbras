@@ -52,7 +52,7 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
       return;
     }
     void handleRequest(request, response, service, options, responseOrigin, trustedDashboardRequest).catch((error) => {
-      sendError(response, error);
+      sendError(response, error, trustedDashboardRequest);
     });
   });
 }
@@ -964,7 +964,7 @@ function clineCallbackPage(ok: boolean, message: string) {
 </html>`;
 }
 
-function sendError(response: ServerResponse, error: unknown) {
+function sendError(response: ServerResponse, error: unknown, trustedDashboardRequest = false) {
   if (response.destroyed) return;
   if (response.headersSent) {
     response.end();
@@ -974,11 +974,19 @@ function sendError(response: ServerResponse, error: unknown) {
   if (status === 401 && !response.hasHeader('www-authenticate')) {
     response.setHeader('www-authenticate', 'Bearer realm="omnihilbras"');
   }
-  sendJson(response, status, toErrorEnvelope(error));
+  sendJson(response, status, toErrorEnvelope(error, trustedDashboardRequest));
 }
 
-function toErrorEnvelope(error: unknown) {
+/**
+ * `includeProviderMessage` is only ever true for an allowlisted local dashboard
+ * origin. API clients get the provider-neutral message, while the dashboard also
+ * gets what the provider actually said, which is the difference between a
+ * diagnosable integration problem and a generic sentence.
+ */
+function toErrorEnvelope(error: unknown, includeProviderMessage = false) {
   if (error instanceof ProviderError) {
+    const details = error.details as { providerMessage?: string } | undefined;
+    const providerMessage = includeProviderMessage && typeof details?.providerMessage === 'string' ? details.providerMessage : undefined;
     return {
       error: {
         code: error.code,
@@ -986,6 +994,7 @@ function toErrorEnvelope(error: unknown) {
         ...(error.providerId ? { provider: error.providerId } : {}),
         ...(error.statusCode ? { status: error.statusCode } : {}),
         ...(error.retryable ? { retryable: true } : {}),
+        ...(providerMessage ? { providerMessage } : {}),
       },
     };
   }

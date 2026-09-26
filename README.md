@@ -40,6 +40,18 @@ The providers page groups cards as **OAuth Providers**, **API Key Providers**,
 **Custom Endpoints**. A card is catalog metadata: it shows `—` metrics and
 `No connections` until a real connection exists behind it.
 
+## Searching Models
+
+The providers page searches models as well as provider names. Type part of a model
+ID and it matches both the full ID and the name after the vendor prefix, so
+`claude-sonnet` finds `anthropic/claude-sonnet-5`.
+
+Results are grouped by provider and say whether that provider is actually serving
+the model — `serving`, `saved · needs attention`, or `not connected`. A saved
+connection is never shown as "not connected", because that hides a credential you
+have actually saved. Only imported models are searchable, so connect a provider
+first.
+
 ## Cline Sign-In
 
 Cline is reached through an OAuth authorization-code flow instead of a pasted API
