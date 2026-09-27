@@ -293,6 +293,19 @@ Note that 9router's hardcoded free list is **stale** — it advertises `union-al
 which is not in the catalog at all and is refused by every lane. Its contributor and
 union models are worth re-checking against the live catalog before being trusted.
 
+### A model name that looks the same and is not
+
+`mimo-v2.6-flash-free` on Zen and `xiaomi/mimo-v2.6-flash` on OpenRouter are
+different models from different vendors, and the ids are close enough to be mistaken
+for one another. The same holds for `mimo-v2.5-free` against `xiaomi/mimo-v2.5`.
+Measured on both: the OpenRouter pair answers with the paid Xiaomi route, while the Zen
+free pair refuses with `403`. A report that "Mimo works in my other gateway" is
+consistent with having been served `xiaomi/mimo-v2.6-flash` there, so the model id and
+the provider both need checking before concluding a route is broken.
+
+A refusal that looks like a routing failure is worth re-testing under the other
+provider's id before it is treated as one.
+
 **Every free model is on the path this gateway already speaks.** Measured on the
 free tier: `space-bunny-free` answers normally, while `nemotron-3-ultra-free`,
 `mimo-v2.6-flash-free` and `ling-3.0-flash-fin-free` are refused with a bare `403`

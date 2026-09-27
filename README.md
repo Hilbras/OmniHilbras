@@ -152,6 +152,10 @@ Zen also returns an empty body to a caller holding a key and a real explanation 
 that is not, so a refusal in the dashboard reads as a bare status code. Re-issue the
 request unauthenticated to see what Zen actually said.
 
+One trap: Zen's `mimo-v2.6-flash-free` and OpenRouter's `xiaomi/mimo-v2.6-flash` are
+different models from different vendors, and the ids are close enough to mix up. The
+OpenRouter one answers on a paid route; the Zen one does not.
+
 ## Cline Sign-In
 
 Cline is reached through an OAuth authorization-code flow instead of a pasted API
