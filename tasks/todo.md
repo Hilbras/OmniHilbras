@@ -146,6 +146,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 15: Give the Kiro card its logo, which it never had.
+  - Acceptance: the Kiro card and page show Kiro's own mark rather than a letter.
+  - Verify: `/providers/kiro.svg` is served as `image/svg+xml` and both the card and the provider page render it as an `<img>` at 1200×1200.
+  - The mark is Kiro's own favicon, fetched from the CDN `app.kiro.dev` declares, rather than drawn or approximated: a `#9046FF` rounded square with the white ghost. A `kiro.png` was already tracked in the repo and matched the same artwork, but at 128px raster where the source is a 1200-unit vector, so the vector replaces it and the raster is removed. The card's `color` moved from `#ff6b35` (OmniRoute's Material-icon tint) to the logo's own `#9046ff`, so the fallback letter mark and the badge sit in the brand colour too.
+  - Files: `public/providers/kiro.svg`, `src/data/providers.ts`.
+  - Depends on: Task 14.
+  - Scope: Small.
+
 - [x] Task 14: Fix Kiro inference, and add its five other ways to connect.
   - Acceptance: a real Kiro request returns an answer, and the six sign-in methods are each wired to their own exchange rather than one generic paste box.
   - Verify: `POST /v1/chat/completions` with `x-omnihilbras-provider: kiro` returns real text, `finish_reason: stop`, and a `meters.credit` figure. The framing tests run against `test/fixtures/kiro-stream.bin`, a real captured 7-frame response. Device flow returns 201 with a real AWS code; an unapproved session polls as `pending`; a non-`awsapps.com` start URL is refused before any call; Google/GitHub return a real PKCE URL whose verifier never leaves the gateway; a pasted code is spent at most once. In the browser all six methods are listed and disabled until the risk is ticked, and a failed test row shows the provider's reason.

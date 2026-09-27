@@ -8,6 +8,7 @@ export const providerLogoMap = {
   mistral: '/providers/mistral.png',
   openrouter: '/providers/openrouter.png',
   cline: '/providers/cline.png',
+  kiro: '/providers/kiro.svg',
   opencode: '/providers/opencode.png',
   nara: '/providers/bynara-logo-icon-light.svg',
   tokenharbor: '/providers/tokenharbor.svg',
@@ -53,8 +54,9 @@ export const providerCatalog: ProviderRecord[] = [
     requests: '0',
     lastUsed: 'never',
     health: 0,
-    color: '#ff6b35',
+    color: '#9046ff',
     initial: 'K',
+    logo: providerLogoMap.kiro,
     endpoint: 'https://codewhisperer.us-east-1.amazonaws.com',
     modelList: [],
     // Not a preference. Kiro's terms prohibit third-party proxy and harness use, and
