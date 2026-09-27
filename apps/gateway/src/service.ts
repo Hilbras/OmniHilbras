@@ -85,11 +85,21 @@ function attachAttempts(error: unknown, attempts: GatewayFailoverAttempt[]) {
         ...(error.statusCode ? { statusCode: error.statusCode } : {}),
         retryable: error.retryable,
         ...(error.publicMessage ? { publicMessage: `${error.publicMessage}${suffix}` } : {}),
+        // Carried through: without this the provider's own wording is lost the
+        // moment a request passes through the failover path, and the operator is
+        // left with a generic refusal and no cause.
+        ...(error.details === undefined ? {} : { details: error.details }),
         cause: error,
       });
     }
     if (terminalRouteCodes.has(error.code)) {
-      return new ProviderError(error.code, `${error.message} Tried: ${failedProviders.join(', ')}.`, { ...(error.providerId ? { providerId: error.providerId } : {}), ...(error.statusCode ? { statusCode: error.statusCode } : {}), retryable: error.retryable, cause: error });
+      return new ProviderError(error.code, `${error.message} Tried: ${failedProviders.join(', ')}.`, {
+        ...(error.providerId ? { providerId: error.providerId } : {}),
+        ...(error.statusCode ? { statusCode: error.statusCode } : {}),
+        retryable: error.retryable,
+        ...(error.details === undefined ? {} : { details: error.details }),
+        cause: error,
+      });
     }
     const message = `Every provider route failed. Tried: ${failedProviders.join(', ')}.`;
     return new ProviderError('PROVIDER_UNAVAILABLE', message, { retryable: true, publicMessage: message, cause: error });

@@ -253,19 +253,33 @@ async function readResponseText(response: Response, maxBytes: number) {
  * a generic "the provider rejected the request". Token-shaped strings are
  * stripped so an error can be shown to a user or written to a log.
  */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function providerErrorDetail(body: unknown): string | undefined {
   if (body === null || body === undefined) return undefined;
   let text: string | undefined;
   if (typeof body === 'string') text = body;
   else if (typeof body === 'object') {
     const record = body as Record<string, unknown>;
-    for (const key of ['message', 'error_description', 'error', 'detail', 'reason', 'code']) {
+    for (const key of ['message', 'error_description', 'error', 'detail', 'reason', 'code', 'msg', 'title']) {
       const value = record[key];
       if (typeof value === 'string' && value.trim()) { text = value.trim(); break; }
       if (value && typeof value === 'object') {
-        const nested = (value as Record<string, unknown>).message;
-        if (typeof nested === 'string' && nested.trim()) { text = nested.trim(); break; }
+        // `{"error":{"type":"AuthError","message":"..."}}` and the
+        // `{"error":{"type":"AuthError"}}` shape that carries only a type.
+        const nested = value as Record<string, unknown>;
+        for (const inner of ['message', 'description', 'detail', 'type']) {
+          if (typeof nested[inner] === 'string' && (nested[inner] as string).trim()) { text = (nested[inner] as string).trim(); break; }
+        }
+        if (text) break;
       }
+    }
+    // A validation-style list: `{"errors":[{"message":"..."}]}`.
+    if (!text && Array.isArray(record.errors)) {
+      const first = record.errors.find((entry) => isRecord(entry) && typeof entry.message === 'string');
+      if (first) text = String((first as { message: string }).message).trim();
     }
   }
   if (!text) return undefined;
@@ -299,7 +313,10 @@ function providerErrorFromResponse(response: Response, body: unknown, providerId
         : code === 'PROVIDER_UNAVAILABLE'
           ? 'The provider is temporarily unavailable.'
           : 'The provider rejected the request.';
-  const detail = providerErrorDetail(body);
+  // Say so when the provider refuses without saying why. A bare 403 with an
+  // empty body is the least actionable response there is, and silence reads as a
+  // gateway problem rather than a refusal that reached the provider.
+  const detail = providerErrorDetail(body) ?? `HTTP ${response.status} with an empty response body`;
 
   return new ProviderError(code, message, {
     providerId,

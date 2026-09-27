@@ -553,3 +553,31 @@ test('an adapter that reports unavailable is recorded as a failure, not a succes
   const successesBefore = routing.providers?.quiet?.successes ?? routing.connections?.find((c) => c.providerId === 'quiet')?.successes;
   assert.equal(successesBefore ?? 0, 0, 'an unavailable check is never a success');
 });
+
+test("a provider's own wording survives the failover path", async () => {
+  // The chat path re-wraps a provider error to add "Tried: …". It used to drop
+  // `details` in the process, so every request that went through routing lost
+  // the provider's own explanation and the operator saw a bare refusal.
+  const { ProviderError } = await import('@hilbras/omnihilbras');
+  const adapter = {
+    id: 'quiet',
+    name: 'Quiet provider',
+    capabilities: { chat: true, streaming: false, models: false },
+    async chat() {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'Provider authentication failed.', {
+        providerId: 'quiet',
+        statusCode: 403,
+        details: { providerMessage: 'HTTP 403 with an empty response body' },
+      });
+    },
+  };
+  const service = new GatewayService(new ProviderRegistry().register(adapter), new InMemorySecretStore({ quiet: { type: 'api-key', value: 'k' } }));
+  await assert.rejects(
+    () => service.chat('quiet', { model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+    (error) => {
+      assert.equal(error.code, 'AUTHENTICATION_FAILED');
+      assert.equal(error.details?.providerMessage, 'HTTP 403 with an empty response body', 'the detail is preserved');
+      return true;
+    },
+  );
+});

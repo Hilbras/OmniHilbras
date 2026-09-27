@@ -94,8 +94,17 @@ to different endpoints: GPT models from `/zen/v1/responses`, some others from
 the last of those, so a model on either of the other two shapes fails here and
 works in OpenCode. Choosing a path per model is not implemented.
 
-**Account state.** Cline answers `402 Payment Required` when the account has no
-credits for inference, which is independent of this gateway.
+**Account state, or model access.** Cline answers `402 Payment Required` when the
+account has no credits. OpenCode Zen answers a bare `403` with an empty body for
+some individual models: from one key on the correct endpoint, `space-bunny-free`
+answers while `nemotron-3-ultra-free`, `mimo-v2.6-flash-free` and
+`ling-3.0-flash-fin-free` are all refused — and Zen lists every one of them as
+free. Zen documents that admins can disable individual models for a workspace, and
+its Nemotron free models are NVIDIA trial endpoints. That refusal happens at the
+provider and is not something this gateway can change.
+
+When a provider refuses without saying why, the dashboard says so explicitly —
+`HTTP 403 with an empty response body` — rather than showing nothing.
 
 When a test fails, the failure reason is shown on the row. The result filter's
 **Failed** tab isolates them, and a bulk run reports the count.

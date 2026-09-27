@@ -355,3 +355,15 @@ test('a failed renewal says the session expired', async () => {
     (error) => error.code === 'AUTHENTICATION_FAILED' && /expired and could not be renewed/.test(error.publicMessage ?? ''),
   );
 });
+
+test('more provider error shapes are read', () => {
+  // Zen: {"type":"error","error":{"type":"AuthError","message":"Invalid API key."}}
+  assert.equal(providerErrorDetail({ type: 'error', error: { type: 'AuthError', message: 'Invalid API key.' } }), 'Invalid API key.');
+  // Carries only a type, no message.
+  assert.equal(providerErrorDetail({ error: { type: 'ForbiddenError' } }), 'ForbiddenError');
+  // A validation list.
+  assert.equal(providerErrorDetail({ errors: [{ message: 'model is disabled' }] }), 'model is disabled');
+  assert.equal(providerErrorDetail({ msg: 'rate limited' }), 'rate limited');
+  assert.equal(providerErrorDetail({ detail: 'upstream busy' }), 'upstream busy');
+  assert.equal(providerErrorDetail({}), undefined);
+});

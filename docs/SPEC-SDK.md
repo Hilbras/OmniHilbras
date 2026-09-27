@@ -231,11 +231,25 @@ OpenCode Zen is a hosted gateway from the OpenCode team, OpenAI-compatible at
 serves it, and its catalog is public, so the model list imports without a
 credential.
 
-**Its API surface is mixed per model.** The published table routes GPT models to
-`/zen/v1/responses`, Anthropic-shaped models to `/zen/v1/messages`, and the rest
-to `/zen/v1/chat/completions`. The generic adapter speaks the last of those, so
-models served through the other two shapes will not answer here. Serving them
-means choosing a path per model, which this slice does not do.
+**Its API surface is mixed per model.** Per the published table at
+`opencode.ai/docs/zen`, GPT and Grok and Muse models come from
+`/zen/v1/responses`, Claude and Qwen from `/zen/v1/messages`, Gemini from
+`/zen/v1/models/{id}`, Jev from `/zen/v1/systemone`, and the rest from
+`/zen/v1/chat/completions`. The generic adapter speaks only the last of those, so a
+model served through another shape will not answer here. Serving them means choosing
+a path per model, which this slice does not do.
+
+**Every free model is on the path this gateway already speaks.** Measured on the
+free tier: `space-bunny-free` answers normally, while `nemotron-3-ultra-free`,
+`mimo-v2.6-flash-free` and `ling-3.0-flash-fin-free` are refused with a bare `403`
+and an empty body — from the same key, on the same endpoint, all listed as free.
+That is a refusal at the provider, not a routing fault here. Zen documents that
+admins can disable individual models for a workspace, and the Nemotron free models
+are NVIDIA trial endpoints. Nothing in this gateway can change the answer.
+
+A refusal that arrives with no body is reported as one, rather than as silence:
+`HTTP 403 with an empty response body`. Silence reads as a gateway problem, and a
+stated refusal does not.
 
 A connection is not limited to the built-in adapters. `PUT
 /v1/connections/:id` accepts any provider ID with a caller-supplied `endpoint`,
