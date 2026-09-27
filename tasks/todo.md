@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 10e: Retest against 9router's own keyless request, and correct the scope of the finding.
+  - Acceptance: the refusal is retested against the reference implementation's own request rather than a hand-written one, and the conclusion is narrowed to what was actually measured.
+  - Verify: 9router's keyless executor (`open-sse/executors/opencode.js`) hardcodes `Authorization: Bearer public` and requires canonical 30-character session and request ids (`ses_`/`msg_` + 12 hex + 14 base62) with `x-opencode-client: desktop` and `x-opencode-project: global`. Reproducing that exactly still returns `403` on every restricted model, so the request shape is not the variable. The remaining variable is the egress address: 9router's own page offers a Proxy Pool to "bypass IP-based limits" and Zen keys the free tier on the client address via `createIpRateLimiter` (`handler.ts:104-127`). v0.7.3's "unreachable" is therefore narrowed to "unreachable from an address that is not on the inside". Also recorded: `x-real-ip` is a client-controllable rate-limit input, a weakness in OpenCode's deployment to report rather than exploit.
+  - Files: docs only.
+  - Depends on: Task 10d.
+  - Scope: Small.
+
 - [x] Task 10d: Establish where the Zen free-tier refusal is actually decided.
   - Acceptance: the deciding layer is identified from provider source rather than inferred from symptoms, and the behaviour of the two reference projects that advertise a keyless OpenCode lane is recorded as measured.
   - Verify: OpenCode's own Zen handler prefixes a relayed upstream error with `Error from provider (<displayName>)` (`handler.ts:339`), so the refusal is an upstream provider's, not Zen's. Zen's edge treats `public` as no key (`handler.ts:107`) and admits anonymous callers when the model's `allowAnonymous` flag is set, rate-limiting by IP (`handler.ts:126`, `:699-701`), so these models are open at the edge and refused downstream. The full client matrix is credential-, header-, transport- and lane-independent across 5 retries. OmniRoute never calls Zen for this: its `open-code` MITM target rewrites `body.model` and forwards to its own router (`handlers/openCode.ts:26,29`), while its `noauth.ts` blurb advertises the very request shape that receives a 403. 9router's lane is `noAuth` with a placeholder `baseUrl` and a stale hardcoded model list, and its own test already reports `OpenCode free tier unavailable`.

@@ -326,9 +326,37 @@ confirms the refusal is independent of everything a client controls:
 | Retries | 5 per model | stable |
 
 Only `space-bunny-free` answers, and it answers anonymously on both the chat and
-messages lanes. The conclusion is that the restriction is a policy of OpenCode's own
-infrastructure, satisfied only by the genuine client. No third-party gateway can meet
-it, and no request shape works around it.
+messages lanes.
+
+### The one variable left is the egress IP
+
+No request shape works around it — and that is now tested against 9router's own
+request rather than a hand-written one. 9router keeps a dedicated keyless executor at
+`open-sse/executors/opencode.js` whose `buildHeaders` hardcodes the sentinel
+`Authorization: Bearer public` and requires both ids to match OpenCode's canonical
+format (`OPENCODE_SESSION_RE`, 30 characters, `ses_` + 12 hex + 14 base62, and the
+`msg_` equivalent for the request id), alongside `x-opencode-client: desktop` and
+`x-opencode-project: global`. Reproducing that exactly — canonical ids, the sentinel
+key, the OpenCode user agent — still returns `403` on every restricted model from an
+ordinary egress address. The request shape is therefore not the differentiator.
+
+What remains is the address the request leaves from, and both projects say so
+in their own UI. 9router's OpenCode Free page offers a **Proxy Pool** and describes it
+as a way to "bypass IP-based limits", defaulting to `None (direct)`. Zen's handler is
+consistent with that reading: the free tier is keyed on the client address, read from
+the `x-real-ip` request header and enforced with `createIpRateLimiter` (`:104-127`).
+
+So the free tier is an **IP-scoped** grant, and the honest summary is narrower than
+"unreachable": unreachable from an address that is not on the inside. Confirming that
+would need a second egress address, which this gateway does not have and does not
+acquire by rotating proxies to defeat a grant the vendor has explicitly limited to its
+own client. Treat the ten restricted models as unavailable from a normal client and
+budget accordingly.
+
+A side observation from reading that handler, worth reporting to OpenCode rather than
+exploiting: the rate-limiting address is taken from a request header, `x-real-ip`
+(`:104-105`). If the edge does not overwrite it, a caller can choose its own rate-limit
+bucket. It is a weakness in their deployment, not a route to these models.
 
 ### The other two projects do not reach these models either
 

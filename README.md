@@ -163,7 +163,12 @@ rate-limits by IP, so the block is strictly downstream of anything a client cont
 The other projects that advertise a keyless OpenCode free lane do not reach these
 models either: OmniRoute intercepts the real OpenCode client and swaps the model to its
 own router, and 9router's free lane is stale and already reports itself unavailable.
-See `docs/SPEC-SDK.md` for the measured matrix.
+
+The remaining variable is the **egress IP**, not the request. 9router's own provider
+page says so — it offers a Proxy Pool to "bypass IP-based limits" — and Zen keys the
+free tier on the client address. Reproducing 9router's exact keyless request, canonical
+session ids and all, still returns `403` from an ordinary address. See
+`docs/SPEC-SDK.md` for the measured matrix.
 
 ## Cline Sign-In
 
