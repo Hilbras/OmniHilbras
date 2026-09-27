@@ -439,3 +439,53 @@ test('a block page is told apart from a sign-in wall', () => {
   assert.equal(looksBlocked(null, 'Just a moment…'), true);
   assert.equal(looksBlocked('Hi', 'ChatGPT'), false);
 });
+
+/* ------------------------------------------------------------------ *
+ * The reason has to survive
+ * ------------------------------------------------------------------ */
+
+test("a refused page names itself, instead of arriving as 'every route failed'", async () => {
+  // The driver's failures are plain errors describing the page. Crossing the routing layer
+  // as a plain error they become "every provider route failed" with the reason discarded —
+  // which is a refused request reported as a broken model.
+  const { driver: d } = driver({
+    async ask() {
+      throw new Error('chatgpt.com served its bot-protection challenge instead of the application');
+    },
+  });
+  const state = parseChatGptStorageState(authExport());
+  await assert.rejects(
+    () => new ChatGptWebAdapter({ driver: d }).chat(request(), { credential: chatGptWebCredential(state) }),
+    (error) => {
+      assert.equal(error.code, 'PROVIDER_UNAVAILABLE');
+      assert.match(error.publicMessage ?? '', /bot-protection challenge/);
+      return true;
+    },
+  );
+});
+
+test('an ordinary page failure is not misfiled as an outage', async () => {
+  const { driver: d } = driver({
+    async ask() {
+      throw new Error('The ChatGPT page loaded but never showed a composer.');
+    },
+  });
+  const state = parseChatGptStorageState(authExport());
+  await assert.rejects(
+    () => new ChatGptWebAdapter({ driver: d }).chat(request(), { credential: chatGptWebCredential(state) }),
+    (error) => error.code === 'PROVIDER_REQUEST_FAILED',
+  );
+});
+
+test('a driver failure is raised, not swallowed into a successful empty answer', async () => {
+  const { driver: d } = driver({
+    async ask() {
+      throw new Error('browser closed');
+    },
+  });
+  const state = parseChatGptStorageState(authExport());
+  await assert.rejects(
+    () => new ChatGptWebAdapter({ driver: d }).chat(request(), { credential: chatGptWebCredential(state) }),
+    (error) => /browser closed/.test(error.publicMessage ?? ''),
+  );
+});

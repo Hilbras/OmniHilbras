@@ -142,7 +142,7 @@ async function readPageState(page: PlaywrightPage) {
   const blocked = /just a moment|unable to load site|attention required|access denied|checking your browser/i.test(
     `${documentTitle ?? ''} ${bodyText ?? ''}`,
   );
-  return { loginLinkCount, composerCount, blocked };
+  return { loginLinkCount, composerCount, blocked, title: documentTitle, bodyHead: bodyText ?? '' };
 }
 
 function describeBlocked(): string {
@@ -184,11 +184,14 @@ export function createChatGptWebDriver(): ChatGptWebDriver {
         args: ['--no-sandbox', '--disable-dev-shm-usage'],
       });
       let context: PlaywrightContext | undefined;
+      // Hoisted so the failure path can re-read the page and name what it actually showed,
+      // rather than reporting a bare timeout that helps nobody.
+      let page: PlaywrightPage | undefined;
       try {
-        context = await browser.newContext({ userAgent: undefined, viewport: { width: 1280, height: 900 } });
+        context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
         // Chunked before they are set, because an oversized cookie fails the whole batch.
         await context.addCookies(cookies.flatMap((cookie) => chunkCookie(cookie)).map(toPlaywrightCookie));
-        const page = await context.newPage();
+        page = await context.newPage();
 
         await page.goto(CHATGPT_WEB.startUrl, { waitUntil: 'domcontentloaded', timeout: CHATGPT_WEB.navigationTimeoutMs });
 
@@ -198,7 +201,25 @@ export function createChatGptWebDriver(): ChatGptWebDriver {
         if (state.blocked) throw new Error(describeBlocked());
         if (state.loginLinkCount > 0 && state.composerCount === 0) throw new Error(describeSignedOut());
 
-        await page.waitForSelector(CHATGPT_WEB.composer, { timeout: CHATGPT_WEB.navigationTimeoutMs });
+        /**
+         * A challenge page is not necessarily present the instant `goto` returns, so the
+         * page is re-inspected when the composer never arrives. Reporting only "it timed
+         * out" is what made this look like a model problem rather than a refused request.
+         */
+        const composerAppeared = await page
+          .waitForSelector(CHATGPT_WEB.composer, { timeout: CHATGPT_WEB.navigationTimeoutMs })
+          .then(() => true)
+          .catch(() => false);
+        if (!composerAppeared) {
+          const after = await readPageState(page);
+          if (after.blocked) throw new Error(describeBlocked());
+          if (after.loginLinkCount > 0) throw new Error(describeSignedOut());
+          throw new Error(
+            `The ChatGPT page loaded but never showed a composer. The document title was ${JSON.stringify(after.title)}${
+              after.bodyHead ? ` and the page said ${JSON.stringify(after.bodyHead.slice(0, 120))}` : ' with an empty body'
+            }.`,
+          );
+        }
         const before = await page.locator(CHATGPT_WEB.assistantMessage).count();
 
         await page.fill(CHATGPT_WEB.composer, prompt);
@@ -224,10 +245,16 @@ export function createChatGptWebDriver(): ChatGptWebDriver {
         return { text };
       } catch (error) {
         if (error instanceof Error && /Timeout .* exceeded/i.test(error.message)) {
-          throw new Error(`The ChatGPT page did not finish within ${Math.round(timeoutMs / 1000)}s. The page may have shown a sign-in prompt or a challenge instead of the conversation.`);
+          // The turn itself timed out, which is a different thing from the page never
+          // loading — so the page is re-read before saying so.
+          const after = page ? await readPageState(page).catch(() => undefined) : undefined;
+          if (after?.blocked) throw new Error(describeBlocked());
+          if (after?.loginLinkCount) throw new Error(describeSignedOut());
+          throw new Error(`The ChatGPT page never finished the turn within ${Math.round(timeoutMs / 1000)}s.`);
         }
         throw error;
       } finally {
+        await page?.close().catch(() => undefined);
         await context?.close().catch(() => undefined);
         await browser.close().catch(() => undefined);
       }

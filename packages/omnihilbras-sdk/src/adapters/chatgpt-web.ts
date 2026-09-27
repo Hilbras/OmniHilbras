@@ -540,13 +540,30 @@ export class ChatGptWebAdapter implements ProviderAdapter {
     const last = messages[messages.length - 1];
     const prompt = [system, last?.text ?? ''].filter(Boolean).join('\n\n');
 
-    const result = await this.driver.ask({
-      cookies: session.cookies,
-      model: request.model,
-      messages: [...messages.slice(0, -1), { role: 'user', text: prompt }],
-      timeoutMs: CHATGPT_WEB.defaultTurnTimeoutMs,
-      ...(context.signal ? { signal: context.signal } : {}),
-    });
+    /**
+     * The driver's failures are plain errors describing the page, and a plain error
+     * crossing the routing layer arrives as "every provider route failed" with the reason
+     * discarded. So it is re-raised as a provider error: a refused request and a broken
+     * model are different problems, and only one of them is worth retrying elsewhere.
+     */
+    let result: { text: string; usage?: TokenUsage };
+    try {
+      result = await this.driver.ask({
+        cookies: session.cookies,
+        model: request.model,
+        messages: [...messages.slice(0, -1), { role: 'user', text: prompt }],
+        timeoutMs: CHATGPT_WEB.defaultTurnTimeoutMs,
+        ...(context.signal ? { signal: context.signal } : {}),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'The ChatGPT page could not be driven.';
+      const blocked = /challenge|unable to load|bot-protection|anti-bot/i.test(message);
+      throw new ProviderError(blocked ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_REQUEST_FAILED', message, {
+        providerId: this.id,
+        publicMessage: message,
+        cause: error,
+      });
+    }
 
     const text = (result.text ?? '').trim();
     if (!text) {

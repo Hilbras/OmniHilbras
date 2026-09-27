@@ -146,6 +146,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 19: Make the ChatGPT Web refusal say what it is, instead of looking like a broken model.
+  - Acceptance: a model test against a blocked address reports the block, with the reason intact.
+  - Verify: `POST /v1/chat/completions` for `chatgpt-web` returns `PROVIDER_UNAVAILABLE` and the full sentence, in place of `Every provider route failed`. Three tests.
+  - Findings: the block **was** being detected, but too early to fire. A Cloudflare challenge is not present the instant `goto` returns — the 403 comes back in 0.8s with an empty title and the interstitial only appears a few seconds later — so the pre-flight check saw nothing, the composer wait then ran to its timeout, and the result was reported as a 60-second timeout with no cause. The page is now re-read whenever a wait fails, and a page that loaded without a composer reports its own title and body text rather than nothing. Separately, the driver's failures were plain `Error`s, so crossing the routing layer they collapsed into "Every provider route failed" and the reason was discarded: a refused request was being reported as a broken model. They are now raised as provider errors, with a block classified as an outage and an ordinary page failure left as a request failure.
+  - Files: `apps/gateway/src/chatgptWeb.ts`, `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, `test/chatgpt-web.test.js`.
+  - Depends on: Task 18.
+  - Scope: Small.
+
 - [x] Task 18: Accept the real ChatGPT export, chunk the oversized cookie, and gate the catalog on the plan.
   - Acceptance: a genuine CLI/Codex auth export connects, and a free-plan account is not offered paid models.
   - Verify: a real export is stored with its session cookie, `planType: free` and `expiresAt`, and round-trips all three; a real request reaches the browser and is refused by name as a block page. 34 SDK tests.
