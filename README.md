@@ -156,19 +156,16 @@ One trap: Zen's `mimo-v2.6-flash-free` and OpenRouter's `xiaomi/mimo-v2.6-flash`
 different models from different vendors, and the ids are close enough to mix up. The
 OpenRouter one answers on a paid route; the Zen one does not.
 
-The refusal comes from an **upstream provider**, not from Zen's edge — Zen relays it
-with the provider's name attached, which is why the message reads
-`Error from provider (Console)`. Zen's own edge admits these models anonymously and
-rate-limits by IP, so the block is strictly downstream of anything a client controls.
-The other projects that advertise a keyless OpenCode free lane do not reach these
-models either: OmniRoute intercepts the real OpenCode client and swaps the model to its
-own router, and 9router's free lane is stale and already reports itself unavailable.
+**An API key cannot reach them; a Console sign-in can.** The free Zen models are gated on
+the credential, not on the address. Signed in to OpenCode Console — the device flow the
+OpenCode client runs for itself — they answer at zero cost. With an API key, or the
+`public` sentinel, every lane returns `403`, under every header combination, on Node and
+Bun alike.
 
-The remaining variable is the **egress IP**, not the request. 9router's own provider
-page says so — it offers a Proxy Pool to "bypass IP-based limits" — and Zen keys the
-free tier on the client address. Reproducing 9router's exact keyless request, canonical
-session ids and all, still returns `403` from an ordinary address. See
-`docs/SPEC-SDK.md` for the measured matrix.
+That also corrects two earlier claims in this file's history: the block is not an
+egress-IP matter, and it is not a provider-relay quirk. 9router's Proxy Pool is offered
+for a reason this project has not established, but it is not what makes the models work.
+See `docs/SPEC-SDK.md` for the measured matrix and the authenticated lane table.
 
 ## Cline Sign-In
 

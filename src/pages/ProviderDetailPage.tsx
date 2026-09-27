@@ -162,6 +162,9 @@ const modelSortOptions: ReadonlyArray<{ value: ModelSort; label: string }> = [
 /** The documented defaults, used when a record arrives without a resilience block. */
 const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, requestsPerMinute: 0, hedgeAfterMs: 0 };
 
+/** OAuth providers the gateway can actually complete a sign-in for today. */
+const oauthProvidersWithFlow = new Set(['cline']);
+
 function ResiliencePanel({ connection, routingState, onSave }: { connection: GatewayConnection; routingState?: GatewayRoutingState; onSave: (next: GatewayResilience) => void | Promise<void> }) {
   const [open, setOpen] = useState(false);
   // A resilience block is required to render this panel. Reading it unguarded
@@ -372,11 +375,21 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   }, [bulkProgress, matchedModels, modelTestLatencies, modelTests, resultFilter, sortBy]);
   const testing = testingModels.length > 0;
   const isOauth = provider.auth === 'OAuth';
+  /**
+   * OAuth providers the gateway can actually sign in to. A card may list an auth mode
+   * the gateway cannot yet serve, so the action is disabled and says so rather than
+   * opening a flow that would fail or, worse, borrow another provider's.
+   */
+  const oauthFlowAvailable = !isOauth || oauthProvidersWithFlow.has(provider.id);
 
   // Browsers only allow window.open inside the click that granted the gesture,
   // so the tab is opened blank here and the dialog navigates it once the
   // gateway hands back the sign-in URL.
   function openAddConnection() {
+    if (!oauthFlowAvailable) {
+      flash(`${provider.name} sign-in is not available yet.`, 'error');
+      return;
+    }
     if (isOauth) {
       setSignInWindow(window.open('about:blank', '_blank'));
     } else {
@@ -610,7 +623,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
             <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-12 w-12 rounded-xl text-sm" />
             <div className="min-w-0"><div className="flex flex-wrap items-center gap-2.5"><h2 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{provider.name}</h2><span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[9px] ${meta.className}`}><span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />{meta.label}</span></div><p className="muted mt-1 text-sm">{provider.description}</p></div>
           </div>
-          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={testConnection} disabled={testingConnection || testing} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={openAddConnection} className="btn-gold !px-3 !py-2.5 !text-xs"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
+          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={testConnection} disabled={testingConnection || testing} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable} title={!oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
         </div>
       </div>
 
@@ -626,7 +639,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       <section className="card mt-5 overflow-hidden" aria-labelledby="connections-title">
         <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:p-5"><div><h2 id="connections-title" className="text-sm font-semibold">Connections</h2><p className="muted mt-1 text-xs">Credentials and endpoints used by this provider.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{connectionAdded ? '1 connection' : 'No connection'}</span></div>
         <div className="p-4 sm:p-5">
-          {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} pingMs={connectionPingMs} testing={testingConnection || testing} onTest={testConnection} onEdit={openAddConnection} /> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">Add an API key or point OmniHilbras at a local endpoint.</p></div></div><button type="button" onClick={openAddConnection} className="btn-gold !px-3 !py-2 !text-xs">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div>}
+          {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} pingMs={connectionPingMs} testing={testingConnection || testing} onTest={testConnection} onEdit={openAddConnection} /> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">{isOauth ? (oauthFlowAvailable ? 'Sign in to finish connecting this provider.' : 'Sign-in for this provider is not available yet.') : 'Add an API key or point OmniHilbras at a local endpoint.'}</p></div></div><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable} title={!oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2 !text-xs disabled:cursor-not-allowed disabled:opacity-40">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div>}
         </div>
       </section>
 
@@ -729,7 +742,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       <section id="endpoint" className="card mt-5 p-4 sm:p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-sm font-semibold">Endpoint details</h2><p className="muted mt-1 text-xs">The base URL OmniHilbras will use for this provider.</p></div><code className="max-w-full overflow-x-auto rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-muted sm:max-w-[420px]">{connection?.endpoint ?? provider.endpoint}</code></div></section>
 
       <AddProviderModal open={addOpen && !isOauth} initialProviderId={provider.id} initialModelPolicy={connection?.modelPolicy} onClose={() => setAddOpen(false)} onSave={handleAddConnection} onSaveMany={handleAddConnections} />
-      {isOauth && addOpen && (
+      {isOauth && oauthFlowAvailable && addOpen && (
         <OauthConnectDialog
           providerId={provider.id}
           providerName={provider.name}

@@ -18,6 +18,26 @@ export function getProviderLogo(id: string | null | undefined) {
 
 export const providerCatalog: ProviderRecord[] = [
   {
+    id: 'opencode-console',
+    name: 'OpenCode Console',
+    description:
+      'Sign in to your OpenCode Console account. This is the credential that reaches Zen’s free models — an API key alone is refused by every lane.',
+    category: 'Multi-model provider',
+    group: 'oauth',
+    status: 'available',
+    auth: 'OAuth',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#e87040',
+    initial: 'O',
+    logo: providerLogoMap.opencode,
+    endpoint: 'https://opencode.ai/inference/openai/v1',
+    modelList: [],
+  },
+  {
     id: 'cline',
     name: 'Cline',
     description: 'VS Code coding agent. Sign in with your Cline account to serve its models here.',

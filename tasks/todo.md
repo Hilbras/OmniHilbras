@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 10f: Add the OpenCode Console card, and correct the two wrong claims.
+  - Acceptance: a Console card exists in the OAuth group without disturbing the existing Zen card, an auth mode with no flow behind it disables its connect action and says so, and the IP-scoped and no-third-party claims are withdrawn in favour of the measured credential-scoped result.
+  - Verify: `opencode-console` renders under OAuth Providers and `opencode` still renders under API Key Providers. On the new card both Add connection buttons are disabled with the title "OpenCode Console sign-in is not available yet." and the empty state reads "Sign-in for this provider is not available yet."; Cline's buttons stay enabled, since it has a flow. Correction: `opencode run -m opencode/mimo-v2.6-flash-free` answers `OK` at cost 0 on the installed client, whose stored credential is a Console OAuth session — recognisable because the client renders `metadata.orgName` as the label, and an org name only exists on the device flow. A Console-authenticated `/api/config` names the real lanes (`/inference/openai/v1` with all 7 free models, `/inference/anthropic/v1`, `/inference/google/v1beta`) and a per-account `x-opencode-org-id`; the API key with that header is still refused, so neither the org id nor the address is the gate.
+  - Files: `src/data/providers.ts`, `src/pages/ProviderDetailPage.tsx`, docs.
+  - Depends on: Task 10e.
+  - Scope: Medium.
+
 - [x] Task 10e: Retest against 9router's own keyless request, and correct the scope of the finding.
   - Acceptance: the refusal is retested against the reference implementation's own request rather than a hand-written one, and the conclusion is narrowed to what was actually measured.
   - Verify: 9router's keyless executor (`open-sse/executors/opencode.js`) hardcodes `Authorization: Bearer public` and requires canonical 30-character session and request ids (`ses_`/`msg_` + 12 hex + 14 base62) with `x-opencode-client: desktop` and `x-opencode-project: global`. Reproducing that exactly still returns `403` on every restricted model, so the request shape is not the variable. The remaining variable is the egress address: 9router's own page offers a Proxy Pool to "bypass IP-based limits" and Zen keys the free tier on the client address via `createIpRateLimiter` (`handler.ts:104-127`). v0.7.3's "unreachable" is therefore narrowed to "unreachable from an address that is not on the inside". Also recorded: `x-real-ip` is a client-controllable rate-limit input, a weakness in OpenCode's deployment to report rather than exploit.

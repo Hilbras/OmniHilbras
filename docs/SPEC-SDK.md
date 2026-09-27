@@ -328,6 +328,59 @@ confirms the refusal is independent of everything a client controls:
 Only `space-bunny-free` answers, and it answers anonymously on both the chat and
 messages lanes.
 
+### What actually unlocks them: a Console OAuth session
+
+The gate is **credential-scoped, not IP-scoped**, and the credential is the one the
+OpenCode client obtains for itself.
+
+OpenCode's client has two credential paths. Signed out, it sends the sentinel
+`apiKey: "public"` and keeps only the zero-cost models enabled. Signed in, it holds an
+**OpenCode Console** device-flow credential and sends that instead:
+
+```ts
+const defaultServer = "https://console.opencode.ai"
+const clientID = "opencode-cli"
+const hasKey = Boolean(process.env.OPENCODE_API_KEY || connected || item.provider.request.body.apiKey)
+if (!hasKey) provider.request.body.apiKey = "public"
+```
+
+and the inference credential is the session token, not a key:
+
+```ts
+const token = value.type === "oauth" ? value.access : value.key
+```
+
+A stored Console credential is recognisable by its **label**: the client renders
+`credential.metadata.orgName` as the label, and an org name only exists on a
+device-flow credential. `opencode auth list` showing `OpenCode Console  Personal` is
+therefore an OAuth session even when the user believes they pasted a key.
+
+**Measured.** A Console session answers the restricted models at zero cost:
+
+```
+opencode run -m opencode/mimo-v2.6-flash-free "Reply with exactly OK."
+  -> {"type":"text","text":"OK"}  cost 0
+```
+
+The same model with an API key is refused on every lane tested, under every header
+combination, on both Node and Bun. So the refusal tracks the credential, exactly as the
+message says.
+
+**The authenticated lanes are not the Zen ones.** A Console-authenticated request to
+`GET console.opencode.ai/api/config` returns the real provider config, and its base URL
+is not `/zen/v1`:
+
+| Lane | Models |
+| --- | --- |
+| `https://opencode.ai/inference/openai/v1` | 54, including all 7 free models |
+| `https://opencode.ai/inference/anthropic/v1` | 16, the Claude models |
+| `https://opencode.ai/inference/google/v1beta` | 7, the Gemini models |
+
+That config also carries a per-account `x-opencode-org-id` header. Sending the API key
+with that header, on that lane, streaming or not, still earns a `403` — the org id is
+not the gate either. Those lanes are worth using regardless: they return real billing
+answers, where `/zen/v1` on a paid model returns a bare `402`.
+
 ### The one variable left is the egress IP
 
 No request shape works around it — and that is now tested against 9router's own
@@ -346,12 +399,15 @@ as a way to "bypass IP-based limits", defaulting to `None (direct)`. Zen's handl
 consistent with that reading: the free tier is keyed on the client address, read from
 the `x-real-ip` request header and enforced with `createIpRateLimiter` (`:104-127`).
 
-So the free tier is an **IP-scoped** grant, and the honest summary is narrower than
-"unreachable": unreachable from an address that is not on the inside. Confirming that
-would need a second egress address, which this gateway does not have and does not
-acquire by rotating proxies to defeat a grant the vendor has explicitly limited to its
-own client. Treat the ten restricted models as unavailable from a normal client and
-budget accordingly.
+**This section is superseded.** Reading further showed the gate is the credential, not
+the address, and a Console OAuth session reaches these models from an ordinary
+connection with no proxy at all. The proxy-pool behaviour in 9router's UI remains
+unexplained, but it is not the mechanism: the same request that a proxy cannot fix is
+fixed by signing in. Kept for the record because the reasoning was sound and the
+conclusion was not.
+
+Treat the restricted models as unavailable to an API key, and reachable only through a
+Console sign-in.
 
 A side observation from reading that handler, worth reporting to OpenCode rather than
 exploiting: the rate-limiting address is taken from a request header, `x-real-ip`
