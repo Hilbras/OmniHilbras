@@ -507,6 +507,30 @@ that can grow without bound.
 The filter rules live in the SDK rather than the dashboard: they are rules about provider
 pricing semantics, and that is where they can be tested.
 
+### Catalog cards added for OpenAI-compatible gateways
+
+A new provider is a catalog card plus, separately, an entry in the add-provider dropdown.
+Those are two lists and the duplication is structural; the resolver added in v0.9.6 makes
+the *card* authoritative, so a card added on its own still resolves to itself. The dropdown
+still reads its own list, so a provider meant to be addable from the providers page needs
+an entry in both.
+
+The endpoint is checked before the card is written, not after:
+
+| Card | Base | Probe | Answer |
+| --- | --- | --- | --- |
+| NaraRouter | `https://router.bynara.id/v1` | `GET /v1/models` | `401 A valid API key is required.` |
+| TokenHarbor | `https://tokenharbor.ai/v1` | `GET /v1/models` | `401 Invalid or revoked API key. Rotate your key at …` |
+
+A `401` with a JSON error body is the useful result: it shows the route exists, the service
+is live, and it wants a bearer key, which is what the generic on-demand adapter sends. A
+`404` or an HTML page means the guessed path is wrong and the base URL needs finding first.
+NaraRouter's site root returns HTML and `/api/v1` 404s, so only `/v1` is the API.
+
+A card never borrows another provider's logo. There is a `tokenrouter` asset in
+`public/providers` belonging to a different, unrelated service, and `tokenharbor` uses the
+letter mark rather than it.
+
 ### A provider id must never resolve to a different vendor
 
 The add-connection dialog keeps its own list of providers, and it used to resolve an

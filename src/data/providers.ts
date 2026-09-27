@@ -10,6 +10,7 @@ export const providerLogoMap = {
   cline: '/providers/cline.png',
   opencode: '/providers/opencode.png',
   nara: '/providers/bynara-logo-icon-light.svg',
+  tokenharbor: '/providers/tokenharbor.svg',
 } as const;
 
 export function getProviderLogo(id: string | null | undefined) {
@@ -150,6 +151,28 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'N',
     logo: providerLogoMap.nara,
     endpoint: 'https://router.bynara.id/v1',
+    modelList: [],
+  },
+  {
+    id: 'tokenharbor',
+    name: 'TokenHarbor',
+    description:
+      'Unified OpenAI-compatible gateway for GPT, Claude, Gemini and DeepSeek. Key from tokenharbor.ai/dashboard; selected models have a standing free tier.',
+    category: 'Multi-model provider',
+    group: 'api-key',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    // Taken from their own stylesheet. They publish no theme-color, and the terracotta
+    // on the page belongs to an Anthropic section they embed, not to them.
+    color: '#3859ff',
+    initial: 'T',
+    logo: providerLogoMap.tokenharbor,
+    endpoint: 'https://tokenharbor.ai/v1',
     modelList: [],
   },
   {

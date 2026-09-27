@@ -24,6 +24,7 @@ export const providerOptions: ProviderOption[] = [
   { id: 'openrouter', name: 'OpenRouter', description: 'Many models through one API', auth: 'API key', color: '#b995e8', initial: 'R', logo: getProviderLogo('openrouter'), defaultEndpoint: 'https://openrouter.ai/api/v1' },
   { id: 'opencode', name: 'OpenCode Zen', description: 'Curated gateway, key from opencode.ai/auth', auth: 'API key', color: '#8b8f96', initial: 'Z', logo: getProviderLogo('opencode'), defaultEndpoint: 'https://opencode.ai/zen/v1' },
   { id: 'nara-router', name: 'NaraRouter', description: 'OpenAI-compatible router at router.bynara.id', auth: 'API key', color: '#2d3948', initial: 'N', logo: getProviderLogo('nara'), defaultEndpoint: 'https://router.bynara.id/v1' },
+  { id: 'tokenharbor', name: 'TokenHarbor', description: 'Unified gateway, key from tokenharbor.ai/dashboard', auth: 'API key', color: '#3859ff', initial: 'T', logo: getProviderLogo('tokenharbor'), defaultEndpoint: 'https://tokenharbor.ai/v1' },
   { id: 'custom', name: 'Custom endpoint', description: 'Any OpenAI-compatible server', auth: 'API key', color: '#9c9584', initial: 'C', defaultEndpoint: 'http://localhost:8000/v1' },
 ];
 
