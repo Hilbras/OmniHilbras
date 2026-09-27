@@ -156,6 +156,15 @@ One trap: Zen's `mimo-v2.6-flash-free` and OpenRouter's `xiaomi/mimo-v2.6-flash`
 different models from different vendors, and the ids are close enough to mix up. The
 OpenRouter one answers on a paid route; the Zen one does not.
 
+The refusal comes from an **upstream provider**, not from Zen's edge — Zen relays it
+with the provider's name attached, which is why the message reads
+`Error from provider (Console)`. Zen's own edge admits these models anonymously and
+rate-limits by IP, so the block is strictly downstream of anything a client controls.
+The other projects that advertise a keyless OpenCode free lane do not reach these
+models either: OmniRoute intercepts the real OpenCode client and swaps the model to its
+own router, and 9router's free lane is stale and already reports itself unavailable.
+See `docs/SPEC-SDK.md` for the measured matrix.
+
 ## Cline Sign-In
 
 Cline is reached through an OAuth authorization-code flow instead of a pasted API

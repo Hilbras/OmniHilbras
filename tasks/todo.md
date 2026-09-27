@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 10d: Establish where the Zen free-tier refusal is actually decided.
+  - Acceptance: the deciding layer is identified from provider source rather than inferred from symptoms, and the behaviour of the two reference projects that advertise a keyless OpenCode lane is recorded as measured.
+  - Verify: OpenCode's own Zen handler prefixes a relayed upstream error with `Error from provider (<displayName>)` (`handler.ts:339`), so the refusal is an upstream provider's, not Zen's. Zen's edge treats `public` as no key (`handler.ts:107`) and admits anonymous callers when the model's `allowAnonymous` flag is set, rate-limiting by IP (`handler.ts:126`, `:699-701`), so these models are open at the edge and refused downstream. The full client matrix is credential-, header-, transport- and lane-independent across 5 retries. OmniRoute never calls Zen for this: its `open-code` MITM target rewrites `body.model` and forwards to its own router (`handlers/openCode.ts:26,29`), while its `noauth.ts` blurb advertises the very request shape that receives a 403. 9router's lane is `noAuth` with a placeholder `baseUrl` and a stale hardcoded model list, and its own test already reports `OpenCode free tier unavailable`.
+  - Files: docs only.
+  - Depends on: Task 10c.
+  - Scope: Small.
+
 - [x] Task 10c: Record the near-identical model id that makes a working route look broken.
   - Acceptance: the confusion between Zen's free `mimo-*-free` and OpenRouter's paid `xiaomi/mimo-*` is documented with both measured, so a "works in my other gateway" report is checked against the model id and provider before it is read as a routing fault.
   - Verify: `xiaomi/mimo-v2.6-flash` and `xiaomi/mimo-v2.5` answer through the configured OpenRouter connection; `mimo-v2.6-flash-free` and `mimo-v2.5-free` refuse on Zen with `403`. The two are distinct vendors' models with near-identical ids.

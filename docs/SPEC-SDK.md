@@ -289,9 +289,72 @@ the sentinel `Bearer public`, and `stream: true`, and it is not lifted by a vali
 Sending those headers anyway was tried and removed, since impersonating the vendor's
 client unlocked nothing.
 
-Note that 9router's hardcoded free list is **stale** — it advertises `union-alpha`,
-which is not in the catalog at all and is refused by every lane. Its contributor and
-union models are worth re-checking against the live catalog before being trusted.
+### Where the refusal actually happens
+
+The gate is **not** at Zen's edge, and it is not a credential check. Zen proxies each
+model to an upstream provider, and when that provider returns an error Zen relays the
+status and prefixes the message with the provider's name. OpenCode's own server does
+this in `packages/console/app/src/routes/zen/util/handler.ts`:
+
+```ts
+json.error.message = `Error from provider${providerInfo.displayName ? ` (${providerInfo.displayName})` : ""}: ${json.error.message}`
+```
+
+The refusal therefore arrives as `Error from provider (Console): …` — the parenthetical
+names the upstream provider that refused, and the text is that provider's, not Zen's.
+
+Zen's edge is in fact *open* to these models. Its handler reads the key, treats the
+sentinel `public` as no key at all, and admits an anonymous caller whenever the model's
+own `allowAnonymous` flag is set, rate-limiting by IP instead of by key:
+
+```ts
+const zenApiKey = rawZenApiKey === "public" ? undefined : rawZenApiKey   // handler.ts:107
+const rateLimiter = modelInfo.allowAnonymous                            // handler.ts:126
+  ? createIpRateLimiter(modelInfo.id, modelInfo.rateLimit, ip, input.request)
+  : createKeyRateLimiter(modelInfo.id, modelInfo.rateLimit, zenApiKey, input.request)
+```
+
+So an anonymous request is admitted and then refused downstream. The full matrix
+confirms the refusal is independent of everything a client controls:
+
+| Axis | Variants tried | Result |
+| --- | --- | --- |
+| Credential | none, `Bearer `, `Bearer public`, real API key | identical per model |
+| Client headers | `x-opencode-client`, `x-opencode-session`, `x-opencode-request`, `x-opencode-project`, `opencode/…` User-Agent | 403 |
+| Transport | `stream: true` and `false`, HTTP/2 | 403 |
+| Lane | chat, responses, messages, systemone, `zen/go`, `/api/v1`, `zen/v2` | 403 or a lane-specific 500/404 |
+| Retries | 5 per model | stable |
+
+Only `space-bunny-free` answers, and it answers anonymously on both the chat and
+messages lanes. The conclusion is that the restriction is a policy of OpenCode's own
+infrastructure, satisfied only by the genuine client. No third-party gateway can meet
+it, and no request shape works around it.
+
+### The other two projects do not reach these models either
+
+Both advertise a keyless OpenCode free lane, and both would hit the refusal above.
+
+**OmniRoute never calls Zen for this.** Its `open-code` MITM target installs a root
+certificate and routes `opencode.ai` DNS into itself so the real OpenCode CLI connects
+to OmniRoute instead. The handler then rewrites the model and forwards to OmniRoute's
+own router — `payload.model = mappedModel` then `this.fetchRouter(payload, …)` in
+`src/mitm/handlers/openCode.ts`. It is a model-swap shim, not a path to Zen's free
+tier. Its provider blurb nonetheless reads "public OpenCode endpoint with Kimi, GLM,
+Qwen, MiMo, MiniMax models … No signup or API key needed" in
+`src/shared/constants/providers/noauth.ts`, which is catalog copy describing the one
+request shape that receives a 403.
+
+**9router's free lane is aspirational and stale.** `registry/opencode.js` sets
+`noAuth: true`, `forceStream: true` and `baseUrl: "https://opencode.ai"` as a
+placeholder, then hardcodes four models — one of which, `union-alpha`, is absent from
+the catalog and refused by every lane. Its own connection test already knows the lane
+can be down: it probes `https://opencode.ai/zen/v1/models` with `Authorization: Bearer
+public` and reports `OpenCode free tier unavailable` when that fails.
+
+A "works in 9router" or "works in OmniRoute" report about these models should be read
+as *"that project advertises them"*, not *"that project served them"*. The
+`mimo` name collision described above is a third possibility and the cheapest to
+check.
 
 ### A model name that looks the same and is not
 
