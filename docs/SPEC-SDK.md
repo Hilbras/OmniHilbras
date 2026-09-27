@@ -433,20 +433,40 @@ A session is renewed when the access token is within a minute of expiry, and the
 credential is written back to the vault so it outlives the request that triggered it.
 Validation reads `/api/user`, which is free and never bills.
 
-**The org id to send must come from `/api/config`, not `/api/orgs`.** The two are not
-interchangeable. The config issues a `wrk_` workspace id; the orgs list carries `org_`
-ids; and the inference lane answers `403 Workspace access denied` when given the latter.
-Measured on the live lane:
+**Two header names, for two different calls.** This was the cause of a connection that
+saved with zero models. Measured:
 
-| `x-opencode-org-id` | Result |
-| --- | --- |
-| absent | `200` |
-| `wrk_` from `/api/config` | `200` |
-| `org_` from `/api/orgs` | `403 Upstream request failed: Workspace access denied` |
+| Call | Header | Without it |
+| --- | --- | --- |
+| `GET /api/config` | `x-org-id` | `400 {"code":"org_required","message":"x-org-id is required"}` |
+| inference (`/inference/*`) | `x-opencode-org-id` | tolerated, but the org is still required upstream |
 
-`/api/orgs` is also `401` for an API key, so it is not a usable source for this header at
-all. It is read for the org's display name only, and the config is authoritative for the
-value that gets echoed back.
+The org id itself comes from `GET /api/orgs`, which needs only the bearer token, and the
+config then echoes back the same value for inference. So the read order is fixed: orgs
+first, then config. An adapter that reads the config without an org fails every time, and
+a credential saved before the org was captured would fail forever, so the org is looked up
+from the account when the credential does not carry one.
+
+**A correction.** v0.9.2 of this document claimed the config issues a `wrk_` workspace id
+while the orgs list carries `org_` ids, and that the inference lane refuses the latter
+with `403 Workspace access denied`. That was wrong, and the measurement behind it was
+faulty: the test built an `org_` id by swapping the prefix onto a `wrk_` value, which
+invented an organization that does not exist. The refusal was real; the conclusion drawn
+from it was not. The config issues an `org_` id and it matches the orgs list. Two things
+here cost real time because a plausible-sounding measurement was believed without being
+re-examined.
+
+**The Anthropic lane must not keep its trailing `/v1`.** `AnthropicAdapter` appends
+`v1/messages` to the base it is given, and the config's lane already ends in `/v1`, so
+passing it as-is asks for `/inference/anthropic/v1/v1/messages` — a `404`. Measured: the
+doubled path answers `404`, and the corrected path answers `402 Insufficient account
+funds`, which is the endpoint working. The OpenAI lane has no such problem, because the
+compatible adapter appends the whole chat path.
+
+**A connection can be re-scanned.** `POST /v1/connections/:id/models/refresh` re-reads a
+saved connection's catalog and stores the result, keeping custom models. Without it a
+connection saved with no models has no way back short of signing in again, which for a
+device flow means another browser approval.
 
 **A device code is single-use, so the exchange is claimed before the Console is called.**
 The poll that receives the token kills the grant. The dashboard polls every second and

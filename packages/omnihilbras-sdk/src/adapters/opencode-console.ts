@@ -153,6 +153,8 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
   private lanes = new Map<string, { at: number; lanes: ConsoleLanes }>();
   /** Renewed credentials, keyed by the token they replaced. */
   private renewed = new Map<string, ProviderCredential>();
+  /** The account's org id, keyed by access token. It does not change. */
+  private orgIds = new Map<string, string>();
 
   constructor(options: OpencodeConsoleAdapterOptions = {}) {
     this.transport = options.transport ?? new FetchHttpTransport();
@@ -266,11 +268,18 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
     const key = bearer(credential);
     const cached = this.lanes.get(key);
     if (cached && this.now() - cached.at < configTtlMs) return cached.lanes;
+    // `/api/config` refuses without an org: `400 {"code":"org_required"}`. A credential
+    // saved before the org was captured would fail every read forever, so the org is
+    // looked up from the account rather than assumed present.
+    const orgId = orgHeaderValue(credential) ?? (await this.lookupOrgId(credential, signal));
     const response = await this.transport.request<ConsoleConfig>({
       method: 'GET',
       providerId: this.id,
       url: `${OPENCODE_CONSOLE.server}${OPENCODE_CONSOLE.configPath}`,
-      headers: this.headers(credential),
+      headers: {
+        ...this.headers(credential),
+        ...(orgId ? { 'x-org-id': orgId } : {}),
+      },
       ...(signal ? { signal } : {}),
     });
     const provider = response.data?.config?.provider?.opencode;
@@ -281,10 +290,34 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
       if (typeof lane === 'string' && lane) byModel.set(id, lane);
       else if (base) byModel.set(id, base);
     }
-    const orgId = provider?.options?.headers?.['x-opencode-org-id'] ?? orgHeaderValue(credential);
-    const lanes: ConsoleLanes = { base, byModel, ...(orgId ? { orgId } : {}) };
+    // The config names the header inference wants, which is spelled differently again.
+    const inferenceOrgId = provider?.options?.headers?.['x-opencode-org-id'] ?? orgId;
+    const lanes: ConsoleLanes = { base, byModel, ...(inferenceOrgId ? { orgId: inferenceOrgId } : {}) };
     this.lanes.set(key, { at: this.now(), lanes });
     return lanes;
+  }
+
+  /**
+   * The account's first org, which is the one the OpenCode client itself picks. Cached
+   * per session because it does not change.
+   */
+  private async lookupOrgId(credential: ProviderCredential, signal?: AbortSignal): Promise<string | undefined> {
+    const key = bearer(credential);
+    const cached = this.orgIds.get(key);
+    if (cached) return cached;
+    const response = await this.transport.request<Array<{ id?: string; name?: string }>>({
+      method: 'GET',
+      providerId: this.id,
+      url: `${OPENCODE_CONSOLE.server}${OPENCODE_CONSOLE.orgsPath}`,
+      headers: this.headers(credential),
+      ...(signal ? { signal } : {}),
+    });
+    const orgs = Array.isArray(response.data) ? response.data : [];
+    const first = [...orgs]
+      .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '') || (a.id ?? '').localeCompare(b.id ?? ''))[0];
+    const id = typeof first?.id === 'string' ? first.id : undefined;
+    if (id) this.orgIds.set(key, id);
+    return id;
   }
 
   private async laneFor(model: string, context: ProviderRequestContext): Promise<{ lane: string; orgId?: string }> {
@@ -311,11 +344,15 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
    * request, because that is the only place either adapter accepts extra headers.
    */
   private laneAdapter(lane: string, orgId: string | undefined): ProviderAdapter {
-    const headers = orgId ? { 'x-opencode-org-id': orgId } : undefined;
+    const headers = orgId ? { 'x-opencode-org-id': orgId } : {} as Record<string, string>;
     if (isAnthropicLane(lane)) {
       return new AnthropicAdapter({
-        baseUrl: lane,
-        ...(headers ? { headers } : {}),
+        // `AnthropicAdapter` appends `v1/messages` to the base it is given, and the
+        // config's lane already ends in `/v1`. Passing it as-is asks for
+        // `/inference/anthropic/v1/v1/messages`, which is a 404. The OpenAI lane does
+        // not have this problem: the compatible adapter appends the whole chat path.
+        baseUrl: lane.replace(/\/v1$/, ''),
+        headers,
         transport: this.transport,
       });
     }
@@ -323,10 +360,9 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
       {
         id: this.id,
         name: this.name,
-        // The OpenAI-compatible adapter appends the chat path to the base.
         baseUrl: lane.replace(/\/chat\/completions$/, ''),
         auth: { header: 'Authorization', prefix: 'Bearer' },
-        ...(headers ? { headers } : {}),
+        headers,
       },
       { transport: this.transport },
     );

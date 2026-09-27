@@ -153,6 +153,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    // Re-reads a saved connection's catalog. A connection can be saved with no models
+    // when a sign-in could not read one, and this is the way back without signing in
+    // again — which for a device flow would mean another browser approval.
+    if (request.method === 'POST' && url.pathname.endsWith('/models/refresh') && url.pathname.startsWith('/v1/connections/')) {
+      const connectionId = decodeConnectionId(url.pathname.slice('/v1/connections/'.length, -'/models/refresh'.length));
+      const connection = await service.refreshConnectionModels(connectionId, controller.signal);
+      sendJson(response, 200, { connection }, origin);
+      return;
+    }
+
     if (request.method === 'POST' && url.pathname.endsWith('/check') && url.pathname.startsWith('/v1/connections/')) {
       const providerId = decodeProviderId(url.pathname.slice('/v1/connections/'.length, -'/check'.length));
       const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));

@@ -136,10 +136,6 @@ type TokenResponse = {
 
 type Org = { id?: string; name?: string };
 type User = { id?: string; email?: string };
-/** Just enough of `/api/config` to read the org id the Console wants echoed back. */
-type ConsoleConfig = {
-  config?: { provider?: { opencode?: { options?: { headers?: Record<string, string> } } } };
-};
 
 async function postJson<T>(path: string, body: Record<string, string>): Promise<{ status: number; data: T }> {
   const response = await fetch(`${OPENCODE_CONSOLE.server}${path}`, {
@@ -157,9 +153,9 @@ async function postJson<T>(path: string, body: Record<string, string>): Promise<
   return { status: response.status, data };
 }
 
-async function getJson<T>(path: string, accessToken: string): Promise<T | undefined> {
+async function getJson<T>(path: string, accessToken: string, extra: Record<string, string> = {}): Promise<T | undefined> {
   const response = await fetch(`${OPENCODE_CONSOLE.server}${path}`, {
-    headers: { accept: 'application/json', Authorization: `Bearer ${accessToken}` },
+    headers: { accept: 'application/json', Authorization: `Bearer ${accessToken}`, ...extra },
   });
   if (!response.ok) return undefined;
   const text = await response.text();
@@ -226,21 +222,26 @@ export async function pollOpencodeConsoleSignIn(deviceCode: string): Promise<Pol
   const access = typeof data.access_token === 'string' ? data.access_token : '';
   if (!access) return { status: 'denied', error: 'OpenCode Console did not return a session. Start the sign-in again.' };
 
-  const [user, orgs, config] = await Promise.all([
+  const [user, orgs] = await Promise.all([
     getJson<User>(OPENCODE_CONSOLE.userPath, access),
     getJson<Org[]>(OPENCODE_CONSOLE.orgsPath, access),
-    getJson<ConsoleConfig>(OPENCODE_CONSOLE.configPath, access),
   ]);
   // The client picks the alphabetically first org, so the same account resolves to the
-  // same org name here as it does there.
+  // same org here as it does there.
   const org = [...(orgs ?? [])].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '') || (a.id ?? '').localeCompare(b.id ?? ''))[0];
   /**
-   * The org id to send is the one the config hands out, not one from the orgs list.
-   * The two are not interchangeable: the config issues a `wrk_` workspace id, and
-   * sending an `org_` id from the orgs list is refused with
-   * `403 Workspace access denied`. Measured, not assumed.
+   * The config cannot be read without an org: it answers
+   * `400 {"code":"org_required","message":"x-org-id is required"}`. So the org is
+   * resolved first, from the orgs list, and the config is then read with it.
+   *
+   * Note the two header names, which are not the same. The *config* call wants
+   * `x-org-id`; the config it returns then names `x-opencode-org-id` for inference.
+   * Sending the inference spelling to the config call is refused.
    */
-  const orgId = config?.config?.provider?.opencode?.options?.headers?.['x-opencode-org-id'] ?? org?.id;
+  // The config is not read here: the adapter reads it per request, and it is the
+  // adapter that knows the config call needs `x-org-id`. Storing the orgs-list id is
+  // enough, because the config names that same value for inference.
+  const orgId = org?.id;
   const expiresIn = typeof data.expires_in === 'number' ? data.expires_in : undefined;
 
   const credential: ProviderCredential = {

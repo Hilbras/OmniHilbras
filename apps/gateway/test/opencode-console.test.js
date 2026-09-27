@@ -143,10 +143,10 @@ test('a token response with no access token is a refusal, not a silent success',
   assert.equal(outcome.status, 'denied');
 });
 
-test('the org id comes from the config, because the orgs list id is refused', async () => {
-  // Measured: the config issues a `wrk_` workspace id and the inference lane answers
-  // `403 Workspace access denied` when sent an `org_` id from the orgs list instead.
-  // So the config is authoritative for the value that gets echoed back.
+test('the credential carries the account org id, which is what inference wants', async () => {
+  // The Console's config names `x-opencode-org-id` for inference, and its value is the
+  // same org the orgs list returns. So the orgs list is the source, read with only the
+  // bearer token, and the config is left to the adapter, which needs it per request.
   withDeviceCode({}, async (url) => {
     if (url === `${OPENCODE_CONSOLE.server}${OPENCODE_CONSOLE.deviceTokenPath}`) {
       return new Response(JSON.stringify({ access_token: 'acc', expires_in: 3600 }), {
@@ -158,30 +158,25 @@ test('the org id comes from the config, because the orgs list id is refused', as
     if (url.endsWith('/api/orgs')) {
       return new Response(JSON.stringify([{ id: 'org_zzzzzzzzzzzzzzzzzzzzzzzzzz', name: 'Personal' }]), { status: 200 });
     }
-    if (url.endsWith('/api/config')) {
-      return new Response(
-        JSON.stringify({ config: { provider: { opencode: { options: { headers: { 'x-opencode-org-id': 'wrk_zzzzzzzzzzzzzzzzzzzzzzzzzz' } } } } } }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
-    }
     return new Response('{}', { status: 404 });
   });
   const outcome = await pollOpencodeConsoleSignIn('dev_1');
   assert.equal(outcome.status, 'connected');
-  assert.equal(outcome.credential.orgId, 'wrk_zzzzzzzzzzzzzzzzzzzzzzzzzz', 'the workspace id wins over the orgs list id');
-  assert.equal(outcome.credential.orgName, 'Personal', 'the orgs list still names the org');
+  assert.equal(outcome.credential.orgId, 'org_zzzzzzzzzzzzzzzzzzzzzzzzzz');
+  assert.equal(outcome.credential.orgName, 'Personal');
 });
 
-test('an unreadable config falls back to the orgs list rather than losing the org', async () => {
+test('an account with no org still connects, minus the org', async () => {
   withDeviceCode({}, async (url) => {
     if (url === `${OPENCODE_CONSOLE.server}${OPENCODE_CONSOLE.deviceTokenPath}`) {
       return new Response(JSON.stringify({ access_token: 'acc' }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
-    if (url.endsWith('/api/orgs')) return new Response(JSON.stringify([{ id: 'org_y', name: 'Personal' }]), { status: 200 });
+    if (url.endsWith('/api/orgs')) return new Response('[]', { status: 200 });
     return new Response('{}', { status: 500 });
   });
   const outcome = await pollOpencodeConsoleSignIn('dev_1');
-  assert.equal(outcome.credential.orgId, 'org_y', 'better a possibly-wrong org than none');
+  assert.equal(outcome.status, 'connected', 'a missing org is not a failed sign-in');
+  assert.equal(outcome.credential.orgId, undefined);
 });
 
 test('a session is claimed once, so two polls cannot spend the same grant', () => {

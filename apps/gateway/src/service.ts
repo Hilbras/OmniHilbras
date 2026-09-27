@@ -374,6 +374,34 @@ export class GatewayService {
   }
 
   /**
+   * Re-reads a connection's catalog and stores the result.
+   *
+   * A connection can be saved with no models — a sign-in tolerates a catalog it could
+   * not read, so an approved session is never thrown away — and a provider's catalog
+   * changes over time. Without this, such a connection has no way back short of signing
+   * in again, which for a device flow means a browser approval.
+   */
+  async refreshConnectionModels(connectionId: string, signal?: AbortSignal): Promise<ConnectionRecord> {
+    if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
+    const record = (await this.connectionStore.list()).find((item) => item.id === connectionId);
+    if (!record) throw new ProviderError('NOT_FOUND', 'That connection no longer exists.', { providerId: connectionId });
+    const credential = await this.secretStore.get(connectionId, record.providerId);
+    const policy = record.modelPolicy ?? 'all';
+    const discovered = await this.discoverConnectionModels(
+      record.providerId,
+      credential ?? { type: 'none' },
+      policy,
+      signal,
+      { endpoint: record.endpoint, name: record.name },
+    );
+    // Custom models are the operator's own additions and survive a rescan.
+    const merged = [...new Set([...discovered, ...(record.customModelIds ?? [])])];
+    const updated = await this.connectionStore.updateModels(connectionId, merged);
+    if (!updated) throw new ProviderError('NOT_FOUND', 'That connection no longer exists.', { providerId: connectionId });
+    return updated;
+  }
+
+  /**
    * Starts an OpenCode Console sign-in. This is a device flow: the Console hands back a
    * code the user types into its own page, so the dashboard shows the code and waits
    * rather than following a redirect.

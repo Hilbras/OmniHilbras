@@ -38,6 +38,8 @@ const USER_URL = `${OPENCODE_CONSOLE.server}${OPENCODE_CONSOLE.userPath}`;
 const TOKEN_URL = `${OPENCODE_CONSOLE.server}${OPENCODE_CONSOLE.deviceTokenPath}`;
 const OPENAI_LANE = 'https://opencode.ai/inference/openai/v1';
 const ANTHROPIC_LANE = 'https://opencode.ai/inference/anthropic/v1';
+/** The adapter appends `v1/messages`, so the lane's own trailing `/v1` is dropped. */
+const ANTHROPIC_MESSAGES = `${ANTHROPIC_LANE.replace(/\/v1$/, '')}/v1/messages`;
 const GOOGLE_LANE = 'https://opencode.ai/inference/google/v1beta';
 
 /** The signed-in config, shaped as the Console returns it. */
@@ -102,7 +104,7 @@ test('a free model is served from the openai lane the config names', async () =>
 test('a Claude model is served from the anthropic lane, with the org header', async () => {
   const t = transport({
     [CONFIG_URL]: config('org_abc'),
-    [`${ANTHROPIC_LANE}/v1/messages`]: {
+    [ANTHROPIC_MESSAGES]: {
       data: { id: 'm1', model: 'claude-sonnet-5', content: [{ type: 'text', text: 'OK' }], stop_reason: 'end_turn', usage: { input_tokens: 4, output_tokens: 1 } },
     },
   });
@@ -112,7 +114,10 @@ test('a Claude model is served from the anthropic lane, with the org header', as
     { credential: signedIn() },
   );
   const sent = t.requests.at(-1);
-  assert.equal(sent.url, `${ANTHROPIC_LANE}/v1/messages`);
+  // The lane from the config already ends in `/v1`, and the Anthropic adapter appends
+  // `v1/messages`. Passing the lane as-is asks for `/v1/v1/messages`, which is a 404.
+  assert.equal(sent.url, ANTHROPIC_MESSAGES);
+  assert.ok(!sent.url.includes('/v1/v1/'), 'the path must not double');
   assert.equal(sent.headers['x-opencode-org-id'], 'org_abc');
   assert.equal(sent.headers['anthropic-version'], '2023-06-01');
   assert.equal(response.message.content, 'OK');
@@ -225,6 +230,9 @@ test('a renewed session does not reuse the previous session lanes', async () => 
 
 test('the org id is taken from the config when the credential has none', async () => {
   const t = transport({
+    // No org on the credential, so the config call needs one looked up from the
+    // account first: `/api/config` answers `400 org_required` without it.
+    [`${OPENCODE_CONSOLE.server}${OPENCODE_CONSOLE.orgsPath}`]: { data: [{ id: 'org_looked_up', name: 'Personal' }] },
     [CONFIG_URL]: config('org_from_server'),
     [`${OPENAI_LANE}/chat/completions`]: { data: { id: 'c1', choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }] } },
   });
@@ -239,7 +247,7 @@ test('the org id is taken from the config when the credential has none', async (
 test('a vendor-prefixed model id resolves to the same lane as the bare id', async () => {
   const t = transport({
     [CONFIG_URL]: config('org_abc'),
-    [`${ANTHROPIC_LANE}/v1/messages`]: {
+    [ANTHROPIC_MESSAGES]: {
       data: { id: 'm1', model: 'claude-sonnet-5', content: [{ type: 'text', text: 'OK' }], stop_reason: 'end_turn' },
     },
   });
@@ -249,5 +257,5 @@ test('a vendor-prefixed model id resolves to the same lane as the bare id', asyn
     { credential: signedIn() },
   );
   assert.equal(response.message.content, 'OK');
-  assert.ok(t.urls().includes(`${ANTHROPIC_LANE}/v1/messages`), 'a prefix does not change the lane');
+  assert.ok(t.urls().includes(ANTHROPIC_MESSAGES), 'a prefix does not change the lane');
 });
