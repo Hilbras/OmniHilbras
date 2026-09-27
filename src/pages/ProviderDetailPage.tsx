@@ -835,6 +835,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       {webCookieProviders.has(provider.id) && addOpen && (
         <WebCookieConnectDialog
           providerName={provider.name}
+          website={provider.endpoint}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           {...(provider.riskSeverity ? { riskSeverity: provider.riskSeverity } : {})}
           onClose={() => { setAddOpen(false); setSignInWindow(null); }}

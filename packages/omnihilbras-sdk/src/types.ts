@@ -173,6 +173,8 @@ export type ProviderCredential =
 
 export type ProviderRequestContext = {
   credential?: ProviderCredential;
+  /** The connection's model import policy, so a provider can narrow its own list. */
+  importPolicy?: ModelImportPolicy;
   signal?: AbortSignal;
   requestId?: string;
 };

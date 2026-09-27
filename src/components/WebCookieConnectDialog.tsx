@@ -1,40 +1,66 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, CircleAlert, LoaderCircle, ShieldAlert, Upload } from 'lucide-react';
+import { Check, CircleAlert, Cookie, ExternalLink, LoaderCircle, ShieldAlert, Tag } from 'lucide-react';
+import { CHATGPT_WEB_SESSION_COOKIE } from '@hilbras/omnihilbras';
 import { requestJson, type GatewayConnection } from '../lib/gatewayClient';
 
 /**
  * Connecting to a Web Cookie provider.
  *
  * There is no sign-in button here and there will not be one. The only way in is a session
- * the user exports from their own browser, so the dialog's job is to say what to export,
- * what will happen to it, and to keep the paste out of anything that is not the gateway.
+ * the user exports from their own browser, so the dialog's job is to say exactly what to copy,
+ * let them check it before committing, and keep the paste out of anything but the gateway.
  *
- * The risk gate is the reason this dialog exists. The credential is a live session for a
- * whole account, not a token scoped to inference, and the flow drives a web app past its
- * own anti-automation checks. Both are stated before the field is enabled, because a
- * warning that appears after you have pasted your session cookie is not a warning.
+ * The risk gate is the reason this dialog exists. The credential is a live session for a whole
+ * account, not a token scoped to inference, and the flow drives a web app past its own
+ * anti-automation checks. Both are stated before the field is enabled, because a warning that
+ * appears after you have pasted your session cookie is not a warning.
  */
 
 type Props = {
   providerName: string;
+  /** The origin to send the user to, and to name in the guide. */
+  website: string;
   riskNotice?: string;
   riskSeverity?: 'standard' | 'high';
   onConnected: (connection: GatewayConnection) => void | Promise<void>;
   onClose: () => void;
 };
 
-const exportSteps = [
-  'Open chatgpt.com in your own browser, signed in.',
-  'Open DevTools → Application → Cookies → https://chatgpt.com.',
-  'Export the cookies, or copy the whole Cookie request header.',
-  'Paste it below. It is stored encrypted in your local vault and never reaches browser storage.',
+type CheckResult = {
+  planType: string | null;
+  isFreePlan: boolean;
+  models: Array<{ id: string; name: string }>;
+};
+
+const credential = CHATGPT_WEB_SESSION_COOKIE;
+
+/**
+ * The two ways out of a browser, in the order a person should try them.
+ *
+ * Both end at the same place — the value of the `Cookie` request header — because that is the
+ * one string that is guaranteed to be complete. Asking for a single cookie instead gets you
+ * `__Secure-next-auth.session-token` on its own, which is what a first reading of the
+ * requirement suggests and is not enough: the export is only useful with the cookies
+ * chatgpt.com mints alongside it.
+ */
+const extractionSteps = [
+  {
+    label: 'Fast path',
+    body: `Install the Cookie Editor extension (chromewebstore.google.com → Cookie Editor), open it on the signed-in chatgpt.com tab, find ${credential} — select every numbered chunk if it is split — and choose Export → Copy with the export format set to "Cookie header".`,
+  },
+  {
+    label: 'Manual path',
+    body: 'Open the browser developer tools (F12 → Network), reload, click any authenticated request, and copy the Cookie header value from Request Headers. Omit the `Cookie:` prefix.',
+  },
 ];
 
-export function WebCookieConnectDialog({ providerName, riskNotice, riskSeverity = 'standard', onConnected, onClose }: Props) {
+export function WebCookieConnectDialog({ providerName, website, riskNotice, riskSeverity = 'standard', onConnected, onClose }: Props) {
   const [acknowledged, setAcknowledged] = useState(false);
   const [exported, setExported] = useState('');
-  const [phase, setPhase] = useState<'idle' | 'running' | 'done'>('idle');
+  const [freeOnly, setFreeOnly] = useState(false);
+  const [checked, setChecked] = useState<CheckResult | null>(null);
+  const [phase, setPhase] = useState<'idle' | 'checking' | 'running' | 'done'>('idle');
   const [error, setError] = useState('');
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
   const settledRef = useRef(false);
@@ -51,6 +77,39 @@ export function WebCookieConnectDialog({ providerName, riskNotice, riskSeverity 
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
+  const host = (() => {
+    try {
+      return new URL(website).host;
+    } catch {
+      return website;
+    }
+  })();
+
+  /**
+   * Reads the export and reports what the account would get, without storing it.
+   *
+   * Worth a button of its own because the model set is not knowable in advance: a free account
+   * has no picker at all and is served two models, so "connected but no models" is otherwise
+   * the first sign that the export came from the wrong account.
+   */
+  const check = useCallback(async () => {
+    setPhase('checking');
+    setError('');
+    try {
+      const result = await requestJson<CheckResult>('/v1/web-cookie/chatgpt/check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ storageState: exported }),
+      });
+      setChecked(result);
+      setPhase('idle');
+    } catch (checkError) {
+      setChecked(null);
+      setPhase('idle');
+      setError(checkError instanceof Error ? checkError.message : 'That export could not be read.');
+    }
+  }, [exported]);
+
   const submit = useCallback(async () => {
     if (settledRef.current) return;
     setPhase('running');
@@ -61,23 +120,28 @@ export function WebCookieConnectDialog({ providerName, riskNotice, riskSeverity 
         headers: { 'content-type': 'application/json' },
         // Sent to the gateway and nowhere else, so the browser is not trusted to decide
         // which cookies belong to this connection.
-        body: JSON.stringify({ storageState: exported }),
+        body: JSON.stringify({ storageState: exported, freeOnly }),
       });
       settledRef.current = true;
       setPhase('done');
       await onConnected(result.connection);
       onClose();
     } catch (submitError) {
-      // The paste is cleared on failure. Leaving a whole-account session in a field next
-      // to an error is how it ends up in a screenshot.
+      // The paste is cleared on failure. Leaving a whole-account session in a field next to an
+      // error is how it ends up in a screenshot.
       setExported('');
+      setChecked(null);
       setPhase('idle');
       setError(submitError instanceof Error ? submitError.message : 'That export could not be connected.');
     }
-  }, [exported, onClose, onConnected]);
+  }, [exported, freeOnly, onClose, onConnected]);
 
   if (!portalNode) return null;
   const high = riskSeverity === 'high';
+  const pasteReady = exported.trim().length > 0 && (!riskNotice || acknowledged);
+  // The models the account would get, narrowed by the toggle — the same narrowing the save
+  // applies, so what is shown here is what will be there afterwards.
+  const offered = freeOnly && checked ? checked.models.filter((model) => model.id.includes('free')) : checked?.models ?? [];
 
   return createPortal(
     <div
@@ -91,7 +155,7 @@ export function WebCookieConnectDialog({ providerName, riskNotice, riskSeverity 
         role="dialog"
         aria-modal="true"
         aria-label={`Connect ${providerName}`}
-        className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[520px] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-2xl"
+        className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[560px] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-2xl"
       >
         <div className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-3">
           <div className="flex items-center gap-1.5" aria-label="Window controls">
@@ -122,44 +186,118 @@ export function WebCookieConnectDialog({ providerName, riskNotice, riskSeverity 
             </div>
           )}
 
-          <div className="mt-4">
-            <p className="flex items-center gap-1.5 text-[11px] font-semibold">
-              <Upload className="h-3.5 w-3.5 text-gold-text" aria-hidden="true" />
-              Export your session
+          {/* The guide, before the field. A credential the user does not know how to export is
+              a field they will fill with the wrong thing. */}
+          <section className="mt-4 rounded-xl border border-purple-500/25 bg-purple-500/10 p-3">
+            <p className="flex items-start gap-1.5 text-[11px] font-semibold text-text">
+              <Cookie className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#a78bfa]" aria-hidden="true" />
+              How to get the session credential
+            </p>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+              {providerName} uses a browser web session instead of an API key. Required cookie:{' '}
+              <code className="rounded bg-black/25 px-1 py-0.5 font-mono text-[10px] text-[#c4b5fd]">{credential}</code>
             </p>
             <ol className="mt-2 space-y-1.5">
-              {exportSteps.map((step, index) => (
-                <li key={step} className="flex gap-2 text-[11px] leading-relaxed text-muted">
+              <li className="flex gap-2 text-[11px] leading-relaxed text-muted">
+                <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border border-line font-mono text-[9px] text-gold-text">1</span>
+                <span>
+                  Sign in to {providerName} in your browser.
+                  <a
+                    href={website}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-1.5 inline-flex items-center gap-0.5 text-gold-text hover:underline"
+                  >
+                    Open {host}
+                    <ExternalLink className="h-2.5 w-2.5" aria-hidden="true" />
+                  </a>
+                </span>
+              </li>
+              {extractionSteps.map((step, index) => (
+                <li key={step.label} className="flex gap-2 text-[11px] leading-relaxed text-muted">
                   <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border border-line font-mono text-[9px] text-gold-text">
-                    {index + 1}
+                    {index + 2}
                   </span>
-                  {step}
+                  <span>
+                    <span className="font-semibold text-text">{step.label}:</span> {step.body}
+                  </span>
                 </li>
               ))}
+              <li className="flex gap-2 text-[11px] leading-relaxed text-muted">
+                <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border border-line font-mono text-[9px] text-gold-text">4</span>
+                Paste it below and check the cookie. If it stops working, sign in again and paste a fresh value.
+              </li>
             </ol>
-          </div>
+            <p className="mt-2.5 text-[10px] leading-relaxed text-amber-600 dark:text-amber-400">
+              Treat this like a password: it may access your signed-in web account until it expires or is revoked.
+            </p>
+          </section>
 
           <div className="mt-4">
             <label htmlFor="web-cookie-export" className="block text-[11px] font-semibold">
-              Paste the export
+              Session cookie
             </label>
             <textarea
               id="web-cookie-export"
               value={exported}
               onChange={(event) => {
                 setExported(event.target.value);
+                setChecked(null);
                 setError('');
               }}
-              rows={4}
+              rows={3}
               spellCheck={false}
               autoComplete="off"
               disabled={!acknowledged}
-              placeholder='{"cookies":[{"name":"…","value":"…"}]}  or  __Secure-next-auth.session-token=…; oai-did=…'
+              placeholder="__Secure-next-auth.session-token=…; oai-did=…"
               className="mt-1.5 w-full resize-y rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-text outline-none focus:border-gold/50 disabled:opacity-50"
             />
-            <p className="muted mt-1.5 text-[11px] leading-relaxed">
-              Only chatgpt.com and openai.com cookies are kept. Anything else in the export is dropped before it is stored.
-            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void check()}
+                disabled={!pasteReady || phase === 'checking' || phase === 'running'}
+                className="btn-secondary !h-8 !px-2.5 !text-[11px]"
+              >
+                {phase === 'checking' ? (
+                  <>
+                    <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden="true" />
+                    Checking
+                  </>
+                ) : (
+                  'Check cookie'
+                )}
+              </button>
+              <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted">
+                <input
+                  type="checkbox"
+                  checked={freeOnly}
+                  onChange={(event) => setFreeOnly(event.target.checked)}
+                  className="h-3.5 w-3.5 accent-[#ff6b35]"
+                />
+                Import only free models
+              </label>
+            </div>
+            {checked && (
+              <div className="mt-2.5 rounded-lg border border-success/30 bg-success/10 p-2.5">
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold text-success">
+                  <Check className="h-3 w-3" aria-hidden="true" />
+                  {checked.planType ? `${checked.planType} plan` : 'Plan not stated by the export'}
+                </p>
+                <p className="mt-1 text-[10px] leading-relaxed text-muted">
+                  {offered.length} model{offered.length === 1 ? '' : 's'} would be imported
+                  {checked.isFreePlan ? ' — a free account has no model picker, so these are all of them.' : '.'}
+                </p>
+                <ul className="mt-1.5 flex flex-wrap gap-1">
+                  {offered.map((model) => (
+                    <li key={model.id} className="flex items-center gap-1 rounded bg-black/25 px-1.5 py-0.5 font-mono text-[9px] text-muted">
+                      <Tag className="h-2 w-2 shrink-0" aria-hidden="true" />
+                      {model.id}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
 
           {error && (
@@ -172,7 +310,7 @@ export function WebCookieConnectDialog({ providerName, riskNotice, riskSeverity 
           <button
             type="button"
             onClick={() => void submit()}
-            disabled={phase === 'running' || !exported.trim() || (Boolean(riskNotice) && !acknowledged)}
+            disabled={!pasteReady || phase === 'running' || phase === 'checking'}
             className="btn-primary mt-4 w-full !h-9 !text-xs"
           >
             {phase === 'running' ? (
@@ -190,7 +328,7 @@ export function WebCookieConnectDialog({ providerName, riskNotice, riskSeverity 
             )}
           </button>
 
-          <p className="muted mt-2 text-center text-[10px] leading-relaxed">
+          <p className="mt-2 text-center text-[10px] leading-relaxed text-muted">
             The gateway stores it encrypted in the local vault. It never reaches browser storage.
           </p>
         </div>

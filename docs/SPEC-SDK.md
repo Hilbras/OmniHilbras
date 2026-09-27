@@ -921,6 +921,95 @@ Patch's third slot writes `undefined` at every path and builds a document full o
 containers — both of which read as a model that answered nothing. A message with no path is
 a new turn, and `content_type` is not always `text`: a `reasoning_recap` is not the answer.
 
+### The catalog: 13 cards, and why the plan does not narrow them
+
+Five Sol rungs, two Luna free, six for GPT-5.5:
+
+```
+gpt-5.6-luna-free            GPT-5.6 Luna (Free)           auto, no thinking
+gpt-5.6-luna-free-thinking   GPT-5.6 Luna (Free, Think)    auto, thinking
+gpt-5.6-sol-instant          GPT-5.6 Sol (Instant)         gpt-5-6
+gpt-5.6-sol-medium           GPT-5.6 Sol (Medium)          gpt-5-6  + thinking
+gpt-5.6-sol-high             GPT-5.6 Sol (High)            gpt-5-6  + thinking
+gpt-5.6-sol-xhigh           GPT-5.6 Sol (XHigh)           gpt-5-6  + thinking
+gpt-5.6-sol-pro              GPT-5.6 Sol (Pro)             gpt-5-6-pro
+gpt-5.5-instant              GPT-5.5 (Instant)             gpt-5-5
+gpt-5.5-medium               GPT-5.5 (Medium)              gpt-5-5  + thinking
+gpt-5.5-high                 GPT-5.5 (High)                gpt-5-5  + thinking
+gpt-5.5-xhigh               GPT-5.5 (XHigh)               gpt-5-5  + thinking
+gpt-5.5-pro                  GPT-5.5 (Pro)                 gpt-5-5-pro
+gpt-5.5-pro-extended         GPT-5.5 (Pro Extended)        gpt-5-5-pro
+```
+
+**The cards and the resolver are one table.** The reference's own provider page advertises
+effort-suffixed ids that its `resolveSelection` then refuses, so a client that copies one out
+of the UI gets `unsupported model`. Deriving both from `CHATGPT_WEB_MODELS` makes that
+unreachable, and a test asserts it.
+
+**The effort ladder collapses to one boolean.** `reason` is a system hint, and ChatGPT picks
+the effort itself once it is set — so `medium`, `high` and `xhigh` are distinct *cards* and one
+*request*. `pro` is different: it is a different model string, and the reference deliberately
+withholds the thinking hint for it. `chatGptWebDirectModel` owns that rule in the SDK, because
+deriving `reason` as `effortIndex > 0` at a call site sends a hint the page does not honour.
+
+**`gpt-5.5-pro-extended` is an alias of `pro`, not a distinct request.** ChatGPT exposes no
+separate wire model for it, and inventing one would produce a model id the page rejects. It is
+kept so a client that sends it is answered rather than refused.
+
+**The plan does not narrow the list.** A free account is offered all 13. `resolveChatGptWebSelection`
+never consults the plan either — it maps an id onto a selection and lets the page refuse,
+because a `planType` read out of an export is weaker evidence than what the page serves. Gating
+the catalog on it was a second, different rule, and the wrong one: a wrong gate is not
+symmetric. Showing a model the account cannot use costs one visible test failure that names
+itself; hiding a model it *can* use hides something that works, with no way to tell that apart
+from "not supported". The plan is still **reported** — the connect dialog shows it.
+
+### Getting the session in, and checking it
+
+The dialog's guide names the cookie, gives both extraction routes, and says to check before
+saving:
+
+```
+POST /v1/web-cookie/chatgpt/check     { storageState }   ->  { planType, isFreePlan, verified, models }
+POST /v1/web-cookie/chatgpt/connect   { storageState, freeOnly }  ->  201 { connection }
+```
+
+**The parser accepts the Cookie header**, because the guide tells you to paste one. It did not
+before: the error message said "paste the cookie header instead" and then refused one, so the
+instruction and the parser disagreed and the only way to find out which was wrong was to paste
+a real session and be turned away. A header is split on `;`, allowlisted to ChatGPT's own
+cookies (`cf_clearance`, `__cf_bm` and `_cfuvid` included — the edge sets those, and a session
+sent without them can be challenged even when the token is valid), and the session token is
+**reassembled from its numbered chunks**, which is how a browser splits a long one.
+
+A **cut-short chunk set is refused**, and the check says so. A partial token is not a shorter
+session, it is a broken one, and sending it reads as an opaque 401. A lone `.0` is the harder
+case: it looks complete on its own, but a browser only splits a token over its size limit, so
+one chunk means the header was truncated.
+
+**The check opens the page.** Expiry, cookie presence and browser availability are all local
+checks, and none of them can tell a working session from one revoked from another device — so
+a check that only parsed would be a button labelled "Check cookie" that accepts a dead
+session. It costs one page load, which the connect immediately does again.
+
+Measured against a real session and a deliberately invalid one, **every DOM marker is
+identical** — both render two textareas, no profile button, no sign-in link, the same form, the
+same URL. A selector picked from either page passes the other. The one difference is the page
+text, which carries the plan on a signed-in account and not on a signed-out one, so that is
+what is read, polled for 15s because the badge arrives with the account data rather than in
+the first paint. A page without it is reported as unconfirmed, not guessed at.
+
+**Every driver failure carries a cause.** A challenge is `PROVIDER_UNAVAILABLE` and a sign-in
+wall is `AUTHENTICATION_FAILED`, because the fixes differ — one is the network, one is the
+credential. Thrown as bare `Error`s they both arrived as `INTERNAL_ERROR` and "The gateway
+encountered an unexpected error", which hides the one thing the user needs to know.
+
+**`freeOnly` is recorded on the connection, and carried through discovery.** A toggle that
+lives only in the dialog is a switch that does nothing for anyone connecting over the API.
+Gating the refresh on `policy === 'all'` was worse than useless: it made a free-only connection
+*unrefreshable*, so the toggle could create a connection that broke the next time anybody asked
+the provider what it serves.
+
 ### Verified end to end
 
 ```

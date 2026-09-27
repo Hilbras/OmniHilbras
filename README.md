@@ -200,6 +200,18 @@ network, it was Playwright's default headless user agent containing `HeadlessChr
 the model ids were invented twice, first as `gpt-5.2` and then as `auto`, which is not a
 model a client can ask for but the string the *page* is given when an account is free.
 
+**All 13 models are offered, whatever the plan.** Five GPT-5.6 Sol rungs, two Luna free, six
+for GPT-5.5. The plan is reported in the connect dialog but does not narrow the list: a free
+account that can use a model should be able to see it. The effort rungs collapse to one request
+because ChatGPT picks the effort itself, and `pro` is a different model string with the
+thinking hint deliberately withheld.
+
+**"Check cookie" opens chatgpt.com and really checks.** Expiry, cookie presence and browser
+availability are all local, and none of them can tell a working session from a revoked one — so
+a check that only parsed would be a button that accepts a dead session. The parser accepts the
+Cookie header the dialog tells you to paste, and reassembles the session token from the
+numbered chunks a browser splits it into.
+
 The turn is made through ChatGPT's own request path — its Sentinel requirements, its
 proof-of-work and Turnstile tokens, its request client — with the module found by scanning
 the page's assets for semantic markers. Driving the composer does not work: it posts a

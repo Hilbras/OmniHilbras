@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { CHATGPT_WEB, type ChatGptCookie, type ChatGptWebDriver } from '@hilbras/omnihilbras';
+import { CHATGPT_WEB, chatGptWebDirectModel, chatGptWebProviderId as CHATGPT_WEB_PROVIDER_ID, ProviderError, type ChatGptCookie, type ChatGptWebDriver } from '@hilbras/omnihilbras';
 import { executeFirstPartyTurn, extractAssistantText, type PageLike } from './chatgptFirstParty.js';
 
 /**
@@ -161,6 +161,96 @@ function toPlaywrightCookie(cookie: ChatGptCookie) {
   };
 }
 
+/**
+ * Opens chatgpt.com with a session in it and hands back the signed-in page.
+ *
+ * Both the turn and the check need exactly this — the cookies set, the profile reused, the
+ * navigation retried, and the two failure modes told apart from each other — so it is one
+ * function rather than two copies that drift.
+ */
+async function openSignedInPage(cookies: readonly ChatGptCookie[], profile: string): Promise<{ page: PageLike; close: () => Promise<void> }> {
+  const playwright = await loadPlaywright();
+  if (!playwright) {
+    const message =
+      'ChatGPT Web needs a browser, and Playwright is not installed. Run `pnpm add -D playwright-core` in the gateway, then `npx playwright install chromium`.';
+    throw new ProviderError('PROVIDER_UNAVAILABLE', message, {
+      providerId: CHATGPT_WEB_PROVIDER_ID,
+      publicMessage: message,
+    });
+  }
+  // The container this often runs in has no shared memory and no sandbox namespaces. Both
+  // are required by a default Chromium and neither is fixable by the user here.
+  const launchOptions = {
+    headless: true,
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
+    // Without these the edge answers 403 before the page exists.
+    userAgent: BROWSER_USER_AGENT,
+    locale: BROWSER_LOCALE,
+    timezoneId: BROWSER_TIMEZONE,
+    viewport: { width: 1400, height: 950 },
+  };
+  await mkdir(profile, { recursive: true });
+  const context = await playwright.chromium.launchPersistentContext(profile, launchOptions);
+  const close = async () => {
+    await context.close().catch(() => undefined);
+  };
+  let page: PageLike | undefined;
+  try {
+    // Chunked before they are set, because an oversized cookie fails the whole batch.
+    await context.addCookies(cookies.flatMap((cookie) => chunkCookie(cookie)).map(toPlaywrightCookie));
+    page = (await context.newPage()) as unknown as PageLike;
+    /**
+     * Navigation is retried, because a dropped connection reports itself as
+     * `ERR_NETWORK_CHANGED` — indistinguishable, to the caller, from chatgpt.com being
+     * unreachable. One retry is the difference between a transient blip and a failed turn.
+     */
+    let navigated = false;
+    for (let attempt = 1; attempt <= 2 && !navigated; attempt += 1) {
+      try {
+        await page.goto(CHATGPT_WEB.startUrl, { waitUntil: 'domcontentloaded', timeout: CHATGPT_WEB.navigationTimeoutMs });
+        navigated = true;
+      } catch (error) {
+        if (attempt === 2) throw error;
+        await page.waitForTimeout(2_000).catch(() => undefined);
+      }
+    }
+    await page.waitForTimeout(6_000);
+
+    // A challenge is identified by its title, because its body is empty. Told apart from a
+    // sign-in wall because the two have completely different fixes: one is the network, the
+    // other is the credential.
+    /**
+     * Both of these are ProviderErrors, and the codes differ because the fixes differ.
+     *
+     * A challenge is the network and is `PROVIDER_UNAVAILABLE`; a sign-in wall is the
+     * credential and is `AUTHENTICATION_FAILED`. Thrown as bare Errors they both arrive as
+     * `INTERNAL_ERROR` and "unexpected error", which is worse than either — it hides the
+     * one thing the user needs to know, which of the two they are looking at.
+     */
+    const title = await page.title().catch(() => '');
+    if (/just a moment/i.test(title)) throw blockedError();
+    if ((await page.locator(CHATGPT_WEB.signedOutMarker).count()) > 0) {
+      throw signedOutError();
+    }
+    return { page, close };
+  } catch (error) {
+    await close();
+    throw error;
+  }
+}
+
+/** A bot-protection challenge: the network, not the credential. */
+function blockedError(): ProviderError {
+  const message = describeBlocked();
+  return new ProviderError('PROVIDER_UNAVAILABLE', message, { providerId: CHATGPT_WEB_PROVIDER_ID, publicMessage: message });
+}
+
+/** A sign-in wall: the credential, not the network. */
+function signedOutError(): ProviderError {
+  const message = describeSignedOut();
+  return new ProviderError('AUTHENTICATION_FAILED', message, { providerId: CHATGPT_WEB_PROVIDER_ID, publicMessage: message });
+}
+
 function describeBlocked(): string {
   return 'chatgpt.com served its bot-protection challenge instead of the application, so no turn was attempted. This is a network-level block on the address OmniHilbras is running from — it happens with a valid session, so it is not a problem with your export. A residential connection with no VPN or datacenter is the usual fix.';
 }
@@ -198,61 +288,79 @@ export function createChatGptWebDriver(connectionKey = 'default'): ChatGptWebDri
       return { ok: true };
     },
 
-    async ask({ cookies, selection, messages }) {
-      const playwright = await loadPlaywright();
-      if (!playwright) {
-        throw new Error(
-          'ChatGPT Web needs a browser, and Playwright is not installed. Run `pnpm add -D playwright-core` in the gateway, then `npx playwright install chromium`.',
-        );
-      }
-      const prompt = messages[messages.length - 1]?.text ?? '';
-      if (!prompt.trim()) throw new Error('There is nothing to ask ChatGPT Web.');
-      // The container this often runs in has no shared memory and no sandbox namespaces.
-      // Both are required by a default Chromium and neither is fixable by the user here.
-      const launchOptions = {
-        headless: true,
-        args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
-        // Without these the edge answers 403 before the page exists.
-        userAgent: BROWSER_USER_AGENT,
-        locale: BROWSER_LOCALE,
-        timezoneId: BROWSER_TIMEZONE,
-        viewport: { width: 1400, height: 950 },
-      };
-      // A persistent profile, not a fresh browser each turn: ChatGPT's first-use
-      // "Temporary Chat" modal otherwise reappears every time, holding focus and
-      // intercepting the click on Send.
-      await mkdir(dir, { recursive: true });
-      const context = await playwright.chromium.launchPersistentContext(dir, launchOptions);
-      let page: PageLike | undefined;
+    /**
+     * Confirms the session is actually signed in, by opening the page.
+     *
+     * This is the whole point of the connect dialog's "Check cookie" button, and it is why
+     * the button costs a page load. Expiry and cookie presence are checked without a browser
+     * and are not enough: a session revoked from another device, or one the edge has since
+     * challenged, parses perfectly and fails every request. Only the page knows.
+     *
+     * The plan is read from the page rather than the export for the same reason — the export
+     * is a claim about an account, the page is the account.
+     */
+    /**
+     * Confirms the session is signed in, by opening the page and looking for the account.
+     *
+     * This is what the connect dialog's "Check cookie" button means, and it is why the
+     * button costs a page load. Expiry, cookie presence and browser availability are all
+     * local checks; none of them can tell a working session from a revoked one, and
+     * reporting "valid" for both is how "connected but every request fails" begins.
+     *
+     * **The signal is the plan badge, and nothing else.** Measured against a real session
+     * and a deliberately invalid one, every DOM marker is identical: both render two
+     * textareas, no profile button, no sign-in link, the same form, the same URL. A selector
+     * picked from either page passes the other. The only thing that differs is the page
+     * text, which carries the plan on a signed-in account and not on a signed-out one — so
+     * that is what is read, and a page without it is reported as unconfirmed rather than
+     * guessed at.
+     */
+    async verify({ cookies }) {
+      const { page, close } = await openSignedInPage(cookies, dir);
       try {
-        // Chunked before they are set, because an oversized cookie fails the whole batch.
-        await context.addCookies(cookies.flatMap((cookie) => chunkCookie(cookie)).map(toPlaywrightCookie));
-        page = (await context.newPage()) as unknown as PageLike;
-        /**
-         * Navigation is retried, because a dropped connection reports itself as
-         * `ERR_NETWORK_CHANGED` — indistinguishable, to the caller, from chatgpt.com being
-         * unreachable. One retry is the difference between a transient blip and a failed
-         * turn.
-         */
-        let navigated = false;
-        for (let attempt = 1; attempt <= 2 && !navigated; attempt += 1) {
-          try {
-            await page.goto(CHATGPT_WEB.startUrl, { waitUntil: 'domcontentloaded', timeout: CHATGPT_WEB.navigationTimeoutMs });
-            navigated = true;
-          } catch (error) {
-            if (attempt === 2) throw error;
-            await page.waitForTimeout(2_000).catch(() => undefined);
-          }
-        }
-        await page.waitForTimeout(6_000);
+        // Polled, because the badge arrives with the account data and is not in the first
+        // paint. A single read races it, and a race that usually wins is still a race.
+        const readPlan = () =>
+          page
+            .evaluate(() => {
+              const body = document.body?.innerText ?? '';
+              // "Free" is checked first because it is the plan most accounts are on, and the
+              // paid names are ordinary English words that can appear in page copy.
+              if (/\bFree\b/.test(body)) return 'Free';
+              return /\b(Plus|Pro|Team|Business|Enterprise|Go)\b/.exec(body)?.[1] ?? null;
+            })
+            .catch(() => null);
 
-        // A challenge is identified by its title, because its body is empty.
-        const title = await page.title().catch(() => '');
-        if (/just a moment/i.test(title)) throw new Error(describeBlocked());
-        if ((await page.locator(CHATGPT_WEB.signedOutMarker).count()) > 0) {
-          throw new Error(describeSignedOut());
+        let plan = await readPlan();
+        for (let waited = 0; plan === null && waited < 15_000; waited += 1_500) {
+          await page.waitForTimeout(1_500).catch(() => undefined);
+          plan = await readPlan();
         }
 
+        if (plan === null) {
+          /**
+           * A ProviderError, not a bare Error: a bare one reaches the user as
+           * `INTERNAL_ERROR` and "an unexpected error", which is the one thing a check must
+           * never say — it hides whether the problem is the export.
+           */
+          const message =
+            'chatgpt.com loaded but showed no account, so this session could not be confirmed. It may have been revoked or signed out. Sign in to chatgpt.com, export the Cookie header again, and check it once more.';
+          throw new ProviderError('AUTHENTICATION_FAILED', message, {
+            providerId: CHATGPT_WEB_PROVIDER_ID,
+            publicMessage: message,
+          });
+        }
+        return { ok: true, plan };
+      } finally {
+        await close();
+      }
+    },
+
+    async ask({ cookies, selection, messages }) {
+      const prompt = messages[messages.length - 1]?.text ?? '';
+      if (!prompt.trim()) throw new ProviderError('INVALID_REQUEST', 'There is nothing to ask ChatGPT Web.', { providerId: CHATGPT_WEB_PROVIDER_ID, publicMessage: 'There is nothing to ask ChatGPT Web.' });
+      const { page, close } = await openSignedInPage(cookies, dir);
+      try {
         /**
          * The turn, through ChatGPT's own code.
          *
@@ -261,7 +369,10 @@ export function createChatGptWebDriver(connectionKey = 'default'): ChatGptWebDri
          * uses for itself — its Sentinel requirements, its proof-of-work and Turnstile
          * tokens, and its request client.
          */
-        const reason = selection.kind === 'free' ? selection.thinkEnabled : selection.effortIndex > 0;
+        // The SDK owns this rule, because it is not the obvious one: Pro must not ask for
+        // thinking. Deriving `reason` here as `effortIndex > 0` would send a hint the page
+        // does not honour on a Pro request.
+        const direct = chatGptWebDirectModel(selection);
 
         /**
          * One retry for a dropped connection, and only for that.
@@ -276,10 +387,17 @@ export function createChatGptWebDriver(connectionKey = 'default'): ChatGptWebDri
         let lastError: Error | null = null;
         for (let attempt = 1; attempt <= 2 && !text; attempt += 1) {
           try {
-            const sse = await executeFirstPartyTurn(page, { prompt, model: selection.model, reason });
+            const sse = await executeFirstPartyTurn(page, { prompt, model: direct.model, reason: direct.reason });
             text = extractAssistantText(sse);
             if (!text) {
-              throw new Error('ChatGPT answered, but the stream carried no text. Its response format may have changed.');
+              // Not retried: a stream with no text is a format change, not a dropped
+              // connection, and retrying it would hide a real break behind a slow failure.
+              const message =
+                'ChatGPT answered, but the stream carried no text. Its response format may have changed.';
+              throw new ProviderError('PROVIDER_REQUEST_FAILED', message, {
+                providerId: CHATGPT_WEB_PROVIDER_ID,
+                publicMessage: message,
+              });
             }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -292,7 +410,7 @@ export function createChatGptWebDriver(connectionKey = 'default'): ChatGptWebDri
         return { text };
       } finally {
         // The profile persists, so the context is what gets closed.
-        await context.close().catch(() => undefined);
+        await close();
       }
     },
   };

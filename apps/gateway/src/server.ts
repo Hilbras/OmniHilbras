@@ -314,9 +314,22 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
      * written, so the browser's decision about which cookies belong to this connection is
      * made here rather than trusted from the client.
      */
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/chatgpt/check') {
+      // Deliberately before the connect route and deliberately storing nothing: this is the
+      // "check the cookie" answer, which is which models the account will actually get.
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      // Async because it verifies: this opens the page and confirms the account is signed in,
+      // which is what makes the button worth pressing before saving a whole-account session.
+      sendJson(response, 200, await service.checkChatGptWeb(readRequiredString(body, 'storageState'), controller.signal), origin);
+      return;
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/web-cookie/chatgpt/connect') {
-      const body = await readJsonBody(request, maxConnectionBodyBytes);
-      const connection = await service.connectChatGptWeb(readRequiredString(body, 'storageState'), controller.signal);
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      // Anything other than a literal `true` is not the free-only import; a truthy string
+      // from a hand-written request would otherwise narrow a connection nobody asked to narrow.
+      const freeOnly = body.freeOnly === true;
+      const connection = await service.connectChatGptWeb(readRequiredString(body, 'storageState'), controller.signal, freeOnly);
       sendJson(response, 201, { connection }, origin);
       return;
     }

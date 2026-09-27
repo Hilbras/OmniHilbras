@@ -11,6 +11,7 @@ import {
   isFreeChatGptPlan,
   normalizeChatGptWebModel,
   resolveChatGptWebSelection,
+  chatGptWebDirectModel,
   lastAssistantText,
   looksBlocked,
   looksSignedOut,
@@ -101,11 +102,12 @@ test('a JSON array of cookies is accepted, since that is what extensions export'
   assert.equal(state.cookies[0].value, 'v');
 });
 
-test('non-JSON says what to paste instead, because a cookie header is what people have', () => {
-  assert.throws(
-    () => parseChatGptStorageState('__Secure-next-auth.session-token=abc; oai-did=def'),
-    (error) => error.code === 'INVALID_REQUEST' && /cookie header/.test(error.publicMessage),
-  );
+test('non-JSON is read as a cookie header, not refused', () => {
+  // This used to assert the opposite — that a cookie header was refused — while the error
+  // message said to paste one. The dialog tells people to paste the header, so the parser
+  // accepts it; the case is covered in detail further down.
+  const state = parseChatGptStorageState('__Secure-next-auth.session-token=abc; oai-did=def');
+  assert.equal(state.cookies.length, 2);
 });
 
 test('an export whose cookies are all unusable is refused', () => {
@@ -503,9 +505,7 @@ test('an id outside the set is refused rather than guessed at', () => {
   assert.equal(resolveChatGptWebSelection('  '), undefined);
 });
 
-test('the free catalog is the Luna Free pair and no invented id survives', () => {
-  const free = chatGptWebModels('free').map((m) => m.id);
-  assert.deepEqual(free, ['gpt-5.6-luna-free', 'gpt-5.6-luna-free-thinking']);
+test('no invented id survives, and every real one is offered', () => {
   const all = allChatGptWebModels();
   for (const invented of ['gpt-5.2', 'gpt-5.1', 'gpt-5-mini', 'auto', 'gpt-5.2-codex']) {
     assert.equal(all.includes(invented), false, `${invented} is not a real model`);
@@ -516,7 +516,9 @@ test('an unrecognised plan gets both sets, because a visible failure beats a hid
   // A storage-state paste carries no plan, which is honestly unknown rather than free.
   const unknown = chatGptWebModels(undefined).map((m) => m.id);
   assert.ok(unknown.includes('gpt-5.6-luna-free'));
-  assert.ok(unknown.includes('gpt-5-6'));
+  // The catalog is the dotted spelling; the hyphenated form is a resolvable alias, not a card.
+  assert.ok(unknown.includes('gpt-5.6-sol-pro'));
+  assert.ok(unknown.includes('gpt-5.5-pro-extended'));
 });
 
 test('a known id is driven on any plan, because the page is the authority', async () => {
@@ -525,7 +527,7 @@ test('a known id is driven on any plan, because the page is the authority', asyn
   // read from an export is weaker evidence than what the page actually serves.
   const { driver: d, asked } = driver();
   const state = parseChatGptStorageState(authExport());
-  await new ChatGptWebAdapter({ driver: d }).chat(request('gpt-5-6-pro'), { credential: chatGptWebCredential(state) });
+  await new ChatGptWebAdapter({ driver: d }).chat(request('gpt-5.6-sol-pro'), { credential: chatGptWebCredential(state) });
   assert.equal(asked[0].selection.modelLabel, 'GPT-5.6 Sol');
   assert.equal(asked[0].selection.effortIndex, 4);
 });
@@ -604,3 +606,242 @@ test('a driver failure is raised, not swallowed into a successful empty answer',
  * The real model ids
  * ------------------------------------------------------------------ */
 
+
+/* ------------------------------------------------------------------ *
+ * The catalog and the resolver are one table
+ * ------------------------------------------------------------------ */
+
+test('every card in the catalog is a model the resolver accepts', () => {
+  // The reference's own provider page advertises effort-suffixed ids that its resolver then
+  // refuses, so a client that copies one out of the UI gets `unsupported model`. Deriving both
+  // from one table makes that unreachable, and this test is what keeps it unreachable.
+  for (const plan of ['free', 'pro', undefined]) {
+    for (const card of chatGptWebModels(plan)) {
+      assert.ok(
+        resolveChatGptWebSelection(card.id),
+        `the catalog offers ${card.id} (plan ${plan}) but the resolver refuses it`,
+      );
+    }
+  }
+});
+
+test('the catalog is the 13 cards the page shows, and the plan does not narrow it', () => {
+  // 5 Sol rungs + 2 Luna free + 6 for GPT-5.5, with `pro-extended` as the sixth.
+  assert.equal(chatGptWebModels('pro').length, 13);
+  // A free account is offered all 13 too. The plan is reported, not enforced, because
+  // `resolveChatGptWebSelection` never consults it either — a gate here would be a second
+  // rule, and the wrong one: showing a model the account cannot use costs one visible test
+  // failure, while hiding one it can use hides something that works.
+  assert.deepEqual(
+    chatGptWebModels('free').map((m) => m.id),
+    chatGptWebModels('pro').map((m) => m.id),
+  );
+  assert.deepEqual(chatGptWebModels().map((m) => m.id), chatGptWebModels('free').map((m) => m.id));
+});
+
+test('the dotted spelling and the hyphenated one are the same model', () => {
+  // Normalisation folds dots to hyphens, so a client that learned `gpt-5-6-sol-pro` from a
+  // log must not be refused for using it.
+  for (const [dotted, hyphenated] of [
+    ['gpt-5.6-sol-pro', 'gpt-5-6-sol-pro'],
+    ['gpt-5.6-luna-free', 'gpt-5-6-luna-free'],
+    ['cgpt-web/gpt-5.5-xhigh', 'gpt-5-5-xhigh'],
+  ]) {
+    assert.deepEqual(
+      resolveChatGptWebSelection(dotted),
+      resolveChatGptWebSelection(hyphenated),
+      `${dotted} and ${hyphenated} must be the same model`,
+    );
+  }
+});
+
+test('the reference registry ids still resolve after the catalog gained a family segment', () => {
+  // `gpt-5-6-pro` and `gpt-5.6-sol-pro` are different strings after normalisation, so the
+  // published names need their own entries or a published client breaks.
+  assert.equal(resolveChatGptWebSelection('gpt-5-6-pro').model, 'gpt-5-6-pro');
+  assert.equal(resolveChatGptWebSelection('gpt-5-5-pro').model, 'gpt-5-5-pro');
+  assert.equal(resolveChatGptWebSelection('gpt-5-6').effortIndex, 0);
+  assert.equal(resolveChatGptWebSelection('gpt-5-5-thinking').effortIndex, 1);
+});
+
+test('a named rung wins over a reasoning_effort in the body', () => {
+  // An id that says `-high` means high. Letting the body override it would send a model the
+  // caller did not ask for.
+  assert.equal(resolveChatGptWebSelection('gpt-5.6-sol-high', 'xhigh').effortIndex, 2);
+  // An id that leaves the effort open still takes it from the body, as it always did.
+  assert.equal(resolveChatGptWebSelection('gpt-5-6-thinking', 'xhigh').effortIndex, 3);
+});
+
+/* ------------------------------------------------------------------ *
+ * What the page is actually given
+ * ------------------------------------------------------------------ */
+
+test('Pro is driven without a thinking hint', () => {
+  // The rule that is not obvious: `reason` is a system hint, and the reference deliberately
+  // withholds it for Pro. Deriving it as `effortIndex > 0` sends a hint the page does not
+  // honour — a wrong request that looks like a harmless extra flag.
+  assert.deepEqual(chatGptWebDirectModel(resolveChatGptWebSelection('gpt-5.6-sol-pro')), {
+    model: 'gpt-5-6-pro',
+    reason: false,
+  });
+  assert.deepEqual(chatGptWebDirectModel(resolveChatGptWebSelection('gpt-5.5-pro-extended')), {
+    model: 'gpt-5-5-pro',
+    reason: false,
+  });
+});
+
+test('every rung below Pro is the base model with a thinking hint', () => {
+  // ChatGPT picks the effort itself once thinking is asked for, so the intermediate rungs are
+  // distinct cards but one request. Asserted so the collapse stays deliberate.
+  for (const [id, reason] of [
+    ['gpt-5.6-sol-instant', false],
+    ['gpt-5.6-sol-medium', true],
+    ['gpt-5.6-sol-high', true],
+    ['gpt-5.6-sol-xhigh', true],
+  ]) {
+    assert.deepEqual(chatGptWebDirectModel(resolveChatGptWebSelection(id)), { model: 'gpt-5-6', reason });
+  }
+});
+
+test('a free account is sent the literal model auto, and decides thinking', () => {
+  assert.deepEqual(chatGptWebDirectModel(resolveChatGptWebSelection('gpt-5.6-luna-free')), {
+    model: 'auto',
+    reason: false,
+  });
+  assert.deepEqual(chatGptWebDirectModel(resolveChatGptWebSelection('gpt-5.6-luna-free-thinking')), {
+    model: 'auto',
+    reason: true,
+  });
+});
+
+test('the free-only import narrows a paid account to the free models', () => {
+  // The toggle has to be true for anyone who connects over the API too, not just in the
+  // dialog, or it is a switch that quietly does nothing.
+  return Promise.all(
+    [undefined, 'free'].map(async (importPolicy) => {
+      const state = parseChatGptStorageState(authExport());
+      const models = await new ChatGptWebAdapter({ driver: driver().driver }).listModels({
+        credential: chatGptWebCredential(state),
+        ...(importPolicy ? { importPolicy } : {}),
+      });
+      const ids = models.map((m) => m.id);
+      if (importPolicy === 'free') {
+        assert.deepEqual(ids, ['gpt-5.6-luna-free', 'gpt-5.6-luna-free-thinking']);
+      } else {
+        assert.equal(ids.length, 13);
+      }
+    }),
+  );
+});
+
+/* ------------------------------------------------------------------ *
+ * A pasted Cookie header
+ * ------------------------------------------------------------------ */
+
+test('the Cookie header the dialog tells you to paste is accepted', () => {
+  // The dialog says to paste the header, and the parser used to refuse it while its own
+  // error message said to paste one instead. The instruction and the parser have to agree, or
+  // the only way to find out which is wrong is to paste a real session and be turned away.
+  const state = parseChatGptStorageState('__Secure-next-auth.session-token=abc; oai-did=xyz; cf_clearance=q');
+  assert.deepEqual(
+    state.cookies.map((c) => c.name),
+    ['__Secure-next-auth.session-token', 'oai-did', 'cf_clearance'],
+  );
+  assert.equal(state.cookies[0].domain, '.chatgpt.com');
+  // A header carries no expiry, and inventing one would expire a live session.
+  assert.equal(state.cookies[0].expires, -1);
+});
+
+test('the Cookie: prefix is tolerated, because people copy the whole header line', () => {
+  const withPrefix = parseChatGptStorageState('Cookie: __Secure-next-auth.session-token=abc');
+  const without = parseChatGptStorageState('__Secure-next-auth.session-token=abc');
+  assert.deepEqual(withPrefix.cookies, without.cookies);
+});
+
+test('a chunked session token is reassembled in index order, not kept as two cookies', () => {
+  // The browser splits the token; `name.0` and `name.1` are one value. Out of order on the
+  // wire, because header order is not index order.
+  const state = parseChatGptStorageState(
+    '__Secure-next-auth.session-token.1=lo-world; __Secure-next-auth.session-token.0=hel',
+  );
+  assert.equal(state.cookies.length, 1);
+  assert.equal(state.cookies[0].value, 'hello-world');
+});
+
+test('a cut-short chunk set is refused, rather than sent as a shorter session', () => {
+  // A partial token is a broken session, and sending it reads as an opaque 401. A lone chunk
+  // is the case that looks whole on its own — but a browser only splits a token that is over
+  // its size limit, so a single chunk means the header was truncated.
+  assert.throws(
+    () => parseChatGptStorageState('__Secure-next-auth.session-token.0=only-half; oai-did=z'),
+    /cut short/,
+  );
+  assert.throws(
+    () => parseChatGptStorageState('__Secure-next-auth.session-token.0=A; __Secure-next-auth.session-token.2=C'),
+    /missing chunk 1/,
+  );
+});
+
+test('a header carries only the cookies this connection is allowed to send', () => {
+  // An allowlist, not a denylist: a pasted header is user-supplied input, and a session is
+  // sent to chatgpt.com, not to whatever else the browser happened to be holding.
+  const state = parseChatGptStorageState(
+    '__Secure-next-auth.session-token=abc; _ga=GA1.2.3; _gid=GA1.2.4; __Host-other=leak',
+  );
+  assert.deepEqual(
+    state.cookies.map((c) => c.name),
+    ['__Secure-next-auth.session-token'],
+  );
+});
+
+test('a header with the wrong cookie in it names what is missing', () => {
+  // The most likely bad paste, and "unauthorized" would send the user looking for a problem
+  // that is not there.
+  assert.throws(
+    () => parseChatGptStorageState('some_other_cookie=abc123'),
+    /no __Secure-next-auth\.session-token in it/,
+  );
+});
+
+test('a request line is refused as a request line', () => {
+  assert.throws(() => parseChatGptStorageState('GET /backend-api/conversation HTTP/1.1'), /not the request line/);
+});
+
+/* ------------------------------------------------------------------ *
+ * Checking a session
+ * ------------------------------------------------------------------ */
+
+test('a driver that cannot open the page says so, rather than passing on local checks', async () => {
+  // Expiry, cookie presence and browser availability are all local, and none of them can
+  // tell a working session from one revoked from another device. Reporting "valid" for both
+  // is how "connected but every request fails" begins — so a driver that cannot ask the page
+  // is a driver that cannot verify.
+  const { driver: d } = driver();
+  const state = parseChatGptStorageState(authExport());
+  await assert.rejects(
+    () => new ChatGptWebAdapter({ driver: d }).validateCredential(chatGptWebCredential(state)),
+    (error) => error.code === 'PROVIDER_UNAVAILABLE' && /cannot check a session/.test(error.publicMessage),
+  );
+});
+
+test('a session the page refuses is reported as an authentication failure', async () => {
+  // The check is worth a page load precisely because this case exists: a revoked session
+  // parses perfectly and fails every request.
+  const { driver: d } = driver();
+  d.verify = async () => ({ ok: false, plan: null });
+  const state = parseChatGptStorageState(authExport());
+  await assert.rejects(
+    () => new ChatGptWebAdapter({ driver: d }).validateCredential(chatGptWebCredential(state)),
+    (error) => error.code === 'AUTHENTICATION_FAILED' && /did not accept/.test(error.publicMessage),
+  );
+});
+
+test('a session the page accepts is valid, and the plan comes back with it', async () => {
+  // The plan is read off the page rather than the export, because the export is a claim about
+  // an account and the page is the account.
+  const { driver: d } = driver();
+  d.verify = async () => ({ ok: true, plan: 'Plus' });
+  const state = parseChatGptStorageState(authExport());
+  const result = await new ChatGptWebAdapter({ driver: d }).validateCredential(chatGptWebCredential(state));
+  assert.equal(result.status, 'valid');
+});

@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, parseChatGptStorageState, chatGptWebProviderId, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, modelMetaPriceOrder, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ModelMeta, type ModelMetaMap, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
@@ -66,6 +66,14 @@ export type GatewayServiceOptions = {
   now?: () => number;
   /** Shared transport, so provider and OAuth requests use one configured client. */
   transport?: HttpTransport;
+  /**
+   * Replaces the browser driver ChatGPT Web is driven through.
+   *
+   * Verifying a ChatGPT session means opening chatgpt.com, so the check and the connect both
+   * cost a browser. This is the seam that lets that be tested without one, and the seam a
+   * caller would use to supply a browser of their own.
+   */
+  chatGptWebDriver?: ChatGptWebDriver;
 };
 
 /** Error codes that mean "this request can never succeed on this route". */
@@ -134,6 +142,8 @@ export class GatewayService {
   private failureThreshold = defaultFailureThreshold;
   private healthIntervalMs = defaultHealthIntervalMs;
   private healthTimer?: NodeJS.Timeout;
+  /** Kept whole, because the ChatGPT Web driver is built lazily on first use. */
+  private readonly options: GatewayServiceOptions;
 
   constructor(
     readonly registry: ProviderRegistry,
@@ -149,6 +159,9 @@ export class GatewayService {
     options: GatewayServiceOptions = {},
   ) {
     if (options.failureThreshold !== undefined) this.failureThreshold = options.failureThreshold;
+    // Kept, not just read: the ChatGPT Web driver is built lazily on first use, long after
+    // the constructor has returned, so the override has to outlive this call.
+    this.options = options;
     this.transport = options.transport ?? new FetchHttpTransport();
     const now = options.now ?? (() => Date.now());
     this.providerHealth = new HealthRegistry(now, options.recoveryCooldownMs);
@@ -604,7 +617,7 @@ export class GatewayService {
    * availability check are not repeated per request.
    */
   chatGptWebAdapter(): ProviderAdapter {
-    this.chatGptWeb ??= new ChatGptWebAdapter({ driver: createChatGptWebDriver() });
+    this.chatGptWeb ??= new ChatGptWebAdapter({ driver: this.options.chatGptWebDriver ?? createChatGptWebDriver() });
     return this.chatGptWeb;
   }
 
@@ -615,7 +628,38 @@ export class GatewayService {
    * openai.com cookies survive, so an export that happens to carry a session for another
    * site does not end up in this vault.
    */
-  async connectChatGptWeb(exported: string, signal?: AbortSignal) {
+  /**
+   * Checks an export for real, and stores nothing.
+   *
+   * The connect route already refuses a bad session, but only after it has saved. So this is
+   * the same verification done first: the session is parsed, then the adapter is asked to
+   * validate it, which opens the page and confirms the account is actually signed in.
+   *
+   * **It launches a browser.** That is the cost of a button that says "check", and it is the
+   * whole point — a parse alone accepts a dead token, so a "Check cookie" button that only
+   * parsed would be a button that lies. What it costs is one page load, which the connect
+   * immediately does again; what it saves is saving a connection that cannot answer.
+   *
+   * The model list is reported for every plan, because the plan narrows nothing: the page is
+   * the authority on what the account gets, and a `planType` read out of an export is weaker
+   * evidence than the page itself.
+   */
+  async checkChatGptWeb(exported: string, signal?: AbortSignal) {
+    const state = parseChatGptStorageState(exported);
+    const adapter = await this.resolveAdapter(chatGptWebProviderId, { endpoint: 'https://chatgpt.com', name: 'ChatGPT Web' });
+    // Throws with the real cause — expired, challenged, signed out, no browser — so the
+    // dialog says which of those it was instead of reporting a generic failure.
+    await adapter.validateCredential?.(chatGptWebCredential(state), { signal });
+    return {
+      /** Absent when the export did not say, which is not the same as `free`. */
+      planType: state.planType ?? null,
+      isFreePlan: state.planType ? isFreeChatGptPlan(state.planType) : false,
+      verified: true,
+      models: chatGptWebModels(state.planType).map((model) => ({ id: model.id, name: model.name })),
+    };
+  }
+
+  async connectChatGptWeb(exported: string, signal?: AbortSignal, freeOnly = false) {
     const state = parseChatGptStorageState(exported);
     return this.saveConnection(
       {
@@ -625,7 +669,9 @@ export class GatewayService {
         endpoint: 'https://chatgpt.com',
         priority: 1,
         proxyPool: 'none',
-        modelPolicy: 'all',
+        // Recorded on the connection, so the narrow import survives a model refresh instead of
+        // quietly coming back in full.
+        modelPolicy: freeOnly ? 'free' : 'all',
       },
       chatGptWebCredential(state),
       signal,
@@ -1174,10 +1220,23 @@ export class GatewayService {
    */
   private async discoverConnectionModels(providerId: string, credential: ProviderCredential, policy: ModelImportPolicy, signal?: AbortSignal, pendingEndpoint?: { endpoint: string; name: string }) {
     const adapter = await this.resolveAdapter(providerId, pendingEndpoint);
-    const context: ProviderRequestContext = { credential, ...(signal ? { signal } : {}) };
+    // The policy is passed here as well as to `discoverModels`, because a provider that
+    // narrows its own list reads it off the context. Without it a free-only import is
+    // correct on connect and silently comes back in full on the next refresh.
+    const context: ProviderRequestContext = { credential, importPolicy: policy, ...(signal ? { signal } : {}) };
+    /**
+     * Both paths are open for either policy.
+     *
+     * The policy travels in the context, so an adapter whose `listModels` narrows by it does
+     * so, and one that ignores it returns its full list — which is the documented meaning of
+     * a `free` policy on a provider that cannot narrow. Gating this branch on
+     * `policy === 'all'` looked stricter and was worse: it made a free-only connection
+     * **unrefreshable**, so the toggle could create a connection that broke the next time
+     * anybody asked the provider what it serves.
+     */
     const models = adapter.discoverModels
       ? await adapter.discoverModels(context, { policy })
-      : policy === 'all' && adapter.listModels && adapter.capabilities.models === true
+      : adapter.listModels && adapter.capabilities.models === true
         ? await adapter.listModels(context)
         : undefined;
     if (!models) throw notSupported(adapter, policy === 'free' ? 'free model discovery' : 'model discovery');
@@ -1278,8 +1337,16 @@ export class GatewayService {
    * keeps resolving.
    */
   private async context(connectionId: string, providerId: string, signal?: AbortSignal): Promise<ProviderRequestContext> {
+    const [credential, policy] = await Promise.all([
+      this.secretStore.get(connectionId, providerId),
+      // The connection's own model policy, so a provider that narrows its list does it the
+      // same way on a manual refresh as on a connect, and a `free` import does not come back
+      // in full. A store without `list` simply has no policy to honour.
+      this.connectionStore?.list().then((all) => all.find((entry) => entry.id === connectionId)?.modelPolicy),
+    ]);
     return {
-      credential: await this.secretStore.get(connectionId, providerId),
+      credential,
+      ...(policy ? { importPolicy: policy } : {}),
       ...(signal ? { signal } : {}),
     };
   }

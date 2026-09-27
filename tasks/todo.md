@@ -147,6 +147,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 23: Build the ChatGPT section properly — the 13-card catalog, the credential guide, and a check that checks.
+  - Acceptance: the catalog matches the reference's product surface, every card resolves, and a check catches a revoked session.
+  - Verify: the connection reports 13 models; `POST /v1/web-cookie/chatgpt/check` returns `verified: true` for the real session and `AUTHENTICATION_FAILED` for a deliberately invalid one; both free models still answer `'working'`; 366 tests pass.
+  - Findings: **the plan must not narrow the catalog.** `resolveChatGptWebSelection` never consults it — it maps an id onto a selection and lets the page refuse — so gating the catalog was a second, different rule, and a wrong gate is not symmetric: a model shown that cannot be used costs one visible failure, while a model hidden that can be used hides something that works. Also: **the reference's own page advertises ids its resolver refuses** (effort-suffixed ones), so the cards and the resolver are now one table with a test asserting every card resolves; **Pro must not ask for thinking** — `reason` is a hint the page does not honour there, and deriving it as `effortIndex > 0` sent it anyway, so the rule moved into the SDK; `gpt-5.5-pro-extended` is an **alias of pro**, not a distinct request, and ChatGPT exposes no wire model for it. The **parser refused the Cookie header** the guide told you to paste, while its own error said "paste the cookie header instead" — now accepted, allowlisted, with the token reassembled from its numbered chunks and a cut-short set refused by name. A **check that only parses accepts a dead session**, so it opens the page — and measured against a real and a fake session, **every DOM marker is identical**, so the only signal is the plan badge in the page text, polled for 15s. Every driver failure now carries a real cause (a challenge is `PROVIDER_UNAVAILABLE`, a sign-in wall is `AUTHENTICATION_FAILED`) because both arrived as `INTERNAL_ERROR`. And gating discovery on `policy === 'all'` made a free-only connection **unrefreshable**.
+  - Files: `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, `apps/gateway/src/chatgptWeb.ts`, `apps/gateway/src/service.ts`, `apps/gateway/src/server.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, tests, docs.
+  - Depends on: Task 22.
+  - Scope: Big.
+
 - [x] Task 22: Make a ChatGPT turn through ChatGPT's own request path, which is what actually works.
   - Acceptance: a real turn returns a real answer through the gateway, on a real session.
   - Verify: `POST /v1/chat/completions` with `x-omnihilbras-provider: chatgpt-web` returns 200 and `content: "working"` for "Reply with the single word: working", and `"4"` for "What is 2+2?" — three consecutive successes in 20s, 24s and 37s. 8 gateway tests on the pure half, 341 total.

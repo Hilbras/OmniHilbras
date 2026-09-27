@@ -30,6 +30,16 @@ import type {
  * looks like, and how an answer is read out of a DOM snapshot.
  */
 
+/**
+ * The one cookie a session is read from.
+ *
+ * Named in a single place because the connect dialog tells the user to copy exactly this
+ * cookie by name, and a second copy of the string is a second chance for the instruction and
+ * the parser to disagree — which shows up as a dialog that says to copy something the parser
+ * will not accept.
+ */
+export const CHATGPT_WEB_SESSION_COOKIE = '__Secure-next-auth.session-token';
+
 export const CHATGPT_WEB = {
   /** The only origin this will talk to. */
   origin: 'https://chatgpt.com',
@@ -140,6 +150,113 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * openai.com. A pasted blob carrying cookies for other sites is not silently forwarded to
  * ChatGPT, and a malformed one is refused with a reason rather than half-applied.
  */
+/**
+ * The cookies worth keeping out of a pasted `Cookie` header.
+ *
+ * A header carries every cookie the site set, and only some of them are the session. An
+ * allowlist rather than a denylist, because a header the user pasted from their own browser
+ * is still user-supplied input, and the job here is to send ChatGPT its own cookies and
+ * nothing else.
+ *
+ * The Cloudflare pair matters: the edge sets its own clearance cookie on the first response,
+ * and a session sent without it can be challenged even though the token is valid.
+ */
+const COOKIE_HEADER_ALLOWLIST: ReadonlySet<string> = new Set([
+  CHATGPT_WEB_SESSION_COOKIE,
+  '__Secure-next-auth.csrf-token',
+  'oai-did',
+  'cf_clearance',
+  '__cf_bm',
+  '_cfuvid',
+]);
+
+/**
+ * Reads a pasted `Cookie` request header.
+ *
+ * Two things it has to get right, both from the same source: the session token is often
+ * **split into numbered chunks** by the browser, so `name.0` and `name.1` are one value and
+ * not two; and the `Cookie:` prefix is usually included even though the guide says to omit
+ * it, because people copy the whole header line.
+ */
+function fromCookieHeader(raw: string): ParsedChatGptStorageState {
+  const body = raw.replace(/^cookie\s*:\s*/i, '');
+  const pairs = body
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (pairs.length === 0 || !pairs.some((pair) => pair.includes('='))) {
+    throw new ProviderError('INVALID_REQUEST', 'Paste the Cookie header value, or a storage-state JSON — not the request line.', {
+      providerId: chatGptWebProviderId,
+      publicMessage: 'Paste the Cookie header value, or a storage-state JSON — not the request line.',
+    });
+  }
+
+  const values = new Map<string, string>();
+  // Sparse on purpose: a gap is a gap, and `undefined` is how it shows up.
+  const chunked = new Map<string, Array<string | undefined>>();
+  for (const pair of pairs) {
+    const at = pair.indexOf('=');
+    if (at <= 0) continue;
+    const name = pair.slice(0, at).trim();
+    const value = pair.slice(at + 1).trim();
+    if (!value) continue;
+    // A chunked session token: `…session-token.0`, `…session-token.1`, and so on.
+    const chunk = name.match(/^(.*)\.(\d+)$/);
+    const family = chunk?.[1];
+    if (family !== undefined && COOKIE_HEADER_ALLOWLIST.has(family)) {
+      const parts = chunked.get(family) ?? [];
+      parts[Number(chunk?.[2])] = value;
+      chunked.set(family, parts);
+      continue;
+    }
+    if (COOKIE_HEADER_ALLOWLIST.has(name)) values.set(name, value);
+  }
+  /**
+   * Reassembled in index order, and only when the set is whole.
+   *
+   * A partial token is not a shorter session, it is a broken one, and sending it reads as a
+   * refusal. A gap is obviously incomplete; a lone `.0` is the harder case, because it looks
+   * complete on its own — but a browser only splits a token that is over its size limit, so a
+   * single chunk means the header was cut short, and that is worth naming rather than
+   * sending.
+   */
+  for (const [family, parts] of chunked) {
+    // `every` skips holes in a sparse array, so a missing middle chunk would pass the check
+    // and the reassembled token would silently lose it. `includes` does not skip holes, which
+    // is what makes it the right test for "is this set whole".
+    const complete = parts.length > 1 && !parts.includes(undefined) && parts.every((part) => Boolean(part));
+    if (!complete) {
+      const message =
+        parts.length <= 1
+          ? `That ${CHATGPT_WEB_SESSION_COOKIE} looks cut short — it has one numbered chunk where a whole token has several. Copy the Cookie header again, from a request that is already authenticated.`
+          : `That ${CHATGPT_WEB_SESSION_COOKIE} is missing chunk ${parts.findIndex((part) => !part)}. Copy the Cookie header again.`;
+      throw new ProviderError('AUTHENTICATION_FAILED', message, {
+        providerId: chatGptWebProviderId,
+        publicMessage: message,
+      });
+    }
+    values.set(family, parts.join(''));
+  }
+
+  if (!values.has(CHATGPT_WEB_SESSION_COOKIE)) {
+    const message = `That header has no ${CHATGPT_WEB_SESSION_COOKIE} in it. Sign in to chatgpt.com, then copy the Cookie header from a request that is already authenticated.`;
+    throw new ProviderError('AUTHENTICATION_FAILED', message, {
+      providerId: chatGptWebProviderId,
+      publicMessage: message,
+    });
+  }
+
+  const cookies: ChatGptCookie[] = [...values].map(([name, value]) => ({
+    name,
+    value,
+    domain: '.chatgpt.com',
+    path: '/',
+    // A header carries no expiry, and inventing one would expire a live session.
+    expires: -1,
+  }));
+  return { cookies, origins: [] };
+}
+
 export function parseChatGptStorageState(raw: string): ParsedChatGptStorageState {
   const trimmed = raw.trim();
   if (!trimmed) {
@@ -152,12 +269,11 @@ export function parseChatGptStorageState(raw: string): ParsedChatGptStorageState
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    // A bare cookie header is the other thing people paste, and saying so is more use than
-    // a JSON syntax error.
-    throw new ProviderError('INVALID_REQUEST', 'That is not JSON. Export storage state from a browser, or paste the cookie header instead.', {
-      providerId: chatGptWebProviderId,
-      publicMessage: 'That is not JSON. Export storage state from a browser, or paste the cookie header instead.',
-    });
+    // The cookie header is the other thing people actually paste, and the connect dialog
+    // tells them to. This used to refuse one while its own message said to paste one
+    // instead, so the instruction and the parser disagreed and the only way to find out
+    // which was wrong was to paste a real session and be turned away.
+    return fromCookieHeader(trimmed);
   }
   /**
    * A bare array of cookie objects is accepted as well as a full storage state, because
@@ -239,7 +355,7 @@ function fromAuthExport(source: Record<string, unknown>): ParsedChatGptStorageSt
   return {
     cookies: [
       {
-        name: '__Secure-next-auth.session-token',
+        name: CHATGPT_WEB_SESSION_COOKIE,
         value: sessionToken,
         domain: '.chatgpt.com',
         path: '/',
@@ -383,56 +499,115 @@ export function looksBlocked(bodyText: string | null | undefined, documentTitle?
  * ------------------------------------------------------------------ */
 
 /**
- * The model catalog.
+ * The model catalog, and the single source of truth for it.
  *
- * ChatGPT Web publishes no model list, and which models an account is offered depends on
- * the plan it is signed in with — a free account is not served the same set as a paid one.
- * So the catalog is keyed by plan rather than asserted for everybody, using the
- * `planType` the export itself carries.
+ * ChatGPT Web publishes no model list, and which models an account is offered depends on the
+ * plan it is signed in with — a free account is not served the same set as a paid one. So the
+ * catalog is keyed by plan, using the `planType` the export itself carries.
  *
  * This is still a claim about ChatGPT, not a fact read from ChatGPT. The page is the
  * authority: it renders its own model picker, and a model missing from this table can be
  * typed in as a custom id. That is why the list is a floor and not a gate.
+ *
+ * **The cards and the resolver are one table on purpose.** A card the resolver refuses is a
+ * visible bug — the provider page offers it, a client sends it, and the request comes back
+ * `unsupported model`. Deriving both from `CHATGPT_WEB_MODELS` makes that unreachable.
  */
+
+/** The model label the page's own picker shows, which is what a paid turn is driven with. */
+export type ChatGptWebFamily = 'GPT-5.6 Sol' | 'GPT-5.5';
+
 /**
- * The models this provider serves, as the reference project accepts them.
+ * A position on the page's effort ladder.
  *
- * `normalizedModel` there lowercases, strips a `chatgpt-web/` prefix and folds every dot
- * into a hyphen, then `resolveSelection` maps what is left onto a **UI selection** — a model
- * label and an effort index — which is what the page is actually driven with. Anything
- * outside this set is refused, so the catalog is a floor rather than a wish.
- *
- * The two spellings are kept because the normalisation makes them equivalent, and a client
- * that learned one from a log is as likely to send the other.
+ * The wire request collapses this ladder to a single boolean: `0` and `4` differ in the
+ * model string, and `1`–`3` are one request with thinking on. ChatGPT picks the effort
+ * itself once `reason` is set, so the intermediate rungs are distinct *cards* — a client can
+ * choose to think — but not distinct requests.
  */
-const CHATGPT_WEB_PLANS: Record<string, ReadonlyArray<{ id: string; name: string }>> = {
-  /**
-   * The free tier has **no model picker at all** — `resolveSelection` returns
-   * `{ kind: "free" }` and the page is sent the literal model `auto`, with the page choosing.
-   * So a free account is offered the two Luna Free ids and nothing from the paid family.
-   */
-  free: [
-    { id: 'gpt-5.6-luna-free', name: 'GPT-5.6 Luna — Free' },
-    { id: 'gpt-5.6-luna-free-thinking', name: 'GPT-5.6 Luna — Free Thinking' },
-  ],
-  paid: [
-    { id: 'gpt-5-6', name: 'GPT-5.6 Sol — Instant' },
-    { id: 'gpt-5-6-instant', name: 'GPT-5.6 Sol — Instant' },
-    { id: 'gpt-5-6-thinking', name: 'GPT-5.6 Sol — Thinking' },
-    { id: 'gpt-5-6-sol', name: 'GPT-5.6 Sol — Thinking' },
-    { id: 'gpt-5-6-pro', name: 'GPT-5.6 Sol — Pro' },
-    { id: 'gpt-5-5', name: 'GPT-5.5 — Instant' },
-    { id: 'gpt-5-5-instant', name: 'GPT-5.5 — Instant' },
-    { id: 'gpt-5-5-thinking', name: 'GPT-5.5 — Thinking' },
-    { id: 'gpt-5-5-pro', name: 'GPT-5.5 — Pro' },
-  ],
+export type ChatGptWebEffort = 0 | 1 | 2 | 3 | 4;
+
+type ChatGptWebCard = {
+  /** The id a client sends. Dots, because that is the spelling on the page. */
+  id: string;
+  name: string;
+  /** `null` for the free tier, which has no picker at all. */
+  family: ChatGptWebFamily | null;
+  effort: ChatGptWebEffort;
+  /** The model string the page is given. Never the card id. */
+  wireModel: string;
+  /** Whether thinking is asked for, as a system hint rather than a different model. */
+  think: boolean;
 };
+
+const SOL = 'GPT-5.6 Sol';
+const FIVE_FIVE = 'GPT-5.5';
+
+/** The wire model for a family: a plain request, and the Pro request. */
+const base = (family: Exclude<ChatGptWebFamily, null>): string => (family === SOL ? 'gpt-5-6' : 'gpt-5-5');
+
+const effortCard = (
+  id: string,
+  name: string,
+  family: Exclude<ChatGptWebFamily, null>,
+  effort: Exclude<ChatGptWebEffort, 4>,
+): ChatGptWebCard => ({
+  id,
+  name,
+  family,
+  effort,
+  // Every rung below Pro is the same request: the base model, with thinking asked for.
+  wireModel: base(family),
+  think: effort > 0,
+});
+
+const proCard = (
+  id: string,
+  name: string,
+  family: Exclude<ChatGptWebFamily, null>,
+): ChatGptWebCard => ({ id, name, family, effort: 4, wireModel: `${base(family)}-pro`, think: false });
+
+/**
+ * Free first is deliberate: it is the tier every account can reach, and an account that
+ * cannot be identified as paid is served this set.
+ */
+const CHATGPT_WEB_MODELS: readonly ChatGptWebCard[] = [
+  /**
+   * The free tier has **no model picker at all**. `resolveSelection` returns
+   * `{ kind: 'free' }` and the page is sent the literal model `auto`, with the page choosing
+   * — so the only axis a free account exposes is whether to think.
+   */
+  { id: 'gpt-5.6-luna-free', name: 'GPT-5.6 Luna (Free)', family: null, effort: 0, wireModel: 'auto', think: false },
+  { id: 'gpt-5.6-luna-free-thinking', name: 'GPT-5.6 Luna (Free, Think)', family: null, effort: 0, wireModel: 'auto', think: true },
+
+  effortCard('gpt-5.6-sol-instant', 'GPT-5.6 Sol (Instant)', SOL, 0),
+  effortCard('gpt-5.6-sol-medium', 'GPT-5.6 Sol (Medium)', SOL, 1),
+  effortCard('gpt-5.6-sol-high', 'GPT-5.6 Sol (High)', SOL, 2),
+  effortCard('gpt-5.6-sol-xhigh', 'GPT-5.6 Sol (XHigh)', SOL, 3),
+  proCard('gpt-5.6-sol-pro', 'GPT-5.6 Sol (Pro)', SOL),
+
+  effortCard('gpt-5.5-instant', 'GPT-5.5 (Instant)', FIVE_FIVE, 0),
+  effortCard('gpt-5.5-medium', 'GPT-5.5 (Medium)', FIVE_FIVE, 1),
+  effortCard('gpt-5.5-high', 'GPT-5.5 (High)', FIVE_FIVE, 2),
+  effortCard('gpt-5.5-xhigh', 'GPT-5.5 (XHigh)', FIVE_FIVE, 3),
+  proCard('gpt-5.5-pro', 'GPT-5.5 (Pro)', FIVE_FIVE),
+  /**
+   * Offered by the reference's own provider page and kept here so a client that sends it is
+   * answered rather than refused.
+   *
+   * It is an **alias of Pro, not a distinct request**: ChatGPT exposes no separate wire model
+   * for it, and inventing one would produce a model id the page rejects. It resolves to the
+   * same request as `gpt-5.5-pro` and is labelled so here rather than pretending otherwise.
+   */
+  proCard('gpt-5.5-pro-extended', 'GPT-5.5 (Pro Extended)', FIVE_FIVE),
+];
 
 /**
  * The spelling normalisation the reference applies before it looks a model up.
  *
  * Every dot becomes a hyphen, which is why `gpt-5.6-luna-free` and `gpt-5-6-luna-free` are
- * the same model and why accepting only one of them refuses the other for no reason.
+ * the same model and why accepting only one of them refuses the other for no reason. The
+ * catalog is dotted, so a client that learned the hyphenated form from a log still resolves.
  */
 export function normalizeChatGptWebModel(value: string): string {
   return value.trim().toLowerCase().replace(/^(chatgpt-web|cgpt-web)\//, '').replace(/\./g, '-');
@@ -441,46 +616,112 @@ export function normalizeChatGptWebModel(value: string): string {
 /** The model the page is actually driven with, which is never the id the client sent. */
 export type ChatGptWebSelection =
   | { kind: 'free'; thinkEnabled: boolean; model: 'auto' }
-  | { kind: 'picker'; modelLabel: 'GPT-5.6 Sol' | 'GPT-5.5'; effortIndex: 0 | 1 | 2 | 3 | 4; model: string };
+  | { kind: 'picker'; modelLabel: ChatGptWebFamily; effortIndex: ChatGptWebEffort; model: string };
 
 /**
  * Resolves a client model id onto the selection the page understands.
  *
- * Returns nothing for an id outside the set, rather than guessing: the reference throws
- * `received an unsupported model` for the same input, and a wrong guess here silently
- * selects a model the user did not ask for.
+ * Returns nothing for an id outside the set, rather than guessing: a wrong guess here silently
+ * selects a model the user did not ask for, and a plausible-looking model string the page
+ * rejects reads as a broken provider.
+ *
+ * Ids that predate the effort ladder are still resolved, so a client that learned one from a
+ * log is not broken by the catalog gaining rungs. They are deliberately *not* in the catalog:
+ * `gpt-5-6` and `gpt-5.6-sol-instant` are the same request, and listing both would show a
+ * duplicate in the picker.
  */
+const LEGACY_SELECTIONS: ReadonlyArray<{ id: string; selection: ChatGptWebSelection }> = [
+  { id: 'gpt-5-6', selection: { kind: 'picker', modelLabel: SOL, effortIndex: 0, model: 'gpt-5-6' } },
+  // The reference's own registry ids, which carry no `sol`. They are a different string from
+  // `gpt-5.6-sol-pro` after normalisation, so they need their own entries or a client using
+  // the published names stops working the moment the catalog gains a family segment.
+  { id: 'gpt-5-6-pro', selection: { kind: 'picker', modelLabel: SOL, effortIndex: 4, model: 'gpt-5-6-pro' } },
+  { id: 'gpt-5-6-instant', selection: { kind: 'picker', modelLabel: SOL, effortIndex: 0, model: 'gpt-5-6' } },
+  { id: 'gpt-5-6-thinking', selection: { kind: 'picker', modelLabel: SOL, effortIndex: 1, model: 'gpt-5-6' } },
+  { id: 'gpt-5-6-sol', selection: { kind: 'picker', modelLabel: SOL, effortIndex: 1, model: 'gpt-5-6' } },
+  { id: 'gpt-5-5', selection: { kind: 'picker', modelLabel: FIVE_FIVE, effortIndex: 0, model: 'gpt-5-5' } },
+  { id: 'gpt-5-5-pro', selection: { kind: 'picker', modelLabel: FIVE_FIVE, effortIndex: 4, model: 'gpt-5-5-pro' } },
+  { id: 'gpt-5-5-instant', selection: { kind: 'picker', modelLabel: FIVE_FIVE, effortIndex: 0, model: 'gpt-5-5' } },
+  { id: 'gpt-5-5-thinking', selection: { kind: 'picker', modelLabel: FIVE_FIVE, effortIndex: 1, model: 'gpt-5-5' } },
+];
+
+/**
+ * The rung a `reasoning_effort` in a request body maps onto.
+ *
+ * The effort in the body only applies to an id that leaves the effort open — `-thinking` and
+ * the bare family names. A card that names its rung, like `gpt-5.6-sol-high`, is that rung.
+ */
+function effortFromRequest(value: string | undefined): ChatGptWebEffort {
+  if (value === undefined || value === 'medium') return 1;
+  if (['none', 'off', 'minimal', 'low'].includes(value)) return 0;
+  if (value === 'high') return 2;
+  if (['xhigh', 'max'].includes(value)) return 3;
+  throw new Error(`ChatGPT Web does not support reasoning effort ${value}.`);
+}
+
 export function resolveChatGptWebSelection(model: string, effort?: string): ChatGptWebSelection | undefined {
   const normalized = normalizeChatGptWebModel(model);
-  const effortIndex = (value: string | undefined): 0 | 1 | 2 | 3 => {
-    if (value === undefined || value === 'medium') return 1;
-    if (['none', 'off', 'minimal', 'low'].includes(value)) return 0;
-    if (value === 'high') return 2;
-    return 3;
-  };
-  if (normalized === 'gpt-5-6-luna-free') return { kind: 'free', thinkEnabled: false, model: 'auto' };
-  if (normalized === 'gpt-5-6-luna-free-thinking') return { kind: 'free', thinkEnabled: true, model: 'auto' };
-  if (normalized === 'gpt-5-6-pro') return { kind: 'picker', modelLabel: 'GPT-5.6 Sol', effortIndex: 4, model: 'gpt-5-6-pro' };
-  if (normalized === 'gpt-5-6-instant' || normalized === 'gpt-5-6') {
-    return { kind: 'picker', modelLabel: 'GPT-5.6 Sol', effortIndex: 0, model: 'gpt-5-6' };
+
+  const card = CHATGPT_WEB_MODELS.find((entry) => normalizeChatGptWebModel(entry.id) === normalized);
+  if (card) {
+    return card.family === null
+      ? { kind: 'free', thinkEnabled: card.think, model: 'auto' }
+      : { kind: 'picker', modelLabel: card.family, effortIndex: card.effort, model: card.wireModel };
   }
-  if (normalized === 'gpt-5-6-thinking' || normalized === 'gpt-5-6-sol') {
-    return { kind: 'picker', modelLabel: 'GPT-5.6 Sol', effortIndex: effortIndex(effort), model: 'gpt-5-6' };
+
+  const legacy = LEGACY_SELECTIONS.find((entry) => entry.id === normalized);
+  if (legacy) {
+    // A legacy id that leaves the effort open takes it from the body, as it always did.
+    if (effort !== undefined && legacy.selection.kind === 'picker') {
+      return { ...legacy.selection, effortIndex: effortFromRequest(effort) };
+    }
+    return legacy.selection;
   }
-  if (normalized === 'gpt-5-5-pro') return { kind: 'picker', modelLabel: 'GPT-5.5', effortIndex: 4, model: 'gpt-5-5-pro' };
-  if (normalized === 'gpt-5-5-instant') {
-    return { kind: 'picker', modelLabel: 'GPT-5.5', effortIndex: 0, model: 'gpt-5-5' };
-  }
-  if (normalized === 'gpt-5-5' || normalized === 'gpt-5-5-thinking') {
-    return { kind: 'picker', modelLabel: 'GPT-5.5', effortIndex: effortIndex(effort), model: 'gpt-5-5' };
-  }
+
   return undefined;
+}
+
+/**
+ * The model string and thinking flag the page is actually given.
+ *
+ * This is the reference's `directModel`, and it lives here rather than at the call site
+ * because the rule is not obvious: **Pro must not ask for thinking.** `reason` is a system
+ * hint, and a hint of `reason` on a Pro request is one the page does not honour — so
+ * deriving it as `effortIndex > 0` sends a flag the reference deliberately withholds. It
+ * read as a harmless extra flag; it is a wrong request.
+ */
+export function chatGptWebDirectModel(selection: ChatGptWebSelection): { model: string; reason: boolean } {
+  if (selection.kind === 'free') return { model: 'auto', reason: selection.thinkEnabled };
+  if (selection.effortIndex === 4) return { model: selection.model, reason: false };
+  return { model: selection.model, reason: selection.effortIndex > 0 };
 }
 
 /** Every id this provider serves, across plans. */
 export function allChatGptWebModels(): string[] {
-  return [...new Set([...CHATGPT_WEB_PLANS.free!, ...CHATGPT_WEB_PLANS.paid!].map((model) => model.id))];
+  return [...new Set([...CHATGPT_WEB_MODELS, ...LEGACY_SELECTIONS.map((entry) => ({ id: entry.id }))].map((model) => model.id))];
 }
+
+/**
+ * Every model this provider serves, for every plan.
+ *
+ * **The plan does not narrow this list**, and that is a deliberate change from the previous
+ * behaviour, which showed a free account only the two Luna cards. Two reasons, and they point
+ * the same way:
+ *
+ *  - `resolveChatGptWebSelection` never consults the plan. It maps an id onto a selection and
+ *    lets the page refuse, because a `planType` read out of an export is weaker evidence than
+ *    what the page actually serves. Gating the catalog on it was a second, different rule.
+ *  - A wrong gate is not symmetric. Showing a model the account cannot use costs one visible
+ *    test failure, which names itself. Hiding a model the account *can* use hides something
+ *    that works, and there is no way to tell that apart from "not supported".
+ *
+ * The `planType` argument is kept and still reported — the connect dialog shows it, and the
+ * free-only import uses it — but it does not decide what is offered.
+ */
+export function chatGptWebModels(_planType?: string): ReadonlyArray<{ id: string; name: string }> {
+  return CHATGPT_WEB_MODELS.map((card) => ({ id: card.id, name: card.name }));
+}
+
 
 /**
  * Plans that are not the free tier.
@@ -495,11 +736,6 @@ export function isFreeChatGptPlan(planType: string | undefined): boolean {
   return normalized === 'free' || normalized === 'free_plan' || normalized === 'freeplus' || normalized.startsWith('free');
 }
 
-/** The catalog for a plan, or the full set when the export did not say. */
-export function chatGptWebModels(planType?: string): ReadonlyArray<{ id: string; name: string }> {
-  if (!planType) return [...CHATGPT_WEB_PLANS.paid!, ...CHATGPT_WEB_PLANS.free!];
-  return isFreeChatGptPlan(planType) ? CHATGPT_WEB_PLANS.free! : CHATGPT_WEB_PLANS.paid!;
-}
 
 /* ------------------------------------------------------------------ *
  * The adapter
@@ -530,6 +766,13 @@ export type ChatGptWebDriver = {
   }) => Promise<{ text: string; usage?: TokenUsage }>;
   /** Whether a browser is actually available. */
   available: () => Promise<{ ok: boolean; reason?: string }>;
+  /**
+   * Opens the page and reports whether the session is signed in.
+   *
+   * Optional because a driver with no browser cannot do it, and its absence is not a failure
+   * of the session — a check that cannot run says so rather than passing.
+   */
+  verify?: (input: { cookies: readonly ChatGptCookie[]; timeoutMs?: number; signal?: AbortSignal }) => Promise<{ ok: boolean; plan?: string | null }>;
 };
 
 function messageText(content: MessageContent): string {
@@ -573,8 +816,13 @@ export class ChatGptWebAdapter implements ProviderAdapter {
    * the full set is offered. Throwing instead leaves a saved connection with no models.
    */
   async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
-    const plan = context.credential ? chatGptWebSessionFromCredential(context.credential).planType : undefined;
-    return chatGptWebModels(plan).map((model) => ({ id: model.id, providerId: this.id, displayName: model.name }));
+    // Every plan gets the whole set; only the connection's own import policy narrows it.
+    const models = chatGptWebModels();
+    // The free-only import is honoured here rather than at the dialog, so it is true whether
+    // the connection was made from the dashboard or from the API. A toggle that only lives in
+    // the dialog is a toggle that silently does nothing for anyone else.
+    const visible = context.importPolicy === 'free' ? models.filter((model) => model.id.includes('free')) : models;
+    return visible.map((model) => ({ id: model.id, providerId: this.id, displayName: model.name }));
   }
 
   async validateCredential(credential: ProviderCredential | undefined): Promise<CredentialValidation> {
@@ -599,6 +847,27 @@ export class ChatGptWebAdapter implements ProviderAdapter {
       throw new ProviderError('PROVIDER_UNAVAILABLE', browser.reason ?? 'No browser is available to ChatGPT Web.', {
         providerId: this.id,
         publicMessage: browser.reason ?? 'No browser is available to ChatGPT Web.',
+      });
+    }
+    /**
+     * The page is asked, not just the browser.
+     *
+     * Everything above is local: expiry, cookie presence, whether a browser exists. None of
+     * it can tell a working session from one revoked elsewhere, and reporting "valid" for
+     * both is how "connected but every request fails" begins. A driver that cannot open the
+     * page says so rather than passing on the strength of the local checks.
+     */
+    if (!this.driver.verify) {
+      throw new ProviderError('PROVIDER_UNAVAILABLE', 'This ChatGPT Web driver cannot check a session, so it cannot be verified.', {
+        providerId: this.id,
+        publicMessage: 'This ChatGPT Web driver cannot check a session, so it cannot be verified.',
+      });
+    }
+    const verified = await this.driver.verify({ cookies: session.cookies });
+    if (!verified.ok) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'chatgpt.com did not accept that session.', {
+        providerId: this.id,
+        publicMessage: 'chatgpt.com did not accept that session.',
       });
     }
     return { status: 'valid', checkedAt: new Date().toISOString() };
