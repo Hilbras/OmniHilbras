@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, FetchHttpTransport, OpenAICompatibleAdapter, ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, FetchHttpTransport, OpenAICompatibleAdapter, ProviderError, ZenAdapter, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
@@ -115,6 +115,7 @@ export class GatewayService {
   private readonly dynamicAdapters = new Map<string, { endpoint: string; adapter: ProviderAdapter }>();
   private readonly transport: HttpTransport;
   private cline?: ProviderAdapter;
+  private zen?: ProviderAdapter;
   private readonly clineSessions = new ClineSessionStore();
   private readonly providerHealth: HealthRegistry;
   private readonly rateLimiter: SlidingWindowRateLimiter;
@@ -231,6 +232,9 @@ export class GatewayService {
     // connection with a credential exists.
     if (connections.some((connection) => connection.providerId === 'cline' && connection.hasCredential)) {
       adapters.set('cline', this.clineAdapter());
+    }
+    if (connections.some((connection) => connection.providerId === 'opencode' && connection.hasCredential)) {
+      adapters.set('opencode', this.zenAdapter());
     }
     for (const connection of connections) {
       if (adapters.has(connection.providerId)) continue;
@@ -416,6 +420,16 @@ export class GatewayService {
   }
 
   /** The Cline adapter, wired so a refreshed token is written back to the vault. */
+  /**
+   * OpenCode Zen serves one catalog through three wire formats, so the adapter
+   * picks a lane per model. The generic on-demand adapter cannot, which is why
+   * this provider is registered rather than resolved from its endpoint.
+   */
+  zenAdapter(): ProviderAdapter {
+    if (!this.zen) this.zen = new ZenAdapter({ transport: this.transport });
+    return this.zen;
+  }
+
   clineAdapter(): ProviderAdapter {
     if (!this.cline) {
       this.cline = createClineAdapter({
@@ -866,6 +880,7 @@ export class GatewayService {
    */
   private async resolveAdapter(providerId: string, pendingEndpoint?: { endpoint: string; name: string }): Promise<ProviderAdapter> {
     if (providerId === 'cline') return this.clineAdapter();
+    if (providerId === 'opencode') return this.zenAdapter();
     const registered = this.registry.get(providerId);
     if (registered) return registered;
     // A connection being saved is not in the store yet, so the caller can pass

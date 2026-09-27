@@ -232,12 +232,35 @@ serves it, and its catalog is public, so the model list imports without a
 credential.
 
 **Its API surface is mixed per model.** Per the published table at
-`opencode.ai/docs/zen`, GPT and Grok and Muse models come from
-`/zen/v1/responses`, Claude and Qwen from `/zen/v1/messages`, Gemini from
-`/zen/v1/models/{id}`, Jev from `/zen/v1/systemone`, and the rest from
-`/zen/v1/chat/completions`. The generic adapter speaks only the last of those, so a
-model served through another shape will not answer here. Serving them means choosing
-a path per model, which this slice does not do.
+`opencode.ai/docs/zen`, GPT, Grok and Muse come from `/zen/v1/responses`, Claude and
+Qwen from `/zen/v1/messages`, Gemini from `/zen/v1/models/{id}`, Jev from
+`/zen/v1/systemone`, and the rest from `/zen/v1/chat/completions`. `ZenAdapter`
+picks the lane per model, translating to and from each wire format:
+
+| Lane | Endpoint | Auth header | Body naming |
+| --- | --- | --- | --- |
+| `chat` | `/zen/v1/chat/completions` | `Authorization: Bearer` | `max_tokens` |
+| `responses` | `/zen/v1/responses` | `Authorization: Bearer` | `max_output_tokens`, content as typed `input_text` parts |
+| `messages` | `/zen/v1/messages` | `x-api-key`, plus `anthropic-version` | `max_tokens`, system turns hoisted out of the message list |
+
+**The messages lane does not take a bearer token.** It takes the raw key in
+`x-api-key`. Sending `Authorization: Bearer` there is answered with a `401` even when
+the key is valid — which is exactly what happened before this was corrected.
+
+Two lanes are **not implemented** and are refused by name rather than guessed at:
+Gemini, which Zen serves from its own path, and Jev, a decision model on
+`/systemone`. Streaming is refused on the `messages` and `responses` lanes rather
+than silently answered without a stream.
+
+Credential validation is presence-and-shape only: Zen's catalog is public, so a live
+probe would prove nothing and would bill on every health poll. Health reads the
+public catalog instead.
+
+**A refusal from Zen is usually billing.** Measured with a valid key: paid models on
+the chat and messages lanes answer `402`, which is Zen's payment-required status —
+its own documentation says the account is charged per request and must hold credits.
+The free models answer `403`, and an unauthenticated probe names why:
+`OpenCode's free tier can only be used from within OpenCode`.
 
 **Every free model is on the path this gateway already speaks.** Measured on the
 free tier: `space-bunny-free` answers normally, while `nemotron-3-ultra-free`,

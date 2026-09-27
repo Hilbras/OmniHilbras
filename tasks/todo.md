@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 10a: Route OpenCode Zen per model to the lane Zen publishes for it.
+  - Acceptance: `ZenAdapter` picks chat, responses, or messages per model from the published table, translating each wire format, and refuses the two unimplemented lanes by name. The messages lane authenticates with `x-api-key`, not a bearer token.
+  - Verify: 11 new SDK tests cover lane selection including the `qwen3.8-max` exception, both wire formats in and out, error envelopes, the streaming refusal, and a validation that spends no request. Live: `claude-sonnet-5` went from 401 to 402 when the header was corrected, which is what proves the fix; `space-bunny-free` answers through the new adapter; paid models answer 402 (no credits) and restricted free models 403.
+  - Files: `packages/omnihilbras-sdk/src/adapters/zen.ts`, `test/zen.test.js`, `src/index.ts`, `apps/gateway/src/service.ts`, docs.
+  - Depends on: Task 9z.
+  - Scope: Medium.
+
 - [x] Task 9z: Match 9router's model probe, and soft-pass a reasoning-only reply.
   - Acceptance: the probe budget is 1024 tokens with a `hi` prompt, and a response whose content is empty but which carries reasoning under any of the four common field names is a pass labelled `reasoning only` rather than a failure. A genuinely empty response still fails, and a truncated one is retried once at 2x.
   - Verify: measured on the OpenRouter free tier. `inclusionai/ling-3.0-flash-fin`, `liquid/lfm-2.5-2.6b` and `nvidia/nemotron-3.5-lightning` all failed or returned nothing at a 96-token budget and answer cleanly at 1024. `nemotron-3-nano-omni-30b-a3b-reasoning` answers 4 of 5, and its one failure now reports "the provider returned no choices" instead of a bare "invalid response".

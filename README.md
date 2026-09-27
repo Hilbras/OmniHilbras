@@ -135,11 +135,16 @@ serves it through the generic OpenAI-compatible path at
 `https://opencode.ai/zen/v1`, and the model catalog imports without a credential
 because OpenCode publishes it.
 
-One caveat worth knowing: Zen routes different models to different API shapes.
-GPT models are served from `/zen/v1/responses` and some others from
-`/zen/v1/messages`, while the rest use `/zen/v1/chat/completions`. The gateway
-speaks the last of those, so a model served through one of the other two shapes
-will not answer here even though it appears in the catalog.
+Zen routes different models to different API shapes, and the gateway picks the right
+one per model: `/zen/v1/responses` for GPT, Grok and Muse; `/zen/v1/messages` for
+Claude and Qwen; `/zen/v1/chat/completions` for the rest. Two shapes are not
+implemented and are refused by name — Gemini, which Zen serves from its own path,
+and Jev, a decision model.
+
+Two things to expect. **Paid models need credits** — Zen charges per request, and
+without a balance they answer `402`. **Free models are restricted to the OpenCode
+client** and answer `403`; OpenCode's own words are "OpenCode's free tier can only
+be used from within OpenCode". `space-bunny-free` is the exception that answers.
 
 ## Cline Sign-In
 
