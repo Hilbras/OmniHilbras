@@ -86,8 +86,19 @@ export class FetchHttpTransport implements HttpTransport {
         signal: lifecycle.signal,
       });
       if (!response.ok) {
-        await response.body?.cancel();
-        throw providerErrorFromResponse(response, undefined, request.providerId);
+        /**
+         * The error body is the only place a provider explains itself, and it used to be
+         * cancelled unread, so every refusal arrived as "the provider rejected the
+         * request" with no reason attached. It is read here, bounded, and handed to the
+         * classifier.
+         */
+        let body: unknown;
+        try {
+          body = await parseResponse<unknown>(response, Math.min(this.maxResponseBytes, maxErrorBodyBytes));
+        } catch {
+          body = undefined;
+        }
+        throw providerErrorFromResponse(response, body, request.providerId);
       }
       const data = await parseResponse<T>(response, this.maxResponseBytes);
 
@@ -113,8 +124,22 @@ export class FetchHttpTransport implements HttpTransport {
       });
 
       if (!response.ok) {
-        await response.body?.cancel();
-        throw providerErrorFromResponse(response, undefined, request.providerId);
+        // Same as the request path: a provider's explanation is in the body it is about
+        // to discard, so it is read before the stream is dropped.
+        let body: unknown;
+        try {
+          body = await readResponseText(response, maxErrorBodyBytes).then((text) => {
+            if (!text) return undefined;
+            try {
+              return JSON.parse(text);
+            } catch {
+              return text;
+            }
+          });
+        } catch {
+          body = undefined;
+        }
+        throw providerErrorFromResponse(response, body, request.providerId);
       }
 
       if (!response.body) {
@@ -203,6 +228,9 @@ function createRequestLifecycle(externalSignal: AbortSignal | undefined, timeout
     },
   };
 }
+
+/** Error bodies are read, so they need their own bound. */
+const maxErrorBodyBytes = 64 * 1024;
 
 async function parseResponse<T>(response: Response, maxBytes: number): Promise<T> {
   if (response.status === 204) return undefined as T;
@@ -294,7 +322,16 @@ export function providerErrorDetail(body: unknown): string | undefined {
 }
 
 function providerErrorFromResponse(response: Response, body: unknown, providerId?: string): ProviderError {
-  const code = response.status === 401 || response.status === 403
+  /**
+   * A 403 is a refusal, not proof that the credential is bad.
+   *
+   * Treating it as an authentication failure was actively harmful: that code is terminal
+   * for routing, so a single refused request ejected the whole connection and took every
+   * working model with it. A real credential failure is a 401, and a provider that knows
+   * a particular 403 *is* an auth failure says so itself — Cline and OpenRouter both
+   * raise `AUTHENTICATION_FAILED` deliberately rather than relying on the status.
+   */
+  const code = response.status === 401
     ? 'AUTHENTICATION_FAILED'
     : response.status === 429
       ? 'RATE_LIMITED'
@@ -312,7 +349,9 @@ function providerErrorFromResponse(response: Response, body: unknown, providerId
         ? 'The provider request timed out.'
         : code === 'PROVIDER_UNAVAILABLE'
           ? 'The provider is temporarily unavailable.'
-          : 'The provider rejected the request.';
+          : response.status === 403
+            ? 'The provider refused the request.'
+            : 'The provider rejected the request.';
   // Say so when the provider refuses without saying why. A bare 403 with an
   // empty body is the least actionable response there is, and silence reads as a
   // gateway problem rather than a refusal that reached the provider.

@@ -156,6 +156,10 @@ One trap: Zen's `mimo-v2.6-flash-free` and OpenRouter's `xiaomi/mimo-v2.6-flash`
 different models from different vendors, and the ids are close enough to mix up. The
 OpenRouter one answers on a paid route; the Zen one does not.
 
+When a provider refuses a request, the dashboard shows the provider's own words. A `403`
+is reported as a refusal rather than an authentication failure, because treating it as one
+ejected the whole connection and took every working model with it.
+
 **An API key cannot reach them; a Console sign-in can.** The free Zen models are gated on
 the credential, not on the address. With an API key, or the `public` sentinel, every lane
 returns `403`, under every header combination, on Node and Bun alike.

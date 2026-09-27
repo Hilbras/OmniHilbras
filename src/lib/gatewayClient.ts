@@ -433,7 +433,21 @@ async function requestJson<T>(path: string, init: RequestInit = {}) {
     if (error instanceof TypeError) throw new Error(`Could not reach the local gateway at ${gatewayBaseUrl}. Start it with pnpm dev:gateway.`);
     throw error;
   }
-  const body = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
-  if (!response.ok) throw new Error(body?.error?.message ?? `Gateway request failed with status ${response.status}.`);
+  const body = await response.json().catch(() => undefined) as { error?: { message?: string; providerMessage?: string } } | undefined;
+  /**
+   * The gateway's neutral message is written for API clients, so it says little. The
+   * provider's own words ride alongside in `providerMessage` and are only sent to a
+   * trusted local dashboard origin, which is exactly who is asking here — so they are
+   * what the operator should read, not "the request failed".
+   */
+  if (!response.ok) {
+    const providerMessage = body?.error?.providerMessage?.trim();
+    const summary = body?.error?.message?.trim();
+    throw new Error(
+      providerMessage && providerMessage !== summary
+        ? `${summary ? `${summary} ` : ''}${providerMessage}`.trim()
+        : summary || `Gateway request failed with status ${response.status}.`,
+    );
+  }
   return body as T;
 }

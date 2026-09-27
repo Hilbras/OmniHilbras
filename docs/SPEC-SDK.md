@@ -468,6 +468,43 @@ saved connection's catalog and stores the result, keeping custom models. Without
 connection saved with no models has no way back short of signing in again, which for a
 device flow means another browser approval.
 
+### How a refusal is reported
+
+Two rules, and getting either wrong costs an operator an afternoon.
+
+**A 403 is a refusal, not an authentication failure.** Only a 401 is a credential failure
+on status alone. `AUTHENTICATION_FAILED` is a *terminal route code*, so treating every 403
+as one meant a single refused request ejected the whole connection and took every working
+model with it — a refused free model could take down a connection serving seventy others. A
+provider that knows a particular 403 *is* an auth failure says so itself: Cline and
+OpenRouter both raise `AUTHENTICATION_FAILED` deliberately rather than relying on status.
+
+| Status | Code | Message |
+| --- | --- | --- |
+| 401 | `AUTHENTICATION_FAILED` | Provider authentication failed. |
+| 403 | `PROVIDER_REQUEST_FAILED` | The provider refused the request. |
+| 429 | `RATE_LIMITED` | The provider rate limit was reached. |
+| 408, 504 | `PROVIDER_TIMEOUT` | The provider request timed out. |
+| ≥500 | `PROVIDER_UNAVAILABLE` | The provider is temporarily unavailable. |
+| other 4xx | `PROVIDER_REQUEST_FAILED` | The provider rejected the request. |
+
+**The error body must be read.** The transport used to cancel it unread and hand the
+classifier `undefined`, so `providerErrorDetail` was never given anything to work with and
+*every* refusal on *every* provider arrived with no reason attached. It is now read on both
+the request and stream paths, bounded to 64 KB, and parsed as JSON when it is JSON.
+
+This is what finally explained the Console refusals. On `/zen/v1` Zen withholds the body
+from a caller holding a key, so a bare status is all there is — but on `/inference/*` with
+a Console session the body is present, and the reason is the provider's own:
+
+```
+The provider request failed. OpenCode's free tier can only be used from within OpenCode
+```
+
+The dashboard reads `providerMessage` in preference to the neutral `message`. That field is
+only sent to a trusted local dashboard origin, which is the operator who needs it; API
+clients still receive a provider-neutral message.
+
 **A device code is single-use, so the exchange is claimed before the Console is called.**
 The poll that receives the token kills the grant. The dashboard polls every second and
 saving a connection is slower than that, so two polls overlap; without a claim the losing
