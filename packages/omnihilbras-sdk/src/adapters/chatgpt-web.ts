@@ -58,6 +58,12 @@ export const CHATGPT_WEB = {
   stopButton: 'button[data-testid="stop-button"]',
   /** A sign-in wall. Its presence means the exported session is no longer valid. */
   signedOutMarker: 'a[href="/auth/login"]',
+  /**
+   * The first-use "Temporary Chat" modal. It holds focus and intercepts the click on
+   * Send, so it is dismissed rather than clicked through — a real browser remembers it
+   * being dismissed, and this one persists its profile so it does too.
+   */
+  onboardingModal: '[data-testid="modal-temporary-chat-onboarding"]',
 } as const;
 
 /* ------------------------------------------------------------------ *

@@ -753,28 +753,83 @@ numbered chunks (`…session-token.0`, `…session-token.1`) that the page rejoi
 writes them the same way, and a cookie that already fits is passed through unchanged. The
 chunks reassemble to the original byte for byte, which is checked rather than assumed.
 
-### What is not verified, and why that matters
+### The 403 was the user agent, not the network
 
-**The browser half has never completed a turn.** From the development machine, chatgpt.com
-serves a bot-protection interstitial — `Just a moment...` with an empty body — *with a valid
-session loaded*. So:
+An earlier version of this concluded the block was environmental — an address chatgpt.com
+refuses — and told readers to try a residential connection. **That was wrong.** The address
+was fine. Playwright's default user agent for a headless browser is the real Chrome string
+with one substitution:
 
-- The premise the whole design rests on, letting the page solve its own challenges, is
-  defeated at the edge before any of that happens.
-- `#prompt-textarea` and `[data-message-author-role="assistant"]` are still ChatGPT's
-  documented test hooks used on the assumption they are current. Nothing has confirmed them.
-- The block is environmental, not a defect in the code. A residential connection is likely
-  to work; a datacenter one will not.
+```
+Mozilla/5.0 (X11; Linux x86_64) … HeadlessChrome/151.0.7922.34 Safari/537.36
+                                            ^^^^^^^^^^^^^^^
+```
 
-This is stated on the card and in the release notes rather than discovered by whoever tries
-it first. It is the same wall as the restricted Zen free models, met from the opposite
-direction: the provider is refusing an automated client.
+That single substring is enough for the edge to answer **403 with a bot-protection
+interstitial**, before any application code runs. Measured on one machine, one session, one
+engine, varying a single thing at a time:
 
-A useful contrast with the reference project this was compared against: it never hardcodes a
-selector at all. It discovers ChatGPT's own JavaScript module at runtime and drives the page
-through their internal API, which survives cosmetic changes and is enormously more complex.
-The version here is the maintainable one and the fragile one, and the trade was made
-knowingly.
+| | result |
+| --- | --- |
+| default UA | **403**, title `Just a moment...`, empty body |
+| real Chrome UA | 200, composer present |
+| real Chrome UA, headed | 200, composer present |
+| real Chrome UA, full Chromium | 200, composer present |
+
+The engine and the mode make no difference. Only the string did. The reference project
+launches **headed with a real Chrome binary and `--disable-blink-features=AutomationControlled`**,
+which points the same way — but in this case the UA alone was sufficient, and saying
+otherwise would be overclaiming.
+
+### Driving the composer
+
+With the page reachable, three things are needed that are not obvious:
+
+**A persistent profile.** ChatGPT shows a first-use "Temporary Chat" modal. With a
+throwaway profile it is shown on *every* request, holding focus and intercepting the click on
+Send, so a working flow times out. A real browser remembers; so does this one, via a profile
+directory keyed on the connection. It is also the difference between a 20-second page load
+per turn and an instant one.
+
+**Real keystrokes, not `fill()`.** The composer is a ProseMirror editor. `page.fill()` sets
+the DOM without the input events React listens for, so the send button stays
+`aria-disabled="true"` and a click on it hangs forever. `pressSequentially` produces what a
+person produces, which is what the button is watching for.
+
+**A dismissed modal.** `data-testid="modal-temporary-chat-onboarding"` does not respond to
+Escape. It is clicked through.
+
+Waiting for the turn to end by waiting for the **stop button to disappear** is the obvious
+signal and it is wrong: after a turn completes the button stays in the DOM, so that wait
+never returns and a finished turn is reported as a timeout. Waiting for the answer text to
+stop growing is what "finished" looks like on this page.
+
+`waitForFunction` must also be given a **function, not a string** — a string is evaluated
+with `eval`, and chatgpt.com's CSP forbids `unsafe-eval`, so a string fails with an EvalError
+on a page that has otherwise worked perfectly.
+
+### What is still not working, stated plainly
+
+**No turn has ever produced an answer.** The request is submitted — the composer accepts
+real keystrokes, the send button enables, the message posts — and the page then renders only
+a placeholder:
+
+```html
+<div data-message-author-role="assistant"
+     data-message-id="request-placeholder-request-WEB:…-0" …>
+```
+
+with no text, and the page sitting at its "Think" indicator indefinitely. Observed on a
+free-plan account. The model ids in the catalog are an assumption; the page's own model
+picker is the authority and has not been read.
+
+For contrast, the reference project **is** completing turns on this same machine, and does so
+by never hardcoding a selector: it discovers ChatGPT's own JavaScript module at runtime and
+calls their internal API, including an explicit model *selection* step. That is very likely
+where the remaining difference lies — not in access, which is now solved, but in how the
+model is chosen and how the answer is read.
+
+So: access solved, submission solved, **completion not yet solved**. The card says so.
 
 ### Catalog cards added for OpenAI-compatible gateways
 

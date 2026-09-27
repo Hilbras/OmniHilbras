@@ -146,6 +146,15 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 20: Unblock access to chatgpt.com, and correct the diagnosis.
+  - Acceptance: the page loads and a turn is submitted, instead of a 403 at the edge.
+  - Verify: measured on one machine, one session, one engine, varying one thing at a time — default UA gives 403 with `Just a moment...`, a real Chrome UA gives 200 with a composer present, and headed/full-Chromium make no difference. The composer accepts `pressSequentially` and the send button then reports `aria-disabled="false"`. 324 tests pass.
+  - Findings: **the 403 was Playwright's default headless user agent, which substitutes `HeadlessChrome/151.0.7922.34` into the real Chrome string.** The address was never the problem, and the earlier "this is environmental, try a residential connection" note was wrong. Setting a real user agent, with a matching locale and timezone, fixes access outright. Three further things were needed to get a turn submitted, none obvious: a **persistent profile**, because the first-use "Temporary Chat" modal otherwise reappears every request holding focus and intercepting Send; **real keystrokes**, because the composer is ProseMirror and `fill()` sets the DOM without the input events React watches, leaving the send button permanently disabled; and clicking through `data-testid="modal-temporary-chat-onboarding"`, which ignores Escape. Also: `waitForFunction` must take a function, since a string is evaluated with `eval` and the page's CSP forbids `unsafe-eval`; and waiting for the stop button to disappear is the wrong completion signal, because the button stays in the DOM after a turn ends, so that wait never returns.
+  - **Still not working:** no turn has produced an answer. The request posts, the page renders only `data-message-id="request-placeholder-request-WEB:…-0"` with no text, and sits at "Think" indefinitely, on a free-plan account. The reference project completes turns on this same machine by discovering ChatGPT's own JS module at runtime and performing an explicit model *selection*, never hardcoding a selector — which is the most likely place the remaining difference lies. Access is solved; completion is not. The card says so.
+  - Files: `apps/gateway/src/chatgptWeb.ts`, `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, docs.
+  - Depends on: Task 19.
+  - Scope: Big.
+
 - [x] Task 19: Make the ChatGPT Web refusal say what it is, instead of looking like a broken model.
   - Acceptance: a model test against a blocked address reports the block, with the reason intact.
   - Verify: `POST /v1/chat/completions` for `chatgpt-web` returns `PROVIDER_UNAVAILABLE` and the full sentence, in place of `Every provider route failed`. Three tests.

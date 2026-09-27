@@ -182,11 +182,15 @@ npx playwright install chromium
 
 Without it, ChatGPT Web says so by name rather than failing as a provider error.
 
-**It has not completed a single turn.** From the machine this was developed on,
-`chatgpt.com` serves a bot-protection challenge — `Just a moment...` — *with a valid
-session loaded*. So the premise it was built on is defeated at the edge, and the DOM
-selectors have never been confirmed. If you try it, that is the most likely reason, not
-your session. A residential connection is worth trying; a datacenter one will not work.
+**It reaches ChatGPT but does not yet complete a turn.** The page loads, the prompt is
+typed and sent — and then only a placeholder appears, with no answer. If you try it, that is
+the most likely result.
+
+An earlier note here blamed the network. That was wrong: the 403 was Playwright's default
+headless user agent containing `HeadlessChrome`, which the edge rejects. Setting a real
+user agent fixed access completely. What is left is the model selection and reading the
+answer, which is where the reference project discovers ChatGPT's own JavaScript module at
+runtime instead of hardcoding selectors.
 
 The export format is the one ChatGPT actually hands you (a CLI/Codex auth export with a
 `sessionToken`), and the plan it carries decides which models you are offered.
