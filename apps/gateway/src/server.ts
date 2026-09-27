@@ -291,7 +291,49 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     // Kiro signs in through AWS's device flow: a code the user approves in their own
     // browser, and the gateway polls until AWS says it was approved.
     if (request.method === 'POST' && url.pathname === '/v1/oauth/kiro/start') {
-      sendJson(response, 201, await service.startKiroSignInFlow(), origin);
+      // A company IAM Identity Center sign-in supplies its own start URL; a plain Builder
+      // ID sign-in does not, and falls back to the public one.
+      const startUrl = readOptionalString(await readJsonBody(request, maxConnectionBodyBytes), 'startUrl');
+      sendJson(response, 201, await service.startKiroSignInFlow(startUrl), origin);
+      return;
+    }
+
+    // A refresh token exported from Kiro. Spent once here so the stored credential is an
+    // access token, never the long-lived secret the user pasted.
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/kiro/import-token') {
+      const body = await readJsonBody(request, maxConnectionBodyBytes);
+      const connection = await service.importKiroRefreshToken(readRequiredString(body, 'refreshToken'), controller.signal);
+      sendJson(response, 201, { connection }, origin);
+      return;
+    }
+
+    // Google or GitHub. The browser cannot return from a `kiro://` callback, so this
+    // returns a URL to open and the code is pasted back on the exchange route below.
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/kiro/social/start') {
+      const body = await readJsonBody(request, maxConnectionBodyBytes);
+      const provider = readRequiredString(body, 'provider');
+      if (provider !== 'google' && provider !== 'github') throw invalidRequest('provider must be google or github.');
+      sendJson(response, 201, await service.startKiroSocialSignInFlow(provider), origin);
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/kiro/social/exchange') {
+      const body = await readJsonBody(request, maxConnectionBodyBytes);
+      const connection = await service.completeKiroSocialSignIn(
+        readRequiredString(body, 'sessionId'),
+        readRequiredString(body, 'code'),
+        controller.signal,
+      );
+      sendJson(response, 201, { connection }, origin);
+      return;
+    }
+
+    // A long-lived Kiro/CodeWhisperer key. Stored as given: it has no refresh token, so it
+    // cannot be renewed and has to be replaced by hand.
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/kiro/api-key') {
+      const body = await readJsonBody(request, maxConnectionBodyBytes);
+      const connection = await service.connectKiroApiKey(readRequiredString(body, 'apiKey'), controller.signal);
+      sendJson(response, 201, { connection }, origin);
       return;
     }
 
@@ -799,6 +841,27 @@ function getExplicitProviderId(request: IncomingMessage, body: unknown) {
   return undefined;
 }
 
+/** A pasted secret, bounded, and rejected rather than coerced when it is absent. */
+function readRequiredString(body: unknown, field: string): string {
+  const value = readOptionalString(body, field);
+  if (!value) throw invalidRequest(`${field} is required.`);
+  return value;
+}
+
+/**
+ * An optional string field.
+ *
+ * A non-string is treated as absent rather than coerced, so an object or an array sent
+ * where a secret belongs cannot reach a provider as `"[object Object]"`.
+ */
+function readOptionalString(body: unknown, field: string): string | undefined {
+  if (typeof body !== 'object' || body === null) return undefined;
+  const value = (body as Record<string, unknown>)[field];
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
 async function readJsonBody(request: IncomingMessage, maxBytes: number) {
   const contentLength = Number(request.headers['content-length']);
   if (Number.isFinite(contentLength) && contentLength > maxBytes) throw invalidRequest('Request body is too large.');
@@ -835,6 +898,10 @@ function toOpenAICompletion(response: ChatResponse) {
       finish_reason: response.finishReason,
     }],
     ...(response.usage ? { usage: { prompt_tokens: response.usage.inputTokens, completion_tokens: response.usage.outputTokens, total_tokens: response.usage.totalTokens } } : {}),
+    // Kiro meters credits and publishes no token counts. Carried through as its own field
+    // so a metered call is never reported as a free one, and never as zero tokens.
+    ...(response.meters ? { meters: response.meters } : {}),
+    ...(response.contextUsagePercent === undefined ? {} : { context_usage_percent: response.contextUsagePercent }),
   };
 }
 

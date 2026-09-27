@@ -163,10 +163,21 @@ Kiro card says so on the card, again on its page, and once more in the sign-in d
 where nothing is sent to your AWS account until you tick the box. If that trade is not one
 you want to make, don't connect it.
 
-Kiro signs in through AWS's device flow, and once signed in it is not an
-OpenAI-compatible endpoint at all: it is CodeWhisperer's streaming service, taking a
-`conversationState` envelope and answering with an AWS eventstream. That is why it needs
-its own adapter.
+Kiro offers **six** ways in, and the dialog asks first: AWS Builder ID, your company's IAM
+Identity Center start URL, Google, GitHub, an imported refresh token, or a pasted API key.
+The risk warning above gates all six — nothing reaches Kiro or AWS until you tick the box.
+
+Two of them have a catch worth knowing. A company start URL is checked against
+`*.awsapps.com` before it is sent anywhere, because it becomes part of an OAuth grant.
+Social sign-in **cannot come back automatically**: the registered redirect is a `kiro://`
+scheme, so the browser hands the code to the Kiro desktop app and you paste it back.
+
+Once signed in, Kiro is not an OpenAI-compatible endpoint at all: it is CodeWhisperer's
+streaming service, taking a `conversationState` envelope and answering with a **binary** AWS
+eventstream. Kiro meters credits rather than tokens, so a call reports what it cost instead
+of a token count it does not publish. And which models you can use depends on your plan —
+Kiro answers `Invalid model` for an id your account does not carry, and the dashboard says
+exactly that rather than showing a bare failure.
 
 ## Filtering models
 

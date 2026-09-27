@@ -438,7 +438,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-async function requestJson<T>(path: string, init: RequestInit = {}) {
+export async function requestJson<T>(path: string, init: RequestInit = {}) {
   if (!gatewayBaseUrl) throw new Error('Gateway URL must target a loopback address.');
   let response: Response;
   try {

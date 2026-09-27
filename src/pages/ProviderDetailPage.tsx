@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Activity,
@@ -25,6 +25,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
+import { KiroConnectDialog } from '../components/KiroConnectDialog';
 import { OauthConnectDialog } from '../components/OauthConnectDialog';
 import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, filterAvailability, modelFacets, priceLabel, type ModelFacets, type ModelFilterState, type ModelMetaMap } from '@hilbras/omnihilbras';
 import { DashboardShell } from '../components/DashboardShell';
@@ -138,7 +139,7 @@ function ModelRow({ model, providerId, facets, onCopy, onTest, testing, disabled
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? 'border-danger/25 bg-danger/10 text-danger' : 'border-line bg-surface text-muted'}`}>
           {testing ? <LoaderCircle className="h-4 w-4 animate-spin text-gold-text" aria-hidden="true" /> : testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
         </span>
-        <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><p className="truncate text-xs font-semibold">{model}</p>{facets.displayName && facets.displayName !== model && <p className="truncate text-[10px] text-muted">{facets.displayName}</p>}{testLatencyMs !== undefined && testState === 'ok' && <span title={testNote || undefined} className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms{testNote ? ' · reasoning only' : ''}</span>}{testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}{badges.map((badge) => <span key={badge} className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[9px] text-muted">{badge}</span>)}</div><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code></div>
+        <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><p className="truncate text-xs font-semibold">{model}</p>{facets.displayName && facets.displayName !== model && <p className="truncate text-[10px] text-muted">{facets.displayName}</p>}{testLatencyMs !== undefined && testState === 'ok' && <span title={testNote || undefined} className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms{testNote ? ' · reasoning only' : ''}</span>}{testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}{badges.map((badge) => <span key={badge} className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[9px] text-muted">{badge}</span>)}</div><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code>{testState === 'error' && testError && <p className="mt-1 text-[10px] leading-relaxed text-danger/90">{testError}</p>}</div>
       </div>
       <div className="flex items-center gap-1.5">
         <button type="button" onClick={onCopy} aria-label={`Copy ${model} model ID`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-gold-text"><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>
@@ -402,6 +403,28 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     setNoticeError(tone === 'error');
     window.setTimeout(() => setNotice(''), 3200);
   }
+
+  /**
+   * Shared by every OAuth dialog.
+   *
+   * The gateway is the source of truth for a connection record, so the authoritative one
+   * is read back rather than trusting whatever shape the sign-in handed over. A partial
+   * record here used to reach the resilience panel and blank the page.
+   */
+  const handleOauthConnected = useCallback(
+    async (saved: GatewayConnection) => {
+      const authoritative = await listGatewayConnections()
+        .then((connections) => connections.find((item) => item.providerId === provider.id && item.hasCredential))
+        .catch(() => undefined);
+      const next = authoritative ?? saved;
+      setConnection(next);
+      setConnectionAdded(true);
+      setConnectionHealthy(false);
+      flash(`Signed in to ${next.name} with ${next.modelIds.length} models.`);
+      void getGatewayRoutingState().then(setRoutingState).catch(() => undefined);
+    },
+    [provider.id],
+  );
 
   async function testConnection() {
     if (testingConnection || testing) return;
@@ -795,28 +818,22 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       <section id="endpoint" className="card mt-5 p-4 sm:p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-sm font-semibold">Endpoint details</h2><p className="muted mt-1 text-xs">The base URL OmniHilbras will use for this provider.</p></div><code className="max-w-full overflow-x-auto rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-muted sm:max-w-[420px]">{connection?.endpoint ?? provider.endpoint}</code></div></section>
 
       <AddProviderModal open={addOpen && !isOauth} initialProviderId={provider.id} initialModelPolicy={connection?.modelPolicy} onClose={() => setAddOpen(false)} onSave={handleAddConnection} onSaveMany={handleAddConnections} />
-      {isOauth && oauthFlowAvailable && addOpen && (
+      {isOauth && oauthFlowAvailable && addOpen && provider.id === 'kiro' && (
+        <KiroConnectDialog
+          providerName={provider.name}
+          {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
+          onClose={() => { setAddOpen(false); setSignInWindow(null); }}
+          onConnected={handleOauthConnected}
+        />
+      )}
+      {isOauth && oauthFlowAvailable && addOpen && provider.id !== 'kiro' && (
         <OauthConnectDialog
           providerId={provider.id}
           providerName={provider.name}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           signInWindow={signInWindow}
           onClose={() => { setAddOpen(false); setSignInWindow(null); }}
-          onConnected={async (saved) => {
-            // The gateway is the source of truth for a connection record, so the
-            // authoritative one is read back rather than trusting whatever shape
-            // the sign-in happened to hand over. A partial record here used to
-            // reach the resilience panel and blank the page.
-            const authoritative = await listGatewayConnections()
-              .then((connections) => connections.find((item) => item.providerId === provider.id && item.hasCredential))
-              .catch(() => undefined);
-            const next = authoritative ?? saved;
-            setConnection(next);
-            setConnectionAdded(true);
-            setConnectionHealthy(false);
-            flash(`Signed in to ${next.name} with ${next.modelIds.length} models.`);
-            void getGatewayRoutingState().then(setRoutingState).catch(() => undefined);
-          }}
+          onConnected={handleOauthConnected}
         />
       )}
     </>

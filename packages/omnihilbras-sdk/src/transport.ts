@@ -10,6 +10,14 @@ export type HttpRequest = {
   headers?: Record<string, string>;
   body?: string;
   signal?: AbortSignal;
+  /**
+   * Read the body as raw bytes instead of text.
+   *
+   * A binary response decoded as text is silently corrupted — length prefixes and CRCs
+   * are mangled by the UTF-8 decoder — and the corruption looks like a provider that
+   * answered with nothing. Providers that answer in a binary framing ask for this.
+   */
+  responseAs?: 'bytes';
 };
 
 export type HttpResponse<T> = {
@@ -100,7 +108,10 @@ export class FetchHttpTransport implements HttpTransport {
         }
         throw providerErrorFromResponse(response, body, request.providerId);
       }
-      const data = await parseResponse<T>(response, this.maxResponseBytes);
+      const data =
+        request.responseAs === 'bytes'
+          ? ((await readResponseBytes(response, this.maxResponseBytes)) as T)
+          : await parseResponse<T>(response, this.maxResponseBytes);
 
       return { status: response.status, headers: response.headers, data };
     } catch (error) {
@@ -247,6 +258,37 @@ async function parseResponse<T>(response: Response, maxBytes: number): Promise<T
       cause: error,
     });
   }
+}
+
+async function readResponseBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
+  if (!response.body) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) break;
+      totalBytes += result.value.byteLength;
+      // Bounded exactly like the text path, so a binary response cannot stream forever.
+      if (totalBytes > maxBytes) throw new ProviderError('INVALID_RESPONSE', 'Provider response exceeded the configured size limit.');
+      chunks.push(result.value);
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // The provider may have already closed the response.
+    }
+    reader.releaseLock();
+  }
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
 }
 
 async function readResponseText(response: Response, maxBytes: number) {

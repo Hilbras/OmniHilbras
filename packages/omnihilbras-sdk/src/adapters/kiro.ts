@@ -1,7 +1,7 @@
 import { ProviderError } from '../errors.js';
 import { FetchHttpTransport } from '../transport.js';
 import type { HttpTransport } from '../transport.js';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderRequestContext, TokenUsage } from '../types.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderRequestContext } from '../types.js';
 
 /**
  * Kiro.
@@ -39,6 +39,15 @@ export const kiroProviderId = 'kiro';
  * Kiro's catalog. Ids must match its upstream exactly — an unknown id is refused with
  * `400 Invalid model. Please select a different model`, and there is no wildcard or
  * `auto` id to fall back on.
+ */
+/**
+ * The catalog.
+ *
+ * Kiro publishes no model list over the API, so this is a published set rather than a
+ * discovered one, and availability is per account: Kiro answers
+ * `400 Invalid model. Please select a different model` for an id the signed-in plan does
+ * not carry. That is the account's entitlement, not a broken connection, so it is surfaced
+ * as itself and a model id is still the only thing that can be sent.
  */
 export const KIRO_MODELS: ReadonlyArray<{ id: string; name: string; contextWindow?: number; maxOutputTokens?: number }> = [
   { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', contextWindow: 1_000_000, maxOutputTokens: 128_000 },
@@ -117,31 +126,191 @@ export async function registerKiroClient(): Promise<{ clientId: string; clientSe
   return { clientId, clientSecret };
 }
 
+/**
+ * A company IAM Identity Center start URL, as an enterprise sign-in supplies it.
+ *
+ * Only `*.awsapps.com` is accepted. That is not a general URL check for its own sake:
+ * this value is sent to AWS as the `startUrl` of a device grant, so an unvalidated value
+ * would turn the sign-in dialog into an open redirect carrying a user's approval.
+ */
+export function isKiroStartUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:') return false;
+  if (url.username || url.password) return false;
+  const host = url.hostname.toLowerCase();
+  return host === 'awsapps.com' || host.endsWith('.awsapps.com');
+}
+
 /** Asks AWS for a device code the user approves in a browser. */
-export async function beginKiroSignIn(): Promise<KiroDeviceAuthorization> {
+export async function beginKiroSignIn(startUrl: string = KIRO.startUrl): Promise<KiroDeviceAuthorization> {
+  if (!isKiroStartUrl(startUrl)) {
+    throw new ProviderError('INVALID_REQUEST', 'That start URL is not an AWS IAM Identity Center URL.', {
+      providerId: kiroProviderId,
+      publicMessage: 'That start URL is not an AWS IAM Identity Center URL. It should look like https://your-org.awsapps.com/start.',
+    });
+  }
   const { clientId, clientSecret } = await registerKiroClient();
   // AWS refuses the request without the start URL, answering
   // `400 Start URL is required`, so it is part of the grant rather than a preference.
-  const { data } = await postAuthJson<Json>(`${KIRO.oidc}/device_authorization`, { clientId, clientSecret, startUrl: KIRO.startUrl });
+  const { status, data } = await postAuthJson<Json>(`${KIRO.oidc}/device_authorization`, { clientId, clientSecret, startUrl });
   const deviceCode = typeof data.deviceCode === 'string' ? data.deviceCode : '';
   const userCode = typeof data.userCode === 'string' ? data.userCode : '';
   if (!deviceCode || !userCode) {
-    throw new ProviderError('AUTHENTICATION_FAILED', 'AWS did not return a Kiro device code.', {
+    /**
+     * AWS's own reason is carried through, because "it did not work" is useless to
+     * somebody who just typed their company's start URL. A start URL on a real
+     * `awsapps.com` host that AWS rejects is almost always a typo in the organisation
+     * name, and AWS says so: `Invalid start url provided`.
+     */
+    const detail = typeof data.error_description === 'string' ? data.error_description : '';
+    const saysInvalidStartUrl = typeof data.error === 'string' && data.error === 'invalid_request';
+    throw new ProviderError('AUTHENTICATION_FAILED', detail || `AWS did not return a Kiro device code (HTTP ${status}).`, {
       providerId: kiroProviderId,
-      publicMessage: 'AWS did not return a Kiro device code. Try again in a moment.',
+      publicMessage: saysInvalidStartUrl
+        ? 'AWS does not recognise that start URL. Check the organisation name in it, and that it ends in /start.'
+        : detail || 'AWS did not return a Kiro device code. Try again in a moment.',
     });
   }
-  const verificationUri = typeof data.verificationUri === 'string' ? data.verificationUri : KIRO.startUrl;
+  const verificationUri = typeof data.verificationUri === 'string' ? data.verificationUri : startUrl;
   return {
     deviceCode,
     userCode,
-    // AWS returns this relative on some regions, so it is joined rather than shown bare.
-    verificationUrl: verificationUri.startsWith('http') ? verificationUri : `https://view.awsapps.com${verificationUri.startsWith('/') ? '' : '/'}${verificationUri}`,
+    /**
+     * The approval page a company start URL leads to is on that company's own domain, not
+     * on `view.awsapps.com`. AWS returns an absolute URI in that case and it is used as
+     * given; only a relative one is joined, and to the start URL that produced it.
+     */
+    verificationUrl: verificationUri.startsWith('http') ? verificationUri : joinVerificationUrl(startUrl, verificationUri),
     intervalSeconds: typeof data.interval === 'number' ? data.interval : 5,
     clientId,
     clientSecret,
     ...(typeof data.expiresIn === 'number' ? { expiresIn: data.expiresIn } : {}),
   };
+}
+
+function joinVerificationUrl(startUrl: string, path: string): string {
+  try {
+    return new URL(path, startUrl).toString();
+  } catch {
+    return startUrl;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Social sign-in
+ * ------------------------------------------------------------------ */
+
+/**
+ * The social flow (Google, GitHub) is a different service from the AWS one: Kiro's own
+ * auth host, not `oidc.*.amazonaws.com`.
+ */
+export const KIRO_SOCIAL = {
+  authHost: 'https://prod.us-east-1.auth.desktop.kiro.dev',
+  /**
+   * The callback is a custom scheme, not a web URL, and it cannot be changed: Kiro's
+   * identity provider only has this one redirect registered. A browser will therefore not
+   * return to OmniHilbras — it hands the code to the Kiro desktop app — so the code has to
+   * be pasted back in. That is a property of the provider, not a gap in this flow, and the
+   * dialog says so rather than opening a tab that silently fails.
+   */
+  redirectUri: 'kiro://kiro.kiroAgent/authenticate-success',
+} as const;
+
+export type KiroSocialProvider = 'google' | 'github';
+
+function socialIdp(provider: KiroSocialProvider): 'Google' | 'Github' {
+  return provider === 'google' ? 'Google' : 'Github';
+}
+
+function base64Url(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * The PKCE pair for a social sign-in. The verifier never leaves the gateway.
+ *
+ * The challenge is the real S256 digest of the verifier, per RFC 7636 — an identity
+ * provider that checks it would reject anything else, and one that does not check it still
+ * costs nothing.
+ */
+export async function createKiroPkce(): Promise<{ verifier: string; challenge: string }> {
+  const verifier = base64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  return { verifier, challenge: base64Url(new Uint8Array(digest)) };
+}
+
+/**
+ * The URL the user opens to sign in with Google or GitHub.
+ *
+ * `state` is checked on the way back, so a code cannot be pasted from somewhere else.
+ */
+export function buildKiroSocialUrl(provider: KiroSocialProvider, codeChallenge: string, state: string): string {
+  const params = new URLSearchParams({
+    idp: socialIdp(provider),
+    redirect_uri: KIRO_SOCIAL.redirectUri,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    state,
+    prompt: 'select_account',
+  });
+  return `${KIRO_SOCIAL.authHost}/login?${params.toString()}`;
+}
+
+export type KiroSocialSession = {
+  provider: KiroSocialProvider;
+  verifier: string;
+  state: string;
+  createdAt: number;
+};
+
+/** Exchanges a pasted authorization code for a Kiro session. */
+export async function exchangeKiroSocialCode(session: KiroSocialSession, code: string): Promise<ProviderCredential> {
+  const trimmed = code.trim();
+  if (!trimmed) {
+    throw new ProviderError('INVALID_REQUEST', 'Paste the code Kiro showed you.', {
+      providerId: kiroProviderId,
+      publicMessage: 'Paste the code Kiro showed you.',
+    });
+  }
+  // The same `redirect_uri` as the authorize request, or the exchange is refused.
+  const { data } = await postAuthJson<Json>(`${KIRO_SOCIAL.authHost}/oauth/token`, {
+    code: trimmed,
+    code_verifier: session.verifier,
+    redirect_uri: KIRO_SOCIAL.redirectUri,
+  });
+  const accessToken = typeof data.accessToken === 'string' ? data.accessToken : '';
+  if (!accessToken) {
+    const detail = typeof data.error_description === 'string' ? data.error_description : '';
+    throw new ProviderError('AUTHENTICATION_FAILED', detail || 'Kiro did not accept that code.', {
+      providerId: kiroProviderId,
+      publicMessage: detail || 'Kiro did not accept that code. Codes expire quickly — sign in again.',
+    });
+  }
+  const expiresIn = typeof data.expiresIn === 'number' ? data.expiresIn : undefined;
+  return {
+    type: 'oauth',
+    value: accessToken,
+    ...(typeof data.refreshToken === 'string' ? { refreshToken: data.refreshToken } : {}),
+    ...(expiresIn === undefined ? {} : { expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() }),
+    ...(typeof data.profileArn === 'string' && data.profileArn ? { accountId: data.profileArn } : {}),
+  };
+}
+
+/** A social session is short: the code it is waiting for expires within minutes. */
+export const kiroSocialTtlMs = 10 * 60_000;
+
+export function kiroSocialSessionExpired(session: KiroSocialSession, now = Date.now()): boolean {
+  return now - session.createdAt > kiroSocialTtlMs;
+}
+
+/** A random, unguessable `state` for one social sign-in. */
+export function newKiroSocialState(): string {
+  return base64Url(globalThis.crypto.getRandomValues(new Uint8Array(24)));
 }
 
 export type KiroPoll =
@@ -181,6 +350,24 @@ export async function pollKiroSignIn(
     ...(typeof data.expiresIn === 'number' ? { expiresIn: data.expiresIn } : {}),
     ...(typeof data.profileArn === 'string' && data.profileArn ? { profileArn: data.profileArn } : {}),
   };
+}
+
+/**
+ * Wraps a pasted API key as a credential.
+ *
+ * It is stored as a bearer credential with no refresh token, so the session cannot be
+ * renewed and has to be replaced by hand. That is a property of the key rather than a
+ * limitation of the import, so it is stated instead of being hidden behind a fake expiry.
+ */
+export function kiroCredentialFromApiKey(apiKey: string): ProviderCredential {
+  const trimmed = apiKey.trim();
+  if (!trimmed) {
+    throw new ProviderError('INVALID_REQUEST', 'Paste a Kiro API key to connect.', {
+      providerId: kiroProviderId,
+      publicMessage: 'Paste a Kiro API key to connect.',
+    });
+  }
+  return { type: 'api-key', value: trimmed };
 }
 
 /** Renews the session. Kiro's refresh grant uses the same token endpoint. */
@@ -247,7 +434,7 @@ function messageText(content: MessageContent): string {
  * addressed on the current message, and a system turn is folded into the user content
  * rather than sent as its own role, because the envelope has no system role.
  */
-export function toKiroBody(request: ChatRequest, conversationId: string): Json {
+export function toKiroBody(request: ChatRequest, conversationId: string, credential?: ProviderCredential): Json {
   const system = request.messages.filter((message) => message.role === 'system').map((message) => messageText(message.content)).filter(Boolean);
   const turns = request.messages.filter((message) => message.role !== 'system');
   const current = turns[turns.length - 1];
@@ -258,6 +445,11 @@ export function toKiroBody(request: ChatRequest, conversationId: string): Json {
     },
   }));
   const content = [system.length ? system.join('\n\n') : '', messageText(current?.content ?? '')].filter(Boolean).join('\n\n');
+  // A profile scopes the session to an IAM Identity Center profile and is absent for a
+  // plain Builder ID or social sign-in. It is sent **only when there is one**: an empty
+  // `profileArn` is not the same as no profile, and Kiro answers
+  // `400 Improperly formed request` for it.
+  const profileArn = credential?.type === 'oauth' ? credential.accountId : undefined;
   return {
     conversationState: {
       chatTriggerType: 'MANUAL',
@@ -271,6 +463,7 @@ export function toKiroBody(request: ChatRequest, conversationId: string): Json {
       },
       history,
     },
+    ...(profileArn ? { profileArn } : {}),
     ...(request.maxOutputTokens === undefined ? {} : { inferenceConfig: { maxTokens: request.maxOutputTokens } }),
   };
 }
@@ -289,33 +482,47 @@ function kiroHeaders(credential: ProviderCredential): Record<string, string> {
 }
 
 /**
- * One decoded event from the stream.
+ * One decoded event from Kiro's stream.
  *
- * Kiro's eventstream arrives as `:event-type:` metadata lines and `data:` payloads, and
- * the payload nests the useful body under a key named after the event. A bare `data:`
- * with no event type is kept as text so a plain body is not silently dropped.
+ * The service answers with the **binary** AWS eventstream, not a text framing. Each frame
+ * is `[total_length][headers_length][prelude_crc][headers][payload][message_crc]`, the
+ * event name is an `:event-type` header — the names carry a leading colon — and the
+ * payload is flat JSON rather than nested under the event name. All of that was read off
+ * a live response: a parser written for the text framing matches no frame at all, which
+ * is indistinguishable from a provider that answered nothing.
  */
 export type KiroEvent = {
   type: string;
+  /** Answer text, from `assistantResponseEvent` only. */
   text?: string;
-  reasoning?: string;
-  stopReason?: FinishReason;
-  usage?: TokenUsage;
+  /** Share of the context window Kiro reports as used, 0–100. */
+  contextUsagePercent?: number;
+  /**
+   * Credits this call cost. Kiro meters credits rather than publishing a token usage
+   * event, so this is the only cost signal the service gives and it is not dropped.
+   */
+  creditsUsed?: number;
 };
 
-/** Event names Kiro nests its payload under, longest first so `x` never shadows `xY`. */
-const kiroEventKeys = [
-  'assistantResponseEvent',
-  'reasoningContentEvent',
-  'messageStopEvent',
-  'usageEvent',
-  'toolUseEvent',
-  'codeEvent',
-  'supplementaryWebLinksEvent',
-] as const;
+const kiroEventTypeHeader = ':event-type';
+/** AWS eventstream header type 7: a string, preceded by its u16 length. */
+const kiroStringHeader = 7;
 
-function isRecord(value: unknown): value is Json {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+function readText(bytes: Uint8Array, start: number, length: number): string {
+  return new TextDecoder().decode(bytes.subarray(start, start + length));
+}
+
+/** A single byte, treating an out-of-range read as 0 so a malformed frame cannot throw. */
+function byteAt(bytes: Uint8Array, index: number): number {
+  return index < 0 || index >= bytes.length ? 0 : (bytes[index] as number);
+}
+
+function readNumber(source: Json, keys: readonly string[]): number | undefined {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  return undefined;
 }
 
 function readString(source: Json, keys: readonly string[]): string | undefined {
@@ -326,97 +533,84 @@ function readString(source: Json, keys: readonly string[]): string | undefined {
   return undefined;
 }
 
-/** Decodes one eventstream frame. Exported so the framing can be tested on its own. */
-export function decodeKiroEvent(payload: string, eventType: string): KiroEvent {
-  let data: Json;
-  try {
-    const parsed: unknown = JSON.parse(payload);
-    data = (typeof parsed === 'object' && parsed !== null ? parsed : { text: String(parsed) }) as Json;
-  } catch {
-    return eventType ? { type: eventType, text: payload } : { type: 'unknown', text: payload };
-  }
-  /**
-   * The type comes from the framing when there is one, and otherwise from a key the
-   * payload nests its body under. Inferring it matters: a response with no
-   * `:event-type:` line at all would otherwise decode to an unknown event and read as an
-   * empty answer rather than as a framing change.
-   */
-  const type =
-    eventType ||
-    readString(data, ['_eventType', 'event', 'eventType']) ||
-    kiroEventKeys.find((key) => isRecord(data[key])) ||
-    'unknown';
-
-  if (type === 'assistantResponseEvent') {
-    const nested = (data.assistantResponseEvent ?? data) as Json;
-    const text = readString(nested, ['content', 'text']);
-    return text === undefined ? { type } : { type, text };
-  }
-  if (type === 'reasoningContentEvent') {
-    const nested = (data.reasoningContentEvent ?? data) as Json;
-    const reasoning = readString(nested, ['content', 'text', 'reasoning']);
-    return reasoning === undefined ? { type } : { type, reasoning };
-  }
-  if (type === 'messageStopEvent' || type === 'done') {
-    const nested = (data.messageStopEvent ?? data) as Json;
-    const reason = readString(nested, ['stopReason', 'stop_reason']);
-    return { type, ...(reason ? { stopReason: kiroStopReason(reason) } : {}) };
-  }
-  if (type === 'usageEvent') {
-    const nested = (data.usageEvent ?? data) as Json;
-    const input = nested.inputTokens ?? nested.input_tokens;
-    const output = nested.outputTokens ?? nested.output_tokens;
-    const total = nested.totalTokens ?? nested.total_tokens;
-    return {
-      type,
-      usage: {
-        ...(typeof input === 'number' ? { inputTokens: input } : {}),
-        ...(typeof output === 'number' ? { outputTokens: output } : {}),
-        ...(typeof total === 'number' ? { totalTokens: total } : {}),
-      },
-    };
-  }
-  // `toolUseEvent` and the rest carry no text this adapter can use, and dropping them
-  // silently would be indistinguishable from a truncated answer.
-  return { type };
-}
-
-function kiroStopReason(reason: string): FinishReason {
-  if (reason === 'max_tokens' || reason === 'MAX_TOKENS') return 'length';
-  if (reason === 'tool_use' || reason === 'TOOL_USE') return 'tool_calls';
-  return 'stop';
-}
-
 /**
- * Splits a raw eventstream body into events.
+ * Decodes a whole Kiro response.
  *
- * The framing is line based: `:event-type: <name>` sets the type for the frames that
- * follow, and each `data:` line is one JSON payload. A `data:` line with no preceding
- * type still yields an event rather than being discarded.
+ * Frames are walked by their declared length rather than scanned for a separator, and a
+ * frame that claims an impossible length ends the walk instead of being read past — a
+ * truncated body must not be mistaken for a complete one.
  */
-export function parseKiroEventStream(body: string): KiroEvent[] {
+export function decodeKiroStream(bytes: Uint8Array): KiroEvent[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const events: KiroEvent[] = [];
-  let eventType = '';
-  for (const line of body.split(/\r?\n/)) {
-    if (line.startsWith(':event-type:')) {
-      eventType = line.slice(':event-type:'.length).trim();
-      continue;
+  let offset = 0;
+  while (offset + 16 <= bytes.length) {
+    // `total_length` counts itself, so a frame occupies exactly that many bytes.
+    const totalLength = view.getUint32(offset);
+    const headersLength = view.getUint32(offset + 4);
+    if (totalLength < 16 || offset + totalLength > bytes.length) break;
+    const headersEnd = offset + 12 + headersLength;
+    const frameEnd = offset + totalLength;
+    // 12 prelude + headers + 4 trailing CRC must fit inside the frame.
+    if (headersEnd + 4 > frameEnd) break;
+
+    let cursor = offset + 12;
+    let eventType = '';
+    while (cursor < headersEnd) {
+      const nameLength = byteAt(bytes, cursor);
+      cursor += 1;
+      const name = readText(bytes, cursor, nameLength);
+      cursor += nameLength;
+      if (cursor >= headersEnd) break;
+      const headerType = byteAt(bytes, cursor);
+      cursor += 1;
+      if (headerType !== kiroStringHeader) break;
+      if (cursor + 2 > headersEnd) break;
+      const valueLength = view.getUint16(cursor);
+      cursor += 2;
+      const value = readText(bytes, cursor, valueLength);
+      cursor += valueLength;
+      if (name === kiroEventTypeHeader || name === 'event-type') eventType = value;
     }
-    if (line.startsWith('data:')) {
-      const payload = line.slice('data:'.length).trim();
-      if (payload) events.push(decodeKiroEvent(payload, eventType));
-      continue;
+
+    const payloadText = readText(bytes, headersEnd, frameEnd - 4 - headersEnd);
+    let payload: Json = {};
+    try {
+      const parsed: unknown = JSON.parse(payloadText);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) payload = parsed as Json;
+    } catch {
+      // An unreadable payload still yields an event, so the frame count stays honest.
     }
-    if (!line.startsWith(':') && line.trim() && !eventType) {
-      // Some responses are a bare JSON body with no framing at all.
-      const trimmed = line.trim();
-      if (trimmed.startsWith('{')) events.push(decodeKiroEvent(trimmed, ''));
-    }
+    events.push(toKiroEvent(eventType, payload));
+    offset = frameEnd;
   }
   return events;
 }
 
-/** The last event carrying a value of this kind, without needing ES2023's `findLast`. */
+/** Maps one decoded frame onto the fields this adapter can use. */
+export function toKiroEvent(eventType: string, payload: Json): KiroEvent {
+  if (eventType === 'assistantResponseEvent') {
+    const text = readString(payload, ['content', 'text']);
+    return text === undefined ? { type: eventType } : { type: eventType, text };
+  }
+  if (eventType === 'contextUsageEvent') {
+    const percent = readNumber(payload, ['contextUsagePercentage', 'contextUsagePercent']);
+    return percent === undefined ? { type: eventType } : { type: eventType, contextUsagePercent: percent };
+  }
+  if (eventType === 'meteringEvent') {
+    const used = readNumber(payload, ['usage', 'creditsUsed']);
+    return used === undefined ? { type: eventType } : { type: eventType, creditsUsed: used };
+  }
+  return { type: eventType };
+}
+
+/** Kiro's wording for an id the signed-in plan does not carry. */
+function isKiroInvalidModel(error: unknown): boolean {
+  const detail = (error as { details?: { providerMessage?: string } } | undefined)?.details?.providerMessage ?? '';
+  return /invalid model|different model/i.test(detail);
+}
+
+/** The last frame carrying a value of this kind. The target is ES2022, so no `findLast`. */
 function lastOf<T>(events: readonly KiroEvent[], pick: (event: KiroEvent) => T | undefined): T | undefined {
   for (let index = events.length - 1; index >= 0; index--) {
     const event = events[index];
@@ -425,10 +619,6 @@ function lastOf<T>(events: readonly KiroEvent[], pick: (event: KiroEvent) => T |
     if (value !== undefined) return value;
   }
   return undefined;
-}
-
-function newConversationId(): string {
-  return globalThis.crypto.randomUUID();
 }
 
 function conversationIdFor(request: ChatRequest): string {
@@ -495,21 +685,40 @@ export class KiroAdapter implements ProviderAdapter {
         publicMessage: `Kiro does not offer a model called ${request.model}. Sign in to refresh the catalog.`,
       });
     }
-    const response = await this.transport.request<string>({
-      method: 'POST',
-      providerId: this.id,
-      url: KIRO.inferenceUrl,
-      headers: kiroHeaders(credential),
-      body: JSON.stringify(toKiroBody(request, conversationIdFor(request))),
-      ...(context.signal ? { signal: context.signal } : {}),
-    });
-    const body = typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? '');
-    const events = parseKiroEventStream(body);
+    let response: { status: number; headers: Headers; data: Uint8Array };
+    try {
+      response = await this.transport.request<Uint8Array>({
+        method: 'POST',
+        providerId: this.id,
+        url: KIRO.inferenceUrl,
+        headers: kiroHeaders(credential),
+        body: JSON.stringify(toKiroBody(request, conversationIdFor(request), credential)),
+        // Read as bytes: the answer is a binary eventstream and a text decode corrupts it.
+        responseAs: 'bytes',
+        ...(context.signal ? { signal: context.signal } : {}),
+      });
+    } catch (error) {
+      /**
+       * An id the plan does not carry comes back as a 400 that reads like a malformed
+       * request. Naming the model is the difference between "Kiro is broken" and "this
+       * account cannot use this model", and only the first of those is our fault.
+       */
+      if (isKiroInvalidModel(error)) {
+        throw new ProviderError('NOT_SUPPORTED', `Your Kiro plan does not offer ${request.model}.`, {
+          providerId: this.id,
+          publicMessage: `Your Kiro plan does not offer ${request.model}. Kiro serves it to some accounts and not others.`,
+          cause: error,
+        });
+      }
+      throw error;
+    }
+    const events = decodeKiroStream(response.data ?? new Uint8Array());
     const text = events.map((event) => event.text ?? '').join('');
-    const reasoning = events.map((event) => event.reasoning ?? '').join('');
-    const stopReason = lastOf(events, (event) => event.stopReason) ?? 'stop';
-    const usage = lastOf(events, (event) => event.usage);
-    if (!text && !reasoning) {
+    // Kiro ends the stream by closing it; it publishes no stop event, so `stop` is the
+    // only honest answer rather than a reason read from an event that never arrives.
+    const creditsUsed = lastOf(events, (event) => event.creditsUsed);
+    const contextUsagePercent = lastOf(events, (event) => event.contextUsagePercent);
+    if (!text) {
       throw new ProviderError('INVALID_RESPONSE', 'Kiro returned no answer text.', {
         providerId: this.id,
         publicMessage: 'Kiro returned no answer text.',
@@ -521,8 +730,14 @@ export class KiroAdapter implements ProviderAdapter {
       model: request.model,
       createdAt: new Date().toISOString(),
       message: { role: 'assistant', content: text },
-      finishReason: stopReason,
-      ...(usage ? { usage } : {}),
+      finishReason: 'stop',
+      /**
+       * Kiro meters credits and publishes no token counts, so `usage` is left unset
+       * rather than reported as zero. The credit cost is carried separately because it is
+       * the real figure and dropping it would leave the call looking free.
+       */
+      ...(creditsUsed === undefined ? {} : { meters: { unit: 'credit', amount: creditsUsed } }),
+      ...(contextUsagePercent === undefined ? {} : { contextUsagePercent }),
     };
   }
 
@@ -570,5 +785,3 @@ export class KiroAdapter implements ProviderAdapter {
     return renewed;
   }
 }
-
-export { newConversationId };

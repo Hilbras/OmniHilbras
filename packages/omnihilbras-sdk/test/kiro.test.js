@@ -1,20 +1,49 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
   KIRO,
   KIRO_MODELS,
   KiroAdapter,
-  decodeKiroEvent,
+  decodeKiroStream,
   kiroCredentialExpired,
-  parseKiroEventStream,
   toKiroBody,
+  toKiroEvent,
 } from '../dist/index.js';
 
 /**
  * Kiro is CodeWhisperer's streaming service, not an OpenAI-compatible endpoint, so the
- * envelope and the eventstream framing are the integration. Both are pinned here, because
- * a framing bug produces a truncated or empty answer rather than an error.
+ * envelope and the binary framing are the whole integration.
+ *
+ * The framing tests run against `fixtures/kiro-stream.bin`, which is a **real captured
+ * response** — a 7-frame AWS eventstream read off the live service. An earlier version of
+ * this file built its own fixture for a text framing the service never sends, every test
+ * passed, and not one request worked. The encoder below exists only to build extra cases;
+ * the format itself is pinned by the bytes the provider actually returned.
  */
+
+const realStream = new Uint8Array(readFileSync(fileURLToPath(new URL('./fixtures/kiro-stream.bin', import.meta.url))));
+
+/** Builds one frame in the same layout, for cases the capture does not contain. */
+function frame(eventType, payload, { omitEventType = false } = {}) {
+  const header = (name, value) => {
+    const nameBytes = Buffer.from(name, 'utf8');
+    const valueBytes = Buffer.from(value, 'utf8');
+    const length = Buffer.alloc(2);
+    length.writeUInt16BE(valueBytes.length);
+    return Buffer.concat([Buffer.from([nameBytes.length]), nameBytes, Buffer.from([7]), length, valueBytes]);
+  };
+  const headers = omitEventType
+    ? Buffer.concat([header(':content-type', 'application/json')])
+    : Buffer.concat([header(':event-type', eventType), header(':content-type', 'application/json')]);
+  const body = Buffer.from(JSON.stringify(payload), 'utf8');
+  const prelude = Buffer.alloc(12);
+  prelude.writeUInt32BE(16 + headers.length + body.length, 0);
+  prelude.writeUInt32BE(headers.length, 4);
+  // The CRCs are not verified by the decoder, so a fixed value is enough here.
+  return Buffer.concat([prelude, headers, body, Buffer.alloc(4)]);
+}
 
 function transport(script) {
   const requests = [];
@@ -38,7 +67,11 @@ function transport(script) {
   };
 }
 
-const request = (model = 'claude-sonnet-4.5', messages = [{ role: 'user', content: 'hi' }]) => ({ model, messages, maxOutputTokens: 256 });
+const request = (model = 'claude-haiku-4.5', messages = [{ role: 'user', content: 'hi' }]) => ({
+  model,
+  messages,
+  maxOutputTokens: 256,
+});
 const session = { type: 'oauth', value: 'access-token', refreshToken: 'r1' };
 
 test('the auth constants are the public AWS ones, with no embedded secret', () => {
@@ -49,6 +82,153 @@ test('the auth constants are the public AWS ones, with no embedded secret', () =
   assert.ok(KIRO.scopes.includes('codewhisperer:completions'));
   // Nothing here is a credential, so this file can be committed.
   assert.equal(JSON.stringify(KIRO).includes('secret'), false);
+});
+
+test('the real captured stream decodes to the answer Kiro actually gave', () => {
+  const events = decodeKiroStream(realStream);
+  // 7 frames, consumed exactly — a decoder that stops early would still "pass" a
+  // truthiness check on the text, so the count is asserted too.
+  assert.equal(events.length, 7);
+  const text = events.map((event) => event.text ?? '').join('');
+  assert.equal(text, 'Hey. What are you working on?');
+});
+
+test('the captured frames are the event names Kiro really sends', () => {
+  // No `messageStopEvent` and no `usageEvent` exist in a real response. An adapter that
+  // waits for them waits forever, and one that reports them is inventing them.
+  const types = decodeKiroStream(realStream).map((event) => event.type);
+  assert.deepEqual(new Set(types), new Set(['assistantResponseEvent', 'contextUsageEvent', 'meteringEvent']));
+  assert.equal(types.includes('messageStopEvent'), false);
+  assert.equal(types.includes('usageEvent'), false);
+});
+
+test('credits and context usage are read rather than dropped', () => {
+  // Kiro meters credits and publishes no token counts, so this is the only cost signal.
+  const events = decodeKiroStream(realStream);
+  const metered = events.find((event) => event.type === 'meteringEvent');
+  assert.ok(typeof metered.creditsUsed === 'number' && metered.creditsUsed > 0);
+  const context = events.find((event) => event.type === 'contextUsageEvent');
+  assert.ok(typeof context.contextUsagePercent === 'number');
+});
+
+test('a live request returns the text, the finish reason, and the credit cost', async () => {
+  const t = transport({ [KIRO.inferenceUrl]: { data: realStream } });
+  const adapter = new KiroAdapter({ transport: t });
+  const response = await adapter.chat(request(), { credential: session });
+  assert.equal(response.message.content, 'Hey. What are you working on?');
+  // The stream simply ends; there is no stop event to read a reason from.
+  assert.equal(response.finishReason, 'stop');
+  assert.equal(response.meters?.unit, 'credit');
+  assert.ok(response.meters.amount > 0);
+  // Kiro publishes no token counts, so none are invented.
+  assert.equal(response.usage, undefined);
+});
+
+test('the request asks for bytes, because a text decode corrupts the stream', async () => {
+  const t = transport({ [KIRO.inferenceUrl]: { data: realStream } });
+  await new KiroAdapter({ transport: t }).chat(request(), { credential: session });
+  assert.equal(t.requests[0].responseAs, 'bytes');
+  assert.equal(t.requests[0].headers['X-Amz-Target'], KIRO.streamingTarget);
+  assert.equal(t.requests[0].headers.accept, KIRO.eventStreamAccept);
+  assert.equal(t.requests[0].headers.Authorization, 'Bearer access-token');
+});
+
+test('a request carries no profileArn when the session has no profile', async () => {
+  // An empty `profileArn` is not the same as no profile: Kiro answers
+  // `400 Improperly formed request` for it, which cost a debugging round trip.
+  const body = toKiroBody(request(), 'conv-1', session);
+  assert.equal('profileArn' in body, false);
+  const t = transport({ [KIRO.inferenceUrl]: { data: realStream } });
+  await new KiroAdapter({ transport: t }).chat(request(), { credential: session });
+  assert.equal(JSON.parse(t.requests[0].body).profileArn, undefined);
+});
+
+test('a session scoped to a profile does send its profileArn', () => {
+  const body = toKiroBody(request(), 'conv-1', { ...session, accountId: 'arn:aws:codewhisperer:us-east-1:1:profile/PROFILE' });
+  assert.equal(body.profileArn, 'arn:aws:codewhisperer:us-east-1:1:profile/PROFILE');
+});
+
+test('an empty-string profileArn is not sent, because it is a 400', () => {
+  const body = toKiroBody(request(), 'conv-1', { ...session, accountId: '' });
+  assert.equal('profileArn' in body, false);
+});
+
+test('a truncated stream yields the frames that arrived and stops', () => {
+  // Cutting the body mid-frame must not read past the end or invent a final event.
+  const events = decodeKiroStream(realStream.subarray(0, 500));
+  assert.ok(events.length >= 1 && events.length < 7);
+  assert.equal(decodeKiroStream(new Uint8Array()).length, 0);
+});
+
+test('a frame claiming an impossible length ends the walk instead of reading past it', () => {
+  const corrupt = Buffer.from(realStream);
+  corrupt.writeUInt32BE(0xfffffff0, 0);
+  assert.deepEqual(decodeKiroStream(new Uint8Array(corrupt)), []);
+});
+
+test('a frame with no event-type header is still an event, not a dropped one', () => {
+  const bytes = new Uint8Array(frame('assistantResponseEvent', { content: 'x' }, { omitEventType: true }));
+  const events = decodeKiroStream(bytes);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].text, undefined, 'no type means no text is claimed');
+});
+
+test('several frames are joined into one answer', () => {
+  const bytes = Buffer.concat([
+    frame('assistantResponseEvent', { content: 'Hello' }),
+    frame('assistantResponseEvent', { content: ' world' }),
+  ]);
+  assert.equal(
+    decodeKiroStream(new Uint8Array(bytes))
+      .map((event) => event.text ?? '')
+      .join(''),
+    'Hello world',
+  );
+});
+
+test('an unparseable payload still counts as a frame', () => {
+  const event = toKiroEvent('assistantResponseEvent', {});
+  assert.equal(event.type, 'assistantResponseEvent');
+  assert.equal(event.text, undefined);
+});
+
+test('an unknown event name is carried through rather than dropped', () => {
+  const event = toKiroEvent('someNewEvent', { anything: true });
+  assert.equal(event.type, 'someNewEvent');
+});
+
+test('a model the plan does not carry says so, rather than reading as a broken request', async () => {
+  // Kiro answers a 400 that reads like a malformed request. Naming the entitlement is the
+  // difference between "Kiro is broken" and "this account cannot use this model".
+  const t = transport({
+    [KIRO.inferenceUrl]: {
+      status: 400,
+      message: 'The provider request failed.',
+      detail: 'Invalid model. Please select a different model to continue.',
+    },
+  });
+  await assert.rejects(
+    () => new KiroAdapter({ transport: t }).chat(request('claude-sonnet-5'), { credential: session }),
+    (error) => error.code === 'NOT_SUPPORTED' && /plan does not offer claude-sonnet-5/.test(error.publicMessage ?? ''),
+  );
+});
+
+test('any other provider failure is passed through unchanged', async () => {
+  const t = transport({
+    [KIRO.inferenceUrl]: { status: 500, message: 'The provider request failed.', detail: 'Internal server error' },
+  });
+  await assert.rejects(
+    () => new KiroAdapter({ transport: t }).chat(request(), { credential: session }),
+    (error) => error.code !== 'NOT_SUPPORTED',
+  );
+});
+
+test('an empty answer is a failure, not a silent success', async () => {
+  const t = transport({ [KIRO.inferenceUrl]: { data: new Uint8Array(frame('meteringEvent', { usage: 0.01 })) } });
+  await assert.rejects(
+    () => new KiroAdapter({ transport: t }).chat(request(), { credential: session }),
+    (error) => error.code === 'INVALID_RESPONSE' && /no answer text/.test(error.publicMessage ?? ''),
+  );
 });
 
 test('the envelope is a conversationState, and the model rides on the current message', () => {
@@ -92,102 +272,24 @@ test('earlier turns become history, with the assistant side named as Kiro names 
 });
 
 test('message content given as parts is flattened rather than dropped', () => {
-  const body = toKiroBody({ model: 'claude-sonnet-4.5', messages: [{ role: 'user', content: [{ type: 'text', text: 'part one ' }, { type: 'text', text: 'part two' }] }] }, 'conv-1');
+  const body = toKiroBody(
+    { model: 'claude-sonnet-4.5', messages: [{ role: 'user', content: [{ type: 'text', text: 'part one ' }, { type: 'text', text: 'part two' }] }] },
+    'conv-1',
+  );
   assert.match(body.conversationState.currentMessage.userInputMessage.content, /part one part two/);
-});
-
-test('the eventstream framing is read, not guessed', () => {
-  // The real shape: `:event-type:` metadata lines and `data:` payloads.
-  const body = [
-    ':event-type: assistantResponseEvent',
-    'data: {"content":"Hello"}',
-    '',
-    ':event-type: assistantResponseEvent',
-    'data: {"content":" world"}',
-    '',
-    ':event-type: messageStopEvent',
-    'data: {"stopReason":"end_turn"}',
-  ].join('\n');
-  const events = parseKiroEventStream(body);
-  assert.deepEqual(events.map((event) => event.type), ['assistantResponseEvent', 'assistantResponseEvent', 'messageStopEvent']);
-  assert.equal(events.map((event) => event.text).join(''), 'Hello world');
-  assert.equal(events[2].stopReason, 'stop');
-});
-
-test('a bare JSON body with no framing still yields an answer', () => {
-  // A framing change upstream must not read as an empty response.
-  const events = parseKiroEventStream('{"assistantResponseEvent":{"content":"plain"}}');
-  assert.equal(events.length, 1);
-  assert.equal(events[0].text, 'plain');
-});
-
-test('usage and reasoning events are read without becoming answer text', () => {
-  const body = [
-    ':event-type: reasoningContentEvent',
-    'data: {"content":"thinking hard"}',
-    ':event-type: assistantResponseEvent',
-    'data: {"content":"answer"}',
-    ':event-type: usageEvent',
-    'data: {"inputTokens":10,"outputTokens":4}',
-  ].join('\n');
-  const events = parseKiroEventStream(body);
-  assert.equal(events[0].type, 'reasoningContentEvent');
-  assert.equal(events[0].reasoning, 'thinking hard');
-  assert.equal(events[0].text, undefined, 'reasoning is not answer text');
-  assert.deepEqual(events[2].usage, { inputTokens: 10, outputTokens: 4 });
-});
-
-test('a max-token stop is reported as length, not as a normal stop', () => {
-  assert.equal(decodeKiroEvent('{"stopReason":"max_tokens"}', 'messageStopEvent').stopReason, 'length');
-  assert.equal(decodeKiroEvent('{"stopReason":"end_turn"}', 'messageStopEvent').stopReason, 'stop');
-});
-
-test('an event with no usable body is kept as an event rather than dropped', () => {
-  // Dropping it silently is indistinguishable from a truncated answer.
-  const event = decodeKiroEvent('{"toolUseEvent":{"toolUseId":"t1"}}', 'toolUseEvent');
-  assert.equal(event.type, 'toolUseEvent');
-  assert.equal(event.text, undefined);
 });
 
 test('a model Kiro does not offer is refused before a request is spent', async () => {
   const t = transport({});
-  const adapter = new KiroAdapter({ transport: t });
   await assert.rejects(
-    () => adapter.chat(request('claude-opus-9-imaginary'), { credential: session }),
+    () => new KiroAdapter({ transport: t }).chat(request('claude-opus-9-imaginary'), { credential: session }),
     (error) => error.code === 'NOT_SUPPORTED' && /does not offer/.test(error.publicMessage ?? ''),
   );
   assert.equal(t.requests.length, 0, 'no request is sent for a model that cannot exist');
 });
 
-test('a chat request is sent to the streaming service with the AWS framing headers', async () => {
-  const t = transport({
-    [KIRO.inferenceUrl]: {
-      data: [':event-type: assistantResponseEvent', 'data: {"content":"OK"}', ':event-type: messageStopEvent', 'data: {"stopReason":"end_turn"}'].join('\n'),
-    },
-  });
-  const adapter = new KiroAdapter({ transport: t });
-  const response = await adapter.chat(request(), { credential: session });
-  const sent = t.requests[0];
-  assert.equal(sent.url, KIRO.inferenceUrl);
-  assert.equal(sent.headers['X-Amz-Target'], KIRO.streamingTarget);
-  assert.equal(sent.headers.accept, KIRO.eventStreamAccept);
-  assert.equal(sent.headers.Authorization, 'Bearer access-token');
-  assert.equal(response.message.content, 'OK');
-  assert.equal(response.finishReason, 'stop');
-});
-
-test('an empty answer is a failure, not a silent success', async () => {
-  const t = transport({ [KIRO.inferenceUrl]: { data: ':event-type: messageStopEvent\ndata: {"stopReason":"end_turn"}' } });
-  const adapter = new KiroAdapter({ transport: t });
-  await assert.rejects(
-    () => adapter.chat(request(), { credential: session }),
-    (error) => error.code === 'INVALID_RESPONSE' && /no answer text/.test(error.publicMessage ?? ''),
-  );
-});
-
 test('the catalog is the known set, and every id is one Kiro really serves', async () => {
-  const adapter = new KiroAdapter({ transport: transport({}) });
-  const models = await adapter.listModels();
+  const models = await new KiroAdapter({ transport: transport({}) }).listModels();
   assert.deepEqual(models.map((model) => model.id), KIRO_MODELS.map((model) => model.id));
   assert.ok(models.every((model) => model.displayName), 'each model carries a name for the dashboard');
   // There is no wildcard, and an unknown id is a 400 upstream, so nothing invented here.

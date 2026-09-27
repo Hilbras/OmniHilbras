@@ -72,6 +72,18 @@ export type TokenUsage = {
   totalTokens?: number;
 };
 
+/**
+ * A cost the provider reports in something other than tokens.
+ *
+ * Kiro meters credits and publishes no token counts. Without a place to carry that, the
+ * only options are dropping it — which makes a metered call look free — or reporting it
+ * as zero tokens, which is a different and equally false claim.
+ */
+export type Meters = {
+  unit: string;
+  amount: number;
+};
+
 export type ChatResponse = {
   id: string;
   providerId: ProviderId;
@@ -80,6 +92,10 @@ export type ChatResponse = {
   message: ChatMessage;
   finishReason: FinishReason;
   usage?: TokenUsage;
+  /** Set when the provider meters this call in something other than tokens. */
+  meters?: Meters;
+  /** Share of the context window the provider reports as used, 0–100. */
+  contextUsagePercent?: number;
 };
 
 export type ChatChunk = {

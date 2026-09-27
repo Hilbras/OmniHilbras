@@ -553,6 +553,108 @@ A system turn is folded into the user content, because the envelope has no syste
 A model Kiro does not offer is refused *before* a request is spent, since an unknown id
 comes back as `400 Invalid model` and the catalog has no wildcard to fall back on.
 
+### The binary eventstream, and a parser that was confidently wrong
+
+Kiro's answer is the **binary** AWS eventstream, and the first version of this adapter
+parsed a text framing that the service never sends. Every request returned 200 and every
+one of them failed with `INVALID_RESPONSE` — indistinguishable, from the outside, from a
+provider that had answered nothing. The tests passed the whole time, because they were
+built from the same wrong assumption as the parser.
+
+The layout, read off a real captured response:
+
+```
+u32 total_length     frame length, INCLUDING these four bytes
+u32 headers_length
+u32 prelude_crc
+headers              name_len u8 | name | type u8 | value
+                     type 7 (string) -> value_len u16 | value
+payload              total_length - headers_length - 16
+u32 message_crc
+```
+
+Three things are worth recording, because each was a wrong guess first:
+
+**The header names carry a leading colon.** The bytes are `:event-type`,
+`:content-type`, `:message-type`. That is why the text rendering of the same stream shows
+`:event-type:` and why a parser written against that text rendering looks for the same
+prefix. A parser that strips or omits the colon matches no frame.
+
+**The payload is flat.** A frame carries `{"content":"Hey","modelId":"claude-haiku-4.5"}`,
+not a body nested under a key named after the event. The event name is in the header and
+nowhere else.
+
+**There is no `messageStopEvent` and no `usageEvent`.** A real response is
+`assistantResponseEvent`, `contextUsageEvent` and `meteringEvent`. An adapter that waits
+for a stop event waits forever, and one that reports `usage` for Kiro is inventing it.
+
+`total_length` counts itself, so a frame occupies exactly that many bytes and frames can be
+walked by length rather than scanned for a separator. A frame claiming an impossible length
+ends the walk: a truncated body must not be read as a complete one.
+
+The transport could not carry this at all — it decoded bodies as text, and a UTF-8 decode
+of a binary stream mangles its length prefixes and CRCs into something that looks like an
+empty response. `HttpRequest` therefore takes `responseAs: 'bytes'`, bounded by the same
+limit as the text path.
+
+**Kiro meters credits, not tokens.** `meteringEvent` carries `usage` in credits, and there
+is no token count anywhere in the response. `usage` is left unset rather than reported as
+zero — an absent field is not a zero — and the credit cost is carried in its own `meters`
+field so a metered call is never reported as a free one. `contextUsageEvent` becomes
+`contextUsagePercent`.
+
+The captured response is committed as `test/fixtures/kiro-stream.bin` and the framing tests
+run against those bytes. A hand-built fixture for a guessed format is what made the original
+parser look correct.
+
+### Kiro's six ways in
+
+The reference project this was built from offers six, and they are not variations on one
+thing, so the dialog asks first and each method does only what is true of it.
+
+| Method | Exchange |
+| --- | --- |
+| AWS Builder ID | the device flow above, on the public start URL |
+| Your Organization | the same device flow, pointed at the company's own start URL |
+| Google / GitHub | PKCE against `prod.us-east-1.auth.desktop.kiro.dev` |
+| Import Token | a refresh grant: the pasted token is spent once, the access token is stored |
+| API Key | stored as a bearer credential with no refresh token |
+
+Two of these are worth spelling out.
+
+**A company start URL is validated before it is sent anywhere.** Only `https` on
+`*.awsapps.com` is accepted. That value becomes the `startUrl` of a device grant, so an
+unvalidated one would turn the sign-in dialog into an open redirect carrying a user's
+approval. When AWS rejects a well-formed one it says `Invalid start url provided`, and that
+is passed through: a user who just typed their organisation's name needs to be told the
+name is wrong, not that "it did not work".
+
+**Social sign-in cannot return to this gateway.** The registered redirect is
+`kiro://kiro.kiroAgent/authenticate-success` — a custom scheme, because the identity
+provider whitelists only that one — so the browser hands the code to the Kiro desktop app
+instead of returning here. The code has to be pasted back, and the dialog says so rather
+than opening a tab that silently fails. The PKCE verifier stays in the gateway: the browser
+only ever holds the challenge, so a pasted code cannot be exchanged without it. A code is
+single-use, so the session is claimed before the exchange and released if the exchange
+fails, leaving a mistyped code retryable without letting a spent one through twice.
+
+An API key is stored as given, with no refresh token and no invented expiry. It cannot be
+renewed, so that connection has to be replaced by hand — a property of the key, stated
+rather than hidden.
+
+### Availability is per account, and says so
+
+Kiro answers `400 Invalid model. Please select a different model` for an id the signed-in
+plan does not carry. That is an entitlement, not a broken connection, and it is reported as
+such: the model name is in the message, so the row reads *"Your Kiro plan does not offer
+claude-sonnet-5"* instead of a bare failure. Verified against a live account: the Claude
+4.5/4.5-Haiku, DeepSeek, GLM, MiniMax and Qwen ids answer; the Sonnet 5 and GPT-5.6 tiers
+do not on this plan.
+
+The risk warning gates **all six** methods, not just the first — a method reached by
+scrolling past a checkbox is still a method, and nothing is sent to Kiro or AWS until it is
+acknowledged.
+
 ### Catalog cards added for OpenAI-compatible gateways
 
 A new provider is a catalog card plus, separately, an entry in the add-provider dropdown.

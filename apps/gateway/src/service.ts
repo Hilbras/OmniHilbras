@@ -1,9 +1,9 @@
-import { CLINE_OAUTH, FetchHttpTransport, KiroAdapter, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, FetchHttpTransport, KiroAdapter, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, modelMetaPriceOrder, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ModelMeta, type ModelMetaMap, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
-import { KiroSessionStore, pollKiroSignInWithClaim, startKiroSignIn, type KiroSignInStatus } from './kiro.js';
+import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialSignIn, type KiroSignInStatus } from './kiro.js';
 import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -121,6 +121,7 @@ export class GatewayService {
   private opencodeConsole?: ProviderAdapter;
   private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
   private readonly kiroSessions = new KiroSessionStore();
+  private readonly kiroSocial = new KiroSocialStore();
   private kiro?: ProviderAdapter;
   /** Why the last model discovery failed, when it was tolerated rather than fatal. */
   private lastDiscoveryNote?: string;
@@ -600,8 +601,78 @@ export class GatewayService {
    * Starts a Kiro sign-in. AWS's device flow, so the user approves a code in their own
    * browser and the dashboard waits.
    */
-  async startKiroSignInFlow() {
-    return startKiroSignIn(this.kiroSessions);
+  async startKiroSignInFlow(startUrl?: string) {
+    return startKiroSignIn(this.kiroSessions, startUrl);
+  }
+
+  /**
+   * Connects Kiro from a refresh token or a long-lived API key the user pasted.
+   *
+   * Both are stored through the same path as a sign-in, so the connection that results is
+   * indistinguishable downstream from one built by the device flow.
+   */
+  async connectKiroFromCredential(
+    credential: ProviderCredential,
+    signal?: AbortSignal,
+  ) {
+    return this.saveConnection(
+      {
+        id: kiroProviderId,
+        providerId: kiroProviderId,
+        name: 'Kiro',
+        endpoint: 'https://codewhisperer.us-east-1.amazonaws.com',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      },
+      credential,
+      signal,
+    );
+  }
+
+  /** Spends a pasted refresh token once and stores the access token it returns. */
+  async importKiroRefreshToken(refreshToken: string, signal?: AbortSignal) {
+    return this.connectKiroFromCredential(await importKiroRefreshToken(refreshToken), signal);
+  }
+
+  /** Stores a pasted long-lived key. It cannot be renewed, so it is stored as given. */
+  async connectKiroApiKey(apiKey: string, signal?: AbortSignal) {
+    return this.connectKiroFromCredential(kiroCredentialFromApiKey(apiKey), signal);
+  }
+
+  /**
+   * Starts a Google or GitHub sign-in.
+   *
+   * The returned URL redirects to a `kiro://` scheme that only the Kiro desktop app
+   * handles, so the browser cannot come back here on its own. The user pastes the code
+   * instead, and the exchange happens below.
+   */
+  async startKiroSocialSignInFlow(provider: 'google' | 'github') {
+    return startKiroSocialSignIn(this.kiroSocial, provider);
+  }
+
+  /**
+   * Completes a social sign-in with the code the user pasted.
+   *
+   * The code is spent at most once: a second attempt against the same session is refused
+   * rather than sending an already-used code to Kiro.
+   */
+  async completeKiroSocialSignIn(sessionId: string, code: string, signal?: AbortSignal) {
+    const session = this.kiroSocial.claim(sessionId);
+    if (!session) {
+      throw new ProviderError('INVALID_REQUEST', 'This sign-in has expired or was already completed. Start again.', {
+        providerId: kiroProviderId,
+        publicMessage: 'This sign-in has expired or was already completed. Start again.',
+      });
+    }
+    try {
+      const credential = await exchangeKiroSocialCode(session, code);
+      return await this.connectKiroFromCredential(credential, signal);
+    } catch (error) {
+      // A failed exchange leaves the session usable, so a mistyped code can be retried.
+      this.kiroSocial.release(sessionId);
+      throw error;
+    }
   }
 
   /**

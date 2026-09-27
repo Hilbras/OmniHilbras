@@ -1,10 +1,18 @@
 import {
   KIRO_MODELS,
   beginKiroSignIn,
+  buildKiroSocialUrl,
+  createKiroPkce,
   kiroProviderId,
+  kiroSocialSessionExpired,
+  newKiroSocialState,
   pollKiroSignIn,
+  refreshKiroCredential,
   type KiroDeviceAuthorization,
+  type KiroSocialProvider,
+  type KiroSocialSession,
 } from '@hilbras/omnihilbras';
+import { ProviderError } from '@hilbras/omnihilbras';
 import type { ProviderCredential } from '@hilbras/omnihilbras';
 
 /**
@@ -104,8 +112,8 @@ export class KiroSessionStore {
   }
 }
 
-export async function startKiroSignIn(store: KiroSessionStore) {
-  const authorization = await beginKiroSignIn();
+export async function startKiroSignIn(store: KiroSessionStore, startUrl?: string) {
+  const authorization = await beginKiroSignIn(startUrl);
   const session = store.create(authorization);
   return {
     sessionId: session.id,
@@ -113,6 +121,28 @@ export async function startKiroSignIn(store: KiroSessionStore) {
     verificationUrl: session.authorization.verificationUrl,
     expiresAt: new Date(session.expiresAt).toISOString(),
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * Imported credentials
+ * ------------------------------------------------------------------ */
+
+/**
+ * Exchanges a refresh token the user exported from Kiro for a usable session.
+ *
+ * This is a real exchange, not a stored paste: the refresh token is spent once to get an
+ * access token, and the *access* token is what gets stored, so the imported secret is not
+ * the thing every request authenticates with.
+ */
+export async function importKiroRefreshToken(refreshToken: string): Promise<ProviderCredential> {
+  const trimmed = refreshToken.trim();
+  if (!trimmed) {
+    throw new ProviderError('INVALID_REQUEST', 'Paste a Kiro refresh token to import.', {
+      providerId: kiroProviderId,
+      publicMessage: 'Paste a Kiro refresh token to import.',
+    });
+  }
+  return refreshKiroCredential({ type: 'oauth', value: '', refreshToken: trimmed });
 }
 
 export type KiroPollOutcome =
@@ -154,3 +184,66 @@ export async function pollKiroSignInWithClaim(store: KiroSessionStore, sessionId
 }
 
 export { KIRO_MODELS, kiroProviderId };
+
+
+/* ------------------------------------------------------------------ *
+ * Social sign-in sessions
+ * ------------------------------------------------------------------ */
+
+/**
+ * One in-flight Google or GitHub sign-in.
+ *
+ * The PKCE verifier lives here and never leaves the gateway: the browser only ever holds
+ * the challenge, so a code pasted into it cannot be exchanged without the matching
+ * verifier. Sessions are dropped once they age out, and a code can only be spent once —
+ * an authorization code is single-use, so a double submit must not burn it.
+ */
+export class KiroSocialStore {
+  private readonly sessions = new Map<string, KiroSocialSession & { claimed: boolean }>();
+
+  create(provider: KiroSocialProvider, verifier: string, state: string): string {
+    this.sweep();
+    const id = crypto.randomUUID().replace(/-/g, '');
+    this.sessions.set(id, { provider, verifier, state, createdAt: Date.now(), claimed: false });
+    return id;
+  }
+
+  get(id: string): (KiroSocialSession & { claimed: boolean }) | undefined {
+    if (!sessionIdPattern.test(id)) return undefined;
+    const session = this.sessions.get(id);
+    if (!session) return undefined;
+    if (kiroSocialSessionExpired(session)) {
+      this.sessions.delete(id);
+      return undefined;
+    }
+    return session;
+  }
+
+  /** Returns the session only if its code has not been spent, and marks it spent. */
+  claim(id: string): KiroSocialSession | undefined {
+    const stored = this.get(id);
+    if (!stored || stored.claimed) return undefined;
+    stored.claimed = true;
+    return stored;
+  }
+
+  /** Un-claims a session whose exchange did not go through, so the code can be retried. */
+  release(id: string) {
+    const stored = this.sessions.get(id);
+    if (stored) stored.claimed = false;
+  }
+
+  private sweep() {
+    for (const [id, session] of this.sessions) {
+      if (kiroSocialSessionExpired(session)) this.sessions.delete(id);
+    }
+  }
+}
+
+/** Starts a Google or GitHub sign-in and returns the URL the user must open. */
+export async function startKiroSocialSignIn(store: KiroSocialStore, provider: KiroSocialProvider) {
+  const { verifier, challenge } = await createKiroPkce();
+  const state = newKiroSocialState();
+  const sessionId = store.create(provider, verifier, state);
+  return { sessionId, authUrl: buildKiroSocialUrl(provider, challenge, state) };
+}
