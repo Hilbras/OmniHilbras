@@ -1,7 +1,8 @@
-import { CLINE_OAUTH, FetchHttpTransport, OpenAICompatibleAdapter, ProviderError, ZenAdapter, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, FetchHttpTransport, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
+import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -116,6 +117,8 @@ export class GatewayService {
   private readonly transport: HttpTransport;
   private cline?: ProviderAdapter;
   private zen?: ProviderAdapter;
+  private opencodeConsole?: ProviderAdapter;
+  private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
   private readonly clineSessions = new ClineSessionStore();
   private readonly providerHealth: HealthRegistry;
   private readonly rateLimiter: SlidingWindowRateLimiter;
@@ -235,6 +238,10 @@ export class GatewayService {
     }
     if (connections.some((connection) => connection.providerId === 'opencode' && connection.hasCredential)) {
       adapters.set('opencode', this.zenAdapter());
+    }
+    const consoleConnection = connections.find((connection) => connection.providerId === opencodeConsoleProviderId && connection.hasCredential);
+    if (consoleConnection) {
+      adapters.set(opencodeConsoleProviderId, this.opencodeConsoleAdapter(consoleConnection.id));
     }
     for (const connection of connections) {
       if (adapters.has(connection.providerId)) continue;
@@ -357,6 +364,60 @@ export class GatewayService {
   }
 
   /**
+   * Starts an OpenCode Console sign-in. This is a device flow: the Console hands back a
+   * code the user types into its own page, so the dashboard shows the code and waits
+   * rather than following a redirect.
+   */
+  async startOpencodeConsoleSignIn() {
+    const started = await beginOpencodeConsoleSignIn();
+    const session = this.opencodeConsoleSessions.create(started);
+    return {
+      sessionId: session.id,
+      userCode: session.userCode,
+      verificationUrl: session.verificationUrl,
+      expiresAt: new Date(session.expiresAt).toISOString(),
+    };
+  }
+
+  /**
+   * Reports whether the device sign-in finished, exchanging the code on the first poll
+   * that finds it approved. The exchange is claimed, so a dashboard that polls twice
+   * cannot spend the same grant twice.
+   */
+  async opencodeConsoleSignInStatus(sessionId: string, signal?: AbortSignal): Promise<OpencodeConsoleSessionStatus | undefined> {
+    const session = this.opencodeConsoleSessions.get(sessionId);
+    if (!session) return undefined;
+    if (session.status !== 'pending') return this.opencodeConsoleSessions.publicStatus(session);
+
+    const outcome = await pollOpencodeConsoleSignIn(session.deviceCode);
+    if (outcome.status === 'pending') return this.opencodeConsoleSessions.publicStatus(session);
+    if (outcome.status === 'denied') {
+      this.opencodeConsoleSessions.resolve(session.id, { status: 'failed', error: outcome.error });
+      return this.opencodeConsoleSessions.publicStatus(session);
+    }
+    try {
+      // `orgName` only exists on the OAuth variant, so the union is narrowed rather
+      // than read blind.
+      const orgName = outcome.credential.type === 'oauth' ? outcome.credential.orgName : undefined;
+      const connection = await this.saveConnection({
+        id: opencodeConsoleProviderId,
+        providerId: opencodeConsoleProviderId,
+        name: `OpenCode Console${orgName ? ` (${orgName})` : ''}`,
+        endpoint: 'https://opencode.ai/inference/openai/v1',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      }, outcome.credential, signal);
+      // The whole record, so the dashboard can render the page without a second fetch.
+      this.opencodeConsoleSessions.resolve(session.id, { status: 'connected', connection });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'The sign-in could not be completed.';
+      this.opencodeConsoleSessions.resolve(session.id, { status: 'failed', error: message });
+    }
+    return this.opencodeConsoleSessions.publicStatus(session);
+  }
+
+  /**
    * Starts a Cline sign-in and returns the URL to send the browser to. The
    * session id is how the dashboard learns the outcome; the `state` is what the
    * callback must echo back.
@@ -428,6 +489,26 @@ export class GatewayService {
   zenAdapter(): ProviderAdapter {
     if (!this.zen) this.zen = new ZenAdapter({ transport: this.transport });
     return this.zen;
+  }
+
+  /**
+   * OpenCode Console is the credential that reaches the free Zen models, and it serves
+   * the catalog from lanes the server names rather than one fixed base URL, so the
+   * generic on-demand adapter cannot stand in for it.
+   */
+  opencodeConsoleAdapter(connectionId: string): ProviderAdapter {
+    if (!this.opencodeConsole) {
+      this.opencodeConsole = new OpencodeConsoleAdapter({
+        transport: this.transport,
+        // A renewal has to outlive the request that triggered it, or the next one
+        // would present a token the Console has already replaced.
+        onTokensRefreshed: async (credential) => {
+          if (!this.connectionStore) return;
+          await this.connectionStore.set(connectionId, credential).catch(() => undefined);
+        },
+      });
+    }
+    return this.opencodeConsole;
   }
 
   clineAdapter(): ProviderAdapter {
@@ -881,6 +962,7 @@ export class GatewayService {
   private async resolveAdapter(providerId: string, pendingEndpoint?: { endpoint: string; name: string }): Promise<ProviderAdapter> {
     if (providerId === 'cline') return this.clineAdapter();
     if (providerId === 'opencode') return this.zenAdapter();
+    if (providerId === opencodeConsoleProviderId) return this.opencodeConsoleAdapter(providerId);
     const registered = this.registry.get(providerId);
     if (registered) return registered;
     // A connection being saved is not in the store yet, so the caller can pass

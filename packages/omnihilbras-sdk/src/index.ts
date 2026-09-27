@@ -11,4 +11,5 @@ export * from './streaming.js';
 export * from './transport.js';
 export * from './types.js';
 export * from './adapters/zen.js';
+export * from './adapters/opencode-console.js';
 export * from './url.js';

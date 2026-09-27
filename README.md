@@ -157,10 +157,15 @@ different models from different vendors, and the ids are close enough to mix up.
 OpenRouter one answers on a paid route; the Zen one does not.
 
 **An API key cannot reach them; a Console sign-in can.** The free Zen models are gated on
-the credential, not on the address. Signed in to OpenCode Console — the device flow the
-OpenCode client runs for itself — they answer at zero cost. With an API key, or the
-`public` sentinel, every lane returns `403`, under every header combination, on Node and
-Bun alike.
+the credential, not on the address. With an API key, or the `public` sentinel, every lane
+returns `403`, under every header combination, on Node and Bun alike.
+
+The **OpenCode Console** card in OAuth Providers signs in with the device flow the
+OpenCode client runs for itself, and those models then answer at zero cost. A session
+also changes the endpoints: the catalog is served from `/inference/openai/v1`,
+`/inference/anthropic/v1` and `/inference/google/v1beta`, with the lanes read from the
+account's own config rather than hardcoded. Those lanes return real billing answers where
+`/zen/v1` returns a bare `402`.
 
 That also corrects two earlier claims in this file's history: the block is not an
 egress-IP matter, and it is not a provider-relay quirk. 9router's Proxy Pool is offered

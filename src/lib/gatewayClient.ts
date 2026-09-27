@@ -331,6 +331,35 @@ export function getClineSignInStatus(sessionId: string, signal?: AbortSignal) {
   return requestJson<GatewayOauthSignInStatus>(`/v1/oauth/cline/session/${encodeURIComponent(sessionId)}`, { signal });
 }
 
+/**
+ * A device-flow sign-in. The provider hands back a code the user types into its own
+ * page, so there is no authUrl to navigate to and nothing is echoed back on a callback.
+ */
+export type GatewayDeviceSignIn = {
+  sessionId: string;
+  userCode: string;
+  verificationUrl: string;
+  expiresAt: string;
+};
+
+export type GatewayDeviceSignInStatus = GatewayOauthSignInStatus & {
+  userCode?: string;
+  verificationUrl?: string;
+};
+
+export function startGatewayDeviceSignIn(signal?: AbortSignal) {
+  return requestJson<GatewayDeviceSignIn>('/v1/oauth/opencode-console/start', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+    ...(signal ? { signal } : {}),
+  });
+}
+
+export function getDeviceSignInStatus(sessionId: string, signal?: AbortSignal) {
+  return requestJson<GatewayDeviceSignInStatus>(`/v1/oauth/opencode-console/session/${encodeURIComponent(sessionId)}`, { signal });
+}
+
 export function getGatewayOauthAuthorization(providerId: string, signal?: AbortSignal) {
   return requestJson<GatewayOauthAuthorization>(`/v1/oauth/${encodeURIComponent(providerId)}/authorize`, { signal });
 }

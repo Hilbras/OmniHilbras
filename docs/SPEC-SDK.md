@@ -381,6 +381,48 @@ with that header, on that lane, streaming or not, still earns a `403` — the or
 not the gate either. Those lanes are worth using regardless: they return real billing
 answers, where `/zen/v1` on a paid model returns a bare `402`.
 
+### OpenCode Console: the credential that works
+
+The restricted free models are reachable, and the credential that reaches them is an
+**OpenCode Console session**, not an API key. The provider signs in with the same device
+flow the OpenCode client runs for itself.
+
+| Step | Call |
+| --- | --- |
+| Request a code | `POST console.opencode.ai/auth/device/code` with `client_id: opencode-cli` |
+| Read the approval | `POST console.opencode.ai/auth/device/token` with the device-code grant |
+| Identify the account | `GET console.opencode.ai/api/user` and `/api/orgs` |
+| Read the live config | `GET console.opencode.ai/api/config` |
+
+A pending poll answers **HTTP 400** with `error: authorization_pending`, so the status has
+to be read from the body rather than treated as a failure. The verification URI comes
+back **relative** and has to be joined to the server. `expires_in` is 600 seconds and
+`interval` is 5.
+
+`OpencodeConsoleAdapter` then serves the catalog from the lanes the server names rather
+than one fixed base URL:
+
+| Lane | Models | Dispatch |
+| --- | --- | --- |
+| `/inference/openai/v1` | 54, all 7 free models | `OpenAICompatibleAdapter` |
+| `/inference/anthropic/v1` | 16, the Claude models | `AnthropicAdapter` |
+| `/inference/google/v1beta` | 7, the Gemini models | refused by name |
+
+Two details worth stating, because both were bugs before they were tests:
+
+**The lane adapters take a bare token and reject an OAuth credential.** Rather than widen
+their contract for one caller, the access token is handed across as an `api-key`
+credential at the adapter boundary. The org id rides on the adapter config, which is the
+only place either adapter accepts extra headers.
+
+**A request resolves the credential more than once** — once to read the lanes, once to
+send — so a renewal is memoised against the token it replaced. Without that, one request
+burns two refresh grants and the second invalidates the first.
+
+A session is renewed when the access token is within a minute of expiry, and the renewed
+credential is written back to the vault so it outlives the request that triggered it.
+Validation reads `/api/user`, which is free and never bills.
+
 ### The one variable left is the egress IP
 
 No request shape works around it — and that is now tested against 9router's own

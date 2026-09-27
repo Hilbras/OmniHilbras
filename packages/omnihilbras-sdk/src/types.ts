@@ -122,7 +122,11 @@ export type ProviderCredential =
    * current access token; `refreshToken` and `expiresAt` let an adapter renew it
    * without asking the user to sign in again.
    */
-  | { type: 'oauth'; value: string; refreshToken?: string; expiresAt?: string; email?: string }
+  /**
+   * `orgId` and `orgName` are set by providers that scope a session to an
+   * organization and expect it echoed on every request, such as OpenCode Console.
+   */
+  | { type: 'oauth'; value: string; refreshToken?: string; expiresAt?: string; email?: string; orgId?: string; orgName?: string; accountId?: string }
   | { type: 'none' };
 
 export type ProviderRequestContext = {

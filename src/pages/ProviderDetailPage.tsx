@@ -163,7 +163,7 @@ const modelSortOptions: ReadonlyArray<{ value: ModelSort; label: string }> = [
 const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, requestsPerMinute: 0, hedgeAfterMs: 0 };
 
 /** OAuth providers the gateway can actually complete a sign-in for today. */
-const oauthProvidersWithFlow = new Set(['cline']);
+const oauthProvidersWithFlow = new Set(['cline', 'opencode-console']);
 
 function ResiliencePanel({ connection, routingState, onSave }: { connection: GatewayConnection; routingState?: GatewayRoutingState; onSave: (next: GatewayResilience) => void | Promise<void> }) {
   const [open, setOpen] = useState(false);

@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, CircleAlert, ExternalLink, LoaderCircle, ShieldCheck } from 'lucide-react';
-import { connectGatewayOauthProvider, getClineSignInStatus, startGatewayOauthSignIn, type GatewayConnection } from '../lib/gatewayClient';
+import {
+  connectGatewayOauthProvider,
+  getClineSignInStatus,
+  getDeviceSignInStatus,
+  startGatewayDeviceSignIn,
+  startGatewayOauthSignIn,
+  type GatewayConnection,
+  type GatewayOauthSignInStatus,
+} from '../lib/gatewayClient';
 
 type Props = {
   providerId: string;
@@ -17,6 +25,13 @@ type Props = {
 };
 
 type Phase = 'starting' | 'waiting' | 'connected' | 'failed';
+
+/**
+ * Providers that sign in with a device code rather than a redirect. The user types a
+ * code into the provider's own page and the gateway polls for the result, so there is
+ * no authUrl to navigate to and nothing comes back on a callback.
+ */
+const deviceFlowProviders = new Set(['opencode-console']);
 
 /** How often to ask the gateway whether the browser sign-in finished. */
 const pollIntervalMs = 1000;
@@ -39,6 +54,7 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
   const [showPaste, setShowPaste] = useState(false);
   const [paste, setPaste] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [deviceCode, setDeviceCode] = useState<{ userCode: string; verificationUrl: string } | null>(null);
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
   const pollRef = useRef<number | null>(null);
   const timeoutRef = useRef<number | null>(null);
@@ -83,11 +99,83 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
     return false;
   }, []);
 
+  /** Applies a poll result. Shared by both flows so they cannot drift apart. */
+  const finish = useCallback((status: GatewayOauthSignInStatus) => {
+    if (settledRef.current) return;
+    missedPollsRef.current = 0;
+    if (status.status === 'pending') return;
+    settledRef.current = true;
+    stopWaiting();
+    if (status.status === 'connected' && status.connection) {
+      setPhase('connected');
+      setMessage(`Connected to ${status.connection.name} with ${status.connection.modelIds.length} models.`);
+      // No cast: the status carries a whole connection record, and a trimmed one
+      // would leave `resilience` undefined and crash the page.
+      void onConnected(status.connection);
+      window.setTimeout(onClose, 1200);
+      return;
+    }
+    setPhase('failed');
+    setError(status.error ?? (status.status === 'expired'
+      ? 'The sign-in expired. Start again.'
+      : 'The sign-in did not complete.'));
+  }, [onClose, onConnected, stopWaiting]);
+
+  /** Waits for a session, reporting a dead gateway rather than sitting out the timeout. */
+  const watch = useCallback((sessionId: string, poll: (id: string) => Promise<GatewayOauthSignInStatus>, timeoutMessage: string) => {
+    stopWaiting();
+    timeoutRef.current = window.setTimeout(() => {
+      settledRef.current = true;
+      stopWaiting();
+      setPhase('failed');
+      setError(timeoutMessage);
+    }, waitTimeoutMs);
+
+    pollRef.current = window.setInterval(() => {
+      void poll(sessionId).then((status) => {
+        if (settledRef.current) return;
+        finish(status);
+      }).catch((pollError: unknown) => {
+        // A single dropped poll is not a failed sign-in, so the next tick tries again.
+        // Several in a row means the gateway is gone, and saying so beats leaving the
+        // dialog waiting out its full timeout.
+        missedPollsRef.current += 1;
+        if (missedPollsRef.current < 3) return;
+        settledRef.current = true;
+        stopWaiting();
+        setPhase('failed');
+        setError(pollError instanceof Error ? pollError.message : 'The local gateway stopped responding.');
+      });
+    }, pollIntervalMs);
+  }, [finish, stopWaiting]);
+
   const begin = useCallback(async () => {
     setPhase('starting');
     setMessage('Opening the sign-in page…');
     setError('');
     missedPollsRef.current = 0;
+
+    if (deviceFlowProviders.has(providerId)) {
+      try {
+        const signIn = await startGatewayDeviceSignIn();
+        if (settledRef.current) return;
+        // The code has to be read by a person, so it is shown here as well as sent
+        // to the browser tab.
+        setDeviceCode({ userCode: signIn.userCode, verificationUrl: signIn.verificationUrl });
+        const sentToOpenTab = navigateTo(signIn.verificationUrl);
+        setPhase('waiting');
+        setMessage(sentToOpenTab
+          ? 'Approve the request in your browser using the code below. This tab will finish the connection.'
+          : 'Your browser blocked the sign-in tab. Open the link below and enter the code.');
+        watch(signIn.sessionId, getDeviceSignInStatus, 'The sign-in timed out. Start again from OmniHilbras.');
+      } catch (startError) {
+        settledRef.current = true;
+        setPhase('failed');
+        setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
+      }
+      return;
+    }
+
     try {
       const signIn = await startGatewayOauthSignIn(providerId);
       if (settledRef.current) return;
@@ -96,53 +184,13 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
       setMessage(sentToOpenTab
         ? `Approve the request in your browser. This tab will finish the connection.`
         : 'Your browser blocked the sign-in tab. Open the link below to continue.');
-
-      stopWaiting();
-      timeoutRef.current = window.setTimeout(() => {
-        settledRef.current = true;
-        stopWaiting();
-        setPhase('failed');
-        setError('The sign-in timed out. Start again, or paste the code if your browser did not return here.');
-      }, waitTimeoutMs);
-
-      pollRef.current = window.setInterval(() => {
-        void getClineSignInStatus(signIn.sessionId).then((status) => {
-          if (settledRef.current) return;
-          missedPollsRef.current = 0;
-          if (status.status === 'pending') return;
-          settledRef.current = true;
-          stopWaiting();
-          if (status.status === 'connected' && status.connection) {
-            setPhase('connected');
-            setMessage(`Connected to ${status.connection.name} with ${status.connection.modelIds.length} models.`);
-            // No cast: the status carries a whole connection record, and a
-            // trimmed one would leave `resilience` undefined and crash the page.
-            void onConnected(status.connection);
-            window.setTimeout(onClose, 1200);
-            return;
-          }
-          setPhase('failed');
-          setError(status.error ?? (status.status === 'expired'
-            ? 'The sign-in expired. Start again.'
-            : 'The sign-in did not complete.'));
-        }).catch((pollError: unknown) => {
-          // A single dropped poll is not a failed sign-in, so the next tick tries
-          // again. Several in a row means the gateway is gone, and saying so
-          // beats leaving the dialog waiting out its full timeout.
-          missedPollsRef.current += 1;
-          if (missedPollsRef.current < 3) return;
-          settledRef.current = true;
-          stopWaiting();
-          setPhase('failed');
-          setError(pollError instanceof Error ? pollError.message : 'The local gateway stopped responding.');
-        });
-      }, pollIntervalMs);
+      watch(signIn.sessionId, getClineSignInStatus, 'The sign-in timed out. Start again, or paste the code if your browser did not return here.');
     } catch (startError) {
       settledRef.current = true;
       setPhase('failed');
       setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
     }
-  }, [navigateTo, onClose, onConnected, providerId, stopWaiting]);
+  }, [navigateTo, providerId, watch]);
 
   useEffect(() => {
     void begin();
@@ -195,6 +243,17 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
             </div>
           </div>
 
+          {deviceCode && phase !== 'connected' && (
+            <div className="mt-4 rounded-xl border border-gold/25 bg-gold-soft p-3">
+              <p className="text-[11px] font-semibold text-gold-text">Enter this code at OpenCode</p>
+              <p className="mt-1 select-all font-mono text-lg tracking-[0.18em] text-text">{deviceCode.userCode}</p>
+              <a href={deviceCode.verificationUrl} target="_blank" rel="noreferrer" className="btn-ghost mt-2 inline-flex !h-7 !px-2.5 !text-[11px]">
+                Open the code page
+                <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              </a>
+            </div>
+          )}
+
           {phase === 'waiting' && (
             <div className="mt-4 flex items-center gap-2">
               <div className="h-1 flex-1 overflow-hidden rounded-full bg-bg-soft" role="progressbar" aria-label="Waiting for the sign-in to complete">
@@ -203,7 +262,7 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
             </div>
           )}
 
-          {(phase === 'starting' || phase === 'waiting') && !showPaste && (
+          {(phase === 'starting' || phase === 'waiting') && !showPaste && !deviceFlowProviders.has(providerId) && (
             <button type="button" onClick={() => setShowPaste(true)} className="btn-ghost mt-4 !h-8 !px-2.5 !text-[11px]">
               Open the sign-in page manually
             </button>
