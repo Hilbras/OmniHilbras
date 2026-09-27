@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 10b: Measure why the restricted Zen free models refuse, and say so plainly.
+  - Acceptance: the refusal cause is established by live request, not inference, and recorded in the docs. Client-impersonation headers are not shipped if they unlock nothing.
+  - Verify: the live catalog holds 82 models, 11 free. Exactly one free model answers (`space-bunny-free`). Eight refuse with `403`; `deepseek-v4-flash-free` refuses with `400` and an upstream "Model is unavailable"; `jev-1.13-free` is refused by name. The restriction survives `x-opencode-client: desktop`, an `opencode/…` User-Agent, the sentinel `Bearer public`, `stream: true`, and a valid key, so those headers were tried and removed. Zen returns an empty error body to an authenticated caller and a descriptive one to an unauthenticated caller, which is why a refusal surfaces as a bare status. 9router's hardcoded free list is stale: it advertises `union-alpha`, absent from the catalog and refused by every lane.
+  - Files: docs only. The v0.7.0 adapter is unchanged.
+  - Depends on: Task 10a.
+  - Scope: Small.
+
 - [x] Task 10a: Route OpenCode Zen per model to the lane Zen publishes for it.
   - Acceptance: `ZenAdapter` picks chat, responses, or messages per model from the published table, translating each wire format, and refuses the two unimplemented lanes by name. The messages lane authenticates with `x-api-key`, not a bearer token.
   - Verify: 11 new SDK tests cover lane selection including the `qwen3.8-max` exception, both wire formats in and out, error envelopes, the streaming refusal, and a validation that spends no request. Live: `claude-sonnet-5` went from 401 to 402 when the header was corrected, which is what proves the fix; `space-bunny-free` answers through the new adapter; paid models answer 402 (no credits) and restricted free models 403.

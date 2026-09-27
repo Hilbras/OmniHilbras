@@ -143,8 +143,14 @@ and Jev, a decision model.
 
 Two things to expect. **Paid models need credits** — Zen charges per request, and
 without a balance they answer `402`. **Free models are restricted to the OpenCode
-client** and answer `403`; OpenCode's own words are "OpenCode's free tier can only
-be used from within OpenCode". `space-bunny-free` is the exception that answers.
+client** and answer `403`; OpenCode's own words are "OpenCode's free tier can only be
+used from within OpenCode". That restriction is not a header or a key or a stream
+setting — it survives every one of them. Of the **11 free models in the catalog, one
+answers: `space-bunny-free`.**
+
+Zen also returns an empty body to a caller holding a key and a real explanation to one
+that is not, so a refusal in the dashboard reads as a bare status code. Re-issue the
+request unauthenticated to see what Zen actually said.
 
 ## Cline Sign-In
 

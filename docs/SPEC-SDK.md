@@ -256,11 +256,42 @@ Credential validation is presence-and-shape only: Zen's catalog is public, so a 
 probe would prove nothing and would bill on every health poll. Health reads the
 public catalog instead.
 
-**A refusal from Zen is usually billing.** Measured with a valid key: paid models on
-the chat and messages lanes answer `402`, which is Zen's payment-required status —
-its own documentation says the account is charged per request and must hold credits.
-The free models answer `403`, and an unauthenticated probe names why:
-`OpenCode's free tier can only be used from within OpenCode`.
+### Why a Zen refusal looks like a bare status code
+
+Zen returns an **empty body to an authenticated caller and a descriptive one to an
+unauthenticated one.** With a real key a refusal surfaces here as `HTTP 403 with an
+empty response body`; the same request with the sentinel key `Bearer public` returns
+
+```json
+{"type":"error","error":{"type":"FreeTierError",
+ "message":"Error from provider (Console): OpenCode's free tier can only be used from within OpenCode"}}
+```
+
+So a bare status in the dashboard is a provider that chose not to explain itself to a
+caller holding a key, not a gateway that lost the message. To read a real reason,
+re-issue the request unauthenticated.
+
+### Measured state of the catalog
+
+Measured against the live catalog, which holds **82 models, 11 of them free**:
+
+| Outcome | Models |
+| --- | --- |
+| Answers | `space-bunny-free` |
+| `403`, free tier restricted to the OpenCode client | `mimo-v2.6-flash-free`, `mimo-v2.5-free`, `ling-3.0-flash-fin-free`, `longcat-2.5-preview-free`, `nemotron-3-ultra-free`, `nemotron-3.5-lightning-free`, `muse-spark-1.2-contributor-free`, `muse-spark-1.3-contributor-free` |
+| `400`, upstream reports the model unavailable | `deepseek-v4-flash-free` |
+| Refused by name, served from `/zen/v1/systemone` | `jev-1.13-free` |
+| `402`, the account holds no credits | the paid models |
+
+**One free model of eleven answers.** The restriction is not a header, a key, or a
+stream setting: it survives `x-opencode-client: desktop`, an `opencode/…` User-Agent,
+the sentinel `Bearer public`, and `stream: true`, and it is not lifted by a valid key.
+Sending those headers anyway was tried and removed, since impersonating the vendor's
+client unlocked nothing.
+
+Note that 9router's hardcoded free list is **stale** — it advertises `union-alpha`,
+which is not in the catalog at all and is refused by every lane. Its contributor and
+union models are worth re-checking against the live catalog before being trusted.
 
 **Every free model is on the path this gateway already speaks.** Measured on the
 free tier: `space-bunny-free` answers normally, while `nemotron-3-ultra-free`,
