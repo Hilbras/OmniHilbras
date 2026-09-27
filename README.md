@@ -64,19 +64,26 @@ Only imported models are searchable, so connect a provider first.
 A model test is one small real request, and several things can make that request
 fail for reasons that have nothing to do with the model being broken.
 
-**Reasoning models and the token budget.** This was a real bug, now fixed in two
-steps. The test originally asked for at most 16 tokens. Reasoning models spend their
-first tokens thinking, so they returned `finish_reason: length` with **no content at
-all** — and the test only checked that the envelope was well formed, so it recorded
-a green `Ping` badge for a model that had answered nothing.
+**Reasoning models.** This was a real bug with two separate halves, both fixed.
 
-Raising it to 96 was not enough, because reasoning length *varies*. The same free
-model answered one request and returned nothing on the next, and
-`inclusionai/ling-3.0-flash-fin` turned out to need **151** completion tokens: it
-returns nothing at 96 and answers at 384. So an empty, truncated response is now
-retried at 4x the budget, up to 8x, before it is called a failure. A model that
-answers still costs exactly one request — the retry only happens after a response
-that produced nothing.
+The test originally asked for at most 16 tokens. Reasoning models spend their budget
+on chain-of-thought before answering, so they returned `finish_reason: length` with
+**no content at all** — and the test only checked that the envelope was well formed,
+so it recorded a green `Ping` badge for a model that had answered nothing. The budget
+is now 1024 tokens. Cost is bounded by what a model actually generates, not by the
+cap.
+
+The bigger half: **a reasoning-only reply is a working connection.** A model that
+spends its whole budget thinking and emits no text has still proved it works. That
+was being reported as a failure, which is why such models looked broken here and
+behaved in other clients. When the content is empty but the response carries
+reasoning — under `reasoning`, `reasoning_content`, `thinking`, or
+`thinking_content` — the test now passes and the row is labelled `reasoning only`.
+
+Measured on the free tier: three models that failed or returned nothing at a
+96-token budget answer cleanly at 1024, and
+`nvidia/nemotron-3-nano-omni-...-reasoning` succeeds on 4 of 5 requests, failing only
+when the provider omits `choices` entirely.
 
 **Free-tier rate limits.** A `:free` model answers `429` when the shared free quota
 is spent, which is a provider limit and not a fault in the gateway.

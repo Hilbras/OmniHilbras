@@ -118,7 +118,7 @@ function omitNumberKey(record: Record<string, number>, key: string) {
   return next;
 }
 
-function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testState, testError, testLatencyMs }: { model: string; providerId: string; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testError?: string; testLatencyMs?: number }) {
+function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testState, testError, testLatencyMs, testNote }: { model: string; providerId: string; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testError?: string; testLatencyMs?: number; testNote?: string }) {
   return (
     <div
       className="flex flex-col gap-3 rounded-xl border border-line bg-bg-soft/45 p-3.5 sm:flex-row sm:items-center sm:justify-between"
@@ -127,7 +127,7 @@ function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testSt
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? 'border-danger/25 bg-danger/10 text-danger' : 'border-line bg-surface text-muted'}`}>
           {testing ? <LoaderCircle className="h-4 w-4 animate-spin text-gold-text" aria-hidden="true" /> : testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
         </span>
-        <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><p className="truncate text-xs font-semibold">{model}</p>{testLatencyMs !== undefined && testState === 'ok' && <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms</span>}{testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}</div><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code></div>
+        <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><p className="truncate text-xs font-semibold">{model}</p>{testLatencyMs !== undefined && testState === 'ok' && <span title={testNote || undefined} className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms{testNote ? ' · reasoning only' : ''}</span>}{testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}</div><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code></div>
       </div>
       <div className="flex items-center gap-1.5">
         <button type="button" onClick={onCopy} aria-label={`Copy ${model} model ID`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-gold-text"><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>
@@ -257,6 +257,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const [concurrency, setConcurrency] = useState(4);
   const [modelTests, setModelTests] = useState<Record<string, ModelTestState>>({});
   const [modelTestErrors, setModelTestErrors] = useState<Record<string, string>>({});
+  const [modelTestNotes, setModelTestNotes] = useState<Record<string, string>>({});
   const [modelTestLatencies, setModelTestLatencies] = useState<Record<string, number>>({});
   const modelTestAbortRef = useRef<AbortController | null>(null);
   const bulkAbortRef = useRef<AbortController | null>(null);
@@ -304,7 +305,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     // every update would fight the user, so the browser anchors normally there.
     if (bulkRunRef.current) return;
     if (scrollAnchorRef.current !== null) window.scrollTo(0, scrollAnchorRef.current);
-  }, [connectionPingMs, modelTestErrors, modelTestLatencies, modelTests, notice, testingModels]);
+  }, [connectionPingMs, modelTestErrors, modelTestLatencies, modelTestNotes, modelTests, notice, testingModels]);
 
   const importedModels = connection?.modelIds ?? provider.modelList;
   const allModels = useMemo(() => [...new Set([...importedModels, ...customModels])], [customModels, importedModels]);
@@ -504,10 +505,12 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   async function runModelTest(model: string, signal: AbortSignal) {
     setModelTests((current) => ({ ...current, [model]: 'testing' }));
     setModelTestErrors((current) => omitKey(current, model));
+    setModelTestNotes((current) => omitKey(current, model));
     setModelTestLatencies((current) => omitNumberKey(current, model));
     try {
       const result = await testGatewayModel(provider.id, model, signal);
       setModelTests((current) => ({ ...current, [model]: 'ok' }));
+      setModelTestNotes((current) => ({ ...current, [model]: result.note ?? '' }));
       setModelTestLatencies((current) => ({ ...current, [model]: result.latencyMs }));
       setConnectionHealthy(true);
       setConnectionPingMs(result.latencyMs);
@@ -709,7 +712,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
               </select>
             </label>
           </div>
-          <div className="mt-3 space-y-2">{visibleModels.length > 0 ? visibleModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingSet.has(model)} disabled={testing || testingConnection} testState={modelTests[model] ?? 'idle'} testError={modelTestErrors[model]} testLatencyMs={modelTestLatencies[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{normalizedModelQuery ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{normalizedModelQuery ? <>Nothing in {allModels.length} models matches &ldquo;{modelQuery.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}</div>
+          <div className="mt-3 space-y-2">{visibleModels.length > 0 ? visibleModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingSet.has(model)} disabled={testing || testingConnection} testState={modelTests[model] ?? 'idle'} testError={modelTestErrors[model]} testLatencyMs={modelTestLatencies[model]} testNote={modelTestNotes[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{normalizedModelQuery ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{normalizedModelQuery ? <>Nothing in {allModels.length} models matches &ldquo;{modelQuery.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}</div>
           <div className="mt-5 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>
           {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {modelReference(provider.id, copiedModel)}</p>}
         </section>

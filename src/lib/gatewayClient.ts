@@ -74,6 +74,12 @@ export type GatewayModelTestResult = {
   content: string;
   finishReason?: string;
   latencyMs: number;
+  /**
+   * Set when the model answered but the reply was reasoning-only: it spent the
+   * whole budget thinking and emitted no text. That is a working connection, and
+   * saying so is more honest than reporting an empty response.
+   */
+  note?: string;
 };
 
 export type OpenRouterConnectionInput = {
@@ -168,12 +174,34 @@ export function saveOpenRouterConnection(input: OpenRouterConnectionInput, signa
   }).then((body) => body.connection);
 }
 
-/** Enough for a reasoning model to think and still answer, and still trivial to bill. */
-export const MODEL_TEST_MAX_TOKENS = 96;
+/**
+ * Big enough that a reasoning model finishes thinking and still answers.
+ *
+ * A small probe starves the answer: reasoning models spend their budget on
+ * chain-of-thought first, so a tiny limit yields `finish_reason: length` with no
+ * content at all and the model looks broken. Cost is bounded by what a model
+ * actually generates, not by this cap, and a model that answers in five tokens
+ * still costs five tokens.
+ */
+export const MODEL_TEST_MAX_TOKENS = 1024;
 
 /** A tool call is a real answer even with no text, so it must not read as empty. */
 function hasToolCalls(message: Record<string, unknown>) {
   return Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+}
+
+/**
+ * Reasoning output, under any of the field names providers use for it. Its
+ * presence proves the model generated tokens, which is all a connectivity probe
+ * needs to know.
+ */
+function readReasoning(message: Record<string, unknown>): string {
+  for (const field of ['reasoning', 'reasoning_content', 'thinking', 'thinking_content']) {
+    const value = message[field];
+    if (typeof value === 'string' && value.trim()) return value;
+    if (Array.isArray(value) && value.length > 0) return JSON.stringify(value);
+  }
+  return '';
 }
 
 export async function testGatewayModel(providerId: string, model: string, options?: AbortSignal | { signal?: AbortSignal; maxTokens?: number }) {
@@ -188,7 +216,9 @@ export async function testGatewayModel(providerId: string, model: string, option
     },
     body: JSON.stringify({
       model,
-      messages: [{ role: 'user', content: 'Reply with exactly OK.' }],
+      // Deliberately trivial. The probe measures whether the model answers, not
+      // what it can write, and a longer prompt only adds tokens to reason about.
+      messages: [{ role: 'user', content: 'hi' }],
       // Large enough for a reasoning model to finish thinking and still answer.
       // At 16 tokens several models spent the whole budget on hidden reasoning
       // and returned nothing at all, which read as a pass.
@@ -204,20 +234,31 @@ export async function testGatewayModel(providerId: string, model: string, option
   if (!isRecord(choice) || !isRecord(choice.message)) throw new Error('The gateway returned an invalid model test response.');
   const content = choice.message.content;
   const text = typeof content === 'string' ? content.trim() : '';
-  // A response with no visible text is not a working model, however well formed
-  // the envelope is. Reporting it as a pass is how a model that answers nothing
-  // ends up with a healthy badge next to its name.
+  const reasoning = readReasoning(choice.message);
+  const truncated = choice.finish_reason === 'length';
+
+  // A reasoning model that spends the whole budget thinking and emits no text has
+  // still proved the connection works. Reporting that as a failure is what made
+  // working models look broken here while they behaved in other clients.
+  if (!text && reasoning) {
+    return {
+      model: typeof body.model === 'string' ? body.model : model,
+      provider: typeof body.provider === 'string' ? body.provider : providerId,
+      content: '',
+      finishReason: 'length',
+      note: 'Reasoning-only reply — the model answered, using its whole budget to think.',
+      latencyMs: Math.max(0, Date.now() - startedAt),
+    } satisfies GatewayModelTestResult;
+  }
+
+  // A response with no visible text and no reasoning is not a working model,
+  // however well formed the envelope is.
   if (!text && !hasToolCalls(choice.message)) {
-    const truncated = choice.finish_reason === 'length';
-    // Reasoning models spend a variable number of tokens thinking, so a single
-    // budget is a coin flip for them: the same model can answer one request and
-    // return nothing on the next. One retry with a larger budget settles it, and
-    // it only costs anything when the first attempt produced nothing.
-    if (truncated && maxTokens < MODEL_TEST_MAX_TOKENS * 8) {
-      return testGatewayModel(providerId, model, { ...(signal ? { signal } : {}), maxTokens: maxTokens * 4 });
+    if (truncated && maxTokens < MODEL_TEST_MAX_TOKENS * 2) {
+      return testGatewayModel(providerId, model, { ...(signal ? { signal } : {}), maxTokens: maxTokens * 2 });
     }
     throw new Error(truncated
-      ? 'The model produced no output even with a larger budget. It may spend its whole reply on reasoning.'
+      ? 'The model produced no output within the test budget.'
       : 'The model returned an empty response.');
   }
   return {

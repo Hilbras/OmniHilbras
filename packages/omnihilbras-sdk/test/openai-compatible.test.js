@@ -158,7 +158,9 @@ test('an unusable chat response says which part was missing', async () => {
   });
   await assert.rejects(
     () => adapter.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, { credential: { type: 'api-key', value: 'k' } }),
-    (error) => error.code === 'INVALID_RESPONSE' && /no choices/.test(error.message),
+    (error) => error.code === 'INVALID_RESPONSE'
+      && /no choices/.test(error.message)
+      && /no choices/.test(error.details?.providerMessage ?? ''),
   );
 
   const noMessage = new OpenAICompatibleAdapter({ id: 'odd', name: 'Odd', baseUrl: 'https://example.test/v1' }, {

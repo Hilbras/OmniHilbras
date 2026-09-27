@@ -131,14 +131,20 @@ The first local gateway exposes:
   envelope with empty content is not a working model, and a `Ping` badge beside a
   model that answers nothing is a false report. A response carrying tool calls
   counts as an answer even with no text.
-- **The test budget is 96 tokens, and it escalates.** Reasoning models spend a
-  *variable* number of tokens on hidden reasoning, so a single budget is a coin
-  flip: the same free model answered one request and returned nothing on the next.
-  Measured, `inclusionai/ling-3.0-flash-fin` returns nothing at 96 tokens, needs
-  151 completion tokens, and answers at 384. An empty response with
-  `finish_reason: length` is therefore retried at 4x the budget, up to 8x, before
-  it is reported as a failure. Retries only happen after a response that produced
-  nothing, so a healthy model still costs exactly one request.
+- **The test budget is 1024 tokens.** Reasoning models spend their budget on
+  chain-of-thought before emitting an answer, so a small probe starves the reply:
+  `max_tokens: 16` yields `finish_reason: length` with no content and the model
+  looks broken. Cost is bounded by what a model generates, not by the cap.
+- **A reasoning-only reply is a pass, not a failure.** A model that spends the
+  whole budget thinking and emits no text has still proved the connection works.
+  When the content is empty but the response carries reasoning — under any of
+  `reasoning`, `reasoning_content`, `thinking`, `thinking_content` — the test
+  passes and the row is labelled `reasoning only`. Treating this as a failure is
+  what made working models look broken here while they behaved elsewhere.
+- **A genuinely empty response still fails**, and one truncated by the budget is
+  retried once at 2x. A response carrying tool calls counts as an answer.
+- **The probe prompt is `hi`.** The test measures whether a model answers, not
+  what it can write, so a longer prompt only adds tokens to reason about.
 
 ### Why a model can fail here and work elsewhere
 
@@ -149,7 +155,7 @@ Four causes, only two of which are the gateway's:
 | Reasoning model outgrows the test budget | gateway, fixed by escalating | `ling-3.0-flash-fin` needs 151 tokens |
 | Free-tier quota shared across users | provider | `:free` models answering `429` |
 | Provider refuses that model on this key | provider | `thinkingmachines/inkling:free` answering `401` |
-| Provider answers with an unusable shape | provider, now explained | `nemotron-3-nano-omni-...-reasoning` returning no `choices[0].message` on some requests |
+| Provider answers with an unusable shape | provider, now explained | `nemotron-3-nano-omni-...-reasoning` answering 4 of 5 requests |
 
 A provider whose API is not one shape is a fifth and is not fixed: OpenCode Zen
 routes different models to `/zen/v1/responses`, `/zen/v1/messages`, and

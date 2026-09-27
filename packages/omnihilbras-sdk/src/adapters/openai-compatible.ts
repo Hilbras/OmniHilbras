@@ -266,7 +266,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
         : seen > 1
           ? `the provider returned ${seen} choices and the first has no message`
           : 'the provider returned a choice with no message';
-      throw invalidResponse(this.id, `Provider chat response is unusable: ${reason}.`);
+      throw invalidResponse(this.id, `Provider chat response is unusable: ${reason}.`, reason);
     }
 
     return {
@@ -358,6 +358,14 @@ function providerStreamError(providerId: string, _error: unknown) {
   return new ProviderError('PROVIDER_REQUEST_FAILED', 'The provider stream returned an error.', { providerId });
 }
 
-function invalidResponse(providerId: string, message: string) {
-  return new ProviderError('INVALID_RESPONSE', message, { providerId });
+/**
+ * `providerMessage` is the channel the local dashboard reads. Putting the shape
+ * detail there keeps it visible to the operator without putting a provider's
+ * internals into the message an API client of the gateway receives.
+ */
+function invalidResponse(providerId: string, message: string, providerMessage?: string) {
+  return new ProviderError('INVALID_RESPONSE', message, {
+    providerId,
+    ...(providerMessage ? { publicMessage: message, details: { providerMessage } } : {}),
+  });
 }
