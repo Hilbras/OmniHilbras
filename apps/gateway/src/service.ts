@@ -170,6 +170,8 @@ export class GatewayService {
         // failure counting that drives ejection.
         if (health.status === 'unavailable') {
           this.providerHealth.recordFailure(adapter.id, 'PROVIDER_UNAVAILABLE', health.message ?? 'The provider reported itself unavailable.');
+          // The reason is returned too, so /health and the dashboard can say why
+          // rather than only that something is wrong.
           return { providerId: adapter.id, ...health };
         }
         this.providerHealth.recordSuccess(adapter.id, health.latencyMs ?? Date.now() - startedAt, health.checkedAt);

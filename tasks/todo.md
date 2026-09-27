@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 9x: Say why a Cline call failed.
+  - Acceptance: a Cline health check returns a reason instead of a bare `unavailable`, and a failed token renewal is reported as an expired session rather than a raw 4xx.
+  - Verify: 3 new SDK tests. Live: a Cline health check that previously reported only `unavailable` now reads "Cline rejected the token. Sign in again."
+  - Files: `packages/omnihilbras-sdk/src/adapters/cline.ts`, `test/cline.test.js`, docs.
+  - Depends on: Task 9w.
+  - Scope: Small.
+
 - [x] Task 9w: Address credentials by connection, so a provider can hold several.
   - Acceptance: `PUT /v1/connections/:providerId` updates that provider's existing connection, and passing an `id` adds another alongside it. Each connection's credential is stored and read under its own connection id, never a provider id.
   - Verify: 3 new store tests cover two connections of one provider holding distinct credentials, an id-less save reusing the existing connection, and deleting one connection leaving the other's credential intact. Live against OpenCode: two connections (`opencode`, `opencode-backup`) coexist with 82 models each and appear separately in `/v1/routing`; the pre-existing OpenRouter and Cline connections still resolve their credentials after the vault rekey.

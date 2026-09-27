@@ -338,6 +338,17 @@ the code as base64 JSON, which is read directly instead of exchanged.
 renewed token is handed back through `onTokensRefreshed`, which the gateway wires
 to the vault, so a refresh is persisted instead of repeated per request.
 
+**A failed renewal is a sign-in problem, whatever shape the refusal takes.** The
+refresh endpoint refuses with a plain 4xx, which surfaced as
+`PROVIDER_REQUEST_FAILED` for what is really an expired session. It is now reported
+as an authentication failure reading "the Cline session expired and could not be
+renewed, sign in again", keeping Cline's own wording when there is any.
+
+**A health check carries a reason.** `healthCheck` returns a message rather than a
+bare `unavailable`, because the symptom alone is unactionable: an expired token, a
+revoked token, an unreachable endpoint, and a cancelled probe all look identical
+otherwise. `clineFailureReason` maps the error to a short, safe explanation.
+
 **Token prefixing.** Cline accepts WorkOS JWTs only with an explicit `workos:`
 prefix, and rejects non-JWT ClinePass keys (`clp_…`) that carry one. The adapter
 applies the prefix only to JWT-shaped tokens and sends everything else verbatim.

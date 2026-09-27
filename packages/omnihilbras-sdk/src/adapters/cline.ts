@@ -1,4 +1,5 @@
 import { ProviderError } from '../errors.js';
+import { providerErrorDetail } from '../transport.js';
 import { FetchHttpTransport } from '../transport.js';
 import { OpenAICompatibleAdapter, type OpenAIResponse } from './openai-compatible.js';
 import type { HttpTransport } from '../transport.js';
@@ -56,7 +57,7 @@ export type ClineAdapterOptions = {
 const defaultRefreshSkewMs = 60_000;
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '0.6.0';
+const omnihilbrasVersion = '0.6.1';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {
@@ -204,6 +205,22 @@ export function unwrapClineEnvelope(body: unknown): OpenAIResponse {
   return body as OpenAIResponse;
 }
 
+/** A short, safe explanation of why a Cline call failed. */
+export function clineFailureReason(error: unknown): string {
+  if (error instanceof ProviderError) {
+    const details = error.details as { providerMessage?: string } | undefined;
+    const reason = typeof details?.providerMessage === 'string' ? details.providerMessage : undefined;
+    if (error.code === 'AUTHENTICATION_FAILED') {
+      return reason ? `Cline rejected the token: ${reason}` : 'Cline rejected the token. Sign in again.';
+    }
+    if (error.code === 'CANCELLED') return 'The health check was cancelled.';
+    if (error.code === 'PROVIDER_TIMEOUT') return 'Cline did not answer in time.';
+    if (error.code === 'PROVIDER_UNAVAILABLE') return 'Cline could not be reached.';
+    return reason ? `${error.code}: ${reason}` : `${error.code}.`;
+  }
+  return 'The Cline health check failed.';
+}
+
 export class ClineAdapter implements ProviderAdapter {
   readonly id = 'cline';
   readonly name = 'Cline';
@@ -263,11 +280,20 @@ export class ClineAdapter implements ProviderAdapter {
   }
 
   async healthCheck(context: ProviderRequestContext = {}): Promise<{ status: 'healthy' | 'degraded' | 'unavailable'; latencyMs?: number; checkedAt: string; message?: string }> {
+    const startedAt = Date.now();
     try {
-      await this.validateCredential(context.credential ?? { type: 'api-key', value: '' }, context);
-      return { status: 'healthy', checkedAt: new Date().toISOString() };
-    } catch {
-      return { status: 'unavailable', checkedAt: new Date().toISOString() };
+      const result = await this.validateCredential(context.credential ?? { type: 'api-key', value: '' }, context);
+      return { status: 'healthy', checkedAt: result.checkedAt, latencyMs: result.latencyMs ?? Date.now() - startedAt };
+    } catch (error) {
+      // The reason is carried through. Without it an expired token and an
+      // unreachable endpoint are indistinguishable, and the only symptom is a
+      // bare "unavailable" that gives the operator nothing to act on.
+      return {
+        status: 'unavailable',
+        checkedAt: new Date().toISOString(),
+        latencyMs: Date.now() - startedAt,
+        message: clineFailureReason(error),
+      };
     }
   }
 
@@ -317,8 +343,18 @@ export class ClineAdapter implements ProviderAdapter {
       await this.onTokensRefreshed?.(renewed);
       return { type: 'oauth', value: renewed.accessToken, ...renewed } satisfies ProviderCredential;
     } catch (error) {
-      if (error instanceof ProviderError) throw error;
-      throw new ProviderError('AUTHENTICATION_FAILED', 'The Cline access token could not be renewed. Sign in again.', { providerId: this.id, cause: error });
+      // A failed renewal means the session is over, whatever shape the refusal
+      // arrived in. Letting the raw 4xx through reported "PROVIDER_REQUEST_FAILED"
+      // for what is really an expired login, which gives the operator nothing to
+      // act on. Cline's own wording is kept when there is one.
+      if (error instanceof ProviderError && error.code === 'CANCELLED') throw error;
+      const detail = providerErrorDetail((error as ProviderError | undefined)?.details);
+      throw new ProviderError('AUTHENTICATION_FAILED', 'The Cline access token could not be renewed. Sign in again.', {
+        providerId: this.id,
+        publicMessage: `The Cline session expired and could not be renewed. Sign in again.${detail ? ` Cline said: ${detail}` : ''}`,
+        ...(detail ? { details: { providerMessage: detail } } : {}),
+        cause: error,
+      });
     }
   }
 }

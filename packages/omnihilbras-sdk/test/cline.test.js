@@ -307,3 +307,51 @@ test('a caller-supplied header can override a default, but not the token', () =>
   assert.equal(headers['x-extra'], '1');
   assert.equal(headers.Authorization, `Bearer workos:${token}`, 'Authorization is set last and cannot be overridden');
 });
+
+test('a health check says why it failed', async () => {
+  const { ProviderError } = await import('@hilbras/omnihilbras');
+  const adapter = new ClineAdapter({
+    transport: {
+      async request() { throw new ProviderError('PROVIDER_REQUEST_FAILED', 'The provider request failed.', { providerId: 'cline', statusCode: 400 }); },
+      stream() { throw new Error('not used'); },
+    },
+  });
+  const health = await adapter.healthCheck({ credential: { type: 'oauth', value: 'jwt' } });
+  assert.equal(health.status, 'unavailable');
+  // A bare "unavailable" tells the operator nothing; the code at least narrows it.
+  assert.match(health.message, /PROVIDER_REQUEST_FAILED/);
+});
+
+test('a rejected token reads as a sign-in problem, not a raw 4xx', async () => {
+  const { ProviderError } = await import('@hilbras/omnihilbras');
+  const adapter = new ClineAdapter({
+    transport: {
+      async request() { throw new ProviderError('AUTHENTICATION_FAILED', 'Provider authentication failed.', { providerId: 'cline' }); },
+      stream() { throw new Error('not used'); },
+    },
+  });
+  const health = await adapter.healthCheck({ credential: { type: 'oauth', value: 'jwt' } });
+  assert.equal(health.status, 'unavailable');
+  assert.match(health.message, /rejected the token/i);
+  assert.match(health.message, /sign in again/i);
+});
+
+test('a failed renewal says the session expired', async () => {
+  // The refresh endpoint refuses with a plain 4xx, which used to surface as
+  // "PROVIDER_REQUEST_FAILED" for what is really an expired login.
+  const { ProviderError } = await import('@hilbras/omnihilbras');
+  const adapter = new ClineAdapter({
+    transport: {
+      async request(request) {
+        assert.match(request.url, /\/auth\/refresh$/);
+        throw new ProviderError('PROVIDER_REQUEST_FAILED', 'The provider request failed.', { providerId: 'cline', statusCode: 400 });
+      },
+      stream() { throw new Error('not used'); },
+    },
+    refreshSkewMs: 0,
+  });
+  await assert.rejects(
+    () => adapter.validateCredential({ type: 'oauth', value: 'jwt', refreshToken: 'r1', expiresAt: '2020-01-01T00:00:00.000Z' }),
+    (error) => error.code === 'AUTHENTICATION_FAILED' && /expired and could not be renewed/.test(error.publicMessage ?? ''),
+  );
+});
