@@ -221,7 +221,7 @@ export function createChatGptWebDriver(connectionKey = 'default'): ChatGptWebDri
       return { ok: true };
     },
 
-    async ask({ cookies, messages, timeoutMs }) {
+    async ask({ cookies, selection, messages, timeoutMs }) {
       const playwright = await loadPlaywright();
       if (!playwright) {
         throw new Error(
@@ -230,6 +230,17 @@ export function createChatGptWebDriver(connectionKey = 'default'): ChatGptWebDri
       }
       const prompt = messages[messages.length - 1]?.text ?? '';
       if (!prompt.trim()) throw new Error('There is nothing to ask ChatGPT Web.');
+      /**
+       * Recorded, not yet applied.
+       *
+       * The selection is the model label and effort the page should be driven with, and
+       * setting it needs the page's own internal API — which is what the reference project
+       * calls after discovering ChatGPT's JavaScript module at runtime. Typing into the
+       * composer cannot set a model, so on a paid account the page uses whatever its picker
+       * was already showing. That limitation is why this is logged rather than silently
+       * ignored, and why a free account (`auto`, the page decides) is unaffected by it.
+       */
+      console.warn(`[chatgpt-web] selection requested: ${JSON.stringify(selection)}; driving the composer, which cannot set a model`);
 
       // The container this often runs in has no shared memory and no sandbox namespaces.
       // Both are required by a default Chromium and neither is fixable by the user here.

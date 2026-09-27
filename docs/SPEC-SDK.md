@@ -808,40 +808,54 @@ stop growing is what "finished" looks like on this page.
 with `eval`, and chatgpt.com's CSP forbids `unsafe-eval`, so a string fails with an EvalError
 on a page that has otherwise worked perfectly.
 
-### The model ids, which were invented
+### The model ids, which were invented — twice
 
-The first catalog was `gpt-5.2`, `gpt-5.1`, `gpt-5-mini` and friends — tidy, plausible, and
-**none of them real**. The ids the web tier actually serves are not tidy, which is exactly
-why the tidy ones were so easy to invent:
+The first catalog was `gpt-5.2`, `gpt-5.1`, `gpt-5-mini` and friends: tidy, plausible, and
+**none of them real**. The ids the web tier serves are not tidy, which is exactly why the
+tidy ones were so easy to invent.
 
-```
-gpt-5-6          GPT-5.6 Sol — Instant
-gpt-5-6-thinking GPT-5.6 Sol — Thinking
-gpt-5-6-pro      GPT-5.6 Sol — Pro
-gpt-5-5          GPT-5.5 — Instant
-gpt-5-5-thinking GPT-5.5 — Thinking
-gpt-5-5-pro      GPT-5.5 — Pro
-```
-
-Hyphens for the version, a dot nowhere, and a `-pro` suffix for the top effort — and the
-reference catalog records them as *"observed from first-party ChatGPT Pro and Free UIs"*,
-which is the right way to record something you learned by watching rather than by reading.
-
-**The free tier is a different thing entirely.** It has no model picker, so the page chooses
-and the id that reaches it is the literal string **`auto`**:
+The correction then got it wrong a second way. `resolveSelection` in the reference does not
+map a model id to a model — it maps it to a **UI selection**, which is a model label and an
+effort index, and it is that selection the page is driven with:
 
 ```ts
-if (selection.kind === "free") return { model: "auto", reason: selection.thinkEnabled };
+if (normalized === "gpt-5-6-luna-free")            return { kind: "free", thinkEnabled: false };
+if (normalized === "gpt-5-6-luna-free-thinking")   return { kind: "free", thinkEnabled: true };
+if (normalized === "gpt-5-6-pro")   return { kind: "picker", modelLabel: "GPT-5.6 Sol", effortIndex: 4 };
+if (normalized === "gpt-5-6")       return { kind: "picker", modelLabel: "GPT-5.6 Sol", effortIndex: 0 };
+if (normalized === "gpt-5-5-pro")   return { kind: "picker", modelLabel: "GPT-5.5",     effortIndex: 4 };
+if (normalized === "gpt-5-5")       return { kind: "picker", modelLabel: "GPT-5.5",     effortIndex: 0 };
+// …and anything else throws `received an unsupported model`
 ```
 
-So a free account is offered `auto` and `auto-thinking`, and the paid family is refused by
-name. A storage-state paste carries no plan at all, which is honestly unknown rather than
-free, so it gets the full set — a false negative costs a line of typing, a false positive
-costs a failing test.
+So the second mistake was publishing **`auto` as a model id**. `auto` is not a model a client
+can ask for; it is the model string the *page* is given when the account is free and the
+page has no picker to choose from. The user-facing ids are the `gpt-5-6` / `gpt-5-5` family
+and the free pair:
 
-The reference also documents aliases with the inconsistency intact (`gpt-5-6-sol` →
-`gpt-5-6-thinking`, `gpt-5.5-instant` → `gpt-5-5`), so both spellings are accepted and
-resolved before anything reaches the page.
+| id | selection |
+| --- | --- |
+| `gpt-5.6-luna-free` | free, no thinking |
+| `gpt-5.6-luna-free-thinking` | free, thinking |
+| `gpt-5-6`, `gpt-5-6-instant` | GPT-5.6 Sol, effort 0 |
+| `gpt-5-6-thinking`, `gpt-5-6-sol` | GPT-5.6 Sol, effort from the request |
+| `gpt-5-6-pro` | GPT-5.6 Sol, effort 4 |
+| `gpt-5-5`, `gpt-5-5-instant` | GPT-5.5, effort 0 |
+| `gpt-5-5-thinking` | GPT-5.5, effort from the request |
+| `gpt-5-5-pro` | GPT-5.5, effort 4 |
+
+`normalizedModel` lowercases, strips a `chatgpt-web/` prefix and **folds every dot into a
+hyphen**, so `gpt-5.6-luna-free` and `gpt-5-6-luna-free` are one model. Both spellings are
+accepted, because refusing a twin for a full stop is refusing it for no reason.
+
+Effort maps the way the reference maps it: `none`/`off`/`minimal`/`low` → 0, absent or
+`medium` → 1, `high` → 2, `xhigh`/`max` → 3, and index 4 is the separate `-pro` id. The
+reasoning flag is sent as a boolean, never as an effort-suffixed model.
+
+**An id outside the set is refused locally**, before a browser is launched, because nothing
+about it could ever resolve. A *known* id is **not** gated on the plan: `resolveSelection`
+never consults one, and a plan field read out of an export is weaker evidence than what the
+page actually serves. The plan only scopes which ids the dashboard offers.
 
 ### A catalog refresh could never remove anything
 

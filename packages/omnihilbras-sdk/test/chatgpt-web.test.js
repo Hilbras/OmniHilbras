@@ -9,12 +9,13 @@ import {
   chatGptWebModels,
   chatGptWebSessionFromCredential,
   isFreeChatGptPlan,
+  normalizeChatGptWebModel,
+  resolveChatGptWebSelection,
   lastAssistantText,
   looksBlocked,
   looksSignedOut,
   parseChatGptCookieHeader,
   parseChatGptStorageState,
-  resolveChatGptWebModel,
 } from '../dist/index.js';
 
 /**
@@ -57,7 +58,7 @@ function driver(overrides = {}) {
   return { driver: { ...base, ...overrides }, asked };
 }
 
-const request = (model = 'auto', messages = [{ role: 'user', content: 'hi' }]) => ({ model, messages });
+const request = (model = 'gpt-5.6-luna-free', messages = [{ role: 'user', content: 'hi' }]) => ({ model, messages });
 
 /* ------------------------------------------------------------------ *
  * The export
@@ -231,7 +232,7 @@ test('a chat request drives the page and returns its text', async () => {
   });
   assert.equal(response.message.content, 'Hello from the page.');
   assert.equal(response.finishReason, 'stop');
-  assert.equal(asked[0].model, 'auto');
+  assert.deepEqual(asked[0].selection, { kind: 'free', thinkEnabled: false, model: 'auto' });
   assert.equal(asked[0].messages[0].text, 'hi');
   // The page gets a prompt, not a message list it has nowhere to put.
   assert.equal(asked[0].messages.length, 1);
@@ -241,7 +242,7 @@ test('a system turn is folded into the prompt, because a browser turn carries on
   const { driver: d, asked } = driver();
   const state = parseChatGptStorageState(authExport());
   await new ChatGptWebAdapter({ driver: d }).chat(
-    { model: 'auto', messages: [{ role: 'system', content: 'be brief' }, { role: 'user', content: 'hi' }] },
+    { model: 'gpt-5.6-luna-free', messages: [{ role: 'system', content: 'be brief' }, { role: 'user', content: 'hi' }] },
     { credential: chatGptWebCredential(state) },
   );
   const prompt = asked[0].messages[0].text;
@@ -386,50 +387,6 @@ test('a session the export says has expired is reported without opening a browse
  * The plan decides the catalog
  * ------------------------------------------------------------------ */
 
-test('a free plan is not offered the paid model set', () => {
-  assert.equal(isFreeChatGptPlan('free'), true);
-  assert.equal(isFreeChatGptPlan('Free'), true);
-  assert.equal(isFreeChatGptPlan('pro'), false);
-  assert.equal(isFreeChatGptPlan(undefined), false, 'an unknown plan is not assumed to be free');
-  const free = chatGptWebModels('free').map((model) => model.id);
-  const paid = chatGptWebModels('pro').map((model) => model.id);
-  // The two sets are disjoint on purpose: `auto` is what a free account's page sends, and
-  // the gpt-5-6/gpt-5-5 family is what a paid account's picker offers. Neither account can
-  // use the other's ids, so pretending one contains the other would be the wrong shape.
-  assert.ok(!free.some((id) => paid.includes(id)), 'the free set is not the paid set');
-  assert.ok(!paid.some((id) => free.includes(id)), 'the paid set is not the free set');
-  assert.ok(free.length > 0 && paid.length > 0);
-});
-
-test('an unrecognised plan gets the full set, because a visible failure beats a hidden model', () => {
-  // Showing a model a paid account cannot use costs a failing test. Hiding one a free
-  // account can use hides something that works.
-  assert.equal(chatGptWebModels(undefined).length, chatGptWebModels('pro').length);
-  assert.equal(chatGptWebModels('team').length, chatGptWebModels('pro').length);
-});
-
-test('the catalog comes from the plan on the session, not from a fixed list', async () => {
-  const { driver: d } = driver();
-  const adapter = new ChatGptWebAdapter({ driver: d });
-  const free = await adapter.listModels({ credential: chatGptWebCredential(parseChatGptStorageState(authExport())) });
-  assert.deepEqual(free.map((model) => model.id), chatGptWebModels('free').map((model) => model.id));
-  const pro = await adapter.listModels({
-    credential: chatGptWebCredential(parseChatGptStorageState(authExport({ account: { planType: 'pro' } }))),
-  });
-  assert.deepEqual(pro.map((model) => model.id), chatGptWebModels('pro').map((model) => model.id));
-});
-
-test('a paid-only model on a free session is refused, naming the plan', async () => {
-  const { driver: d, asked } = driver();
-  const state = parseChatGptStorageState(authExport());
-  const adapter = new ChatGptWebAdapter({ driver: d });
-  await assert.rejects(
-    () => adapter.chat(request('gpt-5-6-pro'), { credential: chatGptWebCredential(state) }),
-    (error) => error.code === 'NOT_SUPPORTED' && /a free plan/.test(error.publicMessage),
-  );
-  assert.equal(asked.length, 0, 'no browser is launched for a model this plan cannot use');
-});
-
 /* ------------------------------------------------------------------ *
  * A blocked edge is not a signed-out session
  * ------------------------------------------------------------------ */
@@ -503,47 +460,148 @@ test('a driver failure is raised, not swallowed into a successful empty answer',
  * The real model ids
  * ------------------------------------------------------------------ */
 
-test('the free tier is `auto`, because it has no model picker at all', () => {
-  // The page chooses on a free account, and the id that reaches it is the literal string
-  // "auto". An invented tidy id like "gpt-5.2" posts a message that never answers.
-  assert.deepEqual(chatGptWebModels('free').map((m) => m.id), ['auto', 'auto-thinking']);
+test('the free tier maps onto `auto`, because it has no model picker at all', () => {
+  // resolveSelection returns { kind: "free" } and directModel sends the literal "auto" —
+  // the page chooses. An invented id like "gpt-5.2" reaches nothing.
+  const plain = resolveChatGptWebSelection('gpt-5.6-luna-free');
+  assert.equal(plain.kind, 'free');
+  assert.equal(plain.model, 'auto');
+  assert.equal(plain.thinkEnabled, false);
+  assert.equal(resolveChatGptWebSelection('gpt-5.6-luna-free-thinking').thinkEnabled, true);
 });
 
-test('no invented model id survives in the catalog', () => {
-  const ids = allChatGptWebModels();
-  assert.equal(ids.includes('gpt-5.2'), false);
-  assert.equal(ids.includes('gpt-5.1'), false);
-  assert.equal(ids.includes('gpt-5-mini'), false);
-  // The real ids are inconsistent about hyphens, which is what made a tidy guess so easy.
-  assert.ok(ids.includes('gpt-5-6'));
-  assert.ok(ids.includes('gpt-5-5'));
+test('dots and hyphens are the same model, and a `chatgpt-web/` prefix is ignored', () => {
+  // The reference lowercases, strips the prefix and folds every dot into a hyphen before
+  // looking a model up, so refusing one spelling refuses its twin for no reason.
+  assert.equal(normalizeChatGptWebModel('chatgpt-web/GPT-5.6-Luna-Free'), 'gpt-5-6-luna-free');
+  assert.deepEqual(resolveChatGptWebSelection('gpt-5.6-luna-free'), resolveChatGptWebSelection('gpt-5-6-luna-free'));
+  assert.deepEqual(resolveChatGptWebSelection('chatgpt-web/gpt-5-6'), resolveChatGptWebSelection('gpt-5-6'));
 });
 
-test('the documented aliases resolve to ids the page understands', () => {
-  assert.equal(resolveChatGptWebModel('gpt-5-6-sol'), 'gpt-5-6-thinking');
-  assert.equal(resolveChatGptWebModel('gpt-5-5-instant'), 'gpt-5-5');
-  assert.equal(resolveChatGptWebModel('gpt-5.6-luna-free'), 'auto');
-  // An id that is already canonical is left alone.
-  assert.equal(resolveChatGptWebModel('gpt-5-6-pro'), 'gpt-5-6-pro');
+test('the paid family resolves to a model label and an effort index', () => {
+  const instant = resolveChatGptWebSelection('gpt-5-6');
+  assert.deepEqual({ ...instant }, { kind: 'picker', modelLabel: 'GPT-5.6 Sol', effortIndex: 0, model: 'gpt-5-6' });
+  assert.equal(resolveChatGptWebSelection('gpt-5-6-pro').effortIndex, 4);
+  assert.equal(resolveChatGptWebSelection('gpt-5-5').modelLabel, 'GPT-5.5');
+  assert.equal(resolveChatGptWebSelection('gpt-5-5-pro').model, 'gpt-5-5-pro');
 });
 
-test('a free session is refused the paid family, by name', async () => {
+test('a thinking model takes its effort from the request, defaulting to medium', () => {
+  // The page is driven with a model plus a reason flag, not with an effort-suffixed id.
+  assert.equal(resolveChatGptWebSelection('gpt-5-6-thinking', 'low').effortIndex, 0);
+  assert.equal(resolveChatGptWebSelection('gpt-5-6-thinking').effortIndex, 1);
+  assert.equal(resolveChatGptWebSelection('gpt-5-6-thinking', 'high').effortIndex, 2);
+  assert.equal(resolveChatGptWebSelection('gpt-5-6-thinking', 'xhigh').effortIndex, 3);
+  assert.equal(resolveChatGptWebSelection('gpt-5-6-sol', 'max').effortIndex, 3);
+});
+
+test('an id outside the set is refused rather than guessed at', () => {
+  // The reference throws for the same input, and a wrong guess would silently select a
+  // model nobody asked for.
+  assert.equal(resolveChatGptWebSelection('gpt-5.2'), undefined);
+  assert.equal(resolveChatGptWebSelection('gpt-5.1'), undefined);
+  assert.equal(resolveChatGptWebSelection('gpt-4o'), undefined);
+  assert.equal(resolveChatGptWebSelection('  '), undefined);
+});
+
+test('the free catalog is the Luna Free pair and no invented id survives', () => {
+  const free = chatGptWebModels('free').map((m) => m.id);
+  assert.deepEqual(free, ['gpt-5.6-luna-free', 'gpt-5.6-luna-free-thinking']);
+  const all = allChatGptWebModels();
+  for (const invented of ['gpt-5.2', 'gpt-5.1', 'gpt-5-mini', 'auto', 'gpt-5.2-codex']) {
+    assert.equal(all.includes(invented), false, `${invented} is not a real model`);
+  }
+});
+
+test('an unrecognised plan gets both sets, because a visible failure beats a hidden model', () => {
+  // A storage-state paste carries no plan, which is honestly unknown rather than free.
+  const unknown = chatGptWebModels(undefined).map((m) => m.id);
+  assert.ok(unknown.includes('gpt-5.6-luna-free'));
+  assert.ok(unknown.includes('gpt-5-6'));
+});
+
+test('a known id is driven on any plan, because the page is the authority', async () => {
+  // resolveSelection never consults the plan: it maps the id onto a selection and lets the
+  // page refuse. Refusing locally would be a second, different rule — and a plan field
+  // read from an export is weaker evidence than what the page actually serves.
   const { driver: d, asked } = driver();
   const state = parseChatGptStorageState(authExport());
-  const adapter = new ChatGptWebAdapter({ driver: d });
+  await new ChatGptWebAdapter({ driver: d }).chat(request('gpt-5-6-pro'), { credential: chatGptWebCredential(state) });
+  assert.equal(asked[0].selection.modelLabel, 'GPT-5.6 Sol');
+  assert.equal(asked[0].selection.effortIndex, 4);
+});
+
+test('an id outside the set is refused locally, before a browser is launched', async () => {
+  // Nothing about `gpt-5.2` could ever resolve, so spending a browser on it is waste.
+  const { driver: d, asked } = driver();
+  const state = parseChatGptStorageState(authExport());
   await assert.rejects(
-    () => adapter.chat(request('gpt-5-6-pro'), { credential: chatGptWebCredential(state) }),
-    (error) => error.code === 'NOT_SUPPORTED' && /a free plan/.test(error.publicMessage),
+    () => new ChatGptWebAdapter({ driver: d }).chat(request('gpt-5.2'), { credential: chatGptWebCredential(state) }),
+    (error) => error.code === 'NOT_SUPPORTED',
   );
   assert.equal(asked.length, 0);
 });
 
-test('an alias is accepted on a free session and passed through resolved', async () => {
+test('the selection, not the client id, is what reaches the page', async () => {
   const { driver: d, asked } = driver();
   const state = parseChatGptStorageState(authExport());
-  const response = await new ChatGptWebAdapter({ driver: d }).chat(request('gpt-5.6-luna-free'), {
+  await new ChatGptWebAdapter({ driver: d }).chat(request('gpt-5.6-luna-free'), {
     credential: chatGptWebCredential(state),
   });
-  assert.equal(asked[0].model, 'auto', 'the alias is resolved before it reaches the page');
-  assert.equal(response.message.content, 'Hello from the page.');
+  assert.deepEqual(asked[0].selection, { kind: 'free', thinkEnabled: false, model: 'auto' });
 });
+
+/* ------------------------------------------------------------------ *
+ * The reason has to survive
+ * ------------------------------------------------------------------ */
+
+test("a refused page names itself, instead of arriving as 'every route failed'", async () => {
+  // The driver's failures are plain errors describing the page. Crossing the routing layer
+  // as a plain error they become "every provider route failed" with the reason discarded —
+  // which is a refused request reported as a broken model.
+  const { driver: d } = driver({
+    async ask() {
+      throw new Error('chatgpt.com served its bot-protection challenge instead of the application');
+    },
+  });
+  const state = parseChatGptStorageState(authExport());
+  await assert.rejects(
+    () => new ChatGptWebAdapter({ driver: d }).chat(request(), { credential: chatGptWebCredential(state) }),
+    (error) => {
+      assert.equal(error.code, 'PROVIDER_UNAVAILABLE');
+      assert.match(error.publicMessage ?? '', /bot-protection challenge/);
+      return true;
+    },
+  );
+});
+
+test('an ordinary page failure is not misfiled as an outage', async () => {
+  const { driver: d } = driver({
+    async ask() {
+      throw new Error('The ChatGPT page loaded but never showed a composer.');
+    },
+  });
+  const state = parseChatGptStorageState(authExport());
+  await assert.rejects(
+    () => new ChatGptWebAdapter({ driver: d }).chat(request(), { credential: chatGptWebCredential(state) }),
+    (error) => error.code === 'PROVIDER_REQUEST_FAILED',
+  );
+});
+
+test('a driver failure is raised, not swallowed into a successful empty answer', async () => {
+  const { driver: d } = driver({
+    async ask() {
+      throw new Error('browser closed');
+    },
+  });
+  const state = parseChatGptStorageState(authExport());
+  await assert.rejects(
+    () => new ChatGptWebAdapter({ driver: d }).chat(request(), { credential: chatGptWebCredential(state) }),
+    (error) => /browser closed/.test(error.publicMessage ?? ''),
+  );
+});
+
+/* ------------------------------------------------------------------ *
+ * The real model ids
+ * ------------------------------------------------------------------ */
+

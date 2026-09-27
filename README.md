@@ -192,8 +192,10 @@ the edge rejects. And the model ids were **invented**: the web tier serves `gpt-
 `gpt-5-5` and friends, and a free account has no picker at all — the page is sent the literal
 id `auto`.
 
-What remains is how the answer is read. The reference project discovers ChatGPT's own
-JavaScript module at runtime and calls their internal API, instead of hardcoding selectors.
+What remains is the same in both: the page is driven with a *selection*, and typing into a
+composer cannot set one. The reference discovers ChatGPT's own JavaScript module at runtime
+and calls their internal API; here the selection is resolved correctly and logged, but the
+composer path cannot apply it.
 
 The export format is the one ChatGPT actually hands you (a CLI/Codex auth export with a
 `sessionToken`), and the plan it carries decides which models you are offered.

@@ -389,45 +389,90 @@ export function looksBlocked(bodyText: string | null | undefined, documentTitle?
  * authority: it renders its own model picker, and a model missing from this table can be
  * typed in as a custom id. That is why the list is a floor and not a gate.
  */
+/**
+ * The models this provider serves, as the reference project accepts them.
+ *
+ * `normalizedModel` there lowercases, strips a `chatgpt-web/` prefix and folds every dot
+ * into a hyphen, then `resolveSelection` maps what is left onto a **UI selection** — a model
+ * label and an effort index — which is what the page is actually driven with. Anything
+ * outside this set is refused, so the catalog is a floor rather than a wish.
+ *
+ * The two spellings are kept because the normalisation makes them equivalent, and a client
+ * that learned one from a log is as likely to send the other.
+ */
 const CHATGPT_WEB_PLANS: Record<string, ReadonlyArray<{ id: string; name: string }>> = {
   /**
-   * The free tier has **no model picker at all**. The page chooses, and the model that
-   * reaches it is the literal string `auto` — which is why an invented id like `gpt-5.2`
-   * posts a message that never becomes an answer.
+   * The free tier has **no model picker at all** — `resolveSelection` returns
+   * `{ kind: "free" }` and the page is sent the literal model `auto`, with the page choosing.
+   * So a free account is offered the two Luna Free ids and nothing from the paid family.
    */
   free: [
-    { id: 'auto', name: 'ChatGPT (Free)' },
-    { id: 'auto-thinking', name: 'ChatGPT (Free) · Thinking' },
+    { id: 'gpt-5.6-luna-free', name: 'GPT-5.6 Luna — Free' },
+    { id: 'gpt-5.6-luna-free-thinking', name: 'GPT-5.6 Luna — Free Thinking' },
   ],
   paid: [
     { id: 'gpt-5-6', name: 'GPT-5.6 Sol — Instant' },
+    { id: 'gpt-5-6-instant', name: 'GPT-5.6 Sol — Instant' },
     { id: 'gpt-5-6-thinking', name: 'GPT-5.6 Sol — Thinking' },
+    { id: 'gpt-5-6-sol', name: 'GPT-5.6 Sol — Thinking' },
     { id: 'gpt-5-6-pro', name: 'GPT-5.6 Sol — Pro' },
     { id: 'gpt-5-5', name: 'GPT-5.5 — Instant' },
+    { id: 'gpt-5-5-instant', name: 'GPT-5.5 — Instant' },
     { id: 'gpt-5-5-thinking', name: 'GPT-5.5 — Thinking' },
     { id: 'gpt-5-5-pro', name: 'GPT-5.5 — Pro' },
   ],
 };
 
 /**
- * Aliases the reference catalog documents, so a client using either spelling is served.
+ * The spelling normalisation the reference applies before it looks a model up.
  *
- * Note the inconsistency in the real ids — `gpt-5-6` uses hyphens, `gpt-5.6-luna-free` uses
- * a dot — which is why an invented, tidy `gpt-5.2` was so plausible and so wrong.
+ * Every dot becomes a hyphen, which is why `gpt-5.6-luna-free` and `gpt-5-6-luna-free` are
+ * the same model and why accepting only one of them refuses the other for no reason.
  */
-export const CHATGPT_WEB_MODEL_ALIASES: Record<string, string> = {
-  'gpt-5-6-sol': 'gpt-5-6-thinking',
-  'gpt-5-5-instant': 'gpt-5-5',
-  'gpt-5.6-luna-free': 'auto',
-  'gpt-5.6-luna-free-thinking': 'auto-thinking',
-};
-
-/** Resolves a documented alias to the id the page understands. */
-export function resolveChatGptWebModel(model: string): string {
-  return CHATGPT_WEB_MODEL_ALIASES[model] ?? model;
+export function normalizeChatGptWebModel(value: string): string {
+  return value.trim().toLowerCase().replace(/^(chatgpt-web|cgpt-web)\//, '').replace(/\./g, '-');
 }
 
-/** Every id this provider serves, across plans. Used by custom model validation. */
+/** The model the page is actually driven with, which is never the id the client sent. */
+export type ChatGptWebSelection =
+  | { kind: 'free'; thinkEnabled: boolean; model: 'auto' }
+  | { kind: 'picker'; modelLabel: 'GPT-5.6 Sol' | 'GPT-5.5'; effortIndex: 0 | 1 | 2 | 3 | 4; model: string };
+
+/**
+ * Resolves a client model id onto the selection the page understands.
+ *
+ * Returns nothing for an id outside the set, rather than guessing: the reference throws
+ * `received an unsupported model` for the same input, and a wrong guess here silently
+ * selects a model the user did not ask for.
+ */
+export function resolveChatGptWebSelection(model: string, effort?: string): ChatGptWebSelection | undefined {
+  const normalized = normalizeChatGptWebModel(model);
+  const effortIndex = (value: string | undefined): 0 | 1 | 2 | 3 => {
+    if (value === undefined || value === 'medium') return 1;
+    if (['none', 'off', 'minimal', 'low'].includes(value)) return 0;
+    if (value === 'high') return 2;
+    return 3;
+  };
+  if (normalized === 'gpt-5-6-luna-free') return { kind: 'free', thinkEnabled: false, model: 'auto' };
+  if (normalized === 'gpt-5-6-luna-free-thinking') return { kind: 'free', thinkEnabled: true, model: 'auto' };
+  if (normalized === 'gpt-5-6-pro') return { kind: 'picker', modelLabel: 'GPT-5.6 Sol', effortIndex: 4, model: 'gpt-5-6-pro' };
+  if (normalized === 'gpt-5-6-instant' || normalized === 'gpt-5-6') {
+    return { kind: 'picker', modelLabel: 'GPT-5.6 Sol', effortIndex: 0, model: 'gpt-5-6' };
+  }
+  if (normalized === 'gpt-5-6-thinking' || normalized === 'gpt-5-6-sol') {
+    return { kind: 'picker', modelLabel: 'GPT-5.6 Sol', effortIndex: effortIndex(effort), model: 'gpt-5-6' };
+  }
+  if (normalized === 'gpt-5-5-pro') return { kind: 'picker', modelLabel: 'GPT-5.5', effortIndex: 4, model: 'gpt-5-5-pro' };
+  if (normalized === 'gpt-5-5-instant') {
+    return { kind: 'picker', modelLabel: 'GPT-5.5', effortIndex: 0, model: 'gpt-5-5' };
+  }
+  if (normalized === 'gpt-5-5' || normalized === 'gpt-5-5-thinking') {
+    return { kind: 'picker', modelLabel: 'GPT-5.5', effortIndex: effortIndex(effort), model: 'gpt-5-5' };
+  }
+  return undefined;
+}
+
+/** Every id this provider serves, across plans. */
 export function allChatGptWebModels(): string[] {
   return [...new Set([...CHATGPT_WEB_PLANS.free!, ...CHATGPT_WEB_PLANS.paid!].map((model) => model.id))];
 }
@@ -437,8 +482,7 @@ export function allChatGptWebModels(): string[] {
  *
  * Anything unrecognised is treated as paid rather than restricted: showing a model a paid
  * account cannot use produces a visible test failure, while hiding one a free account *can*
- * use hides something that works. A false negative costs a line of typing; a false positive
- * costs a failing test.
+ * use hides something that works.
  */
 export function isFreeChatGptPlan(planType: string | undefined): boolean {
   if (!planType) return false;
@@ -448,7 +492,7 @@ export function isFreeChatGptPlan(planType: string | undefined): boolean {
 
 /** The catalog for a plan, or the full set when the export did not say. */
 export function chatGptWebModels(planType?: string): ReadonlyArray<{ id: string; name: string }> {
-  if (!planType) return CHATGPT_WEB_PLANS.paid!;
+  if (!planType) return [...CHATGPT_WEB_PLANS.paid!, ...CHATGPT_WEB_PLANS.free!];
   return isFreeChatGptPlan(planType) ? CHATGPT_WEB_PLANS.free! : CHATGPT_WEB_PLANS.paid!;
 }
 
@@ -469,7 +513,12 @@ export type ChatGptWebDriver = {
   /** Opens the page, sends one prompt, and resolves with the answer text. */
   ask: (input: {
     cookies: readonly ChatGptCookie[];
-    model: string;
+    /**
+     * What to select in the page — a model label and an effort index, or the free tier's
+     * "the page decides" case. This is what the page is driven with; the id the client sent
+     * is only the means of choosing it.
+     */
+    selection: ChatGptWebSelection;
     messages: readonly { role: string; text: string }[];
     timeoutMs: number;
     signal?: AbortSignal;
@@ -552,12 +601,11 @@ export class ChatGptWebAdapter implements ProviderAdapter {
 
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
     const session = chatGptWebSessionFromCredential(context.credential);
-    const wanted = resolveChatGptWebModel(request.model);
-    if (!chatGptWebModels(session.planType).some((model) => model.id === wanted)) {
-      const plan = session.planType ? ` a ${session.planType} plan` : '';
-      throw new ProviderError('NOT_SUPPORTED', `${request.model} is not in the model set for${plan || ' this account'}.`, {
+    const selection = resolveChatGptWebSelection(request.model);
+    if (!selection) {
+      throw new ProviderError('NOT_SUPPORTED', `ChatGPT Web does not offer a model called ${request.model}.`, {
         providerId: this.id,
-        publicMessage: `${request.model} is not in the model set for${plan || ' this account'}. The page's own model picker is the authority — add it as a custom model id if it is listed there.`,
+        publicMessage: `ChatGPT Web does not offer a model called ${request.model}. The page's own picker is the authority — add it as a custom model id if it is listed there.`,
       });
     }
     // A browser turn carries one prompt, so the system turn and history are flattened into
@@ -584,7 +632,7 @@ export class ChatGptWebAdapter implements ProviderAdapter {
     try {
       result = await this.driver.ask({
         cookies: session.cookies,
-        model: wanted,
+        selection,
         messages: [...messages.slice(0, -1), { role: 'user', text: prompt }],
         timeoutMs: CHATGPT_WEB.defaultTurnTimeoutMs,
         ...(context.signal ? { signal: context.signal } : {}),
