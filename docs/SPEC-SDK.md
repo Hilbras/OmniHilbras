@@ -808,28 +808,77 @@ stop growing is what "finished" looks like on this page.
 with `eval`, and chatgpt.com's CSP forbids `unsafe-eval`, so a string fails with an EvalError
 on a page that has otherwise worked perfectly.
 
+### The model ids, which were invented
+
+The first catalog was `gpt-5.2`, `gpt-5.1`, `gpt-5-mini` and friends — tidy, plausible, and
+**none of them real**. The ids the web tier actually serves are not tidy, which is exactly
+why the tidy ones were so easy to invent:
+
+```
+gpt-5-6          GPT-5.6 Sol — Instant
+gpt-5-6-thinking GPT-5.6 Sol — Thinking
+gpt-5-6-pro      GPT-5.6 Sol — Pro
+gpt-5-5          GPT-5.5 — Instant
+gpt-5-5-thinking GPT-5.5 — Thinking
+gpt-5-5-pro      GPT-5.5 — Pro
+```
+
+Hyphens for the version, a dot nowhere, and a `-pro` suffix for the top effort — and the
+reference catalog records them as *"observed from first-party ChatGPT Pro and Free UIs"*,
+which is the right way to record something you learned by watching rather than by reading.
+
+**The free tier is a different thing entirely.** It has no model picker, so the page chooses
+and the id that reaches it is the literal string **`auto`**:
+
+```ts
+if (selection.kind === "free") return { model: "auto", reason: selection.thinkEnabled };
+```
+
+So a free account is offered `auto` and `auto-thinking`, and the paid family is refused by
+name. A storage-state paste carries no plan at all, which is honestly unknown rather than
+free, so it gets the full set — a false negative costs a line of typing, a false positive
+costs a failing test.
+
+The reference also documents aliases with the inconsistency intact (`gpt-5-6-sol` →
+`gpt-5-6-thinking`, `gpt-5.5-instant` → `gpt-5-5`), so both spellings are accepted and
+resolved before anything reaches the page.
+
+### A catalog refresh could never remove anything
+
+Two real bugs, found because the stale `gpt-5.2` ids survived a refresh that reported 200:
+
+**`updateModels` unioned instead of replacing.** A rescan computed the correct list and then
+unioned it with the existing one — and the additive path files every addition as a
+**custom** model. So a model the provider has withdrawn is kept forever *and* becomes
+impossible to remove, because by then it is indistinguishable from something the user typed
+in. Refreshes now replace the discovered set; adding is still the default, because that is
+what the "add model" control means.
+
+**`LocalConnectionStore.updateModels` never persisted.** The in-memory store does not need
+to; the persistent one did, and it already did — which is where the two implementations had
+drifted apart.
+
 ### What is still not working, stated plainly
 
-**No turn has ever produced an answer.** The request is submitted — the composer accepts
-real keystrokes, the send button enables, the message posts — and the page then renders only
-a placeholder:
+**No turn has produced an answer.** The request is submitted — real keystrokes into the
+composer, the send button enables, the message posts — and the page renders only a
+placeholder:
 
 ```html
 <div data-message-author-role="assistant"
      data-message-id="request-placeholder-request-WEB:…-0" …>
 ```
 
-with no text, and the page sitting at its "Think" indicator indefinitely. Observed on a
-free-plan account. The model ids in the catalog are an assumption; the page's own model
-picker is the authority and has not been read.
+with no text, sitting at its "Think" indicator indefinitely. The model is now the right one
+for the plan, and the access path is right, and it still does not complete.
 
-For contrast, the reference project **is** completing turns on this same machine, and does so
-by never hardcoding a selector: it discovers ChatGPT's own JavaScript module at runtime and
-calls their internal API, including an explicit model *selection* step. That is very likely
-where the remaining difference lies — not in access, which is now solved, but in how the
-model is chosen and how the answer is read.
+The reference project **does** complete turns on this same machine, and does it by
+discovering ChatGPT's own JavaScript module at runtime and calling their internal API,
+including an explicit model *selection* step. It never hardcodes a selector. That is the
+remaining difference, and it is a substantial piece of work rather than a fix.
 
-So: access solved, submission solved, **completion not yet solved**. The card says so.
+So: access solved, model ids correct, submission works, **completion not yet solved**. The
+card says so.
 
 ### Catalog cards added for OpenAI-compatible gateways
 

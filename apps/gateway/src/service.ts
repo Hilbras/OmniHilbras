@@ -419,7 +419,14 @@ export class GatewayService {
     );
     // Custom models are the operator's own additions and survive a rescan.
     const merged = [...new Set([...discovered.map((model) => model.id), ...(record.customModelIds ?? [])])];
-    const updated = await this.connectionStore.updateModels(connectionId, merged, GatewayService.modelMetaFor(discovered));
+    // `replace`, not add: the provider is the authority on what it serves, and a union here
+    // would keep a withdrawn model forever and file it as a custom addition besides.
+    const updated = await this.connectionStore.updateModels(
+      connectionId,
+      merged,
+      GatewayService.modelMetaFor(discovered),
+      { replace: true },
+    );
     if (!updated) throw new ProviderError('NOT_FOUND', 'That connection no longer exists.', { providerId: connectionId });
     return updated;
   }

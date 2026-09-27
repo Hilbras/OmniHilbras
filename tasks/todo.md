@@ -146,6 +146,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 21: Replace the invented ChatGPT model ids with the observed ones, and fix catalog refresh.
+  - Acceptance: the catalog carries ids the web tier actually serves, and a refresh can remove a model.
+  - Verify: `listModels()` for a free session returns `auto, auto-thinking` and the paid family is refused by name; a refresh on the live connection drops the stale `gpt-5.2` ids and the result survives a reload from disk. 42 ChatGPT Web tests, 329 total.
+  - Findings: **every model id in the first catalog was invented** — `gpt-5.2`, `gpt-5.1`, `gpt-5-mini` — and none of them exist. The real ones are untidy, which is why tidy guesses were so easy: `gpt-5-6`, `gpt-5-6-thinking`, `gpt-5-6-pro`, `gpt-5-5`, `gpt-5-5-thinking`, `gpt-5-5-pro`, recorded upstream as "observed from first-party ChatGPT Pro and Free UIs". **The free tier is a different thing entirely**: it has no model picker, so the page chooses and the id that reaches it is the literal string `auto`. A storage-state paste carries no plan, which is unknown rather than free, so it gets the full set. Two more real bugs surfaced because the stale ids survived a refresh that returned 200: `updateModels` **unioned instead of replacing**, and its additive path files every addition as a *custom* model, so a withdrawn model is kept forever and becomes impossible to remove; and the persistent store's `updateModels` and the in-memory one had drifted, the latter quietly lacking `replace`. With the right model and the right access, **a turn still does not complete** — the page renders only `request-placeholder-request-WEB:…-0` and sits at "Think". Reading the answer is the remaining work, and the reference does it by driving ChatGPT's own JS module rather than selectors.
+  - Files: `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, `test/chatgpt-web.test.js`, `apps/gateway/src/connections.ts`, `apps/gateway/src/service.ts`, docs.
+  - Depends on: Task 20.
+  - Scope: Medium.
+
 - [x] Task 20: Unblock access to chatgpt.com, and correct the diagnosis.
   - Acceptance: the page loads and a turn is submitted, instead of a 403 at the edge.
   - Verify: measured on one machine, one session, one engine, varying one thing at a time — default UA gives 403 with `Just a moment...`, a real Chrome UA gives 200 with a composer present, and headed/full-Chromium make no difference. The composer accepts `pressSequentially` and the send button then reports `aria-disabled="false"`. 324 tests pass.

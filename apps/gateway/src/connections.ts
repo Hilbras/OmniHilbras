@@ -115,7 +115,14 @@ export interface ConnectionCredentialStore {
 export interface ConnectionStore extends ConnectionCredentialStore {
   list(): Promise<ConnectionRecord[]>;
   save(input: ConnectionInput, credential: ProviderCredential): Promise<ConnectionRecord>;
-  updateModels(connectionId: string, modelIds: string[], modelMeta?: ModelMetaMap): Promise<ConnectionRecord | undefined>;
+  /**
+   * @param options.replace Set by a catalog rescan. The provider is the authority on what
+   *   it serves, so a rescan **replaces** the discovered set rather than adding to it —
+   *   otherwise a model the provider has withdrawn is kept forever, and the union marks it
+   *   as a custom addition, which is how a stale id becomes impossible to remove. Adding
+   *   is the default, because that is what the "add model" control means.
+   */
+  updateModels(connectionId: string, modelIds: string[], modelMeta?: ModelMetaMap, options?: { replace?: boolean }): Promise<ConnectionRecord | undefined>;
   updateResilience(connectionId: string, resilience: Partial<ResilienceSettings>): Promise<ConnectionRecord | undefined>;
   remove(connectionId: string): Promise<boolean>;
 }
@@ -209,10 +216,12 @@ export class InMemoryConnectionStore implements ConnectionStore {
     return cloneRecord(record);
   }
 
-  async updateModels(connectionId: string, modelIds: string[], modelMeta?: ModelMetaMap) {
+  async updateModels(connectionId: string, modelIds: string[], modelMeta?: ModelMetaMap, options: { replace?: boolean } = {}) {
     const record = this.connections.get(connectionId);
     if (!record) return undefined;
-    const merged = mergeAddedModelIds(record, modelIds);
+    const merged = options.replace
+      ? { modelIds: normalizeModelIds(modelIds, maxConnectionModelIds) }
+      : mergeAddedModelIds(record, modelIds);
     // A rescan that found the same ids still learned new metadata, so the metadata is
     // not gated on the id list having changed.
     if (!merged && !modelMeta) return cloneRecord(record);
@@ -368,12 +377,21 @@ export class LocalConnectionStore implements ConnectionStore {
     });
   }
 
-  async updateModels(connectionId: string, modelIds: string[], modelMeta?: ModelMetaMap) {
+  async updateModels(connectionId: string, modelIds: string[], modelMeta?: ModelMetaMap, options: { replace?: boolean } = {}) {
     return this.withMutation(async () => {
       await this.ensureLoaded();
       const record = this.connections.get(connectionId);
       if (!record) return undefined;
-      const merged = mergeAddedModelIds(record, modelIds);
+      /**
+       * A rescan replaces rather than adds. The provider is the authority on what it
+       * serves, and the additive path also files every addition as a *custom* model — so a
+       * union here means a withdrawn model is kept forever and becomes impossible to
+       * remove. Adding stays the default, because that is what the "add model" control
+       * means.
+       */
+      const merged = options.replace
+        ? { modelIds: normalizeModelIds(modelIds, maxConnectionModelIds) }
+        : mergeAddedModelIds(record, modelIds);
       if (!merged && !modelMeta) return cloneRecord(record);
       const previous = record;
       const updated = { ...record, ...merged, ...(modelMeta ? { modelMeta } : {}), updatedAt: new Date().toISOString() };

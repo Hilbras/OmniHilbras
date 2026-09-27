@@ -5,6 +5,7 @@ import {
   ChatGptWebAdapter,
   chatGptCookieHeader,
   chatGptWebCredential,
+  allChatGptWebModels,
   chatGptWebModels,
   chatGptWebSessionFromCredential,
   isFreeChatGptPlan,
@@ -13,6 +14,7 @@ import {
   looksSignedOut,
   parseChatGptCookieHeader,
   parseChatGptStorageState,
+  resolveChatGptWebModel,
 } from '../dist/index.js';
 
 /**
@@ -55,7 +57,7 @@ function driver(overrides = {}) {
   return { driver: { ...base, ...overrides }, asked };
 }
 
-const request = (model = 'gpt-5.2', messages = [{ role: 'user', content: 'hi' }]) => ({ model, messages });
+const request = (model = 'auto', messages = [{ role: 'user', content: 'hi' }]) => ({ model, messages });
 
 /* ------------------------------------------------------------------ *
  * The export
@@ -223,13 +225,13 @@ test('the last assistant turn is the answer, not the first', () => {
 
 test('a chat request drives the page and returns its text', async () => {
   const { driver: d, asked } = driver();
-  const state = parseChatGptStorageState(stateJson([openAiCookie()]));
+  const state = parseChatGptStorageState(authExport());
   const response = await new ChatGptWebAdapter({ driver: d }).chat(request(), {
     credential: chatGptWebCredential(state),
   });
   assert.equal(response.message.content, 'Hello from the page.');
   assert.equal(response.finishReason, 'stop');
-  assert.equal(asked[0].model, 'gpt-5.2');
+  assert.equal(asked[0].model, 'auto');
   assert.equal(asked[0].messages[0].text, 'hi');
   // The page gets a prompt, not a message list it has nowhere to put.
   assert.equal(asked[0].messages.length, 1);
@@ -237,9 +239,9 @@ test('a chat request drives the page and returns its text', async () => {
 
 test('a system turn is folded into the prompt, because a browser turn carries one message', async () => {
   const { driver: d, asked } = driver();
-  const state = parseChatGptStorageState(stateJson([openAiCookie()]));
+  const state = parseChatGptStorageState(authExport());
   await new ChatGptWebAdapter({ driver: d }).chat(
-    { model: 'gpt-5.2', messages: [{ role: 'system', content: 'be brief' }, { role: 'user', content: 'hi' }] },
+    { model: 'auto', messages: [{ role: 'system', content: 'be brief' }, { role: 'user', content: 'hi' }] },
     { credential: chatGptWebCredential(state) },
   );
   const prompt = asked[0].messages[0].text;
@@ -250,9 +252,12 @@ test('a system turn is folded into the prompt, because a browser turn carries on
 test('only the session cookies are handed to the driver', async () => {
   const { driver: d, asked } = driver();
   const state = parseChatGptStorageState(
-    stateJson([openAiCookie(), { name: 'other', value: 'v', domain: '.attacker.example' }]),
+    stateJson([
+      { name: '__Secure-next-auth.session-token', value: 's', domain: '.chatgpt.com', expires: liveExpiry() },
+      { name: 'other', value: 'v', domain: '.attacker.example' },
+    ]),
   );
-  await new ChatGptWebAdapter({ driver: d }).chat(request(), { credential: chatGptWebCredential(state) });
+  await new ChatGptWebAdapter({ driver: d }).chat(request('gpt-5-6'), { credential: chatGptWebCredential(state) });
   assert.deepEqual(asked[0].cookies.map((cookie) => cookie.name), ['__Secure-next-auth.session-token']);
 });
 
@@ -274,7 +279,7 @@ test('a model the page does not offer is refused before a browser is launched', 
 
 test('a page that rendered nothing says the export may be stale', async () => {
   const { driver: d } = driver({ async ask() { return { text: '   ' }; } });
-  const state = parseChatGptStorageState(stateJson([openAiCookie()]));
+  const state = parseChatGptStorageState(authExport());
   await assert.rejects(
     () => new ChatGptWebAdapter({ driver: d }).chat(request(), { credential: chatGptWebCredential(state) }),
     (error) => error.code === 'INVALID_RESPONSE' && /export is stale/.test(error.publicMessage),
@@ -388,8 +393,12 @@ test('a free plan is not offered the paid model set', () => {
   assert.equal(isFreeChatGptPlan(undefined), false, 'an unknown plan is not assumed to be free');
   const free = chatGptWebModels('free').map((model) => model.id);
   const paid = chatGptWebModels('pro').map((model) => model.id);
-  assert.ok(free.every((id) => paid.includes(id)), 'the free set is a subset of the paid one');
-  assert.ok(paid.length > free.length);
+  // The two sets are disjoint on purpose: `auto` is what a free account's page sends, and
+  // the gpt-5-6/gpt-5-5 family is what a paid account's picker offers. Neither account can
+  // use the other's ids, so pretending one contains the other would be the wrong shape.
+  assert.ok(!free.some((id) => paid.includes(id)), 'the free set is not the paid set');
+  assert.ok(!paid.some((id) => free.includes(id)), 'the paid set is not the free set');
+  assert.ok(free.length > 0 && paid.length > 0);
 });
 
 test('an unrecognised plan gets the full set, because a visible failure beats a hidden model', () => {
@@ -415,8 +424,8 @@ test('a paid-only model on a free session is refused, naming the plan', async ()
   const state = parseChatGptStorageState(authExport());
   const adapter = new ChatGptWebAdapter({ driver: d });
   await assert.rejects(
-    () => adapter.chat(request('gpt-5.2-codex'), { credential: chatGptWebCredential(state) }),
-    (error) => error.code === 'NOT_SUPPORTED' && /a free plan/.test(error.publicMessage) && /custom model id/.test(error.publicMessage),
+    () => adapter.chat(request('gpt-5-6-pro'), { credential: chatGptWebCredential(state) }),
+    (error) => error.code === 'NOT_SUPPORTED' && /a free plan/.test(error.publicMessage),
   );
   assert.equal(asked.length, 0, 'no browser is launched for a model this plan cannot use');
 });
@@ -488,4 +497,53 @@ test('a driver failure is raised, not swallowed into a successful empty answer',
     () => new ChatGptWebAdapter({ driver: d }).chat(request(), { credential: chatGptWebCredential(state) }),
     (error) => /browser closed/.test(error.publicMessage ?? ''),
   );
+});
+
+/* ------------------------------------------------------------------ *
+ * The real model ids
+ * ------------------------------------------------------------------ */
+
+test('the free tier is `auto`, because it has no model picker at all', () => {
+  // The page chooses on a free account, and the id that reaches it is the literal string
+  // "auto". An invented tidy id like "gpt-5.2" posts a message that never answers.
+  assert.deepEqual(chatGptWebModels('free').map((m) => m.id), ['auto', 'auto-thinking']);
+});
+
+test('no invented model id survives in the catalog', () => {
+  const ids = allChatGptWebModels();
+  assert.equal(ids.includes('gpt-5.2'), false);
+  assert.equal(ids.includes('gpt-5.1'), false);
+  assert.equal(ids.includes('gpt-5-mini'), false);
+  // The real ids are inconsistent about hyphens, which is what made a tidy guess so easy.
+  assert.ok(ids.includes('gpt-5-6'));
+  assert.ok(ids.includes('gpt-5-5'));
+});
+
+test('the documented aliases resolve to ids the page understands', () => {
+  assert.equal(resolveChatGptWebModel('gpt-5-6-sol'), 'gpt-5-6-thinking');
+  assert.equal(resolveChatGptWebModel('gpt-5-5-instant'), 'gpt-5-5');
+  assert.equal(resolveChatGptWebModel('gpt-5.6-luna-free'), 'auto');
+  // An id that is already canonical is left alone.
+  assert.equal(resolveChatGptWebModel('gpt-5-6-pro'), 'gpt-5-6-pro');
+});
+
+test('a free session is refused the paid family, by name', async () => {
+  const { driver: d, asked } = driver();
+  const state = parseChatGptStorageState(authExport());
+  const adapter = new ChatGptWebAdapter({ driver: d });
+  await assert.rejects(
+    () => adapter.chat(request('gpt-5-6-pro'), { credential: chatGptWebCredential(state) }),
+    (error) => error.code === 'NOT_SUPPORTED' && /a free plan/.test(error.publicMessage),
+  );
+  assert.equal(asked.length, 0);
+});
+
+test('an alias is accepted on a free session and passed through resolved', async () => {
+  const { driver: d, asked } = driver();
+  const state = parseChatGptStorageState(authExport());
+  const response = await new ChatGptWebAdapter({ driver: d }).chat(request('gpt-5.6-luna-free'), {
+    credential: chatGptWebCredential(state),
+  });
+  assert.equal(asked[0].model, 'auto', 'the alias is resolved before it reaches the page');
+  assert.equal(response.message.content, 'Hello from the page.');
 });

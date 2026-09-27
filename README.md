@@ -182,15 +182,18 @@ npx playwright install chromium
 
 Without it, ChatGPT Web says so by name rather than failing as a provider error.
 
-**It reaches ChatGPT but does not yet complete a turn.** The page loads, the prompt is
-typed and sent — and then only a placeholder appears, with no answer. If you try it, that is
-the most likely result.
+**It reaches ChatGPT but does not yet complete a turn.** The page loads, the prompt is typed
+and sent, and then only a placeholder appears, with no answer. If you try it, that is the
+most likely result.
 
-An earlier note here blamed the network. That was wrong: the 403 was Playwright's default
-headless user agent containing `HeadlessChrome`, which the edge rejects. Setting a real
-user agent fixed access completely. What is left is the model selection and reading the
-answer, which is where the reference project discovers ChatGPT's own JavaScript module at
-runtime instead of hardcoding selectors.
+Two earlier notes here were wrong, and both are corrected in the spec. The 403 was **not** the
+network — it was Playwright's default headless user agent containing `HeadlessChrome`, which
+the edge rejects. And the model ids were **invented**: the web tier serves `gpt-5-6`,
+`gpt-5-5` and friends, and a free account has no picker at all — the page is sent the literal
+id `auto`.
+
+What remains is how the answer is read. The reference project discovers ChatGPT's own
+JavaScript module at runtime and calls their internal API, instead of hardcoding selectors.
 
 The export format is the one ChatGPT actually hands you (a CLI/Codex auth export with a
 `sessionToken`), and the plan it carries decides which models you are offered.

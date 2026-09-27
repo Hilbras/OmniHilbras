@@ -390,20 +390,47 @@ export function looksBlocked(bodyText: string | null | undefined, documentTitle?
  * typed in as a custom id. That is why the list is a floor and not a gate.
  */
 const CHATGPT_WEB_PLANS: Record<string, ReadonlyArray<{ id: string; name: string }>> = {
+  /**
+   * The free tier has **no model picker at all**. The page chooses, and the model that
+   * reaches it is the literal string `auto` — which is why an invented id like `gpt-5.2`
+   * posts a message that never becomes an answer.
+   */
   free: [
-    { id: 'gpt-5.2', name: 'GPT-5.2' },
-    { id: 'gpt-5.2-thinking', name: 'GPT-5.2 Thinking' },
-    { id: 'gpt-5.1', name: 'GPT-5.1' },
+    { id: 'auto', name: 'ChatGPT (Free)' },
+    { id: 'auto-thinking', name: 'ChatGPT (Free) · Thinking' },
   ],
   paid: [
-    { id: 'gpt-5.2', name: 'GPT-5.2' },
-    { id: 'gpt-5.2-thinking', name: 'GPT-5.2 Thinking' },
-    { id: 'gpt-5.1', name: 'GPT-5.1' },
-    { id: 'gpt-5.1-thinking', name: 'GPT-5.1 Thinking' },
-    { id: 'gpt-5-mini', name: 'GPT-5 mini' },
-    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
+    { id: 'gpt-5-6', name: 'GPT-5.6 Sol — Instant' },
+    { id: 'gpt-5-6-thinking', name: 'GPT-5.6 Sol — Thinking' },
+    { id: 'gpt-5-6-pro', name: 'GPT-5.6 Sol — Pro' },
+    { id: 'gpt-5-5', name: 'GPT-5.5 — Instant' },
+    { id: 'gpt-5-5-thinking', name: 'GPT-5.5 — Thinking' },
+    { id: 'gpt-5-5-pro', name: 'GPT-5.5 — Pro' },
   ],
 };
+
+/**
+ * Aliases the reference catalog documents, so a client using either spelling is served.
+ *
+ * Note the inconsistency in the real ids — `gpt-5-6` uses hyphens, `gpt-5.6-luna-free` uses
+ * a dot — which is why an invented, tidy `gpt-5.2` was so plausible and so wrong.
+ */
+export const CHATGPT_WEB_MODEL_ALIASES: Record<string, string> = {
+  'gpt-5-6-sol': 'gpt-5-6-thinking',
+  'gpt-5-5-instant': 'gpt-5-5',
+  'gpt-5.6-luna-free': 'auto',
+  'gpt-5.6-luna-free-thinking': 'auto-thinking',
+};
+
+/** Resolves a documented alias to the id the page understands. */
+export function resolveChatGptWebModel(model: string): string {
+  return CHATGPT_WEB_MODEL_ALIASES[model] ?? model;
+}
+
+/** Every id this provider serves, across plans. Used by custom model validation. */
+export function allChatGptWebModels(): string[] {
+  return [...new Set([...CHATGPT_WEB_PLANS.free!, ...CHATGPT_WEB_PLANS.paid!].map((model) => model.id))];
+}
 
 /**
  * Plans that are not the free tier.
@@ -525,7 +552,8 @@ export class ChatGptWebAdapter implements ProviderAdapter {
 
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
     const session = chatGptWebSessionFromCredential(context.credential);
-    if (!chatGptWebModels(session.planType).some((model) => model.id === request.model)) {
+    const wanted = resolveChatGptWebModel(request.model);
+    if (!chatGptWebModels(session.planType).some((model) => model.id === wanted)) {
       const plan = session.planType ? ` a ${session.planType} plan` : '';
       throw new ProviderError('NOT_SUPPORTED', `${request.model} is not in the model set for${plan || ' this account'}.`, {
         providerId: this.id,
@@ -556,7 +584,7 @@ export class ChatGptWebAdapter implements ProviderAdapter {
     try {
       result = await this.driver.ask({
         cookies: session.cookies,
-        model: request.model,
+        model: wanted,
         messages: [...messages.slice(0, -1), { role: 'user', text: prompt }],
         timeoutMs: CHATGPT_WEB.defaultTurnTimeoutMs,
         ...(context.signal ? { signal: context.signal } : {}),
