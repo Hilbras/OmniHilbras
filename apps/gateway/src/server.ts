@@ -288,6 +288,25 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    // Kiro signs in through AWS's device flow: a code the user approves in their own
+    // browser, and the gateway polls until AWS says it was approved.
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/kiro/start') {
+      sendJson(response, 201, await service.startKiroSignInFlow(), origin);
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/kiro/session/')) {
+      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/kiro/session/'.length)).trim();
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
+      const status = await service.kiroSignInStatus(sessionId, controller.signal);
+      if (!status) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
+        return;
+      }
+      sendJson(response, 200, status, origin);
+      return;
+    }
+
     if (request.method === 'GET' && url.pathname === '/v1/keys') {
       sendJson(response, 200, { object: 'list', ...(await service.listApiKeys()) }, origin);
       return;

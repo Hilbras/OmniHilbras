@@ -173,7 +173,7 @@ const modelSortOptions: ReadonlyArray<{ value: ModelFilterState['sort']; label: 
 const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, requestsPerMinute: 0, hedgeAfterMs: 0 };
 
 /** OAuth providers the gateway can actually complete a sign-in for today. */
-const oauthProvidersWithFlow = new Set(['cline', 'opencode-console']);
+const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro']);
 
 function ResiliencePanel({ connection, routingState, onSave }: { connection: GatewayConnection; routingState?: GatewayRoutingState; onSave: (next: GatewayResilience) => void | Promise<void> }) {
   const [open, setOpen] = useState(false);
@@ -625,6 +625,13 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
         </div>
       </div>
 
+      {provider.riskNotice && (
+        <div role="note" className="mb-5 flex items-start gap-2 rounded-xl border border-[#ff6b35]/30 bg-[#ff6b35]/10 px-3.5 py-3 text-xs leading-relaxed text-[#ff6b35]">
+          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          {provider.riskNotice}
+        </div>
+      )}
+
       {notice && <div role={noticeError ? 'alert' : 'status'} className={`mb-5 flex items-center gap-2 rounded-xl border px-3.5 py-3 text-xs ${noticeError ? 'border-danger/25 bg-danger/10 text-danger' : 'border-success/25 bg-success/10 text-success'}`}>{noticeError ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}{notice}</div>}
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -792,6 +799,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
         <OauthConnectDialog
           providerId={provider.id}
           providerName={provider.name}
+          {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           signInWindow={signInWindow}
           onClose={() => { setAddOpen(false); setSignInWindow(null); }}
           onConnected={async (saved) => {

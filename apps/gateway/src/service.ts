@@ -1,8 +1,9 @@
-import { CLINE_OAUTH, FetchHttpTransport, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, FetchHttpTransport, KiroAdapter, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, modelMetaPriceOrder, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ModelMeta, type ModelMetaMap, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
+import { KiroSessionStore, pollKiroSignInWithClaim, startKiroSignIn, type KiroSignInStatus } from './kiro.js';
 import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -119,6 +120,8 @@ export class GatewayService {
   private zen?: ProviderAdapter;
   private opencodeConsole?: ProviderAdapter;
   private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
+  private readonly kiroSessions = new KiroSessionStore();
+  private kiro?: ProviderAdapter;
   /** Why the last model discovery failed, when it was tolerated rather than fatal. */
   private lastDiscoveryNote?: string;
   private readonly clineSessions = new ClineSessionStore();
@@ -244,6 +247,10 @@ export class GatewayService {
     const consoleConnection = connections.find((connection) => connection.providerId === opencodeConsoleProviderId && connection.hasCredential);
     if (consoleConnection) {
       adapters.set(opencodeConsoleProviderId, this.opencodeConsoleAdapter(consoleConnection.id));
+    }
+    const kiroConnection = connections.find((connection) => connection.providerId === kiroProviderId && connection.hasCredential);
+    if (kiroConnection) {
+      adapters.set(kiroProviderId, this.kiroAdapter(kiroConnection.id));
     }
     for (const connection of connections) {
       if (adapters.has(connection.providerId)) continue;
@@ -571,6 +578,69 @@ export class GatewayService {
    * the catalog from lanes the server names rather than one fixed base URL, so the
    * generic on-demand adapter cannot stand in for it.
    */
+  /**
+   * Kiro is CodeWhisperer's streaming service rather than an OpenAI-compatible endpoint,
+   * so it needs its own adapter: a `conversationState` envelope in and an AWS eventstream
+   * out.
+   */
+  kiroAdapter(connectionId: string): ProviderAdapter {
+    if (!this.kiro) {
+      this.kiro = new KiroAdapter({
+        transport: this.transport,
+        onTokensRefreshed: async (credential) => {
+          if (!this.connectionStore) return;
+          await this.connectionStore.set(connectionId, credential).catch(() => undefined);
+        },
+      });
+    }
+    return this.kiro;
+  }
+
+  /**
+   * Starts a Kiro sign-in. AWS's device flow, so the user approves a code in their own
+   * browser and the dashboard waits.
+   */
+  async startKiroSignInFlow() {
+    return startKiroSignIn(this.kiroSessions);
+  }
+
+  /**
+   * Reports whether the Kiro sign-in finished, exchanging the device grant on the first
+   * poll that finds it approved.
+   */
+  async kiroSignInStatus(sessionId: string, signal?: AbortSignal): Promise<KiroSignInStatus | undefined> {
+    const session = this.kiroSessions.get(sessionId);
+    if (!session) return undefined;
+    const outcome = await pollKiroSignInWithClaim(this.kiroSessions, sessionId);
+    if (outcome === 'in-progress') return this.kiroSessions.publicStatus(session);
+    if (outcome.status !== 'connected') return this.kiroSessions.publicStatus(session);
+    try {
+      const connection = await this.saveConnection(
+        {
+          id: kiroProviderId,
+          providerId: kiroProviderId,
+          name: 'Kiro',
+          endpoint: 'https://codewhisperer.us-east-1.amazonaws.com',
+          priority: 1,
+          proxyPool: 'none',
+          modelPolicy: 'all',
+        },
+        outcome.credential,
+        signal,
+      );
+      this.kiroSessions.resolve(sessionId, { status: 'connected', connection });
+    } catch (error) {
+      const said = error instanceof ProviderError ? providerSaid(error) : undefined;
+      const message = error instanceof ProviderError
+        ? [error.publicMessage ?? error.message, said].filter(Boolean).join(' ')
+        : error instanceof Error
+          ? error.message
+          : 'The Kiro sign-in could not be completed.';
+      this.kiroSessions.resolve(sessionId, { status: 'failed', error: message });
+    }
+    return this.kiroSessions.publicStatus(session);
+  }
+
   opencodeConsoleAdapter(connectionId: string): ProviderAdapter {
     if (!this.opencodeConsole) {
       this.opencodeConsole = new OpencodeConsoleAdapter({
@@ -1067,6 +1137,7 @@ export class GatewayService {
     if (providerId === 'cline') return this.clineAdapter();
     if (providerId === 'opencode') return this.zenAdapter();
     if (providerId === opencodeConsoleProviderId) return this.opencodeConsoleAdapter(providerId);
+    if (providerId === kiroProviderId) return this.kiroAdapter(providerId);
     const registered = this.registry.get(providerId);
     if (registered) return registered;
     // A connection being saved is not in the store yet, so the caller can pass

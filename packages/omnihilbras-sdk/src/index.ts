@@ -14,4 +14,5 @@ export * from './pricing.js';
 export * from './modelFilters.js';
 export * from './adapters/zen.js';
 export * from './adapters/opencode-console.js';
+export * from './adapters/kiro.js';
 export * from './url.js';

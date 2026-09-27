@@ -40,6 +40,30 @@ export const providerCatalog: ProviderRecord[] = [
     modelList: [],
   },
   {
+    id: 'kiro',
+    name: 'Kiro',
+    description:
+      'Sign in with your AWS Builder ID. Serves Claude, GPT, DeepSeek, MiniMax and GLM through Kiro’s plan.',
+    category: 'Coding agent',
+    group: 'oauth',
+    status: 'available',
+    auth: 'OAuth',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#ff6b35',
+    initial: 'K',
+    endpoint: 'https://codewhisperer.us-east-1.amazonaws.com',
+    modelList: [],
+    // Not a preference. Kiro's terms prohibit third-party proxy and harness use, and
+    // this is exactly that, so the card says so before anyone connects rather than in a
+    // release note afterwards.
+    riskNotice:
+      'Kiro’s terms prohibit third-party proxy or harness use. Connecting routes your AWS Builder ID session through OmniHilbras — accept that risk or do not connect.',
+  },
+  {
     id: 'cline',
     name: 'Cline',
     description: 'VS Code coding agent. Sign in with your Cline account to serve its models here.',

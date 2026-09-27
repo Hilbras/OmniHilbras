@@ -507,6 +507,52 @@ that can grow without bound.
 The filter rules live in the SDK rather than the dashboard: they are rules about provider
 pricing semantics, and that is where they can be tested.
 
+### Kiro, and the caution it carries
+
+Kiro is in the OAuth group with a working sign-in, and it carries a standing warning
+because **its terms prohibit third-party proxy and harness use** — which is exactly what
+this gateway is. The reference project this was built from flags it the same way:
+
+```ts
+subscriptionRisk: true,
+riskNoticeVariant: "deprecated",
+freeNote: "Free tier: 50 credits/month (~25K–100K tokens). ⚠️ Kiro ToS prohibits third-party proxy/harness use."
+```
+
+The warning is not decoration and not dismissible. It appears on the card in both the
+compact and full views, again on the provider page, and once more inside the sign-in
+dialog, where **nothing is sent to AWS until it is acknowledged**. A caution that only
+appears in one place, or that a single click can bypass, is not a caution.
+
+Kiro is not an OpenAI-compatible endpoint, so there is no generic adapter for it. It is
+CodeWhisperer's streaming service:
+
+| | |
+| --- | --- |
+| Sign-in | AWS SSO OIDC **device authorization**, with the public client registered per sign-in |
+| Inference | `POST codewhisperer.us-east-1.amazonaws.com/generateAssistantResponse` |
+| Framing | `X-Amz-Target: AmazonCodeWhispererStreamingService.GenerateAssistantResponse`, `Accept: application/vnd.amazon.eventstream` |
+| Request | a `conversationState` envelope, with the model id on the current message and earlier turns in `history` |
+| Response | an AWS eventstream: `:event-type:` metadata lines with `data:` payloads |
+
+Two things about it that are easy to get wrong, and were:
+
+**The device authorization needs a start URL.** AWS answers `400 Start URL is required`
+without one, so it is part of the grant rather than a preference.
+
+**A pending grant is an HTTP 400, and the state is in the body** —
+`{"error":"authorization_pending","error_description":"Authorization is still pending"}`.
+The provider transport deliberately flattens an error body into a human sentence, and the
+flattened detail keeps only the description, so the grant reads as a *failure* and the
+sign-in dies while the user is still approving it. OAuth token endpoints are therefore
+read directly, and inference still goes through the transport where that flattening is
+what we want. This is the same shape as the OpenCode Console poll, and the reason both
+auth paths bypass the transport.
+
+A system turn is folded into the user content, because the envelope has no system role.
+A model Kiro does not offer is refused *before* a request is spent, since an unknown id
+comes back as `400 Invalid model` and the catalog has no wildcard to fall back on.
+
 ### Catalog cards added for OpenAI-compatible gateways
 
 A new provider is a catalog card plus, separately, an entry in the add-provider dropdown.

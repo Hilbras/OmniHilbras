@@ -364,6 +364,23 @@ export function getDeviceSignInStatus(sessionId: string, signal?: AbortSignal) {
   return requestJson<GatewayDeviceSignInStatus>(`/v1/oauth/opencode-console/session/${encodeURIComponent(sessionId)}`, { signal });
 }
 
+/** Kiro signs in through AWS's device flow, so there is a code and no auth URL. */
+export function startKiroSignIn(signal?: AbortSignal) {
+  return requestJson<{ sessionId: string; userCode: string; verificationUrl: string; expiresAt: string }>('/v1/oauth/kiro/start', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+    ...(signal ? { signal } : {}),
+  });
+}
+
+export function getKiroSignInStatus(sessionId: string, signal?: AbortSignal) {
+  return requestJson<{ status: 'pending' | 'connected' | 'failed' | 'expired'; connection?: GatewayConnection; error?: string; userCode?: string; verificationUrl?: string }>(
+    `/v1/oauth/kiro/session/${encodeURIComponent(sessionId)}`,
+    { signal },
+  );
+}
+
 export function getGatewayOauthAuthorization(providerId: string, signal?: AbortSignal) {
   return requestJson<GatewayOauthAuthorization>(`/v1/oauth/${encodeURIComponent(providerId)}/authorize`, { signal });
 }

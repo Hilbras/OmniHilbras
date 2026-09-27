@@ -156,6 +156,18 @@ One trap: Zen's `mimo-v2.6-flash-free` and OpenRouter's `xiaomi/mimo-v2.6-flash`
 different models from different vendors, and the ids are close enough to mix up. The
 OpenRouter one answers on a paid route; the Zen one does not.
 
+## Kiro, and why it carries a warning
+
+**Kiro's terms prohibit third-party proxy and harness use**, and this gateway is one. The
+Kiro card says so on the card, again on its page, and once more in the sign-in dialog —
+where nothing is sent to your AWS account until you tick the box. If that trade is not one
+you want to make, don't connect it.
+
+Kiro signs in through AWS's device flow, and once signed in it is not an
+OpenAI-compatible endpoint at all: it is CodeWhisperer's streaming service, taking a
+`conversationState` envelope and answering with an AWS eventstream. That is why it needs
+its own adapter.
+
 ## Filtering models
 
 Every provider page filters its model list by search, price, modality, context window and

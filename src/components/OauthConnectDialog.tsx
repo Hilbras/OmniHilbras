@@ -5,8 +5,10 @@ import {
   connectGatewayOauthProvider,
   getClineSignInStatus,
   getDeviceSignInStatus,
+  getKiroSignInStatus,
   startGatewayDeviceSignIn,
   startGatewayOauthSignIn,
+  startKiroSignIn,
   type GatewayConnection,
   type GatewayOauthSignInStatus,
 } from '../lib/gatewayClient';
@@ -14,6 +16,12 @@ import {
 type Props = {
   providerId: string;
   providerName: string;
+  /**
+   * A standing caution about connecting at all. Shown before the sign-in starts and
+   * requiring an explicit acknowledgement, because a provider whose terms forbid
+   * third-party proxy use should not be connected by a single click.
+   */
+  riskNotice?: string;
   /**
    * A window opened synchronously by the click that started this flow. Browsers
    * only allow that inside a user gesture, so the caller opens a blank tab and
@@ -31,7 +39,7 @@ type Phase = 'starting' | 'waiting' | 'connected' | 'failed';
  * code into the provider's own page and the gateway polls for the result, so there is
  * no authUrl to navigate to and nothing comes back on a callback.
  */
-const deviceFlowProviders = new Set(['opencode-console']);
+const deviceFlowProviders = new Set(['opencode-console', 'kiro']);
 
 /** How often to ask the gateway whether the browser sign-in finished. */
 const pollIntervalMs = 1000;
@@ -47,7 +55,7 @@ const waitTimeoutMs = 5 * 60_000;
  * nothing to paste. The paste field stays available for the case where the
  * provider does not hand the code to a browser redirect.
  */
-export function OauthConnectDialog({ providerId, providerName, signInWindow, onConnected, onClose }: Props) {
+export function OauthConnectDialog({ providerId, providerName, riskNotice, signInWindow, onConnected, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>('starting');
   const [message, setMessage] = useState('Opening the sign-in page…');
   const [error, setError] = useState('');
@@ -55,6 +63,7 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
   const [paste, setPaste] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [deviceCode, setDeviceCode] = useState<{ userCode: string; verificationUrl: string } | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
   const pollRef = useRef<number | null>(null);
   const timeoutRef = useRef<number | null>(null);
@@ -164,6 +173,25 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
     setError('');
     missedPollsRef.current = 0;
 
+    if (providerId === 'kiro') {
+      try {
+        const signIn = await startKiroSignIn();
+        if (settledRef.current) return;
+        setDeviceCode({ userCode: signIn.userCode, verificationUrl: signIn.verificationUrl });
+        const sentToOpenTab = navigateTo(signIn.verificationUrl);
+        setPhase('waiting');
+        setMessage(sentToOpenTab
+          ? 'Approve the request in your browser using the code below. This tab will finish the connection.'
+          : 'Your browser blocked the sign-in tab. Open the link below to approve.');
+        watch(signIn.sessionId, getKiroSignInStatus, 'The sign-in timed out. Start again from OmniHilbras.');
+      } catch (startError) {
+        settledRef.current = true;
+        setPhase('failed');
+        setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
+      }
+      return;
+    }
+
     if (deviceFlowProviders.has(providerId)) {
       try {
         const signIn = await startGatewayDeviceSignIn();
@@ -212,10 +240,13 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
    */
   const startedRef = useRef(false);
   useEffect(() => {
+    // A provider with a standing caution waits for acknowledgement. The flow is not
+    // started on mount in that case, so nothing is sent anywhere until it is accepted.
     if (startedRef.current) return;
+    if (riskNotice && !acknowledged) return;
     startedRef.current = true;
     void begin();
-  }, [begin]);
+  }, [acknowledged, begin, riskNotice]);
 
   async function submitPastedCode() {
     const value = paste.trim();
@@ -264,12 +295,31 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
             </div>
           </div>
 
+          {riskNotice && !acknowledged && (
+            <div className="mt-4 rounded-xl border border-[#ff6b35]/30 bg-[#ff6b35]/10 p-3">
+              <p className="flex items-start gap-1.5 text-[11px] font-semibold text-[#ff6b35]">
+                <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                Read this before connecting
+              </p>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-[#ff6b35]">{riskNotice}</p>
+              <label className="mt-2.5 flex cursor-pointer items-start gap-2 text-[11px] leading-relaxed text-muted">
+                <input
+                  type="checkbox"
+                  checked={acknowledged}
+                  onChange={(event) => setAcknowledged(event.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[#ff6b35]"
+                />
+                I have read this and accept the risk.
+              </label>
+            </div>
+          )}
+
           {deviceCode && phase !== 'connected' && (
             <div className="mt-4 rounded-xl border border-gold/25 bg-gold-soft p-3">
-              <p className="text-[11px] font-semibold text-gold-text">Approve this code at OpenCode</p>
+              <p className="text-[11px] font-semibold text-gold-text">Approve this code at {providerName}</p>
               <p className="mt-1 select-all font-mono text-lg tracking-[0.18em] text-text">{deviceCode.userCode}</p>
               <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-                The code is filled in for you. If OpenCode asks you to log in first, sign in there and it will
+                The code is filled in for you. If you are asked to sign in first, sign in there and it will
                 bring you back to this approval.
               </p>
               <a href={deviceCode.verificationUrl} target="_blank" rel="noreferrer" className="btn-ghost mt-2 inline-flex !h-7 !px-2.5 !text-[11px]">
