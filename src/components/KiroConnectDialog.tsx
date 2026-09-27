@@ -34,6 +34,15 @@ type Phase = 'choose' | 'running' | 'waiting' | 'connected' | 'failed';
 type Props = {
   providerName: string;
   riskNotice?: string;
+  /**
+   * The tab the "Add connection" click already opened.
+   *
+   * That click is what grants the popup gesture, so the provider's page has to be pointed
+   * at this window from inside the dialog's async work. Opening a second window from there
+   * is blocked, and leaving this one on `about:blank` is what made the sign-in look like
+   * it had done nothing.
+   */
+  signInWindow?: Window | null;
   onConnected: (connection: GatewayConnection) => void | Promise<void>;
   onClose: () => void;
 };
@@ -51,7 +60,7 @@ const pollIntervalMs = 1000;
 /** Matches the gateway's own session lifetime. */
 const waitTimeoutMs = 5 * 60_000;
 
-export function KiroConnectDialog({ providerName, riskNotice, onConnected, onClose }: Props) {
+export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onConnected, onClose }: Props) {
   const [method, setMethod] = useState<KiroAuthMethod | null>(null);
   const [phase, setPhase] = useState<Phase>('choose');
   const [message, setMessage] = useState('');
@@ -67,6 +76,11 @@ export function KiroConnectDialog({ providerName, riskNotice, onConnected, onClo
   const timeoutRef = useRef<number | null>(null);
   const settledRef = useRef(false);
   const socialSessionRef = useRef<string | null>(null);
+  const signInWindowRef = useRef<Window | null>(signInWindow ?? null);
+
+  useEffect(() => {
+    signInWindowRef.current = signInWindow ?? null;
+  }, [signInWindow]);
 
   useEffect(() => {
     setPortalNode(document.body);
@@ -79,6 +93,39 @@ export function KiroConnectDialog({ providerName, riskNotice, onConnected, onClo
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
+
+  /**
+   * Points the already-open tab at the provider.
+   *
+   * Returns whether it went, because "your browser blocked the tab" and "here is the link"
+   * are different situations and the user needs to be told which one they are in.
+   */
+  const navigateTo = useCallback((authUrl: string) => {
+    const opened = signInWindowRef.current;
+    if (opened && !opened.closed) {
+      opened.location.href = authUrl;
+      // One-shot: a retry should not silently re-navigate a tab the user has since used.
+      signInWindowRef.current = null;
+      return true;
+    }
+    return false;
+  }, []);
+
+  /**
+   * Opens the sign-in tab.
+   *
+   * Called synchronously from the click that chose a method, because that click is the
+   * gesture a popup needs. Opening it any later — after awaiting the device code — is
+   * blocked, and opening it on "Add connection" instead leaves a blank tab sitting there
+   * through the method chooser, which is what made this look like nothing happened.
+   */
+  const openSignInTab = useCallback(() => {
+    const opened = signInWindowRef.current;
+    if (opened && !opened.closed) return true;
+    const created = window.open('about:blank', '_blank');
+    signInWindowRef.current = created ?? null;
+    return Boolean(created);
+  }, []);
 
   const stopWaiting = useCallback(() => {
     if (pollRef.current !== null) window.clearInterval(pollRef.current);
@@ -111,8 +158,6 @@ export function KiroConnectDialog({ providerName, riskNotice, onConnected, onClo
   /** Polls the gateway until the browser approval lands, then saves the connection. */
   const watchDeviceSession = useCallback(
     (sessionId: string) => {
-      setPhase('waiting');
-      setMessage('Approve the request in your browser using the code below. This tab will finish the connection.');
       timeoutRef.current = window.setTimeout(() => {
         fail('The sign-in timed out. Start again from OmniHilbras.');
       }, waitTimeoutMs);
@@ -150,12 +195,18 @@ export function KiroConnectDialog({ providerName, riskNotice, onConnected, onClo
         const signIn = await startKiroDeviceSignIn(url);
         if (settledRef.current) return;
         setDeviceCode({ userCode: signIn.userCode, verificationUrl: signIn.verificationUrl });
+        const sentToOpenTab = navigateTo(signIn.verificationUrl);
+        setMessage(
+          sentToOpenTab
+            ? 'Approve the request in the tab that just opened, using the code below. This tab will finish the connection.'
+            : 'Your browser blocked the sign-in tab. Open the link below to approve.',
+        );
         watchDeviceSession(signIn.sessionId);
       } catch (startError) {
         fail(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
       }
     },
-    [fail, watchDeviceSession],
+    [fail, navigateTo, watchDeviceSession],
   );
 
   const runSocialFlow = useCallback(
@@ -168,13 +219,17 @@ export function KiroConnectDialog({ providerName, riskNotice, onConnected, onClo
         setSocialUrl(signIn.authUrl);
         setDeviceCode({ userCode: '', verificationUrl: signIn.authUrl });
         setPhase('waiting');
-        setMessage('Sign in on the page that just opened, then copy the code from your address bar and paste it below.');
+        setMessage(
+          navigateTo(signIn.authUrl)
+            ? 'Sign in on the tab that just opened, then copy the code from its address bar and paste it below.'
+            : 'Your browser blocked the sign-in tab. Open the link below, then paste the code from its address bar.',
+        );
         socialSessionRef.current = signIn.sessionId;
       } catch (startError) {
         fail(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
       }
     },
-    [fail],
+    [fail, navigateTo],
   );
 
   const submitSecret = useCallback(async () => {
@@ -296,6 +351,25 @@ export function KiroConnectDialog({ providerName, riskNotice, onConnected, onClo
                           setMethod(entry.id);
                           setError('');
                           setMessage('');
+                          settledRef.current = false;
+                          // The four methods that need nothing typed start on this click,
+                          // and the two that do (a start URL, a pasted credential) wait
+                          // for it. Asking for a second click before anything happens is
+                          // what left the tab on about:blank while the dialog waited.
+                          if (entry.id === 'builder-id') {
+                            openSignInTab();
+                            void runDeviceFlow();
+                            return;
+                          }
+                          if (entry.id === 'google' || entry.id === 'github') {
+                            openSignInTab();
+                            void runSocialFlow(entry.id);
+                            return;
+                          }
+                          if (entry.id === 'import-token' || entry.id === 'api-key') {
+                            // No browser involved, so no tab is opened for nothing.
+                            document.getElementById('kiro-secret')?.focus();
+                          }
                         }}
                         className="flex w-full items-start gap-3 rounded-lg border border-line bg-bg-soft/40 p-3 text-left transition-colors hover:border-line-strong hover:bg-bg-soft disabled:opacity-50"
                         // Nothing is sent to Kiro or AWS until the risk is acknowledged.
@@ -366,17 +440,20 @@ export function KiroConnectDialog({ providerName, riskNotice, onConnected, onClo
                     </div>
                   )}
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      settledRef.current = false;
-                      void runDeviceFlow(method === 'organization' ? startUrl.trim() : undefined);
-                    }}
-                    disabled={phase === 'running' || (method === 'organization' && !startUrl.trim())}
-                    className="btn-primary mt-4 w-full !h-9 !text-xs"
-                  >
-                    {phase === 'running' ? 'Starting…' : 'Continue'}
-                  </button>
+                  {method === 'organization' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        settledRef.current = false;
+                        openSignInTab();
+                        void runDeviceFlow(startUrl.trim());
+                      }}
+                      disabled={phase === 'running' || !startUrl.trim()}
+                      className="btn-primary mt-4 w-full !h-9 !text-xs"
+                    >
+                      {phase === 'running' ? 'Starting…' : 'Continue'}
+                    </button>
+                  )}
                 </>
               )}
 
@@ -384,7 +461,7 @@ export function KiroConnectDialog({ providerName, riskNotice, onConnected, onClo
                 <>
                   {socialUrl && (
                     <a href={socialUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-1 text-[11px] text-gold-text hover:underline">
-                      Reopen the sign-in page
+                      Or open it in a new tab
                       <ExternalLink className="h-3 w-3" aria-hidden="true" />
                     </a>
                   )}
@@ -410,17 +487,20 @@ export function KiroConnectDialog({ providerName, riskNotice, onConnected, onClo
                     </p>
                   </div>
                   <div className="mt-4 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        settledRef.current = false;
-                        void runSocialFlow(method);
-                      }}
-                      disabled={phase === 'running' || Boolean(socialUrl)}
-                      className="btn-ghost !h-9 flex-1 !px-2.5 !text-[11px]"
-                    >
-                      {socialUrl ? 'Page opened' : `Open ${method === 'google' ? 'Google' : 'GitHub'} sign-in`}
-                    </button>
+                    {socialUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          settledRef.current = false;
+                          openSignInTab();
+                          void runSocialFlow(method);
+                        }}
+                        disabled={phase === 'running'}
+                        className="btn-ghost !h-9 flex-1 !px-2.5 !text-[11px]"
+                      >
+                        Reopen sign-in page
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {

@@ -316,7 +316,19 @@ export function newKiroSocialState(): string {
 export type KiroPoll =
   | { status: 'pending' }
   | { status: 'denied'; error: string }
-  | { status: 'connected'; accessToken: string; refreshToken?: string; expiresIn?: number; profileArn?: string };
+  | {
+      status: 'connected';
+      accessToken: string;
+      refreshToken?: string;
+      expiresIn?: number;
+      profileArn?: string;
+      /**
+       * The registered client the grant was issued to. It is bound to the refresh token,
+       * so a later renewal has to present the same pair or AWS answers `invalid_client`.
+       */
+      clientId: string;
+      clientSecret: string;
+    };
 
 /**
  * Polls for the token. A pending answer is HTTP 400 with `authorization_pending` in the
@@ -349,6 +361,8 @@ export async function pollKiroSignIn(
     ...(typeof data.refreshToken === 'string' ? { refreshToken: data.refreshToken } : {}),
     ...(typeof data.expiresIn === 'number' ? { expiresIn: data.expiresIn } : {}),
     ...(typeof data.profileArn === 'string' && data.profileArn ? { profileArn: data.profileArn } : {}),
+    clientId: authorization.clientId,
+    clientSecret: authorization.clientSecret,
   };
 }
 
@@ -378,17 +392,33 @@ export async function refreshKiroCredential(credential: ProviderCredential): Pro
       publicMessage: 'This Kiro session cannot be renewed. Sign in again.',
     });
   }
+  /**
+   * The refresh grant is bound to the client that was registered when the sign-in started.
+   * AWS answers `invalid_client` for any other pair, including the client *name*, so the
+   * registered pair is carried on the credential and sent as issued.
+   */
+  const clientId = credential.oauthClientId;
+  const clientSecret = credential.oauthClientSecret;
+  if (!clientId || !clientSecret) {
+    throw new ProviderError('AUTHENTICATION_FAILED', 'This Kiro session cannot be renewed. Sign in again.', {
+      providerId: kiroProviderId,
+      publicMessage: 'This Kiro session cannot be renewed. Sign in again.',
+    });
+  }
   const { data } = await postAuthJson<Json>(`${KIRO.oidc}/token`, {
     grantType: 'refresh_token',
     refreshToken: credential.refreshToken,
-    clientId: credential.accountId ?? KIRO.clientName,
-    clientSecret: KIRO.clientName,
+    clientId,
+    clientSecret,
   });
   const accessToken = typeof data.accessToken === 'string' ? data.accessToken : '';
   if (!accessToken) {
-    throw new ProviderError('AUTHENTICATION_FAILED', 'AWS did not renew the Kiro session. Sign in again.', {
+    const detail = typeof data.error_description === 'string' ? data.error_description : '';
+    throw new ProviderError('AUTHENTICATION_FAILED', detail || 'AWS did not renew the Kiro session. Sign in again.', {
       providerId: kiroProviderId,
-      publicMessage: 'AWS did not renew the Kiro session. Sign in again.',
+      publicMessage: detail.includes('Invalid refresh token')
+        ? 'This Kiro session has expired. Sign in again.'
+        : detail || 'AWS did not renew the Kiro session. Sign in again.',
     });
   }
   const expiresIn = typeof data.expiresIn === 'number' ? data.expiresIn : undefined;
@@ -397,6 +427,10 @@ export async function refreshKiroCredential(credential: ProviderCredential): Pro
     value: accessToken,
     ...(typeof data.refreshToken === 'string' ? { refreshToken: data.refreshToken } : { refreshToken: credential.refreshToken }),
     ...(expiresIn === undefined ? {} : { expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() }),
+    // Carried forward, or the next refresh has no client to send.
+    oauthClientId: clientId,
+    oauthClientSecret: clientSecret,
+    ...(credential.accountId ? { accountId: credential.accountId } : {}),
   };
 }
 

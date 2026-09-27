@@ -5,6 +5,7 @@ import {
   createKiroPkce,
   kiroProviderId,
   kiroSocialSessionExpired,
+  registerKiroClient,
   newKiroSocialState,
   pollKiroSignIn,
   refreshKiroCredential,
@@ -142,7 +143,22 @@ export async function importKiroRefreshToken(refreshToken: string): Promise<Prov
       publicMessage: 'Paste a Kiro refresh token to import.',
     });
   }
-  return refreshKiroCredential({ type: 'oauth', value: '', refreshToken: trimmed });
+  /**
+   * A refresh token is only usable by the client it was issued to, and an imported token
+   * arrives with no client alongside it. So one is registered here and the token is
+   * redeemed against it. AWS refuses a token from a different client with
+   * `invalid_grant`, and that answer is passed through rather than reported as a bad
+   * paste — a token from the Kiro desktop app will simply not work here, and saying so
+   * is more use than "could not connect".
+   */
+  const { clientId, clientSecret } = await registerKiroClient();
+  return refreshKiroCredential({
+    type: 'oauth',
+    value: '',
+    refreshToken: trimmed,
+    oauthClientId: clientId,
+    oauthClientSecret: clientSecret,
+  });
 }
 
 export type KiroPollOutcome =
@@ -179,6 +195,9 @@ export async function pollKiroSignInWithClaim(store: KiroSessionStore, sessionId
     ...(outcome.expiresIn === undefined ? {} : { expiresAt: new Date(Date.now() + outcome.expiresIn * 1000).toISOString() }),
     // AWS scopes the session to a profile, and Kiro echoes it back on inference.
     ...(outcome.profileArn ? { accountId: outcome.profileArn } : {}),
+    // The registered client, which the refresh grant is bound to.
+    oauthClientId: outcome.clientId,
+    oauthClientSecret: outcome.clientSecret,
   };
   return { status: 'connected', credential };
 }

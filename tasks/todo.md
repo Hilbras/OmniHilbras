@@ -146,6 +146,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 16: Add a Web Cookie Providers group with ChatGPT Web, behind a high-severity warning.
+  - Acceptance: a new group holds a ChatGPT Web card that connects by pasting an exported session, and the credential warning is acknowledged before anything is stored.
+  - Verify: the group renders between API Key and Local with one card; the card badge reads `ACCOUNT SESSION`, not `TERMS`; the dialog shows the warning, four export steps, and a paste field disabled until the box is ticked. `POST /v1/web-cookie/chatgpt/connect` accepts a real-shaped storage state (201, 6 models) and refuses non-JSON, an export with no OpenAI cookies, and a missing field. Only `chatgpt.com`/`openai.com` cookies survive — `notopenai.com` and `chatgpt.com.evil.example` are dropped. A bad paste shows the reason and clears the field. 23 SDK tests.
+  - Findings: **the browser half has never seen the real application.** `chatgpt.com` returns its anti-bot block page from the development machine (`Unable to load site … Ray ID:…`), so `#prompt-textarea` and `[data-message-author-role="assistant"]` are ChatGPT's documented test hooks used on the assumption they are current. That is stated on the card, not buried. A stale session and a blocked request both render a real page with no composer, so they are told apart: a sign-in link means re-export, the block page's own wording means the network. The generic API-key modal was also opening underneath the right one, since `auth: 'Web cookie'` is not `isOauth` — suppressed. The reference project hardcodes no selector at all; it discovers ChatGPT's own JS module at runtime and drives their internal API. The version here is the maintainable one and the fragile one, traded knowingly.
+  - Files: `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, `test/chatgpt-web.test.js`, `apps/gateway/src/chatgptWeb.ts`, `service.ts`, `server.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/components/ProviderCard.tsx`, `src/data/providers.ts`, `src/pages/ProviderDetailPage.tsx`, `public/providers/chatgpt.svg`, docs.
+  - Depends on: Task 15.
+  - Scope: Big — a new group, a new auth shape, and a browser dependency in the gateway.
+
 - [x] Task 15: Give the Kiro card its logo, which it never had.
   - Acceptance: the Kiro card and page show Kiro's own mark rather than a letter.
   - Verify: `/providers/kiro.svg` is served as `image/svg+xml` and both the card and the provider page render it as an `<img>` at 1200×1200.

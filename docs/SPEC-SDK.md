@@ -655,6 +655,80 @@ The risk warning gates **all six** methods, not just the first — a method reac
 scrolling past a checkbox is still a method, and nothing is sent to Kiro or AWS until it is
 acknowledged.
 
+### Web Cookie providers, and what they are not
+
+A **Web Cookie** provider is not an integration and not an auth method. There is no ChatGPT
+endpoint that accepts a browser session, so the only way to reach a model this way is to
+load `chatgpt.com` in a real browser, let its own page run the anti-automation challenges,
+type the prompt into the composer, and read the answer out of the DOM.
+
+The credential is therefore not a token scoped to inference. It is **a live session for a
+whole OpenAI account** — the thing a `__Secure-next-auth.session-token` grants is everything
+the person who exported it can do. That is a different class of secret from every other
+credential here, and the card says so in a different colour from a terms flag:
+
+```ts
+riskNotice: 'OpenAI's terms do not permit automating chatgpt.com, and the credential here is
+a live session for your whole account — not a token limited to inference. …',
+riskSeverity: 'high',
+```
+
+`riskSeverity: 'high'` is what separates "this provider's terms forbid it" from "this
+credential is your account". Rendering both identically would understate the second.
+
+**Nothing is stored before the warning is acknowledged**, and the pasted blob is cleared on
+failure. A whole-account session sitting in a textarea next to an error message is how one
+ends up in a screenshot.
+
+### The parts that are actually verifiable
+
+The browser lives in the gateway, lazily imported, so the published package stays free of a
+browser dependency. The SDK owns the parts that can be reasoned about without one, and those
+are tested:
+
+- **A pasted export is filtered, not trusted.** Only `chatgpt.com` and `openai.com` cookies
+  survive. A blob that happens to carry a session for another site does not get forwarded
+  to OpenAI, and neither does `notopenai.com` or `chatgpt.com.evil.example`.
+- **A bare cookie array is accepted**, because that is what a cookie-editor extension
+  exports and it is the format people actually have. Anything else says what to paste
+  instead of a JSON syntax error.
+- **Expired cookies are dropped.** A stale `__Secure-next-auth.session-token` fails like a
+  wrong password, and telling somebody their paste was bad when it was merely old is worse
+  than useless.
+- **A signed-out page is told apart from a blocked one.** A browser with stale cookies still
+  renders a page, and it renders it perfectly well; the only honest difference is a missing
+  composer beside a sign-in link. Separately, a refused request renders a *different* real
+  page, caught by its own wording — because "no composer" alone would send a user off to
+  re-export a perfectly good session when the actual problem is the network.
+- **The last assistant turn is the answer.** ChatGPT streams into the final node and leaves
+  earlier turns on the page, so reading the first assistant element answers a message from
+  several turns ago.
+
+### What is not verified, and why that matters
+
+**The browser half has never seen the real application.** From the development machine,
+`chatgpt.com` returns its anti-bot block page before any app code runs:
+
+```
+Unable to load site … [IP:37.232.214.61 | Ray ID:a41bea6e3fe4af63]
+```
+
+So `#prompt-textarea`, `[data-message-author-role="assistant"]` and the rest are ChatGPT's
+documented test hooks used **on the assumption they are current** — they are a private
+contract with a product that ships daily, and nothing here has confirmed them. That is the
+honest limit of driving a web app rather than its API, and it is stated on the card rather
+than hidden behind a retry loop that would only fail more slowly.
+
+This is also the same wall as the restricted Zen free models, from the opposite direction:
+the provider is refusing an automated client, and the only known way past is inside the
+product's own client.
+
+A useful contrast with the reference project this was compared against: it never hardcodes a
+selector at all. It discovers ChatGPT's own JavaScript module at runtime and drives the page
+through their internal API, which survives cosmetic changes and is enormously more complex.
+The version here is the maintainable one and the fragile one, and the trade was made
+knowingly.
+
 ### Catalog cards added for OpenAI-compatible gateways
 
 A new provider is a catalog card plus, separately, an entry in the add-provider dropdown.

@@ -8,6 +8,7 @@ export const providerLogoMap = {
   mistral: '/providers/mistral.png',
   openrouter: '/providers/openrouter.png',
   cline: '/providers/cline.png',
+  chatgpt: '/providers/chatgpt.svg',
   kiro: '/providers/kiro.svg',
   opencode: '/providers/opencode.png',
   nara: '/providers/bynara-logo-icon-light.svg',
@@ -39,6 +40,38 @@ export const providerCatalog: ProviderRecord[] = [
     logo: providerLogoMap.opencode,
     endpoint: 'https://opencode.ai/inference/openai/v1',
     modelList: [],
+  },
+  {
+    id: 'chatgpt-web',
+    name: 'ChatGPT Web',
+    description:
+      'Drives chatgpt.com in a browser using a session you export yourself. Answers are read out of the page.',
+    category: 'Web session',
+    group: 'web-cookie',
+    status: 'available',
+    auth: 'Web cookie',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#10a37f',
+    initial: 'C',
+    logo: providerLogoMap.chatgpt,
+    endpoint: 'https://chatgpt.com',
+    modelList: [],
+    /**
+     * Not a preference, and not the ordinary sort of credential warning.
+     *
+     * There is no ChatGPT API that accepts a browser session, so reaching a model this way
+     * means loading chatgpt.com in a real browser and letting its own page solve the
+     * anti-automation challenges. The credential is a live session for a whole OpenAI
+     * account rather than a token scoped to inference, and OpenAI's terms do not permit
+     * this. Both facts are on the card because both are the user's to weigh.
+     */
+    riskNotice:
+      'OpenAI’s terms do not permit automating chatgpt.com, and the credential here is a live session for your whole account — not a token limited to inference. OmniHilbras opens chatgpt.com in a browser and lets its page solve the anti-bot challenges. Only continue if that is a trade you have decided to make.',
+    riskSeverity: 'high',
   },
   {
     id: 'kiro',

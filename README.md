@@ -156,6 +156,37 @@ One trap: Zen's `mimo-v2.6-flash-free` and OpenRouter's `xiaomi/mimo-v2.6-flash`
 different models from different vendors, and the ids are close enough to mix up. The
 OpenRouter one answers on a paid route; the Zen one does not.
 
+## Web Cookie providers, and the warning that comes with them
+
+The **Web Cookie Providers** group holds providers with no API — you export a session from
+your own browser and OmniHilbras drives the web app to get an answer out of it.
+
+**ChatGPT Web** is the one implemented. Two things you should weigh before using it:
+
+- **The credential is your whole account, not a token.** A `__Secure-next-auth.session-token`
+  is a live session for everything you can do on OpenAI. Every other credential in this
+  gateway is scoped to inference; this one is not.
+- **OpenAI's terms do not permit automating chatgpt.com.** The flow exists because a real
+  browser is used so the page can run its own anti-automation challenges.
+
+The card says both before you paste anything, and nothing is stored until you acknowledge
+it. Only `chatgpt.com` and `openai.com` cookies are kept out of your export.
+
+### ChatGPT Web needs a browser
+
+It is installed on demand rather than with the rest of the workspace:
+
+```bash
+npx playwright install chromium
+```
+
+Without it, ChatGPT Web says so by name rather than failing as a provider error.
+
+**It has not been verified end to end.** From the machine this was developed on,
+`chatgpt.com` returns its bot-protection page before the app loads, so the DOM selectors
+have never run against the real thing. If you try it and it fails, that is the most likely
+reason — not your session.
+
 ## Kiro, and why it carries a warning
 
 **Kiro's terms prohibit third-party proxy and harness use**, and this gateway is one. The

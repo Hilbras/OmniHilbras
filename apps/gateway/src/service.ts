@@ -1,9 +1,10 @@
-import { CLINE_OAUTH, FetchHttpTransport, KiroAdapter, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, parseChatGptStorageState, chatGptWebProviderId, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, modelMetaPriceOrder, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ModelMeta, type ModelMetaMap, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialSignIn, type KiroSignInStatus } from './kiro.js';
+import { createChatGptWebDriver } from './chatgptWeb.js';
 import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -122,6 +123,7 @@ export class GatewayService {
   private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
   private readonly kiroSessions = new KiroSessionStore();
   private readonly kiroSocial = new KiroSocialStore();
+  private chatGptWeb?: ProviderAdapter;
   private kiro?: ProviderAdapter;
   /** Why the last model discovery failed, when it was tolerated rather than fatal. */
   private lastDiscoveryNote?: string;
@@ -252,6 +254,10 @@ export class GatewayService {
     const kiroConnection = connections.find((connection) => connection.providerId === kiroProviderId && connection.hasCredential);
     if (kiroConnection) {
       adapters.set(kiroProviderId, this.kiroAdapter(kiroConnection.id));
+    }
+    const chatGptWebConnection = connections.find((connection) => connection.providerId === chatGptWebProviderId && connection.hasCredential);
+    if (chatGptWebConnection) {
+      adapters.set(chatGptWebProviderId, this.chatGptWebAdapter());
     }
     for (const connection of connections) {
       if (adapters.has(connection.providerId)) continue;
@@ -584,6 +590,41 @@ export class GatewayService {
    * so it needs its own adapter: a `conversationState` envelope in and an AWS eventstream
    * out.
    */
+  /**
+   * ChatGPT Web, which has no API to point an adapter at: the browser is the transport.
+   *
+   * The driver is created once and shared, so the Playwright import and the browser
+   * availability check are not repeated per request.
+   */
+  chatGptWebAdapter(): ProviderAdapter {
+    this.chatGptWeb ??= new ChatGptWebAdapter({ driver: createChatGptWebDriver() });
+    return this.chatGptWeb;
+  }
+
+  /**
+   * Stores an exported ChatGPT Web session.
+   *
+   * The pasted blob is parsed and filtered before anything is stored: only chatgpt.com and
+   * openai.com cookies survive, so an export that happens to carry a session for another
+   * site does not end up in this vault.
+   */
+  async connectChatGptWeb(exported: string, signal?: AbortSignal) {
+    const state = parseChatGptStorageState(exported);
+    return this.saveConnection(
+      {
+        id: chatGptWebProviderId,
+        providerId: chatGptWebProviderId,
+        name: 'ChatGPT Web',
+        endpoint: 'https://chatgpt.com',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      },
+      chatGptWebCredential(state),
+      signal,
+    );
+  }
+
   kiroAdapter(connectionId: string): ProviderAdapter {
     if (!this.kiro) {
       this.kiro = new KiroAdapter({
@@ -1209,6 +1250,7 @@ export class GatewayService {
     if (providerId === 'opencode') return this.zenAdapter();
     if (providerId === opencodeConsoleProviderId) return this.opencodeConsoleAdapter(providerId);
     if (providerId === kiroProviderId) return this.kiroAdapter(providerId);
+    if (providerId === chatGptWebProviderId) return this.chatGptWebAdapter();
     const registered = this.registry.get(providerId);
     if (registered) return registered;
     // A connection being saved is not in the store yet, so the caller can pass

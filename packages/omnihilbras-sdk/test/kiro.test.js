@@ -6,6 +6,7 @@ import {
   KIRO,
   KIRO_MODELS,
   KiroAdapter,
+  refreshKiroCredential,
   decodeKiroStream,
   kiroCredentialExpired,
   toKiroBody,
@@ -301,4 +302,102 @@ test('expiry is judged with a minute of slack', () => {
   assert.equal(kiroCredentialExpired({ type: 'oauth', value: 'a', expiresAt: new Date(now + 30_000).toISOString() }, now), true);
   assert.equal(kiroCredentialExpired({ type: 'oauth', value: 'a', expiresAt: new Date(now + 600_000).toISOString() }, now), false);
   assert.equal(kiroCredentialExpired({ type: 'api-key', value: 'a' }, now), false);
+});
+
+/* ------------------------------------------------------------------ *
+ * The refresh grant
+ * ------------------------------------------------------------------ */
+
+/**
+ * The auth half reads OAuth token endpoints with `fetch` directly, so these stub the
+ * global rather than injecting a transport.
+ */
+async function withStubbedFetch(handler, run) {
+  const original = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    const body = init?.body ? JSON.parse(init.body) : undefined;
+    seen.push({ url: String(url), body });
+    return handler(String(url), body);
+  };
+  try {
+    // A rejection is captured rather than thrown, so a test can assert on what was sent
+    // as well as on the error.
+    return { result: await run().then((value) => ({ value }), (error) => ({ error })), seen };
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+const jsonResponse = (data, status = 200) => ({
+  status,
+  headers: new Headers(),
+  text: async () => JSON.stringify(data),
+});
+
+test('the refresh grant sends the registered client, not the client name', async () => {
+  // This is the bug: `clientId: KIRO.clientName, clientSecret: KIRO.clientName` answers
+  // `401 invalid_client — Invalid client secret provided` from AWS, every single time.
+  const session = {
+    type: 'oauth',
+    value: 'old-access',
+    refreshToken: 'r1',
+    expiresAt: new Date(Date.now() - 1000).toISOString(),
+    oauthClientId: 'client-abc123',
+    oauthClientSecret: 'secret-xyz789',
+  };
+  const { result, seen } = await withStubbedFetch(
+    () => jsonResponse({ accessToken: 'new-access', refreshToken: 'r2', expiresIn: 3600 }),
+    () => refreshKiroCredential(session),
+  );
+  const token = seen.find((call) => call.url.endsWith('/token'));
+  assert.equal(token.body.clientId, 'client-abc123');
+  assert.equal(token.body.clientSecret, 'secret-xyz789');
+  assert.equal(token.body.grantType, 'refresh_token');
+  assert.equal(result.value.value, 'new-access');
+  assert.equal(result.value.refreshToken, 'r2');
+});
+
+test('a renewed credential keeps its client, or the next refresh has nothing to send', async () => {
+  const session = {
+    type: 'oauth',
+    value: 'old',
+    refreshToken: 'r1',
+    oauthClientId: 'client-abc123',
+    oauthClientSecret: 'secret-xyz789',
+  };
+  const { result } = await withStubbedFetch(
+    () => jsonResponse({ accessToken: 'new', expiresIn: 3600 }),
+    () => refreshKiroCredential(session),
+  );
+  assert.equal(result.value.oauthClientId, 'client-abc123');
+  assert.equal(result.value.oauthClientSecret, 'secret-xyz789');
+});
+
+test('a credential with no client refuses to refresh rather than sending a placeholder', async () => {
+  // Better to say "sign in again" than to send a guess AWS will reject with a 401 that
+  // reads like a bad password.
+  const { result, seen } = await withStubbedFetch(
+    () => jsonResponse({ error: 'invalid_client' }),
+    () => refreshKiroCredential({ type: 'oauth', value: 'old', refreshToken: 'r1' }),
+  );
+  assert.equal(seen.length, 0, 'nothing is sent without a client to send');
+  assert.equal(result.error.code, 'AUTHENTICATION_FAILED');
+});
+
+test('an expired refresh token says so, rather than reporting a bad paste', async () => {
+  // `invalid_grant` is what AWS says when a token is dead or belongs to another client —
+  // both of which mean "sign in again", not "that was not a token".
+  const { result } = await withStubbedFetch(
+    () => jsonResponse({ error: 'invalid_grant', error_description: 'Invalid refresh token provided' }, 400),
+    () =>
+      refreshKiroCredential({
+        type: 'oauth',
+        value: 'old',
+        refreshToken: 'r1',
+        oauthClientId: 'c',
+        oauthClientSecret: 's',
+      }),
+  );
+  assert.match(result.error.publicMessage ?? '', /expired/);
 });

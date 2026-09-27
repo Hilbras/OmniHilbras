@@ -15,4 +15,5 @@ export * from './modelFilters.js';
 export * from './adapters/zen.js';
 export * from './adapters/opencode-console.js';
 export * from './adapters/kiro.js';
+export * from './adapters/chatgpt-web.js';
 export * from './url.js';

@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
 import { KiroConnectDialog } from '../components/KiroConnectDialog';
+import { WebCookieConnectDialog } from '../components/WebCookieConnectDialog';
 import { OauthConnectDialog } from '../components/OauthConnectDialog';
 import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, filterAvailability, modelFacets, priceLabel, type ModelFacets, type ModelFilterState, type ModelMetaMap } from '@hilbras/omnihilbras';
 import { DashboardShell } from '../components/DashboardShell';
@@ -175,6 +176,9 @@ const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, req
 
 /** OAuth providers the gateway can actually complete a sign-in for today. */
 const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro']);
+
+/** Providers whose flow is a pasted credential rather than a browser sign-in. */
+const webCookieProviders = new Set(['chatgpt-web']);
 
 function ResiliencePanel({ connection, routingState, onSave }: { connection: GatewayConnection; routingState?: GatewayRoutingState; onSave: (next: GatewayResilience) => void | Promise<void> }) {
   const [open, setOpen] = useState(false);
@@ -383,12 +387,20 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   // so the tab is opened blank here and the dialog navigates it once the
   // gateway hands back the sign-in URL.
   function openAddConnection() {
+    if (webCookieProviders.has(provider.id)) {
+      setSignInWindow(null);
+      setAddOpen(true);
+      return;
+    }
     if (!oauthFlowAvailable) {
       flash(`${provider.name} sign-in is not available yet.`, 'error');
       return;
     }
     if (isOauth) {
-      setSignInWindow(window.open('about:blank', '_blank'));
+      // Kiro opens its own tab from the click that picks a method, which is closer to the
+      // gesture a popup needs. Opening one here instead left a blank tab sitting on
+      // about:blank through the whole method chooser, doing nothing.
+      setSignInWindow(provider.id === 'kiro' ? null : window.open('about:blank', '_blank'));
     } else {
       setSignInWindow(null);
     }
@@ -817,10 +829,22 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
 
       <section id="endpoint" className="card mt-5 p-4 sm:p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-sm font-semibold">Endpoint details</h2><p className="muted mt-1 text-xs">The base URL OmniHilbras will use for this provider.</p></div><code className="max-w-full overflow-x-auto rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-muted sm:max-w-[420px]">{connection?.endpoint ?? provider.endpoint}</code></div></section>
 
-      <AddProviderModal open={addOpen && !isOauth} initialProviderId={provider.id} initialModelPolicy={connection?.modelPolicy} onClose={() => setAddOpen(false)} onSave={handleAddConnection} onSaveMany={handleAddConnections} />
+      {/* Not for a web-cookie provider: that one connects by pasting an exported session,
+          so the API-key modal would open underneath the right one and be the one on top. */}
+      <AddProviderModal open={addOpen && !isOauth && !webCookieProviders.has(provider.id)} initialProviderId={provider.id} initialModelPolicy={connection?.modelPolicy} onClose={() => setAddOpen(false)} onSave={handleAddConnection} onSaveMany={handleAddConnections} />
+      {webCookieProviders.has(provider.id) && addOpen && (
+        <WebCookieConnectDialog
+          providerName={provider.name}
+          {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
+          {...(provider.riskSeverity ? { riskSeverity: provider.riskSeverity } : {})}
+          onClose={() => { setAddOpen(false); setSignInWindow(null); }}
+          onConnected={handleOauthConnected}
+        />
+      )}
       {isOauth && oauthFlowAvailable && addOpen && provider.id === 'kiro' && (
         <KiroConnectDialog
           providerName={provider.name}
+          signInWindow={signInWindow}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           onClose={() => { setAddOpen(false); setSignInWindow(null); }}
           onConnected={handleOauthConnected}

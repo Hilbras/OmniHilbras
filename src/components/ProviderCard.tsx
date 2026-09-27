@@ -3,14 +3,15 @@ import { Link } from 'react-router-dom';
 import { ProviderMark } from './ProviderMark';
 
 export type ProviderStatus = 'connected' | 'attention' | 'available';
-export type ProviderGroup = 'oauth' | 'api-key' | 'free-tier' | 'hosted' | 'local' | 'custom';
+export type ProviderGroup = 'oauth' | 'api-key' | 'web-cookie' | 'free-tier' | 'hosted' | 'local' | 'custom';
 export type ProviderCardMode = 'simple' | 'advanced';
 
-export const providerGroupOrder: ProviderGroup[] = ['oauth', 'api-key', 'hosted', 'free-tier', 'local', 'custom'];
+export const providerGroupOrder: ProviderGroup[] = ['oauth', 'api-key', 'web-cookie', 'hosted', 'free-tier', 'local', 'custom'];
 
 export const providerGroupLabels: Record<ProviderGroup, string> = {
   oauth: 'OAuth Providers',
   'api-key': 'API Key Providers',
+  'web-cookie': 'Web Cookie Providers',
   'free-tier': 'Free Tier Providers',
   hosted: 'Hosted API Providers',
   local: 'Local Providers',
@@ -42,6 +43,12 @@ export type ProviderRecord = {
    * presented as an ordinary option, and it is not dismissible.
    */
   riskNotice?: string;
+  /**
+   * `high` marks a notice that is about the credential itself rather than the provider's
+   * terms — a session that grants account-wide access reads differently from a ToS flag,
+   * and the card says so.
+   */
+  riskSeverity?: 'standard' | 'high';
 };
 
 function statusMeta(status: ProviderStatus) {
@@ -86,9 +93,14 @@ function SimpleProviderCard({ provider, detailTo, onManage, onConnect, simpleEna
                 the provider page. A warning that only appears in one view is not a
                 warning. */}
             {provider.riskNotice && (
-              <span title={provider.riskNotice} className="inline-flex shrink-0 items-center gap-1 rounded border border-[#ff6b35]/40 bg-[#ff6b35]/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-[#ff6b35]">
+              <span
+                title={provider.riskNotice}
+                className={`inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide ${
+                  provider.riskSeverity === 'high' ? 'border-danger/50 bg-danger/15 text-danger' : 'border-[#ff6b35]/40 bg-[#ff6b35]/10 text-[#ff6b35]'
+                }`}
+              >
                 <CircleAlert className="h-2.5 w-2.5" aria-hidden="true" />
-                Terms
+                {provider.riskSeverity === 'high' ? 'Account session' : 'Terms'}
               </span>
             )}
           </span>

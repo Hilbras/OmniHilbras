@@ -307,6 +307,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    /**
+     * An exported ChatGPT Web session.
+     *
+     * The blob is user-pasted and is parsed and filtered server-side before anything is
+     * written, so the browser's decision about which cookies belong to this connection is
+     * made here rather than trusted from the client.
+     */
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/chatgpt/connect') {
+      const body = await readJsonBody(request, maxConnectionBodyBytes);
+      const connection = await service.connectChatGptWeb(readRequiredString(body, 'storageState'), controller.signal);
+      sendJson(response, 201, { connection }, origin);
+      return;
+    }
+
     // Google or GitHub. The browser cannot return from a `kiro://` callback, so this
     // returns a URL to open and the code is pasted back on the exchange route below.
     if (request.method === 'POST' && url.pathname === '/v1/oauth/kiro/social/start') {
