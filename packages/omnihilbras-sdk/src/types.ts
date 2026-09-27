@@ -95,6 +95,19 @@ export type ChatChunk = {
   usage?: TokenUsage;
 };
 
+/**
+ * Prices are normalised to **per 1M tokens** because that is the unit a person compares.
+ * Providers disagree: OpenRouter quotes per-token strings (`"0.0000025"`), OpenCode
+ * Zen quotes per-1M numbers (`2.5`). Converting at the edge means the dashboard never has
+ * to know which provider it is looking at.
+ */
+export type ModelPricing = {
+  inputPer1M?: number;
+  outputPer1M?: number;
+  cacheReadPer1M?: number;
+  cacheWritePer1M?: number;
+};
+
 export type Model = {
   id: string;
   providerId: ProviderId;
@@ -102,6 +115,14 @@ export type Model = {
   ownedBy?: string;
   contextWindow?: number;
   capabilities?: ProviderCapabilities;
+  /**
+   * Declared modalities, e.g. `['text']` or `['text', 'image', 'pdf']`. Only present
+   * when the provider's catalog states them; a minimal OpenAI-compatible catalog says
+   * nothing, and an absent list must not be read as "text only".
+   */
+  inputModalities?: readonly string[];
+  outputModalities?: readonly string[];
+  pricing?: ModelPricing;
 };
 
 export type ProviderCapability =

@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
 import { OauthConnectDialog } from '../components/OauthConnectDialog';
+import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, filterAvailability, modelFacets, priceLabel, type ModelFacets, type ModelFilterState, type ModelMetaMap } from '@hilbras/omnihilbras';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { addGatewayConnectionModels, getGatewayHealth, getGatewayRoutingState, listGatewayConnections, putGatewayConnection, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, type GatewayConnection, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
@@ -118,7 +119,17 @@ function omitNumberKey(record: Record<string, number>, key: string) {
   return next;
 }
 
-function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testState, testError, testLatencyMs, testNote }: { model: string; providerId: string; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testError?: string; testLatencyMs?: number; testNote?: string }) {
+function ModelRow({ model, providerId, facets, onCopy, onTest, testing, disabled, testState, testError, testLatencyMs, testNote }: { model: string; providerId: string; facets: ModelFacets; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testError?: string; testLatencyMs?: number; testNote?: string }) {
+  const input = priceLabel(facets.prices, 'input');
+  const output = priceLabel(facets.prices, 'output');
+  const context = contextLabel(facets.contextWindow);
+  // Only badges the provider actually stated are shown. A missing price is not "Free",
+  // and an unstated modality is not "Text".
+  const badges: string[] = [];
+  if (input) badges.push(input === output ? input : `${input} in · ${output ?? '?'} out`);
+  if (context) badges.push(`${context} ctx`);
+  if (facets.acceptsImage) badges.push('Vision');
+  else if (facets.inputModalities.length > 0) badges.push('Text');
   return (
     <div
       className="flex flex-col gap-3 rounded-xl border border-line bg-bg-soft/45 p-3.5 sm:flex-row sm:items-center sm:justify-between"
@@ -127,7 +138,7 @@ function ModelRow({ model, providerId, onCopy, onTest, testing, disabled, testSt
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? 'border-danger/25 bg-danger/10 text-danger' : 'border-line bg-surface text-muted'}`}>
           {testing ? <LoaderCircle className="h-4 w-4 animate-spin text-gold-text" aria-hidden="true" /> : testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
         </span>
-        <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><p className="truncate text-xs font-semibold">{model}</p>{testLatencyMs !== undefined && testState === 'ok' && <span title={testNote || undefined} className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms{testNote ? ' · reasoning only' : ''}</span>}{testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}</div><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code></div>
+        <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><p className="truncate text-xs font-semibold">{model}</p>{facets.displayName && facets.displayName !== model && <p className="truncate text-[10px] text-muted">{facets.displayName}</p>}{testLatencyMs !== undefined && testState === 'ok' && <span title={testNote || undefined} className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms{testNote ? ' · reasoning only' : ''}</span>}{testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}{badges.map((badge) => <span key={badge} className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[9px] text-muted">{badge}</span>)}</div><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code></div>
       </div>
       <div className="flex items-center gap-1.5">
         <button type="button" onClick={onCopy} aria-label={`Copy ${model} model ID`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-gold-text"><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>
@@ -143,20 +154,19 @@ function isValidResilience(value: GatewayResilience) {
 }
 
 /** Narrows the model list to a test result. */
-type ResultFilter = 'all' | 'untested' | 'passed' | 'failed';
-type ModelSort = 'name' | 'fastest' | 'slowest';
-
-const resultFilterOptions: ReadonlyArray<{ value: ResultFilter; label: string }> = [
+const resultFilterOptions: ReadonlyArray<{ value: ModelFilterState['result']; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'untested', label: 'Untested' },
   { value: 'passed', label: 'Passed' },
   { value: 'failed', label: 'Failed' },
 ];
 
-const modelSortOptions: ReadonlyArray<{ value: ModelSort; label: string }> = [
+const modelSortOptions: ReadonlyArray<{ value: ModelFilterState['sort']; label: string }> = [
   { value: 'name', label: 'Name' },
+  { value: 'cheapest', label: 'Cheapest first' },
   { value: 'fastest', label: 'Fastest first' },
   { value: 'slowest', label: 'Slowest first' },
+  { value: 'widest', label: 'Widest context' },
 ];
 
 /** The documented defaults, used when a record arrives without a resilience block. */
@@ -267,9 +277,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const bulkRunRef = useRef(false);
   const scrollAnchorRef = useRef<number | null>(null);
   const [customModels, setCustomModels] = useState<string[]>([]);
-  const [modelQuery, setModelQuery] = useState('');
-  const [resultFilter, setResultFilter] = useState<ResultFilter>('all');
-  const [sortBy, setSortBy] = useState<ModelSort>('name');
+  const [filters, setFilters] = useState<ModelFilterState>(defaultModelFilters);
   const [strategy, setStrategy] = useState('balanced');
   const [notice, setNotice] = useState('');
   const [noticeError, setNoticeError] = useState(false);
@@ -319,60 +327,48 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
    * A provider can carry hundreds of models, so this is the only practical way
    * to find one.
    */
-  const normalizedModelQuery = modelQuery.trim().toLowerCase();
+  const modelMeta: ModelMetaMap = useMemo(() => connection?.modelMeta ?? {}, [connection?.modelMeta]);
 
-  /** Models matching the text query, before any result filter. */
-  const matchedModels = useMemo(() => {
-    if (!normalizedModelQuery) return allModels;
-    return allModels.filter((model) => {
-      const id = model.toLowerCase();
-      const leaf = id.includes('/') ? id.slice(id.lastIndexOf('/') + 1) : id;
-      return id.includes(normalizedModelQuery) || leaf.includes(normalizedModelQuery);
-    });
-  }, [allModels, normalizedModelQuery]);
-
-  const testedCount = useMemo(
-    () => matchedModels.filter((model) => modelTests[model] === 'ok' || modelTests[model] === 'error').length,
-    [matchedModels, modelTests],
+  /** Every model with the facets its catalog stated, whether or not a filter is active. */
+  const filterableModels = useMemo(
+    () =>
+      allModels.map((model) => ({
+        model,
+        facets: modelFacets(modelMeta[model]),
+        testState: modelTests[model] ?? 'idle',
+        ...(modelTestLatencies[model] === undefined ? {} : { latencyMs: modelTestLatencies[model] }),
+      })),
+    [allModels, modelMeta, modelTestLatencies, modelTests],
   );
-  const passedCount = useMemo(() => matchedModels.filter((model) => modelTests[model] === 'ok').length, [matchedModels, modelTests]);
 
-  const resultCounts = useMemo(() => ({
-    all: matchedModels.length,
-    untested: matchedModels.length - testedCount,
-    passed: passedCount,
-    failed: matchedModels.length - passedCount - (matchedModels.length - testedCount),
-  }), [matchedModels.length, passedCount, testedCount]);
+  const availability = useMemo(() => filterAvailability(filterableModels), [filterableModels]);
 
   /**
-   * The list, narrowed by result and ordered by the chosen sort.
-   *
-   * The result filter is suspended during a bulk run. Applying it would empty the
-   * list as each model flipped to "testing", which would take the rows out from
-   * under the workers and make progress unreadable.
+   * The result filter is suspended during a bulk run. Applying it would empty the list as
+   * each model flipped to "testing", which would take the rows out from under the workers
+   * and make progress unreadable.
    */
-  const visibleModels = useMemo(() => {
-    const bulkRunning = bulkProgress !== undefined;
-    const filtered = bulkRunning || resultFilter === 'all'
-      ? matchedModels
-      : matchedModels.filter((model) => {
-        if (resultFilter === 'untested') return modelTests[model] === undefined || modelTests[model] === 'idle';
-        if (resultFilter === 'passed') return modelTests[model] === 'ok';
-        return modelTests[model] === 'error';
-      });
-    if (sortBy === 'name') return [...filtered].sort((left, right) => left.localeCompare(right));
-    // Untested models sort last in either latency order: they have no latency,
-    // and a list of blanks at the top reads as a broken sort.
-    const withLatency = (model: string) => modelTestLatencies[model];
-    return [...filtered].sort((left, right) => {
-      const a = withLatency(left);
-      const b = withLatency(right);
-      if (a === undefined && b === undefined) return left.localeCompare(right);
-      if (a === undefined) return 1;
-      if (b === undefined) return -1;
-      return sortBy === 'fastest' ? a - b : b - a;
-    });
-  }, [bulkProgress, matchedModels, modelTestLatencies, modelTests, resultFilter, sortBy]);
+  const bulkRunning = bulkProgress !== undefined;
+  const effectiveFilters = useMemo<ModelFilterState>(
+    () => (bulkRunning ? { ...filters, result: 'all' as const } : filters),
+    [bulkRunning, filters],
+  );
+
+  const visibleModels = useMemo(() => applyModelFilters(filterableModels, effectiveFilters), [effectiveFilters, filterableModels]);
+
+  /** Counts for the result chips, taken after every other filter so they add up. */
+  const resultCounts = useMemo(() => {
+    const base = applyModelFilters(filterableModels, { ...effectiveFilters, result: 'all' });
+    const count = (result: ModelFilterState['result']) =>
+      applyModelFilters(filterableModels, { ...effectiveFilters, result }).length;
+    return {
+      all: base.length,
+      untested: count('untested'),
+      passed: count('passed'),
+      failed: count('failed'),
+    };
+  }, [effectiveFilters, filterableModels]);
+
   const testing = testingModels.length > 0;
   const isOauth = provider.auth === 'OAuth';
   /**
@@ -397,6 +393,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     }
     setAddOpen(true);
   }
+
   const testingSet = useMemo(() => new Set(testingModels), [testingModels]);
 
   function flash(message: string, tone: 'success' | 'error' = 'success') {
@@ -548,7 +545,8 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     bulkRunRef.current = true;
     const controller = new AbortController();
     bulkAbortRef.current = controller;
-    const queue = [...visibleModels];
+    // The bulk runner works on ids; the filter list carries facets alongside them.
+    const queue = visibleModels.map((entry) => entry.model);
     const total = queue.length;
     const latencies: number[] = [];
     const failures: string[] = [];
@@ -650,7 +648,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
               <h2 id="models-title" className="text-sm font-semibold">Available models</h2>
               <p className="muted mt-1 text-xs">
                 Models currently exposed by this provider route. Test sends one real minimal request.
-                {visibleModels.length !== matchedModels.length && <> Showing {visibleModels.length} of {matchedModels.length}.</>}
+                {visibleModels.length !== allModels.length && <> Showing {visibleModels.length} of {allModels.length}.</>}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -679,7 +677,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
               ) : (
                 <button type="button" onClick={() => void testAllModels()} disabled={testingConnection || visibleModels.length === 0} className="btn-gold !px-3 !py-2 !text-xs">
                   <Zap className="h-3.5 w-3.5" aria-hidden="true" />
-                  {normalizedModelQuery ? `Test ${visibleModels.length} shown` : 'Test all'}
+                  {visibleModels.length !== allModels.length ? `Test ${visibleModels.length} shown` : 'Test all'}
                 </button>
               )}
             </div>
@@ -689,43 +687,91 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
               <span className="sr-only">Search {provider.name} models</span>
               <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-muted" aria-hidden="true" />
               <input
-                value={modelQuery}
-                onChange={(event) => setModelQuery(event.target.value)}
+                value={filters.query}
+                onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
                 placeholder={`Search ${provider.name} models`}
                 aria-label={`Search ${provider.name} models`}
                 className="input !h-9 !w-full !py-2 !pl-9 !pr-8 !text-xs"
                 autoComplete="off"
                 spellCheck={false}
               />
-              {normalizedModelQuery && (
-                <button type="button" onClick={() => setModelQuery('')} aria-label="Clear model search" title="Clear search" className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 text-muted transition-colors hover:text-text">
+              {filters.query && (
+                <button type="button" onClick={() => setFilters((current) => ({ ...current, query: '' }))} aria-label="Clear model search" title="Clear search" className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 text-muted transition-colors hover:text-text">
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               )}
             </label>
-            <div className="flex shrink-0 overflow-x-auto rounded-lg border border-line bg-bg-soft p-0.5" role="tablist" aria-label="Filter models by test result">
-              {resultFilterOptions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="tab"
-                  aria-selected={resultFilter === option.value}
-                  onClick={() => setResultFilter(option.value)}
-                  className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors ${resultFilter === option.value ? 'bg-surface text-gold-text shadow-sm' : 'text-muted hover:text-text'}`}
-                >
-                  {option.label}
-                  {resultCounts[option.value] > 0 && <span className="ml-1 font-mono opacity-70">{resultCounts[option.value]}</span>}
-                </button>
-              ))}
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {/* A filter is only offered when the provider published the field it
+                  filters on. Offering one that can never match reads as a broken page. */}
+              {availability.pricing && (
+                <label className="shrink-0">
+                  <span className="sr-only">Filter by price</span>
+                  <select
+                    value={filters.free}
+                    onChange={(event) => setFilters((current) => ({ ...current, free: event.target.value as ModelFilterState['free'] }))}
+                    aria-label="Filter models by price"
+                    className="input !h-9 !py-1.5 !pr-7 !text-[10px]"
+                  >
+                    <option value="any">Any price</option>
+                    <option value="free">Free only</option>
+                    <option value="priced">Paid only</option>
+                    <option value="unpriced">No price listed</option>
+                  </select>
+                </label>
+              )}
+              {availability.modalities && (
+                <label className="shrink-0">
+                  <span className="sr-only">Filter by modality</span>
+                  <select
+                    value={filters.modality}
+                    onChange={(event) => setFilters((current) => ({ ...current, modality: event.target.value as ModelFilterState['modality'] }))}
+                    aria-label="Filter models by modality"
+                    className="input !h-9 !py-1.5 !pr-7 !text-[10px]"
+                  >
+                    <option value="any">Any modality</option>
+                    <option value="image">Accepts image</option>
+                    <option value="text">Text only</option>
+                  </select>
+                </label>
+              )}
+              {availability.context && (
+                <label className="shrink-0">
+                  <span className="sr-only">Filter by context window</span>
+                  <select
+                    value={filters.minContext}
+                    onChange={(event) => setFilters((current) => ({ ...current, minContext: Number(event.target.value) }))}
+                    aria-label="Filter models by minimum context window"
+                    className="input !h-9 !py-1.5 !pr-7 !text-[10px]"
+                  >
+                    {contextOptions.map((option) => <option key={option.value} value={option.value}>{option.value === 0 ? 'Any context' : `${option.label} context`}</option>)}
+                  </select>
+                </label>
+              )}
+              <div className="flex shrink-0 overflow-x-auto rounded-lg border border-line bg-bg-soft p-0.5" role="tablist" aria-label="Filter models by test result">
+                {resultFilterOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={filters.result === option.value}
+                    onClick={() => setFilters((current) => ({ ...current, result: option.value }))}
+                    className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-[10px] font-medium transition-colors ${filters.result === option.value ? 'bg-surface text-gold-text shadow-sm' : 'text-muted hover:text-text'}`}
+                  >
+                    {option.label}
+                    {resultCounts[option.value] > 0 && <span className="ml-1 font-mono opacity-70">{resultCounts[option.value]}</span>}
+                  </button>
+                ))}
+              </div>
+              <label className="shrink-0">
+                <span className="sr-only">Sort models</span>
+                <select value={filters.sort} onChange={(event) => setFilters((current) => ({ ...current, sort: event.target.value as ModelFilterState['sort'] }))} aria-label="Sort models" className="input !h-9 !py-1.5 !pr-7 !text-[10px]">
+                  {modelSortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
             </div>
-            <label className="shrink-0">
-              <span className="sr-only">Sort models</span>
-              <select value={sortBy} onChange={(event) => setSortBy(event.target.value as ModelSort)} aria-label="Sort models" className="input !h-9 !py-1.5 !pr-7 !text-[10px]">
-                {modelSortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
           </div>
-          <div className="mt-3 space-y-2">{visibleModels.length > 0 ? visibleModels.map((model) => <ModelRow key={model} model={model} providerId={provider.id} onCopy={() => void copyModel(model)} onTest={() => void testModel(model)} testing={testingSet.has(model)} disabled={testing || testingConnection} testState={modelTests[model] ?? 'idle'} testError={modelTestErrors[model]} testLatencyMs={modelTestLatencies[model]} testNote={modelTestNotes[model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{normalizedModelQuery ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{normalizedModelQuery ? <>Nothing in {allModels.length} models matches &ldquo;{modelQuery.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}</div>
+          <div className="mt-3 space-y-2">{visibleModels.length > 0 ? visibleModels.map((entry) => <ModelRow key={entry.model} model={entry.model} facets={entry.facets} providerId={provider.id} onCopy={() => void copyModel(entry.model)} onTest={() => void testModel(entry.model)} testing={testingSet.has(entry.model)} disabled={testing || testingConnection} testState={modelTests[entry.model] ?? 'idle'} testError={modelTestErrors[entry.model]} testLatencyMs={modelTestLatencies[entry.model]} testNote={modelTestNotes[entry.model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{filters.query ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{filters.query ? <>Nothing in {allModels.length} models matches &ldquo;{filters.query.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}</div>
           <div className="mt-5 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>
           {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {modelReference(provider.id, copiedModel)}</p>}
         </section>

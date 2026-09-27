@@ -4,6 +4,34 @@ import { join } from 'node:path';
 import { assertSafeProviderRequestUrl, type ModelImportPolicy, type ProviderCredential, type ProviderId, type SecretStore } from '@hilbras/omnihilbras';
 import { atomicWrite, defaultStateDirectory, ensureSecureDirectory, isNodeError, readOptionalFile, readOptionalText } from './secure-store.js';
 
+/**
+ * What a provider's catalog said about one model, kept so the dashboard can filter on it
+ * without asking the provider again. Everything is optional because catalogs differ: a
+ * minimal OpenAI-compatible `/v1/models` states nothing beyond an id, and an absent field
+ * must stay absent rather than defaulting to something the provider never claimed.
+ *
+ * Keys are short because this is written into a metadata file with a hard size cap, and
+ * a full catalog runs to hundreds of entries per connection.
+ */
+export type ModelMeta = {
+  /** Display name. */
+  n?: string;
+  /** Context window in tokens. */
+  c?: number;
+  /** Declared input modalities, e.g. `['text', 'image']`. */
+  i?: readonly string[];
+  /** Declared output modalities. */
+  o?: readonly string[];
+  /** Per 1M tokens: input, output, cache read, cache write. */
+  p?: readonly number[];
+};
+
+/** Everything a provider's catalog told us, keyed by model id. */
+export type ModelMetaMap = Record<string, ModelMeta>;
+
+/** The four prices, in the order `ModelMeta.p` stores them. */
+export const modelMetaPriceOrder = ['inputPer1M', 'outputPer1M', 'cacheReadPer1M', 'cacheWritePer1M'] as const;
+
 export type ConnectionRecord = {
   id: string;
   providerId: ProviderId;
@@ -16,6 +44,8 @@ export type ConnectionRecord = {
   modelPolicy: ModelImportPolicy;
   modelIds: string[];
   customModelIds: string[];
+  /** Catalog metadata for `modelIds`, when the provider stated any. */
+  modelMeta?: ModelMetaMap;
   resilience: ResilienceSettings;
   createdAt: string;
   updatedAt: string;
@@ -48,6 +78,7 @@ export type ConnectionInput = {
   modelPolicy?: ModelImportPolicy;
   modelIds?: string[];
   customModelIds?: string[];
+  modelMeta?: ModelMetaMap;
   resilience?: Partial<ResilienceSettings>;
 };
 
@@ -84,7 +115,7 @@ export interface ConnectionCredentialStore {
 export interface ConnectionStore extends ConnectionCredentialStore {
   list(): Promise<ConnectionRecord[]>;
   save(input: ConnectionInput, credential: ProviderCredential): Promise<ConnectionRecord>;
-  updateModels(connectionId: string, modelIds: string[]): Promise<ConnectionRecord | undefined>;
+  updateModels(connectionId: string, modelIds: string[], modelMeta?: ModelMetaMap): Promise<ConnectionRecord | undefined>;
   updateResilience(connectionId: string, resilience: Partial<ResilienceSettings>): Promise<ConnectionRecord | undefined>;
   remove(connectionId: string): Promise<boolean>;
 }
@@ -98,6 +129,8 @@ export type LocalConnectionStoreOptions = {
 const metadataVersion = 1;
 const secretEnvelopeVersion = 1;
 const maxMetadataBytes = 256 * 1024;
+/** Catalog metadata is bounded so a large catalog cannot fill the metadata file. */
+const maxModelMetaEntries = 2_000;
 const maxSecretEnvelopeBytes = 1024 * 1024;
 const maxConnections = 100;
 const maxDiscoveredModelIds = 2_000;
@@ -176,12 +209,14 @@ export class InMemoryConnectionStore implements ConnectionStore {
     return cloneRecord(record);
   }
 
-  async updateModels(connectionId: string, modelIds: string[]) {
+  async updateModels(connectionId: string, modelIds: string[], modelMeta?: ModelMetaMap) {
     const record = this.connections.get(connectionId);
     if (!record) return undefined;
     const merged = mergeAddedModelIds(record, modelIds);
-    if (!merged) return cloneRecord(record);
-    const updated = { ...record, ...merged, updatedAt: new Date().toISOString() };
+    // A rescan that found the same ids still learned new metadata, so the metadata is
+    // not gated on the id list having changed.
+    if (!merged && !modelMeta) return cloneRecord(record);
+    const updated = { ...record, ...merged, ...(modelMeta ? { modelMeta } : {}), updatedAt: new Date().toISOString() };
     this.connections.set(connectionId, updated);
     return cloneRecord(updated);
   }
@@ -333,15 +368,15 @@ export class LocalConnectionStore implements ConnectionStore {
     });
   }
 
-  async updateModels(connectionId: string, modelIds: string[]) {
+  async updateModels(connectionId: string, modelIds: string[], modelMeta?: ModelMetaMap) {
     return this.withMutation(async () => {
       await this.ensureLoaded();
       const record = this.connections.get(connectionId);
       if (!record) return undefined;
       const merged = mergeAddedModelIds(record, modelIds);
-      if (!merged) return cloneRecord(record);
+      if (!merged && !modelMeta) return cloneRecord(record);
       const previous = record;
-      const updated = { ...record, ...merged, updatedAt: new Date().toISOString() };
+      const updated = { ...record, ...merged, ...(modelMeta ? { modelMeta } : {}), updatedAt: new Date().toISOString() };
       this.connections.set(connectionId, updated);
       try {
         await this.persistMetadata();
@@ -528,6 +563,7 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
   if (input.modelPolicy !== undefined && input.modelPolicy !== 'free' && input.modelPolicy !== 'all') throw new Error('Model import policy is invalid.');
   const modelIds = input.modelIds === undefined ? undefined : normalizeModelIds(input.modelIds);
   const customModelIds = input.customModelIds === undefined ? undefined : normalizeModelIds(input.customModelIds);
+  const modelMeta = input.modelMeta === undefined ? undefined : normalizeModelMeta(input.modelMeta);
   return {
     id: input.id,
     providerId,
@@ -535,6 +571,7 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
     endpoint,
     priority: input.priority,
     proxyPool,
+    ...(modelMeta ? { modelMeta } : {}),
     ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
     ...(input.modelPolicy === undefined ? {} : { modelPolicy: input.modelPolicy }),
     ...(modelIds === undefined ? {} : { modelIds }),
@@ -643,6 +680,7 @@ function parseRecord(value: unknown): ConnectionRecord {
     modelPolicy: value.modelPolicy === undefined ? 'all' : value.modelPolicy,
     modelIds: modelLists.modelIds,
     customModelIds: modelLists.customModelIds,
+    ...(value.modelMeta === undefined ? {} : { modelMeta: value.modelMeta as ModelMetaMap }),
     ...(value.resilience === undefined ? {} : { resilience: value.resilience as Partial<ResilienceSettings> }),
   });
   return {
@@ -655,6 +693,7 @@ function parseRecord(value: unknown): ConnectionRecord {
     enabled: value.enabled,
     hasCredential: value.hasCredential,
     modelPolicy: input.modelPolicy ?? 'all',
+    ...(input.modelMeta ? { modelMeta: input.modelMeta } : {}),
     modelIds: input.modelIds ?? [],
     customModelIds: input.customModelIds ?? [],
     resilience: normalizeResilienceSettings(input.resilience ?? {}),
@@ -741,7 +780,69 @@ function cloneCredential(credential: ProviderCredential): ProviderCredential {
 }
 
 function cloneRecord(record: ConnectionRecord): ConnectionRecord {
-  return { ...record, modelIds: [...record.modelIds], customModelIds: [...record.customModelIds], resilience: { ...record.resilience } };
+  return {
+    ...record,
+    modelIds: [...record.modelIds],
+    customModelIds: [...record.customModelIds],
+    ...(record.modelMeta ? { modelMeta: cloneModelMeta(record.modelMeta) } : {}),
+    resilience: { ...record.resilience },
+  };
+}
+
+/** A deep-enough copy that a caller cannot mutate stored metadata through a record. */
+function cloneModelMeta(meta: ModelMetaMap): ModelMetaMap {
+  const copy: ModelMetaMap = {};
+  for (const [id, entry] of Object.entries(meta)) {
+    copy[id] = {
+      ...(entry.n === undefined ? {} : { n: entry.n }),
+      ...(entry.c === undefined ? {} : { c: entry.c }),
+      ...(entry.i === undefined ? {} : { i: [...entry.i] }),
+      ...(entry.o === undefined ? {} : { o: [...entry.o] }),
+      ...(entry.p === undefined ? {} : { p: [...entry.p] }),
+    };
+  }
+  return copy;
+}
+
+/**
+ * Validates catalog metadata read back from disk.
+ *
+ * This is untrusted input like everything else in the file, and it is the one field that
+ * can grow without bound, so every string, array and number is checked. Anything that
+ * does not fit is dropped rather than failing the whole load: stale metadata from an
+ * older build must not make a vault unreadable.
+ */
+function normalizeModelMeta(value: unknown): ModelMetaMap | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: ModelMetaMap = {};
+  let kept = 0;
+  for (const [id, raw] of Object.entries(value)) {
+    if (kept >= maxModelMetaEntries) break;
+    if (!id || id.length > 256 || !isRecord(raw)) continue;
+    const entry: ModelMeta = {};
+    if (typeof raw.n === 'string' && raw.n.trim() && raw.n.length <= 200) entry.n = raw.n.trim();
+    if (typeof raw.c === 'number' && Number.isInteger(raw.c) && raw.c > 0 && raw.c <= 10_000_000) entry.c = raw.c;
+    const modalities = (input: unknown) => {
+      if (!Array.isArray(input) || input.length > 8) return undefined;
+      const list = input.filter((item): item is string => typeof item === 'string' && /^[a-z0-9-]{1,32}$/i.test(item));
+      return list.length > 0 ? [...new Set(list.map((item) => item.toLowerCase()))] : undefined;
+    };
+    const i = modalities(raw.i);
+    const o = modalities(raw.o);
+    if (i) entry.i = i;
+    if (o) entry.o = o;
+    if (Array.isArray(raw.p)) {
+      const prices = raw.p
+        .slice(0, modelMetaPriceOrder.length)
+        .filter((item): item is number => typeof item === 'number' && Number.isFinite(item) && item >= 0 && item <= 1_000_000);
+      if (prices.length > 0) entry.p = prices;
+    }
+    if (Object.keys(entry).length > 0) {
+      out[id] = entry;
+      kept++;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

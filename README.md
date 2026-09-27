@@ -156,6 +156,18 @@ One trap: Zen's `mimo-v2.6-flash-free` and OpenRouter's `xiaomi/mimo-v2.6-flash`
 different models from different vendors, and the ids are close enough to mix up. The
 OpenRouter one answers on a paid route; the Zen one does not.
 
+## Filtering models
+
+Every provider page filters its model list by search, price, modality, context window and
+test result, and sorts by name, price, latency or context. Prices are shown per 1M tokens
+whatever the provider quotes, and each row carries the badges the provider actually
+published — a price, a context size, `Vision` or `Text`.
+
+The filters are only as honest as the data behind them. A model with **no published price
+is unknown, not free**, and gets its own filter. A provider that publishes no modalities
+is not assumed to lack them, and a filter that could never match is not offered at all —
+so a minimal catalog like Cline shows search, result and sort, and nothing else.
+
 A card's provider id always resolves to that provider — its own endpoint, its own name —
 and an id that resolves to nothing resolves to the neutral custom option rather than to any
 named vendor, so a key can never be sent to a company you did not name.

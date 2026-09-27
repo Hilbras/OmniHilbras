@@ -1,3 +1,5 @@
+import type { ModelMetaMap } from '@hilbras/omnihilbras';
+
 export type GatewayProviderHealth = {
   providerId: string;
   status: 'healthy' | 'degraded' | 'unavailable';
@@ -39,6 +41,8 @@ export type GatewayConnection = {
   modelPolicy: 'free' | 'all';
   modelIds: string[];
   customModelIds: string[];
+  /** Catalog metadata for `modelIds`, when the provider published any. */
+  modelMeta?: ModelMetaMap;
   resilience: GatewayResilience;
   createdAt: string;
   updatedAt: string;

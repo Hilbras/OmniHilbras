@@ -468,6 +468,45 @@ saved connection's catalog and stores the result, keeping custom models. Without
 connection saved with no models has no way back short of signing in again, which for a
 device flow means another browser approval.
 
+### Model metadata and filters
+
+A model is more than an id, and the dashboard can only filter on what a provider actually
+publishes. `Model` therefore carries optional `inputModalities`, `outputModalities` and
+`pricing`, and only the catalogs that state them fill them in:
+
+| Provider | context | modalities | pricing |
+| --- | --- | --- | --- |
+| OpenRouter | `context_length` | `architecture.input_modalities` | `pricing.prompt` / `completion`, **per token** |
+| OpenCode Console | `limit.context` | `modalities.input` | `cost.input` / `output`, **per 1M** |
+| Cline, Zen API key, generic | not published | not published | not published |
+
+The two quoting styles are the reason prices are normalised at the edge. OpenRouter
+publishes per-token strings (`"0.0000025"`), Zen publishes per-1M numbers (`2.5`), and
+converting both to **per 1M** at the adapter means the dashboard never has to know which
+provider a model came from. Guessing the unit instead would render a price a million
+times out, so the converters are separate and both are tested against the real shapes.
+
+**An absent field is never a zero.** This is the rule the whole feature rests on:
+
+- A model with no published price is **unknown**, not free. A free filter selects models
+  that stated zero, and a separate "no price listed" filter finds the rest.
+- A provider that says nothing about modalities has not been shown to lack them, so an
+  unstated model does not satisfy a modality filter.
+- A model with no stated context window does not satisfy a minimum-context filter.
+- A filter is **only offered when the provider published the field it filters on**, so a
+  minimal catalog does not present three controls that can never match.
+- Untested models sort last in *both* latency directions. A column of blanks at the top of
+  a "slowest first" list reads as a broken sort.
+
+Metadata is captured while discovery already runs, so a save or a
+`POST /v1/connections/:id/models/refresh` costs no extra provider request. It is stored
+compactly — short keys, since a full catalog runs to hundreds of entries per connection —
+and validated on read like the rest of the metadata file, because it is the one field
+that can grow without bound.
+
+The filter rules live in the SDK rather than the dashboard: they are rules about provider
+pricing semantics, and that is where they can be tested.
+
 ### A provider id must never resolve to a different vendor
 
 The add-connection dialog keeps its own list of providers, and it used to resolve an

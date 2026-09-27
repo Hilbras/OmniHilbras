@@ -1,6 +1,7 @@
 import { ProviderError } from '../errors.js';
 import { FetchHttpTransport } from '../transport.js';
 import type { HttpTransport } from '../transport.js';
+import { compactPricing, normalizeContextWindow, normalizeModalities, perMillionPrice } from '../pricing.js';
 import { AnthropicAdapter } from './anthropic.js';
 import { OpenAICompatibleAdapter } from './openai-compatible.js';
 import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderRequestContext } from '../types.js';
@@ -37,13 +38,23 @@ export const OPENCODE_CONSOLE = {
 
 export const opencodeConsoleProviderId = 'opencode-console';
 
+/** One entry of the Console's model config, which carries name, limits and prices. */
+type ConsoleModelConfig = {
+  name?: string;
+  provider?: { api?: string };
+  modalities?: { input?: unknown; output?: unknown };
+  limit?: { context?: unknown; output?: unknown };
+  /** Quoted per 1M tokens, unlike OpenRouter's per-token strings. */
+  cost?: { input?: unknown; output?: unknown; cache_read?: unknown; cache_write?: unknown };
+};
+
 type ConsoleConfig = {
   config?: {
     provider?: {
       opencode?: {
         api?: string;
         options?: { headers?: Record<string, string> };
-        models?: Record<string, { provider?: { api?: string } }>;
+        models?: Record<string, ConsoleModelConfig>;
       };
     };
   };
@@ -55,6 +66,8 @@ type ConsoleLanes = {
   base: string;
   /** Per-model overrides, keyed by model id. */
   byModel: Map<string, string>;
+  /** The catalog entries, keyed by model id, for names, limits and prices. */
+  entries: Map<string, ConsoleModelConfig>;
   orgId?: string;
 };
 
@@ -68,6 +81,39 @@ function isAnthropicLane(lane: string) {
 /** True when the lane speaks the Google GenAI shape. */
 function isGoogleLane(lane: string) {
   return lane.includes('/inference/google/');
+}
+
+/**
+ * Turns a Console catalog entry into a model record.
+ *
+ * The Console is the only catalog we read that states prices, limits and modalities
+ * together, and it quotes per 1M tokens where OpenRouter quotes per token.
+ */
+export function describeConsoleModel(id: string, entry: ConsoleModelConfig | undefined, providerId: string): Model {
+  const displayName = typeof entry?.name === 'string' && entry.name.trim() ? entry.name.trim().slice(0, 200) : undefined;
+  const contextWindow = normalizeContextWindow(entry?.limit?.context);
+  const inputModalities = normalizeModalities(entry?.modalities?.input);
+  const outputModalities = normalizeModalities(entry?.modalities?.output);
+  const cost = entry?.cost;
+  const inputPer1M = perMillionPrice(cost?.input);
+  const outputPer1M = perMillionPrice(cost?.output);
+  const cacheReadPer1M = perMillionPrice(cost?.cache_read);
+  const cacheWritePer1M = perMillionPrice(cost?.cache_write);
+  const pricing = compactPricing({
+    ...(inputPer1M === undefined ? {} : { inputPer1M }),
+    ...(outputPer1M === undefined ? {} : { outputPer1M }),
+    ...(cacheReadPer1M === undefined ? {} : { cacheReadPer1M }),
+    ...(cacheWritePer1M === undefined ? {} : { cacheWritePer1M }),
+  });
+  return {
+    id,
+    providerId,
+    ...(displayName ? { displayName } : {}),
+    ...(contextWindow ? { contextWindow } : {}),
+    ...(inputModalities ? { inputModalities } : {}),
+    ...(outputModalities ? { outputModalities } : {}),
+    ...(pricing ? { pricing } : {}),
+  };
 }
 
 function orgHeaderValue(credential: ProviderCredential | undefined): string | undefined {
@@ -167,7 +213,7 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
     const lanes = await this.resolveLanes(credential, context.signal);
     return [...lanes.byModel.keys()]
       .filter((id) => id.length > 0)
-      .map((id) => ({ id, providerId: this.id, displayName: id }));
+      .map((id) => describeConsoleModel(id, lanes.entries.get(id), this.id));
   }
 
   /**
@@ -285,14 +331,17 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
     const provider = response.data?.config?.provider?.opencode;
     const base = typeof provider?.api === 'string' ? provider.api : '';
     const byModel = new Map<string, string>();
+    const entries = new Map<string, ConsoleModelConfig>();
     for (const [id, model] of Object.entries(provider?.models ?? {})) {
+      if (!id) continue;
       const lane = model?.provider?.api;
       if (typeof lane === 'string' && lane) byModel.set(id, lane);
       else if (base) byModel.set(id, base);
+      entries.set(id, model ?? {});
     }
     // The config names the header inference wants, which is spelled differently again.
     const inferenceOrgId = provider?.options?.headers?.['x-opencode-org-id'] ?? orgId;
-    const lanes: ConsoleLanes = { base, byModel, ...(inferenceOrgId ? { orgId: inferenceOrgId } : {}) };
+    const lanes: ConsoleLanes = { base, byModel, entries, ...(inferenceOrgId ? { orgId: inferenceOrgId } : {}) };
     this.lanes.set(key, { at: this.now(), lanes });
     return lanes;
   }

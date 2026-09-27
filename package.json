@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "0.9.6",
+  "version": "0.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -19,6 +19,7 @@
     "test:gateway": "pnpm --filter @omnihilbras/gateway test"
   },
   "dependencies": {
+    "@hilbras/omnihilbras": "workspace:*",
     "lucide-react": "^1.47.0",
     "motion": "^13.4.1",
     "react": "^19.3.0",

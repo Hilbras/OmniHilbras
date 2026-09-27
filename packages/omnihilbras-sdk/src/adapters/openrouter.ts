@@ -1,4 +1,5 @@
 import { ProviderError } from '../errors.js';
+import { compactPricing, normalizeContextWindow, normalizeModalities, perTokenPrice } from '../pricing.js';
 import { FetchHttpTransport, type HttpResponse, type HttpTransport } from '../transport.js';
 import { assertSafeProviderHeaderValue, assertSafeProviderRequestUrl, normalizeProviderBaseUrl, resolveProviderUrl } from '../url.js';
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterConfig } from './openai-compatible.js';
@@ -163,8 +164,30 @@ function normalizeOpenRouterModel(value: unknown, providerId: string): Model | u
   const id = value.id.trim();
   if (!id || id.length > 256 || !/^[a-z0-9~][a-z0-9._:/~-]*$/i.test(id)) return undefined;
   const displayName = typeof value.name === 'string' && value.name.length <= 200 ? value.name : undefined;
-  const contextLength = typeof value.context_length === 'number' && Number.isInteger(value.context_length) && value.context_length > 0 ? value.context_length : undefined;
-  return { id, providerId, ...(displayName ? { displayName } : {}), ...(contextLength ? { contextWindow: contextLength } : {}) };
+  const contextWindow = normalizeContextWindow(value.context_length);
+  // OpenRouter states all three, and this adapter already read them for its own free and
+  // text-output checks and then discarded them. They are the reason a price or a vision
+  // filter can be honest on this provider.
+  const architecture = isRecord(value.architecture) ? value.architecture : undefined;
+  const inputModalities = normalizeModalities(architecture?.input_modalities);
+  const outputModalities = normalizeModalities(architecture?.output_modalities);
+  const rawPricing = isRecord(value.pricing) ? value.pricing : undefined;
+  const pricing = compactPricing({
+    // OpenRouter quotes per token, as strings.
+    ...(perTokenPrice(rawPricing?.prompt) === undefined ? {} : { inputPer1M: perTokenPrice(rawPricing?.prompt) }),
+    ...(perTokenPrice(rawPricing?.completion) === undefined ? {} : { outputPer1M: perTokenPrice(rawPricing?.completion) }),
+    ...(perTokenPrice(rawPricing?.input_cache_read) === undefined ? {} : { cacheReadPer1M: perTokenPrice(rawPricing?.input_cache_read) }),
+    ...(perTokenPrice(rawPricing?.input_cache_write) === undefined ? {} : { cacheWritePer1M: perTokenPrice(rawPricing?.input_cache_write) }),
+  });
+  return {
+    id,
+    providerId,
+    ...(displayName ? { displayName } : {}),
+    ...(contextWindow ? { contextWindow } : {}),
+    ...(inputModalities ? { inputModalities } : {}),
+    ...(outputModalities ? { outputModalities } : {}),
+    ...(pricing ? { pricing } : {}),
+  };
 }
 
 function supportsTextOutput(value: unknown) {

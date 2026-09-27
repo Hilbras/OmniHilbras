@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@hilbras/omnihilbras':
+        specifier: workspace:*
+        version: link:packages/omnihilbras-sdk
       lucide-react:
         specifier: ^1.47.0
         version: 1.47.0(react@19.3.0)

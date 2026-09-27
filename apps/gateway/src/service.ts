@@ -1,6 +1,6 @@
 import { CLINE_OAUTH, FetchHttpTransport, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
-import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
+import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, modelMetaPriceOrder, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ModelMeta, type ModelMetaMap, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
@@ -331,15 +331,24 @@ export class GatewayService {
         // A sign-in that already came from the provider's own flow has proven the
         // credential, so a catalog that will not read is not a reason to throw the
         // session away. The connection is saved and the models arrive on the next read.
-        const discoveredModelIds = await this.discoverConnectionModels(input.providerId, credential, input.modelPolicy, signal, { endpoint: input.endpoint, name: input.name }).catch((error: unknown) => {
+        const discovered = await this.discoverConnectionModels(input.providerId, credential, input.modelPolicy, signal, { endpoint: input.endpoint, name: input.name }).catch((error: unknown) => {
           if (!options.tolerateDiscoveryFailure) throw error;
           const said = error instanceof ProviderError ? providerSaid(error) : error instanceof Error ? error.message : undefined;
           this.lastDiscoveryNote = said;
-          return [] as string[];
+          return [] as Model[];
         });
+        const discoveredModelIds = discovered.map((model) => model.id);
         const existing = (await this.connectionStore!.list()).find((connection) => (input.id ? connection.id === input.id : connection.providerId === input.providerId));
         const customModelIds = input.customModelIds ?? existing?.customModelIds ?? [];
-        saveInput = { ...input, modelIds: [...discoveredModelIds, ...customModelIds], customModelIds };
+        const discoveredMeta = GatewayService.modelMetaFor(discovered);
+        saveInput = {
+          ...input,
+          modelIds: [...discoveredModelIds, ...customModelIds],
+          customModelIds,
+          // Custom ids are the operator's own and carry no catalog metadata, so only the
+          // discovered half is described here.
+          ...(discoveredMeta ? { modelMeta: { ...(input.modelMeta ?? {}), ...discoveredMeta } } : {}),
+        };
       }
       if (signal?.aborted) throw new ProviderError('CANCELLED', 'The connection save was cancelled.', { providerId: input.providerId });
       try {
@@ -395,8 +404,8 @@ export class GatewayService {
       { endpoint: record.endpoint, name: record.name },
     );
     // Custom models are the operator's own additions and survive a rescan.
-    const merged = [...new Set([...discovered, ...(record.customModelIds ?? [])])];
-    const updated = await this.connectionStore.updateModels(connectionId, merged);
+    const merged = [...new Set([...discovered.map((model) => model.id), ...(record.customModelIds ?? [])])];
+    const updated = await this.connectionStore.updateModels(connectionId, merged, GatewayService.modelMetaFor(discovered));
     if (!updated) throw new ProviderError('NOT_FOUND', 'That connection no longer exists.', { providerId: connectionId });
     return updated;
   }
@@ -968,6 +977,12 @@ export class GatewayService {
     }
   }
 
+  /**
+   * Reads a provider's catalog. Returns the full records, not just ids, because the
+   * prices, context windows and modalities a catalog states are the only source for the
+   * dashboard's model filters, and asking the provider a second time to get them would
+   * mean a request per page load.
+   */
   private async discoverConnectionModels(providerId: string, credential: ProviderCredential, policy: ModelImportPolicy, signal?: AbortSignal, pendingEndpoint?: { endpoint: string; name: string }) {
     const adapter = await this.resolveAdapter(providerId, pendingEndpoint);
     const context: ProviderRequestContext = { credential, ...(signal ? { signal } : {}) };
@@ -977,7 +992,30 @@ export class GatewayService {
         ? await adapter.listModels(context)
         : undefined;
     if (!models) throw notSupported(adapter, policy === 'free' ? 'free model discovery' : 'model discovery');
-    return models.map((model) => model.id);
+    return models;
+  }
+
+  /**
+   * Reduces catalog records to the compact form stored alongside the ids. A model the
+   * provider described only as an id yields no entry at all, so the dashboard can tell
+   * "nothing was stated" from "stated as zero".
+   */
+  private static modelMetaFor(models: readonly Model[]): ModelMetaMap | undefined {
+    const meta: ModelMetaMap = {};
+    for (const model of models) {
+      const prices = modelMetaPriceOrder
+        .map((key) => model.pricing?.[key])
+        .filter((value): value is number => typeof value === 'number');
+      const entry: ModelMeta = {
+        ...(model.displayName ? { n: model.displayName } : {}),
+        ...(model.contextWindow ? { c: model.contextWindow } : {}),
+        ...(model.inputModalities?.length ? { i: [...model.inputModalities] } : {}),
+        ...(model.outputModalities?.length ? { o: [...model.outputModalities] } : {}),
+        ...(prices.length ? { p: prices } : {}),
+      };
+      if (Object.keys(entry).length > 0) meta[model.id] = entry;
+    }
+    return Object.keys(meta).length > 0 ? meta : undefined;
   }
 
   private async validateConnectionCredentialUnlocked(providerId: string, credential: ProviderCredential, signal?: AbortSignal): Promise<GatewayConnectionValidation> {
