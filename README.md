@@ -182,10 +182,14 @@ npx playwright install chromium
 
 Without it, ChatGPT Web says so by name rather than failing as a provider error.
 
-**It has not been verified end to end.** From the machine this was developed on,
-`chatgpt.com` returns its bot-protection page before the app loads, so the DOM selectors
-have never run against the real thing. If you try it and it fails, that is the most likely
-reason — not your session.
+**It has not completed a single turn.** From the machine this was developed on,
+`chatgpt.com` serves a bot-protection challenge — `Just a moment...` — *with a valid
+session loaded*. So the premise it was built on is defeated at the edge, and the DOM
+selectors have never been confirmed. If you try it, that is the most likely reason, not
+your session. A residential connection is worth trying; a datacenter one will not work.
+
+The export format is the one ChatGPT actually hands you (a CLI/Codex auth export with a
+`sessionToken`), and the plan it carries decides which models you are offered.
 
 ## Kiro, and why it carries a warning
 

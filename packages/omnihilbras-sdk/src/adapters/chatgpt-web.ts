@@ -88,6 +88,33 @@ export type ChatGptStorageState = {
 export type ParsedChatGptStorageState = {
   cookies: ChatGptCookie[];
   origins: unknown[];
+  /**
+   * The plan the export was issued for, when it says so.
+   *
+   * This is real entitlement rather than a guess, and it decides which models the account
+   * is offered. It is recorded rather than inferred from a model list that would be wrong
+   * for half the accounts.
+   */
+  planType?: string;
+  /** When the session itself expires, so a dead one is known before a browser opens. */
+  expiresAt?: string;
+};
+
+/**
+ * The Codex / ChatGPT CLI auth export.
+ *
+ * This is the format people actually have: a JSON object with `sessionToken` holding the
+ * `__Secure-next-auth.session-token` cookie value, plus a JWT `accessToken` and an account
+ * block. It is **not** a Playwright storage state — there is no `cookies` key in it at all,
+ * and a parser written only for the storage-state shape rejects it outright.
+ */
+export type ChatGptAuthExport = {
+  sessionToken?: string;
+  accessToken?: string;
+  expires?: string;
+  authProvider?: string;
+  account?: { planType?: string; structure?: string };
+  'https://api.openai.com/auth'?: unknown;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -126,6 +153,16 @@ export function parseChatGptStorageState(raw: string): ParsedChatGptStorageState
    * that is what a cookie-editor extension exports and it is the format people actually
    * have in hand. Anything else is refused with what to paste instead.
    */
+  /**
+   * The CLI/Codex auth export is checked before anything else, because it is the shape
+   * people paste most often and it shares no keys with a storage state.
+   */
+  // The key's presence, not its value, identifies the format: an export with an empty
+  // sessionToken is a broken export, and saying "no cookies array" about it is nonsense.
+  if (isRecord(parsed) && 'sessionToken' in parsed) {
+    return fromAuthExport(parsed);
+  }
+
   const isBareCookieArray = Array.isArray(parsed);
   if (!isBareCookieArray && !isRecord(parsed)) {
     throw new ProviderError('INVALID_REQUEST', 'A storage state is a JSON object, or an array of cookie objects.', {
@@ -168,6 +205,43 @@ export function parseChatGptStorageState(raw: string): ParsedChatGptStorageState
   return { cookies, origins };
 }
 
+/**
+ * Turns the CLI auth export into cookies.
+ *
+ * `sessionToken` *is* the session cookie's value, so it becomes
+ * `__Secure-next-auth.session-token` on `.chatgpt.com` — which is the one cookie the page
+ * checks. The account block and the `expires` field are carried through, because both are
+ * worth more than the cookie alone: one says what the account may use, the other says when
+ * this stops working.
+ */
+function fromAuthExport(source: Record<string, unknown>): ParsedChatGptStorageState {
+  const sessionToken = typeof source.sessionToken === 'string' ? source.sessionToken : '';
+  if (!sessionToken) {
+    throw new ProviderError('INVALID_REQUEST', 'That export has no sessionToken in it.', {
+      providerId: chatGptWebProviderId,
+      publicMessage: 'That export has no sessionToken in it.',
+    });
+  }
+  const account = isRecord(source.account) ? source.account : undefined;
+  const planType = typeof account?.planType === 'string' ? account.planType : undefined;
+  const expires = typeof source.expires === 'string' && !Number.isNaN(Date.parse(source.expires)) ? source.expires : undefined;
+  return {
+    cookies: [
+      {
+        name: '__Secure-next-auth.session-token',
+        value: sessionToken,
+        domain: '.chatgpt.com',
+        path: '/',
+        // `-1` is a session cookie, so it is never treated as expired by the header builder.
+        expires: -1,
+      },
+    ],
+    origins: [],
+    ...(planType ? { planType } : {}),
+    ...(expires ? { expiresAt: expires } : {}),
+  };
+}
+
 function isOpenAiDomain(domain: string): boolean {
   const host = domain.replace(/^\./, '').toLowerCase();
   return host === 'chatgpt.com' || host.endsWith('.chatgpt.com') || host === 'openai.com' || host.endsWith('.openai.com');
@@ -203,7 +277,16 @@ export function parseChatGptCookieHeader(raw: string): ChatGptCookie[] {
 
 /** The credential: the session cookies, held as one opaque blob. */
 export function chatGptWebCredential(state: ParsedChatGptStorageState): ProviderCredential {
-  return { type: 'api-key', value: JSON.stringify(state.cookies) };
+  return {
+    type: 'api-key',
+    // The whole state, not just the cookies: the expiry and the plan are what make a dead
+    // session and a plan-gated model distinguishable from a broken connection.
+    value: JSON.stringify({
+      cookies: state.cookies,
+      ...(state.planType ? { planType: state.planType } : {}),
+      ...(state.expiresAt ? { expiresAt: state.expiresAt } : {}),
+    }),
+  };
 }
 
 export function chatGptWebSessionFromCredential(credential: ProviderCredential | undefined): ParsedChatGptStorageState {
@@ -222,8 +305,15 @@ export function chatGptWebSessionFromCredential(credential: ProviderCredential |
       publicMessage: 'The stored ChatGPT Web session is unreadable. Export one and connect again.',
     });
   }
-  const cookies = Array.isArray(parsed) ? (parsed as ChatGptCookie[]) : [];
-  return { cookies, origins: [] };
+  if (Array.isArray(parsed)) return { cookies: parsed as ChatGptCookie[], origins: [] };
+  if (!isRecord(parsed) || !Array.isArray(parsed.cookies)) return { cookies: [], origins: [] };
+  const cookies = parsed.cookies as ChatGptCookie[];
+  return {
+    cookies,
+    origins: [],
+    ...(typeof parsed.planType === 'string' ? { planType: parsed.planType } : {}),
+    ...(typeof parsed.expiresAt === 'string' ? { expiresAt: parsed.expiresAt } : {}),
+  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -268,22 +358,66 @@ export function looksSignedOut(input: { loginLinkCount: number; composerCount: n
  * signed-out session and a refused connection — and those send a user in opposite
  * directions. The block page has its own wording, and it is read.
  */
-export function looksBlocked(bodyText: string | null | undefined): boolean {
-  return /unable to load site|attention required|access denied|checking your browser/i.test(bodyText ?? '');
+export function looksBlocked(bodyText: string | null | undefined, documentTitle?: string | null): boolean {
+  // Cloudflare's interstitial is titled "Just a moment..." with an empty body, so the
+  // title has to be read too — the body alone is blank and matches nothing.
+  if (/just a moment/i.test(documentTitle ?? '')) return true;
+  return /unable to load site|attention required|access denied|checking your browser|verify you are human|enable javascript and cookies/i.test(
+    bodyText ?? '',
+  );
 }
 
 /* ------------------------------------------------------------------ *
  * The catalog
  * ------------------------------------------------------------------ */
 
-export const CHATGPT_WEB_MODELS: ReadonlyArray<{ id: string; name: string }> = [
-  { id: 'gpt-5.2', name: 'GPT-5.2' },
-  { id: 'gpt-5.2-thinking', name: 'GPT-5.2 Thinking' },
-  { id: 'gpt-5.1', name: 'GPT-5.1' },
-  { id: 'gpt-5.1-thinking', name: 'GPT-5.1 Thinking' },
-  { id: 'gpt-5-mini', name: 'GPT-5 mini' },
-  { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
-];
+/**
+ * The model catalog.
+ *
+ * ChatGPT Web publishes no model list, and which models an account is offered depends on
+ * the plan it is signed in with — a free account is not served the same set as a paid one.
+ * So the catalog is keyed by plan rather than asserted for everybody, using the
+ * `planType` the export itself carries.
+ *
+ * This is still a claim about ChatGPT, not a fact read from ChatGPT. The page is the
+ * authority: it renders its own model picker, and a model missing from this table can be
+ * typed in as a custom id. That is why the list is a floor and not a gate.
+ */
+const CHATGPT_WEB_PLANS: Record<string, ReadonlyArray<{ id: string; name: string }>> = {
+  free: [
+    { id: 'gpt-5.2', name: 'GPT-5.2' },
+    { id: 'gpt-5.2-thinking', name: 'GPT-5.2 Thinking' },
+    { id: 'gpt-5.1', name: 'GPT-5.1' },
+  ],
+  paid: [
+    { id: 'gpt-5.2', name: 'GPT-5.2' },
+    { id: 'gpt-5.2-thinking', name: 'GPT-5.2 Thinking' },
+    { id: 'gpt-5.1', name: 'GPT-5.1' },
+    { id: 'gpt-5.1-thinking', name: 'GPT-5.1 Thinking' },
+    { id: 'gpt-5-mini', name: 'GPT-5 mini' },
+    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
+  ],
+};
+
+/**
+ * Plans that are not the free tier.
+ *
+ * Anything unrecognised is treated as paid rather than restricted: showing a model a paid
+ * account cannot use produces a visible test failure, while hiding one a free account *can*
+ * use hides something that works. A false negative costs a line of typing; a false positive
+ * costs a failing test.
+ */
+export function isFreeChatGptPlan(planType: string | undefined): boolean {
+  if (!planType) return false;
+  const normalized = planType.trim().toLowerCase();
+  return normalized === 'free' || normalized === 'free_plan' || normalized === 'freeplus' || normalized.startsWith('free');
+}
+
+/** The catalog for a plan, or the full set when the export did not say. */
+export function chatGptWebModels(planType?: string): ReadonlyArray<{ id: string; name: string }> {
+  if (!planType) return CHATGPT_WEB_PLANS.paid!;
+  return isFreeChatGptPlan(planType) ? CHATGPT_WEB_PLANS.free! : CHATGPT_WEB_PLANS.paid!;
+}
 
 /* ------------------------------------------------------------------ *
  * The adapter
@@ -346,12 +480,26 @@ export class ChatGptWebAdapter implements ProviderAdapter {
     this.now = options.now ?? (() => Date.now());
   }
 
-  async listModels(): Promise<Model[]> {
-    return CHATGPT_WEB_MODELS.map((model) => ({ id: model.id, providerId: this.id, displayName: model.name }));
+  /**
+   * Discovery runs when a connection is being created, which is before any credential
+   * exists, so a missing one is not an error here — it just means the plan is unknown and
+   * the full set is offered. Throwing instead leaves a saved connection with no models.
+   */
+  async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
+    const plan = context.credential ? chatGptWebSessionFromCredential(context.credential).planType : undefined;
+    return chatGptWebModels(plan).map((model) => ({ id: model.id, providerId: this.id, displayName: model.name }));
   }
 
   async validateCredential(credential: ProviderCredential | undefined): Promise<CredentialValidation> {
     const session = chatGptWebSessionFromCredential(credential);
+    // The export says when it expires, so a dead session is reported as one without
+    // spending a browser launch to discover it.
+    if (session.expiresAt && Date.parse(session.expiresAt) <= this.now()) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'This ChatGPT session has expired. Export a new one.', {
+        providerId: this.id,
+        publicMessage: 'This ChatGPT session has expired. Export a new one.',
+      });
+    }
     const header = chatGptCookieHeader(session.cookies, this.now());
     if (!header) {
       throw new ProviderError('AUTHENTICATION_FAILED', 'Every cookie in that export has expired. Export a new one.', {
@@ -371,10 +519,11 @@ export class ChatGptWebAdapter implements ProviderAdapter {
 
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
     const session = chatGptWebSessionFromCredential(context.credential);
-    if (!CHATGPT_WEB_MODELS.some((model) => model.id === request.model)) {
-      throw new ProviderError('NOT_SUPPORTED', `ChatGPT Web does not offer a model called ${request.model}.`, {
+    if (!chatGptWebModels(session.planType).some((model) => model.id === request.model)) {
+      const plan = session.planType ? ` a ${session.planType} plan` : '';
+      throw new ProviderError('NOT_SUPPORTED', `${request.model} is not in the model set for${plan || ' this account'}.`, {
         providerId: this.id,
-        publicMessage: `ChatGPT Web does not offer a model called ${request.model}.`,
+        publicMessage: `${request.model} is not in the model set for${plan || ' this account'}. The page's own model picker is the authority — add it as a custom model id if it is listed there.`,
       });
     }
     // A browser turn carries one prompt, so the system turn and history are flattened into

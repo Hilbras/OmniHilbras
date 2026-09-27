@@ -146,6 +146,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 18: Accept the real ChatGPT export, chunk the oversized cookie, and gate the catalog on the plan.
+  - Acceptance: a genuine CLI/Codex auth export connects, and a free-plan account is not offered paid models.
+  - Verify: a real export is stored with its session cookie, `planType: free` and `expiresAt`, and round-trips all three; a real request reaches the browser and is refused by name as a block page. 34 SDK tests.
+  - Findings: **the real export shares no keys with a Playwright storage state.** It is `{ accessToken, sessionToken, expires, account }` with no `cookies` key, so the storage-state parser rejected a genuine session with "That JSON has no `cookies` array" — the bug that was reported. `sessionToken` *is* the session cookie's value. Two fields are now carried through: `expires`, so a dead session is known before a browser launch, and `planType`, which is real entitlement and decides the catalog — a free plan gets 3 models, not the 6 that were invented, and an unrecognised plan gets the full set because a visible failure beats a hidden model. **The session token is ~5 KB and Chrome caps one cookie at 4096 bytes**, so `addCookies` failed the whole batch with `Invalid cookie fields`, which names no field and is not about the fields at all; found by varying one at a time against a real session. NextAuth already chunks oversized session cookies, and the driver now does the same, verified to reassemble byte for byte. `listModels()` also threw without a credential, which would have left a saved connection with no models. **And the answer to whether it works: no.** chatgpt.com serves `Just a moment...` — a Cloudflare interstitial with an empty body — *with a valid session loaded*, so the premise the design rests on is defeated at the edge and the selectors remain unconfirmed. The block is environmental.
+  - Files: `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, `test/chatgpt-web.test.js`, `apps/gateway/src/chatgptWeb.ts`, docs.
+  - Depends on: Task 17.
+  - Scope: Medium.
+
 - [x] Task 17: Give ChatGPT Web the ChatGPT logo, not OpenAI's.
   - Acceptance: the card shows ChatGPT's own mark.
   - Verify: the asset is ChatGPT's blossom path from OpenAI's own asset CDN, not a copy of `openai.svg`; the geometry differs from the OpenAI knot (4091 vs 1554 path characters); the SVG parses with no `<style>`, no script and no external reference; rasterised it renders the six-loop blossom.

@@ -704,24 +704,71 @@ are tested:
   earlier turns on the page, so reading the first assistant element answers a message from
   several turns ago.
 
+### The export format people actually have
+
+A Playwright storage state is not what a ChatGPT account hands you. The real format is the
+CLI/Codex auth export, and it shares **no keys** with a storage state:
+
+```jsonc
+{
+  "accessToken": "<JWT>",
+  "sessionToken": "<the __Secure-next-auth.session-token cookie value>",
+  "expires": "2026-12-26T17:00:52.429Z",
+  "authProvider": "openai",
+  "account": { "planType": "free", "structure": "personal" }
+}
+```
+
+There is no `cookies` key in it, so a parser written for the storage-state shape rejects a
+genuine export with *"That JSON has no `cookies` array"* — which is exactly what happened
+when a real one was pasted. Four shapes are now accepted: this export, a storage state, a
+bare array of cookie objects, and a plain `Cookie` header.
+
+Two fields are carried through, because both are worth more than the cookie alone:
+
+- **`expires`** makes a dead session knowable *before* a browser is launched. Without it,
+  every expired session costs a browser launch to discover.
+- **`planType` decides the model catalog.** Which models an account is offered depends on
+  its plan, and this is real entitlement rather than a guess. A free plan is not offered the
+  paid model set, and a model outside the account's set is refused by name with the plan in
+  the message. An unrecognised plan gets the **full** set: showing a model a paid account
+  cannot use costs a visible failing test, while hiding one a free account can use hides
+  something that works.
+
+### A 5 KB cookie, and a 4096-byte browser
+
+A session token is a compact JWE of roughly 5 KB. **Chrome caps a single cookie at 4096
+bytes**, so setting one directly fails the entire `addCookies` batch with:
+
+```
+Protocol error (Storage.setCookies): Invalid cookie fields
+```
+
+Nothing in that message names the value, and every field is valid — the length is not. It
+was found by varying one field at a time against a real session: a short value with the
+identical fields is accepted.
+
+NextAuth already solves this for the browser, splitting an oversized session cookie into
+numbered chunks (`…session-token.0`, `…session-token.1`) that the page rejoins. The driver
+writes them the same way, and a cookie that already fits is passed through unchanged. The
+chunks reassemble to the original byte for byte, which is checked rather than assumed.
+
 ### What is not verified, and why that matters
 
-**The browser half has never seen the real application.** From the development machine,
-`chatgpt.com` returns its anti-bot block page before any app code runs:
+**The browser half has never completed a turn.** From the development machine, chatgpt.com
+serves a bot-protection interstitial — `Just a moment...` with an empty body — *with a valid
+session loaded*. So:
 
-```
-Unable to load site … [IP:37.232.214.61 | Ray ID:a41bea6e3fe4af63]
-```
+- The premise the whole design rests on, letting the page solve its own challenges, is
+  defeated at the edge before any of that happens.
+- `#prompt-textarea` and `[data-message-author-role="assistant"]` are still ChatGPT's
+  documented test hooks used on the assumption they are current. Nothing has confirmed them.
+- The block is environmental, not a defect in the code. A residential connection is likely
+  to work; a datacenter one will not.
 
-So `#prompt-textarea`, `[data-message-author-role="assistant"]` and the rest are ChatGPT's
-documented test hooks used **on the assumption they are current** — they are a private
-contract with a product that ships daily, and nothing here has confirmed them. That is the
-honest limit of driving a web app rather than its API, and it is stated on the card rather
-than hidden behind a retry loop that would only fail more slowly.
-
-This is also the same wall as the restricted Zen free models, from the opposite direction:
-the provider is refusing an automated client, and the only known way past is inside the
-product's own client.
+This is stated on the card and in the release notes rather than discovered by whoever tries
+it first. It is the same wall as the restricted Zen free models, met from the opposite
+direction: the provider is refusing an automated client.
 
 A useful contrast with the reference project this was compared against: it never hardcodes a
 selector at all. It discovers ChatGPT's own JavaScript module at runtime and drives the page

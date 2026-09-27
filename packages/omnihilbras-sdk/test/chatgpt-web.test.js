@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   CHATGPT_WEB,
-  CHATGPT_WEB_MODELS,
   ChatGptWebAdapter,
   chatGptCookieHeader,
   chatGptWebCredential,
+  chatGptWebModels,
   chatGptWebSessionFromCredential,
+  isFreeChatGptPlan,
   lastAssistantText,
+  looksBlocked,
   looksSignedOut,
   parseChatGptCookieHeader,
   parseChatGptStorageState,
@@ -283,7 +285,8 @@ test('the catalog is the known set, and streaming is not claimed', async () => {
   const { driver: d } = driver();
   const adapter = new ChatGptWebAdapter({ driver: d });
   const models = await adapter.listModels();
-  assert.deepEqual(models.map((model) => model.id), CHATGPT_WEB_MODELS.map((model) => model.id));
+  assert.ok(models.length > 0);
+  assert.ok(models.every((model) => model.providerId === adapter.id));
   assert.equal(adapter.capabilities.streaming, false);
 });
 
@@ -294,4 +297,145 @@ test('the selectors are ChatGPT test hooks, and the origin is pinned', () => {
   assert.match(CHATGPT_WEB.signedOutMarker, /^a\[href="/);
   // A temporary chat, so a gateway's traffic does not accumulate a visible history.
   assert.match(CHATGPT_WEB.startUrl, /temporary-chat=true/);
+});
+
+/* ------------------------------------------------------------------ *
+ * The CLI / Codex auth export
+ * ------------------------------------------------------------------ */
+
+/**
+ * The shape people actually paste.
+ *
+ * This is the format of a real ChatGPT/Codex auth export: a `sessionToken` holding the
+ * session cookie's value, a JWT `accessToken`, an `expires`, and an `account` block. It
+ * has **no `cookies` key at all**, so a parser written only for the Playwright storage-state
+ * shape rejects it — which is what happened when somebody pasted a genuine export.
+ */
+const authExport = (overrides = {}) =>
+  JSON.stringify({
+    accessToken: 'eyJhbGciOi.header.payload'.padEnd(200, 'x'),
+    sessionToken: 'session-token-value',
+    expires: '2026-12-26T17:00:52.429Z',
+    authProvider: 'openai',
+    account: { planType: 'free', structure: 'personal' },
+    user: { email: 'someone@example.com' },
+    ...overrides,
+  });
+
+test('the CLI auth export is read, which is the shape people actually have', () => {
+  const state = parseChatGptStorageState(authExport());
+  assert.equal(state.cookies.length, 1);
+  assert.equal(state.cookies[0].name, '__Secure-next-auth.session-token');
+  assert.equal(state.cookies[0].value, 'session-token-value');
+  assert.equal(state.cookies[0].domain, '.chatgpt.com');
+  assert.equal(state.cookies[0].path, '/');
+});
+
+test('the export says when it expires and what plan it is, and both survive the round trip', () => {
+  // Both are worth more than the cookie: one says when this stops working, the other says
+  // what the account may use. Losing them makes a dead session look like a broken one.
+  const state = parseChatGptStorageState(authExport());
+  assert.equal(state.planType, 'free');
+  assert.equal(state.expiresAt, '2026-12-26T17:00:52.429Z');
+  const back = chatGptWebSessionFromCredential(chatGptWebCredential(state));
+  assert.equal(back.cookies[0].value, 'session-token-value');
+  assert.equal(back.planType, 'free');
+  assert.equal(back.expiresAt, '2026-12-26T17:00:52.429Z');
+});
+
+test('a session cookie is not treated as expired, because the export carries no expiry for it', () => {
+  // `expires: -1` is a session cookie. Treating it as a past timestamp would drop the only
+  // cookie the page checks, and the failure would look like a signed-out session.
+  const state = parseChatGptStorageState(authExport());
+  assert.equal(state.cookies[0].expires, -1);
+  assert.match(chatGptCookieHeader(state.cookies), /__Secure-next-auth\.session-token=session-token-value/);
+});
+
+test('an export with no sessionToken says so rather than storing nothing', () => {
+  assert.throws(
+    () => parseChatGptStorageState(authExport({ sessionToken: '' })),
+    (error) => error.code === 'INVALID_REQUEST' && /no sessionToken/.test(error.publicMessage),
+  );
+});
+
+test('an unparseable expires is dropped, not trusted as a date', () => {
+  const state = parseChatGptStorageState(authExport({ expires: 'never' }));
+  assert.equal(state.expiresAt, undefined);
+});
+
+test('a session the export says has expired is reported without opening a browser', async () => {
+  const { driver: d } = driver({
+    async available() {
+      throw new Error('a browser must not be launched to answer this');
+    },
+  });
+  const state = parseChatGptStorageState(authExport({ expires: '2020-01-01T00:00:00.000Z' }));
+  const adapter = new ChatGptWebAdapter({ driver: d, now: () => Date.parse('2026-01-01T00:00:00Z') });
+  await assert.rejects(
+    () => adapter.validateCredential(chatGptWebCredential(state)),
+    (error) => error.code === 'AUTHENTICATION_FAILED' && /expired/.test(error.publicMessage),
+  );
+});
+
+/* ------------------------------------------------------------------ *
+ * The plan decides the catalog
+ * ------------------------------------------------------------------ */
+
+test('a free plan is not offered the paid model set', () => {
+  assert.equal(isFreeChatGptPlan('free'), true);
+  assert.equal(isFreeChatGptPlan('Free'), true);
+  assert.equal(isFreeChatGptPlan('pro'), false);
+  assert.equal(isFreeChatGptPlan(undefined), false, 'an unknown plan is not assumed to be free');
+  const free = chatGptWebModels('free').map((model) => model.id);
+  const paid = chatGptWebModels('pro').map((model) => model.id);
+  assert.ok(free.every((id) => paid.includes(id)), 'the free set is a subset of the paid one');
+  assert.ok(paid.length > free.length);
+});
+
+test('an unrecognised plan gets the full set, because a visible failure beats a hidden model', () => {
+  // Showing a model a paid account cannot use costs a failing test. Hiding one a free
+  // account can use hides something that works.
+  assert.equal(chatGptWebModels(undefined).length, chatGptWebModels('pro').length);
+  assert.equal(chatGptWebModels('team').length, chatGptWebModels('pro').length);
+});
+
+test('the catalog comes from the plan on the session, not from a fixed list', async () => {
+  const { driver: d } = driver();
+  const adapter = new ChatGptWebAdapter({ driver: d });
+  const free = await adapter.listModels({ credential: chatGptWebCredential(parseChatGptStorageState(authExport())) });
+  assert.deepEqual(free.map((model) => model.id), chatGptWebModels('free').map((model) => model.id));
+  const pro = await adapter.listModels({
+    credential: chatGptWebCredential(parseChatGptStorageState(authExport({ account: { planType: 'pro' } }))),
+  });
+  assert.deepEqual(pro.map((model) => model.id), chatGptWebModels('pro').map((model) => model.id));
+});
+
+test('a paid-only model on a free session is refused, naming the plan', async () => {
+  const { driver: d, asked } = driver();
+  const state = parseChatGptStorageState(authExport());
+  const adapter = new ChatGptWebAdapter({ driver: d });
+  await assert.rejects(
+    () => adapter.chat(request('gpt-5.2-codex'), { credential: chatGptWebCredential(state) }),
+    (error) => error.code === 'NOT_SUPPORTED' && /a free plan/.test(error.publicMessage) && /custom model id/.test(error.publicMessage),
+  );
+  assert.equal(asked.length, 0, 'no browser is launched for a model this plan cannot use');
+});
+
+/* ------------------------------------------------------------------ *
+ * A blocked edge is not a signed-out session
+ * ------------------------------------------------------------------ */
+
+test('a block page is told apart from a sign-in wall', () => {
+  // Both render a real page with no composer, and they send a user in opposite directions:
+  // re-export a good session, or fix the network.
+  assert.equal(looksBlocked('Unable to load site [IP:1.2.3.4 | Ray ID:abc]'), true);
+  assert.equal(looksBlocked('Attention Required! | Cloudflare'), true);
+  assert.equal(looksBlocked('Checking your browser before accessing'), true);
+  assert.equal(looksBlocked('What is ChatGPT?'), false);
+  assert.equal(looksBlocked(null), false);
+  // Cloudflare's interstitial has a blank body, so the title is the only signal there is.
+  // This is what a real session gets from a blocked address.
+  assert.equal(looksBlocked('', 'Just a moment...'), true);
+  assert.equal(looksBlocked(null, 'Just a moment…'), true);
+  assert.equal(looksBlocked('Hi', 'ChatGPT'), false);
 });

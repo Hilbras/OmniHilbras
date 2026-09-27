@@ -35,6 +35,7 @@ type PlaywrightContext = {
 type PlaywrightPage = {
   goto: (url: string, options: Record<string, unknown>) => Promise<unknown>;
   waitForSelector: (selector: string, options: Record<string, unknown>) => Promise<unknown>;
+  title: () => Promise<string>;
   fill: (selector: string, value: string) => Promise<void>;
   click: (selector: string, options?: Record<string, unknown>) => Promise<void>;
   locator: (selector: string) => PlaywrightLocator;
@@ -61,6 +62,41 @@ async function loadPlaywright(): Promise<PlaywrightModule | undefined> {
   return playwrightPromise;
 }
 
+/**
+ * Chrome's ceiling for a single cookie is 4096 bytes, and a ChatGPT session token is a
+ * compact JWE that runs to about 5 KB — so `addCookies` refuses the whole batch with
+ * `Invalid cookie fields`, naming no field and giving no hint that the *value* is at
+ * fault. Every other field is valid; only the length is not.
+ *
+ * NextAuth already solves this for the browser: an oversized session cookie is split into
+ * numbered chunks (`…session-token.0`, `…session-token.1`) which the page rejoins. Writing
+ * them the same way is what makes an exported session loadable into a browser at all.
+ */
+/** Chrome's ceiling for one cookie. A margin under it means an over-limit cookie cannot be produced. */
+const chunkSize = 3800;
+
+/**
+ * Splits one cookie into the numbered chunks a browser will accept.
+ *
+ * A cookie that already fits is passed through unchanged, so the chunked form is only ever
+ * used where it is actually needed.
+ */
+export function chunkCookie(cookie: ChatGptCookie): ChatGptCookie[] {
+  if (cookie.value.length <= chunkSize) return [cookie];
+  const chunks: ChatGptCookie[] = [];
+  for (let index = 0, at = 0; at < cookie.value.length; index += 1, at += chunkSize) {
+    chunks.push({
+      ...cookie,
+      name: `${cookie.name}.${index}`,
+      value: cookie.value.slice(at, at + chunkSize),
+      // The chunk carries no expiry of its own: the original's expiry applies to the whole
+      // session, and a per-chunk one would expire the tail early.
+      ...(cookie.expires === undefined ? {} : { expires: cookie.expires }),
+    });
+  }
+  return chunks;
+}
+
 /** Turns a Playwright cookie into the shape its own `addCookies` expects. */
 function toPlaywrightCookie(cookie: ChatGptCookie) {
   return {
@@ -73,6 +109,15 @@ function toPlaywrightCookie(cookie: ChatGptCookie) {
     httpOnly: cookie.httpOnly ?? true,
     secure: cookie.secure ?? true,
     sameSite: 'Lax' as const,
+    /**
+     * `expires` is a Unix timestamp in seconds, and **omitted** for a session cookie.
+     *
+     * The CLI export carries no expiry for the session token, so the parser records `-1` —
+     * which is Chrome's internal marker for "no expiry" and *not* a value Playwright
+     * accepts. Passing it through fails the whole `addCookies` call with
+     * `Invalid cookie fields`, which is a protocol error with no hint about the field.
+     */
+    ...(cookie.expires === undefined || cookie.expires === -1 || cookie.expires <= 0 ? {} : { expires: cookie.expires }),
   };
 }
 
@@ -92,12 +137,16 @@ async function readPageState(page: PlaywrightPage) {
   // own wording, because "no composer" would otherwise be reported as a signed-out session
   // and send the user off to re-export a perfectly good one.
   const bodyText = await page.locator('body').textContent().catch(() => '');
-  const blocked = /unable to load site|attention required|access denied|checking your browser/i.test(bodyText ?? '');
+  const documentTitle = await page.title().catch(() => '');
+  // A Cloudflare interstitial has an empty body, so the title is what identifies it.
+  const blocked = /just a moment|unable to load site|attention required|access denied|checking your browser/i.test(
+    `${documentTitle ?? ''} ${bodyText ?? ''}`,
+  );
   return { loginLinkCount, composerCount, blocked };
 }
 
 function describeBlocked(): string {
-  return 'chatgpt.com returned its anti-bot block page instead of the application, so no turn was attempted. This is a network-level block on the address OmniHilbras is running from, not a problem with your session — a residential connection without a VPN is the usual fix.';
+  return 'chatgpt.com served its bot-protection challenge instead of the application, so no turn was attempted. This is a network-level block on the address OmniHilbras is running from — it happens with a valid session, so it is not a problem with your export. A residential connection with no VPN or datacenter is the usual fix.';
 }
 
 function describeSignedOut(): string {
@@ -137,7 +186,8 @@ export function createChatGptWebDriver(): ChatGptWebDriver {
       let context: PlaywrightContext | undefined;
       try {
         context = await browser.newContext({ userAgent: undefined, viewport: { width: 1280, height: 900 } });
-        await context.addCookies(cookies.map(toPlaywrightCookie));
+        // Chunked before they are set, because an oversized cookie fails the whole batch.
+        await context.addCookies(cookies.flatMap((cookie) => chunkCookie(cookie)).map(toPlaywrightCookie));
         const page = await context.newPage();
 
         await page.goto(CHATGPT_WEB.startUrl, { waitUntil: 'domcontentloaded', timeout: CHATGPT_WEB.navigationTimeoutMs });
