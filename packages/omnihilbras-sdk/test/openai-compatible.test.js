@@ -144,3 +144,33 @@ test('OpenAI-compatible adapter requires credentials when configured', async () 
     (error) => error instanceof ProviderError && error.code === 'AUTHENTICATION_FAILED',
   );
 });
+
+test('an unusable chat response says which part was missing', async () => {
+  // A provider that intermittently answers with an empty `choices` array is
+  // indistinguishable from one that answers with a choice lacking a message.
+  const adapter = new OpenAICompatibleAdapter({ id: 'odd', name: 'Odd', baseUrl: 'https://example.test/v1' }, {
+    transport: {
+      async request() {
+        return { status: 200, headers: new Headers(), data: { id: 'x', choices: [] } };
+      },
+      stream() { throw new Error('not used'); },
+    },
+  });
+  await assert.rejects(
+    () => adapter.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, { credential: { type: 'api-key', value: 'k' } }),
+    (error) => error.code === 'INVALID_RESPONSE' && /no choices/.test(error.message),
+  );
+
+  const noMessage = new OpenAICompatibleAdapter({ id: 'odd', name: 'Odd', baseUrl: 'https://example.test/v1' }, {
+    transport: {
+      async request() {
+        return { status: 200, headers: new Headers(), data: { id: 'x', choices: [{ index: 0, finish_reason: 'stop' }] } };
+      },
+      stream() { throw new Error('not used'); },
+    },
+  });
+  await assert.rejects(
+    () => noMessage.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, { credential: { type: 'api-key', value: 'k' } }),
+    (error) => error.code === 'INVALID_RESPONSE' && /choice with no message/.test(error.message),
+  );
+});

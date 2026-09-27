@@ -255,7 +255,19 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
 
   private toChatResponse(response: OpenAIResponse, requestedModel: string): ChatResponse {
     const choice = response.choices?.[0];
-    if (!choice?.message) throw invalidResponse(this.id, 'Provider chat response is missing a message.');
+    if (!choice?.message) {
+      // Say which part was missing. A provider that intermittently answers with
+      // an empty `choices` array is indistinguishable from one that answers with
+      // a choice that has no message, and both used to read as a bare
+      // "invalid response" with nothing to act on.
+      const seen = Array.isArray(response.choices) ? response.choices.length : 0;
+      const reason = seen === 0
+        ? 'the provider returned no choices'
+        : seen > 1
+          ? `the provider returned ${seen} choices and the first has no message`
+          : 'the provider returned a choice with no message';
+      throw invalidResponse(this.id, `Provider chat response is unusable: ${reason}.`);
+    }
 
     return {
       id: response.id ?? `response-${requestedModel}`,

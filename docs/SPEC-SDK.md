@@ -129,10 +129,36 @@ The first local gateway exposes:
 - The dashboard provider test uses live adapter health; each model test uses a bounded real chat completion through the same route.
 - A model test must fail when the model returns no visible output. A well-formed
   envelope with empty content is not a working model, and a `Ping` badge beside a
-  model that answers nothing is a false report. The test budget is 96 tokens
-  because reasoning models spend the first several on hidden reasoning; at 16 they
-  returned nothing at all and still read as a pass. A response carrying tool calls
+  model that answers nothing is a false report. A response carrying tool calls
   counts as an answer even with no text.
+- **The test budget is 96 tokens, and it escalates.** Reasoning models spend a
+  *variable* number of tokens on hidden reasoning, so a single budget is a coin
+  flip: the same free model answered one request and returned nothing on the next.
+  Measured, `inclusionai/ling-3.0-flash-fin` returns nothing at 96 tokens, needs
+  151 completion tokens, and answers at 384. An empty response with
+  `finish_reason: length` is therefore retried at 4x the budget, up to 8x, before
+  it is reported as a failure. Retries only happen after a response that produced
+  nothing, so a healthy model still costs exactly one request.
+
+### Why a model can fail here and work elsewhere
+
+Four causes, only two of which are the gateway's:
+
+| Cause | Whose | Example |
+| --- | --- | --- |
+| Reasoning model outgrows the test budget | gateway, fixed by escalating | `ling-3.0-flash-fin` needs 151 tokens |
+| Free-tier quota shared across users | provider | `:free` models answering `429` |
+| Provider refuses that model on this key | provider | `thinkingmachines/inkling:free` answering `401` |
+| Provider answers with an unusable shape | provider, now explained | `nemotron-3-nano-omni-...-reasoning` returning no `choices[0].message` on some requests |
+
+A provider whose API is not one shape is a fifth and is not fixed: OpenCode Zen
+routes different models to `/zen/v1/responses`, `/zen/v1/messages`, and
+`/zen/v1/chat/completions`, and the generic adapter speaks only the last.
+
+An unusable response names the part that was missing — an empty `choices` array is
+reported differently from a choice without a message — because a provider that
+answers inconsistently is otherwise indistinguishable from one that is simply
+broken.
 
 
 Gateway errors use one shape:

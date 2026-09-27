@@ -176,7 +176,9 @@ function hasToolCalls(message: Record<string, unknown>) {
   return Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
 }
 
-export async function testGatewayModel(providerId: string, model: string, signal?: AbortSignal) {
+export async function testGatewayModel(providerId: string, model: string, options?: AbortSignal | { signal?: AbortSignal; maxTokens?: number }) {
+  const signal = options instanceof AbortSignal ? options : options?.signal;
+  const maxTokens = options instanceof AbortSignal ? MODEL_TEST_MAX_TOKENS : options?.maxTokens ?? MODEL_TEST_MAX_TOKENS;
   const startedAt = Date.now();
   const body = await requestJson<unknown>('/v1/chat/completions', {
     method: 'POST',
@@ -190,7 +192,7 @@ export async function testGatewayModel(providerId: string, model: string, signal
       // Large enough for a reasoning model to finish thinking and still answer.
       // At 16 tokens several models spent the whole budget on hidden reasoning
       // and returned nothing at all, which read as a pass.
-      max_tokens: MODEL_TEST_MAX_TOKENS,
+      max_tokens: maxTokens,
       stream: false,
     }),
     ...(signal ? { signal } : {}),
@@ -206,8 +208,16 @@ export async function testGatewayModel(providerId: string, model: string, signal
   // the envelope is. Reporting it as a pass is how a model that answers nothing
   // ends up with a healthy badge next to its name.
   if (!text && !hasToolCalls(choice.message)) {
-    throw new Error(choice.finish_reason === 'length'
-      ? 'The model produced no output within the test budget. It may need a larger max_tokens than the test allows.'
+    const truncated = choice.finish_reason === 'length';
+    // Reasoning models spend a variable number of tokens thinking, so a single
+    // budget is a coin flip for them: the same model can answer one request and
+    // return nothing on the next. One retry with a larger budget settles it, and
+    // it only costs anything when the first attempt produced nothing.
+    if (truncated && maxTokens < MODEL_TEST_MAX_TOKENS * 8) {
+      return testGatewayModel(providerId, model, { ...(signal ? { signal } : {}), maxTokens: maxTokens * 4 });
+    }
+    throw new Error(truncated
+      ? 'The model produced no output even with a larger budget. It may spend its whole reply on reasoning.'
       : 'The model returned an empty response.');
   }
   return {
