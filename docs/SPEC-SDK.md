@@ -433,6 +433,27 @@ A session is renewed when the access token is within a minute of expiry, and the
 credential is written back to the vault so it outlives the request that triggered it.
 Validation reads `/api/user`, which is free and never bills.
 
+**The org id to send must come from `/api/config`, not `/api/orgs`.** The two are not
+interchangeable. The config issues a `wrk_` workspace id; the orgs list carries `org_`
+ids; and the inference lane answers `403 Workspace access denied` when given the latter.
+Measured on the live lane:
+
+| `x-opencode-org-id` | Result |
+| --- | --- |
+| absent | `200` |
+| `wrk_` from `/api/config` | `200` |
+| `org_` from `/api/orgs` | `403 Upstream request failed: Workspace access denied` |
+
+`/api/orgs` is also `401` for an API key, so it is not a usable source for this header at
+all. It is read for the org's display name only, and the config is authoritative for the
+value that gets echoed back.
+
+**A catalog that will not read must not discard a session the user just approved.** A
+device-flow sign-in has already proven the credential, so model discovery is allowed to
+fail there: the connection is saved with no models and the reason is carried on the
+sign-in status, rather than the whole sign-in failing on a catalog read. Discovery
+failures anywhere else still throw.
+
 ### The one variable left is the egress IP
 
 No request shape works around it — and that is now tested against 9router's own

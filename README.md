@@ -163,7 +163,8 @@ returns `403`, under every header combination, on Node and Bun alike.
 The **OpenCode Console** card in OAuth Providers signs in with the device flow the
 OpenCode client runs for itself, and those models then answer at zero cost. The code
 arrives pre-filled; if OpenCode asks you to log in first, signing in returns you to the
-approval. A session
+approval. The org id the session sends is the one OpenCode's own config hands out, which
+is not the same id its org list returns — the lane refuses the org-list form outright. A session
 also changes the endpoints: the catalog is served from `/inference/openai/v1`,
 `/inference/anthropic/v1` and `/inference/google/v1beta`, with the lanes read from the
 account's own config rather than hardcoded. Those lanes return real billing answers where

@@ -143,6 +143,47 @@ test('a token response with no access token is a refusal, not a silent success',
   assert.equal(outcome.status, 'denied');
 });
 
+test('the org id comes from the config, because the orgs list id is refused', async () => {
+  // Measured: the config issues a `wrk_` workspace id and the inference lane answers
+  // `403 Workspace access denied` when sent an `org_` id from the orgs list instead.
+  // So the config is authoritative for the value that gets echoed back.
+  withDeviceCode({}, async (url) => {
+    if (url === `${OPENCODE_CONSOLE.server}${OPENCODE_CONSOLE.deviceTokenPath}`) {
+      return new Response(JSON.stringify({ access_token: 'acc', expires_in: 3600 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.endsWith('/api/user')) return new Response(JSON.stringify({ id: 'usr_1', email: 'dev@example.com' }), { status: 200 });
+    if (url.endsWith('/api/orgs')) {
+      return new Response(JSON.stringify([{ id: 'org_zzzzzzzzzzzzzzzzzzzzzzzzzz', name: 'Personal' }]), { status: 200 });
+    }
+    if (url.endsWith('/api/config')) {
+      return new Response(
+        JSON.stringify({ config: { provider: { opencode: { options: { headers: { 'x-opencode-org-id': 'wrk_zzzzzzzzzzzzzzzzzzzzzzzzzz' } } } } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return new Response('{}', { status: 404 });
+  });
+  const outcome = await pollOpencodeConsoleSignIn('dev_1');
+  assert.equal(outcome.status, 'connected');
+  assert.equal(outcome.credential.orgId, 'wrk_zzzzzzzzzzzzzzzzzzzzzzzzzz', 'the workspace id wins over the orgs list id');
+  assert.equal(outcome.credential.orgName, 'Personal', 'the orgs list still names the org');
+});
+
+test('an unreadable config falls back to the orgs list rather than losing the org', async () => {
+  withDeviceCode({}, async (url) => {
+    if (url === `${OPENCODE_CONSOLE.server}${OPENCODE_CONSOLE.deviceTokenPath}`) {
+      return new Response(JSON.stringify({ access_token: 'acc' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.endsWith('/api/orgs')) return new Response(JSON.stringify([{ id: 'org_y', name: 'Personal' }]), { status: 200 });
+    return new Response('{}', { status: 500 });
+  });
+  const outcome = await pollOpencodeConsoleSignIn('dev_1');
+  assert.equal(outcome.credential.orgId, 'org_y', 'better a possibly-wrong org than none');
+});
+
 test('a session is claimed once, so two polls cannot spend the same grant', () => {
   const store = new OpencodeConsoleSessionStore();
   const session = store.create({ deviceCode: 'd', userCode: 'ABCD-1234', verificationUrl: 'https://opencode.ai/console/device' });

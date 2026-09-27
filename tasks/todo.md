@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 10i: Take the org id from the Console config, and stop a catalog read failing a sign-in.
+  - Acceptance: the org id sent with inference requests is the one the Console's own config hands out, a sign-in the user approved is not thrown away because the catalog would not read, and a failure names the provider's reason instead of a generic refusal.
+  - Verify: the config issues a `wrk_` workspace id and the orgs list carries `org_` ids, and the live lane answers `403 Workspace access denied` for the `org_` form while `wrk_` and an absent header both answer `200`. `/api/orgs` is also `401` for an API key, so it is read for the org name only. Separately, the transport's generic 4xx message was being shown instead of the provider's words, so a real reason never reached the user; the provider detail is now surfaced the way the Cline sign-in already does. Model discovery is tolerated for this provider only, so a session the user just approved is kept and the reason is carried on the sign-in status. 14 gateway tests, including one that pins the workspace-id-over-orgs-list ordering and one that an unreadable config degrades to the orgs list rather than losing the org.
+  - Files: `apps/gateway/src/opencodeConsole.ts`, `apps/gateway/test/opencode-console.test.js`, `apps/gateway/src/service.ts`, `src/components/OauthConnectDialog.tsx`, docs.
+  - Depends on: Task 10h.
+  - Scope: Small.
+
 - [x] Task 10h: Fix the Console verification URL, which pointed at the API host.
   - Acceptance: the device page opens on the Console web host, and the dashboard says what to expect when the browser has no Console session.
   - Verify: the Console serves its API from `console.opencode.ai` and its pages from `opencode.ai`. `verification_uri` is relative, so joining it to the API host produced `/console/console/device`, which renders a blank page and presents as a sign-in that did nothing. Reproduced live: the doubled path was reached, the corrected URL is not, and an unauthenticated visit correctly redirects to `/console/login?next=/console/device?user_code=…&reason=device` with the device query preserved. 12 gateway tests cover the host split, the leading-slash case, a missing device code, pending-as-400, `slow_down`, a refusal in the Console's words, the org the client would pick, a token with no account lookup, a token with no access token, single-claim sessions, expiry, and a malformed session id.

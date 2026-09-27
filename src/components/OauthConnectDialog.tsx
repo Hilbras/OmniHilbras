@@ -108,10 +108,19 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
     stopWaiting();
     if (status.status === 'connected' && status.connection) {
       setPhase('connected');
-      setMessage(`Connected to ${status.connection.name} with ${status.connection.modelIds.length} models.`);
+      const count = status.connection.modelIds.length;
+      setMessage(count > 0
+        ? `Connected to ${status.connection.name} with ${count} models.`
+        : `Connected to ${status.connection.name}. The model list is still loading.`);
       // No cast: the status carries a whole connection record, and a trimmed one
       // would leave `resilience` undefined and crash the page.
       void onConnected(status.connection);
+      // A tolerated discovery failure arrives as a note alongside a success, and it is
+      // the only place the reason will be seen, so it is kept on screen.
+      if (status.error) {
+        setError(status.error);
+        return;
+      }
       window.setTimeout(onClose, 1200);
       return;
     }

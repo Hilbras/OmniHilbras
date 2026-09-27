@@ -119,6 +119,8 @@ export class GatewayService {
   private zen?: ProviderAdapter;
   private opencodeConsole?: ProviderAdapter;
   private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
+  /** Why the last model discovery failed, when it was tolerated rather than fatal. */
+  private lastDiscoveryNote?: string;
   private readonly clineSessions = new ClineSessionStore();
   private readonly providerHealth: HealthRegistry;
   private readonly rateLimiter: SlidingWindowRateLimiter;
@@ -310,7 +312,7 @@ export class GatewayService {
     return this.withProviderLock(providerId, () => this.validateConnectionCredentialUnlocked(providerId, credential, signal));
   }
 
-  async saveConnection(input: ConnectionInput, credential: ProviderCredential, signal?: AbortSignal): Promise<ConnectionRecord> {
+  async saveConnection(input: ConnectionInput, credential: ProviderCredential, signal?: AbortSignal, options: { tolerateDiscoveryFailure?: boolean } = {}): Promise<ConnectionRecord> {
     if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
     // An unregistered provider is configuration for a custom endpoint, which is
     // validated when it is first used rather than at save time.
@@ -326,7 +328,15 @@ export class GatewayService {
       }
       let saveInput = input;
       if (input.modelPolicy) {
-        const discoveredModelIds = await this.discoverConnectionModels(input.providerId, credential, input.modelPolicy, signal, { endpoint: input.endpoint, name: input.name });
+        // A sign-in that already came from the provider's own flow has proven the
+        // credential, so a catalog that will not read is not a reason to throw the
+        // session away. The connection is saved and the models arrive on the next read.
+        const discoveredModelIds = await this.discoverConnectionModels(input.providerId, credential, input.modelPolicy, signal, { endpoint: input.endpoint, name: input.name }).catch((error: unknown) => {
+          if (!options.tolerateDiscoveryFailure) throw error;
+          const said = error instanceof ProviderError ? providerSaid(error) : error instanceof Error ? error.message : undefined;
+          this.lastDiscoveryNote = said;
+          return [] as string[];
+        });
         const existing = (await this.connectionStore!.list()).find((connection) => (input.id ? connection.id === input.id : connection.providerId === input.providerId));
         const customModelIds = input.customModelIds ?? existing?.customModelIds ?? [];
         saveInput = { ...input, modelIds: [...discoveredModelIds, ...customModelIds], customModelIds };
@@ -407,11 +417,24 @@ export class GatewayService {
         priority: 1,
         proxyPool: 'none',
         modelPolicy: 'all',
-      }, outcome.credential, signal);
+      }, outcome.credential, signal, { tolerateDiscoveryFailure: true });
+      const note = this.lastDiscoveryNote;
+      this.lastDiscoveryNote = undefined;
       // The whole record, so the dashboard can render the page without a second fetch.
-      this.opencodeConsoleSessions.resolve(session.id, { status: 'connected', connection });
+      this.opencodeConsoleSessions.resolve(session.id, {
+        status: 'connected',
+        connection,
+        ...(note ? { error: `Connected, but the model list could not be read: ${note}` } : {}),
+      });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'The sign-in could not be completed.';
+      // The transport's generic refusal hides the status and body that explain it,
+      // so the provider's own words are preferred over `error.message`.
+      const said = error instanceof ProviderError ? providerSaid(error) : undefined;
+      const message = error instanceof ProviderError
+        ? [error.publicMessage ?? error.message, said].filter(Boolean).join(' ')
+        : error instanceof Error
+          ? error.message
+          : 'The sign-in could not be completed.';
       this.opencodeConsoleSessions.resolve(session.id, { status: 'failed', error: message });
     }
     return this.opencodeConsoleSessions.publicStatus(session);

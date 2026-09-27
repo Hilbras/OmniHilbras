@@ -136,6 +136,10 @@ type TokenResponse = {
 
 type Org = { id?: string; name?: string };
 type User = { id?: string; email?: string };
+/** Just enough of `/api/config` to read the org id the Console wants echoed back. */
+type ConsoleConfig = {
+  config?: { provider?: { opencode?: { options?: { headers?: Record<string, string> } } } };
+};
 
 async function postJson<T>(path: string, body: Record<string, string>): Promise<{ status: number; data: T }> {
   const response = await fetch(`${OPENCODE_CONSOLE.server}${path}`, {
@@ -222,13 +226,21 @@ export async function pollOpencodeConsoleSignIn(deviceCode: string): Promise<Pol
   const access = typeof data.access_token === 'string' ? data.access_token : '';
   if (!access) return { status: 'denied', error: 'OpenCode Console did not return a session. Start the sign-in again.' };
 
-  const [user, orgs] = await Promise.all([
+  const [user, orgs, config] = await Promise.all([
     getJson<User>(OPENCODE_CONSOLE.userPath, access),
     getJson<Org[]>(OPENCODE_CONSOLE.orgsPath, access),
+    getJson<ConsoleConfig>(OPENCODE_CONSOLE.configPath, access),
   ]);
   // The client picks the alphabetically first org, so the same account resolves to the
-  // same org here as it does there.
+  // same org name here as it does there.
   const org = [...(orgs ?? [])].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '') || (a.id ?? '').localeCompare(b.id ?? ''))[0];
+  /**
+   * The org id to send is the one the config hands out, not one from the orgs list.
+   * The two are not interchangeable: the config issues a `wrk_` workspace id, and
+   * sending an `org_` id from the orgs list is refused with
+   * `403 Workspace access denied`. Measured, not assumed.
+   */
+  const orgId = config?.config?.provider?.opencode?.options?.headers?.['x-opencode-org-id'] ?? org?.id;
   const expiresIn = typeof data.expires_in === 'number' ? data.expires_in : undefined;
 
   const credential: ProviderCredential = {
@@ -237,7 +249,7 @@ export async function pollOpencodeConsoleSignIn(deviceCode: string): Promise<Pol
     ...(typeof data.refresh_token === 'string' ? { refreshToken: data.refresh_token } : {}),
     ...(expiresIn === undefined ? {} : { expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() }),
     ...(user?.email ? { email: user.email } : {}),
-    ...(org?.id ? { orgId: org.id } : {}),
+    ...(orgId ? { orgId } : {}),
     ...(org?.name ? { orgName: org.name } : {}),
     ...(user?.id ? { accountId: user.id } : {}),
   };
