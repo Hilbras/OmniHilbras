@@ -964,6 +964,42 @@ symmetric. Showing a model the account cannot use costs one visible test failure
 itself; hiding a model it *can* use hides something that works, with no way to tell that apart
 from "not supported". The plan is still **reported** — the connect dialog shows it.
 
+### Signing in, which is how you get the session
+
+```
+POST /v1/oauth/chatgpt/start                    ->  { sessionId, headed }
+GET  /v1/oauth/chatgpt/status?sessionId=&freeOnly=
+     -> { status: "pending" }
+     -> { status: "denied",  error }
+     -> { status: "connected", connection, plan }
+```
+
+A window opens on **the machine running the gateway** — not inside the dashboard, because a
+dashboard on a different machine cannot put a browser on your desktop. `headed` comes back
+with the id so the dialog can say so: with no display there is nowhere to type a password, and
+the flow points at the paste path rather than waiting for a sign-in nobody can perform.
+
+The session is read out of the browser that created it, so the Cloudflare clearance the edge
+set is the one that gets kept — a copied cookie tends to lose it. The paste path stays as the
+fallback, and is unchanged.
+
+**The profile is the fast path; the vault is the fallback.** Signing in writes the session into
+the persistent profile, so a turn afterwards finds the browser already signed in and injects
+nothing. Injecting anyway would overwrite a *fresher* session with a stored one — the
+clearance rotates — and replacing a working session with a stale copy is how a working
+provider starts failing for no visible reason. So the stored cookies are set only when the
+profile turns out not to be signed in, which is also the state the paste flow always lands in.
+
+**A poll is claimed before the page is read.** Two polls arriving together must not both see a
+signed-in page and save two connections from one sign-in. `pending` releases the claim so the
+next poll can look again; `connected` and `denied` discard the session and close the window.
+
+**Sessions are swept.** A leaked window is a signed-in session left open on someone's desktop,
+so one nobody came back for is closed when the next one starts and again at the TTL.
+
+**The terms position is unchanged.** Signing in as yourself does not make automating
+chatgpt.com any more permitted than pasting its cookie was. The warning stands.
+
 ### Getting the session in, and checking it
 
 The dialog's guide names the cookie, gives both extraction routes, and says to check before

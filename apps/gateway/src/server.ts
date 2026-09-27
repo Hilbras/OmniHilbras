@@ -314,6 +314,23 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
      * written, so the browser's decision about which cookies belong to this connection is
      * made here rather than trusted from the client.
      */
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/chatgpt/start') {
+      // The window opens on the machine running the gateway, not inside the dashboard, so
+      // `headed` comes back with the id: a dashboard on another machine needs to be told
+      // there is nowhere for the user to type their password.
+      sendJson(response, 201, await service.startChatGptWebSignIn(), origin);
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/v1/oauth/chatgpt/status') {
+      const sessionId = url.searchParams.get('sessionId') ?? '';
+      // A literal `true` only, for the same reason as the connect route: a truthy string from
+      // a hand-written request would otherwise narrow a connection nobody asked to narrow.
+      const freeOnly = url.searchParams.get('freeOnly') === 'true';
+      sendJson(response, 200, await service.pollChatGptWebSignIn(sessionId, freeOnly), origin);
+      return;
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/web-cookie/chatgpt/check') {
       // Deliberately before the connect route and deliberately storing nothing: this is the
       // "check the cookie" answer, which is which models the account will actually get.

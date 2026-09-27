@@ -194,11 +194,28 @@ async function openSignedInPage(cookies: readonly ChatGptCookie[], profile: stri
   const close = async () => {
     await context.close().catch(() => undefined);
   };
+  const newPage = async () => (await context.newPage()) as unknown as PageLike;
+  /** The set the Cloudflare cookies are the reason for. */
+  const vaultCookies = () => cookies.flatMap((cookie) => chunkCookie(cookie)).map(toPlaywrightCookie);
+
+  /**
+   * The profile is the fast path; the vault is the fallback.
+   *
+   * Signing in writes the session into the profile, so on every turn after that the browser is
+   * already signed in and there is nothing to inject. Injecting anyway would overwrite a
+   * *fresher* session with a stored one — including the Cloudflare clearance, which rotates —
+   * and replacing a working session with a stale copy is how a working provider starts
+   * failing for no visible reason.
+   *
+   * So the cookies are set only when the profile turns out not to be signed in. The
+   * paste-a-cookie flow lands here too, with an empty profile, and is unaffected.
+   */
+  const signedOut = async (candidate: PageLike): Promise<boolean> =>
+    (await candidate.locator(CHATGPT_WEB.signedOutMarker).count()) > 0;
+
   let page: PageLike | undefined;
   try {
-    // Chunked before they are set, because an oversized cookie fails the whole batch.
-    await context.addCookies(cookies.flatMap((cookie) => chunkCookie(cookie)).map(toPlaywrightCookie));
-    page = (await context.newPage()) as unknown as PageLike;
+    page = await newPage();
     /**
      * Navigation is retried, because a dropped connection reports itself as
      * `ERR_NETWORK_CHANGED` — indistinguishable, to the caller, from chatgpt.com being
@@ -229,8 +246,13 @@ async function openSignedInPage(cookies: readonly ChatGptCookie[], profile: stri
      */
     const title = await page.title().catch(() => '');
     if (/just a moment/i.test(title)) throw blockedError();
-    if ((await page.locator(CHATGPT_WEB.signedOutMarker).count()) > 0) {
-      throw signedOutError();
+    if (await signedOut(page)) {
+      // The profile was not signed in, so fall back to the stored session. Chunked before
+      // they are set, because an oversized cookie fails the whole batch.
+      await context.addCookies(vaultCookies());
+      await page.goto(CHATGPT_WEB.startUrl, { waitUntil: 'domcontentloaded', timeout: CHATGPT_WEB.navigationTimeoutMs });
+      await page.waitForTimeout(6_000);
+      if (await signedOut(page)) throw signedOutError();
     }
     return { page, close };
   } catch (error) {

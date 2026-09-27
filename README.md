@@ -206,6 +206,13 @@ account that can use a model should be able to see it. The effort rungs collapse
 because ChatGPT picks the effort itself, and `pro` is a different model string with the
 thinking hint deliberately withheld.
 
+**Signing in is one button.** It opens chatgpt.com in a window on the machine running
+OmniHilbras, you sign in with your own password and second factor, and the session is read
+straight out of that browser — including the Cloudflare clearance a copied cookie tends to
+lose. Pasting a cookie by hand is still there, collapsed, for a gateway with no display to open
+a window on. Afterwards the browser profile is the fast path and the stored cookies are only
+used if it is not signed in, so a rotating clearance is not overwritten by a stale copy.
+
 **"Check cookie" opens chatgpt.com and really checks.** Expiry, cookie presence and browser
 availability are all local, and none of them can tell a working session from a revoked one — so
 a check that only parsed would be a button that accepts a dead session. The parser accepts the

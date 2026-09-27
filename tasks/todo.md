@@ -147,6 +147,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 24: Sign in to ChatGPT Web in a browser window, and make the profile the fast path.
+  - Acceptance: one button signs in and saves a working connection; the manual paste survives as a fallback; a turn afterwards still answers.
+  - Verify: `POST /v1/oauth/chatgpt/start` returned `headed: true`; the first status poll returned `connected` with plan `Free` and a connection carrying 13 models; the next poll correctly reported the session already completed; two live turns then returned `'working'` (20s, 97s). 371 tests pass.
+  - Findings: the profile **already held the session on disk** — a 72 KB cookie store in `~/.config/omnihilbras/chatgpt-web/` — so keeping it is not a new security model, discarding it is. The fragility is entirely in moving the credential *by hand*, and all of it goes away: which cookie, the `Cookie:` prefix, the numbered chunks, the truncated header, and an unknown plan. The session is now read out of the browser that created it, so the Cloudflare clearance the edge set is the one that gets kept. **The profile became the fast path and the vault the fallback** — injecting stored cookies on every turn would overwrite a fresher session (the clearance rotates) with a stale copy, which is how a working provider starts failing for no visible reason. A poll is **claimed before the page is read**, or two concurrent polls save two connections from one sign-in; sessions are swept because a leaked window is a signed-in session left open on a desktop. The **terms position is unchanged** and the warning stands. Also fixed: `btn-primary`/`btn-secondary` **were not real classes** — nothing in the stylesheet defines them, so the connect buttons here and every button in `KiroConnectDialog` had been rendering unstyled since they were written; and there was **no `:disabled` styling anywhere**, so an unclickable button looked identical to a clickable one.
+  - Files: `apps/gateway/src/chatgptWebSignIn.ts` (new), `src/chatgptWeb.ts`, `src/service.ts`, `src/server.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/components/KiroConnectDialog.tsx`, `src/index.css`, `apps/gateway/test/chatgpt-web-signin.test.js` (new), docs.
+  - Depends on: Task 23.
+  - Scope: Big.
+
 - [x] Task 23: Build the ChatGPT section properly — the 13-card catalog, the credential guide, and a check that checks.
   - Acceptance: the catalog matches the reference's product surface, every card resolves, and a check catches a revoked session.
   - Verify: the connection reports 13 models; `POST /v1/web-cookie/chatgpt/check` returns `verified: true` for the real session and `AUTHENTICATION_FAILED` for a deliberately invalid one; both free models still answer `'working'`; 366 tests pass.

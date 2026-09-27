@@ -449,7 +449,7 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
                         void runDeviceFlow(startUrl.trim());
                       }}
                       disabled={phase === 'running' || !startUrl.trim()}
-                      className="btn-primary mt-4 w-full !h-9 !text-xs"
+                      className="btn-gold mt-4 w-full !h-9 !text-xs"
                     >
                       {phase === 'running' ? 'Starting…' : 'Continue'}
                     </button>
@@ -508,7 +508,7 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
                         void submitSocialCode();
                       }}
                       disabled={phase === 'running' || !code.trim()}
-                      className="btn-primary !h-9 flex-1 !text-xs"
+                      className="btn-gold !h-9 flex-1 !text-xs"
                     >
                       {phase === 'running' ? 'Checking…' : 'Connect'}
                     </button>
@@ -547,7 +547,7 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
                       void submitSecret();
                     }}
                     disabled={phase === 'running' || !secret.trim()}
-                    className="btn-primary mt-4 w-full !h-9 !text-xs"
+                    className="btn-gold mt-4 w-full !h-9 !text-xs"
                   >
                     {phase === 'running' ? 'Connecting…' : 'Connect'}
                   </button>

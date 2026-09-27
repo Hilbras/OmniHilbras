@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, CircleAlert, Cookie, ExternalLink, LoaderCircle, ShieldAlert, Tag } from 'lucide-react';
+import { Check, CircleAlert, Cookie, ExternalLink, LoaderCircle, LogIn, ShieldAlert, Tag } from 'lucide-react';
 import { CHATGPT_WEB_SESSION_COOKIE } from '@hilbras/omnihilbras';
 import { requestJson, type GatewayConnection } from '../lib/gatewayClient';
 
@@ -60,7 +60,9 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
   const [exported, setExported] = useState('');
   const [freeOnly, setFreeOnly] = useState(false);
   const [checked, setChecked] = useState<CheckResult | null>(null);
-  const [phase, setPhase] = useState<'idle' | 'checking' | 'running' | 'done'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'checking' | 'signing-in' | 'running' | 'done'>('idle');
+  /** What the sign-in flow last said, shown verbatim so a failure is never vague. */
+  const [signIn, setSignIn] = useState<{ state: 'waiting' | 'headless' | 'error'; message: string } | null>(null);
   const [error, setError] = useState('');
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
   const settledRef = useRef(false);
@@ -109,6 +111,70 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
       setError(checkError instanceof Error ? checkError.message : 'That export could not be read.');
     }
   }, [exported]);
+
+  /**
+   * Sign in through a real browser window, rather than by hand.
+   *
+   * This is the primary path and the paste is the fallback. The four ways the paste could go
+   * wrong — wrong cookie, a `Cookie:` prefix, numbered chunks, a truncated header — are all
+   * things the browser can simply do, and a session read out of the browser that created it
+   * keeps the Cloudflare clearance that a copied one tends to lose.
+   *
+   * The window opens on the **gateway's** machine, so when there is no display the flow says
+   * so and points at the paste path instead of waiting for a sign-in nobody can perform.
+   */
+  const signInWithBrowser = useCallback(async () => {
+    setPhase('signing-in');
+    setError('');
+    try {
+      const started = await requestJson<{ sessionId: string; headed: boolean }>('/v1/oauth/chatgpt/start', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      if (!started.headed) {
+        setPhase('idle');
+        setSignIn({
+          state: 'headless',
+          message:
+            'A ChatGPT window would open on the machine running OmniHilbras, and there is no display there — so there is nowhere to sign in. Paste a Cookie header below instead, or start OmniHilbras on a machine with a display.',
+        });
+        return;
+      }
+      setSignIn({ state: 'waiting', message: 'A ChatGPT window has opened on your desktop. Sign in there — this closes itself once you are signed in.' });
+
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        // A visible wait rather than a tight loop: the page needs time to fetch the account,
+        // and polling harder than that only costs the machine.
+        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        const status = await requestJson<{ status: string; error?: string; connection?: GatewayConnection }>(
+          `/v1/oauth/chatgpt/status?sessionId=${encodeURIComponent(started.sessionId)}&freeOnly=${freeOnly ? 'true' : 'false'}`,
+        );
+        if (status.status === 'pending') continue;
+        if (status.status === 'denied') {
+          setPhase('idle');
+          setSignIn({ state: 'error', message: status.error ?? 'Sign-in did not complete.' });
+          return;
+        }
+        if (status.connection) {
+          settledRef.current = true;
+          setPhase('done');
+          setSignIn(null);
+          await onConnected(status.connection);
+          onClose();
+          return;
+        }
+      }
+      setPhase('idle');
+      setSignIn({ state: 'error', message: 'That window was left without being signed in. Start again when you are ready.' });
+    } catch (signInError) {
+      setPhase('idle');
+      setSignIn({
+        state: 'error',
+        message: signInError instanceof Error ? signInError.message : 'Sign-in could not be started.',
+      });
+    }
+  }, [freeOnly, onClose, onConnected]);
 
   const submit = useCallback(async () => {
     if (settledRef.current) return;
@@ -186,9 +252,59 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
             </div>
           )}
 
-          {/* The guide, before the field. A credential the user does not know how to export is
-              a field they will fill with the wrong thing. */}
-          <section className="mt-4 rounded-xl border border-purple-500/25 bg-purple-500/10 p-3">
+          {/* Sign-in first. It is the path that cannot be got wrong, and the paste below is
+              the fallback for a gateway with nowhere to open a window. */}
+          <div className="mt-4">
+            <p className="text-[11px] font-semibold">Sign in</p>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+              Opens chatgpt.com in a window on the machine running OmniHilbras. Sign in with your own
+              password and second factor, and the session is read straight out of that browser — including
+              the Cloudflare clearance that a copied cookie tends to lose.
+            </p>
+            <button
+              type="button"
+              onClick={() => void signInWithBrowser()}
+              disabled={!acknowledged || phase === 'signing-in' || phase === 'running'}
+              className="btn-gold mt-2.5 w-full !h-9 !text-xs"
+            >
+              {phase === 'signing-in' ? (
+                <>
+                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  Waiting for you to sign in
+                </>
+              ) : (
+                <>
+                  <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
+                  Sign in with ChatGPT
+                </>
+              )}
+            </button>
+            {signIn && (
+              <p
+                role="status"
+                className={`mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed ${signIn.state === 'error' || signIn.state === 'headless' ? 'text-amber-600 dark:text-amber-400' : 'text-muted'}`}
+              >
+                {signIn.state === 'waiting' ? (
+                  <LoaderCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                ) : (
+                  <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                )}
+                {signIn.message}
+              </p>
+            )}
+          </div>
+
+          <details className="mt-4 rounded-xl border border-line bg-bg-soft/40 p-3">
+            <summary className="cursor-pointer text-[11px] font-semibold text-text">
+              Or paste a session cookie instead
+            </summary>
+            <p className="mt-2 text-[11px] leading-relaxed text-muted">
+              For a gateway with no display to open a window on. The same credential either way — this is
+              just the part you do by hand.
+            </p>
+            {/* The guide belongs beside the manual route it describes, not above a button that
+              does it for you. */}
+          <section className="rounded-xl border border-purple-500/25 bg-purple-500/10 p-3">
             <p className="flex items-start gap-1.5 text-[11px] font-semibold text-text">
               <Cookie className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#a78bfa]" aria-hidden="true" />
               How to get the session credential
@@ -232,8 +348,7 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
               Treat this like a password: it may access your signed-in web account until it expires or is revoked.
             </p>
           </section>
-
-          <div className="mt-4">
+            <div className="mt-3">
             <label htmlFor="web-cookie-export" className="block text-[11px] font-semibold">
               Session cookie
             </label>
@@ -257,7 +372,7 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
                 type="button"
                 onClick={() => void check()}
                 disabled={!pasteReady || phase === 'checking' || phase === 'running'}
-                className="btn-secondary !h-8 !px-2.5 !text-[11px]"
+                className="btn-ghost !h-8 !px-2.5 !text-[11px]"
               >
                 {phase === 'checking' ? (
                   <>
@@ -275,7 +390,7 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
                   onChange={(event) => setFreeOnly(event.target.checked)}
                   className="h-3.5 w-3.5 accent-[#ff6b35]"
                 />
-                Import only free models
+                Import only the free models
               </label>
             </div>
             {checked && (
@@ -285,8 +400,10 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
                   {checked.planType ? `${checked.planType} plan` : 'Plan not stated by the export'}
                 </p>
                 <p className="mt-1 text-[10px] leading-relaxed text-muted">
-                  {offered.length} model{offered.length === 1 ? '' : 's'} would be imported
-                  {checked.isFreePlan ? ' — a free account has no model picker, so these are all of them.' : '.'}
+                  {offered.length} model{offered.length === 1 ? '' : 's'} would be imported.
+                  {checked.isFreePlan
+                    ? ' The plan is reported, not enforced — the page decides what the account can actually use.'
+                    : ''}
                 </p>
                 <ul className="mt-1.5 flex flex-wrap gap-1">
                   {offered.map((model) => (
@@ -298,7 +415,29 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
                 </ul>
               </div>
             )}
-          </div>
+            </div>
+
+                      <button
+                        type="button"
+                        onClick={() => void submit()}
+                        disabled={!pasteReady || phase === 'running' || phase === 'checking'}
+                        className="btn-gold mt-4 w-full !h-9 !text-xs"
+                      >
+                        {phase === 'running' ? (
+                          <>
+                            <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                            Connecting
+                          </>
+                        ) : phase === 'done' ? (
+                          <>
+                            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                            Connected
+                          </>
+                        ) : (
+                          'Connect'
+                        )}
+                      </button>
+          </details>
 
           {error && (
             <p role="alert" className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-danger">
@@ -307,26 +446,6 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
             </p>
           )}
 
-          <button
-            type="button"
-            onClick={() => void submit()}
-            disabled={!pasteReady || phase === 'running' || phase === 'checking'}
-            className="btn-primary mt-4 w-full !h-9 !text-xs"
-          >
-            {phase === 'running' ? (
-              <>
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                Connecting
-              </>
-            ) : phase === 'done' ? (
-              <>
-                <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                Connected
-              </>
-            ) : (
-              'Connect'
-            )}
-          </button>
 
           <p className="mt-2 text-center text-[10px] leading-relaxed text-muted">
             The gateway stores it encrypted in the local vault. It never reaches browser storage.

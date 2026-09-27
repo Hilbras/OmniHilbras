@@ -148,6 +148,23 @@
     transform: translateY(0);
   }
 
+  /**
+   * A disabled control has to *look* disabled.
+   *
+   * There was no disabled state at all, so every button in the app — the ones that cannot be
+   * pressed yet included — rendered identical to the ones that can. On the connect dialog that
+   * meant a gold "Connect" sitting under a collapsed panel with nothing to connect.
+   */
+  .btn-gold:disabled,
+  .btn-ghost:disabled,
+  .btn-quiet:disabled {
+    opacity: 0.45;
+    filter: saturate(0.5);
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
+  }
+
   .btn-ghost {
     display: inline-flex;
     align-items: center;
