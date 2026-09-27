@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 10j: Claim the device exchange, and start the sign-in once per dialog.
+  - Acceptance: two overlapping polls cannot spend the same single-use device code, and a re-render cannot mint a second one. Both are proven by tests that fail without the fix.
+  - Verify: a device code dies the moment the token is issued, and the dashboard polls every second while saving a connection takes longer, so two polls overlap. The losing poll was told `The device code is invalid` and overwrote a success — matching the reported symptom exactly, where the Console showed "Device authorized" and the dashboard showed "The device code is invalid". The exchange is now claimed before the Console is called and a pending claim is released so the next poll may retry. Separately, `onConnected` and `onClose` are inline arrows, so their identity changes each render, which rebuilt the start callback and requested a fresh device code on every render while the browser was sent to whichever was minted last. A ref guard makes it start once. Four service-level tests drive the real method against a stubbed Console that treats the grant as dead after use; the overlapping-poll test was confirmed to fail with the claim removed and pass with it restored. In the browser, twelve forced re-renders produce exactly one start call.
+  - Files: `apps/gateway/src/service.ts`, `apps/gateway/test/opencode-console-race.test.js`, `src/components/OauthConnectDialog.tsx`, docs.
+  - Depends on: Task 10i.
+  - Scope: Small.
+
 - [x] Task 10i: Take the org id from the Console config, and stop a catalog read failing a sign-in.
   - Acceptance: the org id sent with inference requests is the one the Console's own config hands out, a sign-in the user approved is not thrown away because the catalog would not read, and a failure names the provider's reason instead of a generic refusal.
   - Verify: the config issues a `wrk_` workspace id and the orgs list carries `org_` ids, and the live lane answers `403 Workspace access denied` for the `org_` form while `wrk_` and an absent header both answer `200`. `/api/orgs` is also `401` for an API key, so it is read for the org name only. Separately, the transport's generic 4xx message was being shown instead of the provider's words, so a real reason never reached the user; the provider detail is now surfaced the way the Cline sign-in already does. Model discovery is tolerated for this provider only, so a session the user just approved is kept and the reason is carried on the sign-in status. 14 gateway tests, including one that pins the workspace-id-over-orgs-list ordering and one that an unreadable config degrades to the orgs list rather than losing the org.

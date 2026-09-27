@@ -448,6 +448,21 @@ Measured on the live lane:
 all. It is read for the org's display name only, and the config is authoritative for the
 value that gets echoed back.
 
+**A device code is single-use, so the exchange is claimed before the Console is called.**
+The poll that receives the token kills the grant. The dashboard polls every second and
+saving a connection is slower than that, so two polls overlap; without a claim the losing
+poll spends the dead code, is told `The device code is invalid`, and overwrites a success
+that had already happened. The symptom is unmistakable once seen: the Console says
+*Device authorized* and the dashboard immediately says *the device code is invalid*. A
+pending claim is released so the next poll may try again; a completed one is not.
+
+**The dialog starts one sign-in, not one per render.** `onConnected` and `onClose` arrive
+as inline arrows, so their identity changes on every render, which rebuilds the callback
+that starts the flow. A plain `useEffect(begin, [begin])` therefore requests a fresh
+device code on every render and sends the browser to whichever was minted last while the
+poll watches another. A ref guard makes the start happen exactly once. For a redirect flow
+the same mistake is merely wasteful; for a device flow it is fatal.
+
 **A catalog that will not read must not discard a session the user just approved.** A
 device-flow sign-in has already proven the credential, so model discovery is allowed to
 fail there: the connection is saved with no models and the reason is carried on the

@@ -201,7 +201,19 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
     }
   }, [navigateTo, providerId, watch]);
 
+  /**
+   * The flow starts exactly once per dialog.
+   *
+   * `begin` is rebuilt whenever `onConnected` or `onClose` changes identity, and the
+   * caller passes both as inline arrows, so a plain `useEffect(begin, [begin])` starts
+   * a *new* sign-in on every render. For a redirect flow that is merely wasteful; for a
+   * device flow it is fatal, because each start mints a fresh single-use code and the
+   * browser is sent to whichever one was minted last, while the poll watches another.
+   */
+  const startedRef = useRef(false);
   useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
     void begin();
   }, [begin]);
 

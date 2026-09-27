@@ -164,7 +164,10 @@ The **OpenCode Console** card in OAuth Providers signs in with the device flow t
 OpenCode client runs for itself, and those models then answer at zero cost. The code
 arrives pre-filled; if OpenCode asks you to log in first, signing in returns you to the
 approval. The org id the session sends is the one OpenCode's own config hands out, which
-is not the same id its org list returns — the lane refuses the org-list form outright. A session
+is not the same id its org list returns — the lane refuses the org-list form outright.
+Approval and the token exchange are also single-shot: the sign-in is claimed before the
+token is requested, so a second poll cannot spend a dead code and report a failure over a
+success. A session
 also changes the endpoints: the catalog is served from `/inference/openai/v1`,
 `/inference/anthropic/v1` and `/inference/google/v1beta`, with the lanes read from the
 account's own config rather than hardcoded. Those lanes return real billing answers where

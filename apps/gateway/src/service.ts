@@ -391,16 +391,31 @@ export class GatewayService {
 
   /**
    * Reports whether the device sign-in finished, exchanging the code on the first poll
-   * that finds it approved. The exchange is claimed, so a dashboard that polls twice
-   * cannot spend the same grant twice.
+   * that finds it approved.
+   *
+   * The exchange is claimed before the Console is called, and a device code is
+   * single-use: the poll that wins the claim receives the token, and the code is dead
+   * from that moment. Without the claim a second poll arriving while the first is still
+   * saving would spend the same code, be told `The device code is invalid`, and
+   * overwrite a success that had already happened.
    */
   async opencodeConsoleSignInStatus(sessionId: string, signal?: AbortSignal): Promise<OpencodeConsoleSessionStatus | undefined> {
     const session = this.opencodeConsoleSessions.get(sessionId);
     if (!session) return undefined;
     if (session.status !== 'pending') return this.opencodeConsoleSessions.publicStatus(session);
 
+    // Another poll owns the exchange. Report the session as it stands rather than
+    // racing it, and let that poll publish the outcome.
+    if (!this.opencodeConsoleSessions.claim(sessionId)) {
+      return this.opencodeConsoleSessions.publicStatus(session);
+    }
+
     const outcome = await pollOpencodeConsoleSignIn(session.deviceCode);
-    if (outcome.status === 'pending') return this.opencodeConsoleSessions.publicStatus(session);
+    if (outcome.status === 'pending') {
+      // Nothing was spent, so the next poll may try again.
+      this.opencodeConsoleSessions.release(session);
+      return this.opencodeConsoleSessions.publicStatus(session);
+    }
     if (outcome.status === 'denied') {
       this.opencodeConsoleSessions.resolve(session.id, { status: 'failed', error: outcome.error });
       return this.opencodeConsoleSessions.publicStatus(session);
