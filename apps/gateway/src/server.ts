@@ -399,6 +399,12 @@ function parseModelPolicy(value: unknown): ModelImportPolicy {
   return value;
 }
 
+/** A caller-supplied connection id, held to the same shape as a provider id. */
+function parseConnectionId(value: unknown) {
+  if (typeof value !== 'string') throw invalidRequest('id must be a string.');
+  return parseIdentifier(value, 'connection id');
+}
+
 function decodeProviderId(value: string) {
   let decoded: string;
   try {
@@ -418,17 +424,21 @@ function assertSafeEndpoint(endpoint: string, providerId: string) {
  * required so the adapter can be pointed at a real server, and the model
  * policy is optional so a caller can save before importing a catalog.
  */
-function parseGenericConnectionRequest(body: unknown, providerId: string): { providerId: string; name: string; endpoint: string; priority: number; proxyPool: string; enabled?: boolean; modelPolicy?: ModelImportPolicy; credential: ProviderCredential } {
+function parseGenericConnectionRequest(body: unknown, providerId: string): { id?: string; providerId: string; name: string; endpoint: string; priority: number; proxyPool: string; enabled?: boolean; modelPolicy?: ModelImportPolicy; credential: ProviderCredential } {
   if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
-  assertOnlyFields(body, ['apiKey', 'name', 'endpoint', 'priority', 'proxyPool', 'enabled', 'modelPolicy', 'resilience']);
+  // `id` is accepted so a caller can add a second connection for a provider that
+  // already has one. Omitting it reuses that provider's existing connection.
+  assertOnlyFields(body, ['apiKey', 'name', 'endpoint', 'id', 'priority', 'proxyPool', 'enabled', 'modelPolicy', 'resilience']);
   const endpoint = body.endpoint === undefined ? '' : parseBoundedString(body.endpoint, 'endpoint', 2048);
   if (!endpoint) throw invalidRequest('endpoint is required.');
   assertSafeEndpoint(endpoint, providerId);
   const name = body.name === undefined ? providerId : parseBoundedString(body.name, 'name', 120);
+  const id = body.id === undefined ? undefined : parseConnectionId(body.id);
   const priority = body.priority === undefined ? 1 : parsePriority(body.priority);
   const proxyPool = body.proxyPool === undefined ? 'none' : parseBoundedString(body.proxyPool, 'proxyPool', 128, true);
   if (body.enabled !== undefined && typeof body.enabled !== 'boolean') throw invalidRequest('enabled must be a boolean.');
   return {
+    ...(id === undefined ? {} : { id }),
     providerId,
     name,
     endpoint,

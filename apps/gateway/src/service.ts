@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, FetchHttpTransport, OpenAICompatibleAdapter, ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext, type SecretStore } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, FetchHttpTransport, OpenAICompatibleAdapter, ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
@@ -50,6 +50,9 @@ export type GatewayStreamOutcome = {
   chunks: AsyncIterable<ChatChunk>;
   attempts: GatewayFailoverAttempt[];
 };
+
+/** The credential surface the service needs, keyed by connection id. */
+export type CredentialSource = Pick<ConnectionStore, 'get' | 'set' | 'delete'>;
 
 export type GatewayServiceOptions = {
   /** Consecutive failures before a connection stops receiving traffic. */
@@ -112,7 +115,13 @@ export class GatewayService {
 
   constructor(
     readonly registry: ProviderRegistry,
-    private readonly secretStore: SecretStore,
+    /**
+   * Credentials are read per connection, so this is the narrow credential
+   * surface rather than the SDK's provider-keyed `SecretStore`. A store whose
+   * `get` ignores the provider id still satisfies it, which is what keeps the
+   * in-memory test store usable.
+   */
+  private readonly secretStore: CredentialSource,
     private readonly connectionStore?: ConnectionStore,
     private readonly apiKeyStore?: ApiKeyStore,
     options: GatewayServiceOptions = {},
@@ -151,7 +160,10 @@ export class GatewayService {
       if (!adapter.healthCheck) return { providerId: adapter.id, status: 'unavailable' as const, checkedAt: new Date().toISOString(), message: 'Health checks are not supported.' };
       const startedAt = Date.now();
       try {
-        const health = await adapter.healthCheck(await this.context(adapter.id, signal));
+        // Health is reported per provider, so it is checked with that provider's
+        // first credentialed connection.
+        const owner = await this.connectionFor(adapter.id);
+        const health = await adapter.healthCheck(await this.context(owner?.id ?? adapter.id, adapter.id, signal));
         // An adapter may report `unavailable` instead of throwing. Recording
         // that as a success made routing report a healthy provider with zero
         // failures while `/health` said unavailable, and it corrupted the
@@ -232,7 +244,8 @@ export class GatewayService {
     const results = await Promise.all(this.registry.list().map(async (adapter) => {
       if (!adapter.listModels || adapter.capabilities.models !== true) return { providerId: adapter.id, models: [], unavailable: { providerId: adapter.id, code: 'NOT_SUPPORTED' } };
       try {
-        return { providerId: adapter.id, models: await adapter.listModels(await this.context(adapter.id, signal)), unavailable: undefined };
+        const owner = await this.connectionFor(adapter.id);
+        return { providerId: adapter.id, models: await adapter.listModels(await this.context(owner?.id ?? adapter.id, adapter.id, signal)), unavailable: undefined };
       } catch (error) {
         return { providerId: adapter.id, models: [], unavailable: { providerId: adapter.id, code: error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED' } };
       }
@@ -266,7 +279,8 @@ export class GatewayService {
   async listModels(providerId: string, signal?: AbortSignal) {
     const adapter = this.requireAdapter(providerId);
     if (!adapter.listModels || adapter.capabilities.models !== true) throw notSupported(adapter, 'models');
-    return adapter.listModels(await this.context(adapter.id, signal));
+    const owner = await this.connectionFor(providerId);
+    return adapter.listModels(await this.context(owner?.id ?? adapter.id, adapter.id, signal));
   }
 
   async validateConnectionCredential(providerId: string, credential: ProviderCredential, signal?: AbortSignal): Promise<GatewayConnectionValidation> {
@@ -484,16 +498,24 @@ export class GatewayService {
     });
   }
 
+  /** The connection that serves a provider: the only one, or the first enabled. */
+  private async connectionFor(providerId: string) {
+    const matches = (await this.listConnections()).filter((connection) => connection.providerId === providerId && connection.hasCredential);
+    return matches[0];
+  }
+
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    return adapter.chat(request, await this.context(adapter.id, signal));
+    const connection = await this.connectionFor(providerId);
+    return adapter.chat(request, await this.context(connection?.id ?? adapter.id, adapter.id, signal));
   }
 
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    yield* adapter.streamChat(request, await this.context(adapter.id, signal));
+    const connection = await this.connectionFor(providerId);
+    yield* adapter.streamChat(request, await this.context(connection?.id ?? adapter.id, adapter.id, signal));
   }
 
   /**
@@ -846,9 +868,14 @@ export class GatewayService {
     return adapter;
   }
 
-  private async context(providerId: string, signal?: AbortSignal): Promise<ProviderRequestContext> {
+  /**
+   * The credential belongs to a connection, not to a provider: one provider can
+   * hold several. The provider id is still passed so an environment credential
+   * keeps resolving.
+   */
+  private async context(connectionId: string, providerId: string, signal?: AbortSignal): Promise<ProviderRequestContext> {
     return {
-      credential: await this.secretStore.get(providerId),
+      credential: await this.secretStore.get(connectionId, providerId),
       ...(signal ? { signal } : {}),
     };
   }

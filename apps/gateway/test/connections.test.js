@@ -126,3 +126,40 @@ test('in-memory connection store keeps metadata and credentials available to the
   assert.deepEqual(await store.list(), []);
   assert.equal(await store.get('openrouter'), undefined);
 });
+
+test('one provider can hold several connections, each with its own credential', async () => {
+  const store = new InMemoryConnectionStore();
+  const first = await store.save({ id: 'opencode', providerId: 'opencode', name: 'account A', endpoint: 'https://opencode.ai/zen/v1', priority: 1, proxyPool: 'none' }, { type: 'api-key', value: 'key-A' });
+  const second = await store.save({ id: 'opencode-backup', providerId: 'opencode', name: 'account B', endpoint: 'https://opencode.ai/zen/v1', priority: 1, proxyPool: 'none' }, { type: 'api-key', value: 'key-B' });
+
+  assert.equal(first.id, 'opencode');
+  assert.equal(second.id, 'opencode-backup');
+  assert.equal((await store.list()).length, 2, 'both connections exist');
+
+  // The whole point of keying by connection: neither credential is overwritten.
+  assert.deepEqual(await store.get('opencode'), { type: 'api-key', value: 'key-A' });
+  assert.deepEqual(await store.get('opencode-backup'), { type: 'api-key', value: 'key-B' });
+
+  const listed = await store.list();
+  assert.deepEqual(listed.map((connection) => connection.hasCredential), [true, true], 'both report a credential');
+});
+
+test('saving without an id reuses the provider existing connection', async () => {
+  const store = new InMemoryConnectionStore();
+  await store.save({ id: 'opencode', providerId: 'opencode', name: 'first', endpoint: 'https://opencode.ai/zen/v1', priority: 1, proxyPool: 'none' }, { type: 'api-key', value: 'key-A' });
+  const again = await store.save({ providerId: 'opencode', name: 'renamed', endpoint: 'https://opencode.ai/zen/v1', priority: 1, proxyPool: 'none' }, { type: 'api-key', value: 'key-A2' });
+  assert.equal(again.id, 'opencode');
+  assert.equal((await store.list()).length, 1, 'no second connection is created');
+  assert.deepEqual(await store.get('opencode'), { type: 'api-key', value: 'key-A2' }, 'the credential is replaced');
+});
+
+test('a credential is never shared between two connections of one provider', async () => {
+  // The dangerous regression: reading by provider id would hand key-A to the
+  // connection that holds key-B.
+  const store = new InMemoryConnectionStore();
+  await store.save({ id: 'opencode', providerId: 'opencode', name: 'A', endpoint: 'https://opencode.ai/zen/v1', priority: 1, proxyPool: 'none' }, { type: 'api-key', value: 'key-A' });
+  await store.save({ id: 'opencode-backup', providerId: 'opencode', name: 'B', endpoint: 'https://opencode.ai/zen/v1', priority: 1, proxyPool: 'none' }, { type: 'api-key', value: 'key-B' });
+  await store.remove('opencode');
+  assert.deepEqual(await store.get('opencode-backup'), { type: 'api-key', value: 'key-B' }, 'deleting one leaves the other intact');
+  assert.equal(await store.get('opencode'), undefined, 'the removed one has no credential');
+});

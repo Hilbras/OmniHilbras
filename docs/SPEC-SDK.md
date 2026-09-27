@@ -216,11 +216,30 @@ A card could therefore look connected with no credential behind it. The key is n
 passed for any provider that asks for one, and every other provider is saved
 through the generic route.
 
-**Bulk Add remains unbacked.** It still reports the connections it parsed without
-saving them, because the generic route derives the connection id from the provider
-id, so N connections for one provider would collide. Adding several connections
-for a single provider needs an explicit id in the request, and is not done here.
-Until then the control should be read as unverified.
+### Several connections per provider
+
+Credentials are addressed by **connection id**, not by provider id, so one provider
+can hold several connections — two Cline accounts, a spare OpenRouter key. The
+connection id comes from the request when given, and otherwise reuses the
+provider's existing connection, so a plain save still updates in place.
+
+Three things follow, and each is a trap worth naming:
+
+- **The stored credential map is never read by provider id.** Falling back to a
+  provider-keyed entry would hand one connection's secret to every other
+  connection of the same provider. The only provider-keyed lookup left is the
+  environment credential store, which is where `PROVIDER_API_KEY` lives.
+- **The orphan sweep compares connection ids.** A stored key matching no
+  credential-bearing connection is discarded. For a single-connection provider the
+  two are the same string, which is why an existing vault still resolves after
+  the change with no migration.
+- **Health is a provider-level signal** and is checked with that provider's first
+  credentialed connection. Per-connection health is not reported.
+
+Requests resolve the credential through the connection that serves them: routing
+already produced a `connectionId` per candidate, and a direct provider call
+resolves the owning connection. Reading by adapter id would have used whichever
+credential happened to be written last.
 
 Endpoints go through `assertSafeProviderRequestUrl`, so a caller cannot point a
 connection at a credential-bearing URL. A provider without a `validateCredential`

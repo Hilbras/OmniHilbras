@@ -41,7 +41,7 @@ export const providerCatalog: ProviderRecord[] = [
     name: 'OpenCode Zen',
     description: 'Curated gateway from the OpenCode team. Sign in at opencode.ai/auth for a key; you are charged per request.',
     category: 'Multi-model provider',
-    group: 'hosted',
+    group: 'api-key',
     status: 'available',
     auth: 'API key',
     models: '—',

@@ -56,7 +56,7 @@ export type ClineAdapterOptions = {
 const defaultRefreshSkewMs = 60_000;
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '0.5.0';
+const omnihilbrasVersion = '0.6.0';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {

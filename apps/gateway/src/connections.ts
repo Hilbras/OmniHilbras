@@ -70,7 +70,18 @@ export interface WritableSecretStore extends SecretStore {
   delete(providerId: ProviderId): Promise<boolean>;
 }
 
-export interface ConnectionStore extends WritableSecretStore {
+/**
+ * Credentials are addressed per connection rather than per provider, so one
+ * provider can hold several. `providerId` stays optional on `get` because that
+ * is where an environment credential is found.
+ */
+export interface ConnectionCredentialStore {
+  get(connectionId: string, providerId?: ProviderId): Promise<ProviderCredential | undefined>;
+  set(connectionId: string, credential: ProviderCredential): Promise<void>;
+  delete(connectionId: string): Promise<boolean>;
+}
+
+export interface ConnectionStore extends ConnectionCredentialStore {
   list(): Promise<ConnectionRecord[]>;
   save(input: ConnectionInput, credential: ProviderCredential): Promise<ConnectionRecord>;
   updateModels(connectionId: string, modelIds: string[]): Promise<ConnectionRecord | undefined>;
@@ -149,7 +160,7 @@ export class InMemoryConnectionStore implements ConnectionStore {
   }
 
   async list() {
-    return [...this.connections.values()].map((connection) => cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.providerId) }));
+    return [...this.connections.values()].map((connection) => cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.id) }));
   }
 
   async save(input: ConnectionInput, credential: ProviderCredential) {
@@ -161,7 +172,7 @@ export class InMemoryConnectionStore implements ConnectionStore {
 
     const record = buildRecord({ ...normalized, id }, existing, credential.type !== 'none');
     this.connections.set(id, record);
-    this.credentials.set(normalized.providerId, cloneCredential(credential));
+    this.credentials.set(id, cloneCredential(credential));
     return cloneRecord(record);
   }
 
@@ -239,37 +250,43 @@ export class LocalConnectionStore implements ConnectionStore {
     if (options.masterKey) this.configuredMasterKey = normalizeMasterKey(options.masterKey);
   }
 
-  async get(providerId: ProviderId) {
+  /**
+   * Credentials are stored per connection, so one provider can hold several.
+   * The provider id is still consulted as a fallback: that is where an
+   * environment credential lives, and for a single-connection provider the two
+   * are the same string, which is what keeps existing vaults readable.
+   */
+  async get(connectionId: string, providerId?: ProviderId) {
     await this.mutationQueue;
     await this.ensureLoaded();
-    return this.credentials.get(providerId) ?? this.fallback?.get(providerId);
+    return this.credentials.get(connectionId) ?? (providerId ? this.fallback?.get(providerId) : undefined);
   }
 
-  async set(providerId: ProviderId, credential: ProviderCredential) {
+  async set(connectionId: string, credential: ProviderCredential) {
     return this.withMutation(async () => {
       await this.ensureLoaded();
-      const previous = this.credentials.get(providerId);
-      this.credentials.set(providerId, cloneCredential(credential));
+      const previous = this.credentials.get(connectionId);
+      this.credentials.set(connectionId, cloneCredential(credential));
       try {
         await this.persistSecrets();
       } catch (error) {
-        if (previous) this.credentials.set(providerId, previous);
-        else this.credentials.delete(providerId);
+        if (previous) this.credentials.set(connectionId, previous);
+        else this.credentials.delete(connectionId);
         throw error;
       }
     });
   }
 
-  async delete(providerId: ProviderId) {
+  async delete(connectionId: string) {
     return this.withMutation(async () => {
       await this.ensureLoaded();
-      const previous = this.credentials.get(providerId);
-      const deleted = this.credentials.delete(providerId);
+      const previous = this.credentials.get(connectionId);
+      const deleted = this.credentials.delete(connectionId);
       if (!deleted) return false;
       try {
         await this.persistSecrets();
       } catch (error) {
-        if (previous) this.credentials.set(providerId, previous);
+        if (previous) this.credentials.set(connectionId, previous);
         throw error;
       }
       return true;
@@ -280,7 +297,7 @@ export class LocalConnectionStore implements ConnectionStore {
     await this.mutationQueue;
     await this.ensureLoaded();
     return [...this.connections.values()]
-      .map((connection) => cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.providerId) }))
+      .map((connection) => cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.id) }))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
@@ -293,18 +310,20 @@ export class LocalConnectionStore implements ConnectionStore {
       if (existing && existing.providerId !== normalized.providerId) throw new Error('Connection ID is already used by another provider.');
       if (!existing && this.connections.size >= maxConnections) throw new Error('The local connection limit has been reached.');
 
-      const previousCredential = this.credentials.get(normalized.providerId);
+      // Keyed by the connection, so a provider can hold several without the
+      // newest credential overwriting the others.
+      const previousCredential = this.credentials.get(id);
       const previousConnections = new Map(this.connections);
       const record = buildRecord({ ...normalized, id }, existing, credential.type !== 'none');
 
-      this.credentials.set(normalized.providerId, cloneCredential(credential));
+      this.credentials.set(id, cloneCredential(credential));
       this.connections.set(id, record);
       try {
         await this.persistSecrets();
         await this.persistMetadata();
       } catch (error) {
         this.connections = previousConnections;
-        if (previousCredential) this.credentials.set(normalized.providerId, previousCredential);
+        if (previousCredential) this.credentials.set(id, previousCredential);
         else this.credentials.delete(normalized.providerId);
         await this.persistSecrets().catch(() => undefined);
         await this.persistMetadata().catch(() => undefined);
@@ -413,11 +432,15 @@ export class LocalConnectionStore implements ConnectionStore {
     ]);
     this.connections = parseMetadata(metadataText);
     this.credentials = secretText ? await this.decryptSecrets(secretText) : new Map<ProviderId, ProviderCredential>();
-    const listedProviders = new Set([...this.connections.values()].filter((connection) => connection.hasCredential).map((connection) => connection.providerId));
+    // Credentials are keyed by connection id, so a stored key that matches no
+    // credential-bearing connection is an orphan. For a single-connection
+    // provider the two are the same string, which is why an existing vault
+    // still resolves after this change.
+    const listedConnectionIds = new Set([...this.connections.values()].filter((connection) => connection.hasCredential).map((connection) => connection.id));
     let discardedOrphans = false;
-    for (const providerId of this.credentials.keys()) {
-      if (!listedProviders.has(providerId)) {
-        this.credentials.delete(providerId);
+    for (const key of this.credentials.keys()) {
+      if (!listedConnectionIds.has(key)) {
+        this.credentials.delete(key);
         discardedOrphans = true;
       }
     }

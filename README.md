@@ -59,6 +59,24 @@ as "not connected", because that hides a credential you have actually saved.
 
 Only imported models are searchable, so connect a provider first.
 
+## Several Connections Per Provider
+
+A provider can hold more than one connection — two Cline accounts, a spare
+OpenRouter key. Each has its own credential, stored encrypted and keyed by
+connection rather than by provider, so adding a second never disturbs the first.
+
+`PUT /v1/connections/:providerId` updates that provider's existing connection.
+Pass an `id` in the body to add another one alongside it:
+
+```bash
+curl -X PUT http://127.0.0.1:8787/v1/connections/opencode \
+  -H 'content-type: application/json' \
+  -d '{"id":"opencode-backup","apiKey":"...","name":"Backup account","endpoint":"https://opencode.ai/zen/v1"}'
+```
+
+Health is reported per provider rather than per connection, so a page shows one
+health figure for a provider even when it has several connections.
+
 ## OpenCode Zen
 
 OpenCode Zen is a hosted gateway from the OpenCode team. Get a key at
