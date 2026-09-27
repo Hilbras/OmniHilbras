@@ -395,9 +395,19 @@ flow the OpenCode client runs for itself.
 | Read the live config | `GET console.opencode.ai/api/config` |
 
 A pending poll answers **HTTP 400** with `error: authorization_pending`, so the status has
-to be read from the body rather than treated as a failure. The verification URI comes
-back **relative** and has to be joined to the server. `expires_in` is 600 seconds and
+to be read from the body rather than treated as a failure. `expires_in` is 600 seconds and
 `interval` is 5.
+
+**The verification URI is relative, and it belongs to the web host, not the API host.**
+The Console serves its API from `console.opencode.ai` and its pages from `opencode.ai`, so
+joining `/console/device` to the API host yields `/console/console/device`, which renders
+a blank page and presents as a sign-in that did nothing. It must be joined to
+`https://opencode.ai`.
+
+**The device page requires a Console session.** Unauthenticated, it redirects to
+`/console/login?next=/console/device?user_code=…&reason=device`, carrying the device query
+through, so signing in returns to the approval with the code already filled in. The dialog
+says so, because a blank console page otherwise reads as a broken flow.
 
 `OpencodeConsoleAdapter` then serves the catalog from the lanes the server names rather
 than one fixed base URL:

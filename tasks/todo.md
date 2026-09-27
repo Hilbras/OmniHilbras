@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 10h: Fix the Console verification URL, which pointed at the API host.
+  - Acceptance: the device page opens on the Console web host, and the dashboard says what to expect when the browser has no Console session.
+  - Verify: the Console serves its API from `console.opencode.ai` and its pages from `opencode.ai`. `verification_uri` is relative, so joining it to the API host produced `/console/console/device`, which renders a blank page and presents as a sign-in that did nothing. Reproduced live: the doubled path was reached, the corrected URL is not, and an unauthenticated visit correctly redirects to `/console/login?next=/console/device?user_code=…&reason=device` with the device query preserved. 12 gateway tests cover the host split, the leading-slash case, a missing device code, pending-as-400, `slow_down`, a refusal in the Console's words, the org the client would pick, a token with no account lookup, a token with no access token, single-claim sessions, expiry, and a malformed session id.
+  - Files: `packages/omnihilbras-sdk/src/adapters/opencode-console.ts`, `apps/gateway/src/opencodeConsole.ts`, `apps/gateway/test/opencode-console.test.js`, `src/components/OauthConnectDialog.tsx`, docs.
+  - Depends on: Task 10g.
+  - Scope: Small.
+
 - [x] Task 10g: Build the OpenCode Console device-code sign-in, and light up the card.
   - Acceptance: the card signs in through the vendor's own device flow, stores the session per connection, renews it, and serves the catalog from the lanes the server names. Gemini is refused by name.
   - Verify: `POST /v1/oauth/opencode-console/start` returns 201 with a session, a 9-character user code, and an absolute verification URL — the Console returns a relative path, so it is joined to the server. `GET .../session/:id` reports `pending` for an unapproved code, 404 for an unknown session, 400 for a malformed id. In the dashboard the dialog shows the code, links to the code page, and falls back to the manual link when the tab is blocked. 15 new SDK tests cover lane dispatch, the Gemini refusal, renewal with the org preserved, the config-sourced org id, per-session lane caching, and the prefix-stripping of a vendor-prefixed id. Two bugs were found by those tests: a request renewed the session twice because the credential is resolved twice, and a config-supplied org id never reached the header because the adapter read only the credential.

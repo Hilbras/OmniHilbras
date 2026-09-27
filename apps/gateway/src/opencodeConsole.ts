@@ -167,8 +167,13 @@ async function getJson<T>(path: string, accessToken: string): Promise<T | undefi
 }
 
 /**
- * Asks the Console for a device code. The verification URI comes back relative, so it
- * is joined to the server rather than shown as a bare path.
+ * Asks the Console for a device code.
+ *
+ * The verification URI comes back relative, and it belongs to the Console's *web* host
+ * rather than its API host — joining it to `server` yields `/console/console/device`,
+ * which renders a blank page and looks like the flow did nothing. The page also
+ * redirects to a Console login when the browser has no session, and it carries the
+ * device query through as `next`, so signing in lands back on the code.
  */
 export async function beginOpencodeConsoleSignIn(): Promise<{
   deviceCode: string;
@@ -186,7 +191,7 @@ export async function beginOpencodeConsoleSignIn(): Promise<{
   return {
     deviceCode,
     userCode,
-    verificationUrl: `${OPENCODE_CONSOLE.server}${relative.startsWith('/') ? '' : '/'}${relative}`,
+    verificationUrl: `${OPENCODE_CONSOLE.webOrigin}${relative.startsWith('/') ? '' : '/'}${relative}`,
     ...(typeof data.expires_in === 'number' ? { expiresIn: data.expires_in } : {}),
   };
 }
@@ -240,4 +245,4 @@ export async function pollOpencodeConsoleSignIn(deviceCode: string): Promise<Pol
 }
 
 export const opencodeConsoleProviderLabel = 'OpenCode Console';
-export { opencodeConsoleProviderId };
+export { OPENCODE_CONSOLE, opencodeConsoleProviderId };

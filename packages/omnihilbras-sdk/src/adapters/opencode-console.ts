@@ -20,6 +20,12 @@ import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model,
  */
 export const OPENCODE_CONSOLE = {
   server: 'https://console.opencode.ai',
+  /**
+   * The Console serves its API from `server` but its web pages from `opencode.ai`.
+   * `verification_uri` comes back relative, and joining it to the API host produces
+   * `/console/console/device`, which renders a blank page.
+   */
+  webOrigin: 'https://opencode.ai',
   clientId: 'opencode-cli',
   deviceCodePath: '/auth/device/code',
   deviceTokenPath: '/auth/device/token',

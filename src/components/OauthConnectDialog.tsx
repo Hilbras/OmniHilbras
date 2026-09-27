@@ -166,7 +166,7 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
         setPhase('waiting');
         setMessage(sentToOpenTab
           ? 'Approve the request in your browser using the code below. This tab will finish the connection.'
-          : 'Your browser blocked the sign-in tab. Open the link below and enter the code.');
+          : 'Your browser blocked the sign-in tab. Open the link below to approve.');
         watch(signIn.sessionId, getDeviceSignInStatus, 'The sign-in timed out. Start again from OmniHilbras.');
       } catch (startError) {
         settledRef.current = true;
@@ -245,8 +245,12 @@ export function OauthConnectDialog({ providerId, providerName, signInWindow, onC
 
           {deviceCode && phase !== 'connected' && (
             <div className="mt-4 rounded-xl border border-gold/25 bg-gold-soft p-3">
-              <p className="text-[11px] font-semibold text-gold-text">Enter this code at OpenCode</p>
+              <p className="text-[11px] font-semibold text-gold-text">Approve this code at OpenCode</p>
               <p className="mt-1 select-all font-mono text-lg tracking-[0.18em] text-text">{deviceCode.userCode}</p>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+                The code is filled in for you. If OpenCode asks you to log in first, sign in there and it will
+                bring you back to this approval.
+              </p>
               <a href={deviceCode.verificationUrl} target="_blank" rel="noreferrer" className="btn-ghost mt-2 inline-flex !h-7 !px-2.5 !text-[11px]">
                 Open the code page
                 <ExternalLink className="h-3 w-3" aria-hidden="true" />
