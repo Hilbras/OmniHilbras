@@ -147,6 +147,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 22: Make a ChatGPT turn through ChatGPT's own request path, which is what actually works.
+  - Acceptance: a real turn returns a real answer through the gateway, on a real session.
+  - Verify: `POST /v1/chat/completions` with `x-omnihilbras-provider: chatgpt-web` returns 200 and `content: "working"` for "Reply with the single word: working", and `"4"` for "What is 2+2?" — three consecutive successes in 20s, 24s and 37s. 8 gateway tests on the pure half, 341 total.
+  - Findings: **typing into the composer does not work.** The request is accepted, a placeholder appears, and the page sits at "Think" indefinitely — signed in, plan known, composer accepting keystrokes, the send button enabled, the message posted. The composer path is simply not how a programmatic client makes a turn. What works is the page's own path: its Sentinel requirements, its proof-of-work and Turnstile tokens, its request client, and `POST /f/conversation`. The module is found by scanning the page's assets for **semantic markers** and reading the minified names out of the trailing `export{…}` block; all four markers are in one 2.6 MB chunk today, which imports directly and yields 4 074 exports. Three things had to be found rather than assumed: the asset is imported **directly**, because a generated blob module re-exporting from it fails with a bare "Failed to fetch dynamically imported module" that names no cause; only a first-party `/cdn/assets/*.js` URL is ever fetched, since the candidate list comes off a live page and is untrusted input; and the delta stream is JSON Patch **objects** whose `append` concatenates — reading it as a replace keeps only the last fragment, and reading the value out of JSON Patch's third slot writes `undefined` at every path, both of which read as a model that answered nothing. Also: the temporary-chat URL triggers the first-use onboarding modal and failed to navigate, so the plain landing page is used. **Not perfectly reliable** — a fetch inside ChatGPT's own code can fail on the network and gets exactly one retry; anything else is raised as a real failure so a broken session is not retried into looking intermittent. Attachments are not implemented.
+  - Files: `apps/gateway/src/chatgptFirstParty.ts`, `src/chatgptWeb.ts`, `apps/gateway/test/chatgpt-first-party.test.js`, `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, docs.
+  - Depends on: Task 21.
+  - Scope: Big.
+
 - [x] Task 21: Replace the invented ChatGPT model ids with the observed ones, and fix catalog refresh.
   - Acceptance: the catalog carries ids the web tier actually serves, and a refresh can remove a model.
   - Verify: `listModels()` for a free session returns `auto, auto-thinking` and the paid family is refused by name; a refresh on the live connection drops the stale `gpt-5.2` ids and the result survives a reload from disk. 42 ChatGPT Web tests, 329 total.

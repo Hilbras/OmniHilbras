@@ -34,11 +34,16 @@ export const CHATGPT_WEB = {
   /** The only origin this will talk to. */
   origin: 'https://chatgpt.com',
   /**
-   * A temporary chat is used because a normal conversation is kept server-side against
-   * the account, and a gateway's own traffic should not accumulate a visible history
-   * under somebody's name. It is also one fewer artifact to clean up afterwards.
+   * The signed-in landing page.
+   *
+   * `?temporary-chat=true` would keep a gateway's traffic out of the account's visible
+   * history, which is the right idea, but it is also what triggers the first-use
+   * onboarding modal — which holds focus and intercepts the request — and it failed to
+   * navigate at all on the address this was tested from. A turn sent through the first-party
+   * request path creates its own conversation regardless, so the URL is not what keeps
+   * history clean.
    */
-  startUrl: 'https://chatgpt.com/?temporary-chat=true',
+  startUrl: 'https://chatgpt.com/',
   /** Playwright needs a writable profile directory; this is where the browser state goes. */
   defaultTurnTimeoutMs: 180_000,
   navigationTimeoutMs: 30_000,

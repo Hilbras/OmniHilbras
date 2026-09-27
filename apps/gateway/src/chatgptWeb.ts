@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { CHATGPT_WEB, type ChatGptCookie, type ChatGptWebDriver } from '@hilbras/omnihilbras';
+import { executeFirstPartyTurn, extractAssistantText, type PageLike } from './chatgptFirstParty.js';
 
 /**
  * The browser half of ChatGPT Web.
@@ -160,30 +161,6 @@ function toPlaywrightCookie(cookie: ChatGptCookie) {
   };
 }
 
-/**
- * The signed-out check.
- *
- * A browser with stale cookies still renders a page, and it renders it perfectly well. The
- * only honest difference is that the composer is absent and the sign-in link is present, so
- * that is what is looked for — and it is checked *before* the turn, because a signed-out
- * page otherwise looks like a model that returned nothing.
- */
-async function readPageState(page: PlaywrightPage) {
-  const loginLink = page.locator(CHATGPT_WEB.signedOutMarker);
-  const composer = page.locator(CHATGPT_WEB.composer);
-  const [loginLinkCount, composerCount] = await Promise.all([loginLink.count(), composer.count()]);
-  // A blocked request renders a real page — just not the application. It is caught by its
-  // own wording, because "no composer" would otherwise be reported as a signed-out session
-  // and send the user off to re-export a perfectly good one.
-  const bodyText = await page.locator('body').textContent().catch(() => '');
-  const documentTitle = await page.title().catch(() => '');
-  // A Cloudflare interstitial has an empty body, so the title is what identifies it.
-  const blocked = /just a moment|unable to load site|attention required|access denied|checking your browser/i.test(
-    `${documentTitle ?? ''} ${bodyText ?? ''}`,
-  );
-  return { loginLinkCount, composerCount, blocked, title: documentTitle, bodyHead: bodyText ?? '' };
-}
-
 function describeBlocked(): string {
   return 'chatgpt.com served its bot-protection challenge instead of the application, so no turn was attempted. This is a network-level block on the address OmniHilbras is running from — it happens with a valid session, so it is not a problem with your export. A residential connection with no VPN or datacenter is the usual fix.';
 }
@@ -221,7 +198,7 @@ export function createChatGptWebDriver(connectionKey = 'default'): ChatGptWebDri
       return { ok: true };
     },
 
-    async ask({ cookies, selection, messages, timeoutMs }) {
+    async ask({ cookies, selection, messages }) {
       const playwright = await loadPlaywright();
       if (!playwright) {
         throw new Error(
@@ -230,152 +207,92 @@ export function createChatGptWebDriver(connectionKey = 'default'): ChatGptWebDri
       }
       const prompt = messages[messages.length - 1]?.text ?? '';
       if (!prompt.trim()) throw new Error('There is nothing to ask ChatGPT Web.');
-      /**
-       * Recorded, not yet applied.
-       *
-       * The selection is the model label and effort the page should be driven with, and
-       * setting it needs the page's own internal API — which is what the reference project
-       * calls after discovering ChatGPT's JavaScript module at runtime. Typing into the
-       * composer cannot set a model, so on a paid account the page uses whatever its picker
-       * was already showing. That limitation is why this is logged rather than silently
-       * ignored, and why a free account (`auto`, the page decides) is unaffected by it.
-       */
-      console.warn(`[chatgpt-web] selection requested: ${JSON.stringify(selection)}; driving the composer, which cannot set a model`);
-
       // The container this often runs in has no shared memory and no sandbox namespaces.
       // Both are required by a default Chromium and neither is fixable by the user here.
       const launchOptions = {
         headless: true,
         args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
+        // Without these the edge answers 403 before the page exists.
         userAgent: BROWSER_USER_AGENT,
         locale: BROWSER_LOCALE,
         timezoneId: BROWSER_TIMEZONE,
         viewport: { width: 1400, height: 950 },
       };
+      // A persistent profile, not a fresh browser each turn: ChatGPT's first-use
+      // "Temporary Chat" modal otherwise reappears every time, holding focus and
+      // intercepting the click on Send.
       await mkdir(dir, { recursive: true });
-      let context: PlaywrightContext | undefined;
-      // Hoisted so the failure path can re-read the page and name what it actually showed,
-      // rather than reporting a bare timeout that helps nobody.
-      let page: PlaywrightPage | undefined;
+      const context = await playwright.chromium.launchPersistentContext(dir, launchOptions);
+      let page: PageLike | undefined;
       try {
-        context = await playwright.chromium.launchPersistentContext(dir, launchOptions);
         // Chunked before they are set, because an oversized cookie fails the whole batch.
         await context.addCookies(cookies.flatMap((cookie) => chunkCookie(cookie)).map(toPlaywrightCookie));
-        page = await context.newPage();
-
-        await page.goto(CHATGPT_WEB.startUrl, { waitUntil: 'domcontentloaded', timeout: CHATGPT_WEB.navigationTimeoutMs });
-
-        // Checked before typing, so a stale export is named as a stale export — and a
-        // blocked edge is named as a blocked edge rather than mistaken for one.
-        const state = await readPageState(page);
-        if (state.blocked) throw new Error(describeBlocked());
-        if (state.loginLinkCount > 0 && state.composerCount === 0) throw new Error(describeSignedOut());
-
+        page = (await context.newPage()) as unknown as PageLike;
         /**
-         * A challenge page is not necessarily present the instant `goto` returns, so the
-         * page is re-inspected when the composer never arrives. Reporting only "it timed
-         * out" is what made this look like a model problem rather than a refused request.
+         * Navigation is retried, because a dropped connection reports itself as
+         * `ERR_NETWORK_CHANGED` — indistinguishable, to the caller, from chatgpt.com being
+         * unreachable. One retry is the difference between a transient blip and a failed
+         * turn.
          */
-        // The first-use "Temporary Chat" modal holds focus and intercepts the click on
-        // Send. With a persistent profile it appears once, but an existing profile can
-        // still be holding it, so it is dismissed rather than assumed absent.
-        const onboarding = page.locator(`${CHATGPT_WEB.onboardingModal} button`).last();
-        if (await onboarding.count()) {
-          await onboarding.click({ force: true }).catch(() => undefined);
-          await page.waitForTimeout(750).catch(() => undefined);
-        }
-
-        const composerAppeared = await page
-          .waitForSelector(CHATGPT_WEB.composer, { timeout: CHATGPT_WEB.navigationTimeoutMs })
-          .then(() => true)
-          .catch(() => false);
-        if (!composerAppeared) {
-          const after = await readPageState(page);
-          if (after.blocked) throw new Error(describeBlocked());
-          if (after.loginLinkCount > 0) throw new Error(describeSignedOut());
-          throw new Error(
-            `The ChatGPT page loaded but never showed a composer. The document title was ${JSON.stringify(after.title)}${
-              after.bodyHead ? ` and the page said ${JSON.stringify(after.bodyHead.slice(0, 120))}` : ' with an empty body'
-            }.`,
-          );
-        }
-        const before = await page.locator(CHATGPT_WEB.assistantMessage).count();
-
-        /**
-         * Typed as keystrokes, never assigned.
-         *
-         * The composer is a ProseMirror editor: `fill()` sets the DOM without the input
-         * events React listens for, so the send button stays `aria-disabled="true"` and a
-         * click on it hangs forever. Real key events are what a person produces, and they
-         * are what the button is watching for.
-         */
-        const composer = page.locator(CHATGPT_WEB.composer);
-        await composer.click({ force: true });
-        await composer.pressSequentially(prompt, { delay: 12 });
-        await page.waitForSelector(CHATGPT_WEB.sendButton, { timeout: 15_000 });
-        // Forced, because a dismissible page notice can overlap the button and swallow a
-        // synthetic click that a person would simply click through.
-        await page.click(CHATGPT_WEB.sendButton, { force: true });
-
-        /**
-         * Waiting for the turn to finish is waiting for the stop button to *disappear*,
-         * which is the only completion signal the page exposes. Then the new assistant
-         * message is read.
-         */
-        await page.waitForSelector(CHATGPT_WEB.stopButton, { timeout: 15_000 }).catch(() => undefined);
-        /**
-         * Waiting for the turn to end by waiting for the answer to stop growing.
-         *
-         * Waiting for the stop button to disappear is the obvious signal and it is wrong:
-         * after a turn finishes the button stays in the DOM, so that wait never returns and
-         * a completed turn is reported as a timeout. Answer text that has stopped changing
-         * is what "finished" actually looks like on this page.
-         */
-        const assistantSelector = CHATGPT_WEB.assistantMessage;
-        const assistantBefore = before;
-        const deadline = Date.now() + timeoutMs;
-        let lastText = '';
-        let stableSince = 0;
-        while (Date.now() < deadline) {
-          const snapshot = await page
-            .evaluate(
-              (selector: string) => {
-                const nodes = Array.from(document.querySelectorAll(selector)) as HTMLElement[];
-                return { count: nodes.length, text: (nodes[nodes.length - 1]?.innerText ?? '').trim() };
-              },
-              assistantSelector,
-            )
-            .catch(() => undefined);
-          if (snapshot && snapshot.count > assistantBefore && snapshot.text) {
-            if (snapshot.text === lastText) {
-              if (!stableSince) stableSince = Date.now();
-              // Two seconds of no change is the page's own cadence; more is a network pause.
-              if (Date.now() - stableSince >= 2_000) break;
-            } else {
-              lastText = snapshot.text;
-              stableSince = 0;
-            }
+        let navigated = false;
+        for (let attempt = 1; attempt <= 2 && !navigated; attempt += 1) {
+          try {
+            await page.goto(CHATGPT_WEB.startUrl, { waitUntil: 'domcontentloaded', timeout: CHATGPT_WEB.navigationTimeoutMs });
+            navigated = true;
+          } catch (error) {
+            if (attempt === 2) throw error;
+            await page.waitForTimeout(2_000).catch(() => undefined);
           }
-          await page.waitForTimeout(750).catch(() => undefined);
+        }
+        await page.waitForTimeout(6_000);
+
+        // A challenge is identified by its title, because its body is empty.
+        const title = await page.title().catch(() => '');
+        if (/just a moment/i.test(title)) throw new Error(describeBlocked());
+        if ((await page.locator(CHATGPT_WEB.signedOutMarker).count()) > 0) {
+          throw new Error(describeSignedOut());
         }
 
-        const messages_ = await page.locator(CHATGPT_WEB.assistantMessage).allTextContents();
-        const text = (messages_[messages_.length - 1] ?? '').trim();
-        return { text };
-      } catch (error) {
-        if (error instanceof Error && /Timeout .* exceeded/i.test(error.message)) {
-          // The turn itself timed out, which is a different thing from the page never
-          // loading — so the page is re-read before saying so.
-          const after = page ? await readPageState(page).catch(() => undefined) : undefined;
-          if (after?.blocked) throw new Error(describeBlocked());
-          if (after?.loginLinkCount) throw new Error(describeSignedOut());
-          throw new Error(`The ChatGPT page never finished the turn within ${Math.round(timeoutMs / 1000)}s.`);
+        /**
+         * The turn, through ChatGPT's own code.
+         *
+         * Typing into the composer posts a request the page never completes: a placeholder
+         * appears and the page sits at "Think" indefinitely. What works is the path the page
+         * uses for itself — its Sentinel requirements, its proof-of-work and Turnstile
+         * tokens, and its request client.
+         */
+        const reason = selection.kind === 'free' ? selection.thinkEnabled : selection.effortIndex > 0;
+
+        /**
+         * One retry for a dropped connection, and only for that.
+         *
+         * The turn runs inside the page, and a fetch ChatGPT's own code makes can fail on
+         * the network — `Failed to fetch` from its Sentinel or Turnstile solve. That is
+         * indistinguishable, to the caller, from a real refusal, and it is not one: it
+         * succeeds on a second attempt. Anything else is a real failure and is raised as
+         * one, so a broken session is not retried into looking intermittent.
+         */
+        let text = '';
+        let lastError: Error | null = null;
+        for (let attempt = 1; attempt <= 2 && !text; attempt += 1) {
+          try {
+            const sse = await executeFirstPartyTurn(page, { prompt, model: selection.model, reason });
+            text = extractAssistantText(sse);
+            if (!text) {
+              throw new Error('ChatGPT answered, but the stream carried no text. Its response format may have changed.');
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const transient = /Failed to fetch|ERR_NETWORK_CHANGED|NetworkError|load failed/i.test(message);
+            lastError = error instanceof Error ? error : new Error(message);
+            if (!transient || attempt === 2) throw lastError;
+            await page.waitForTimeout(3_000).catch(() => undefined);
+          }
         }
-        throw error;
+        return { text };
       } finally {
-        // The profile persists, so only the page is closed.
-        await page?.close().catch(() => undefined);
-        await context?.close().catch(() => undefined);
+        // The profile persists, so the context is what gets closed.
+        await context.close().catch(() => undefined);
       }
     },
   };

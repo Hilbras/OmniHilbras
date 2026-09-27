@@ -872,27 +872,74 @@ what the "add model" control means.
 to; the persistent one did, and it already did — which is where the two implementations had
 drifted apart.
 
-### What is still not working, stated plainly
+### Driving the turn, which is not a composer
 
-**No turn has produced an answer.** The request is submitted — real keystrokes into the
-composer, the send button enables, the message posts — and the page renders only a
-placeholder:
+Typing into the composer **does not work**, and no amount of waiting changes that. The
+request is accepted, a placeholder appears with `data-message-id="request-placeholder-…-0"`,
+and the page sits at its "Think" indicator indefinitely. Everything about the surrounding
+page is fine — signed in, plan known, composer accepts keystrokes, the send button enables,
+the message posts. The composer path just is not how a programmatic client makes a turn.
 
-```html
-<div data-message-author-role="assistant"
-     data-message-id="request-placeholder-request-WEB:…-0" …>
+What works is the path the page uses for **itself**: its Sentinel requirements, its
+proof-of-work and Turnstile tokens, its request client, and `POST /f/conversation`. That
+code lives in a hashed chunk under `/cdn/assets/`, its exports are minified, and both change
+on every deployment — so it is found by scanning the page's own asset list for **semantic
+markers** and reading the names out of the trailing `export{…}` block:
+
+```
+Kc(e=!1,t=`none`,n=Oz){return Oz(`finalized`,e,t,n)}   -> finalizeRequirements
+Promise.all([ll.getEnforcementToken(t,{forceSync:!0}), …])  -> proofManager, turnstileManager
+U8.safePost(`/sentinel/chat-requirements/prepare`, …)  -> requestClient
+function Xc(e,t,n,r,i,a){…o[`OpenAI-Sentinel-Chat-Requirements-Token`]…}  -> buildSentinelHeaders
 ```
 
-with no text, sitting at its "Think" indicator indefinitely. The model is now the right one
-for the plan, and the access path is right, and it still does not complete.
+Verified against the live page: all four markers sit in one 2.6 MB chunk, and importing it
+directly yields 4 074 exports. Nothing is pinned — the markers are behaviour, the names are
+read, and when ChatGPT changes its minified output the failure **names itself** rather than
+returning nothing.
 
-The reference project **does** complete turns on this same machine, and does it by
-discovering ChatGPT's own JavaScript module at runtime and calling their internal API,
-including an explicit model *selection* step. It never hardcodes a selector. That is the
-remaining difference, and it is a substantial piece of work rather than a fix.
+Three things that had to be found rather than assumed:
 
-So: access solved, model ids correct, submission works, **completion not yet solved**. The
-card says so.
+**The asset is imported directly.** A generated blob module that re-exports from it fails
+with a bare `Failed to fetch dynamically imported module` that says nothing about the cause,
+while importing the asset itself works. So the five functions are lifted out of the module
+namespace directly, and a missing one is named at install time instead of failing three
+calls later as `undefined is not a function`.
+
+**Only a first-party asset is ever read.** The candidate list comes off a live page, so it
+is untrusted input: an origin or path outside `/cdn/assets/*.js` is refused before anything
+is fetched.
+
+**The delta stream is JSON Patch objects, and `append` concatenates.**
+
+```json
+{"p": "/message/content/parts/0", "o": "append", "v": "working"}
+```
+
+Reading `append` as a replace keeps only the final fragment; reading the value out of JSON
+Patch's third slot writes `undefined` at every path and builds a document full of empty
+containers — both of which read as a model that answered nothing. A message with no path is
+a new turn, and `content_type` is not always `text`: a `reasoning_recap` is not the answer.
+
+### Verified end to end
+
+```
+POST /v1/chat/completions  x-omnihilbras-provider: chatgpt-web
+  {"model":"gpt-5.6-luna-free","messages":[{"role":"user","content":"Reply with the single word: working"}]}
+
+-> 200  provider: chatgpt-web  model: gpt-5.6-luna-free  finish_reason: stop
+   content: "working"          20s, 24s, 37s across three consecutive runs
+-> 200  content: "4"           for "What is 2+2? Answer with the number only."
+```
+
+**It is not perfectly reliable.** A fetch that ChatGPT's own code makes — its Sentinel or
+Turnstile solve — can fail on the network, arriving as `Failed to fetch`, which is
+indistinguishable to the caller from a real refusal and is not one. That gets exactly one
+retry; anything else is raised as a real failure, so a broken session is never retried into
+looking intermittent. Two navigation retries for the same reason.
+
+Attachments are **not** implemented. A text-only turn is the whole of what this does, and
+saying so beats a partial upload path.
 
 ### Catalog cards added for OpenAI-compatible gateways
 

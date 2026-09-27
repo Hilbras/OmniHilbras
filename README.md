@@ -182,23 +182,28 @@ npx playwright install chromium
 
 Without it, ChatGPT Web says so by name rather than failing as a provider error.
 
-**It reaches ChatGPT but does not yet complete a turn.** The page loads, the prompt is typed
-and sent, and then only a placeholder appears, with no answer. If you try it, that is the
-most likely result.
+**ChatGPT Web works.** A real turn returns a real answer in about 20–40 seconds:
 
-Two earlier notes here were wrong, and both are corrected in the spec. The 403 was **not** the
-network — it was Playwright's default headless user agent containing `HeadlessChrome`, which
-the edge rejects. And the model ids were **invented**: the web tier serves `gpt-5-6`,
-`gpt-5-5` and friends, and a free account has no picker at all — the page is sent the literal
-id `auto`.
+```bash
+curl -s -X POST http://127.0.0.1:8787/v1/chat/completions \
+  -H 'content-type: application/json' -H 'Origin: http://localhost:5173' \
+  -H 'x-omnihilbras-provider: chatgpt-web' \
+  -d '{"model":"gpt-5.6-luna-free","messages":[{"role":"user","content":"Reply with the single word: working"}]}'
+# -> 200, content: "working"
+```
 
-What remains is the same in both: the page is driven with a *selection*, and typing into a
-composer cannot set one. The reference discovers ChatGPT's own JavaScript module at runtime
-and calls their internal API; here the selection is resolved correctly and logged, but the
-composer path cannot apply it.
+It is **not perfectly reliable** — a fetch inside the page can fail on the network, and gets
+one retry. Attachments are not supported; a text-only turn is the whole of it.
 
-The export format is the one ChatGPT actually hands you (a CLI/Codex auth export with a
-`sessionToken`), and the plan it carries decides which models you are offered.
+Two earlier notes here were wrong and are corrected in the spec: the 403 was **not** the
+network, it was Playwright's default headless user agent containing `HeadlessChrome`; and
+the model ids were invented twice, first as `gpt-5.2` and then as `auto`, which is not a
+model a client can ask for but the string the *page* is given when an account is free.
+
+The turn is made through ChatGPT's own request path — its Sentinel requirements, its
+proof-of-work and Turnstile tokens, its request client — with the module found by scanning
+the page's assets for semantic markers. Driving the composer does not work: it posts a
+request the page never completes.
 
 ## Kiro, and why it carries a warning
 

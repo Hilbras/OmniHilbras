@@ -296,13 +296,12 @@ test('the catalog is the known set, and streaming is not claimed', async () => {
   assert.equal(adapter.capabilities.streaming, false);
 });
 
-test('the selectors are ChatGPT test hooks, and the origin is pinned', () => {
+test('the origin is pinned, and the sign-in wall is detected', () => {
   assert.equal(CHATGPT_WEB.origin, 'https://chatgpt.com');
-  assert.match(CHATGPT_WEB.composer, /^#/);
-  assert.match(CHATGPT_WEB.assistantMessage, /^\[data-message-author-role="assistant"\]$/);
   assert.match(CHATGPT_WEB.signedOutMarker, /^a\[href="/);
-  // A temporary chat, so a gateway's traffic does not accumulate a visible history.
-  assert.match(CHATGPT_WEB.startUrl, /temporary-chat=true/);
+  // The signed-in landing page: the temporary-chat variant is what triggers the first-use
+  // onboarding modal, and it did not navigate at all from the address tested.
+  assert.equal(CHATGPT_WEB.startUrl, 'https://chatgpt.com/');
 });
 
 /* ------------------------------------------------------------------ *
