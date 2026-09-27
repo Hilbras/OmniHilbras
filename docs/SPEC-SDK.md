@@ -127,6 +127,12 @@ The first local gateway exposes:
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
 - `POST /v1/chat/completions` with `stream: true` — normalized SSE chunks.
 - The dashboard provider test uses live adapter health; each model test uses a bounded real chat completion through the same route.
+- A model test must fail when the model returns no visible output. A well-formed
+  envelope with empty content is not a working model, and a `Ping` badge beside a
+  model that answers nothing is a false report. The test budget is 96 tokens
+  because reasoning models spend the first several on hidden reasoning; at 16 they
+  returned nothing at all and still read as a pass. A response carrying tool calls
+  counts as an answer even with no text.
 
 
 Gateway errors use one shape:

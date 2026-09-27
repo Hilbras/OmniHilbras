@@ -59,6 +59,34 @@ as "not connected", because that hides a credential you have actually saved.
 
 Only imported models are searchable, so connect a provider first.
 
+## Why a Model Can Fail Here And Work Elsewhere
+
+A model test is one small real request, and several things can make that request
+fail for reasons that have nothing to do with the model being broken.
+
+**Reasoning models and the token budget.** This was a real bug, now fixed. The
+test asked for at most 16 tokens. Reasoning models spend their first several tokens
+thinking, so they returned `finish_reason: length` with **no content at all** — and
+the test only checked that the response envelope was well formed, so it recorded a
+green `Ping` badge for a model that had answered nothing. Two free models that
+"passed" returned literally nothing. The budget is now 96 tokens, and an empty
+response is a failure with a reason instead of a pass.
+
+**Free-tier rate limits.** A `:free` model answers `429` when the shared free quota
+is spent, which is a provider limit and not a fault in the gateway.
+
+**Providers that do not speak one API shape.** OpenCode Zen routes different models
+to different endpoints: GPT models from `/zen/v1/responses`, some others from
+`/zen/v1/messages`, the rest from `/zen/v1/chat/completions`. The gateway speaks
+the last of those, so a model on either of the other two shapes fails here and
+works in OpenCode. Choosing a path per model is not implemented.
+
+**Account state.** Cline answers `402 Payment Required` when the account has no
+credits for inference, which is independent of this gateway.
+
+When a test fails, the failure reason is shown on the row. The result filter's
+**Failed** tab isolates them, and a bulk run reports the count.
+
 ## Several Connections Per Provider
 
 A provider can hold more than one connection — two Cline accounts, a spare

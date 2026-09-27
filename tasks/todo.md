@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 9y: Stop recording an empty model response as a pass.
+  - Acceptance: the model test budget is 96 tokens, and a response with no visible text is a failure carrying a reason rather than a `Ping` badge. A response with tool calls still counts as an answer.
+  - Verify: live against OpenRouter free models. `liquid/lfm-2.5-2.6b:free` and `dots-studio/dots-3-note-preview:free` both returned `content: null, finish_reason: length` at 16 tokens and were recorded as passes; at 96 tokens both answer `OK` with `finish_reason: stop`.
+  - Files: `src/lib/gatewayClient.ts`, docs.
+  - Depends on: Task 9x.
+  - Scope: Small.
+
 - [x] Task 9x: Say why a Cline call failed.
   - Acceptance: a Cline health check returns a reason instead of a bare `unavailable`, and a failed token renewal is reported as an expired session rather than a raw 4xx.
   - Verify: 3 new SDK tests. Live: a Cline health check that previously reported only `unavailable` now reads "Cline rejected the token. Sign in again."

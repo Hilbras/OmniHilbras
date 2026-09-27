@@ -168,6 +168,14 @@ export function saveOpenRouterConnection(input: OpenRouterConnectionInput, signa
   }).then((body) => body.connection);
 }
 
+/** Enough for a reasoning model to think and still answer, and still trivial to bill. */
+export const MODEL_TEST_MAX_TOKENS = 96;
+
+/** A tool call is a real answer even with no text, so it must not read as empty. */
+function hasToolCalls(message: Record<string, unknown>) {
+  return Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+}
+
 export async function testGatewayModel(providerId: string, model: string, signal?: AbortSignal) {
   const startedAt = Date.now();
   const body = await requestJson<unknown>('/v1/chat/completions', {
@@ -179,7 +187,10 @@ export async function testGatewayModel(providerId: string, model: string, signal
     body: JSON.stringify({
       model,
       messages: [{ role: 'user', content: 'Reply with exactly OK.' }],
-      max_tokens: 16,
+      // Large enough for a reasoning model to finish thinking and still answer.
+      // At 16 tokens several models spent the whole budget on hidden reasoning
+      // and returned nothing at all, which read as a pass.
+      max_tokens: MODEL_TEST_MAX_TOKENS,
       stream: false,
     }),
     ...(signal ? { signal } : {}),
@@ -190,6 +201,15 @@ export async function testGatewayModel(providerId: string, model: string, signal
   const choice = body.choices[0];
   if (!isRecord(choice) || !isRecord(choice.message)) throw new Error('The gateway returned an invalid model test response.');
   const content = choice.message.content;
+  const text = typeof content === 'string' ? content.trim() : '';
+  // A response with no visible text is not a working model, however well formed
+  // the envelope is. Reporting it as a pass is how a model that answers nothing
+  // ends up with a healthy badge next to its name.
+  if (!text && !hasToolCalls(choice.message)) {
+    throw new Error(choice.finish_reason === 'length'
+      ? 'The model produced no output within the test budget. It may need a larger max_tokens than the test allows.'
+      : 'The model returned an empty response.');
+  }
   return {
     model: typeof body.model === 'string' ? body.model : model,
     provider: typeof body.provider === 'string' ? body.provider : providerId,
