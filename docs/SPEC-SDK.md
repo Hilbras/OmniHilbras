@@ -468,6 +468,32 @@ saved connection's catalog and stores the result, keeping custom models. Without
 connection saved with no models has no way back short of signing in again, which for a
 device flow means another browser approval.
 
+### A provider id must never resolve to a different vendor
+
+The add-connection dialog keeps its own list of providers, and it used to resolve an
+unknown id to the *first* entry, which is OpenAI. So a card the dialog did not know about
+became OpenAI, with OpenAI's endpoint — and the key typed for one provider was validated
+against, and transmitted to, a different company. The failure looks like a wrong key,
+because the error comes back from the wrong vendor in exactly that shape:
+
+```
+Provider authentication failed. Incorrect API key provided: sk-nry-…
+You can find your API key at https://platform.openai.com/account/api-keys.
+```
+
+Two rules now hold, and the second is the one that matters:
+
+1. A card in `providerCatalog` resolves to its own option, endpoint and all, whether or
+   not the dialog's list has been updated. The list is no longer a second source of truth
+   that can fall behind the catalog.
+2. **An id that resolves to nothing resolves to the neutral custom option, never to a
+   named vendor.** A key must not be able to reach a company the operator did not name,
+   and "I have never heard of this provider" is not a reason to pick one.
+
+A catalog card and the dialog's option list are the same data in two places, and that is
+the structural cause. The resolver reads the catalog as the authority and the list as an
+override, so a card can be added in one place and still resolve correctly.
+
 ### How a refusal is reported
 
 Two rules, and getting either wrong costs an operator an afternoon.

@@ -146,6 +146,13 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 10m: Never let a provider id resolve to a different vendor.
+  - Acceptance: a card resolves to its own option and endpoint whether or not the dialog's list knows it, and an unknown id resolves to the neutral custom option rather than to a named vendor. A key must never be transmitted to a provider the operator did not name.
+  - Verify: adding the NaraRouter card without adding it to the dialog's own option list made the dialog fall back to `providerOptions[0]`, which is OpenAI — so the dialog was titled "Add OpenAI API Key", carried `https://api.openai.com/v1`, and a NaraRouter key was validated against and transmitted to OpenAI, which replied with its own "Incorrect API key provided" shape. Verified fixed in the browser: the dialog is titled "Add NaraRouter API Key", references NaraRouter and not OpenAI, and the check request goes to `/v1/connections/nara-router` and returns NaraRouter's own `A valid API key is required.` The stale "Preview mode: this provider connection is not sent to the gateway yet" copy is corrected too, since the key demonstrably does reach the loopback gateway. `src/` has no test runner, so this is browser-verified rather than covered by an automated test.
+  - Files: `src/components/AddProviderModal.tsx`, `src/data/providers.ts`, docs.
+  - Depends on: Task 10l.
+  - Scope: Small.
+
 - [x] Task 10l: Stop discarding the provider's explanation, and stop treating a 403 as an auth failure.
   - Acceptance: a refusal names the provider's reason on every provider, and a refused request cannot eject a connection that is otherwise healthy.
   - Verify: two defects with one cause visible between them. First, the transport cancelled the error body unread and passed `undefined` to the classifier, so `providerErrorDetail` never had anything to work with and every refusal on every provider arrived with no reason — the body is now read on both the request and stream paths, bounded to 64 KB and JSON-parsed when it is JSON. Second, a 403 mapped to `AUTHENTICATION_FAILED`, which is a terminal route code, so one refused free model ejected the connection and took seventy working models with it; only a 401 is an auth failure on status alone, and Cline and OpenRouter already raise it deliberately. Measured live on `/inference/openai/v1` with a Console session: refused model now reports "OpenCode's free tier can only be used from within OpenCode", the following request on the same connection answers 200, and the pattern repeats. The dashboard tooltip carries the provider's words, taken from `providerMessage`, which is only sent to a trusted local dashboard origin. Seven tests cover the status mapping, and the body-extraction case fails against the old behaviour.

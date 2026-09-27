@@ -156,6 +156,10 @@ One trap: Zen's `mimo-v2.6-flash-free` and OpenRouter's `xiaomi/mimo-v2.6-flash`
 different models from different vendors, and the ids are close enough to mix up. The
 OpenRouter one answers on a paid route; the Zen one does not.
 
+A card's provider id always resolves to that provider — its own endpoint, its own name —
+and an id that resolves to nothing resolves to the neutral custom option rather than to any
+named vendor, so a key can never be sent to a company you did not name.
+
 When a provider refuses a request, the dashboard shows the provider's own words. A `403`
 is reported as a refusal rather than an authentication failure, because treating it as one
 ejected the whole connection and took every working model with it.

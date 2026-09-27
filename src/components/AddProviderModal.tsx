@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, CheckCircle2, ChevronDown, CircleAlert, LoaderCircle, LockKeyhole, ShieldCheck } from 'lucide-react';
-import { getProviderLogo } from '../data/providers';
+import { getProviderLogo, providerCatalog } from '../data/providers';
 import { checkOpenRouterConnection } from '../lib/gatewayClient';
 
 export type ProviderOption = {
@@ -23,8 +23,39 @@ export const providerOptions: ProviderOption[] = [
   { id: 'mistral', name: 'Mistral', description: 'Efficient hosted models', auth: 'API key', color: '#f97316', initial: 'M', logo: getProviderLogo('mistral'), defaultEndpoint: 'https://api.mistral.ai/v1' },
   { id: 'openrouter', name: 'OpenRouter', description: 'Many models through one API', auth: 'API key', color: '#b995e8', initial: 'R', logo: getProviderLogo('openrouter'), defaultEndpoint: 'https://openrouter.ai/api/v1' },
   { id: 'opencode', name: 'OpenCode Zen', description: 'Curated gateway, key from opencode.ai/auth', auth: 'API key', color: '#8b8f96', initial: 'Z', logo: getProviderLogo('opencode'), defaultEndpoint: 'https://opencode.ai/zen/v1' },
+  { id: 'nara-router', name: 'NaraRouter', description: 'OpenAI-compatible router at router.bynara.id', auth: 'API key', color: '#2d3948', initial: 'N', logo: getProviderLogo('nara'), defaultEndpoint: 'https://router.bynara.id/v1' },
   { id: 'custom', name: 'Custom endpoint', description: 'Any OpenAI-compatible server', auth: 'API key', color: '#9c9584', initial: 'C', defaultEndpoint: 'http://localhost:8000/v1' },
 ];
+
+/** The neutral option. Never a named vendor. */
+const customOption = (): ProviderOption => providerOptions[providerOptions.length - 1];
+
+/**
+ * Resolves a provider id to an option without ever substituting a different vendor.
+ *
+ * This used to fall back to `providerOptions[0]`, which is OpenAI. A card the dialog did
+ * not know about therefore became OpenAI, with OpenAI's endpoint — so a key typed for one
+ * provider was validated against, and transmitted to, another. A key must never be able
+ * to reach a vendor the operator did not name, so an unknown id resolves to the catalog
+ * card when there is one, and to the neutral custom option otherwise.
+ */
+export function resolveProviderOption(providerId: string | undefined): ProviderOption {
+  const known = providerOptions.find((item) => item.id === providerId);
+  if (known) return known;
+  const card = providerCatalog.find((item) => item.id === providerId);
+  if (!card) return customOption();
+  return {
+    id: card.id,
+    name: card.name,
+    description: card.description,
+    // The catalog spells keyless auth as "No key", which is what the modal tests for.
+    auth: /no key/i.test(card.auth) ? 'No key' : card.auth,
+    color: card.color,
+    initial: card.initial,
+    ...(card.logo ? { logo: card.logo } : {}),
+    defaultEndpoint: card.endpoint,
+  };
+}
 
 export type NewProvider = {
   providerId: string;
@@ -58,7 +89,7 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
   const [name, setName] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [bulkText, setBulkText] = useState('');
-  const [endpoint, setEndpoint] = useState(providerOptions[0].defaultEndpoint ?? '');
+  const [endpoint, setEndpoint] = useState(resolveProviderOption(initialProviderId).defaultEndpoint ?? '');
   const [priority, setPriority] = useState('1');
   const [proxyPool, setProxyPool] = useState('none');
   const [importFreeModels, setImportFreeModels] = useState(true);
@@ -69,7 +100,7 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
 
   useEffect(() => {
     if (!open) return;
-    const option = providerOptions.find((item) => item.id === initialProviderId) ?? providerOptions[0];
+    const option = resolveProviderOption(initialProviderId);
     setSelectedId(option.id);
     setMode('single');
     setName('');
@@ -114,7 +145,7 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
 
   if (!open) return null;
 
-  const selected = providerOptions.find((item) => item.id === selectedId) ?? providerOptions[0];
+  const selected = resolveProviderOption(selectedId);
   const requiresKey = selected.auth !== 'No key';
   const showsProviderSelect = !initialProviderId;
   const showsEndpoint = selected.id === 'custom' || selected.id === 'ollama';
@@ -132,7 +163,7 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
 
   function selectProvider(id: string) {
     cancelPendingCheck();
-    const option = providerOptions.find((item) => item.id === id) ?? providerOptions[0];
+    const option = resolveProviderOption(id);
     setSelectedId(option.id);
     if (option.id === 'openrouter') setMode('single');
     setApiKey('');
@@ -328,7 +359,9 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
                 </div>
 
                 <p className="mt-3 text-[11px] leading-relaxed text-muted">No active proxy pools available. Create one in Proxy Pools first.</p>
-                <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gold-text" aria-hidden="true" />{selected.id === 'openrouter' ? 'OpenRouter keys are checked by the loopback gateway and stored encrypted on this machine.' : 'Preview mode: this provider connection is not sent to the gateway yet.'}</p>
+                <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gold-text" aria-hidden="true" />{requiresKey
+                  ? `The key is checked against ${selected.name} through the loopback gateway and stored encrypted on this machine. It never reaches browser storage.`
+                  : 'This provider needs no key, so nothing is stored for it.'}</p>
               </>
             ) : (
               <div>
