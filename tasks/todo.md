@@ -146,6 +146,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 17: Give ChatGPT Web the ChatGPT logo, not OpenAI's.
+  - Acceptance: the card shows ChatGPT's own mark.
+  - Verify: the asset is ChatGPT's blossom path from OpenAI's own asset CDN, not a copy of `openai.svg`; the geometry differs from the OpenAI knot (4091 vs 1554 path characters); the SVG parses with no `<style>`, no script and no external reference; rasterised it renders the six-loop blossom.
+  - The first version copied `openai.svg`, which is OpenAI's hexagonal knot — a different company's mark, and the wrong one to label a ChatGPT card with. Two errors, actually: `chatgpt.com` itself is 403 from here, so the mark comes from `cdn.oaistatic.com`. Upstream's file is a 16-unit favicon with a `prefers-color-scheme` block and a white background rect; the geometry is taken and the chrome dropped, so the glyph is white on transparent like every other card mark and there is no embedded stylesheet to collide with the dashboard's.
+  - Files: `public/providers/chatgpt.svg`.
+  - Depends on: Task 16.
+  - Scope: Small.
+
 - [x] Task 16: Add a Web Cookie Providers group with ChatGPT Web, behind a high-severity warning.
   - Acceptance: a new group holds a ChatGPT Web card that connects by pasting an exported session, and the credential warning is acknowledged before anything is stored.
   - Verify: the group renders between API Key and Local with one card; the card badge reads `ACCOUNT SESSION`, not `TERMS`; the dialog shows the warning, four export steps, and a paste field disabled until the box is ticked. `POST /v1/web-cookie/chatgpt/connect` accepts a real-shaped storage state (201, 6 models) and refuses non-JSON, an export with no OpenAI cookies, and a missing field. Only `chatgpt.com`/`openai.com` cookies survive — `notopenai.com` and `chatgpt.com.evil.example` are dropped. A bad paste shows the reason and clears the field. 23 SDK tests.
