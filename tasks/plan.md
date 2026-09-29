@@ -217,12 +217,19 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 
 ### Phase 5: Cloud readiness
 
-- [ ] Task 10: Define cloud integration boundaries.
-  - Acceptance: auth context, tenant context, remote `SecretStore`, and deployment configuration are represented by interfaces without implementing cloud infrastructure.
-  - Verify: typecheck and architecture review.
-  - Files: SDK/gateway interfaces and documentation.
+- [x] Task 10: Define cloud integration boundaries.
+  - Acceptance: auth context, tenant context, a remote credential store, and deployment configuration are represented by interfaces without implementing cloud infrastructure.
+  - Verify: `apps/gateway/test/runtime.test.js` (11 tests), including *"THE BOUNDARY: no cloud infrastructure was written"* — which asserts the **absence**, because the tempting way to fail "interfaces only" is to add a remote store nobody uses. `pnpm verify` green.
+  - Files: `apps/gateway/src/runtime.ts` (new), `service.ts`, `config.ts`, `connections.ts`, `server.ts`, `routes/route-context.ts`, `docs/architecture/README.md`.
   - Depends on: Task 8.
   - Scope: Small.
+  - Findings:
+    - **Two exported types called `SecretStore`, meaning different things.** The SDK's is keyed by *provider* and read-only; the gateway's is keyed by *connection* and writable. Reading `SecretStore` in either package meant opening the other to find out which you had. The gateway's is now `ConnectionSecretStore`, named for its key.
+    - **The service's credential dependency was `Pick<ConnectionStore, 'get' | 'set' | 'delete'>`** — a type describing the *local file store's origin* rather than the shape the gateway needs, so "could this be remote" had to be answered by reading a constructor. And the `Pick` described a shape the local store never actually satisfied: `get` takes a provider id and `set` does not. That inconsistency is preserved rather than tidied, because re-keying it is a migration to every adapter's refresh callback and not this task's business.
+    - **A third credential-store shape existed and was used nowhere**: `WritableSecretStore`, which extends the *provider*-keyed SDK type and so looked like the gateway's writable store while having a different key. Deprecated with a pointer, because a trap left exported is worse than a trap removed.
+    - **Auth context replaced a `trusted: boolean`.** That boolean is a real and correct decision expressed as a value with no owner and no name, so nothing above the HTTP layer could ask *who*, and a hosted gateway could not answer "may this reach the LLM surface without a key" differently from a loopback one. The gate now asks `isTrustedDashboard(auth)`.
+    - **Tenancy is named and carried, not threaded.** A tenant is a property of a *deployment*, so it is configured once; a multi-tenant deployment scopes a store by construction rather than adding a parameter to thirty methods. Threading a value nothing reads would be decoration shaped like architecture.
+    - `readonly` is a type and not a runtime guarantee — asserted by a test, which is the third time this project has been caught by that distinction.
 
 ## Risks and Mitations
 

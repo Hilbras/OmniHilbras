@@ -120,6 +120,7 @@ apps/gateway/src/
   hedge-policy        Whether a second request is worth sending, and which route. Every refusal is named.
   request-context     One request's id, from the edge to whichever provider answered it.
   credential-lifecycle  Whether a stored credential still works, asked without a request.
+  runtime.ts            The outer runtime: auth context, tenant, credential store, deployment.
   capability          A named "this adapter does not do that", for two consumers that needed it.
   health.ts          Probing, ejection and recovery, asked two questions only.
   api-key-manager    API keys and the two user-facing messages about them.
@@ -181,6 +182,34 @@ manual step rather than a request body. Those routes live in `routes/oauth.ts` a
 *intentional* provider-specific surface in the HTTP layer. It is also the module where a provider
 split would pay for itself fastest: a fifth OAuth provider is five more `if` blocks in one file,
 next to the four that already exist.
+
+## The outer runtime, and what it is not
+
+`runtime.ts` names the four things a deployment supplies — `AuthContext`, `TenantContext`,
+`ConnectionSecretStore`, `DeploymentConfig` — and **implements none of them**. The task said
+"interfaces, without cloud infrastructure", and the tempting way to fail that is to add a
+`RemoteSecretStore` nobody uses, so a test asserts the *absence*: no file under `src/` may contain
+`remote`, `tenantStore` or `CloudConfig` outside a comment.
+
+The boundary earned its keep by finding real problems rather than by existing:
+
+- **Two exported types were called `SecretStore`.** The SDK's is keyed by *provider* and read-only;
+  the gateway's is keyed by *connection* and writable. Reading `SecretStore` in either package meant
+  opening the other one to find out which you had. The gateway's is now `ConnectionSecretStore`.
+- **The service's credential dependency was `Pick<ConnectionStore, 'get' | 'set' | 'delete'>`** —
+  a type describing the local file store's *origin* rather than the shape the gateway needs, and one
+  the local store never actually satisfied. "Could this be remote?" was only answerable by reading a
+  constructor.
+- **A third credential-store shape existed and was used nowhere.** `WritableSecretStore` extends the
+  provider-keyed type, so it looked like the gateway's writable store while having a different key.
+  Deprecated with a pointer; a trap left exported is worse than a trap removed.
+- **`trusted: boolean` became `AuthContext`.** The boolean is a correct decision expressed as a
+  value with no owner and no name, so nothing could ask *who*, and a hosted gateway could not answer
+  "may this reach the LLM surface without a key" differently from a loopback one.
+
+**Tenancy is carried, not threaded.** A tenant is a property of a *deployment*, so it is configured
+once; a multi-tenant deployment scopes a store by construction rather than adding a parameter to
+thirty methods. Threading a value nothing reads would be decoration shaped like architecture.
 
 ---
 

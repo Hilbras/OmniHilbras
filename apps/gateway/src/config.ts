@@ -14,6 +14,7 @@ import {
 import { LocalApiKeyStore, type ApiKeyStore } from './api-keys.js';
 import { defaultConnectionDirectory, LocalConnectionStore, parseMasterKey, type ConnectionStore } from './connections.js';
 import { GatewayService } from './service.js';
+import { localDeployment, type DeploymentConfig } from './runtime.js';
 
 export type GatewayConfig = {
   host: string;
@@ -142,6 +143,23 @@ export function createProviderRegistry(config: GatewayConfig, transport = new Fe
   return registry;
 }
 
+/**
+ * The deployment described by a loaded configuration.
+ *
+ * Derived from the config rather than declared beside it, so the two cannot disagree about where
+ * state lives or which origins are allowed — a config that said one thing and a deployment another
+ * would be exactly the "local/cloud behavior diverges" risk the plan names.
+ */
+export function deploymentFrom(config: GatewayConfig): DeploymentConfig {
+  return localDeployment({
+    // The config knows the port; the deployment has to state the URL an OAuth callback is built
+    // from, and deriving it here is what keeps those two from being set separately.
+    publicBaseUrl: `http://${config.host}:${config.port}`,
+    dataDir: config.dataDir,
+    corsOrigins: config.corsOrigins,
+  });
+}
+
 export function createGatewayService(config: GatewayConfig = loadGatewayConfig(), env: Readonly<Record<string, string | undefined>> = process.env, connectionStore?: ConnectionStore, apiKeyStore?: ApiKeyStore) {
   const environmentSecretStore = new EnvironmentSecretStore(env, config.compatible.id);
   const store = connectionStore ?? new LocalConnectionStore({ directory: config.dataDir, fallback: environmentSecretStore, masterKey: parseMasterKey(env.OMNIHILBRAS_MASTER_KEY) });
@@ -149,7 +167,7 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
   return new GatewayService(createProviderRegistry(config), store, store, keys, {
     failureThreshold: config.failureThreshold,
     recoveryCooldownMs: config.recoveryCooldownMs,
-  });
+  }, deploymentFrom(config));
 }
 
 function providerEnvKey(providerId: string) {

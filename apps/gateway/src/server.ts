@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { canonicalLoopbackHost } from '@hilbras/omnihilbras';
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './config.js';
 import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, resolveCorsOrigins, sendError, sendJson, setCors } from './http.js';
+import { isTrustedDashboard, type AuthContext } from './runtime.js';
 import { handleApiKeysRoute } from './routes/api-keys.js';
 import { handleConnectionsRoute } from './routes/connections.js';
 import { handleInferenceRoute } from './routes/inference.js';
@@ -69,7 +70,13 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
       return;
     }
 
-    const trustedDashboardRequest = Boolean(requestOrigin) && corsOrigins.includes(requestOrigin as string);
+    // Who is asking, decided once here because this is the only place that understands the
+    // request. `dashboard` is an allowlisted browser origin on this machine; anything else is
+    // unauthenticated until a key says otherwise, which the LLM surface's gate checks for itself.
+    const auth: AuthContext = {
+      kind: requestOrigin && corsOrigins.includes(requestOrigin) ? 'dashboard' : 'system',
+      tenant: service.deployment().tenant,
+    };
     const responseOrigin = requestOrigin && corsOrigins.includes(requestOrigin) ? requestOrigin : undefined;
     setCors(response, responseOrigin);
     if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings')) response.setHeader('cache-control', 'no-store');
@@ -77,8 +84,8 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
       sendJson(response, 415, { error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'JSON requests must use application/json.' } }, responseOrigin);
       return;
     }
-    void handleRequest(request, response, service, options, responseOrigin, trustedDashboardRequest).catch((error) => {
-      sendError(response, error, trustedDashboardRequest);
+    void handleRequest(request, response, service, options, responseOrigin, auth).catch((error) => {
+      sendError(response, error, isTrustedDashboard(auth));
     });
   });
 }
@@ -122,7 +129,7 @@ export async function startGatewayServer(options: {
   return { config, server, service };
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, trustedDashboardRequest: boolean) {
+async function handleRequest(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, auth: AuthContext) {
   const controller = new AbortController();
   const abort = () => controller.abort();
   const onResponseClose = () => {
@@ -146,7 +153,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       options,
       origin,
       signal: controller.signal,
-      trusted: trustedDashboardRequest,
+      auth,
     };
     for (const route of routes) {
       if (await route(ctx)) return;

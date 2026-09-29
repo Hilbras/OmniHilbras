@@ -10,6 +10,7 @@ import { ProviderError, isLoopbackHostname, isPrivateHostname, type ChatChunk, t
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
 import { attachRequestId, type RequestScope } from '../request-context.js';
+import { isTrustedDashboard } from '../runtime.js';
 import type { GatewayServerOptions } from '../server.js';
 import type { GatewayService } from '../service.js';
 import {
@@ -22,12 +23,12 @@ import {
 } from '../http.js';
 
 export async function handleInferenceRoute(ctx: RouteContext): Promise<boolean> {
-  const { request, response, url, service, origin, options, signal, trusted } = ctx;
+  const { request, response, url, service, origin, options, signal, auth } = ctx;
 
     // The LLM surface is the only authenticated part of the gateway. Requests
     // from the allowlisted dashboard origin are local administration traffic
     // and stay reachable so the dashboard can keep testing models.
-    if (isPublicLlmRoute(request.method, url.pathname) && !trusted) {
+    if (isPublicLlmRoute(request.method, url.pathname) && !isTrustedDashboard(auth)) {
       await service.authorizePublicRequest(extractApiKey(request));
     }
 

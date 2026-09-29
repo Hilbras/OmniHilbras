@@ -1,3 +1,19 @@
+<!--
+  PHASE NAMING — read this before reading any phase number below.
+
+  `tasks/plan.md` and this file use "phase" for two different things, and I conflated them for a
+  long time, reporting progress against the wrong one. The correction, stated so it is not repeated:
+
+  - **`tasks/plan.md` is the plan.** Five phases: SDK foundation, provider adapters, local gateway,
+    dashboard integration, cloud readiness. 49 of its 50 tasks are complete. Its phases are numbered
+    1-5 and there is no Phase 6.
+  - **This file is the refactoring log** for the work carried out against that plan. Its tasks are
+    labelled "Phase 1/2/3" meaning *extraction round*, not plan phase. Nothing here is a plan phase.
+
+  So "Phase 3" below does not mean plan Phase 3, and there are no "Phases 4-12" in either document.
+  Progress is measured against `tasks/plan.md`.
+-->
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

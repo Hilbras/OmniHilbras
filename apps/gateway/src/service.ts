@@ -11,6 +11,7 @@ import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
 import { CredentialManager } from './credential-manager.js';
 import { CredentialLifecycle } from './credential-lifecycle.js';
+import { localDeployment, type ConnectionSecretStore, type DeploymentConfig } from './runtime.js';
 import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
@@ -54,8 +55,14 @@ const defaultProviderId = 'openai';
  */
 export type { GatewayFailoverAttempt, GatewayChatOutcome, GatewayStreamOutcome } from './request-executor.js';
 
-/** The credential surface the service needs, keyed by connection id. */
-export type CredentialSource = Pick<ConnectionStore, 'get' | 'set' | 'delete'>;
+/**
+ * The credential surface the service needs, keyed by connection id.
+ *
+ * Now an alias for the named `SecretStore` rather than a `Pick` of the local connection store. The
+ * `Pick` admitted only an implementation of *that* store and described its origin rather than its
+ * purpose, so "could this be remote" had to be answered by reading the constructor.
+ */
+export type CredentialSource = ConnectionSecretStore;
 
 export type GatewayServiceOptions = {
   /** Consecutive failures before a connection stops receiving traffic. */
@@ -156,6 +163,12 @@ export class GatewayService {
   private readonly connections: ConnectionManager;
   private readonly rateLimiter: SlidingWindowRateLimiter;
   /**
+   * The outer runtime, as named. Carried rather than threaded per call, because a tenant is a
+   * property of a *deployment* and a public base URL is a property of the machine — and a gateway
+   * that read them out of module-level state could not be told otherwise.
+   */
+  private readonly deploymentConfig: DeploymentConfig;
+  /**
    * Health, extracted so it can be tested without routing.
    *
    * The manager is given two questions and nothing else — which adapters exist, and what context
@@ -178,7 +191,15 @@ export class GatewayService {
     private readonly connectionStore?: ConnectionStore,
     private readonly apiKeyStore?: ApiKeyStore,
     options: GatewayServiceOptions = {},
+    /**
+     * The outer runtime. Optional, with a local default, because the overwhelming majority of
+     * callers are embedded or single-user and must not be asked to think about any of it — which is
+     * what keeps a cloud boundary from becoming a tax on the local case it is meant to be optional
+     * for.
+     */
+    deployment: DeploymentConfig = localDeployment(),
   ) {
+    this.deploymentConfig = deployment;
     // Kept, not just read: the ChatGPT Web driver is built lazily on first use, long after
     // the constructor has returned, so the override has to outlive this call.
     this.options = options;
@@ -906,6 +927,17 @@ export class GatewayService {
    */
   startScope(requestedModel: string, explicitProviderId?: string): RequestScope {
     return startRequestScope({ requestedModel, ...(explicitProviderId === undefined ? {} : { explicitProviderId }) });
+  }
+
+  /**
+   * Which deployment this instance is, as the outer runtime describes it.
+   *
+   * Read rather than assumed, so a caller can see what the gateway believes about itself —
+   * which tenant it serves, where its state lives, and which origins may reach it — without
+   * reconstructing it from the config it already had.
+   */
+  deployment(): DeploymentConfig {
+    return this.deploymentConfig;
   }
 
   /** Streaming cannot retry after bytes are sent, so failover only covers the first chunk. */

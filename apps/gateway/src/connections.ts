@@ -1,9 +1,12 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { assertSafeProviderRequestUrl, type ModelImportPolicy, type ProviderCredential, type ProviderId, type SecretStore } from '@hilbras/omnihilbras';
+import { assertSafeProviderRequestUrl, type ModelImportPolicy, type ProviderCredential, type ProviderId, } from '@hilbras/omnihilbras';
 import { atomicWrite, defaultStateDirectory, ensureSecureDirectory, isNodeError, readOptionalFile, readOptionalText } from './secure-store.js';
 import { DEFAULT_TIMEOUT_MS } from './timeout-policy.js';
+import type { ConnectionSecretStore } from './runtime.js';
+/** The SDK's provider-keyed, read-only store. Aliased so the two are never confused at a call site. */
+import type { SecretStore as ProviderSecretStore } from '@hilbras/omnihilbras';
 
 /**
  * What a provider's catalog said about one model, kept so the dashboard can filter on it
@@ -110,7 +113,13 @@ export const resilienceLimits = {
   hedgeAfterMs: { min: 0, max: 30_000 },
 } as const;
 
-export interface WritableSecretStore extends SecretStore {
+/**
+ * @deprecated Declared and never used, and a trap: it extends the SDK's *provider*-keyed
+ * `SecretStore`, so it looked like the gateway's writable credential store while having a different
+ * key and a different shape. Use `ConnectionSecretStore` from `./runtime.js`, which is the one the
+ * gateway actually depends on.
+ */
+export interface WritableSecretStore extends ProviderSecretStore {
   set(providerId: ProviderId, credential: ProviderCredential): Promise<void>;
   delete(providerId: ProviderId): Promise<boolean>;
 }
@@ -120,11 +129,12 @@ export interface WritableSecretStore extends SecretStore {
  * provider can hold several. `providerId` stays optional on `get` because that
  * is where an environment credential is found.
  */
-export interface ConnectionCredentialStore {
-  get(connectionId: string, providerId?: ProviderId): Promise<ProviderCredential | undefined>;
-  set(connectionId: string, credential: ProviderCredential): Promise<void>;
-  delete(connectionId: string): Promise<boolean>;
-}
+/**
+ * @deprecated Use `ConnectionSecretStore` from `./runtime.js`. This was the same shape under a name that
+ * described where it lived rather than what it does, which is why the service's dependency on it
+ * had to be written as a `Pick` and read as a question about the local file store.
+ */
+export type ConnectionCredentialStore = ConnectionSecretStore;
 
 export interface ConnectionStore extends ConnectionCredentialStore {
   list(): Promise<ConnectionRecord[]>;
@@ -143,7 +153,7 @@ export interface ConnectionStore extends ConnectionCredentialStore {
 
 export type LocalConnectionStoreOptions = {
   directory?: string;
-  fallback?: SecretStore;
+  fallback?: ProviderSecretStore;
   masterKey?: Uint8Array;
 };
 
@@ -195,11 +205,11 @@ export function parseMasterKey(value: string | undefined) {
   return normalized ? normalizeMasterKey(decodeConfiguredMasterKey(normalized)) : undefined;
 }
 
-export class InMemoryConnectionStore implements ConnectionStore {
+export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecretStore {
   private readonly credentials = new Map<ProviderId, ProviderCredential>();
   private readonly connections = new Map<string, ConnectionRecord>();
 
-  constructor(private readonly fallback?: SecretStore) {}
+  constructor(private readonly fallback?: ProviderSecretStore) {}
 
   async get(providerId: ProviderId) {
     return this.credentials.get(providerId) ?? this.fallback?.get(providerId);
@@ -287,12 +297,12 @@ function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefi
   };
 }
 
-export class LocalConnectionStore implements ConnectionStore {
+export class LocalConnectionStore implements ConnectionStore, ConnectionSecretStore {
   private readonly directory: string;
   private readonly metadataPath: string;
   private readonly secretsPath: string;
   private readonly keyPath: string;
-  private readonly fallback?: SecretStore;
+  private readonly fallback?: ProviderSecretStore;
   private readonly configuredMasterKey?: Buffer;
   private credentials = new Map<ProviderId, ProviderCredential>();
   private connections = new Map<string, ConnectionRecord>();

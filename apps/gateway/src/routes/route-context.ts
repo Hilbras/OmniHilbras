@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { URL } from 'node:url';
 import type { GatewayServerOptions } from '../server.js';
 import type { GatewayService } from '../service.js';
+import type { AuthContext } from '../runtime.js';
 
 /**
  * What a route handler is given.
@@ -28,8 +29,15 @@ export type RouteContext = {
   /** Echoed back as `Access-Control-Allow-Origin`, and `undefined` for a non-browser caller. */
   origin: string | undefined;
   signal: AbortSignal;
-  /** From an allowlisted dashboard origin: local administration traffic. */
-  trusted: boolean;
+  /**
+   * Who is asking, rather than a flag saying whether they may.
+   *
+   * This was `trusted: boolean`, which is a real and correct decision expressed as a value with no
+   * owner and no name — so nothing above the HTTP layer could ask *who*, and a hosted gateway could
+   * not answer "may this call the LLM surface without a key" any differently from a loopback one.
+   * It is derived once, where the request is understood, and everything else asks.
+   */
+  auth: AuthContext;
 };
 
 /** A route handler. Returns true when it consumed the request. */
