@@ -13,6 +13,7 @@ import {
   type KiroSocialProvider,
   type KiroSocialSession,
 } from '@hilbras/omnihilbras';
+import { SignInSessionStore, claimOnce, releaseClaim } from './sign-in-sessions.js';
 import { ProviderError } from '@hilbras/omnihilbras';
 import type { ProviderCredential } from '@hilbras/omnihilbras';
 
@@ -46,70 +47,51 @@ export type KiroSignInStatus = {
   connection?: unknown;
 };
 
+/**
+ * Kiro's sign-in sessions.
+ *
+ * A declaration of Kiro's session *shape*, and nothing else. The lifecycle — expiry, claiming a
+ * grant exactly once, releasing a failed exchange, the sweep, the public projection — is
+ * `SignInSessionStore`, which it shares with OpenCode Console because the two were the same code.
+ *
+ * Kiro nests its device authorization rather than flattening it, so `session.authorization` is
+ * what the polling path reads. That is Kiro's shape and it stays Kiro's.
+ */
 export class KiroSessionStore {
-  private readonly sessions = new Map<string, Session>();
-  private readonly ttlMs: number;
+  private readonly store: SignInSessionStore<Session, KiroDeviceAuthorization>;
 
   constructor(options: { ttlMs?: number } = {}) {
-    this.ttlMs = options.ttlMs ?? defaultTtlMs;
+    const ttlMs = options.ttlMs ?? defaultTtlMs;
+    this.store = new SignInSessionStore<Session, KiroDeviceAuthorization>({
+      ttlMs,
+      isPlausibleId: (id) => sessionIdPattern.test(id),
+      build: (authorization, { id, expiresAt }) => ({ id, authorization, expiresAt, status: 'pending', claimed: false }),
+      read: (session) => ({ userCode: session.authorization.userCode, verificationUrl: session.authorization.verificationUrl }),
+    });
   }
 
   create(authorization: KiroDeviceAuthorization): Session {
-    this.sweep();
-    const id = crypto.randomUUID().replace(/-/g, '');
-    const ttl = Math.min(this.ttlMs, (authorization.expiresIn ?? this.ttlMs / 60000) * 1000);
-    const session: Session = { id, authorization, expiresAt: Date.now() + ttl, status: 'pending', claimed: false };
-    this.sessions.set(id, session);
-    return session;
+    return this.store.create(authorization, authorization.expiresIn);
   }
 
   get(id: string): Session | undefined {
-    if (!sessionIdPattern.test(id)) return undefined;
-    const session = this.sessions.get(id);
-    if (!session) return undefined;
-    if (session.status === 'pending' && Date.now() >= session.expiresAt) {
-      session.status = 'expired';
-      session.error = 'This sign-in expired before it was approved. Start again from OmniHilbras.';
-    }
-    return session;
+    return this.store.get(id);
   }
 
-  /** Returns the session only if the grant has not already been exchanged. */
   claim(id: string): Session | undefined {
-    const session = this.get(id);
-    if (!session || session.claimed) return undefined;
-    session.claimed = true;
-    return session;
+    return this.store.claim(id);
   }
 
   release(session: Session) {
-    session.claimed = false;
+    this.store.release(session);
   }
 
   resolve(id: string, patch: { status: Session['status']; connection?: unknown; error?: string }) {
-    const session = this.sessions.get(id);
-    if (!session) return;
-    session.status = patch.status;
-    if (patch.connection !== undefined) session.connection = patch.connection;
-    if (patch.error !== undefined) session.error = patch.error;
+    this.store.resolve(id, patch);
   }
 
   publicStatus(session: Session): KiroSignInStatus {
-    return {
-      status: session.status,
-      userCode: session.authorization.userCode,
-      verificationUrl: session.authorization.verificationUrl,
-      expiresAt: new Date(session.expiresAt).toISOString(),
-      ...(session.error ? { error: session.error } : {}),
-      ...(session.connection !== undefined ? { connection: session.connection } : {}),
-    };
-  }
-
-  private sweep() {
-    const cutoff = Date.now() - this.ttlMs;
-    for (const [id, session] of this.sessions) {
-      if (session.expiresAt < cutoff) this.sessions.delete(id);
-    }
+    return this.store.publicStatus(session);
   }
 }
 
@@ -240,16 +222,15 @@ export class KiroSocialStore {
 
   /** Returns the session only if its code has not been spent, and marks it spent. */
   claim(id: string): KiroSocialSession | undefined {
-    const stored = this.get(id);
-    if (!stored || stored.claimed) return undefined;
-    stored.claimed = true;
-    return stored;
+    // The spending rule is shared with the other sign-in stores. The lifecycle around it is not:
+    // this store expires on `createdAt`, deletes rather than marks, and has no public status.
+    return claimOnce(() => this.get(id));
   }
 
   /** Un-claims a session whose exchange did not go through, so the code can be retried. */
   release(id: string) {
     const stored = this.sessions.get(id);
-    if (stored) stored.claimed = false;
+    if (stored) releaseClaim(stored);
   }
 
   private sweep() {

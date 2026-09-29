@@ -1,3 +1,4 @@
+import { claimOnce } from './sign-in-sessions.js';
 import {
   CLINE_OAUTH,
   ClineAdapter,
@@ -150,15 +151,22 @@ export class ClineSessionStore {
    */
   claim(sessionId: string, state?: string): ClineSession | undefined {
     this.prune();
-    const session = this.sessions.get(sessionId);
-    if (!session || session.claimed) return undefined;
-    // A provider that echoes `state` must echo the right one.
-    if (state !== undefined && session.state !== undefined && session.state !== state) return undefined;
-    // A wrong state spends nothing, so a user whose provider crossed the value
-    // can retry; the session id is the capability, and the state only narrows it.
-    session.claimed = true;
-    delete session.state;
-    return session;
+    // The spending rule is shared with the other sign-in stores. The cross-check and the state
+    // deletion are Cline's own and stay here: they are why a wrong `state` spends *nothing*, and a
+    // user whose provider crossed the value can retry. Returning undefined from the reader is what
+    // makes `claimOnce` leave the claim unspent.
+    const claimed = claimOnce(() => {
+      const session = this.sessions.get(sessionId);
+      // A provider that echoes `state` must echo the right one.
+      if (!session) return undefined;
+      if (state !== undefined && session.state !== undefined && session.state !== state) return undefined;
+      return session;
+    });
+    if (!claimed) return undefined;
+    // The state has done its job and is no longer needed, so a replayed callback has nothing to
+    // cross-check against. The session id is the capability; the state only narrowed it.
+    delete claimed.state;
+    return claimed;
   }
 
   resolve(sessionId: string, result: ClineSessionStatus) {

@@ -1,3 +1,4 @@
+import { SignInSessionStore } from './sign-in-sessions.js';
 import { OPENCODE_CONSOLE, opencodeConsoleProviderId } from '@hilbras/omnihilbras';
 import type { ProviderCredential } from '@hilbras/omnihilbras';
 
@@ -42,79 +43,50 @@ type Session = {
   claimed: boolean;
 };
 
+/**
+ * OpenCode Console's sign-in sessions.
+ *
+ * A declaration of Console's session *shape*, and nothing else. The lifecycle is
+ * `SignInSessionStore`, which it shares with Kiro because the two were the same code.
+ *
+ * Console flattens its device code onto the session rather than nesting it, so `session.deviceCode`
+ * is what the polling path in the service reads. That is Console's shape and it stays Console's.
+ */
 export class OpencodeConsoleSessionStore {
-  private readonly sessions = new Map<string, Session>();
-  private readonly ttlMs: number;
+  private readonly store: SignInSessionStore<Session, { deviceCode: string; userCode: string; verificationUrl: string }>;
 
   constructor(options: { ttlMs?: number } = {}) {
-    this.ttlMs = options.ttlMs ?? defaultTtlMs;
+    const ttlMs = options.ttlMs ?? defaultTtlMs;
+    this.store = new SignInSessionStore<Session, { deviceCode: string; userCode: string; verificationUrl: string }>({
+      ttlMs,
+      isPlausibleId: (id) => sessionIdPattern.test(id),
+      build: (input, { id, expiresAt }) => ({ id, ...input, expiresAt, status: 'pending', claimed: false }),
+      read: (session) => ({ userCode: session.userCode, verificationUrl: session.verificationUrl }),
+    });
   }
 
   create(input: { deviceCode: string; userCode: string; verificationUrl: string; expiresIn?: number }): Session {
-    this.sweep();
-    const id = crypto.randomUUID().replace(/-/g, '');
-    const ttl = Math.min(this.ttlMs, (input.expiresIn ?? this.ttlMs / 60000) * 1000);
-    const session: Session = {
-      id,
-      deviceCode: input.deviceCode,
-      userCode: input.userCode,
-      verificationUrl: input.verificationUrl,
-      expiresAt: Date.now() + ttl,
-      status: 'pending',
-      claimed: false,
-    };
-    this.sessions.set(id, session);
-    return session;
+    return this.store.create({ deviceCode: input.deviceCode, userCode: input.userCode, verificationUrl: input.verificationUrl }, input.expiresIn);
   }
 
   get(id: string): Session | undefined {
-    if (!sessionIdPattern.test(id)) return undefined;
-    const session = this.sessions.get(id);
-    if (!session) return undefined;
-    if (session.status === 'pending' && Date.now() >= session.expiresAt) {
-      session.status = 'expired';
-      session.error = 'This sign-in expired before it was approved. Start again from OmniHilbras.';
-    }
-    return session;
+    return this.store.get(id);
   }
 
-  /** Returns the session only if the token has not already been exchanged. */
   claim(id: string): Session | undefined {
-    const session = this.get(id);
-    if (!session || session.claimed) return undefined;
-    session.claimed = true;
-    return session;
+    return this.store.claim(id);
   }
 
-  /** Puts a session back in play after a failed exchange, so a retry can finish it. */
   release(session: Session) {
-    session.claimed = false;
+    this.store.release(session);
   }
 
   resolve(id: string, patch: { status: OpencodeConsoleSessionStatus['status']; connection?: unknown; error?: string }) {
-    const session = this.sessions.get(id);
-    if (!session) return;
-    session.status = patch.status;
-    if (patch.connection !== undefined) session.connection = patch.connection;
-    if (patch.error !== undefined) session.error = patch.error;
+    this.store.resolve(id, patch);
   }
 
   publicStatus(session: Session): OpencodeConsoleSessionStatus {
-    return {
-      status: session.status,
-      userCode: session.userCode,
-      verificationUrl: session.verificationUrl,
-      expiresAt: new Date(session.expiresAt).toISOString(),
-      ...(session.error ? { error: session.error } : {}),
-      ...(session.connection !== undefined ? { connection: session.connection } : {}),
-    };
-  }
-
-  private sweep() {
-    const cutoff = Date.now() - this.ttlMs;
-    for (const [id, session] of this.sessions) {
-      if (session.expiresAt < cutoff) this.sessions.delete(id);
-    }
+    return this.store.publicStatus(session);
   }
 }
 
