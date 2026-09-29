@@ -1023,6 +1023,31 @@ Replaying a refusal as though the model had said it is a subtle way to corrupt e
 **It is not offered when it cannot work.** No connection, or a provider the gateway cannot serve,
 gets a sentence saying why instead of a control that can only fail.
 
+### Provider cards: the grid follows the container, not the viewport
+
+The card grid is `repeat(auto-fit, minmax(272px, 1fr))` — compact cards — and
+`minmax(320px, 1fr)` for the advanced view. **Not** `sm:`/`md:`/`xl:` column counts, because the
+dashboard has a sidebar that is 252 px from `lg` up and off-canvas below it:
+
+> The same viewport width yields a content area 252 px narrower on one side of that breakpoint
+> than the other, and collapsing the sidebar changes it again. Any fixed column count is
+> therefore wrong somewhere.
+
+Measured column counts by content width: 360→1, 480→1, 640→2, 760→2, 900→3, 1024→3, 1200→4,
+1440→5, 1920→6. A card is never rendered narrower than it can show its name and status.
+
+Three separate clipping faults lived inside the cards, none of them about the grid:
+
+- **The name shared a row with the caution badge** — badge `shrink-0`, name `truncate` — so a
+  badge reading "Account session" took the space and "ChatGPT Web" got 93 px of text in 82. The
+  badge now sits on the status line, where it reads better anyway.
+- **A planned provider's reason sat in a hard `max-w-[11rem]` box**: 905 px of sentence in 176 px,
+  so the first fragment and nothing else. It has its own full-width row now, clamped to two
+  lines, with the whole reason still on `title`.
+- **The advanced card's Models stat is a composite string** — `77 models · all import` — needing
+  158 px in a 121 px cell, so it ellipsised to `77 models · all i…`, which reads as a rendering
+  fault rather than as a number. It wraps.
+
 ### DeepSeek Web: the answer is mostly bare strings
 
 The stream shape is not what it looks like, and getting it wrong is invisible. A real reply to

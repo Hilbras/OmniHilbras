@@ -112,13 +112,22 @@ function SimpleProviderCard({ provider, detailTo, onManage, onConnect, simpleEna
       : attention ? 'Needs attention' : 'No connections';
 
   return (
-    <article className="group relative isolate flex min-h-[84px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-line bg-surface-2/75 p-3 transition-colors hover:border-line-strong hover:bg-surface-2">
+    <article className="group relative isolate flex min-h-[84px] cursor-pointer flex-col justify-center gap-2 rounded-xl border border-line bg-surface-2/75 p-3 transition-colors hover:border-line-strong hover:bg-surface-2">
       <Link to={detailTo} aria-label={`Open ${provider.name} provider`} className="absolute inset-0 z-0 rounded-xl" />
       <div className="pointer-events-none relative z-10 flex min-w-0 items-center gap-3">
         <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-10 w-10 shrink-0 rounded-xl" />
-        <span className="min-w-0">
-          <span className="flex items-center gap-1.5">
-            <span className="truncate text-sm font-semibold text-text transition-colors group-hover:text-gold-text">{provider.name}</span>
+        <span className="min-w-0 flex-1">
+          {/*
+            The name gets the full width of the card, and the caution badge moved to the status
+            line below it. They used to share one row, with the badge `shrink-0` and the name
+            `truncate` — so a badge reading "Account session" took the space and "ChatGPT Web"
+            ended up with 93 pixels of text in 82 and an ellipsis. The badge also reads better
+            beside the status than jammed against the name.
+          */}
+          <span className="block truncate text-sm font-semibold text-text transition-colors group-hover:text-gold-text">{provider.name}</span>
+          <span className={`mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] ${connected && simpleEnabled ? 'text-success' : attention ? 'text-gold-text' : 'text-muted'}`}>
+            {connected && simpleEnabled && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" aria-hidden="true" />}
+            <span className="truncate">{statusLabel}</span>
             {/* A standing caution has to be visible here as well as on the full card and
                 the provider page. A warning that only appears in one view is not a
                 warning. */}
@@ -130,36 +139,39 @@ function SimpleProviderCard({ provider, detailTo, onManage, onConnect, simpleEna
                 }`}
               >
                 <CircleAlert className="h-2.5 w-2.5" aria-hidden="true" />
-                {provider.riskSeverity === 'high' ? 'Account session' : 'Terms'}
+                {provider.riskSeverity === 'high' ? 'Account' : 'Terms'}
               </span>
             )}
           </span>
-          <span className={`mt-1 flex items-center gap-1.5 text-[11px] ${connected && simpleEnabled ? 'text-success' : attention ? 'text-gold-text' : 'text-muted'}`}>
-            {connected && simpleEnabled && <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />}
-            {statusLabel}
-          </span>
         </span>
+        {/*
+          The action stays in the top row, beside the name. It moved out here only so the
+          planned provider's reason could have a full-width row of its own; on its own row it
+          would have been stranded below the card.
+        */}
+        {planned ? null : connected ? (
+          <button type="button" role="switch" aria-checked={simpleEnabled} aria-label={`${simpleEnabled ? 'Disable' : 'Enable'} ${provider.name}`} onClick={() => onToggle?.(!simpleEnabled)} disabled={!onToggle} className={`relative z-20 h-6 w-11 shrink-0 rounded-full p-1 opacity-100 transition-[colors,opacity] sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 ${simpleEnabled ? 'bg-[#f0643b]' : 'bg-line-strong'} disabled:cursor-not-allowed disabled:opacity-60`}>
+            <span className={`block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${simpleEnabled ? 'translate-x-5' : 'translate-x-0'}`} aria-hidden="true" />
+          </button>
+        ) : attention ? (
+          <button type="button" onClick={onManage} className="btn-quiet relative z-20 shrink-0 !px-2 !py-1.5 !text-[11px]">Review</button>
+        ) : (
+          <button type="button" onClick={onConnect} className="btn-quiet relative z-20 shrink-0 !px-2 !py-1.5 !text-[11px]">Connect</button>
+        )}
       </div>
       {/*
-        A planned provider gets the reason where the Connect button would be, and no button at
-        all. Both the simple and advanced cards needed this, and the first one I guarded was
-        not the one this list actually renders.
+        A planned provider gets the reason on its own row, and no button at all. It used to sit
+        where the Connect button goes, in a hard `max-w-[11rem]` box: 905 pixels of sentence in
+        176, so the first sentence fragment and nothing else. Clamped to two lines at the card's
+        real width it is readable, and the title still carries the whole thing.
       */}
-      {planned ? (
-        <span
+      {planned && (
+        <p
           title={provider.unavailableReason}
-          className="relative z-20 max-w-[11rem] shrink-0 truncate text-right text-[10px] leading-tight text-muted"
+          className="pointer-events-none relative z-10 line-clamp-2 text-[10px] leading-snug text-muted"
         >
           {provider.unavailableReason}
-        </span>
-      ) : connected ? (
-        <button type="button" role="switch" aria-checked={simpleEnabled} aria-label={`${simpleEnabled ? 'Disable' : 'Enable'} ${provider.name}`} onClick={() => onToggle?.(!simpleEnabled)} disabled={!onToggle} className={`relative z-20 h-6 w-11 shrink-0 rounded-full p-1 opacity-100 transition-[colors,opacity] sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 ${simpleEnabled ? 'bg-[#f0643b]' : 'bg-line-strong'} disabled:cursor-not-allowed disabled:opacity-60`}>
-          <span className={`block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${simpleEnabled ? 'translate-x-5' : 'translate-x-0'}`} aria-hidden="true" />
-        </button>
-      ) : attention ? (
-        <button type="button" onClick={onManage} className="btn-quiet relative z-20 shrink-0 !px-2 !py-1.5 !text-[11px]">Review</button>
-      ) : (
-        <button type="button" onClick={onConnect} className="btn-quiet relative z-20 shrink-0 !px-2 !py-1.5 !text-[11px]">Connect</button>
+        </p>
       )}
     </article>
   );
@@ -204,9 +216,13 @@ export function ProviderCard({ provider, detailTo, onManage, onConnect, mode = '
         <p className="muted min-h-10 text-xs leading-relaxed">{provider.description}</p>
 
         <div className="mt-5 grid grid-cols-2 gap-2">
-          <div className="rounded-lg border border-line bg-bg-soft/70 px-3 py-2.5">
+          <div className="min-w-0 rounded-lg border border-line bg-bg-soft/70 px-3 py-2.5">
             <span className="mono-label flex items-center gap-1"><Cpu className="h-3 w-3" aria-hidden="true" />Models</span>
-            <strong className="mt-1 block truncate font-mono text-xs">{provider.models}</strong>
+            {/* Wraps rather than truncating. This value is a composite — "77 models · all
+                import" — and in a two-column stat cell on a 344px card it needs 158 pixels in
+                121, so it ellipsised to "77 models · all i…", which reads as a rendering fault
+                rather than as a number. Two lines is honest; a clipped policy is not. */}
+            <strong className="mt-1 block font-mono text-xs leading-snug break-words">{provider.models}</strong>
           </div>
           <div className="rounded-lg border border-line bg-bg-soft/70 px-3 py-2.5">
             <span className="mono-label flex items-center gap-1"><Clock3 className="h-3 w-3" aria-hidden="true" />Latency</span>

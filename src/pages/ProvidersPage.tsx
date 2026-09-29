@@ -437,7 +437,22 @@ export function ProvidersContent() {
                       <h3 id={`provider-group-${group}`} className="text-sm font-semibold">{providerGroupLabels[group]}</h3>
                       <span className="muted font-mono text-[10px]">{grouped.length} {grouped.length === 1 ? 'provider' : 'providers'}</span>
                     </div>
-                    <div className={`grid gap-3 ${cardMode === 'simple' ? 'sm:grid-cols-2 xl:grid-cols-4' : 'md:grid-cols-2 xl:grid-cols-3'}`}>
+                    {/*
+                      Columns follow the container, not the viewport — `auto-fit` with a minimum
+                      card width, rather than `sm:`/`md:`/`xl:` steps.
+
+                      The breakpoints could not express this, and that is the point. The sidebar
+                      is 252px from `lg` up and off-canvas below it, so the same viewport width
+                      yields a content area 252px narrower on one side of that breakpoint than the
+                      other. Every fixed column count is therefore wrong somewhere: `md:grid-cols-3`
+                      put three cards in 225px at an 800px viewport, which truncated *every*
+                      provider name ("OpenCode Console" needs 129px and had 75). Collapsing the
+                      sidebar changes it again, and so does any future chrome.
+
+                      With a minimum, a card is never rendered narrower than it can show its name
+                      and status, and it takes an extra column as soon as there is room for one.
+                    */}
+                    <div className={`grid gap-3 ${cardMode === 'simple' ? 'grid-cols-[repeat(auto-fit,minmax(272px,1fr))]' : 'grid-cols-[repeat(auto-fit,minmax(320px,1fr))]'}`}>
                       {grouped.map((provider) => renderProviderCard(provider))}
                     </div>
                   </section>

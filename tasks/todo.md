@@ -147,6 +147,17 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 37: Make the provider cards fit the space they are actually given.
+  - Acceptance: no provider name, status, or metric is clipped at any content width, and the card count follows the container rather than the viewport.
+  - Verify: 0 of 13 cards have a truncated name; "ChatGPT Web" needs 200 px and gets 200 px; Qwen Web's reason shows two full lines where it showed 176 px of 905; the simple and advanced grids are both 2 × 344 px with 0 overflowing elements at an 800 px viewport; column counts across content widths 360 → 1920 px: 1, 1, 2, 2, 2, 3, 3, 4, 5, 5, 6. 409 tests pass.
+  - Findings: **breakpoints could not express the problem, and that is why the fix is not a breakpoint.** The sidebar is 252 px from `lg` up and off-canvas below it, so the same viewport width yields a content area 252 px narrower on one side of that breakpoint than the other — and collapsing the sidebar changes it again. Any fixed column count is therefore wrong somewhere. The grid is now `repeat(auto-fit, minmax(272px, 1fr))`, so a card is never rendered narrower than it can show its name and status, and it gains a column as soon as there is room for one. Measured: 360→1, 640→2, 900→3, 1200→4, 1440→5, 1920→6.
+  - I first "fixed" it with `md:grid-cols-3` and **made it worse** — three cards in 225 px at an 800 px viewport truncated *every* name, "OpenCode Console" needing 129 px in 75. The measurement is what caught it; the reasoning had not.
+  - Two clipping bugs that were never about the grid. **The name shared a row with the caution badge**, badge `shrink-0` and name `truncate`, so an "Account session" badge took the space and "ChatGPT Web" got 93 px of text in 82. The badge moved to the status line, where it reads better anyway. And **a planned provider's reason sat in a hard `max-w-[11rem]` box** — 905 px of sentence in 176 px. It now has its own full-width row, clamped to two lines, with the whole reason still on `title`.
+  - Also: the advanced card's Models stat is a composite string — "77 models · all import" — needing 158 px in a 121 px cell, so it ellipsised to "77 models · all i…", which reads as a rendering fault rather than as a number. It wraps now. Two lines is honest; a clipped policy is not.
+  - Files: `src/pages/ProvidersPage.tsx`, `src/components/ProviderCard.tsx`.
+  - Depends on: Task 36.
+  - Scope: Small — a layout fix, but three separate clipping faults.
+
 - [x] Task 36: DeepSeek Web returned only the first character of every answer.
   - Acceptance: a real turn returns the whole answer, and a stream cut off mid-generation is an error rather than a clean `stop`.
   - Verify: "Count from 1 to 10" returns `'1, 2, 3, 4, 5, 6, 7, 8, 9, 10'` (29 chars) where it returned `'1'`; "In one short sentence, what is a hash table?" returns 144 chars; "What is 17 times 3?" returns `51`; a body with no `response/status: FINISHED` is refused. 407 tests pass.
