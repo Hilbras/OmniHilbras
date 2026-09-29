@@ -111,6 +111,7 @@ apps/gateway/src/
   connection-manager  Storing connections: one error mapper, one catalog merge, one lock scope.
   sign-in-sessions   The one OAuth session lifecycle. A grant is spent once, in one function.
   sign-in-coordinator  Claim, poll, save, publish — and one description of why a sign-in failed.
+  credential-manager  Which connection serves a provider, and the context a request is made in.
   health.ts          Probing, ejection and recovery, asked two questions only.
   api-key-manager    API keys and the two user-facing messages about them.
   routing.ts         Provider-agnostic selection, ejection and recovery. Zero provider ids.

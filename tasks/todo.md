@@ -147,6 +147,18 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 56: Extract `CredentialManager`, and collapse five copies of "which connection serves this provider".
+  - Acceptance: one method answers it; no call site resolves a connection for itself.
+  - Verify: 8 tests; 277 gateway tests. `service.ts` 1052 → 1043 lines. `connectionFor` and `context` are gone from the service, and `grep -c "connectionFor|this.context("` is 0.
+  - Findings: **the answer was written in five places with the local variable named differently at each** — `owner` twice, `connection` twice — and one of the five was already a method whose entire purpose was to be the single answer. That method's own comment said the point was that *a credential cannot be assembled one way for a health check and another for a real request*, which is exactly what four inline copies undermine.
+  - **This is the same seam that had already gone wrong one layer up.** In 1.23.0 the adapter factories were called with the provider id from one path and the connection id from another. Here the credential is looked up under an id the caller chose, and a credential under the wrong key is either missing — a confusing authentication error — or another connection's. So the fallback to the provider id is now confined to `CredentialManager.contextForProvider`, once.
+  - **The failure is invisible when the two strings are equal, which they are for every connection the sign-in flows create.** A test that seeds the store under *both* `connection-1` and `p` with different secrets pins it: the provider id is never used as a storage key.
+  - A connection with no model policy is asked for with **none rather than a default**. Inventing one here would silently widen or narrow somebody's catalog depending on which code path asked.
+  - An unconnected provider is still polled, with the provider id standing in for the connection id. Failing instead would make *"not connected"* look like *"broken"*, which is the distinction the dashboard exists to draw.
+  - Files: `apps/gateway/src/credential-manager.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/test/credential-manager.test.js` (new).
+  - Depends on: Task 55.
+  - Scope: Medium.
+
 - [x] Task 55: One way to ask "which adapters are worth probing", and one answer to which connection.
   - Acceptance: `activeAdapters()` names no provider; the resolution path and the health path cannot disagree about which connection an adapter belongs to.
   - Verify: 5 new resolver tests, including *"the resolution path and the health path now agree on the connection"*. 269 gateway tests. `service.ts` 1081 → 1052 lines, provider-id literals 8 → 5 in code (`defaultProviderId`, the Cline registration, and three in the Cline connect path).

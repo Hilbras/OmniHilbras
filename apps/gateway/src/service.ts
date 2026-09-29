@@ -9,6 +9,7 @@ import { SlidingWindowRateLimiter, resolveRoute, type RouteCandidate } from './r
 import { HealthManager } from './health.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
+import { CredentialManager } from './credential-manager.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
@@ -101,6 +102,14 @@ export class GatewayService {
    */
   private readonly requests: RequestExecutor;
   /**
+   * The credential surface a request is made with, and which connection serves a provider.
+   *
+   * Five call sites used to answer that second question themselves, with the local variable named
+   * differently at each. The provider-id-versus-connection-id mix-up this seam is prone to had
+   * already happened one layer up, in the adapter factories.
+   */
+  private readonly credentials: CredentialManager;
+  /**
    * Storing and changing connections, with one error mapper and one catalog-merge policy.
    *
    * `canValidate` is what removed the Core's last reason to know a provider's name: it used to be
@@ -151,6 +160,7 @@ export class GatewayService {
       readCredential: (connectionId, providerId) => this.secretStore.get(connectionId, providerId),
       noteDiscoveryFailure: (error) => { this.lastDiscoveryNote = error instanceof ProviderError ? providerSaid(error) : error instanceof Error ? error.message : undefined; },
     });
+    this.credentials = new CredentialManager(this.secretStore, this.connections);
     this.requests = new RequestExecutor({
       planRoute: (model, explicitProviderId) => this.planRoute(model, explicitProviderId),
       chat: (providerId, request, signal) => this.chat(providerId, request, signal),
@@ -275,8 +285,7 @@ export class GatewayService {
     const results = await Promise.all(this.registry.list().map(async (adapter) => {
       if (!adapter.listModels || adapter.capabilities.models !== true) return { providerId: adapter.id, models: [], unavailable: { providerId: adapter.id, code: 'NOT_SUPPORTED' } };
       try {
-        const owner = await this.connectionFor(adapter.id);
-        return { providerId: adapter.id, models: await adapter.listModels(await this.context(owner?.id ?? adapter.id, adapter.id, signal)), unavailable: undefined };
+        return { providerId: adapter.id, models: await adapter.listModels(await this.credentials.contextForProvider(adapter.id, signal)), unavailable: undefined };
       } catch (error) {
         return { providerId: adapter.id, models: [], unavailable: { providerId: adapter.id, code: error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED' } };
       }
@@ -310,8 +319,7 @@ export class GatewayService {
   async listModels(providerId: string, signal?: AbortSignal) {
     const adapter = this.requireAdapter(providerId);
     if (!adapter.listModels || adapter.capabilities.models !== true) throw notSupported(adapter, 'models');
-    const owner = await this.connectionFor(providerId);
-    return adapter.listModels(await this.context(owner?.id ?? adapter.id, adapter.id, signal));
+    return adapter.listModels(await this.credentials.contextForProvider(providerId, signal));
   }
 
   async validateConnectionCredential(providerId: string, credential: ProviderCredential, signal?: AbortSignal): Promise<GatewayConnectionValidation> {
@@ -833,22 +841,18 @@ export class GatewayService {
   }
 
   /** The connection that serves a provider: the only one, or the first enabled. */
-  private async connectionFor(providerId: string) {
-    return this.connections.firstWithCredentialFor(providerId);
-  }
+
 
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    const connection = await this.connectionFor(providerId);
-    return adapter.chat(request, await this.context(connection?.id ?? adapter.id, adapter.id, signal));
+    return adapter.chat(request, await this.credentials.contextForProvider(providerId, signal));
   }
 
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    const connection = await this.connectionFor(providerId);
-    yield* adapter.streamChat(request, await this.context(connection?.id ?? adapter.id, adapter.id, signal));
+    yield* adapter.streamChat(request, await this.credentials.contextForProvider(providerId, signal));
   }
 
   /**
@@ -1026,24 +1030,11 @@ export class GatewayService {
    * assembled one way for a health check and another for a real request.
    */
   private async contextForAdapter(providerId: string, signal?: AbortSignal): Promise<ProviderRequestContext> {
-    const owner = await this.connectionFor(providerId);
-    return this.context(owner?.id ?? providerId, providerId, signal);
+    return this.credentials.contextForProvider(providerId, signal);
   }
 
-  private async context(connectionId: string, providerId: string, signal?: AbortSignal): Promise<ProviderRequestContext> {
-    const [credential, policy] = await Promise.all([
-      this.secretStore.get(connectionId, providerId),
-      // The connection's own model policy, so a provider that narrows its list does it the
-      // same way on a manual refresh as on a connect, and a `free` import does not come back
-      // in full. A store without `list` simply has no policy to honour.
-      this.connectionStore?.list().then((all) => all.find((entry) => entry.id === connectionId)?.modelPolicy),
-    ]);
-    return {
-      credential,
-      ...(policy ? { importPolicy: policy } : {}),
-      ...(signal ? { signal } : {}),
-    };
-  }
+
+
 }
 
 function notSupported(adapter: ProviderAdapter, capability: string) {
