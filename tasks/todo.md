@@ -147,6 +147,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 27: Stop the provider list opening the API-key modal for a web-session provider.
+  - Acceptance: Connect on a web-session card goes to the page that can actually sign you in, and no path opens the API-key modal for a provider with no API key.
+  - Verify: 401 tests pass; typecheck and build clean. **The browser click-through could not be completed** — the dev server's module fetches keep failing with `ERR_NETWORK_CHANGED` on this network and the built bundle serves the marketing site at `/dashboard/providers`, so both routes to verifying it were blocked. The change is three lines and unambiguous, but it is unverified in the browser and should be checked by hand.
+  - Findings: `AddProviderModal` collects an **API key**, and `resolveProviderOption` falls through to `providerCatalog` for anything it does not recognise — so clicking Connect on DeepSeek resolved to a catalog entry and opened an API-key dialog for a provider that has no API key. The user saw a dialog for a different provider entirely. The dialog that knows how to sign in (`WebCookieConnectDialog`) only ever rendered on the **detail** page; the list had no idea it existed. Fixed at two levels: the list's Connect now navigates to the provider's page for a web-session provider, and `openAdd` itself refuses one, so no future caller can repeat it. `isWebSessionProvider` is exported from the modal so the check is available rather than re-derived.
+  - Files: `src/pages/ProvidersPage.tsx`, `src/components/AddProviderModal.tsx`.
+  - Depends on: Task 26.
+  - Scope: Small.
+
 - [x] Task 26: Fix the last three hardcoded provider strings, and add the Qwen card honestly.
   - Acceptance: no provider-specific string lives in the dialog, and the Qwen card exists without offering an action that cannot work.
   - Verify: the DeepSeek dialog reads "Sign in with DeepSeek" and contains no occurrence of "ChatGPT"; its paste section reads "Or paste a userToken instead"; the Qwen card reads "Not built yet" with the reason and has no Connect button. 401 tests pass.

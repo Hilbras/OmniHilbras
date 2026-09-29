@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, CheckCircle2, ChevronDown, CircleAlert, LoaderCircle, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { getProviderLogo, providerCatalog } from '../data/providers';
+import { webSessionProviderIds } from '../lib/webSessionProviders';
 import { checkOpenRouterConnection } from '../lib/gatewayClient';
 
 export type ProviderOption = {
@@ -30,6 +31,20 @@ export const providerOptions: ProviderOption[] = [
 
 /** The neutral option. Never a named vendor. */
 const customOption = (): ProviderOption => providerOptions[providerOptions.length - 1];
+
+/**
+ * Whether this modal is the wrong tool for a provider.
+ *
+ * It collects an API key. A web-session provider has none — it is signed into — so opening
+ * this for one asks for a credential the provider does not use, and the saved result is a
+ * connection that cannot work. Checked here rather than only at the call site so no other
+ * caller can repeat the mistake.
+ */
+export function isWebSessionProvider(providerId: string | undefined): boolean {
+  if (!providerId) return false;
+  const card = providerCatalog.find((item) => item.id === providerId);
+  return Boolean(card && webSessionProviderIds().includes(card.id));
+}
 
 /**
  * Resolves a provider id to an option without ever substituting a different vendor.

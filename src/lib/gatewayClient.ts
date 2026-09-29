@@ -133,6 +133,42 @@ export async function getGatewayHealth(signal?: AbortSignal) {
   return requestJson<GatewayHealth>('/health', { signal });
 }
 
+/**
+ * Whether the gateway is currently answering.
+ *
+ * Set by every request, so the dashboard can tell "the gateway is down" from "this failed",
+ * and — more usefully — can tell when a gateway that *was* down has come back. A page that
+ * rendered the down message once used to keep it forever, because nothing re-checked: the
+ * only way out was a manual reload, which is exactly the wrong instinct when the fix is
+ * something else entirely.
+ */
+let gatewayReachable: boolean | undefined;
+const gatewayReachabilityListeners = new Set<(reachable: boolean) => void>();
+
+function noteGatewayReachability(reachable: boolean): void {
+  if (gatewayReachable === reachable) return;
+  gatewayReachable = reachable;
+  for (const listener of gatewayReachabilityListeners) {
+    try {
+      listener(reachable);
+    } catch {
+      // A listener that throws must not break the request that woke it.
+    }
+  }
+}
+
+export function isGatewayReachable(): boolean | undefined {
+  return gatewayReachable;
+}
+
+/** Subscribes to reachability changes. Returns an unsubscribe function. */
+export function onGatewayReachabilityChange(listener: (reachable: boolean) => void): () => void {
+  gatewayReachabilityListeners.add(listener);
+  return () => {
+    gatewayReachabilityListeners.delete(listener);
+  };
+}
+
 export async function listGatewayConnections(signal?: AbortSignal) {
   const body = await requestJson<{ object: 'list'; data: GatewayConnection[] }>('/v1/connections', { signal });
   return body.data;
@@ -451,9 +487,16 @@ export async function requestJson<T>(path: string, init: RequestInit = {}) {
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
-    if (error instanceof TypeError) throw new Error(`Could not reach the local gateway at ${gatewayBaseUrl}. Start it with pnpm dev:gateway.`);
+    if (error instanceof TypeError) {
+      noteGatewayReachability(false);
+      throw new Error(`Could not reach the local gateway at ${gatewayBaseUrl}. Start it with pnpm dev:gateway.`);
+    }
     throw error;
   }
+  // A response at all means something answered. A 500 is a working gateway having a bad day,
+  // and treating it as "down" would flash the offline banner at the user at the wrong moment.
+  noteGatewayReachability(true);
+
   const body = await response.json().catch(() => undefined) as { error?: { message?: string; providerMessage?: string } } | undefined;
   /**
    * The gateway's neutral message is written for API clients, so it says little. The

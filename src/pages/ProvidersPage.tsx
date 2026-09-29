@@ -12,12 +12,13 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react';
-import { AddProviderModal, providerOptions, type NewProvider } from '../components/AddProviderModal';
+import { AddProviderModal, isWebSessionProvider, providerOptions, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderCard, providerGroupLabels, providerGroupOrder, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
 import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection, type GatewayHealth } from '../lib/gatewayClient';
 import { ProviderMark } from '../components/ProviderMark';
 import { providerRoute } from '../lib/routes';
+import { webSessionProviderIds } from '../lib/webSessionProviders';
 import { providerCatalog } from '../data/providers';
 
 type Filter = 'all' | 'connected' | 'attention' | 'available';
@@ -194,6 +195,14 @@ export function ProvidersContent() {
     .filter((group) => group.providers.length > 0), [filteredProviders]);
 
   function openAdd(providerId?: string) {
+    // This modal collects an API key. A web-session provider is signed into instead, so
+    // sending one here asked for a credential it does not use — and the connection that came
+    // back could not work. Guarded at the function rather than at the one caller, because
+    // every path into this modal goes through it.
+    if (providerId && isWebSessionProvider(providerId)) {
+      navigate(providerRoute(providerId));
+      return;
+    }
     setInitialProviderId(providerId);
     setInitialModelPolicy(providerId ? gatewayConnections.find((connection) => connection.providerId === providerId)?.modelPolicy : undefined);
     setAddOpen(true);
@@ -263,7 +272,18 @@ export function ProvidersContent() {
   function renderProviderCard(provider: ProviderRecord) {
     const detailTo = providerRoute(provider.catalogId ?? provider.id);
     const simpleEnabled = provider.status === 'connected' && !disabledProviderIds.has(provider.id);
-    return <ProviderCard key={provider.id} provider={provider} detailTo={detailTo} mode={cardMode} simpleEnabled={simpleEnabled} onToggle={(enabled) => toggleProvider(provider.id, enabled)} onManage={() => navigate(detailTo)} onConnect={() => openAdd(provider.catalogId ?? provider.id)} />;
+    /**
+     * A web-session provider is connected on its own page, not from here.
+     *
+     * `AddProviderModal` collects an API key, and a web-session provider has none — opening
+     * it for one asked for a credential the provider does not use, which is how clicking
+     * "Connect" on DeepSeek produced a dialog for a different provider entirely. The dialog
+     * that knows how to sign in lives on the detail page, so that is where the click goes.
+     */
+    const onConnect = webSessionProviderIds().includes(provider.catalogId ?? provider.id)
+      ? () => navigate(detailTo)
+      : () => openAdd(provider.catalogId ?? provider.id);
+    return <ProviderCard key={provider.id} provider={provider} detailTo={detailTo} mode={cardMode} simpleEnabled={simpleEnabled} onToggle={(enabled) => toggleProvider(provider.id, enabled)} onManage={() => navigate(detailTo)} onConnect={onConnect} />;
   }
 
   return (

@@ -1019,6 +1019,23 @@ client-attestation token from obfuscated JS, is deliberately omitted — reprodu
 porting that JS, and the endpoint does not currently require it. If it ever does, requests will
 fail with a 401 that says nothing about attestation, which is when to come back to it.
 
+### Where a Connect click goes, and why it is not the API-key modal
+
+`AddProviderModal` collects an **API key**, and `resolveProviderOption` falls through to
+`providerCatalog` for any id it does not recognise. So a web-session provider — which is
+signed into, and has no API key — resolved to a catalog entry and opened an API-key dialog
+asking for a credential it does not use. The dialog that knows how to sign in
+(`WebCookieConnectDialog`) only ever rendered on the provider's **detail** page; the list had
+no idea it existed.
+
+Two levels, because one is not enough:
+
+- the list's Connect **navigates to the provider's page** for a web-session provider
+- `openAdd` **refuses** one, so no future caller can repeat it by accident
+
+`isWebSessionProvider` is exported from the modal so the check is available rather than
+re-derived at each call site.
+
 ### Qwen Web: a card that says why it cannot be connected
 
 There **is** a card, and it is the honest kind. `status: 'planned'` is a distinct status rather
