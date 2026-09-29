@@ -264,6 +264,206 @@ function readReasoning(message: Record<string, unknown>): string {
   return '';
 }
 
+export type GatewayChatMessage = { role: 'user' | 'assistant'; content: string };
+
+export type GatewayChatTurn = {
+  content: string;
+  provider: string;
+  model: string;
+  latencyMs: number;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+  /**
+   * Whether the answer actually arrived in pieces.
+   *
+   * False for providers that cannot stream — DeepSeek Web, and any other adapter declaring
+   * `streaming: false`. The gateway answers such a request `501 NOT_SUPPORTED`, and the panel
+   * retries it as one request rather than showing the user a refusal: the provider works, it
+   * just cannot do it in a stream, and "this model cannot be tested here" would be wrong.
+   */
+  streamed: boolean;
+};
+
+/**
+ * One streamed turn through `/v1/chat/completions`.
+ *
+ * Streaming, not a single JSON body, because a chat that shows nothing for eight seconds and
+ * then prints the whole answer is not a chat — and on the providers page, where the whole
+ * point is comparing models, the wait *is* the observation. The caller gets deltas as they
+ * arrive and can stop mid-answer.
+ *
+ * Errors are raised as `Error` carrying the gateway's own message. That is deliberate: the
+ * alternative is a panel that says "something went wrong" while the model above it was
+ * refused for a specific, actionable reason.
+ */
+export async function streamGatewayChat(
+  request: { providerId: string; model: string; messages: GatewayChatMessage[]; maxTokens?: number; stream?: boolean },
+  onDelta: (delta: string, accumulated: string) => void,
+  signal?: AbortSignal,
+): Promise<GatewayChatTurn> {
+  if (!gatewayBaseUrl) throw new Error('Gateway URL must target a loopback address.');
+  const startedAt = Date.now();
+  const response = await fetch(`${gatewayBaseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    cache: 'no-store',
+    credentials: 'omit',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream', 'x-omnihilbras-provider': request.providerId },
+    body: JSON.stringify({
+      model: request.model,
+      messages: request.messages,
+      max_tokens: request.maxTokens ?? 2048,
+      stream: true,
+    }),
+    ...(signal ? { signal } : {}),
+  });
+  noteGatewayReachability(true);
+
+  if (!response.ok) {
+    // The gateway routes errors as JSON, and the message inside is the provider's reason.
+    const text = await response.text().catch(() => '');
+    let code = '';
+    let message = `The gateway refused this request with ${response.status}.`;
+    try {
+      const parsed = JSON.parse(text) as { error?: { message?: string; code?: string } };
+      if (parsed.error?.message) message = parsed.error.message;
+      code = parsed.error?.code ?? '';
+    } catch {
+      if (text.trim()) message = text.trim().slice(0, 400);
+    }
+    // A provider that cannot stream is not a provider that cannot answer. Send the same turn
+    // as one request so the panel still works against it, and report `streamed: false` so the
+    // user is told the answer arrived at once rather than being left waiting on deltas.
+    if (code === 'NOT_SUPPORTED' && request.stream !== false) {
+      return sendWithoutStreaming(request, onDelta, signal, startedAt);
+    }
+    throw new Error(message);
+  }
+  if (!response.body) throw new Error('The gateway returned no response body to stream from.');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
+  let provider = request.providerId;
+  let model = request.model;
+  let usage: GatewayChatTurn['usage'];
+
+  // SSE frames are separated by a blank line, and a frame can be split across reads, so the
+  // tail is carried over rather than parsed per chunk.
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.indexOf('\n\n');
+    while (boundary !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf('\n\n');
+
+      const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
+      if (!dataLine) continue;
+      const payload = dataLine.slice(5).trim();
+      if (payload === '[DONE]') continue;
+      // A stream that fails mid-answer reports it as an event, not a status code — by then
+      // the 200 is long gone, so this is the only place the reason can come from.
+      if (frame.includes('event: error')) throw new Error(safeErrorPayload(payload));
+
+      let parsed: { choices?: Array<{ delta?: { content?: string } }>; provider?: string; model?: string; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } };
+      try {
+        parsed = JSON.parse(payload) as typeof parsed;
+      } catch {
+        continue;
+      }
+      if (parsed.provider) provider = parsed.provider;
+      if (parsed.model) model = parsed.model;
+      if (parsed.usage) {
+        usage = {
+          promptTokens: parsed.usage.prompt_tokens ?? 0,
+          completionTokens: parsed.usage.completion_tokens ?? 0,
+          totalTokens: parsed.usage.total_tokens ?? 0,
+        };
+      }
+      const delta = parsed.choices?.[0]?.delta?.content;
+      if (delta) {
+        content += delta;
+        onDelta(delta, content);
+      }
+    }
+  }
+  return { content, provider, model, latencyMs: Date.now() - startedAt, streamed: true, ...(usage ? { usage } : {}) };
+}
+
+function safeErrorPayload(payload: string) {
+  try {
+    const parsed = JSON.parse(payload) as { error?: { message?: string } };
+    return parsed.error?.message ?? 'The stream failed partway through.';
+  } catch {
+    return 'The stream failed partway through.';
+  }
+}
+
+/**
+ * The same turn, asked for in one piece.
+ *
+ * Used only when the gateway refuses to stream a provider that works. The content is still
+ * handed to `onDelta` so the transcript renders identically — the caller does not need two
+ * code paths for "the answer is on screen".
+ */
+async function sendWithoutStreaming(
+  request: { providerId: string; model: string; messages: GatewayChatMessage[]; maxTokens?: number },
+  onDelta: (delta: string, accumulated: string) => void,
+  signal: AbortSignal | undefined,
+  startedAt: number,
+): Promise<GatewayChatTurn> {
+  const response = await fetch(`${gatewayBaseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    cache: 'no-store',
+    credentials: 'omit',
+    headers: { 'content-type': 'application/json', accept: 'application/json', 'x-omnihilbras-provider': request.providerId },
+    body: JSON.stringify({
+      model: request.model,
+      messages: request.messages,
+      max_tokens: request.maxTokens ?? 2048,
+      stream: false,
+    }),
+    ...(signal ? { signal } : {}),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    let message = `The gateway refused this request with ${response.status}.`;
+    try {
+      const parsed = JSON.parse(text) as { error?: { message?: string } };
+      if (parsed.error?.message) message = parsed.error.message;
+    } catch {
+      if (text.trim()) message = text.trim().slice(0, 400);
+    }
+    throw new Error(message);
+  }
+  const body = JSON.parse(text) as {
+    provider?: string;
+    model?: string;
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+  };
+  const content = body.choices?.[0]?.message?.content ?? '';
+  if (content) onDelta(content, content);
+  return {
+    content,
+    provider: body.provider ?? request.providerId,
+    model: body.model ?? request.model,
+    latencyMs: Date.now() - startedAt,
+    streamed: false,
+    ...(body.usage
+      ? {
+          usage: {
+            promptTokens: body.usage.prompt_tokens ?? 0,
+            completionTokens: body.usage.completion_tokens ?? 0,
+            totalTokens: body.usage.total_tokens ?? 0,
+          },
+        }
+      : {}),
+  };
+}
+
 export async function testGatewayModel(providerId: string, model: string, options?: AbortSignal | { signal?: AbortSignal; maxTokens?: number }) {
   const signal = options instanceof AbortSignal ? options : options?.signal;
   const maxTokens = options instanceof AbortSignal ? MODEL_TEST_MAX_TOKENS : options?.maxTokens ?? MODEL_TEST_MAX_TOKENS;

@@ -978,6 +978,83 @@ The detail page now has three states, because the difference is the whole point:
 | ready, found | Connected | 1 active |
 | failed | Couldn't read the gateway | — |
 
+### `/health` no longer re-probes on every request
+
+`GET /health` used to call `refreshHealth()` per request, on top of a 60-second background
+sweep. It was slow — **8.45 s**, thirteen real requests to thirteen providers' APIs. The part
+that actually broke a feature was subtler:
+
+> The browser allows six connections per origin. The page asks for health on load, and a sweep
+> that outlives the poll interval queues the next one behind it — so health requests monopolise
+> the pool and **ordinary requests to the same gateway queue behind them**. A chat turn that
+> answers in six seconds took over a minute, which is indistinguishable from a model that hangs.
+
+`health()` now returns the last sweep and stores it; concurrent callers **share** one sweep
+rather than each starting their own. Four consecutive calls: 2.9 s cold, then 3 ms, 15 ms, 4 ms.
+`checkedAt` is reported so the age of the report is visible rather than implied.
+
+### Talking to a model: the provider playground
+
+Every provider page ends with a conversation against one of its own models.
+
+**Everything else on the page reports *about* a provider** — a badge, a latency, a model count.
+"Test provider" sends `hi` and shows a green tick, which proves the credential works and nothing
+about whether the model is usable. This is the surface that answers the question actually being
+asked.
+
+**It streams, and it can be stopped.** A chat that shows nothing for eight seconds and then
+prints the whole answer is not a chat, and here the wait *is* the observation — it is the
+clearest signal of which model is fast.
+
+**Not every provider can stream.** DeepSeek Web declares `streaming: false`, and the gateway
+answers a streamed request `501 NOT_SUPPORTED`:
+
+```json
+{"error":{"code":"NOT_SUPPORTED","message":"DeepSeek Web does not support streaming. …"}}
+```
+
+The client retries the same turn as one request and reports `streamed: false`, so the answer
+still appears and the turn is labelled **"no streaming"**. A provider that cannot stream is not a
+provider that cannot answer; showing the refusal would have been wrong.
+
+**A failed turn is dropped from the replayed history**, not sent back as an assistant message.
+Replaying a refusal as though the model had said it is a subtle way to corrupt every later turn.
+
+**It is not offered when it cannot work.** No connection, or a provider the gateway cannot serve,
+gets a sentence saying why instead of a control that can only fail.
+
+### DeepSeek Web: the answer is mostly bare strings
+
+The stream shape is not what it looks like, and getting it wrong is invisible. A real reply to
+"Count from 1 to 5" arrives as:
+
+```text
+data: {"v":{"response":{"thinking_enabled":false,"fragments":[{"type":"RESPONSE","content":"1"}]}}}
+data: {"p":"response/fragments/-1/content","o":"APPEND","v":","}
+data: {"v":" "}
+data: {"v":"2"}
+data: {"v":","}
+data: {"p":"response","o":"BATCH","v":[{"p":"accumulated_token_usage","v":60}]}
+data: {"p":"response/status","o":"SET","v":"FINISHED"}
+```
+
+**Only the first line is a fragment object.** The path is the *indexed* form, not
+`response/fragments`. The rest of the answer is frames whose value is a bare string, most with
+**no path at all**. A decoder that recognises only fragment objects keeps the opening character
+and drops everything after it — so **"Count from 1 to 10" returned `1`**, with
+`finish_reason: stop`, and every answer looked like a terse model that happened to work.
+
+This survived because the one-token test it was written against asked for a one-token answer.
+A probe that proves only what it was built to prove passes happily while the feature is broken.
+
+Two consequences, both from the captured body rather than from reasoning:
+
+- **`FINISHED` is a status word with a string value.** Appending every string value writes the
+  literal word `FINISHED` onto the end of the answer. It is consumed as status.
+- **A body that closes without `response/status: "FINISHED"` was cut off mid-generation** — an
+  expired session, a dropped connection. It is now refused by name rather than returned as a
+  fragment wearing `finish_reason: stop`.
+
 Only the third row makes a claim about the credential, and only after reading it. The read has
 a **10 second ceiling** — generous for an endpoint that answers in single-digit milliseconds,
 and there so that a stall resolves into a *failure the user can see* rather than a wrong answer

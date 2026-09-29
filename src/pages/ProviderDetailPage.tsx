@@ -33,6 +33,7 @@ import { OauthConnectDialog } from '../components/OauthConnectDialog';
 import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, filterAvailability, modelFacets, priceLabel, type ModelFacets, type ModelFilterState, type ModelMetaMap } from '@hilbras/omnihilbras';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
+import { ProviderPlayground } from '../components/ProviderPlayground';
 import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, putGatewayConnection, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, type GatewayConnection, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import { dashboardRoutes } from '../lib/routes';
@@ -915,6 +916,12 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       </div>
 
       <section id="endpoint" className="card mt-5 p-4 sm:p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-sm font-semibold">Endpoint details</h2><p className="muted mt-1 text-xs">The base URL OmniHilbras will use for this provider.</p></div><code className="max-w-full overflow-x-auto rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-muted sm:max-w-[420px]">{connection?.endpoint ?? provider.endpoint}</code></div></section>
+
+      {/* Last on the page, after everything that establishes the connection. The point of this
+          one is to be reached *after* connecting, so it explains rather than offering a control
+          that can only fail — and when a provider is not connected the chat is exactly the
+          thing a person wants to be able to skip. */}
+      <ProviderPlayground provider={provider} connection={connection} />
 
       {/* Not for a web-cookie provider: that one connects by pasting an exported session,
           so the API-key modal would open underneath the right one and be the one on top. */}

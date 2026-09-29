@@ -395,6 +395,16 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
     if (!answer.content) {
       throw fail('PROVIDER_REQUEST_FAILED', 'DeepSeek answered, but the stream carried no text. Its response format may have changed.');
     }
+    // A body that closes without `response/status: "FINISHED"` was cut off mid-generation — an
+    // expired session, a dropped connection, an anti-bot challenge. Reporting the fragment as a
+    // complete answer with `finish_reason: stop` is the worst version of this: it looks like a
+    // model that finished, and the text is silently missing its ending.
+    if (!answer.finished) {
+      throw fail(
+        'PROVIDER_REQUEST_FAILED',
+        `DeepSeek's stream ended before it finished generating — the answer was cut off after ${answer.content.length} characters. This is usually a dropped connection or an expired session. Try again.`,
+      );
+    }
 
     const message: ChatMessage = {
       role: 'assistant',
@@ -461,23 +471,65 @@ export function flattenToPrompt(messages: ReadonlyArray<{ role: string; text: st
  * append as the answer is how a model that thinks first ends up answering with its
  * reasoning.
  */
-export function decodeDeepSeekAnswer(body: string): { content: string; reasoning: string } {
+/**
+ * Reads a completed answer out of DeepSeek's SSE body.
+ *
+ * Captured from a live stream rather than assumed, and the shape is not what it looks like. A
+ * real reply to "Count from 1 to 5" arrives as:
+ *
+ * ```text
+ * data: {"v":{"response":{"thinking_enabled":false,"fragments":[{"type":"RESPONSE","content":"1"}]}}}
+ * data: {"p":"response/fragments/-1/content","o":"APPEND","v":","}
+ * data: {"v":" "}
+ * data: {"v":"2"}
+ * data: {"v":","}
+ * data: {"p":"response","o":"BATCH","v":[{"p":"accumulated_token_usage","v":60}]}
+ * data: {"p":"response/status","o":"SET","v":"FINISHED"}
+ * ```
+ *
+ * **Only the first line is a fragment object.** The rest of the answer is a run of frames whose
+ * value is a bare string, most of them carrying no path at all. A decoder that only recognises
+ * fragment objects keeps the opening character and discards the rest — which is exactly what
+ * happened: every answer came back one character long, `finish_reason: stop`, looking like a
+ * working model that happened to be terse. "Count from 1 to 10" returned `1`.
+ *
+ * Two more things the stream requires:
+ *
+ * **The path is positional, and the last stated one wins.** A thinking model interleaves
+ * `THINK` and `RESPONSE` fragments, and an untyped append belongs to whichever was last.
+ *
+ * **`FINISHED` is a status word, not text.** `{"p":"response/status","v":"FINISHED"}` has a
+ * string value, so a decoder that appends every string value writes the literal word `FINISHED`
+ * onto the end of the answer. It is consumed as status here, and the absence of it is reported:
+ * a body that closes without `FINISHED` was cut off mid-generation, and reporting that as a
+ * clean answer is the same fault as not reading the stream at all.
+ */
+export function decodeDeepSeekAnswer(body: string): { content: string; reasoning: string; finished: boolean } {
   let content = '';
   let reasoning = '';
-  // Which side an untyped append belongs to, from the last whole response that said so.
+  // Which side an untyped append belongs to, from the last fragment or response that said so.
   let currentPath: 'thinking' | 'content' = 'content';
+  let finished = false;
 
-  const take = (fragment: unknown, typed: boolean) => {
+  const append = (text: string) => {
+    if (!text) return;
+    if (currentPath === 'thinking') reasoning += text;
+    else content += text;
+  };
+
+  const applyType = (fragment: { type?: unknown }) => {
+    const type = String(fragment.type ?? '').toUpperCase();
+    if (type === 'THINK') currentPath = 'thinking';
+    else if (type === 'ANSWER' || type === 'RESPONSE') currentPath = 'content';
+  };
+
+  const takeFragment = (fragment: unknown, pathFromType: boolean) => {
     if (!fragment || typeof fragment !== 'object') return;
     const record = fragment as { type?: unknown; content?: unknown };
+    if (pathFromType) applyType(record);
     if (typeof record.content !== 'string' || record.content.length === 0) return;
-    if (typed) {
-      const type = String(record.type ?? '').toUpperCase();
-      if (type === 'THINK') currentPath = 'thinking';
-      else if (type === 'ANSWER' || type === 'RESPONSE') currentPath = 'content';
-    }
-    if (currentPath === 'thinking') reasoning += record.content;
-    else content += record.content;
+    if (!pathFromType) applyType(record);
+    append(record.content);
   };
 
   for (const rawLine of body.replace(/\r\n?/g, '\n').split('\n')) {
@@ -493,22 +545,42 @@ export function decodeDeepSeekAnswer(body: string): { content: string; reasoning
     }
     if (typeof parsed !== 'object' || parsed === null) continue;
     const frame = parsed as { p?: unknown; v?: unknown };
+    const path = typeof frame.p === 'string' ? frame.p : '';
     const value = frame.v;
+
+    // Status, not an answer. Checked before the string branch below, deliberately.
+    if (path === 'response/status' && value === 'FINISHED') {
+      finished = true;
+      continue;
+    }
+    if (path === 'response/search_status' || path === 'response/search_results') continue;
 
     // A whole response: it declares the path and carries its own fragments.
     if (value && typeof value === 'object' && !Array.isArray(value) && 'response' in (value as Record<string, unknown>)) {
       const response = (value as { response: { thinking_enabled?: unknown; fragments?: unknown } }).response;
       if (response.thinking_enabled === true) currentPath = 'thinking';
       else if (response.thinking_enabled === false) currentPath = 'content';
-      if (Array.isArray(response.fragments)) for (const fragment of response.fragments) take(fragment, true);
+      if (Array.isArray(response.fragments)) for (const fragment of response.fragments) takeFragment(fragment, false);
     }
 
-    if (frame.p === 'response/fragments') {
-      if (Array.isArray(value)) for (const fragment of value) take(fragment, true);
-      else take(value, false);
+    if (path === 'response/fragments') {
+      if (Array.isArray(value)) for (const fragment of value) takeFragment(fragment, true);
+      else takeFragment(value, true);
+      continue;
     }
+
+    // A metadata batch: token counts and status words, never text.
+    if (path === 'response' && Array.isArray(value)) {
+      for (const entry of value as Array<{ p?: unknown; v?: unknown }>) {
+        if (entry?.p === 'response' && (entry.v as { thinking_enabled?: unknown } | undefined)?.thinking_enabled === true) currentPath = 'thinking';
+      }
+      continue;
+    }
+
+    // Most of a normal answer, and the part that was being dropped.
+    if (typeof value === 'string') append(value);
   }
-  return { content: content.trim(), reasoning: reasoning.trim() };
+  return { content: content.trim(), reasoning: reasoning.trim(), finished };
 }
 
 /**

@@ -143,6 +143,10 @@ export class GatewayService {
   private readonly rateLimitWaitMs = new Map<string, number>();
   private failureThreshold = defaultFailureThreshold;
   private healthIntervalMs = defaultHealthIntervalMs;
+  /** The most recent full sweep, served to every `GET /health` until the next one lands. */
+  private lastHealth: { status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] } | undefined;
+  /** The sweep in flight, so concurrent callers share it rather than each starting one. */
+  private healthSweep: Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> | undefined;
   private healthTimer?: NodeJS.Timeout;
   /** Kept whole, because the ChatGPT Web driver is built lazily on first use. */
   private readonly options: GatewayServiceOptions;
@@ -191,14 +195,30 @@ export class GatewayService {
     this.healthTimer = undefined;
   }
 
-  /** Polls every configured adapter and folds the result into routing state. */
+  /**
+   * Polls every configured adapter and folds the result into routing state.
+   *
+   * Also stores the result, so `health()` can answer from it instead of starting a second
+   * sweep per HTTP request. Concurrent callers share one sweep: without that, a page reload
+   * and the background timer landing together would each start their own thirteen probes.
+   */
   async refreshHealth(signal?: AbortSignal): Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> {
+    if (!this.healthSweep) {
+      this.healthSweep = this.runHealthSweep(signal).finally(() => {
+        this.healthSweep = undefined;
+      });
+    }
+    return this.healthSweep;
+  }
+
+  private async runHealthSweep(signal?: AbortSignal): Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> {
     const providers = await Promise.all((await this.activeAdapters()).map((adapter) => this.probeAdapter(adapter, signal)));
     const result = {
       status: providers.some((provider) => provider.status !== 'healthy') ? 'degraded' as const : 'ok' as const,
       checkedAt: new Date().toISOString(),
       providers,
     };
+    this.lastHealth = result;
     this.rateLimiter.prune();
     return result;
   }
@@ -282,7 +302,26 @@ export class GatewayService {
     };
   }
 
+  /**
+   * The health report, from the last sweep rather than a new one.
+   *
+   * This used to call `refreshHealth()` on every request, which probes **every** active
+   * adapter — thirteen providers, around 8.5 seconds, each one a real request to somebody's
+   * API. Two things were wrong with that. A dashboard that reloaded the page, or two tabs
+   * open, multiplied the cost, and a status page is exactly the thing that gets polled.
+   *
+   * Worse, it was not just slow. The browser allows only six connections per origin, the page
+   * asks for health on load, and a sweep that outlives the poll interval queued the next one
+   * behind it — so health requests monopolised the pool and ordinary requests to the same
+   * gateway queued behind them. A chat turn that answers in six seconds took over a minute,
+   * which looked like the model hanging.
+   *
+   * A background sweep already runs every 60 seconds, so the freshest honest answer is almost
+   * always at most that old. `checkedAt` is reported precisely so the caller can see the age
+   * rather than being handed a report that implies it was just measured.
+   */
   async health(signal?: AbortSignal): Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> {
+    if (this.lastHealth) return this.lastHealth;
     return this.refreshHealth(signal);
   }
 

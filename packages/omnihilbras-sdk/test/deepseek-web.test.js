@@ -211,9 +211,11 @@ test('an untyped append follows the last stated path, not the default', () => {
 });
 
 test('a stream with no fragments yields nothing rather than throwing', () => {
-  assert.deepEqual(decodeDeepSeekAnswer('data: [DONE]\n\n'), { content: '', reasoning: '' });
-  assert.deepEqual(decodeDeepSeekAnswer(''), { content: '', reasoning: '' });
-  assert.deepEqual(decodeDeepSeekAnswer('data: not json\n\n'), { content: '', reasoning: '' });
+  // `finished: false`, and that is correct rather than a gap: no FINISHED was ever sent, so the
+  // stream genuinely did not complete. An empty body that never finished is not a short answer.
+  for (const body of ['data: [DONE]\n\n', '', 'data: not json\n\n']) {
+    assert.deepEqual(decodeDeepSeekAnswer(body), { content: '', reasoning: '', finished: false });
+  }
 });
 
 test('the origin and API base are pinned', () => {
@@ -270,4 +272,144 @@ test('the health check bypasses the access-token cache, because a cache proves n
   const before = calls.length;
   await adapter.healthCheck({ credential });
   assert.equal(calls.length, before + 1, 'healthCheck answered from the cache instead of asking DeepSeek');
+});
+
+/* ------------------------------------------------------------------ *
+ * The real stream shape
+ * ------------------------------------------------------------------ */
+
+/**
+ * Captured verbatim from a live DeepSeek Web reply, with the prompt "Count from 1 to 5,
+ * separated by commas". Kept as a fixture because the shape is the whole point: only the first
+ * line is a fragment object, and the rest of the answer is bare strings.
+ */
+const COUNT_TO_FIVE = [
+  'event: ready',
+  'data: {"request_message_id":1,"response_message_id":2,"model_type":"default"}',
+  '',
+  'data: {"v":{"response":{"message_id":2,"parent_id":1,"model":"","role":"ASSISTANT","thinking_enabled":false,"ban_edit":false,"ban_regenerate":false,"status":"WIP","incomplete_message":null,"accumulated_token_usage":0,"feedback":null,"inserted_at":1790680841.3108969,"search_enabled":false,"fragments":[{"id":2,"type":"RESPONSE","content":"1","references":[],"stage_id":1}],"conversation_mode":"DEFAULT","has_pending_fragment":false,"auto_continue":false,"search_triggered":false,"extra_search_providers":[]}}}',
+  '',
+  'data: {"p":"response/fragments/-1/content","o":"APPEND","v":","}',
+  '',
+  'data: {"v":" "}',
+  '',
+  'data: {"v":"2"}',
+  '',
+  'data: {"v":","}',
+  '',
+  'data: {"v":" "}',
+  '',
+  'data: {"v":"3"}',
+  '',
+  'data: {"v":","}',
+  '',
+  'data: {"v":" "}',
+  '',
+  'data: {"v":"4"}',
+  '',
+  'data: {"v":","}',
+  '',
+  'data: {"v":" "}',
+  '',
+  'data: {"v":"5"}',
+  '',
+  'data: {"p":"response","o":"BATCH","v":[{"p":"accumulated_token_usage","v":60},{"p":"quasi_status","v":"FINISHED"}]}',
+  '',
+  'data: {"p":"response/status","o":"SET","v":"FINISHED"}',
+  '',
+  'event: update_session',
+  'data: {"updated_at":1790680841.4933379}',
+  '',
+  'event: title',
+  'data: {"content":"Count 1 to 5"}',
+  '',
+  'event: close',
+  'data: {"click_behavior":"none","auto_resume":false}',
+  '',
+].join('\n');
+
+test('a real answer is read in full, not just its first character', () => {
+  // The bug this fixture exists for: a decoder that only recognises fragment objects kept the
+  // opening "1" and dropped every bare-string append, so "Count from 1 to 10" answered "1" and
+  // looked like a working model.
+  const answer = decodeDeepSeekAnswer(COUNT_TO_FIVE);
+  assert.equal(answer.content, '1, 2, 3, 4, 5');
+  assert.equal(answer.finished, true);
+});
+
+test('"FINISHED" is a status word and is never written onto the answer', () => {
+  // `{"p":"response/status","v":"FINISHED"}` has a string value. A decoder that appends every
+  // string value ends the reply with the literal word FINISHED.
+  assert.ok(!decodeDeepSeekAnswer(COUNT_TO_FIVE).content.includes('FINISHED'));
+});
+
+test('a token batch is metadata, not text', () => {
+  const body = 'data: {"p":"response","o":"BATCH","v":[{"p":"accumulated_token_usage","v":60}]}\n';
+  assert.equal(decodeDeepSeekAnswer(body).content, '');
+});
+
+test('a stream that never finished is reported, so a cut-off answer is not a clean stop', () => {
+  const truncated = COUNT_TO_FIVE.split('\n').filter((line) => !line.includes('response/status')).join('\n');
+  const answer = decodeDeepSeekAnswer(truncated);
+  assert.equal(answer.content, '1, 2, 3, 4, 5');
+  assert.equal(answer.finished, false, 'a body that closes without FINISHED was cut off mid-generation');
+});
+
+test('a thinking model keeps its reasoning out of the answer', () => {
+  const body = [
+    'data: {"v":{"response":{"thinking_enabled":true,"fragments":[{"type":"THINK","content":"They want a count."}]}}}',
+    'data: {"p":"response/fragments","o":"append","v":[{"type":"RESPONSE","content":"1, 2, 3"}]}',
+    'data: {"v":" done"}',
+    'data: {"p":"response/status","v":"FINISHED"}',
+  ].join('\n');
+  const answer = decodeDeepSeekAnswer(body);
+  assert.equal(answer.reasoning, 'They want a count.');
+  assert.equal(answer.content, '1, 2, 3 done');
+});
+
+test('a fragment addressed by index, not by the bare path, is still read', () => {
+  // The live path is `response/fragments/-1/content`, not `response/fragments`. Matching only
+  // the short form silently ignored every continuation.
+  const body = [
+    'data: {"v":{"response":{"thinking_enabled":false,"fragments":[{"type":"RESPONSE","content":"a"}]}}}',
+    'data: {"p":"response/fragments/-1/content","o":"APPEND","v":"b"}',
+    'data: {"p":"response/status","v":"FINISHED"}',
+  ].join('\n');
+  assert.equal(decodeDeepSeekAnswer(body).content, 'ab');
+});
+
+test('the adapter refuses a cut-off answer instead of returning a fragment', async () => {
+  const truncated = COUNT_TO_FIVE.split('\n').filter((line) => !line.includes('response/status')).join('\n');
+  const adapter = new DeepSeekWebAdapter({
+    fetch: async (url) => {
+      const path = String(url);
+      if (path.includes('users/current')) return jsonResponse({ code: 0, data: { biz_data: { token: 'access' } } });
+      if (path.includes('create_pow_challenge')) {
+        return jsonResponse({ code: 0, data: { biz_data: { challenge: { algorithm: 'DeepSeekHashV1', challenge: deepSeekHashV1(`${SALT}_${EXPIRE_AT}_3`), salt: SALT, difficulty: 8, signature: 'sig', target_path: '/api/v0/chat/completion', expire_at: EXPIRE_AT } } } });
+      }
+      if (path.includes('chat_session/create')) return jsonResponse({ code: 0, data: { biz_data: { chat_session: { id: 'session-1' } } } });
+      return new Response(truncated, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    },
+  });
+  await assert.rejects(
+    () => adapter.chat({ model: 'deepseek-chat', messages: [{ role: 'user', content: 'Count from 1 to 5' }] }, { credential: { type: 'api-key', value: 'user-token' } }),
+    (error) => /ended before it finished generating/.test(error.message),
+  );
+});
+
+test('the adapter returns the whole answer when the stream finished', async () => {
+  const adapter = new DeepSeekWebAdapter({
+    fetch: async (url) => {
+      const path = String(url);
+      if (path.includes('users/current')) return jsonResponse({ code: 0, data: { biz_data: { token: 'access' } } });
+      if (path.includes('create_pow_challenge')) {
+        return jsonResponse({ code: 0, data: { biz_data: { challenge: { algorithm: 'DeepSeekHashV1', challenge: deepSeekHashV1(`${SALT}_${EXPIRE_AT}_3`), salt: SALT, difficulty: 8, signature: 'sig', target_path: '/api/v0/chat/completion', expire_at: EXPIRE_AT } } } });
+      }
+      if (path.includes('chat_session/create')) return jsonResponse({ code: 0, data: { biz_data: { chat_session: { id: 'session-1' } } } });
+      return new Response(COUNT_TO_FIVE, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    },
+  });
+  const response = await adapter.chat({ model: 'deepseek-chat', messages: [{ role: 'user', content: 'Count from 1 to 5' }] }, { credential: { type: 'api-key', value: 'user-token' } });
+  assert.equal(response.message.content, '1, 2, 3, 4, 5');
+  assert.equal(response.finishReason, 'stop');
 });
