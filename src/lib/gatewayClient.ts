@@ -182,6 +182,18 @@ export async function listGatewayConnections(signal?: AbortSignal) {
   return body.data;
 }
 
+/**
+ * Health for one provider.
+ *
+ * Not a filter over `/health`: that endpoint probes every active adapter, so asking it about
+ * a single card meant waiting for the whole registry. A dashboard card shows one provider, so
+ * it asks about one provider.
+ */
+export async function getGatewayProviderHealth(providerId: string, signal?: AbortSignal) {
+  const body = await requestJson<{ provider: GatewayProviderHealth }>(`/v1/health/${encodeURIComponent(providerId)}`, { signal });
+  return body.provider;
+}
+
 export function checkOpenRouterConnection(apiKey: string, signal?: AbortSignal) {
   return requestJson<GatewayConnectionValidation>('/v1/connections/openrouter/check', {
     method: 'POST',

@@ -211,8 +211,9 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
 
   async validateCredential(credential: ProviderCredential | undefined): Promise<CredentialValidation> {
     // A real call, because a token's only meaningful test is whether DeepSeek accepts it.
-    // Cheap: `users/current` is a single round trip and needs no proof of work.
-    await this.accessToken(userTokenFromCredential(credential), undefined);
+    // Cheap: `users/current` is a single round trip and needs no proof of work. It skips the
+    // access-token cache, so "valid" means DeepSeek said so just now rather than an hour ago.
+    await this.accessToken(userTokenFromCredential(credential), undefined, { fresh: true });
     return { status: 'valid', checkedAt: new Date(this.now()).toISOString() };
   }
 
@@ -222,10 +223,16 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
    * The userToken authorises this call and nothing else. Cached for an hour because it is
    * the same value for every request in that window, and a turn otherwise spends two
    * round trips before it sends anything.
+   *
+   * `fresh` skips that cache, and only the health check asks for it. A cache makes the check
+   * cheap, but it also makes it meaningless: the dashboard reported "healthy in 0 ms" from a
+   * cache entry that proved nothing, which is the same fault as every other confident
+   * unverified answer in this area — it looks like a successful check because something was
+   * returned. The point of a health check is to learn whether the credential works *now*.
    */
-  private async accessToken(userToken: string, signal?: AbortSignal): Promise<string> {
+  private async accessToken(userToken: string, signal?: AbortSignal, options: { fresh?: boolean } = {}): Promise<string> {
     const cached = this.accessTokens.get(userToken);
-    if (cached && cached.expiresAt > this.now()) return cached.token;
+    if (!options.fresh && cached && cached.expiresAt > this.now()) return cached.token;
 
     const response = await this.fetchImpl(`${API_BASE}/v0/users/current`, {
       method: 'GET',

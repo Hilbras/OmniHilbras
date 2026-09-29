@@ -193,31 +193,7 @@ export class GatewayService {
 
   /** Polls every configured adapter and folds the result into routing state. */
   async refreshHealth(signal?: AbortSignal): Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> {
-    const providers = await Promise.all((await this.activeAdapters()).map(async (adapter) => {
-      if (!adapter.healthCheck) return { providerId: adapter.id, status: 'unavailable' as const, checkedAt: new Date().toISOString(), message: 'Health checks are not supported.' };
-      const startedAt = Date.now();
-      try {
-        // Health is reported per provider, so it is checked with that provider's
-        // first credentialed connection.
-        const owner = await this.connectionFor(adapter.id);
-        const health = await adapter.healthCheck(await this.context(owner?.id ?? adapter.id, adapter.id, signal));
-        // An adapter may report `unavailable` instead of throwing. Recording
-        // that as a success made routing report a healthy provider with zero
-        // failures while `/health` said unavailable, and it corrupted the
-        // failure counting that drives ejection.
-        if (health.status === 'unavailable') {
-          this.providerHealth.recordFailure(adapter.id, 'PROVIDER_UNAVAILABLE', health.message ?? 'The provider reported itself unavailable.');
-          // The reason is returned too, so /health and the dashboard can say why
-          // rather than only that something is wrong.
-          return { providerId: adapter.id, ...health };
-        }
-        this.providerHealth.recordSuccess(adapter.id, health.latencyMs ?? Date.now() - startedAt, health.checkedAt);
-        return { providerId: adapter.id, ...health };
-      } catch {
-        this.providerHealth.recordFailure(adapter.id, 'PROVIDER_UNAVAILABLE', 'The provider health check failed.');
-        return { providerId: adapter.id, status: 'unavailable' as const, checkedAt: new Date().toISOString() };
-      }
-    }));
+    const providers = await Promise.all((await this.activeAdapters()).map((adapter) => this.probeAdapter(adapter, signal)));
     const result = {
       status: providers.some((provider) => provider.status !== 'healthy') ? 'degraded' as const : 'ok' as const,
       checkedAt: new Date().toISOString(),
@@ -225,6 +201,69 @@ export class GatewayService {
     };
     this.rateLimiter.prune();
     return result;
+  }
+
+  /**
+   * Probes one adapter and folds the result into routing state.
+   *
+   * Extracted from the full sweep so that "Test provider" can ask about the one provider the
+   * user is looking at. Reading `/health` to answer that question meant waiting for all
+   * thirteen providers to be probed — and on a loaded machine that was long enough that the
+   * button looked permanently stuck, which is the same failure as a wrong answer: the user
+   * learns nothing.
+   */
+  private async probeAdapter(adapter: ProviderAdapter, signal?: AbortSignal): Promise<GatewayProviderHealth> {
+    if (!adapter.healthCheck) {
+      return { providerId: adapter.id, status: 'unavailable' as const, checkedAt: new Date().toISOString(), message: 'Health checks are not supported.' };
+    }
+    const startedAt = Date.now();
+    try {
+      // Health is reported per provider, so it is checked with that provider's
+      // first credentialed connection.
+      const owner = await this.connectionFor(adapter.id);
+      const health = await adapter.healthCheck(await this.context(owner?.id ?? adapter.id, adapter.id, signal));
+      // An adapter may report `unavailable` instead of throwing. Recording
+      // that as a success made routing report a healthy provider with zero
+      // failures while `/health` said unavailable, and it corrupted the
+      // failure counting that drives ejection.
+      if (health.status === 'unavailable') {
+        this.providerHealth.recordFailure(adapter.id, 'PROVIDER_UNAVAILABLE', health.message ?? 'The provider reported itself unavailable.');
+        // The reason is returned too, so /health and the dashboard can say why
+        // rather than only that something is wrong.
+        return { providerId: adapter.id, ...health };
+      }
+      this.providerHealth.recordSuccess(adapter.id, health.latencyMs ?? Date.now() - startedAt, health.checkedAt);
+      return { providerId: adapter.id, latencyMs: Date.now() - startedAt, ...health };
+    } catch (error) {
+      this.providerHealth.recordFailure(adapter.id, 'PROVIDER_UNAVAILABLE', 'The provider health check failed.');
+      // The underlying reason, because "The provider health check failed" sends the user
+      // looking at the provider when the cause was their own connection.
+      return {
+        providerId: adapter.id,
+        status: 'unavailable' as const,
+        checkedAt: new Date().toISOString(),
+        message: error instanceof Error ? error.message : 'The provider health check failed.',
+      };
+    }
+  }
+
+  /**
+   * Health for a single provider, without the cost of the whole sweep.
+   *
+   * A provider that is not in the active set is named in the error rather than reported
+   * unhealthy: "no such provider" and "this provider is down" are different problems, and
+   * the second one sends the user to fix a credential that was never the issue.
+   */
+  async healthForProvider(providerId: string, signal?: AbortSignal): Promise<GatewayProviderHealth> {
+    const adapters = await this.activeAdapters();
+    const adapter = adapters.find((item) => item.id === providerId);
+    if (!adapter) {
+      throw new ProviderError('NOT_FOUND', `OmniHilbras has no active connection for ${providerId}. Connect it first, then test it.`, {
+        providerId,
+        publicMessage: `OmniHilbras has no active connection for ${providerId}. Connect it first, then test it.`,
+      });
+    }
+    return this.probeAdapter(adapter, signal);
   }
 
   /** Live routing state for the dashboard. */

@@ -242,3 +242,32 @@ test('every catalog model is one the adapter will accept', async () => {
 function jsonResponse(body) {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 }
+
+test('the health check bypasses the access-token cache, because a cache proves nothing', async () => {
+  // A health check that reads a cached token reports "healthy" without DeepSeek having been
+  // asked. The dashboard showed "healthy in 0 ms" from a cache entry — a confident answer
+  // with no check behind it, which is the whole fault this area keeps making.
+  const calls = [];
+  const adapter = new DeepSeekWebAdapter({
+    fetch: async (url) => {
+      calls.push(String(url));
+      return new Response(JSON.stringify({ code: 0, data: { biz_data: { token: 'access-' + calls.length } } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+  const credential = { type: 'api-key', value: 'user-token' };
+
+  // First call populates the cache.
+  await adapter.validateCredential(credential);
+  assert.equal(calls.length, 1);
+  // Second call reuses it — that is the point of the cache on the request path.
+  await adapter.validateCredential(credential);
+  assert.equal(calls.length, 2, 'a plain credential check should reuse the cached token');
+
+  // The health check must not.
+  const before = calls.length;
+  await adapter.healthCheck({ credential });
+  assert.equal(calls.length, before + 1, 'healthCheck answered from the cache instead of asking DeepSeek');
+});

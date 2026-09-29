@@ -33,7 +33,7 @@ import { OauthConnectDialog } from '../components/OauthConnectDialog';
 import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, filterAvailability, modelFacets, priceLabel, type ModelFacets, type ModelFilterState, type ModelMetaMap } from '@hilbras/omnihilbras';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
-import { addGatewayConnectionModels, getGatewayHealth, getGatewayRoutingState, listGatewayConnections, putGatewayConnection, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, type GatewayConnection, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, putGatewayConnection, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, type GatewayConnection, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import { dashboardRoutes } from '../lib/routes';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
@@ -62,10 +62,36 @@ function providerFromLocation(): ProviderRecord {
   return getProviderById(id) ?? fallbackProvider;
 }
 
+/**
+ * How long to wait for the connection list before treating the read as failed.
+ *
+ * The gateway answers `/v1/connections` in single-digit milliseconds, so this is not a budget
+ * for a slow gateway — it is a ceiling on how long the page will claim a provider is
+ * unconnected while knowing nothing. Without it, a request that stalls (a loaded machine, a
+ * suspended laptop, six connections already open to the gateway) leaves the page asserting
+ * "Not connected" indefinitely, which is worse than any error: it is a confident wrong answer
+ * about a credential.
+ */
+const CONNECTION_LOAD_TIMEOUT_MS = 10_000;
+
 function statusMeta(status: ProviderStatus) {
   if (status === 'connected') return { label: 'Connected', className: 'border-success/25 bg-success/10 text-success', dot: 'bg-success' };
   if (status === 'attention') return { label: 'Needs attention', className: 'border-gold/30 bg-gold-soft text-gold-text', dot: 'bg-gold' };
   return { label: 'Not connected', className: 'border-line-strong bg-surface-2 text-muted', dot: 'bg-muted' };
+}
+
+/**
+ * What the badge says before the connection list has been read.
+ *
+ * "Not connected" is a claim about the credential, and before the read it is a claim about
+ * nothing. "Checking…" is the only honest label, and "Couldn't read the gateway" is honest
+ * when the read failed — the provider may well be connected.
+ */
+function unknownStatusMeta(state: 'loading' | 'failed') {
+  if (state === 'failed') {
+    return { label: "Couldn't read the gateway", className: 'border-gold/30 bg-gold-soft text-gold-text', dot: 'bg-gold' };
+  }
+  return { label: 'Checking…', className: 'border-line-strong bg-surface-2 text-muted', dot: 'bg-muted animate-pulse' };
 }
 
 function modelReference(providerId: string, model: string) {
@@ -280,14 +306,23 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
    */
   const loadConnection = useCallback(() => {
     let active = true;
-    void listGatewayConnections()
+    setConnectionState((current) => (current === 'failed' ? 'loading' : current));
+    void listGatewayConnections(AbortSignal.timeout(CONNECTION_LOAD_TIMEOUT_MS))
       .then((connections) => {
         if (!active) return;
         const savedConnection = connections.find((item) => item.providerId === provider.id && item.hasCredential);
         setConnection(savedConnection);
         setConnectionAdded(Boolean(savedConnection));
+        setConnectionState('ready');
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!active) return;
+        // Deliberately *not* `setConnectionAdded(false)`. A read that timed out or was refused
+        // says nothing about whether a connection exists, and rendering that as "No connection
+        // yet" offered an Add connection button for a provider that was already connected —
+        // inviting a second connection, and hiding a working one behind a wrong answer.
+        setConnectionState('failed');
+      });
     return () => {
       active = false;
     };
@@ -304,6 +339,18 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const [connectionHealthy, setConnectionHealthy] = useState(false);
   const [connectionPingMs, setConnectionPingMs] = useState<number | undefined>();
   const [connectionAdded, setConnectionAdded] = useState(provider.status !== 'available');
+  /**
+   * Whether the connection list has been read at all.
+   *
+   * `connectionAdded` alone cannot carry this. It is initialised to `false` for an unconnected
+   * provider, so a read that is still in flight — or that hung and then failed — is
+   * indistinguishable from a provider with no connection. On a loaded machine that request can
+   * take a minute, and the page spent that minute saying "Not connected" about a connection
+   * that existed. Three states, because the difference is the whole point.
+   */
+  const [connectionState, setConnectionState] = useState<'loading' | 'ready' | 'failed'>(
+    provider.status !== 'available' ? 'ready' : 'loading',
+  );
   const [testingModels, setTestingModels] = useState<string[]>([]);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | undefined>();
   const [concurrency, setConcurrency] = useState(4);
@@ -322,7 +369,11 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const [noticeError, setNoticeError] = useState(false);
   const [copiedModel, setCopiedModel] = useState<string | null>(null);
   const [routingState, setRoutingState] = useState<GatewayRoutingState | undefined>();
-  const meta = statusMeta(connectionAdded ? (provider.id === 'openrouter' && !connectionHealthy ? 'attention' : provider.status === 'available' ? 'connected' : provider.status) : 'available');
+  // Before the read lands, the badge must not assert a credential state it has not checked.
+  const meta =
+    connectionState === 'ready'
+      ? statusMeta(connectionAdded ? (provider.id === 'openrouter' && !connectionHealthy ? 'attention' : provider.status === 'available' ? 'connected' : provider.status) : 'available')
+      : unknownStatusMeta(connectionState);
 
   useEffect(() => {
     // Any provider can have a saved connection, not just the first one that
@@ -472,13 +523,20 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     scrollAnchorRef.current = window.scrollY;
     setTestingConnection(true);
     try {
-      const health = await getGatewayHealth();
-      const providerHealth = health.providers.find((item) => item.providerId === provider.id);
-      const healthy = providerHealth?.status === 'healthy';
+      // This provider, not the whole registry. Reading `/health` here meant waiting for all
+      // thirteen adapters to be probed before answering a question about one of them, which
+      // on a loaded machine was long enough that the button looked broken.
+      const providerHealth = await getGatewayProviderHealth(provider.id);
+      const healthy = providerHealth.status === 'healthy';
       setConnectionHealthy(healthy);
-      setConnectionPingMs(healthy ? providerHealth?.latencyMs : undefined);
-      if (!healthy) throw new Error(`${provider.name} is not connected to the local gateway.`);
-      const latency = providerHealth?.latencyMs === undefined ? '' : ` in ${providerHealth.latencyMs} ms`;
+      setConnectionPingMs(healthy ? providerHealth.latencyMs : undefined);
+      if (!healthy) {
+        // The provider's own reason, which distinguishes a dead credential from a provider
+        // that is up and refusing us. "Not connected to the local gateway" claimed the first
+        // when the truth was usually the second.
+        throw new Error(providerHealth.message?.trim() || `${provider.name} did not report itself healthy.`);
+      }
+      const latency = providerHealth.latencyMs === undefined ? '' : ` in ${providerHealth.latencyMs} ms`;
       flash(`${provider.name} provider is healthy${latency}.`);
     } catch (error) {
       flash(error instanceof Error ? error.message : 'The local gateway could not verify this connection.', 'error');
@@ -699,16 +757,16 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       {notice && <div role={noticeError ? 'alert' : 'status'} className={`mb-5 flex items-center gap-2 rounded-xl border px-3.5 py-3 text-xs ${noticeError ? 'border-danger/25 bg-danger/10 text-danger' : 'border-success/25 bg-success/10 text-success'}`}>{noticeError ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}{notice}</div>}
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <DetailStat label="Connections" value={connectionAdded ? '1 active' : '0'} icon={KeyRound} tone={connectionAdded ? 'green' : 'muted'} />
+        <DetailStat label="Connections" value={connectionState === 'ready' ? (connectionAdded ? '1 active' : '0') : '—'} icon={KeyRound} tone={connectionAdded && connectionState === 'ready' ? 'green' : 'muted'} />
         <DetailStat label="Models" value={allModels.length > 0 ? String(allModels.length) : '—'} icon={Cpu} tone="blue" />
         <DetailStat label="Latency" value={connectionPingMs === undefined ? (connectionHealthy ? 'Checked just now' : provider.latency) : `${connectionPingMs} ms`} icon={Clock3} tone="gold" />
         <DetailStat label="Route health" value={connectionHealthy ? '100%' : connectionAdded ? 'Pending' : '—'} icon={Activity} tone={connectionHealthy ? 'green' : connectionAdded ? 'gold' : 'muted'} />
       </div>
 
       <section className="card mt-5 overflow-hidden" aria-labelledby="connections-title">
-        <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:p-5"><div><h2 id="connections-title" className="text-sm font-semibold">Connections</h2><p className="muted mt-1 text-xs">Credentials and endpoints used by this provider.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{connectionAdded ? '1 connection' : 'No connection'}</span></div>
+        <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:p-5"><div><h2 id="connections-title" className="text-sm font-semibold">Connections</h2><p className="muted mt-1 text-xs">Credentials and endpoints used by this provider.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{connectionState === 'ready' ? (connectionAdded ? '1 connection' : 'No connection') : 'Unknown'}</span></div>
         <div className="p-4 sm:p-5">
-          {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} pingMs={connectionPingMs} testing={testingConnection || testing} onTest={testConnection} onEdit={openAddConnection} /> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">{planned ? provider.unavailableReason : isOauth ? (oauthFlowAvailable ? 'Sign in to finish connecting this provider.' : 'Sign-in for this provider is not available yet.') : 'Add an API key or point OmniHilbras at a local endpoint.'}</p></div></div><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable || planned} title={planned ? provider.unavailableReason : !oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2 !text-xs disabled:cursor-not-allowed disabled:opacity-40">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div>}
+          {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} pingMs={connectionPingMs} testing={testingConnection || testing} onTest={testConnection} onEdit={openAddConnection} /> : connectionState === 'ready' ? <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">{planned ? provider.unavailableReason : isOauth ? (oauthFlowAvailable ? 'Sign in to finish connecting this provider.' : 'Sign-in for this provider is not available yet.') : 'Add an API key or point OmniHilbras at a local endpoint.'}</p></div></div><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable || planned} title={planned ? provider.unavailableReason : !oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2 !text-xs disabled:cursor-not-allowed disabled:opacity-40">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text ${connectionState === 'loading' ? 'animate-pulse' : ''}`}><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">{connectionState === 'loading' ? 'Checking the gateway' : "Couldn't read the gateway"}</p><p className="muted mt-1 text-xs">{connectionState === 'loading' ? 'Asking which connections are saved. This is usually instant.' : `OmniHilbras asked the local gateway which connections are saved and did not get an answer, so it does not yet know whether ${provider.name} is connected. Nothing has been changed.`}</p></div></div>{connectionState === 'failed' && <button type="button" onClick={loadConnection} className="btn-gold !px-3 !py-2 !text-xs">Try again <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /></button>}</div>}
         </div>
       </section>
 

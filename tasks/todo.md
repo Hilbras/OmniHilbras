@@ -147,6 +147,15 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 34: Test one provider, not thirteen — and stop a hung read from saying "not connected".
+  - Acceptance: "Test provider" answers in about a second with the provider's own reason for any failure, and a slow or failed connection read says so instead of "No connection yet".
+  - Verify: `GET /v1/health/deepseek-web` returns in 8 ms of gateway time (478–823 ms of real DeepSeek round trip) against 8.45 s for `GET /health`; the badge reads Checking… → Connected; "Test provider" reports `Ping 816 ms`; an unknown provider returns 404 naming it. 401 tests pass.
+  - Findings: **three more layers of the same fault, all of them reporting rather than behaviour.** (1) "Test provider" called `getGatewayHealth()`, which probes every active adapter, to answer a question about one provider — thirteen probes to render one card, and on a loaded machine long enough that the button looked permanently stuck. There is now `GET /v1/health/:providerId`, and the test asserts the other adapter is *never probed* rather than merely that the response shape is right. (2) `loadConnection` had `.catch(() => undefined)` and no timeout, so a request that **hung for 60 seconds** left the page on its initial `false` and it said **"Not connected"** about a connection that existed, with an **Add connection** button inviting a second one. Three states now — loading, ready, failed — and a 10 s ceiling, because a read that stalls is not evidence of anything. (3) The health check then reported **"healthy in 0 ms"**, which was the *cached* access token: `accessToken()` caches for an hour, so the check proved nothing while looking like a check. `validateCredential` now passes `fresh: true`. This is the exact fault the area keeps making — a confident answer with nothing behind it.
+  - Also: an unknown provider is `NOT_FOUND` naming itself, not `unavailable`. "This provider is down" and "you never connected it" are different problems, and the first sends the user to fix a credential that was never the issue.
+  - Files: `apps/gateway/src/service.ts` (`probeAdapter`, `healthForProvider`), `apps/gateway/src/server.ts`, `packages/omnihilbras-sdk/src/adapters/deepseek-web.ts`, `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, tests, docs.
+  - Depends on: Task 33.
+  - Scope: Medium — a new route.
+
 - [x] Task 33: Register DeepSeek Web for health, and give it a health check.
   - Acceptance: "Test provider" works on a DeepSeek connection, and health says healthy rather than "not connected".
   - Verify: `GET /health` reports `deepseek-web -> healthy`; a real turn through the gateway returns `'working'` in 7.9 s (proof of work solved); `GET /v1/connections` shows `deepseek-web | hasCredential: True | models: 14`. 397 tests pass.

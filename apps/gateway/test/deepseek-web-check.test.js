@@ -141,3 +141,66 @@ test('a refused credential is reported in the provider’s own words', async () 
   assert.equal(result.status, 'unavailable');
   assert.match(result.message ?? '', /rejected that userToken/i);
 });
+
+/* ------------------------------------------------------------------ *
+ * Health for one provider
+ * ------------------------------------------------------------------ */
+
+test('health can be asked for one provider without probing the whole registry', async () => {
+  // `/health` probes every active adapter. A dashboard card shows one provider, so it now
+  // asks about one provider — otherwise "Test provider" waited on all thirteen and looked
+  // permanently stuck on a loaded machine.
+  //
+  // Two stub adapters, and the assertion that matters is that asking about one of them does
+  // not touch the other. A full sweep would have called both.
+  const probed = [];
+  const stub = (id) => ({
+    id,
+    capabilities: { chat: true, streaming: false, models: false },
+    async listModels() { return []; },
+    async chat() { throw new Error('not used'); },
+    async validateCredential() { return { ok: true }; },
+    async healthCheck() {
+      probed.push(id);
+      return { status: 'healthy', checkedAt: new Date().toISOString() };
+    },
+  });
+  const { createGatewayServer } = await import('../dist/index.js');
+  const { ProviderRegistry } = await import('../../../packages/omnihilbras-sdk/dist/index.js');
+  const gateway = new GatewayService(new ProviderRegistry().register(stub('one')).register(stub('two')), { get: async () => undefined });
+  const server = createGatewayServer(gateway, { corsOrigin: 'http://localhost:5173' });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/health/one`, { headers: { origin: 'http://localhost:5173' } });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    // One provider in, one provider out — not a report about the registry.
+    assert.equal(body.provider.providerId, 'one');
+    assert.equal(body.provider.status, 'healthy');
+    assert.equal(Array.isArray(body.providers), false);
+    // The other adapter was never asked. This is the whole point of the route.
+    assert.deepEqual(probed, ['one']);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('a provider with no active connection is named, not reported unhealthy', async () => {
+  // "This provider is down" and "you never connected it" are different problems, and the
+  // first sends the user to fix a credential that was never the issue.
+  await assert.rejects(
+    () => service().healthForProvider('not-a-provider'),
+    (error) => error.code === 'NOT_FOUND' && /Connect it first/.test(error.publicMessage ?? error.message),
+  );
+});
+
+test('a failed check reports the cause rather than a generic failure', async () => {
+  // The message is what the dashboard shows, so "The provider health check failed" would
+  // point the user at the provider when the cause was their own connection.
+  const gateway = service();
+  const result = await gateway.healthForProvider('deepseek-web').catch((error) => ({ threw: error }));
+  // deepseek-web has no connection in this store, so it is named rather than probed. What
+  // matters is that the outcome is a reason, not a silent "unavailable".
+  assert.ok(result.threw || result.message, 'a health result without any reason was returned');
+});

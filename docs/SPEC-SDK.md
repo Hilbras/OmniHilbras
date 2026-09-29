@@ -942,6 +942,47 @@ every poll rather than being a second completion.
 Both are the same shape of bug: a missing registration is silent, and the symptom
 ("not connected") points at the credential rather than at the wiring.
 
+### Health for one provider: `GET /v1/health/:providerId`
+
+`GET /health` probes **every** active adapter, which is right for a status page and wrong for a
+provider card. "Test provider" was calling it to answer a question about one provider, so it
+waited for thirteen probes first — long enough on a loaded machine that the button looked
+permanently stuck. One route, one provider:
+
+```
+GET /v1/health/deepseek-web
+200 {"provider":{"providerId":"deepseek-web","status":"healthy","latencyMs":816, ...}}
+```
+
+**A provider with no active connection is `NOT_FOUND` and names itself**, rather than
+reporting `unavailable`. "This provider is down" and "you never connected it" are different
+problems, and the first sends the user to fix a credential that was never the issue.
+
+**The DeepSeek health check bypasses the access-token cache.** `accessToken()` caches for an
+hour, which is right for the request path and wrong for a check: the dashboard reported
+*"healthy in 0 ms"* from a cache entry, which looks like a successful check because something
+was returned. It now asks DeepSeek, and reports the real round trip — 478–823 ms.
+
+### A read that stalls is not evidence of anything
+
+`loadConnection` had `.catch(() => undefined)` and no timeout. When the request hung — sixty
+seconds, on this machine — the page kept its initial `false` and asserted **"Not connected"**
+about a connection that existed, next to an **Add connection** button inviting a second one.
+
+The detail page now has three states, because the difference is the whole point:
+
+| State | Badge | Connections |
+| --- | --- | --- |
+| loading | Checking… | — |
+| ready, none found | Not connected | 0 |
+| ready, found | Connected | 1 active |
+| failed | Couldn't read the gateway | — |
+
+Only the third row makes a claim about the credential, and only after reading it. The read has
+a **10 second ceiling** — generous for an endpoint that answers in single-digit milliseconds,
+and there so that a stall resolves into a *failure the user can see* rather than a wrong answer
+they cannot.
+
 ### The catalog: 13 cards, and why the plan does not narrow them
 
 Five Sol rungs, two Luna free, six for GPT-5.5:
