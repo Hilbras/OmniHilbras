@@ -272,7 +272,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
               How to get the session credential
             </p>
             <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-              {providerName} uses a browser web session instead of an API key. Required cookie:{' '}
+              {providerName} uses a browser web session instead of an API key. What to copy:{' '}
               <code className="rounded bg-black/25 px-1 py-0.5 font-mono text-[10px] text-[#c4b5fd]">{credential}</code>
             </p>
             <ol className="mt-2 space-y-1.5">
@@ -325,7 +325,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
           </section>
             <div className="mt-3">
               <label htmlFor="web-cookie-export" className="block text-[11px] font-semibold">
-              {descriptor.paste?.fieldLabel ?? descriptor.credentialName ?? 'Credential'}
+              {descriptor.paste?.fieldLabel ?? 'Cookie header'}
             </label>
             <textarea
               id="web-cookie-export"
@@ -339,7 +339,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
               spellCheck={false}
               autoComplete="off"
               disabled={!acknowledged}
-              placeholder={descriptor.paste?.placeholder ?? descriptor.credentialName ?? ''}
+              placeholder={descriptor.paste?.placeholder ?? 'name=value; name=value'}
               className="mt-1.5 w-full resize-y rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-text outline-none focus:border-gold/50 disabled:opacity-50"
             />
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -440,6 +440,10 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
                 type="button"
                 onClick={() => void check()}
                 disabled={!pasteReady || phase === 'running' || phase === 'checking'}
+                // Named rather than silently greyed. A disabled primary button with no
+                // explanation is read as a broken feature, which is exactly the wrong
+                // conclusion — the thing it wants is one field, described two steps above.
+                title={pasteReady ? undefined : 'Paste the credential above first.'}
                 className="btn-gold mt-3 w-full !h-9 !text-xs"
               >
                 {phase === 'checking' ? (
@@ -451,6 +455,14 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
                   'Ask Qwen'
                 )}
               </button>
+            )}
+            {!descriptor.paste && descriptor.check && phase === 'checking' && (
+              <p className="muted mt-2 text-center text-[10px] leading-relaxed" role="status">
+                {/* A spinner with nothing to say is the same as a dead button. Naming the three
+                    questions, and the clock, is what makes a slow answer legible as progress. */}
+                Asking Qwen three things: whether the cookie means anything, what models it serves,
+                and whether a turn is really answered. This can take up to 20 seconds.
+              </p>
             )}
             <button
               type="button"

@@ -116,3 +116,39 @@ test('every catalog model is named for the provider, so routing can attribute a 
   }
   assert.equal(new Set(QWEN_WEB_MODELS.map((m) => m.id)).size, QWEN_WEB_MODELS.length, 'duplicate model id');
 });
+
+test('the probe cannot wait forever: it has a budget and says what it got', async () => {
+  // "Ask Qwen" with no outcome is indistinguishable from a broken button, and the three requests
+  // to a host on another continent are exactly the kind that stall. The budget turns a hang into
+  // an answer, and the answers gathered so far are returned rather than thrown away — a slow auth
+  // origin with a fast refusal on the turn is still a useful answer.
+  let calls = 0;
+  const stalling = {
+    async request() {
+      calls += 1;
+      return new Promise((_, reject) => {
+        // Never settles on its own; only the abort below can end it.
+        setTimeout(() => reject(new ProviderError('PROVIDER_TIMEOUT', 'stalled')), 5_000).unref?.();
+      });
+    },
+  };
+  const probe = await probeQwenWeb('cna=x', stalling, undefined, { timeoutMs: 120 });
+  assert.equal(calls, 3, 'the auth, catalog and turn are all asked');
+  assert.equal(probe.turnServed, false);
+  assert.ok(probe.detail.length > 0, 'a stalled probe must still report a reason');
+  assert.equal(probe.authenticated, false);
+});
+
+test('the three questions do not queue behind each other', async () => {
+  // Sequential requests cost three round trips. The auth origin and the model catalog are
+  // independent, so they are asked together and only the turn waits for a model id.
+  const order = [];
+  const t = transport({
+    [`${ORIGIN}/api/v2/auths/`]: () => { order.push('auth'); return { status: 200, headers: new Headers(), data: AUTH_OK.data }; },
+    [`${CHAT}/api/v2/models/`]: () => { order.push('models'); return { status: 200, headers: new Headers(), data: MODELS_BODY }; },
+    [`${CHAT}/api/v2/chat/completions`]: () => { order.push('turn'); return { status: 200, headers: new Headers(), data: { ret: [] } }; },
+  });
+  await probeQwenWeb('cna=x', t);
+  assert.ok(order.indexOf('models') < order.indexOf('turn'), 'the turn must wait for the catalog, since it names a model from it');
+  assert.equal(order.length, 3);
+});

@@ -1415,6 +1415,29 @@ while the only thing Qwen could be asked was a guess. There is a flow behind it 
 | What models are served? | `chat.qwen.ai/api/v2/models/` | readable by guests, so the catalog is real even when a turn is not |
 | **Is a turn actually served?** | `chat.qwen.ai/api/v2/chat/completions` | the one question that decides whether this is a provider |
 
+### The probe has a budget, and asks its three questions at once
+
+The dialog did work, and read as broken — which is the same outcome as broken. The probe answers in
+about a second; the problem was that "Ask Qwen" then said nothing at all, so a wait looked
+identical to a dead button. Measured rather than assumed: the gateway answers in 0.7–1.8 s by
+`curl` and the browser's own fetch took 1.2–1.5 s, so the network was never the bottleneck.
+
+Three changes, none of which depend on the diagnosis being right:
+
+- **A 20-second budget.** A stall becomes an answer instead of an indefinite spinner, and the
+  answers gathered so far are *returned rather than discarded* — a slow auth origin with a fast
+  refusal on the turn is still a useful answer, and throwing it away would be its own dishonesty.
+- **The three questions go out together.** They were sequential: three round trips to a host on
+  another continent for no reason. The auth origin and the model catalog are independent, and only
+  the turn waits — it names a model id from the catalog, so a hard-coded id would go stale the day
+  Qwen renames one and the request would fail for a reason unrelated to the credential.
+- **The waiting state says what is being asked and how long it may take**, which is what turns a
+  spinner into progress.
+
+A disabled primary button is named too — *"Paste the credential above first."* — because a silently
+greyed button reads as a broken feature, and the thing it wants is one field described two steps
+above it.
+
 **Nothing is saved.** There is no connect route for Qwen, and the dialog hides Connect because
 there is nothing to save — a connection is only worth having once a turn is really served.
 

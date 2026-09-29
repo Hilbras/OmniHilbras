@@ -134,7 +134,12 @@ function readModels(payload: unknown): string[] {
  * ship a card that cannot answer, and refusing to try would be refusing on the strength of a
  * measurement nobody made. So it asks, and it says what came back.
  */
-export async function probeQwenWeb(cookieHeader: string, transport: HttpTransport, signal?: AbortSignal): Promise<QwenProbeResult> {
+export async function probeQwenWeb(
+  cookieHeader: string,
+  transport: HttpTransport,
+  signal?: AbortSignal,
+  options: { timeoutMs?: number } = {},
+): Promise<QwenProbeResult> {
   const cookies = parseQwenCookieHeader(cookieHeader);
   const cookie = Object.entries(cookies).map(([name, value]) => `${name}=${value}`).join('; ');
   const headers = (extra: Record<string, string> = {}) => ({
@@ -143,9 +148,33 @@ export async function probeQwenWeb(cookieHeader: string, transport: HttpTranspor
     'user-agent': BROWSER_USER_AGENT,
     ...extra,
   });
+
+  /**
+   * A budget for the whole probe, because the alternative is a spinner that never resolves.
+   *
+   * Not the network — the three requests together take about a second. It is that a caller
+   * waiting on a promise it cannot see into will sit there indefinitely if anything stalls, and
+   * "Ask Qwen" with no outcome is indistinguishable from a broken button. On expiry the answers
+   * gathered so far are returned rather than discarded: a slow auth origin with a fast refusal on
+   * the turn is still a useful answer, and throwing it away would be its own kind of dishonesty.
+   */
+  const timeoutMs = options.timeoutMs ?? 20_000;
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  timer.unref?.();
+
   const ask = async (url: string, init: { method: 'GET' | 'POST'; headers: Record<string, string>; body?: string }) => {
     try {
-      const response = await transport.request<unknown>({ method: init.method, url, headers: init.headers, providerId: qwenWebProviderId, ...(init.body ? { body: init.body } : {}), ...(signal ? { signal } : {}) });
+      const response = await transport.request<unknown>({
+        method: init.method,
+        url,
+        headers: init.headers,
+        providerId: qwenWebProviderId,
+        ...(init.body ? { body: init.body } : {}),
+        signal: controller.signal,
+      });
       return { status: response.status, data: response.data, error: undefined as string | undefined };
     } catch (error) {
       // A refusal is an answer here, not a failure to report around. The transport throws on a
@@ -154,41 +183,60 @@ export async function probeQwenWeb(cookieHeader: string, transport: HttpTranspor
     }
   };
 
-  // 1. The auth origin. A guest is refused here first, so this separates "no credential" from
-  //    "the credential is not the problem".
-  //
-  //    Read from the **body**, not the status. `auth.qwen.ai` answers a guest with **HTTP 200**
-  //    and `{"success":false,"data":{"code":"Unauthorized","details":"401 Unauthorized"}}` — the
-  //    status code is a lie and the transport, correctly, does not throw. Trusting the status is
-  //    what made a guest cookie report as `authenticated: true`.
-  const auth = await ask(`${QWEN_AUTH_ORIGIN}${AUTH_PATH}`, { method: 'GET', headers: headers() });
-  const authRefused = readRefusal(auth.data) ?? (auth.error ? auth.error : undefined);
-  const authenticated = auth.error === undefined && !authRefused;
-  const authDetail = authRefused ?? `HTTP ${auth.status}`;
+  try {
+    /**
+     * All three at once, and the turn last only because it needs a model id.
+     *
+     * Sequential requests cost three round trips to a host on another continent. The models
+     * catalog is the only dependency between them, and it does not need the turn's answer — so
+     * the turn is fired as soon as the catalog lands and the two never wait on each other.
+     */
+    const authPromise = ask(`${QWEN_AUTH_ORIGIN}${AUTH_PATH}`, { method: 'GET', headers: headers() });
+    const catalogPromise = ask(`${QWEN_ORIGIN}/api/v2/models/`, { method: 'GET', headers: headers() });
 
-  // 2. The model catalog. Readable by guests, so it is reported whatever else happened.
-  const catalog = await ask(`${QWEN_ORIGIN}/api/v2/models/`, { method: 'GET', headers: headers() });
-  const models = readModels(catalog.data);
+    const [auth, catalog] = await Promise.all([authPromise, catalogPromise]);
+    const models = readModels(catalog.data);
+    const turn = await ask(`${QWEN_ORIGIN}${TURN_PATH}`, {
+      method: 'POST',
+      headers: headers({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ model: models[0] ?? 'qwen3.7-plus', messages: [{ role: 'user', content: 'hi' }], stream: false }),
+    });
 
-  // 3. The turn — the question that actually matters, and the one the refusal answers.
-  const turn = await ask(`${QWEN_ORIGIN}${TURN_PATH}`, {
-    method: 'POST',
-    headers: headers({ 'content-type': 'application/json' }),
-    body: JSON.stringify({ model: models[0] ?? 'qwen3.7-plus', messages: [{ role: 'user', content: 'hi' }], stream: false }),
-  });
-  const ret = Array.isArray((turn.data as { ret?: unknown })?.ret) ? ((turn.data as { ret: unknown[] }).ret) : [];
-  const turnRefusal = readRefusal(turn.data);
-  const served = turn.error === undefined && ret.length === 0 && !turnRefusal;
-  const detail =
-    turn.error
-    ?? (ret.length > 0 ? `Qwen refused the turn: ${ret.join(', ')}` : undefined)
-    ?? turnRefusal
-    ?? `Qwen answered HTTP ${turn.status}.`;
+    // 1. The auth origin. A guest is refused here first, so this separates "no credential" from
+    //    "the credential is not the problem".
+    //
+    //    Read from the **body**, not the status. `auth.qwen.ai` answers a guest with **HTTP 200**
+    //    and `{"success":false,"data":{"code":"Unauthorized"}}` — the status code is a lie and the
+    //    transport, correctly, does not throw. Trusting the status is what made a guest cookie
+    //    report as `authenticated: true`.
+    const authRefused = readRefusal(auth.data) ?? (auth.error ? auth.error : undefined);
+    const authenticated = auth.error === undefined && !authRefused;
+    const authDetail = authRefused ?? `HTTP ${auth.status}`;
 
-  return { authenticated, turnServed: served, detail, authDetail, models };
+    // 2. The turn — the question that actually matters, and the one the refusal answers.
+    const ret = Array.isArray((turn.data as { ret?: unknown })?.ret) ? ((turn.data as { ret: unknown[] }).ret) : [];
+    const turnRefusal = readRefusal(turn.data);
+    const turnServed = turn.error === undefined && ret.length === 0 && !turnRefusal;
+    const detail =
+      turn.error
+      ?? (ret.length > 0 ? `Qwen refused the turn: ${ret.join(', ')}` : undefined)
+      ?? turnRefusal
+      ?? `Qwen answered HTTP ${turn.status}.`;
+
+    return { authenticated, turnServed, detail, authDetail, models };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
 }
 
-/** The catalog Qwen serves, for the card. Read from the guest-visible endpoint, so it is real. */
+/**
+ * The provider's own refusal, read out of a **200** response.
+ *
+ * Qwen signals every refusal in the body and never in the status code, on both origins. A check
+ * that trusted the status would report a guest cookie as a working credential.
+ */
+
 /**
  * The catalog, read from the live `GET /api/v2/models/` rather than written from memory.
  *

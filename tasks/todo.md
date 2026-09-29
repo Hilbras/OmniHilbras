@@ -147,6 +147,16 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 41: Make the Qwen dialog look like it works, because it did not.
+  - Acceptance: the probe cannot wait forever, a slow answer reads as progress rather than a dead button, and the disabled button says what it wants.
+  - Verify: the three questions are asked concurrently (`models` still precedes `turn`, since the turn names a model from it); a stalling transport returns an answer in ~120 ms with a reason rather than hanging; the disabled primary button carries "Paste the credential above first."; the in-flight state names the three questions and the 20 s ceiling. 419 tests pass.
+  - Findings: **it worked, and looked broken.** The probe answers in about a second, and the dialog did eventually show the result — but "Ask Qwen" sat there with nothing to say, so a wait reads exactly like a dead button. Measured, not assumed: the gateway answers in 0.7–1.8 s by curl and the browser's own fetch took 1.2–1.5 s, so the network was never the problem. The delay was the **browser's main thread being starved** on a machine at load 17–42, which delays the promise callback rather than the request.
+  - Three fixes, none of which depend on that diagnosis being right. **A 20-second budget**, so a stall becomes an answer instead of an indefinite spinner — and the answers gathered so far are returned rather than discarded, because a slow auth origin with a fast refusal on the turn is still a useful answer and throwing it away would be its own dishonesty. **The three questions now go out together** instead of in sequence, which was three round trips to another continent for no reason: the auth origin and the model catalog are independent, and only the turn waits for a model id. **The waiting state says what is being asked and how long it may take**, which is what turns a spinner into progress.
+  - Also: the disabled primary button was silently greyed, which is read as a broken feature. It now carries "Paste the credential above first." And the field said `auth cookie` as both its label and its placeholder — words that do not say where the value comes from. It says `Cookie header from auth.qwen.ai` and shows what to copy.
+  - Files: `packages/omnihilbras-sdk/src/adapters/qwen-web.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, tests, docs.
+  - Depends on: Task 40.
+  - Scope: Small.
+
 - [x] Task 40: Give Qwen a real flow, and find out the one thing that was unknown.
   - Acceptance: the Qwen card is connectable, the dialog asks the three questions that matter, and it reports the provider's own answers. Nothing is saved unless a turn is actually served.
   - Verify: live through the dialog with a guest cookie — *"A turn was refused · Qwen refused the turn: FAIL_SYS_USER_VALIDATE, RGV587_ERROR::SM… · Credential at auth.qwen.ai: Unauthorized — 401 Unauthorized · 3 models served to guests"*; `POST /v1/web-cookie/qwen/check` returns the same; 417 tests pass.

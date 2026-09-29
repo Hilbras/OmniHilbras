@@ -63,7 +63,7 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     id: 'qwen-web',
     name: 'Qwen Web',
     website: 'https://chat.qwen.ai',
-    credentialName: 'auth cookie',
+    credentialName: 'Cookie header from auth.qwen.ai',
     /**
      * Qwen's auth is on a **different origin** from its chat app — `auth.qwen.ai`. That is
      * measured, not guessed: a guest gets `401 Unauthorized` from `auth.qwen.ai/api/v2/auths/`
