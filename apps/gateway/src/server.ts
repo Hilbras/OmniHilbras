@@ -329,6 +329,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/qwen/check') {
+      // A probe, not a connect, and it stores nothing. The open question is whether Alibaba's
+      // bot-protection gate applies to an authenticated request, and that cannot be answered
+      // without a signed-in account — so the route exists to make the question askable and to
+      // report the provider's own answer rather than a verdict anyone guessed at.
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      sendJson(response, 200, { probe: await service.checkQwenWeb(readRequiredString(body, 'cookieHeader'), controller.signal) }, origin);
+      return;
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/web-cookie/chatgpt/check') {
       // Deliberately before the connect route and deliberately storing nothing: this is the
       // "check the cookie" answer, which is which models the account will actually get.

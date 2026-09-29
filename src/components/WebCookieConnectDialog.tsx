@@ -66,12 +66,29 @@ type CheckResult = {
   models: Array<{ id: string; name: string }>;
 };
 
+/**
+ * A probe, for a provider whose one open question cannot be answered offline.
+ *
+ * Qwen is the case: whether Alibaba's bot-protection gate applies to an *authenticated* request
+ * is unknown until a signed-in credential is tried, and it refuses with HTTP 200 and a refusal in
+ * the body. So there is nothing to save and nothing to narrow — the answer is three facts, and
+ * the provider's own words are shown rather than a verdict.
+ */
+type ProbeResult = {
+  authenticated: boolean;
+  turnServed: boolean;
+  detail: string;
+  authDetail: string;
+  models: string[];
+};
+
 export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskSeverity = 'standard', onConnected, onClose }: Props) {
   const { name: providerName, website, credentialName: credential } = descriptor;
   const [acknowledged, setAcknowledged] = useState(false);
   const [exported, setExported] = useState('');
   const [freeOnly, setFreeOnly] = useState(false);
   const [checked, setChecked] = useState<CheckResult | null>(null);
+  const [probe, setProbe] = useState<ProbeResult | null>(null);
   const [phase, setPhase] = useState<'idle' | 'checking' | 'running' | 'done'>('idle');
   const [error, setError] = useState('');
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
@@ -109,15 +126,25 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
     setError('');
     try {
       if (!descriptor.check) return;
-      const result = await requestJson<CheckResult>(descriptor.check.path, {
+      const body = await requestJson<CheckResult & { probe?: ProbeResult }>(descriptor.check.path, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ [descriptor.check.field]: exported }),
       });
-      setChecked(result);
+      // A route that answers with a probe has no connection to offer, so it is kept apart
+      // rather than read as a plan and a model list.
+      if (body.probe) {
+        setProbe(body.probe);
+        setChecked(null);
+        setPhase('idle');
+        return;
+      }
+      setChecked(body);
+      setProbe(null);
       setPhase('idle');
     } catch (checkError) {
       setChecked(null);
+      setProbe(null);
       setPhase('idle');
       setError(checkError instanceof Error ? checkError.message : 'That export could not be read.');
     }
@@ -231,7 +258,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
             </a>
           </div>
 
-          {descriptor.paste && (
+          {(descriptor.paste ?? descriptor.check) && (
           <section className="mt-4 rounded-xl border border-line bg-bg-soft/40 p-3">
             <p className="text-[11px] font-semibold">Copy the credential</p>
             <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
@@ -298,7 +325,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
           </section>
             <div className="mt-3">
               <label htmlFor="web-cookie-export" className="block text-[11px] font-semibold">
-              {descriptor.paste?.fieldLabel ?? 'Credential'}
+              {descriptor.paste?.fieldLabel ?? descriptor.credentialName ?? 'Credential'}
             </label>
             <textarea
               id="web-cookie-export"
@@ -312,7 +339,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
               spellCheck={false}
               autoComplete="off"
               disabled={!acknowledged}
-              placeholder={descriptor.paste?.placeholder ?? ''}
+              placeholder={descriptor.paste?.placeholder ?? descriptor.credentialName ?? ''}
               className="mt-1.5 w-full resize-y rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-text outline-none focus:border-gold/50 disabled:opacity-50"
             />
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -321,7 +348,9 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
                 type="button"
                 onClick={() => void check()}
                 disabled={!descriptor.check || !pasteReady || phase === 'checking' || phase === 'running'}
-                className="btn-ghost !h-8 !px-2.5 !text-[11px]"
+                // Hidden when there is nothing to save, because the primary action is then the
+                // check itself and two buttons that do the same thing is a choice nobody wants.
+                className={`btn-ghost !h-8 !px-2.5 !text-[11px] ${descriptor.paste ? '' : 'hidden'}`}
               >
                 {phase === 'checking' ? (
                   <>
@@ -345,6 +374,43 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
               </label>
               )}
             </div>
+            {/*
+              A probe reports three facts and nothing is saved. The turn is the one that
+              matters, and the provider's own words are shown rather than a verdict — Qwen
+              refuses bot-protected requests with HTTP 200 and a refusal in the body, so
+              "the request succeeded" and "the answer was no" are the same wire event.
+            */}
+            {probe && (
+              <div className={`mt-2.5 rounded-lg border p-2.5 ${probe.turnServed ? 'border-success/30 bg-success/10' : 'border-gold/30 bg-gold-soft'}`}>
+                <p className={`flex items-center gap-1.5 text-[11px] font-semibold ${probe.turnServed ? 'text-success' : 'text-gold-text'}`}>
+                  {probe.turnServed ? <Check className="h-3 w-3" aria-hidden="true" /> : <CircleAlert className="h-3 w-3" aria-hidden="true" />}
+                  {probe.turnServed ? 'A turn was served' : 'A turn was refused'}
+                </p>
+                <p className="mt-1 text-[10px] leading-relaxed text-muted">{probe.detail}</p>
+                <p className="muted mt-1 text-[10px] leading-relaxed">
+                  Credential at auth.qwen.ai: <span className="font-mono">{probe.authDetail}</span>
+                </p>
+                {probe.models.length > 0 && (
+                  <>
+                    <p className="muted mt-1.5 text-[10px]">
+                      {probe.models.length} model{probe.models.length === 1 ? '' : 's'} served to guests:
+                    </p>
+                    <ul className="mt-1 flex flex-wrap gap-1">
+                      {probe.models.map((model) => (
+                        <li key={model} className="flex items-center gap-1 rounded bg-black/25 px-1.5 py-0.5 font-mono text-[9px] text-muted">
+                          <Tag className="h-2 w-2 shrink-0" aria-hidden="true" />
+                          {model}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                <p className="muted mt-2 text-[10px] leading-relaxed">
+                  Nothing has been saved. A connection is only worth having once a turn is actually served.
+                </p>
+              </div>
+            )}
+
             {checked && (
               <div className="mt-2.5 rounded-lg border border-success/30 bg-success/10 p-2.5">
                 <p className="flex items-center gap-1.5 text-[11px] font-semibold text-success">
@@ -369,11 +435,28 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
             )}
             </div>
 
+            {!descriptor.paste && descriptor.check && (
+              <button
+                type="button"
+                onClick={() => void check()}
+                disabled={!pasteReady || phase === 'running' || phase === 'checking'}
+                className="btn-gold mt-3 w-full !h-9 !text-xs"
+              >
+                {phase === 'checking' ? (
+                  <>
+                    <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    Asking Qwen
+                  </>
+                ) : (
+                  'Ask Qwen'
+                )}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => void submit()}
               disabled={!descriptor.paste || !pasteReady || phase === 'running' || phase === 'checking'}
-              className="btn-gold mt-3 w-full !h-9 !text-xs"
+              className={`btn-gold mt-3 w-full !h-9 !text-xs ${descriptor.paste ? '' : 'hidden'}`}
             >
               {phase === 'running' ? (
                 <>

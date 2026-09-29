@@ -1360,50 +1360,68 @@ line) and **Application → Storage → Cookies**. The whole line matters: a tok
 limit is split into numbered chunks, and a header copied without its siblings is a broken session
 that fails later as an unexplained refusal.
 
-### Qwen Web: a card that says why it cannot be connected
+### Qwen Web: refusals arrive in the body, on both origins
 
-There **is** a card, and it is the honest kind. `status: 'planned'` is a distinct status rather
-than a flavour of `available`, because the two need opposite behaviour: `available` should
-invite you to connect, and this one must not.
+Qwen's shape is unusual enough to be worth stating plainly, because **every refusal is HTTP 200**:
 
 ```
-Qwen Web   Not built yet
-  The models are served to guests, but every turn is gated by Alibaba's bot-protection
-  captcha, which has to be solved in a browser. Not built on a maybe — see docs/SPEC-SDK.md.
+GET  https://auth.qwen.ai/api/v2/auths/            → 200
+     {"success":false,"data":{"code":"Unauthorized","details":"401 Unauthorized"}}
+
+POST https://chat.qwen.ai/api/v2/chat/completions  → 200
+     {"ret":["FAIL_SYS_USER_VALIDATE","RGV587_ERROR::SM::哎哟喂,被挤爆啦,请稍后重试"],
+      "data":{"url":"…/_____tmd_____/punish?x5secdata=…"}}
 ```
 
-`unavailableReason` is **required** whenever the status is `planned`. A card that says "not
-available" without saying why is a dead end, and one that hides the reason is worse than no
-card. Both card views enforce it — the compact row and the full card each have their own
-action, and guarding only one leaves the other offering a button that opens a dialog which
-cannot work.
+A client that checks the status code sees a working provider on both. The first version of the
+probe did exactly that and reported a guest cookie as `authenticated: true`; the live run is what
+caught it. Refusals are read out of the body with `readRefusal`, and never inferred from a status.
 
-The detail page enforces it too, and its empty state says the real reason rather than
-"add an API key" for a provider that has no API key.
+Two origins, because **Qwen's auth is not on its chat host**. A guest holds no auth cookie on any
+host, which is why there is nothing for an unauthenticated client to present.
 
+**The challenge is not a clearance flow.** Requesting that `_____tmd_____/punish` URL returns 200,
+renders "Please connect them in order", **sets no cookie**, and the retry is refused with a freshly
+minted challenge. It is a human puzzle, so no client can satisfy it. `GET /api/v1/chat/completions`
+is 404 — v2 is the only turn path. And asking the turn from inside the page **kills the renderer**,
+because the failing body never ends; a probe has to run from Node with a byte cap, which is why
+`readCapped` exists.
 
-**Re-tested against the live site** (app `0.4.4`, model list now `qwen3.7-plus`). The verdict is
-unchanged and now precisely known:
+### The catalog is read, not remembered
+
+`GET /api/v2/models/` answers guests, and it answers **three** models:
 
 ```
-POST /api/v2/chat/completions  →  200 application/json
-{"ret":["FAIL_SYS_USER_VALIDATE","RGV587_ERROR::SM::哎哟喂,被挤爆啦,请稍后重试"],
- "data":{"url":"https://chat.qwen.ai/api/v2/chat/completions/_____tmd_____/punish?x5secdata=…"}}
+qwen3.7-plus   Qwen3.7-Plus
+qwen3.8-max    Qwen3.8-Max
+qwen3.8-omni-flash  Qwen3.8-Omni-Flash
 ```
 
-Note the **200**. The refusal is a body, not a status, so a client that only checks the status
-code sees success. Three further facts, each measured:
+Ten plausible ids were written first — `qwen3.7-flash`, `qwen3.7-coder-plus`, `qwen3.7-vl-plus` and
+so on — and the probe caught the difference. Guessing a catalog is the same fault as guessing a
+capability: the card would have advertised models that do not exist and offered turns guaranteed
+to fail, with nothing on the page to say why. Qwen publishes no context length on that endpoint,
+so none is claimed.
 
-- **The challenge is not a clearance flow.** Visiting that `_____tmd_____/punish` URL returns 200,
-  renders "Please connect them in order", **sets no cookie**, and the retry is refused with a
-  freshly minted challenge. It is a human puzzle, not something a client can satisfy.
-- **`/api/v1/chat/completions` is 404.** v2 is the only turn path.
-- **Asking the turn from inside the page kills the renderer.** Any probe has to be made from Node
-  with the harvested cookies and a hard byte cap, because the failing response never ends.
+### Qwen is `available`, not `planned`
 
-The one untested hypothesis is the one that unblocked DeepSeek: **a signed-in Qwen session may
-not be gated.** That needs a credential only the operator has, so the card stays `planned` rather
-than claiming a connection that cannot serve a token.
+`planned` meant "there is nothing behind this button", and the page disables it. That was right
+while the only thing Qwen could be asked was a guess. There is a flow behind it now — a **probe**,
+`POST /v1/web-cookie/qwen/check` — that asks three questions and reports the answers:
+
+| Question | Route | Why it matters |
+| --- | --- | --- |
+| Does the credential mean anything? | `auth.qwen.ai/api/v2/auths/` | a guest is refused here first, so it separates "no credential" from "the gate is the problem" |
+| What models are served? | `chat.qwen.ai/api/v2/models/` | readable by guests, so the catalog is real even when a turn is not |
+| **Is a turn actually served?** | `chat.qwen.ai/api/v2/chat/completions` | the one question that decides whether this is a provider |
+
+**Nothing is saved.** There is no connect route for Qwen, and the dialog hides Connect because
+there is nothing to save — a connection is only worth having once a turn is really served.
+
+**What remains unknown, and cannot be resolved without a signed-in account: does the TMD gate
+apply to an authenticated request?** That is exactly the one DeepSeek's `userToken` unblocked, and
+it is why this is a probe rather than a verdict. If the answer is no, this becomes a working
+provider; if yes, it stays a catalog entry. Either way nobody takes a guess on trust.
 
 ### What was found on the way
 

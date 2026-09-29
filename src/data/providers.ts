@@ -94,8 +94,17 @@ export const providerCatalog: ProviderRecord[] = [
      * nothing to connect to *yet*, and the honest state is that rather than a button which
      * opens a dialog that cannot work.
      */
-    status: 'planned',
-    auth: 'Not yet available',
+    /**
+     * Not `planned` any more, and the distinction matters.
+     *
+     * `planned` meant "there is nothing behind this button", and the page disables it. That was
+     * right while the only thing Qwen could be asked was a guess. There is now a flow behind it:
+     * a probe that asks the real questions and reports the provider's own answers. A card with a
+     * flow but no connection is `available` with `—` metrics — which is what the project rule
+     * says — and the dialog is where the blocker is explained and testable.
+     */
+    status: 'available',
+    auth: 'Session cookie',
     models: '—',
     latency: '—',
     requests: '0',
@@ -105,7 +114,12 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'Q',
     logo: providerLogoMap.qwen,
     endpoint: 'https://chat.qwen.ai',
-    modelList: [],
+    /**
+     * Read from the live `GET /api/v2/models/`, which answers guests. Three, not the ten a
+     * plausible-looking guess produces — the probe is what caught it. No context window is
+     * claimed because Qwen publishes none on that endpoint.
+     */
+    modelList: ['qwen3.7-plus', 'qwen3.8-max', 'qwen3.8-omni-flash'],
     /** Why it is not built, in one sentence a user can act on. */
     unavailableReason:
       'Models are served to guests, but every turn is refused by Alibaba’s bot-protection gate (RGV587_ERROR). Visiting the challenge it hands back grants no cookie and the retry is refused identically, so it is a human puzzle rather than a clearance flow. Needs a signed-in Qwen session; not built on a maybe — see docs/SPEC-SDK.md.',

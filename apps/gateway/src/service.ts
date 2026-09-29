@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, modelMetaPriceOrder, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ModelMeta, type ModelMetaMap, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
@@ -782,6 +782,22 @@ export class GatewayService {
       credential,
       signal,
     );
+  }
+
+  /**
+   * Asks Qwen whether a credential works, and reports exactly what came back.
+   *
+   * A probe, not a connect, and deliberately so. The one question nobody can answer without a
+   * signed-in account is whether Alibaba's bot-protection gate applies to an *authenticated*
+   * request. Guessing either way is bad — claiming it works ships a card that cannot answer, and
+   * refusing to try refuses on the strength of a measurement nobody made. So it asks, and it
+   * returns the provider's own words.
+   *
+   * Nothing is stored. A probe that half-connects is worse than no probe: the user would believe
+   * the credential is good and find out on their first request.
+   */
+  async checkQwenWeb(cookieHeader: string, signal?: AbortSignal) {
+    return probeQwenWeb(cookieHeader, this.transport, signal);
   }
 
   async connectChatGptWeb(exported: string, signal?: AbortSignal, freeOnly = false) {

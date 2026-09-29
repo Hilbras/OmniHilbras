@@ -147,6 +147,18 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 40: Give Qwen a real flow, and find out the one thing that was unknown.
+  - Acceptance: the Qwen card is connectable, the dialog asks the three questions that matter, and it reports the provider's own answers. Nothing is saved unless a turn is actually served.
+  - Verify: live through the dialog with a guest cookie — *"A turn was refused · Qwen refused the turn: FAIL_SYS_USER_VALIDATE, RGV587_ERROR::SM… · Credential at auth.qwen.ai: Unauthorized — 401 Unauthorized · 3 models served to guests"*; `POST /v1/web-cookie/qwen/check` returns the same; 417 tests pass.
+  - Findings: **Qwen signals every refusal in the body and never in the status code — on both origins.** `auth.qwen.ai/api/v2/auths/` answers a guest with **HTTP 200** and `{"success":false,"data":{"code":"Unauthorized","details":"401 Unauthorized"}}`, and the turn answers 200 with `ret:["FAIL_SYS_USER_VALIDATE",…]`. A check that trusted the status reported a guest cookie as `authenticated: true`; the first version of this probe did exactly that and the live run caught it. Refusals are now read out of the body.
+  - The card moved from `status: 'planned'` to **`available`**. `planned` meant "there is nothing behind this button" and the page disables it, which was right while the only thing Qwen could be asked was a guess. There is a flow behind it now. A card with a flow but no connection is `available` with `—` metrics, which is the project rule, and the dialog is where the blocker is explained and testable.
+  - **I invented the model catalog and the probe caught it.** I wrote ten plausible ids — `qwen3.7-flash`, `qwen3.7-coder-plus`, `qwen3.7-vl-plus` and so on. The live endpoint answers **three**: `qwen3.7-plus`, `qwen3.8-max`, `qwen3.8-omni-flash`. Guessing a catalog is the same fault as guessing a capability: the card would have advertised models that do not exist and offered turns guaranteed to fail, with nothing on the page to say why. Qwen publishes no context length there, so none is claimed.
+  - Also fixed: the DeepSeek dialog still said *"Or let OmniHilbras read it — a window opens"*, referring to the sign-in window removed in v1.10.0. It now explains what an empty `userToken` means instead.
+  - **What is still unknown, and cannot be resolved here:** whether Alibaba's gate applies to an *authenticated* request. The card says so and the probe asks it. If the answer is no, this is a working provider; if yes, it stays a catalog entry — and either way nobody will have to take a guess on trust.
+  - Files: `packages/omnihilbras-sdk/src/adapters/qwen-web.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/src/server.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, `src/data/providers.ts`, tests, docs.
+  - Depends on: Task 39.
+  - Scope: Medium — a new surface and a new route.
+
 - [x] Task 39: Retract the ChatGPT console one-liner, and re-test the Qwen gate.
   - Acceptance: the dialog never tells the user to use the Console for ChatGPT, and the error distinguishes "signed in, copied from the Console" from "not signed in".
   - Verify: the dialog offers only the Network and Application routes and no `copy(document.cookie)`; a header containing `__Secure-next-auth.callback-url` is told the cookie is HttpOnly and pointed at the Network tab, while a header with no NextAuth cookie is told the browser is not signed in. 411 tests pass.

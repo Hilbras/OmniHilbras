@@ -59,6 +59,35 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     planNote: 'Only chatgpt.com and openai.com cookies are kept. Anything else in the export is dropped before it is stored.',
   },
 
+  'qwen-web': {
+    id: 'qwen-web',
+    name: 'Qwen Web',
+    website: 'https://chat.qwen.ai',
+    credentialName: 'auth cookie',
+    /**
+     * Qwen's auth is on a **different origin** from its chat app — `auth.qwen.ai`. That is
+     * measured, not guessed: a guest gets `401 Unauthorized` from `auth.qwen.ai/api/v2/auths/`
+     * and holds no auth cookie on any host, while `chat.qwen.ai/api/v2/models/` answers fine.
+     * So the credential has to come from the auth origin.
+     *
+     * Deliberately **no console one-liner**, and that is the lesson from ChatGPT Web: the session
+     * cookie is almost certainly HttpOnly, and `document.cookie` cannot read one. A snippet that
+     * cannot work is worse than a slightly longer set of clicks, because it fails in a way that
+     * looks like being signed out.
+     */
+    extractionSteps: [
+      {
+        label: 'Copy the auth cookie',
+        body: 'Sign in at chat.qwen.ai. Then: F12 → Application → Storage → Cookies → **https://auth.qwen.ai**, and copy the cookies for that host. If you would rather use the Network tab, reload, click a request to auth.qwen.ai, and copy its **Request Headers → Cookie** value.',
+      },
+      {
+        label: 'What happens next',
+        body: 'OmniHilbras asks three questions and shows you the answers: whether the credential means anything to auth.qwen.ai, what models Qwen serves, and whether a turn is actually served. Qwen refuses bot-protected requests with **HTTP 200 and a refusal in the body**, so the probe reads the body rather than the status code — nothing is saved either way until a turn really works.',
+      },
+    ],
+    check: { path: '/v1/web-cookie/qwen/check', field: 'cookieHeader' },
+    planNote: 'Qwen serves its models to guests, so the catalog is real even when a turn is not. The card says which of the two you are looking at.',
+  },
   'deepseek-web': {
     id: 'deepseek-web',
     name: 'DeepSeek Web',
@@ -75,8 +104,10 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
         snippet: 'copy(JSON.parse(localStorage.userToken).value)',
       },
       {
-        label: 'Or let OmniHilbras read it',
-        body: 'Use the sign-in button above. A window opens, you sign in, and the token is read out of that browser — including any wrapper, so there is nothing to unwrap by hand.',
+        label: 'If the copied value is empty',
+        // Not a stale reference to the sign-in window, which was removed in v1.10.0 — this used
+        // to tell people to use a button that no longer exists.
+        body: '`{"value":null}` means the page has no session, so you are signed out. Sign in at chat.deepseek.com first, then copy it again.',
       },
     ],
     paste: {
