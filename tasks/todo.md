@@ -14,6 +14,34 @@
   Progress is measured against `tasks/plan.md`.
 -->
 
+
+---
+
+## Standing rule: every phase ships completely
+
+**Push to GitHub, publish a GitHub release, and publish to npm after every phase**, every
+checkpoint, and every task group that changes behaviour. A phase is not done when its code is
+merged; it is done when the tag is on `main`, the release exists, and the version resolves from the
+registry. Recorded in `AGENTS.md` so it is enforced rather than remembered.
+
+**Compliance audited across every release made in this work** — `v1.16.0` through `v1.32.0`, all 17:
+
+```
+tag      git-pushed  github-release  npm-published
+1.16.0   yes         yes              yes
+…        …           …                …
+1.32.0   yes         yes              yes
+```
+
+So the rule was being followed; it had simply never been written down, which is the same failure as
+a guard that is not asserted — it survives on attention rather than on anything.
+
+**The one step of it that is not reliable, recorded in `AGENTS.md` as well:** `npm publish` has twice
+printed `+ @hilbras/omnihilbras@<version>` while the version was **absent** from the registry. The
+tarball is staged and finalised a minute or two later, and a re-publish inside that window fails
+with `409 Cannot publish over previously staged version`. A `409` means wait — not retry harder, and
+not bump the version.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

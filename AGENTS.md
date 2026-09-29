@@ -39,6 +39,36 @@ version.
 6. `npm publish --access public` from `packages/omnihilbras-sdk`, then confirm
    the version resolves from the registry.
 
+**Steps 4–6 are required after every phase, every checkpoint, and every task
+group that changes behaviour.** A phase is not done when its code is merged; it
+is done when the tag is on `main`, the release exists, and the version resolves
+from the registry. Leaving any of the three for later is how a tag ends up
+pointing at something nobody published, and a published version ends up with no
+release explaining it.
+
+**`npm publish` reporting success is not evidence the version exists.** It has
+twice printed `+ @hilbras/omnihilbras@<version>` while the version was absent
+from the registry — the tarball is staged and finalised minutes later, and a
+re-publish during that window fails with `409 Cannot publish over previously
+staged version`. So step 6's "confirm" is a real check, not a formality:
+
+```bash
+npm view @hilbras/omnihilbras@<version> version   # poll until it echoes the version
+```
+
+A `409` means *wait*, not *retry harder* and not *bump the version*. Every
+version between 1.16.0 and 1.32.0 has all three steps; this audit reproduces it:
+
+```bash
+for t in $(git tag --sort=v:refname); do
+  v=${t#v}
+  printf '%-8s %s %s %s\n' "$v" \
+    "$(git merge-base --is-ancestor "$t" origin/main && echo pushed || echo MISSING)" \
+    "$(gh release view "$t" >/dev/null 2>&1 && echo released || echo MISSING)" \
+    "$(npm view @hilbras/omnihilbras@$v version 2>/dev/null | tail -1 | grep -qx "$v" && echo published || echo MISSING)"
+done
+```
+
 Never publish a version that does not exist on GitHub, and never tag a commit
 that is not on `main`.
 
