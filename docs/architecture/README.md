@@ -138,6 +138,58 @@ manual step rather than a request body. Those routes live in `server.ts` and are
 
 ---
 
+## The provider contract
+
+`packages/omnihilbras-sdk/test/provider-contract.js` holds the invariants the Core is entitled to
+assume, and `provider-contract.test.js` runs them against every adapter that can be driven offline
+— currently `openai`, `openrouter`, `openai-compatible`, `anthropic` and `gemini`.
+
+The split is the design: **the contract owns the invariants, a provider supplies only its wire
+format.** Asking a provider to describe its own expectations would make this a second copy of its
+tests; asking it only how to speak its own protocol keeps the assertions in one place, where they
+cannot drift per provider.
+
+It asserts what the Core actually relies on:
+
+| Invariant | Why the Core needs it |
+| --- | --- |
+| declared capabilities have implementations | routing dispatches on the flag; a flag with no method is a crash |
+| refusals are `ProviderError` with a known code | the routing engine decides retry/fail-over by reading `code` and nothing else |
+| a 401 maps to `AUTHENTICATION_FAILED` | "unauthorized" is terminal, "unavailable" is not — the wrong one ejects a working connection |
+| models are attributed to the adapter that returned them | usage and ejection both read `providerId` |
+| health never throws, and carries a reason when unhealthy | a throw breaks the sweep that contains it |
+| **text survives the round trip exactly** | a truncated answer is worse than an error, because it looks like a working model |
+
+**The last one is the centrepiece, and it exists because of a real bug.** DeepSeek Web's own tests
+asserted that two hand-written frame shapes were read correctly, and passed — while every real
+answer was being truncated to its first character, because live traffic arrives as a run of
+bare-string frames the fixture did not contain. A test that constructs its own input and then
+asserts against that input only proves the decoder agrees with the author of the test.
+
+So every completion fixture in the contract is **multi-part**, and the assertion is exact
+equality. The contract answer ends in a lone space and its parts share prefixes, so per-frame
+trimming and deduplication each fail. It was proven, not assumed: the shipped decoder returns
+`"1, 2, 3"` from a captured stream, and a decoder that keeps only the first fragment returns `"1"`
+and is rejected.
+
+### It found a bug on the first run
+
+Four adapters reported `unavailable` from a bare `catch {}` with **no message** — `anthropic`,
+`gemini`, `openai-compatible`, `openrouter`. The dashboard could say "unavailable" and not whether
+the key was rejected, the endpoint was wrong, or the provider was down, which are three different
+things to go and fix. Six other adapters already carried the reason, so the shape existed to copy.
+
+### Three injection styles, and why that matters next
+
+| Style | Adapters |
+| --- | --- |
+| `{ transport }` | openai, openrouter, openai-compatible, anthropic, gemini, cline, kiro, opencode-console |
+| `{ fetch }` | deepseek-web |
+| `{ driver }` | chatgpt-web |
+
+Every contract test needs a harness per style, so a single seam here would remove real cost. It
+ranks below closing `resolveAdapter` but above decomposing the service.
+
 ## Contracts worth keeping
 
 Three things in this repository have earned their keep and should be protected:

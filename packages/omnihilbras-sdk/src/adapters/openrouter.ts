@@ -132,8 +132,20 @@ export class OpenRouterAdapter extends OpenAICompatibleAdapter {
     try {
       await this.validateCredential(context.credential, context);
       return { status: 'healthy' as const, latencyMs: Math.round(performance.now() - startedAt), checkedAt: new Date().toISOString() };
-    } catch {
-      return { status: 'unavailable' as const, checkedAt: new Date().toISOString() };
+    } catch (error) {
+      /**
+       * The reason, not just the verdict.
+       *
+       * A bare `catch {}` reported `unavailable` with nothing attached, so the dashboard could
+       * only say "unavailable" — not whether the key was rejected, the endpoint was wrong, or the
+       * provider was down. Those need three different things from the user, and "unavailable" is
+       * none of them. Found by the provider contract on its first run.
+       */
+      return {
+        status: 'unavailable' as const,
+        checkedAt: new Date().toISOString(),
+        message: error instanceof Error ? error.message : 'The health check failed without a reason.',
+      };
     }
   }
 }

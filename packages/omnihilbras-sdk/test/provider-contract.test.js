@@ -1,0 +1,184 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { runProviderContract, CONTRACT_TEXT } from './provider-contract.js';
+import { framesFor, scriptedTransport } from './harness/scripted-transport.js';
+import { OpenAIAdapter } from '../dist/adapters/openai.js';
+import { OpenRouterAdapter } from '../dist/adapters/openrouter.js';
+import { OpenAICompatibleAdapter } from '../dist/adapters/openai-compatible.js';
+import { AnthropicAdapter } from '../dist/adapters/anthropic.js';
+import { GeminiAdapter } from '../dist/adapters/gemini.js';
+import { ProviderRegistry } from '../dist/registry.js';
+import { ProviderError } from '../dist/errors.js';
+
+/**
+ * The contract, run against every adapter that can be driven offline.
+ *
+ * The registry's own guard is tested first and separately, because it is the one place the Core is
+ * allowed to *refuse* a bad adapter — and a guard that has never been seen to fire is a guard
+ * nobody can rely on.
+ */
+
+/**
+ * The harness *is* the transport. It is not wrapped here, and the first version wrapped it:
+ * `request` was delegated but `stream` was stubbed as an empty generator, so every streaming
+ * assertion failed with "the provider stream ended before completion" for five providers. That
+ * reads exactly like five provider bugs and was entirely the wrapper's doing.
+ */
+const transport = (wireFormat) => {
+  const stub = scriptedTransport({ wireFormat });
+  return { stub, transport: stub };
+};
+
+/** Each provider supplies only the wire shape; the contract owns every assertion. */
+const providers = [
+  {
+    name: 'openai',
+    make: () => {
+      const { stub, transport: t } = transport('openai');
+      return { adapter: new OpenAIAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    name: 'openrouter',
+    make: () => {
+      const { stub, transport: t } = transport('openai');
+      return { adapter: new OpenRouterAdapter({}, { transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    name: 'openai-compatible',
+    make: () => {
+      const { stub, transport: t } = transport('openai');
+      const adapter = new OpenAICompatibleAdapter({ id: 'contract', name: 'Contract', baseUrl: 'https://example.invalid/v1' }, { transport: t });
+      return { adapter, script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    name: 'anthropic',
+    make: () => {
+      const { stub, transport: t } = transport('anthropic');
+      return { adapter: new AnthropicAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    name: 'gemini',
+    make: () => {
+      const { stub, transport: t } = transport('gemini');
+      return { adapter: new GeminiAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+];
+
+for (const provider of providers) {
+  const { adapter, script } = provider.make();
+  runProviderContract({ name: provider.name, adapter, script });
+}
+
+/* ------------------------------------------------------------------ *
+ * The registry's guard
+ * ------------------------------------------------------------------ */
+
+test('an adapter that declares a capability it does not implement is refused at registration', () => {
+  // This is the invariant the whole contract rests on: routing dispatches on the flag, so a flag
+  // without a method is a crash the first time the flag is trusted. The Core has to catch it at
+  // the door, not at the request.
+  const lying = { id: 'liar', name: 'Liar', capabilities: { chat: true, streaming: true, models: false }, chat: async () => ({}) };
+  assert.throws(() => new ProviderRegistry().register(lying), /streaming/i);
+});
+
+test('a model adapter with no listModels is refused at registration', () => {
+  const lying = { id: 'liar', name: 'Liar', capabilities: { chat: false, streaming: false, models: true } };
+  assert.throws(() => new ProviderRegistry().register(lying), /models/i);
+});
+
+test('an adapter with no id is refused at registration', () => {
+  assert.throws(() => new ProviderRegistry().register({ id: '  ', name: 'x', capabilities: {} }), /id/i);
+});
+
+test('two adapters cannot claim the same id', () => {
+  const registry = new ProviderRegistry();
+  const adapter = { id: 'same', name: 'Same', capabilities: {} };
+  registry.register(adapter);
+  assert.throws(() => registry.register(adapter), /already registered/i);
+});
+
+/* ------------------------------------------------------------------ *
+ * The harness itself
+ * ------------------------------------------------------------------ */
+
+test('the harness serves a multi-part answer as separate frames', async () => {
+  // If the harness joined the parts into one frame, every assertion built on it would be testing
+  // a joined string — and a decoder that drops everything after the first frame would pass. The
+  // fixture has to be hostile for the assertion to mean anything.
+  const frames = framesFor({ url: 'https://example.invalid/v1/chat/completions' }, ['a', 'b', 'c'], 'openai');
+  const contentFrames = frames.filter((frame) => frame.includes('"content"'));
+  assert.ok(contentFrames.length === 3, `expected one frame per part, got ${contentFrames.length}`);
+  const reassembled = contentFrames
+    .map((frame) => JSON.parse(frame.replace(/^data: /, '').trim()).choices[0].delta.content)
+    .join('');
+  assert.equal(reassembled, 'abc');
+});
+
+test('the harness can express a refusal that arrives as HTTP 200 with a refusal in the body', async () => {
+  // Qwen does exactly this on both origins, and a harness that could only express an HTTP error
+  // would have hidden an entire class of provider behaviour. The refusal has to survive the
+  // transport untouched, because whether the adapter notices it is the thing under test.
+  const stub = scriptedTransport();
+  stub.set(['a'], { refuseWith: { status: 200, body: { ret: ['FAIL_SYS_USER_VALIDATE'] } } });
+  const response = await stub.request({ url: 'https://example.invalid/v1/chat/completions', method: 'POST', headers: {}, body: '{}' });
+  assert.equal(response.status, 200, 'a 200 refusal must not be turned into a transport error by the harness');
+  assert.deepEqual(response.data.ret, ['FAIL_SYS_USER_VALIDATE']);
+});
+
+test('the harness classifies a real HTTP refusal the way the transport does', async () => {
+  // Duplicated rather than shared with the transport on purpose: a double that shares the
+  // implementation it stands in for cannot catch a bug in it, and this mapping decides whether a
+  // connection is ejected.
+  const stub = scriptedTransport();
+  stub.set(['a'], { refuseWith: 401 });
+  await assert.rejects(
+    () => stub.request({ url: 'https://example.invalid/v1/chat/completions', method: 'POST', headers: {}, body: '{}' }),
+    (error) => error.code === 'AUTHENTICATION_FAILED' && error.statusCode === 401,
+  );
+});
+
+test('a bare status and a shaped refusal mean the same thing', () => {
+  // `{ refuseWith: 401 }` is the obvious thing to write, and reading only `.status` off a number
+  // yields undefined and then 200 — so a refusal test silently asserted that a refusal works.
+  const bare = scriptedTransport();
+  bare.set(['a'], { refuseWith: 401 });
+  const shaped = scriptedTransport();
+  shaped.set(['a'], { refuseWith: { status: 401 } });
+  assert.equal(bare.seen.length, 0);
+  assert.equal(shaped.seen.length, 0);
+  return Promise.all([
+    bare.request({ url: 'https://x.invalid/v1/chat/completions', method: 'POST', headers: {}, body: '{}' }).catch((e) => e.code),
+    shaped.request({ url: 'https://x.invalid/v1/chat/completions', method: 'POST', headers: {}, body: '{}' }).catch((e) => e.code),
+  ]).then(([a, b]) => assert.equal(a, b));
+});
+
+test('a Gemini chat URL is not mistaken for the catalog', () => {
+  // Gemini embeds the model name in the path, so a naive `/models` test answered a chat with a
+  // model list and the adapter reported "missing a candidate" — a failure that named the provider
+  // and was entirely the harness's fault.
+  const stub = scriptedTransport({ wireFormat: 'gemini' });
+  stub.set(['a', 'b']);
+  return stub.request({ url: 'https://generativelanguage.googleapis.com/v1beta/models/contract-model:generateContent', method: 'POST', headers: {}, body: '{}' }).then((response) => {
+    assert.ok(Array.isArray(response.data.candidates), 'a generateContent request must be answered with a candidate, not a model list');
+  });
+});
+
+test('the contract answer is awkward on purpose', () => {
+  // A tidy fixture proves nothing. The trailing lone space and the shared prefixes are there so
+  // that trimming per frame, deduplicating, or dropping empties each show up as a failure.
+  assert.ok(CONTRACT_TEXT.endsWith(' '), 'the last part is a lone space, so per-frame trimming loses it');
+  assert.equal(CONTRACT_TEXT, 'Hello, world — a ');
+  assert.ok(new Set(CONTRACT_TEXT.split('')).size > 3, 'the parts must not be trivially interchangeable');
+});
+
+test('ProviderError is the shape routing depends on', () => {
+  const error = new ProviderError('AUTHENTICATION_FAILED', 'nope', { publicMessage: 'nope' });
+  assert.equal(error.name, 'ProviderError');
+  assert.equal(error.code, 'AUTHENTICATION_FAILED');
+  assert.ok(error instanceof Error, 'routing catches Error, so it must be one');
+});
