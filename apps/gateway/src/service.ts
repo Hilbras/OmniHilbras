@@ -1,15 +1,16 @@
 import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
-import { defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
+import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialSignIn, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
-import { SlidingWindowRateLimiter, resolveRoute, type RouteCandidate } from './routing.js';
+import { SlidingWindowRateLimiter, type RouteCandidate } from './routing.js';
 import { HealthManager } from './health.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
 import { CredentialManager } from './credential-manager.js';
+import { RoutingEngine } from './routing-engine.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
@@ -110,6 +111,13 @@ export class GatewayService {
    */
   private readonly credentials: CredentialManager;
   /**
+   * Which routes a request may take, given the current health and limits.
+   *
+   * The algorithm was already in `routing.ts`; the inputs it needed were scattered across this
+   * class, so a routing change looked like a service change.
+   */
+  private readonly routing: RoutingEngine;
+  /**
    * Storing and changing connections, with one error mapper and one catalog-merge policy.
    *
    * `canValidate` is what removed the Core's last reason to know a provider's name: it used to be
@@ -119,7 +127,6 @@ export class GatewayService {
    */
   private readonly connections: ConnectionManager;
   private readonly rateLimiter: SlidingWindowRateLimiter;
-  private readonly rateLimitWaitMs = new Map<string, number>();
   /**
    * Health, extracted so it can be tested without routing.
    *
@@ -161,6 +168,12 @@ export class GatewayService {
       noteDiscoveryFailure: (error) => { this.lastDiscoveryNote = error instanceof ProviderError ? providerSaid(error) : error instanceof Error ? error.message : undefined; },
     });
     this.credentials = new CredentialManager(this.secretStore, this.connections);
+    this.routing = new RoutingEngine({
+      health: { getFailureThreshold: () => this.healthManager.getFailureThreshold(), registry: () => this.healthManager.snapshotRegistry() },
+      rateLimiter: this.rateLimiter,
+      defaultProviderId,
+      requireAdapter: (providerId) => { this.requireAdapter(providerId); },
+    });
     this.requests = new RequestExecutor({
       planRoute: (model, explicitProviderId) => this.planRoute(model, explicitProviderId),
       chat: (providerId, request, signal) => this.chat(providerId, request, signal),
@@ -199,9 +212,7 @@ export class GatewayService {
    * counters keeps `resolveRoute`'s signature — which is provider-agnostic and well tested —
    * unchanged, while the health concern still has exactly one owner.
    */
-  private healthRegistry() {
-    return this.healthManager.snapshotRegistry();
-  }
+
 
   /** How often background health polling runs. 0 keeps polling off. */
   setHealthInterval(intervalMs: number) {
@@ -876,36 +887,14 @@ export class GatewayService {
   }
 
   private async planRoute(model: string, explicitProviderId?: string) {
-    const connections = await this.listConnections();
-    const decision = resolveRoute({
-      connections,
-      model,
-      ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
-      health: this.healthRegistry(),
-      failureThreshold: this.healthManager.getFailureThreshold(),
-      rateLimitWaitMs: this.rateLimitWaitMs,
-    });
-    if (decision.candidates.length > 0) return decision;
-    // Without connection metadata there is nothing to route on, so an embedded
-    // service still serves the requested provider directly.
-    if (connections.length === 0) {
-      const providerId = explicitProviderId ?? defaultProviderId;
-      this.requireAdapter(providerId);
-      return { ...decision, candidates: [{ providerId, connectionId: `unmanaged:${providerId}`, priority: 0, resilience: { ...defaultResilienceSettings } }] };
-    }
-    return decision;
+    return this.routing.plan({ connections: await this.listConnections(), model, ...(explicitProviderId === undefined ? {} : { explicitProviderId }) });
   }
 
+
   private enforceRateLimit(candidate: RouteCandidate) {
-    const waitMs = this.rateLimiter.check(candidate.connectionId, candidate.resilience.requestsPerMinute);
-    this.rateLimitWaitMs.set(candidate.connectionId, waitMs);
-    if (waitMs > 0) {
-      throw new ProviderError('RATE_LIMITED', `This connection reached its limit of ${candidate.resilience.requestsPerMinute} requests per minute.`, {
-        providerId: candidate.providerId,
-        retryable: true,
-      });
-    }
+    this.routing.enforceRateLimit(candidate);
   }
+
 
   /**
    * Applies a per-connection deadline without leaking timers: the timeout aborts

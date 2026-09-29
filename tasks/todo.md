@@ -147,6 +147,18 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 57: Extract `RoutingEngine`, and find two defects in what it now owns.
+  - Acceptance: the routing algorithm and its inputs live together; the engine names no provider; a default request has a deadline.
+  - Verify: 13 engine tests plus 2 rewritten limiter tests; 292 gateway tests. `service.ts` 1043 → 1013 lines.
+  - Findings: **`planRoute` was twenty lines in the composition root, and each reached for a different piece of state owned by someone else** — the health registry, the failure threshold, the rate limiter's waits, the default resilience. So the algorithm was in `routing.ts` and the inputs were scattered across a class, which is the shape that makes a routing change look like a service change.
+  - **A connection saved without an explicit timeout had no deadline at all.** `withDeadline` treats a non-positive timeout as *run without a deadline*, and `defaultResilienceSettings.timeoutMs` was `0`, so a provider that stopped responding held the request open indefinitely — the client hung, nothing noticed. Both `withDeadline`'s own comment and the SPEC promised the opposite. **This is the third time this project has contradicted its own documented guarantee, and the first time it was the *default* that was wrong.** The default is now two minutes; `0` still means unlimited for anyone who asks, and existing connections keep their own settings, so the blast radius is new connections only.
+  - **A rate limit of 60 per minute allowed 30.** `check()` pushed the timestamp into the window when it allowed a request, *and* the request path then called `record()`, which pushes again. Every request counted twice. It also over-counted in a second way: a request the limit *refused* consumed budget for a call that was never made. `check` is now a pure query; `record` is the commit and is called when a request is **dispatched**, not when it succeeds — because a request that was sent and failed still cost the provider a call. Measured, not assumed: 30 through before, 60 after.
+  - **The sliding-window test was written against the buggy behaviour.** It drove `check` alone, because `check` used to record — which is precisely why the double count survived. Rewritten to drive both the way the request path does, with the window property now measured the way it is used, plus two new tests: *asking does not spend, and a request that is refused spends nothing* and *a request that was sent and failed still counts*.
+  - Three of my own tests were wrong before the code was. I stubbed health as a set of healthy ids when `resolveRoute` asks `isUnhealthy(providerId, threshold)` — a double for the component the engine exists to consult is a double for the thing under test, and the mismatch surfaced as eight failures about a method I had invented. I asserted that an unowned model is skipped, when routing deliberately falls back to any usable connection so a manually added model works. And I asserted the default resilience had a timeout, which it did not.
+  - Files: `apps/gateway/src/routing-engine.ts` (new), `apps/gateway/src/routing.ts`, `apps/gateway/src/request-executor.ts`, `apps/gateway/src/connections.ts`, `apps/gateway/src/service.ts`, `apps/gateway/test/routing-engine.test.js` (new), `apps/gateway/test/routing.test.js`, `docs/SPEC-SDK.md`.
+  - Depends on: Task 56.
+  - Scope: Medium.
+
 - [x] Task 56: Extract `CredentialManager`, and collapse five copies of "which connection serves this provider".
   - Acceptance: one method answers it; no call site resolves a connection for itself.
   - Verify: 8 tests; 277 gateway tests. `service.ts` 1052 → 1043 lines. `connectionFor` and `context` are gone from the service, and `grep -c "connectionFor|this.context("` is 0.

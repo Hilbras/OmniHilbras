@@ -97,10 +97,13 @@ export class RequestExecutor {
         const startedAt = Date.now();
         try {
           this.deps.enforceRateLimit(candidate);
+          // Counted here, at dispatch, rather than on success: a request that was sent and then
+          // failed still cost the provider a call. A request the limit *refused* is not counted,
+          // because nothing was sent.
+          this.deps.recordRateLimitUse(candidate.connectionId);
           const response = await this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.deps.chat(candidate.providerId, request, deadline));
           const latencyMs = Date.now() - startedAt;
           this.deps.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString());
-          this.deps.recordRateLimitUse(candidate.connectionId);
           attempts.push({ providerId: candidate.providerId, attempt, ok: true, latencyMs });
           return { response, attempts };
         } catch (error) {
@@ -144,6 +147,9 @@ export class RequestExecutor {
       started.add(candidate);
       const controller = new AbortController();
       const startedAt = Date.now();
+      // Counted here for the same reason as the sequential path: a hedge that loses was still sent
+      // and still cost money, and the ledger records it as such.
+      this.deps.recordRateLimitUse(candidate.connectionId);
       const done = this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.deps.chat(candidate.providerId, request, deadline))
         .then(
           (response): Outcome => ({ candidate, ok: true, latencyMs: Date.now() - startedAt, response }),
@@ -154,7 +160,6 @@ export class RequestExecutor {
           const code = outcome.ok ? undefined : outcome.error instanceof ProviderError ? outcome.error.code : 'PROVIDER_REQUEST_FAILED';
           if (outcome.ok) {
             this.deps.recordSuccess(candidate.providerId, outcome.latencyMs, new Date().toISOString());
-            this.deps.recordRateLimitUse(candidate.connectionId);
           } else {
             this.deps.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.');
           }
@@ -245,6 +250,7 @@ export class RequestExecutor {
       let rest: AsyncIterator<ChatChunk> | undefined;
       try {
         this.deps.enforceRateLimit(candidate);
+        this.deps.recordRateLimitUse(candidate.connectionId);
         const opened = await this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, async (deadline) => {
           const source = this.deps.streamChat(candidate.providerId, request, deadline)[Symbol.asyncIterator]();
           const first = await source.next();
@@ -269,7 +275,6 @@ export class RequestExecutor {
         if (!isRetryableFailure(error) || signal?.aborted) break;
         continue;
       }
-      this.deps.recordRateLimitUse(candidate.connectionId);
       attempts.push({ providerId: candidate.providerId, attempt: 1, ok: true, latencyMs: Date.now() - startedAt });
       const settled = opening;
       return {

@@ -25,25 +25,43 @@ export class SlidingWindowRateLimiter {
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
-  /** Returns the wait in ms before the next request is allowed, or 0 when allowed. */
+  /**
+   * The wait in ms before the next request is allowed, or 0 when one is allowed now.
+   *
+   * **A query. It records nothing.** It used to push the timestamp into the window when it allowed
+   * a request, and the request path calls `record()` as well — so every request was counted twice
+   * and a connection set to 60 requests per minute behaved like 30. The over-count only bites when
+   * a limit is actually set, and the default is no limit, which is why it survived.
+   *
+   * It also over-counted in a second way: a request that was refused still consumed budget, and so
+   * did a request whose provider call was never made. `record()` is the commit, and it is called
+   * when the request is dispatched.
+   */
   check(key: string, limitPerMinute: number): number {
     if (limitPerMinute <= 0) return 0;
     const now = this.now();
     const cutoff = now - 60_000;
-    const recent = (this.windows.get(key) ?? []).filter((timestamp) => timestamp > cutoff);
-    if (recent.length < limitPerMinute) {
-      recent.push(now);
-      this.windows.set(key, recent);
-      return 0;
-    }
-    this.windows.set(key, recent);
+    const recent = (this.window(key, cutoff));
+    if (recent.length < limitPerMinute) return 0;
     return Math.max(0, recent[0]! + 60_000 - now);
   }
 
+  /** The requests still inside the window, for the dashboard's view of a connection's load. */
+  private window(key: string, cutoff: number): number[] {
+    return (this.windows.get(key) ?? []).filter((timestamp) => timestamp > cutoff);
+  }
+
   /** Records a request that was allowed without going through `check`. */
+  /**
+   * Counts one request against a connection's budget.
+   *
+   * Called when a request is **dispatched**, not when it succeeds: a request that was sent and then
+   * failed still cost the provider a call, and a rate limit that forgives failures is not a rate
+   * limit. A request that was *refused* is not counted, because nothing was sent.
+   */
   record(key: string) {
     const now = this.now();
-    const recent = (this.windows.get(key) ?? []).filter((timestamp) => timestamp > now - 60_000);
+    const recent = this.window(key, now - 60_000);
     recent.push(now);
     this.windows.set(key, recent);
   }

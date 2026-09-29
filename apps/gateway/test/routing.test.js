@@ -300,19 +300,44 @@ test('resilience settings persist and validate at the store boundary', async () 
 test('the sliding window limiter does not allow a double burst across a minute', () => {
   let now = 0;
   const limiter = new SlidingWindowRateLimiter(() => now);
-  assert.equal(limiter.check('a', 2), 0);
-  assert.equal(limiter.check('a', 2), 0);
-  assert.equal(limiter.check('a', 2) > 0, true, 'the third request waits');
+  // `check` is a query and `record` is the commit. This test used to drive `check` alone, because
+  // `check` used to record — which is how the double count went unnoticed. Driving both is what the
+  // request path actually does, so the window property is now measured the way it is used.
+  const send = (key, limit) => { const wait = limiter.check(key, limit); if (wait === 0) limiter.record(key); return wait; };
+
+  assert.equal(send('a', 2), 0);
+  assert.equal(send('a', 2), 0);
+  assert.equal(send('a', 2) > 0, true, 'the third request waits');
   now = 30_000;
-  assert.equal(limiter.check('a', 2) > 0, true, 'still limited halfway through the window');
+  assert.equal(send('a', 2) > 0, true, 'still limited halfway through the window');
   now = 60_001;
-  assert.equal(limiter.check('a', 2), 0, 'the window slides');
+  assert.equal(send('a', 2), 0, 'the window slides');
   assert.equal(limiter.check('b', 0), 0, 'a zero limit never blocks');
   assert.equal(limiter.check('c', 0), 0);
 
   now = 500_000;
   limiter.prune();
-  assert.equal(limiter.check('a', 2), 0);
+  assert.equal(send('a', 2), 0);
+});
+
+test('asking does not spend, and a request that is refused spends nothing', () => {
+  // Two things a rate limit has to get right, and both were wrong: a query that recorded made
+  // every request count twice — a connection set to 60 per minute behaved like 30 — and a refused
+  // request consumed budget for a call that was never made.
+  const limiter = new SlidingWindowRateLimiter(() => 0);
+  for (let query = 0; query < 10; query += 1) assert.equal(limiter.check('a', 2), 0, 'asking is free');
+  assert.equal(limiter.check('a', 2), 0, 'still free after ten queries, because none were sent');
+  limiter.record('a');
+  limiter.record('a');
+  assert.ok(limiter.check('a', 2) > 0, 'two real requests fill a limit of two');
+});
+
+test('a request that was sent and failed still counts', () => {
+  // A limit that forgives failures is not a limit: a provider that fails every request is exactly
+  // the case a rate limit exists for.
+  const limiter = new SlidingWindowRateLimiter(() => 0);
+  limiter.record('failed-request');
+  assert.ok(limiter.check('failed-request', 1) > 0);
 });
 
 test('a slow leader is hedged and the faster route wins', async () => {

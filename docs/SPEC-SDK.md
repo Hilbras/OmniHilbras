@@ -2100,10 +2100,16 @@ Behavior when serving a request:
   fails over, and the connection is marked unhealthy either way.
 - The per-request deadline is enforced by the gateway, not delegated to the
   adapter, so a provider that ignores its abort signal still cannot hold a
-  request open.
+  request open. It defaults to **two minutes**; a connection saved without an
+  explicit `timeoutMs` gets that default. A `timeoutMs` of `0` means no
+  deadline, and is only reachable by asking for it.
 - Rate limiting uses a sliding window per connection, so a burst cannot
   straddle a minute boundary and double the effective rate. A limited
-  connection hands the request to the next route.
+  connection hands the request to the next route. Asking whether a request may
+  be sent costs nothing: a refused request spends no budget, because nothing was
+  sent, and a request that *was* sent and then failed still spends it, because
+  it still cost the provider a call. The default limit is none, which is right
+  for a local single-user gateway.
 - Hedging: when the leading candidate has `hedgeAfterMs` set and another
   candidate can serve the same model, a second request is started after that
   delay while the leader is still in flight. The first success wins and every
