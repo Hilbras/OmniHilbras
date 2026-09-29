@@ -210,4 +210,31 @@ export type ProviderAdapter = {
   /** Discovers models for a connection import policy. */
   discoverModels?: (context: ProviderRequestContext | undefined, options: ModelImportOptions) => Promise<readonly Model[]>;
   healthCheck?: (context?: ProviderRequestContext) => Promise<ProviderHealth>;
+  /**
+   * Whether a stored credential is already known to have expired, answered **without a request**.
+   *
+   * Optional, and the point of it is cost. Every credential this SDK stores carries an expiry, and
+   * before this, three of the five kinds discovered it by *asking the provider* — which for a
+   * ChatGPT Web connection means launching a browser, on every health sweep, to be told something
+   * the credential already said in writing.
+   *
+   * So: an adapter whose credential states when it ends implements this, and the gateway skips the
+   * round trip. An adapter that cannot say — an API key with no expiry — leaves it out and behaves
+   * exactly as before.
+   *
+   * It is a *pre*-check and not a replacement for `healthCheck`. A credential that is not expired may
+   * still be revoked, so the network check still happens; this only answers the question that
+   * needs no network.
+   *
+   * Three answers, not two, and the third is the load-bearing one. `true` means *definitely*
+   * expired. `false` means definitely not. `undefined` means **the adapter cannot say** — no
+   * expiry, an unreadable one, a credential shape it does not recognise — and the gateway then asks
+   * the provider.
+   *
+   * It started as a plain boolean and that was wrong, because `false` from an adapter that does not
+   * know is indistinguishable from `false` from one that does. Every uncertainty has to resolve
+   * towards "go and ask", because the two ways of being wrong cost very differently: a needless
+   * request, or a working connection ejected.
+   */
+  isCredentialExpired?: (credential: ProviderCredential | undefined, now?: number) => boolean | undefined;
 };

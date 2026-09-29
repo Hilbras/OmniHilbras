@@ -57,7 +57,7 @@ export type ClineAdapterOptions = {
 const defaultRefreshSkewMs = 60_000;
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '1.30.0';
+const omnihilbrasVersion = '1.31.0';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {
@@ -225,6 +225,26 @@ export class ClineAdapter implements ProviderAdapter {
   readonly id = 'cline';
   readonly name = 'Cline';
   readonly capabilities = { chat: true, streaming: true, models: true } as const;
+
+  /**
+   * Whether the stored access token has expired, read from the credential rather than discovered.
+   *
+   * The exchange endpoint reports a dead refresh token as an opaque refusal, so without this a
+   * Cline connection whose session ended is diagnosed by making a request that cannot succeed and
+   * reading a message written for a token problem.
+   */
+  isCredentialExpired(credential: ProviderCredential | undefined, now = Date.now()): boolean | undefined {
+    // `expiresAt` is declared on the OAuth branch only. An API key has no expiry to read, which is
+    // "cannot say" and not "not expired" — the two look identical to the caller and only one of them
+    // is honest.
+    if (credential?.type !== 'oauth') return undefined;
+    if (typeof credential.expiresAt !== 'string') return undefined;
+    const parsed = Date.parse(credential.expiresAt);
+    // An unparseable expiry is not treated as expired either. Guessing would eject a working
+    // connection over a field we failed to read, and the network check would have answered for free.
+    if (!Number.isFinite(parsed)) return undefined;
+    return parsed <= now;
+  }
   private readonly transport: HttpTransport;
   private readonly delegate: OpenAICompatibleAdapter;
   private readonly onTokensRefreshed?: ClineAdapterOptions['onTokensRefreshed'];

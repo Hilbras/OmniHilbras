@@ -189,6 +189,44 @@ for (const provider of providers) {
  */
 const NOT_YET_CONTRACTED = {};
 
+test('an adapter that can tell when a credential expired never throws and never guesses', () => {
+  // The value of `isCredentialExpired` is entirely in what it *refuses* to claim. An adapter that
+  // answered `false` for a credential it could not read would turn its own uncertainty into a
+  // confident "still valid", and the gateway would then send a request that cannot succeed — which
+  // for a ChatGPT Web connection means launching a browser.
+  //
+  // So the contract pins what holds for **any** credential shape: it does not throw, it returns one
+  // of three answers, and a credential it cannot read comes back `undefined` rather than a guess.
+  //
+  // It deliberately does *not* assert "a past expiry is expired" here, because a contract cannot
+  // know each provider's credential shape — a ChatGPT Web credential is a JSON storage state, not
+  // an OAuth record, and feeding one the other's shape is exactly the kind of plausible-looking
+  // fixture that proves a test rather than a fact. Those assertions live with the adapters that own
+  // the shape, and the gateway's lifecycle test makes them for both of the current ones.
+  const UNREADABLE = [
+    { type: 'oauth', value: 'not a shape this adapter reads' },
+    { type: 'api-key', value: 'k' },
+    { type: 'none' },
+    undefined,
+  ];
+  let checked = 0;
+  for (const provider of providers) {
+    const { adapter } = provider.make();
+    if (typeof adapter.isCredentialExpired !== 'function') continue;
+    checked += 1;
+    for (const credential of UNREADABLE) {
+      const verdict = adapter.isCredentialExpired(credential);
+      const what = JSON.stringify(credential);
+      assert.ok(verdict === true || verdict === false || verdict === undefined, `${provider.name} returned ${String(verdict)} for ${what}`);
+      // "Cannot say" and never "not expired": only the first of the two guesses is safe.
+      assert.equal(verdict, undefined, `${provider.name} guessed ${String(verdict)} for a credential it cannot read`);
+    }
+    // An expiry it cannot parse is also "cannot say", for the same reason.
+    assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'x', expiresAt: 'not-a-date' }), undefined, `${provider.name} guessed at an unreadable expiry`);
+  }
+  assert.ok(checked > 0, 'at least one adapter implements the pre-check, or this test proves nothing');
+});
+
 test('the contract knows which adapters it does not cover, and says why', () => {
   const covered = new Set(providers.map((provider) => provider.name));
   for (const [id, reason] of Object.entries(NOT_YET_CONTRACTED)) {

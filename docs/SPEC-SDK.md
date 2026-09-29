@@ -2083,6 +2083,12 @@ off). Settings are validated at the store boundary and exposed through `PUT
 
 Behavior when serving a request:
 
+- A credential that states when it ends is recognised as expired **without a request**. An adapter
+  may implement `isCredentialExpired`; it returns `true`, `false`, or `undefined` for *cannot say*,
+  and a health probe skips the network round trip only on `true`. A credential that is not expired
+  may still have been revoked, so the provider is still asked whenever the answer is not already
+  known. An expired session is reported as `AUTHENTICATION_FAILED` — *"sign in again"* — and not as
+  an unavailable provider, because those need different things from the user.
 - Every request the LLM surface accepts is given an id, and it is the **same** id in three
   places: the `gateway.requestId` on a successful reply, the `requestId` on a refusal, and the
   `requestId` on the `ProviderRequestContext` every adapter is called with. So *"it failed at 3pm,

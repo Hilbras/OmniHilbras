@@ -147,6 +147,20 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 64: Phase 3 — `CredentialLifecycle`: the one question about a credential that needs no request.
+  - Acceptance: a credential that says it has ended is reported as such without the provider being asked, and every uncertainty still asks.
+  - Verify: 12 gateway tests, 1 SDK contract test; 762 tests. Measured end to end through `HealthManager`.
+  - Findings: **every credential this project stores carries an expiry, and for two of the five kinds nothing ever read it.** A ChatGPT Web health check *launches a browser*, so a connection whose session ended an hour ago was launching one on every sweep to be told what the stored credential already said in writing. Cline was the same shape at lower cost.
+  - **My first measurement was wrong and I corrected it before building.** I checked whether each adapter's *file* mentioned `expiresAt`, and reported three kinds unchecked. `deepSeekWebCredential` stores no expiry at all — a userToken — so the real gap is **two**, not three. Measuring the wrong thing and reporting it confidently is the failure this project keeps running into, and it is cheaper to catch here than after shipping.
+  - The gap's real shape: `chatgpt-web` keeps its expiry *inside* the credential's JSON, and `toClineCredential` writes an `expiresAt` that `ProviderCredential` only declares on the OAuth branch — so a field was being stored that nothing could read back generically.
+  - **A boolean could not express three states, and that was a real flaw in my first design.** `false` from an adapter that *cannot say* is indistinguishable from `false` from one that checked, so an uncertain adapter would have produced a confident "valid" and the gateway would have sent a request that cannot succeed. `isCredentialExpired` now returns `boolean | undefined`, where `undefined` is *cannot say* — and a test that asserts every uncertainty resolves to "go and ask" is what caught it.
+  - **The SDK contract caught `isCredentialExpired` throwing on the very first adapter it was run against.** `chatGptWebSessionFromCredential` throws for a credential that is not a ChatGPT session, which is right on the request path and wrong in a *pre*-check: a pre-check that throws can take down whatever asked it. Now read defensively.
+  - **The contract deliberately does not assert "a past expiry is expired"**, because a contract cannot know each provider's credential shape. A ChatGPT Web credential is a JSON storage state, not an OAuth record, and feeding one adapter the other's shape is exactly the plausible-looking fixture that proves a test rather than a fact — my first draft did precisely that and failed. The contract now pins what holds for *any* shape (does not throw; one of three answers; unreadable is `undefined`), and the shape-specific assertions live where the shape is owned.
+  - **It is a pre-check and not a replacement.** A credential that is not expired may still have been revoked, so the network check still runs whenever the answer is not already known — asserted, because skipping it would report revoked sessions as healthy, which is the confidence-without-evidence this project refuses elsewhere.
+  - Files: `apps/gateway/src/credential-lifecycle.ts` (new), `apps/gateway/src/health.ts`, `apps/gateway/src/service.ts`, `packages/omnihilbras-sdk/src/types.ts`, `packages/omnihilbras-sdk/src/adapters/{chatgpt-web,cline}.ts`, `apps/gateway/test/credential-lifecycle.test.js` (new), `packages/omnihilbras-sdk/test/provider-contract.test.js`.
+  - Depends on: Task 63.
+  - Scope: Medium.
+
 - [x] Task 63: Phase 3 — a real `RequestContext`, because `ProviderRequestContext.requestId` was declared and never set.
   - Acceptance: one id per accepted request, and the *same* id in the reply, the refusal, and the context every adapter is called with.
   - Verify: 12 tests including an end-to-end one through a real server; 372 gateway tests. Measured end to end, not asserted.

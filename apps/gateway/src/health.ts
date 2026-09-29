@@ -60,6 +60,15 @@ export type HealthProbeSource = {
   adapters(signal?: AbortSignal): Promise<ProviderAdapter[]>;
   /** The request context an adapter should be asked in, carrying its credential. */
   contextFor(adapterId: string, signal?: AbortSignal): Promise<ProviderRequestContext>;
+  /**
+   * Whether the stored credential is already known to have expired, without a request.
+   *
+   * Optional so an embedder that does not track credential expiry is unaffected, and *only* ever
+   * used to skip a probe that cannot succeed. A provider's own health check still runs whenever the
+   * answer is not already known, because a credential that is not expired may still have been
+   * revoked.
+   */
+  credentialStanding?(adapterId: string, signal?: AbortSignal): Promise<{ state: 'expired' | 'valid' | 'unknown' }>;
 };
 
 const defaultHealthIntervalMs = 60_000;
@@ -206,6 +215,15 @@ export class HealthManager {
    * `/health` said unavailable, and it corrupted the very counting that drives ejection.
    */
   private async probe(adapter: ProviderAdapter, signal?: AbortSignal): Promise<GatewayProviderHealth> {
+    // Asked before anything is spent. A ChatGPT Web check launches a browser, and this is the one
+    // question whose answer is already written down in the credential.
+    if (this.source.credentialStanding) {
+      const standing = await this.source.credentialStanding(adapter.id, signal);
+      if (standing.state === 'expired') {
+        const message = 'This connection’s session has expired. Sign in again.';
+        return { providerId: adapter.id, status: 'unavailable', checkedAt: new Date().toISOString(), message };
+      }
+    }
     if (!adapter.healthCheck) {
       return { providerId: adapter.id, status: 'unavailable', checkedAt: new Date().toISOString(), message: 'Health checks are not supported.' };
     }

@@ -10,6 +10,7 @@ import { HealthManager } from './health.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
 import { CredentialManager } from './credential-manager.js';
+import { CredentialLifecycle } from './credential-lifecycle.js';
 import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
@@ -115,6 +116,14 @@ export class GatewayService {
    */
   private readonly credentials: CredentialManager;
   /**
+   * Whether a stored credential is still usable, answered without asking the provider.
+   *
+   * The saving is concrete rather than architectural: a ChatGPT Web health check launches a
+   * browser, and a session that ended an hour ago was launching one on every sweep to be told what
+   * the credential already said in writing.
+   */
+  private readonly credentialLifecycle: CredentialLifecycle;
+  /**
    * Which routes a request may take, given the current health and limits.
    *
    * The algorithm was already in `routing.ts`; the inputs it needed were scattered across this
@@ -218,10 +227,21 @@ export class GatewayService {
       .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId))
       .onDemand(chatGptWebProviderId, () => this.chatGptWebAdapter())
       .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter());
+    this.credentialLifecycle = new CredentialLifecycle({
+      adapterFor: (providerId) => { try { return this.registry.get(providerId); } catch { return undefined; } },
+      now,
+    });
     this.healthManager = new HealthManager(
       {
         adapters: () => this.activeAdapters(),
         contextFor: (adapterId, signal) => this.contextForAdapter(adapterId, signal),
+        // The third question the health probe can ask, and the only one that costs nothing. Asked
+        // before the adapter's own check so an expired session is not discovered by launching a
+        // browser to be told what the credential already said.
+        credentialStanding: async (adapterId) => {
+          const context = await this.contextForAdapter(adapterId);
+          return this.credentialLifecycle.standing(adapterId, context.credential);
+        },
       },
       {
         now,

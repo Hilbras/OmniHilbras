@@ -855,6 +855,39 @@ export class ChatGptWebAdapter implements ProviderAdapter {
    */
   readonly capabilities = { chat: true, streaming: false, models: true } as const;
 
+  /**
+   * The export says when the session ends, and this reads it without opening chatgpt.com.
+   *
+   * The credential stores an `expiresAt` precisely so a dead session can be recognised without a
+   * browser — and then nothing read it, so every health sweep launched a browser to be told what
+   * the stored credential already said. A refresh token that expired an hour ago does not become
+   * valid again because somebody asked politely.
+   */
+  isCredentialExpired(credential: ProviderCredential | undefined, now = Date.now()): boolean | undefined {
+    if (!credential) return undefined;
+    /**
+     * Read defensively, because this must not throw.
+     *
+     * `chatGptWebSessionFromCredential` throws for a credential that is not a ChatGPT session, which
+     * is right for the request path and wrong here: a *pre*-check that throws is a pre-check that can
+     * take down whatever asked it, and "this is not a credential I recognise" is simply another way
+     * of saying *cannot say*. The provider contract's expiry test caught this on the first adapter it
+     /// was run against.
+     */
+    let expiresAt: string | undefined;
+    try {
+      expiresAt = chatGptWebSessionFromCredential(credential).expiresAt;
+    } catch {
+      return undefined;
+    }
+    if (typeof expiresAt !== 'string') return undefined;
+    const at = Date.parse(expiresAt);
+    // Unparseable is "cannot say", not "not expired". Guessing either way would eject a working
+    // connection over a field we failed to read, and the network check would have answered for free.
+    if (!Number.isFinite(at)) return undefined;
+    return at <= now;
+  }
+
   private readonly driver: ChatGptWebDriver;
   private readonly now: () => number;
 
