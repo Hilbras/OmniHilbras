@@ -1019,7 +1019,28 @@ client-attestation token from obfuscated JS, is deliberately omitted — reprodu
 porting that JS, and the endpoint does not currently require it. If it ever does, requests will
 fail with a 401 that says nothing about attestation, which is when to come back to it.
 
-### Qwen Web, and why there is no card
+### Qwen Web: a card that says why it cannot be connected
+
+There **is** a card, and it is the honest kind. `status: 'planned'` is a distinct status rather
+than a flavour of `available`, because the two need opposite behaviour: `available` should
+invite you to connect, and this one must not.
+
+```
+Qwen Web   Not built yet
+  The models are served to guests, but every turn is gated by Alibaba's bot-protection
+  captcha, which has to be solved in a browser. Not built on a maybe — see docs/SPEC-SDK.md.
+```
+
+`unavailableReason` is **required** whenever the status is `planned`. A card that says "not
+available" without saying why is a dead end, and one that hides the reason is worse than no
+card. Both card views enforce it — the compact row and the full card each have their own
+action, and guarding only one leaves the other offering a button that opens a dialog which
+cannot work.
+
+The detail page enforces it too, and its empty state says the real reason rather than
+"add an API key" for a provider that has no API key.
+
+### What was found on the way
 
 The catalog is open and the turn is not:
 

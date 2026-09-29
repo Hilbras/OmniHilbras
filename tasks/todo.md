@@ -147,6 +147,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 26: Fix the last three hardcoded provider strings, and add the Qwen card honestly.
+  - Acceptance: no provider-specific string lives in the dialog, and the Qwen card exists without offering an action that cannot work.
+  - Verify: the DeepSeek dialog reads "Sign in with DeepSeek" and contains no occurrence of "ChatGPT"; its paste section reads "Or paste a userToken instead"; the Qwen card reads "Not built yet" with the reason and has no Connect button. 401 tests pass.
+  - Findings: **five** provider-specific strings were hardcoded in the dialog, not one. I had claimed the class of bug was fixed after moving the sign-in blurb, and then left the button label, the waiting message, the no-display message, the paste section label and the field label — so DeepSeek's dialog said "Sign in with ChatGPT" and offered to paste a "session cookie". Fixing the one I noticed did not fix the class, which is the actual lesson. **The Qwen card exists and is honestly marked**: `status: 'planned'`, a required `unavailableReason` naming the TMD captcha, and **no Connect button in either card view** — the simple list card and the advanced card each had their own button, and the first one guarded was not the one the list renders. Also found, not fixed: **`GET /health` takes 24 seconds** because it probes all twelve providers on every call, and `ProvidersPage` awaits it *before* setting connections, so the whole list waits on it. Pre-existing and separate.
+  - Files: `src/components/ProviderCard.tsx`, `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, `src/pages/ProviderDetailPage.tsx`, `src/data/providers.ts`, docs.
+  - Depends on: Task 25.
+  - Scope: Medium.
+
 - [x] Task 25: Add DeepSeek Web, and work out that Qwen Web is not worth a card.
   - Acceptance: a DeepSeek Web card that connects by signing in or by pasting a `userToken`, and a request path with no browser in it.
   - Verify: `POST /v1/oauth/deepseek/start` returns 201; an invalid `userToken` is refused with **DeepSeek's own answer** — `PROVIDER_REQUEST_FAILED`, "DeepSeek rejected the sign-in: Authorization Failed (invalid token)" — and no connection is created; 14 models; both cards render and the DeepSeek dialog names `chat.deepseek.com`; 401 tests pass.

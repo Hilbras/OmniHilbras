@@ -2,7 +2,15 @@ import { ArrowUpRight, CheckCircle2, CircleAlert, Clock3, Cpu, KeyRound, Server,
 import { Link } from 'react-router-dom';
 import { ProviderMark } from './ProviderMark';
 
-export type ProviderStatus = 'connected' | 'attention' | 'available';
+/**
+ * `planned` is a card whose provider is real and catalogued but has no working connection.
+ *
+ * It is a distinct status rather than a flavour of `available` because the two need opposite
+ * behaviour: `available` should invite you to connect, and this one must not, because there is
+ * nothing to connect to. Presenting a known-blocked provider as an ordinary option is the
+ * thing a status like this exists to prevent.
+ */
+export type ProviderStatus = 'connected' | 'attention' | 'available' | 'planned';
 export type ProviderGroup = 'oauth' | 'api-key' | 'web-cookie' | 'free-tier' | 'hosted' | 'local' | 'custom';
 export type ProviderCardMode = 'simple' | 'advanced';
 
@@ -49,6 +57,13 @@ export type ProviderRecord = {
    * and the card says so.
    */
   riskSeverity?: 'standard' | 'high';
+  /**
+   * Why this provider cannot be connected yet, in one sentence the user can act on.
+   *
+   * Required whenever `status` is `planned`: a card that says "not available" without saying
+   * why is a dead end, and one that hides the reason is worse.
+   */
+  unavailableReason?: string;
 };
 
 function statusMeta(status: ProviderStatus) {
@@ -68,6 +83,14 @@ function statusMeta(status: ProviderStatus) {
       dot: 'bg-gold',
     };
   }
+  if (status === 'planned') {
+    return {
+      label: 'Not built yet',
+      icon: Clock3,
+      className: 'border-line-strong bg-surface-2 text-muted',
+      dot: 'bg-muted',
+    };
+  }
   return {
     label: 'Available',
     icon: Server,
@@ -79,7 +102,14 @@ function statusMeta(status: ProviderStatus) {
 function SimpleProviderCard({ provider, detailTo, onManage, onConnect, simpleEnabled, onToggle }: { provider: ProviderRecord; detailTo: string; onManage: () => void; onConnect: () => void; simpleEnabled: boolean; onToggle?: (enabled: boolean) => void }) {
   const connected = provider.status === 'connected';
   const attention = provider.status === 'attention';
-  const statusLabel = connected ? (simpleEnabled ? '1 Connected' : 'Disabled') : attention ? 'Needs attention' : 'No connections';
+  // A planned provider says so in place of "No connections", because "no connections" reads
+  // as "you have not connected it yet" — which implies there is something to connect.
+  const planned = provider.status === 'planned';
+  const statusLabel = planned
+    ? 'Not built yet'
+    : connected
+      ? simpleEnabled ? '1 Connected' : 'Disabled'
+      : attention ? 'Needs attention' : 'No connections';
 
   return (
     <article className="group relative isolate flex min-h-[84px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-line bg-surface-2/75 p-3 transition-colors hover:border-line-strong hover:bg-surface-2">
@@ -110,7 +140,19 @@ function SimpleProviderCard({ provider, detailTo, onManage, onConnect, simpleEna
           </span>
         </span>
       </div>
-      {connected ? (
+      {/*
+        A planned provider gets the reason where the Connect button would be, and no button at
+        all. Both the simple and advanced cards needed this, and the first one I guarded was
+        not the one this list actually renders.
+      */}
+      {planned ? (
+        <span
+          title={provider.unavailableReason}
+          className="relative z-20 max-w-[11rem] shrink-0 truncate text-right text-[10px] leading-tight text-muted"
+        >
+          {provider.unavailableReason}
+        </span>
+      ) : connected ? (
         <button type="button" role="switch" aria-checked={simpleEnabled} aria-label={`${simpleEnabled ? 'Disable' : 'Enable'} ${provider.name}`} onClick={() => onToggle?.(!simpleEnabled)} disabled={!onToggle} className={`relative z-20 h-6 w-11 shrink-0 rounded-full p-1 opacity-100 transition-[colors,opacity] sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 ${simpleEnabled ? 'bg-[#f0643b]' : 'bg-line-strong'} disabled:cursor-not-allowed disabled:opacity-60`}>
           <span className={`block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${simpleEnabled ? 'translate-x-5' : 'translate-x-0'}`} aria-hidden="true" />
         </button>
@@ -147,6 +189,12 @@ export function ProviderCard({ provider, detailTo, onManage, onConnect, mode = '
       </div>
 
       <div className="flex flex-1 flex-col p-4 sm:p-5">
+        {provider.unavailableReason && (
+          <p className="mb-3 flex items-start gap-1.5 rounded-lg border border-line-strong bg-surface-2 px-2.5 py-2 text-[11px] leading-relaxed text-muted">
+            <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            {provider.unavailableReason}
+          </p>
+        )}
         {provider.riskNotice && (
           <p className="mb-3 flex items-start gap-1.5 rounded-lg border border-[#ff6b35]/30 bg-[#ff6b35]/10 px-2.5 py-2 text-[11px] leading-relaxed text-[#ff6b35]">
             <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -186,8 +234,26 @@ export function ProviderCard({ provider, detailTo, onManage, onConnect, mode = '
       </div>
 
       <div className="border-t border-line/70 px-4 py-3 sm:px-5">
-        <button type="button" onClick={isAvailable ? onConnect : onManage} className={`flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${isAvailable ? 'bg-gold-soft text-gold-text hover:bg-gold/20' : 'text-muted hover:bg-bg-soft hover:text-gold-text'}`}>
-          {isAvailable ? 'Connect provider' : 'Manage connection'}
+        {/*
+          A planned provider gets no Connect button at all. The rule the project already has
+          for an auth mode with no flow behind it applies here for the same reason: a button
+          that opens a dialog which cannot work is worse than no button, and a disabled one is
+          still an invitation. The card says why, in `unavailableReason`.
+        */}
+        <button
+          type="button"
+          onClick={isAvailable ? onConnect : onManage}
+          disabled={provider.status === 'planned'}
+          title={provider.status === 'planned' ? provider.unavailableReason : undefined}
+          className={`flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
+            provider.status === 'planned'
+              ? 'cursor-not-allowed text-muted opacity-50'
+              : isAvailable
+                ? 'bg-gold-soft text-gold-text hover:bg-gold/20'
+                : 'text-muted hover:bg-bg-soft hover:text-gold-text'
+          }`}
+        >
+          {provider.status === 'planned' ? 'Not available yet' : isAvailable ? 'Connect provider' : 'Manage connection'}
           <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       </div>

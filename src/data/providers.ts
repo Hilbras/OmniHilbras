@@ -76,6 +76,41 @@ export const providerCatalog: ProviderRecord[] = [
     riskSeverity: 'high',
   },
   {
+    id: 'qwen-web',
+    name: 'Qwen Web',
+    description:
+      'chat.qwen.ai through a browser session. The models are readable; the turn is not — see the card.',
+    category: 'Web session',
+    group: 'web-cookie',
+    /**
+     * Catalogued, not connected, and the card says so rather than implying otherwise.
+     *
+     * `qwen3.7-plus`, `qwen3.8-max` and `qwen3.8-omni-flash` are all real: the models endpoint
+     * answers an unauthenticated guest with 200 and a million tokens of context each. The chat
+     * endpoint is a plain, unminified `POST /api/v2/chat/completions`.
+     *
+     * The turn is refused by Alibaba's TMD anti-bot, which answers 200 with a captcha that has
+     * to be rendered in a browser, and a guest session has no XSRF cookie to send. So there is
+     * nothing to connect to *yet*, and the honest state is that rather than a button which
+     * opens a dialog that cannot work.
+     */
+    status: 'planned',
+    auth: 'Not yet available',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#615ced',
+    initial: 'Q',
+    logo: providerLogoMap.qwen,
+    endpoint: 'https://chat.qwen.ai',
+    modelList: [],
+    /** Why it is not built, in one sentence a user can act on. */
+    unavailableReason:
+      'The models are served to guests, but every turn is gated by Alibaba’s bot-protection captcha, which has to be solved in a browser. Not built on a maybe — see docs/SPEC-SDK.md for what was found.',
+  },
+  {
     id: 'deepseek-web',
     name: 'DeepSeek Web',
     description:

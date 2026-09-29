@@ -35,6 +35,10 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
       },
     ],
     signIn: {
+      label: 'Sign in with ChatGPT',
+      opened: 'A ChatGPT window has opened on your desktop. Sign in there — this closes itself once you are signed in.',
+      noDisplay:
+        'A ChatGPT window would open on the machine running OmniHilbras, and there is no display there — so there is nowhere to sign in. Paste a Cookie header below instead, or start OmniHilbras on a machine with a display.',
       note: 'Opens chatgpt.com in a window on the machine running OmniHilbras. Sign in with your own password and second factor, and the session is read straight out of that browser — including the Cloudflare clearance that a copied cookie tends to lose.',
       start: '/v1/oauth/chatgpt/start',
       status: (sessionId, freeOnly) =>
@@ -45,6 +49,8 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
       field: 'storageState',
       placeholder: `${CHATGPT_WEB_SESSION_COOKIE}=…; oai-did=…`,
       supportsFreeOnly: true,
+      sectionLabel: 'Or paste a session cookie instead',
+      fieldLabel: 'Session cookie',
     },
     check: { path: '/v1/web-cookie/chatgpt/check', field: 'storageState' },
     planNote: 'Only chatgpt.com and openai.com cookies are kept. Anything else in the export is dropped before it is stored.',
@@ -70,6 +76,10 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
       },
     ],
     signIn: {
+      label: 'Sign in with DeepSeek',
+      opened: 'A DeepSeek window has opened on your desktop. Sign in there — this closes itself once you are signed in.',
+      noDisplay:
+        'A DeepSeek window would open on the machine running OmniHilbras, and there is no display there — so there is nowhere to sign in. Paste a userToken below instead, or start OmniHilbras on a machine with a display.',
       note: 'Opens chat.deepseek.com in a window on the machine running OmniHilbras. Sign in with your own account, and the userToken is read out of that browser’s local storage — so there is no cookie header to copy and no value to unwrap by hand.',
       start: '/v1/oauth/deepseek/start',
       status: (sessionId) => `/v1/oauth/deepseek/status?sessionId=${encodeURIComponent(sessionId)}`,
@@ -78,6 +88,8 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
       path: '/v1/web-cookie/deepseek/connect',
       field: 'userToken',
       placeholder: 'userToken value, or {"value":"…"}',
+      sectionLabel: 'Or paste a userToken instead',
+      fieldLabel: 'userToken',
     },
     planNote: 'DeepSeek Web serves the same 14 models to every account, so there is no plan to read and nothing is narrowed.',
   },

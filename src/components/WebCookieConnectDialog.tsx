@@ -36,9 +36,27 @@ export type WebSessionDescriptor = {
    * ChatGPT sentence and cheerfully told DeepSeek users that a chatgpt.com window was about to
    * open. Anything provider-specific belongs to the provider.
    */
-  signIn?: { start: string; status: (sessionId: string, freeOnly: boolean) => string; note: string };
+  signIn?: {
+    start: string;
+    status: (sessionId: string, freeOnly: boolean) => string;
+    note: string;
+    /** The button. */
+    label: string;
+    /** Shown when the gateway has no display to open a window on. */
+    noDisplay: string;
+    /** Shown while the window is open and waiting. */
+    opened: string;
+  };
   /** The paste route, when there is one. */
-  paste?: { path: string; field: string; placeholder: string; supportsFreeOnly?: boolean };
+  paste?: {
+    path: string;
+    field: string;
+    placeholder: string;
+    supportsFreeOnly?: boolean;
+    /** The collapsed section's own label, and the field's label. */
+    sectionLabel: string;
+    fieldLabel: string;
+  };
   /** The check route, when a check exists. */
   check?: { path: string; field: string };
   /** What a signed-in account offers, when the provider varies its models by plan. */
@@ -144,11 +162,14 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
         setSignIn({
           state: 'headless',
           message:
-            'A ChatGPT window would open on the machine running OmniHilbras, and there is no display there — so there is nowhere to sign in. Paste a Cookie header below instead, or start OmniHilbras on a machine with a display.',
+            descriptor.signIn?.noDisplay ?? 'A window would open on the machine running OmniHilbras, and there is no display there — so there is nowhere to sign in. Paste a credential below instead, or start OmniHilbras on a machine with a display.',
         });
         return;
       }
-      setSignIn({ state: 'waiting', message: 'A ChatGPT window has opened on your desktop. Sign in there — this closes itself once you are signed in.' });
+      setSignIn({
+        state: 'waiting',
+        message: descriptor.signIn?.opened ?? 'A window has opened on your desktop. Sign in there — this closes itself once you are signed in.',
+      });
 
       for (let attempt = 0; attempt < 120; attempt += 1) {
         // A visible wait rather than a tight loop: the page needs time to fetch the account,
@@ -282,7 +303,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
               ) : (
                 <>
                   <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
-                  Sign in with ChatGPT
+                  {descriptor.signIn?.label ?? 'Sign in'}
                 </>
               )}
             </button>
@@ -304,7 +325,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
           {descriptor.paste && (
           <details className="mt-4 rounded-xl border border-line bg-bg-soft/40 p-3">
             <summary className="cursor-pointer text-[11px] font-semibold text-text">
-              Or paste a session cookie instead
+              {descriptor.paste?.sectionLabel ?? 'Or paste a credential instead'}
             </summary>
             <p className="mt-2 text-[11px] leading-relaxed text-muted">
               For a gateway with no display to open a window on. The same credential either way — this is
@@ -358,7 +379,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
           </section>
             <div className="mt-3">
               <label htmlFor="web-cookie-export" className="block text-[11px] font-semibold">
-              Session cookie
+              {descriptor.paste?.fieldLabel ?? 'Credential'}
             </label>
             <textarea
               id="web-cookie-export"
