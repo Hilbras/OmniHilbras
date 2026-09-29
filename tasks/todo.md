@@ -147,6 +147,19 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 58: Extract `ModelCatalog` — the last Phase 2 item in the plan.
+  - Acceptance: the client list, the per-provider list, model-to-provider resolution and discovery all live together; the catalog names no provider.
+  - Verify: 20 tests; 312 gateway tests. `service.ts` 1013 → 994 lines, which is **1,506 lines below where this phase started**.
+  - Findings: **four provider-neutral jobs were scattered through the composition root** — the list a client sees, the list one provider offers, which provider a model id belongs to, and what a provider will actually serve when asked. None named a provider; together they are the whole of "what models can I use", which is a question about the catalog and not about the gateway.
+  - `notSupported()` moved to `capability.ts` because a second consumer needed it, and importing a private function from the composition root would have been backwards. Its message names the adapter and the capability, because "this provider is unavailable" and "this provider never advertised the feature" look identical from outside and send the user to opposite places.
+  - `resolveProviderId` is the interesting one, and each step is a **different kind of certainty**: the caller named one (not this method's job to overrule); exactly one saved connection owns it; several own it, so a chat-capable one wins — because owning a model in a catalog is not the same as being able to answer it; one connection exists at all, so use it, which is the manually-added-model case; and otherwise the default, which is a **refusal to guess** rather than a coin toss between unconnected providers.
+  - A disabled connection does not claim a model, or switching one off would leave its models routed to it.
+  - One of my own tests had a fixture that contradicted its own assertion — the first connection was enabled *and* credentialed while the test asserted an empty list. The code was right.
+  - **Phase 2 as the roadmap specifies it is now complete:** `ProviderResolver`, `RequestExecutor`, `ConnectionManager`, `CredentialManager`, `SignInManager`'s sessions, `SignInCoordinator`, `RoutingEngine`, `ModelCatalog`, and the `routes/` split.
+  - Files: `apps/gateway/src/model-catalog.ts` (new), `apps/gateway/src/capability.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/test/model-catalog.test.js` (new).
+  - Depends on: Task 57.
+  - Scope: Medium.
+
 - [x] Task 57: Extract `RoutingEngine`, and find two defects in what it now owns.
   - Acceptance: the routing algorithm and its inputs live together; the engine names no provider; a default request has a deadline.
   - Verify: 13 engine tests plus 2 rewritten limiter tests; 292 gateway tests. `service.ts` 1043 → 1013 lines.

@@ -112,6 +112,9 @@ apps/gateway/src/
   sign-in-sessions   The one OAuth session lifecycle. A grant is spent once, in one function.
   sign-in-coordinator  Claim, poll, save, publish — and one description of why a sign-in failed.
   credential-manager  Which connection serves a provider, and the context a request is made in.
+  routing-engine      Which routes a request may take, given health and limits. Zero ids.
+  model-catalog       What this gateway serves, and which provider serves what. Zero ids.
+  capability          A named "this adapter does not do that", for two consumers that needed it.
   health.ts          Probing, ejection and recovery, asked two questions only.
   api-key-manager    API keys and the two user-facing messages about them.
   routing.ts         Provider-agnostic selection, ejection and recovery. Zero provider ids.

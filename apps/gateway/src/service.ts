@@ -11,6 +11,8 @@ import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
 import { CredentialManager } from './credential-manager.js';
 import { RoutingEngine } from './routing-engine.js';
+import { ModelCatalog } from './model-catalog.js';
+import { notSupported } from './capability.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
@@ -118,6 +120,14 @@ export class GatewayService {
    */
   private readonly routing: RoutingEngine;
   /**
+   * What this gateway serves, and which provider serves what.
+   *
+   * Four provider-neutral jobs that were scattered through this class: the list a client sees, the
+   * list one provider offers, which provider a model id belongs to, and what a provider will
+   * actually serve when asked.
+   */
+  private readonly models: ModelCatalog;
+  /**
    * Storing and changing connections, with one error mapper and one catalog-merge policy.
    *
    * `canValidate` is what removed the Core's last reason to know a provider's name: it used to be
@@ -173,6 +183,13 @@ export class GatewayService {
       rateLimiter: this.rateLimiter,
       defaultProviderId,
       requireAdapter: (providerId) => { this.requireAdapter(providerId); },
+    });
+    this.models = new ModelCatalog({
+      connections: this.connections,
+      credentials: this.credentials,
+      resolveAdapter: (providerId, pendingEndpoint) => this.resolveAdapter(providerId, pendingEndpoint),
+      activeAdapters: () => this.activeAdapters(),
+      defaultProviderId,
     });
     this.requests = new RequestExecutor({
       planRoute: (model, explicitProviderId) => this.planRoute(model, explicitProviderId),
@@ -283,29 +300,9 @@ export class GatewayService {
 
 
   async listAllModels(signal?: AbortSignal): Promise<GatewayModelList> {
-    const connections = (await this.listConnections()).filter((connection) => connection.enabled && connection.hasCredential);
-    if (connections.length > 0) {
-      // Advertise the saved catalog so clients only see models this gateway
-      // actually routes, instead of a provider's full paid inventory.
-      return {
-        models: connections.flatMap((connection) => connection.modelIds.map((id) => ({ id, providerId: connection.providerId } satisfies Model))),
-        unavailable: [],
-      };
-    }
-
-    const results = await Promise.all(this.registry.list().map(async (adapter) => {
-      if (!adapter.listModels || adapter.capabilities.models !== true) return { providerId: adapter.id, models: [], unavailable: { providerId: adapter.id, code: 'NOT_SUPPORTED' } };
-      try {
-        return { providerId: adapter.id, models: await adapter.listModels(await this.credentials.contextForProvider(adapter.id, signal)), unavailable: undefined };
-      } catch (error) {
-        return { providerId: adapter.id, models: [], unavailable: { providerId: adapter.id, code: error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED' } };
-      }
-    }));
-    return {
-      models: results.flatMap((result) => result.models),
-      unavailable: results.flatMap((result) => result.unavailable ? [result.unavailable] : []),
-    };
+    return this.models.listAll(signal);
   }
+
 
   /**
    * Resolves which provider should serve a model. An explicit request wins;
@@ -313,25 +310,14 @@ export class GatewayService {
    * client only needs a base URL, a key, and a model ID.
    */
   async resolveProviderId(model: string, explicitProviderId?: string) {
-    if (explicitProviderId) return explicitProviderId;
-    const modelId = model.trim();
-    if (!modelId) return defaultProviderId;
-    const connections = (await this.listConnections()).filter((connection) => connection.enabled && connection.hasCredential);
-    const owners = [...new Set(connections.filter((connection) => connection.modelIds.includes(modelId)).map((connection) => connection.providerId))];
-    if (owners.length === 1) return owners[0]!;
-    if (owners.length > 1) {
-      const chatCapable = (await this.activeAdapters()).find((adapter) => owners.includes(adapter.id) && adapter.capabilities.chat === true);
-      return chatCapable?.id ?? owners[0]!;
-    }
-    if (connections.length === 1) return connections[0]!.providerId;
-    return defaultProviderId;
+    return this.models.resolveProviderId(model, explicitProviderId);
   }
 
+
   async listModels(providerId: string, signal?: AbortSignal) {
-    const adapter = this.requireAdapter(providerId);
-    if (!adapter.listModels || adapter.capabilities.models !== true) throw notSupported(adapter, 'models');
-    return adapter.listModels(await this.credentials.contextForProvider(providerId, signal));
+    return this.models.listForProvider(providerId, this.requireAdapter(providerId), signal);
   }
+
 
   async validateConnectionCredential(providerId: string, credential: ProviderCredential, signal?: AbortSignal): Promise<GatewayConnectionValidation> {
     return this.withProviderLock(providerId, () => this.validateConnectionCredentialUnlocked(providerId, credential, signal));
@@ -930,29 +916,9 @@ export class GatewayService {
    * mean a request per page load.
    */
   private async discoverConnectionModels(providerId: string, credential: ProviderCredential, policy: ModelImportPolicy, signal?: AbortSignal, pendingEndpoint?: { endpoint: string; name: string }) {
-    const adapter = await this.resolveAdapter(providerId, pendingEndpoint);
-    // The policy is passed here as well as to `discoverModels`, because a provider that
-    // narrows its own list reads it off the context. Without it a free-only import is
-    // correct on connect and silently comes back in full on the next refresh.
-    const context: ProviderRequestContext = { credential, importPolicy: policy, ...(signal ? { signal } : {}) };
-    /**
-     * Both paths are open for either policy.
-     *
-     * The policy travels in the context, so an adapter whose `listModels` narrows by it does
-     * so, and one that ignores it returns its full list — which is the documented meaning of
-     * a `free` policy on a provider that cannot narrow. Gating this branch on
-     * `policy === 'all'` looked stricter and was worse: it made a free-only connection
-     * **unrefreshable**, so the toggle could create a connection that broke the next time
-     * anybody asked the provider what it serves.
-     */
-    const models = adapter.discoverModels
-      ? await adapter.discoverModels(context, { policy })
-      : adapter.listModels && adapter.capabilities.models === true
-        ? await adapter.listModels(context)
-        : undefined;
-    if (!models) throw notSupported(adapter, policy === 'free' ? 'free model discovery' : 'model discovery');
-    return models;
+    return this.models.discover({ providerId, credential, policy, ...(signal ? { signal } : {}), ...(pendingEndpoint ? { pendingEndpoint } : {}) });
   }
+
 
   /**
    * Reduces catalog records to the compact form stored alongside the ids. A model the
@@ -1026,7 +992,3 @@ export class GatewayService {
 
 }
 
-function notSupported(adapter: ProviderAdapter, capability: string) {
-  const message = `${adapter.name} does not support ${capability}.`;
-  return new ProviderError('NOT_SUPPORTED', message, { providerId: adapter.id, publicMessage: message });
-}
