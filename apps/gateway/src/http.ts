@@ -159,10 +159,15 @@ export function toErrorEnvelope(error: unknown, includeProviderMessage = false) 
   if (error instanceof ProviderError) {
     const details = error.details as { providerMessage?: string } | undefined;
     const providerMessage = includeProviderMessage && typeof details?.providerMessage === 'string' ? details.providerMessage : undefined;
+    // Always present when the request carried an id, trusted caller or not: it is the gateway's own
+    // identifier, contains nothing about the provider, and it is the one thing that lets a user
+    // write down "it failed, 4f2a" and an operator find the line.
+    const requestId = typeof (details as { requestId?: unknown } | undefined)?.requestId === 'string' ? (details as { requestId: string }).requestId : undefined;
     return {
       error: {
         code: error.code,
         message: error.publicMessage ?? publicProviderMessage(error.code),
+        ...(requestId ? { requestId } : {}),
         ...(error.providerId ? { provider: error.providerId } : {}),
         ...(error.statusCode ? { status: error.statusCode } : {}),
         ...(error.retryable ? { retryable: true } : {}),

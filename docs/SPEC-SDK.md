@@ -2083,6 +2083,10 @@ off). Settings are validated at the store boundary and exposed through `PUT
 
 Behavior when serving a request:
 
+- Every request the LLM surface accepts is given an id, and it is the **same** id in three
+  places: the `gateway.requestId` on a successful reply, the `requestId` on a refusal, and the
+  `requestId` on the `ProviderRequestContext` every adapter is called with. So *"it failed at 3pm,
+  4f2a…"* is something a user can write down and an operator can find.
 - Candidates are ordered by priority, then name, and a candidate must own the
   model unless the caller pinned a provider explicitly.
 - A retryable failure — timeout, rate limit, provider unavailable, an

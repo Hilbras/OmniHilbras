@@ -9,6 +9,7 @@
 import { ProviderError, isLoopbackHostname, isPrivateHostname, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ToolDefinition } from '@hilbras/omnihilbras';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
+import { attachRequestId, type RequestScope } from '../request-context.js';
 import type { GatewayServerOptions } from '../server.js';
 import type { GatewayService } from '../service.js';
 import {
@@ -53,15 +54,46 @@ export async function handleChat(request: IncomingMessage, response: ServerRespo
   const chatRequest = parseChatRequest(body);
   const explicitProviderId = getExplicitProviderId(request, body);
 
+  // Created once, here, where a request has been accepted. Everywhere else it is passed down, so
+  // the id is per *request* rather than per provider — which is the only way a client can quote it
+  // and an operator can find it.
+  const scope = service.startScope(chatRequest.model, explicitProviderId);
+
+  // A refusal is where the id matters most — it is the case where the user needs to quote
+  // something — so the error is given the id on its way out rather than only on the success path.
+  try {
+    return await handleChatRequest({ response, service, origin, signal, scope, chatRequest, explicitProviderId });
+  } catch (error) {
+    throw attachRequestId(error, scope);
+  }
+}
+
+/** The two response shapes, split out so the id can be attached to a failure from either. */
+async function handleChatRequest(input: {
+  response: ServerResponse;
+  service: GatewayService;
+  origin: string | undefined;
+  signal: AbortSignal;
+  scope: RequestScope;
+  chatRequest: ChatRequest;
+  explicitProviderId: string | undefined;
+}) {
+  const { response, service, origin, signal, scope, chatRequest, explicitProviderId } = input;
+
   if (!chatRequest.stream) {
-    const { response: completion, attempts } = await service.chatWithFailover(chatRequest, explicitProviderId, signal);
-    sendJson(response, 200, { ...toOpenAICompletion(completion), ...(attempts.length > 1 ? { gateway: { attempts: attempts.map(toPublicAttempt) } } : {}) }, origin);
+    const { response: completion, attempts } = await service.chatWithFailover(chatRequest, explicitProviderId, signal, scope);
+    sendJson(response, 200, {
+      ...toOpenAICompletion(completion),
+      // Always present, even on a success with one attempt. A client that was refused gets it from
+      // the error; a client that succeeded and wants to quote a conversation gets it from here.
+      gateway: { requestId: scope.id, ...(attempts.length > 1 ? { attempts: attempts.map(toPublicAttempt) } : {}) },
+    }, origin);
     return;
   }
 
   // The failover decision is made before any byte is written, so a stream that
   // cannot start returns a normal JSON error instead of a truncated SSE body.
-  const outcome = await service.streamChatWithFailover(chatRequest, explicitProviderId, signal);
+  const outcome = await service.streamChatWithFailover(chatRequest, explicitProviderId, signal, scope);
   response.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-cache',

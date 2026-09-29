@@ -1,5 +1,6 @@
 import type { ProviderRequestContext, ProviderCredential, ModelImportPolicy } from '@hilbras/omnihilbras';
 import type { ConnectionManager } from './connection-manager.js';
+import { withRequestScope, type RequestScope } from './request-context.js';
 
 /**
  * The credential surface one request is made with.
@@ -70,8 +71,12 @@ export class CredentialManager {
    * id and the adapter's own "no credential" path reports it. Failing instead would make an
    * unconnected provider look broken rather than unconnected.
    */
-  async contextForProvider(providerId: string, signal?: AbortSignal): Promise<ProviderRequestContext> {
+  async contextForProvider(providerId: string, signal?: AbortSignal, scope?: RequestScope): Promise<ProviderRequestContext> {
     const owner = await this.connections.firstWithCredentialFor(providerId);
-    return this.context(owner?.id ?? providerId, providerId, signal);
+    const context = await this.context(owner?.id ?? providerId, providerId, signal);
+    // Optional, because an embedded caller that does not track request identity still works — the
+    // context is the SDK's type and the adapter boundary is published, so this only ever *adds* a
+    // field that already existed.
+    return scope ? withRequestScope(context, scope) : context;
   }
 }

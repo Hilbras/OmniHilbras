@@ -147,6 +147,28 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 63: Phase 3 — a real `RequestContext`, because `ProviderRequestContext.requestId` was declared and never set.
+  - Acceptance: one id per accepted request, and the *same* id in the reply, the refusal, and the context every adapter is called with.
+  - Verify: 12 tests including an end-to-end one through a real server; 372 gateway tests. Measured end to end, not asserted.
+  - Findings: **`ProviderRequestContext` has carried a `requestId` field since it was written, and nothing has ever set it.** Measured across the repository, the only `requestId` is a local inside the ChatGPT Web browser driver, which never reaches an adapter. So the one field that makes a request context worth having — the thing that lets a user quote *"it failed at 3pm, request 4f2a"* and an operator find that line — was declared and permanently `undefined`.
+  - **Tying four fields into one tidier type would have changed nothing.** The finding is not that the type is scattered; it is that the one field that earns the type's existence is empty. So this is a feature, not an extraction, and it is sized like one.
+  - Generated **once at the edge**, before routing. A context that acquired its id inside a provider adapter would be an id per *provider* rather than per *request*, which is the opposite of what it is for.
+  - **Two of my own tests found holes in my own code, and the second is the same class as last release's.** I typed `RequestScope` `readonly` and returned a plain object — `readonly` is a *type* and nothing at runtime. Second time this session: a `ReadonlyMap` that was a real `Map`, now a `readonly` that was a mutable object. Frozen.
+  - The other: `attachRequestId` **replaced** an id that was already attached by a different scope. Silently pointing an error at a request that was never in flight is worse than no id, so the first id wins and a second attachment is a no-op.
+  - **My end-to-end probe printed `undefined` on both sides and I nearly read it as a wiring failure.** It was the probe: without an `Origin` header the request is not dashboard traffic, so the LLM surface's API-key gate refused it before it reached a provider. **The gate behaving correctly looked exactly like the feature being broken** — and had I trusted the probe I would have "fixed" working code. Now pinned as a test with that reasoning attached.
+  - The id rides on the context field that already existed, so a published adapter type gains nothing and an adapter that ignores it is unaffected.
+  - Files: `apps/gateway/src/request-context.ts` (new), `apps/gateway/src/credential-manager.ts`, `apps/gateway/src/request-executor.ts`, `apps/gateway/src/service.ts`, `apps/gateway/src/routes/inference.ts`, `apps/gateway/src/http.ts`, `apps/gateway/test/request-context.test.js` (new), `docs/SPEC-SDK.md`.
+  - Depends on: Task 62.
+  - Scope: Medium.
+
+- [x] Task 62: Measure `FailoverPolicy` before creating it — and decline.
+  - Acceptance: the roadmap's Phase 3 list is reconciled with what the code actually needs, with the reasoning on the record rather than the item quietly omitted.
+  - Verify: read the executor's chain loop looking for a fourth decision. There is none — every statement is bookkeeping or a delegated call to a policy that already owns the choice.
+  - Findings: **the failover decision is already covered by two files.** `routing-engine.plan` decides which routes may serve a model; `retry-policy.afterFailure` decides retry / next-route / stop; `request-executor` walks the chain and decides nothing.
+  - A `FailoverPolicy` file would therefore be a **rename, not an extraction** — a file that decides nothing, added to the architecture because a list mentioned it. That is the cosmetic extraction every phase so far has been careful to avoid, and the roadmap's own constraint is *incremental refactoring rather than a rewrite*.
+  - **Recorded rather than quietly dropped.** The plan file now says this item was measured and declined, with the measurement, so "Phase 3 complete" does not quietly mean "Phase 3 complete except for the parts I skipped".
+  - No files changed. This is a decision, not a change.
+
 - [x] Task 61: Phase 3 — `HedgePolicy`, the last of the four mechanisms separated from their rules.
   - Acceptance: whether a second request is worth sending, and which route, is one decision with a named reason for every refusal.
   - Verify: 14 tests; 360 gateway tests, all 346 previous ones unchanged. `request-executor.ts` 372 → 362, `service.ts` 994 → 985.

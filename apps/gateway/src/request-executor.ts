@@ -2,6 +2,7 @@ import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse } fr
 import { noCandidateMessage, type RouteCandidate, type RouteDecision } from './routing.js';
 import { RetryPolicy } from './retry-policy.js';
 import { HedgePolicy } from './hedge-policy.js';
+import type { RequestScope } from './request-context.js';
 
 /**
  * Trying routes until one answers.
@@ -63,9 +64,9 @@ export type RequestExecutorDeps = {
   /** Which providers could serve this model, in preference order. */
   planRoute: (model: string, explicitProviderId?: string) => Promise<RouteDecision>;
   /** Sends one request to one provider. */
-  chat: (providerId: string, request: ChatRequest, signal?: AbortSignal) => Promise<ChatResponse>;
+  chat: (providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope) => Promise<ChatResponse>;
   /** Opens a stream with one provider. Only the first chunk is a failover decision point. */
-  streamChat: (providerId: string, request: ChatRequest, signal?: AbortSignal) => AsyncIterable<ChatChunk>;
+  streamChat: (providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope) => AsyncIterable<ChatChunk>;
   /** Applies a per-attempt deadline and never leaks its timer. */
   withDeadline: <T>(signal: AbortSignal | undefined, timeoutMs: number, providerId: string, run: (signal: AbortSignal | undefined) => Promise<T>) => Promise<T>;
   /** Refuses an attempt that would exceed the connection's per-minute limit. */
@@ -90,11 +91,11 @@ export class RequestExecutor {
 
   constructor(private readonly deps: RequestExecutorDeps) {}
 
-  async chat(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal): Promise<GatewayChatOutcome> {
+  async chat(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayChatOutcome> {
     const decision = await this.deps.planRoute(request.model, explicitProviderId);
     if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
     const attempts: GatewayFailoverAttempt[] = [];
-    const race = await this.tryHedgedRace(decision.candidates, request, signal);
+    const race = await this.tryHedgedRace(decision.candidates, request, signal, scope);
     if (race) {
       attempts.push(...race.attempts);
       if (race.response) return { response: race.response, attempts };
@@ -114,7 +115,7 @@ export class RequestExecutor {
           // failed still cost the provider a call. A request the limit *refused* is not counted,
           // because nothing was sent.
           this.deps.recordRateLimitUse(candidate.connectionId);
-          const response = await this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.deps.chat(candidate.providerId, request, deadline));
+          const response = await this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.deps.chat(candidate.providerId, request, deadline, scope));
           const latencyMs = Date.now() - startedAt;
           this.deps.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString());
           attempts.push({ providerId: candidate.providerId, attempt, ok: true, latencyMs });
@@ -147,7 +148,7 @@ export class RequestExecutor {
    * while the leader is still in flight and another candidate can serve the
    * model, so a single connection never pays the extra cost.
    */
-  private async tryHedgedRace(candidates: RouteCandidate[], request: ChatRequest, signal: AbortSignal | undefined) {
+  private async tryHedgedRace(candidates: RouteCandidate[], request: ChatRequest, signal: AbortSignal | undefined, scope?: RequestScope) {
     const plan = this.hedges.planFor(candidates);
     if (!plan.enabled || !plan.leader) return undefined;
     const leader = plan.leader;
@@ -169,7 +170,7 @@ export class RequestExecutor {
       // Counted here for the same reason as the sequential path: a hedge that loses was still sent
       // and still cost money, and the ledger records it as such.
       this.deps.recordRateLimitUse(candidate.connectionId);
-      const done = this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.deps.chat(candidate.providerId, request, deadline))
+      const done = this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.deps.chat(candidate.providerId, request, deadline, scope))
         .then(
           (response): Outcome => ({ candidate, ok: true, latencyMs: Date.now() - startedAt, response }),
           (error: unknown): Outcome => ({ candidate, ok: false, latencyMs: Date.now() - startedAt, error }),
@@ -251,7 +252,7 @@ export class RequestExecutor {
   }
 
   /** Streaming cannot retry after bytes are sent, so failover only covers the first chunk. */
-  async stream(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal): Promise<GatewayStreamOutcome> {
+  async stream(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayStreamOutcome> {
     const decision = await this.deps.planRoute(request.model, explicitProviderId);
     if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
     const attempts: GatewayFailoverAttempt[] = [];
@@ -265,7 +266,7 @@ export class RequestExecutor {
         this.deps.enforceRateLimit(candidate);
         this.deps.recordRateLimitUse(candidate.connectionId);
         const opened = await this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, async (deadline) => {
-          const source = this.deps.streamChat(candidate.providerId, request, deadline)[Symbol.asyncIterator]();
+          const source = this.deps.streamChat(candidate.providerId, request, deadline, scope)[Symbol.asyncIterator]();
           const first = await source.next();
           if (first.done) throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before producing a chunk.');
           // The deadline has passed; the rest of the stream continues without it.

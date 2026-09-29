@@ -13,6 +13,7 @@ import { CredentialManager } from './credential-manager.js';
 import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
+import { startRequestScope, type RequestScope } from './request-context.js';
 import { notSupported } from './capability.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { ConnectionManager } from './connection-manager.js';
@@ -202,8 +203,8 @@ export class GatewayService {
     this.timeouts = new TimeoutPolicy();
     this.requests = new RequestExecutor({
       planRoute: (model, explicitProviderId) => this.planRoute(model, explicitProviderId),
-      chat: (providerId, request, signal) => this.chat(providerId, request, signal),
-      streamChat: (providerId, request, signal) => this.streamChat(providerId, request, signal),
+      chat: (providerId, request, signal, scope) => this.chat(providerId, request, signal, scope),
+      streamChat: (providerId, request, signal, scope) => this.streamChat(providerId, request, signal, scope),
       withDeadline: (signal, timeoutMs, providerId, run) => this.withDeadline(signal, timeoutMs, providerId, run),
       enforceRateLimit: (candidate) => this.enforceRateLimit(candidate),
       recordSuccess: (providerId, latencyMs, at) => this.healthManager.recordSuccess(providerId, latencyMs, at),
@@ -849,16 +850,16 @@ export class GatewayService {
   /** The connection that serves a provider: the only one, or the first enabled. */
 
 
-  async chat(providerId: string, request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
+  async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    return adapter.chat(request, await this.credentials.contextForProvider(providerId, signal));
+    return adapter.chat(request, await this.credentials.contextForProvider(providerId, signal, scope));
   }
 
-  async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal): AsyncIterable<ChatChunk> {
+  async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    yield* adapter.streamChat(request, await this.credentials.contextForProvider(providerId, signal));
+    yield* adapter.streamChat(request, await this.credentials.contextForProvider(providerId, signal, scope));
   }
 
   /**
@@ -872,13 +873,24 @@ export class GatewayService {
    * wiring — every effect the loop performs is one of this service's own methods, passed in rather
    * than reached for, which is what lets the loop be tested without a gateway.
    */
-  async chatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal): Promise<GatewayChatOutcome> {
-    return this.requests.chat(request, explicitProviderId, signal);
+  async chatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayChatOutcome> {
+    return this.requests.chat(request, explicitProviderId, signal, scope);
+  }
+
+  /**
+   * A scope for one request, created at the edge so the id is per *request* rather than per
+   * provider.
+   *
+   * Public because the HTTP layer is the only place that knows a request has been accepted, and it
+   * needs to hand the id to the client *and* to the providers it will be sent to.
+   */
+  startScope(requestedModel: string, explicitProviderId?: string): RequestScope {
+    return startRequestScope({ requestedModel, ...(explicitProviderId === undefined ? {} : { explicitProviderId }) });
   }
 
   /** Streaming cannot retry after bytes are sent, so failover only covers the first chunk. */
-  async streamChatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal): Promise<GatewayStreamOutcome> {
-    return this.requests.stream(request, explicitProviderId, signal);
+  async streamChatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayStreamOutcome> {
+    return this.requests.stream(request, explicitProviderId, signal, scope);
   }
 
   private async planRoute(model: string, explicitProviderId?: string) {
@@ -975,8 +987,8 @@ export class GatewayService {
    * the request path uses. One place builds a request context, so a credential cannot be
    * assembled one way for a health check and another for a real request.
    */
-  private async contextForAdapter(providerId: string, signal?: AbortSignal): Promise<ProviderRequestContext> {
-    return this.credentials.contextForProvider(providerId, signal);
+  private async contextForAdapter(providerId: string, signal?: AbortSignal, scope?: RequestScope): Promise<ProviderRequestContext> {
+    return this.credentials.contextForProvider(providerId, signal, scope);
   }
 
 
