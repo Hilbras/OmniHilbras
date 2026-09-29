@@ -2085,11 +2085,19 @@ Behavior when serving a request:
 
 - Candidates are ordered by priority, then name, and a candidate must own the
   model unless the caller pinned a provider explicitly.
-- A retryable failure — timeout, rate limit, provider unavailable, or a
-  provider-marked retryable error — spends that connection's retry budget and
-  then moves to the next candidate. `INVALID_REQUEST`, `AUTHENTICATION_FAILED`,
-  `NOT_SUPPORTED`, `NOT_FOUND`, and `CANCELLED` are terminal: they are neither
-  retried nor failed over, because another connection cannot fix them.
+- A retryable failure — timeout, rate limit, provider unavailable, an
+  unreadable response, or a provider-marked retryable error — spends that
+  connection's retry budget and then moves to the next candidate.
+  `INVALID_REQUEST`, `AUTHENTICATION_FAILED`, `NOT_SUPPORTED`, `NOT_FOUND`,
+  and `CANCELLED` are terminal: they are neither retried nor failed over,
+  because another connection cannot fix them.
+- The terminal set is drawn by what the code says about the **request**.
+  Those four describe this request or this credential — a model the plan does
+  not carry, a key the provider refused, a lane that does not exist — so
+  another connection refuses them identically. `INVALID_RESPONSE` is not one
+  of them: the provider accepted the request and returned a body nobody could
+  read, which is a statement about that provider and not about the request. It
+  fails over, and the connection is marked unhealthy either way.
 - The per-request deadline is enforced by the gateway, not delegated to the
   adapter, so a provider that ignores its abort signal still cannot hold a
   request open.

@@ -5,9 +5,10 @@ import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, creat
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialSignIn, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
-import { SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
+import { SlidingWindowRateLimiter, resolveRoute, type RouteCandidate } from './routing.js';
 import { HealthManager } from './health.js';
 import { ProviderResolver } from './provider-resolver.js';
+import { RequestExecutor, type GatewayChatOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { ApiKeyManager } from './api-key-manager.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -36,23 +37,13 @@ const defaultProviderId = 'openai';
 /** Consecutive failures before routing stops sending traffic to a connection. */
 /** How often background health polling runs. 0 disables it. */
 
-export type GatewayFailoverAttempt = {
-  providerId: string;
-  attempt: number;
-  ok: boolean;
-  latencyMs: number;
-  errorCode?: string;
-};
-
-export type GatewayChatOutcome = {
-  response: ChatResponse;
-  attempts: GatewayFailoverAttempt[];
-};
-
-export type GatewayStreamOutcome = {
-  chunks: AsyncIterable<ChatChunk>;
-  attempts: GatewayFailoverAttempt[];
-};
+/**
+ * The attempt ledger and the outcomes the failover path returns.
+ *
+ * Re-exported rather than moved: the types now live with the loop that produces them, but every
+ * existing importer of `service.js` keeps working without learning a second path for the same type.
+ */
+export type { GatewayFailoverAttempt, GatewayChatOutcome, GatewayStreamOutcome } from './request-executor.js';
 
 /** The credential surface the service needs, keyed by connection id. */
 export type CredentialSource = Pick<ConnectionStore, 'get' | 'set' | 'delete'>;
@@ -75,49 +66,6 @@ export type GatewayServiceOptions = {
    */
   chatGptWebDriver?: ChatGptWebDriver;
 };
-
-/** Error codes that mean "this request can never succeed on this route". */
-const terminalRouteCodes = new Set(['INVALID_REQUEST', 'AUTHENTICATION_FAILED', 'NOT_SUPPORTED', 'NOT_FOUND']);
-
-function noRouteAvailable(skipped: Array<{ providerId: string; reason: string }>) {
-  const detail = skipped.length > 0 ? ` Skipped: ${skipped.map((entry) => `${entry.providerId} (${entry.reason})`).join(', ')}.` : '';
-  return new ProviderError('PROVIDER_UNAVAILABLE', `${noCandidateMessage}${detail}`, { retryable: true, publicMessage: `${noCandidateMessage}${detail}` });
-}
-
-function attachAttempts(error: unknown, attempts: GatewayFailoverAttempt[]) {
-  const failedProviders = [...new Set(attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.providerId))];
-  if (error instanceof ProviderError) {
-    // A single route keeps the adapter's own redacted public message, so existing
-    // error semantics do not change when failover never engaged.
-    if (failedProviders.length <= 1) {
-      const suffix = failedProviders.length === 1 ? ` Tried: ${failedProviders[0]}.` : '';
-      return new ProviderError(error.code, `${error.message}${suffix}`, {
-        ...(error.providerId ? { providerId: error.providerId } : {}),
-        ...(error.statusCode ? { statusCode: error.statusCode } : {}),
-        retryable: error.retryable,
-        ...(error.publicMessage ? { publicMessage: `${error.publicMessage}${suffix}` } : {}),
-        // Carried through: without this the provider's own wording is lost the
-        // moment a request passes through the failover path, and the operator is
-        // left with a generic refusal and no cause.
-        ...(error.details === undefined ? {} : { details: error.details }),
-        cause: error,
-      });
-    }
-    if (terminalRouteCodes.has(error.code)) {
-      return new ProviderError(error.code, `${error.message} Tried: ${failedProviders.join(', ')}.`, {
-        ...(error.providerId ? { providerId: error.providerId } : {}),
-        ...(error.statusCode ? { statusCode: error.statusCode } : {}),
-        retryable: error.retryable,
-        ...(error.details === undefined ? {} : { details: error.details }),
-        cause: error,
-      });
-    }
-    const message = `Every provider route failed. Tried: ${failedProviders.join(', ')}.`;
-    return new ProviderError('PROVIDER_UNAVAILABLE', message, { retryable: true, publicMessage: message, cause: error });
-  }
-  const message = `Every provider route failed.${failedProviders.length > 0 ? ` Tried: ${failedProviders.join(', ')}.` : ''}`;
-  return new ProviderError('PROVIDER_REQUEST_FAILED', message, { retryable: true, publicMessage: message, cause: error });
-}
 
 export class GatewayService {
   private readonly connectionLocks = new Map<string, Promise<void>>();
@@ -146,6 +94,11 @@ export class GatewayService {
    * separately rather than pretending this is already it.
    */
   private readonly providers: ProviderResolver;
+  /**
+   * The failover chain. Holds the order, the retry counting and the attempt ledger; every effect
+   * it performs is one of this service's methods, passed in above.
+   */
+  private readonly requests: RequestExecutor;
   private readonly rateLimiter: SlidingWindowRateLimiter;
   private readonly rateLimitWaitMs = new Map<string, number>();
   /**
@@ -179,6 +132,16 @@ export class GatewayService {
     const now = options.now ?? (() => Date.now());
     this.rateLimiter = new SlidingWindowRateLimiter(now);
     this.apiKeys = new ApiKeyManager(this.apiKeyStore);
+    this.requests = new RequestExecutor({
+      planRoute: (model, explicitProviderId) => this.planRoute(model, explicitProviderId),
+      chat: (providerId, request, signal) => this.chat(providerId, request, signal),
+      streamChat: (providerId, request, signal) => this.streamChat(providerId, request, signal),
+      withDeadline: (signal, timeoutMs, providerId, run) => this.withDeadline(signal, timeoutMs, providerId, run),
+      enforceRateLimit: (candidate) => this.enforceRateLimit(candidate),
+      recordSuccess: (providerId, latencyMs, at) => this.healthManager.recordSuccess(providerId, latencyMs, at),
+      recordFailure: (providerId, code, reason) => this.healthManager.recordFailure(providerId, code, reason),
+      recordRateLimitUse: (connectionId) => this.rateLimiter.record(connectionId),
+    });
     this.providers = new ProviderResolver(registry)
       .onDemand('cline', () => this.clineAdapter())
       .onDemand('opencode', () => this.zenAdapter())
@@ -1006,218 +969,20 @@ export class GatewayService {
    * Serves one request across a failover chain: each candidate gets its own
    * retry budget, and a retryable failure moves on to the next connection.
    */
-  async chatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal): Promise<GatewayChatOutcome> {
-    const decision = await this.planRoute(request.model, explicitProviderId);
-    if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
-    const attempts: GatewayFailoverAttempt[] = [];
-    const race = await this.tryHedgedRace(decision.candidates, request, signal);
-    if (race) {
-      attempts.push(...race.attempts);
-      if (race.response) return { response: race.response, attempts };
-      // The race found no winner; continue down the normal chain.
-    }
-    const racedProviders = new Set(race?.attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.providerId));
-    let lastError: unknown = race?.lastError;
-
-    for (const candidate of decision.candidates) {
-      if (racedProviders.has(candidate.providerId)) continue;
-      for (let attempt = 1; attempt <= candidate.resilience.maxRetries + 1; attempt += 1) {
-        if (signal?.aborted) throw new ProviderError('CANCELLED', 'The request was cancelled.', { cause: signal.reason });
-        const startedAt = Date.now();
-        try {
-          this.enforceRateLimit(candidate);
-          const response = await this.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.chat(candidate.providerId, request, deadline));
-          const latencyMs = Date.now() - startedAt;
-          this.healthManager.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString());
-          this.rateLimiter.record(candidate.connectionId);
-          attempts.push({ providerId: candidate.providerId, attempt, ok: true, latencyMs });
-          return { response, attempts };
-        } catch (error) {
-          const latencyMs = Date.now() - startedAt;
-          const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
-          this.healthManager.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.');
-          attempts.push({ providerId: candidate.providerId, attempt, ok: false, latencyMs, errorCode: code });
-          // A per-connection limit should hand off to the next route, not retry here.
-          if (error instanceof ProviderError && error.code === 'RATE_LIMITED' && attempts.length > 1) break;
-          if (!isRetryableFailure(error)) throw attachAttempts(error, attempts);
-          lastError = error;
-          if (signal?.aborted) break;
-        }
-      }
-    }
-    throw attachAttempts(lastError, attempts);
-  }
-
   /**
-   * Races the leading candidates when a hedge delay is configured. The first
-   * successful reply wins and the losers are aborted, so the client waits for
-   * the fastest route instead of the first-priority one. A hedge is only sent
-   * while the leader is still in flight and another candidate can serve the
-   * model, so a single connection never pays the extra cost.
+   * The failover chain: hedge, retry, then the next route.
+   *
+   * The loop, the attempt ledger, and the ordering live in `RequestExecutor`. This method is the
+   * wiring — every effect the loop performs is one of this service's own methods, passed in rather
+   * than reached for, which is what lets the loop be tested without a gateway.
    */
-  private async tryHedgedRace(candidates: RouteCandidate[], request: ChatRequest, signal: AbortSignal | undefined) {
-    const [leader, ...rest] = candidates;
-    if (!leader || rest.length === 0 || leader.resilience.hedgeAfterMs <= 0) return undefined;
-
-    type Outcome = { candidate: RouteCandidate; ok: boolean; latencyMs: number; response?: ChatResponse; error?: unknown };
-    const attempts: GatewayFailoverAttempt[] = [];
-    const inflight: Array<{ candidate: RouteCandidate; abort: () => void; done: Promise<Outcome>; startedAt: number }> = [];
-    const settled = new Set<Promise<Outcome>>();
-    const started = new Set<RouteCandidate>();
-    let winner: Outcome | undefined;
-    let lastError: unknown;
-    let onChange: () => void = () => undefined;
-    const resetChange = () => new Promise<void>((resolve) => { onChange = resolve; });
-
-    const start = (candidate: RouteCandidate) => {
-      started.add(candidate);
-      const controller = new AbortController();
-      const startedAt = Date.now();
-      const done = this.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.chat(candidate.providerId, request, deadline))
-        .then(
-          (response): Outcome => ({ candidate, ok: true, latencyMs: Date.now() - startedAt, response }),
-          (error: unknown): Outcome => ({ candidate, ok: false, latencyMs: Date.now() - startedAt, error }),
-        )
-        .then((outcome) => {
-          settled.add(done);
-          const code = outcome.ok ? undefined : outcome.error instanceof ProviderError ? outcome.error.code : 'PROVIDER_REQUEST_FAILED';
-          if (outcome.ok) {
-            this.healthManager.recordSuccess(candidate.providerId, outcome.latencyMs, new Date().toISOString());
-            this.rateLimiter.record(candidate.connectionId);
-          } else {
-            this.healthManager.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.');
-          }
-          attempts.push({ providerId: candidate.providerId, attempt: 1, ok: outcome.ok, latencyMs: outcome.latencyMs, ...(code ? { errorCode: code } : {}) });
-          if (outcome.ok) {
-            if (!winner) {
-              winner = outcome;
-              // A faster route answered: stop paying for the others. The
-              // abandoned attempts are recorded now so the client can see that
-              // a hedge was fired and won.
-              for (const other of inflight) {
-                if (other.candidate === candidate) continue;
-                other.abort();
-                if (!settled.has(other.done)) {
-                  attempts.push({ providerId: other.candidate.providerId, attempt: 1, ok: false, latencyMs: Date.now() - other.startedAt, errorCode: 'CANCELLED' });
-                }
-              }
-            }
-          } else {
-            lastError = outcome.error;
-          }
-          onChange();
-          return outcome;
-        });
-      inflight.push({ candidate, done, startedAt, abort: () => controller.abort(new ProviderError('CANCELLED', 'A faster provider answered this request.')) });
-      return done;
-    };
-
-    start(leader);
-    let hedgePending = true;
-    const hedgeTimer = setInterval(() => {
-      if (winner || signal?.aborted) {
-        clearInterval(hedgeTimer);
-        hedgePending = false;
-        return;
-      }
-      // Only hedge while the leader is still in flight.
-      if (settled.size > 0) {
-        clearInterval(hedgeTimer);
-        hedgePending = false;
-        return;
-      }
-      const next = rest.find((candidate) => !started.has(candidate));
-      if (next) {
-        start(next);
-        onChange();
-      } else {
-        clearInterval(hedgeTimer);
-        hedgePending = false;
-      }
-    }, leader.resilience.hedgeAfterMs);
-    hedgeTimer.unref?.();
-
-    // Wait for the first success, or until every candidate has been tried.
-    while (!winner) {
-      const running = inflight.filter((handle) => !settled.has(handle.done));
-      if (running.length === 0) {
-        if (hedgePending) {
-          // The hedge timer decides whether another candidate is worth starting.
-          await resetChange();
-          continue;
-        }
-        break;
-      }
-      await resetChange();
-    }
-    clearInterval(hedgeTimer);
-    if (winner) {
-      // Return immediately: the losers were aborted and their own bookkeeping
-      // continues in the background. Waiting for them would reintroduce the
-      // leader's latency, which is exactly what hedging exists to avoid.
-      return { response: winner.response!, attempts, lastError };
-    }
-    await Promise.allSettled(inflight.map((handle) => handle.done));
-    return attempts.length === 0 ? undefined : { response: undefined, attempts, lastError };
+  async chatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal): Promise<GatewayChatOutcome> {
+    return this.requests.chat(request, explicitProviderId, signal);
   }
 
   /** Streaming cannot retry after bytes are sent, so failover only covers the first chunk. */
   async streamChatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal): Promise<GatewayStreamOutcome> {
-    const decision = await this.planRoute(request.model, explicitProviderId);
-    if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
-    const attempts: GatewayFailoverAttempt[] = [];
-    let lastError: unknown;
-
-    for (const candidate of decision.candidates) {
-      const startedAt = Date.now();
-      let opening: ChatChunk | undefined;
-      let rest: AsyncIterator<ChatChunk> | undefined;
-      try {
-        this.enforceRateLimit(candidate);
-        const opened = await this.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, async (deadline) => {
-          const source = this.streamChat(candidate.providerId, request, deadline)[Symbol.asyncIterator]();
-          const first = await source.next();
-          if (first.done) throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before producing a chunk.');
-          // The deadline has passed; the rest of the stream continues without it.
-          const remainder = (async function* (): AsyncGenerator<ChatChunk> {
-            while (true) {
-              const next = await source.next();
-              if (next.done) return;
-              yield next.value;
-            }
-          })();
-          return { first: first.value, remainder };
-        });
-        opening = opened.first;
-        rest = opened.remainder[Symbol.asyncIterator]();
-      } catch (error) {
-        const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
-        this.healthManager.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.');
-        attempts.push({ providerId: candidate.providerId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
-        lastError = error;
-        if (!isRetryableFailure(error) || signal?.aborted) break;
-        continue;
-      }
-      this.rateLimiter.record(candidate.connectionId);
-      attempts.push({ providerId: candidate.providerId, attempt: 1, ok: true, latencyMs: Date.now() - startedAt });
-      const settled = opening;
-      return {
-        attempts,
-        chunks: (async function* (self: GatewayService) {
-          if (settled) yield settled;
-          try {
-            while (true) {
-              const next = await rest!.next();
-              if (next.done) return;
-              yield next.value;
-            }
-          } finally {
-            self.healthManager.recordSuccess(candidate.providerId, Date.now() - startedAt, new Date().toISOString());
-          }
-        })(this),
-      };
-    }
-    throw attachAttempts(lastError, attempts);
+    return this.requests.stream(request, explicitProviderId, signal);
   }
 
   private async planRoute(model: string, explicitProviderId?: string) {

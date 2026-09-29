@@ -20,9 +20,11 @@ refactor, and several of them contradict what an outsider might assume.
 
 | Surface | Lines | Provider-id literals | Note |
 | --- | --- | --- | --- |
-| `apps/gateway/src/routing.ts` | 186 | **0** | routing was already provider-agnostic |
-| `apps/gateway/src/provider-resolver.ts` | ~120 | **0** | enforced by a test that greps the file |
-| `apps/gateway/src/service.ts` | 1409 | 9 | down from 12, all `.onDemand()` registrations |
+| `apps/gateway/src/routing.ts` | 195 | **0** | routing was already provider-agnostic |
+| `apps/gateway/src/routing.ts` → see above | 195 | **0** | `isRetryableFailure` now judges an unreadable answer a provider fault |
+| `apps/gateway/src/provider-resolver.ts` | 120 | **0** | enforced by a test that greps the file |
+| `apps/gateway/src/request-executor.ts` | 331 | **0** | the failover loop, the attempt ledger, the ordering |
+| `apps/gateway/src/service.ts` | 1174 | 9 | down from 12, all `.onDemand()` registrations |
 | `apps/gateway/src/server.ts` | 1202 | 5 | all in connection lifecycle routes |
 
 **The Core was far more provider-neutral than it looked.** Twelve literals in 1500 lines is not a
@@ -94,7 +96,11 @@ the adapter owning *how* — would absorb every one of those hand-wired branches
 ```text
 apps/gateway/src/
   server.ts          HTTP: routes, CORS, body limits. Translates requests; no provider logic.
-  service.ts         Orchestration: connections, lifecycle, execution, health, routing state.
+  service.ts         Composition root. Wires the managers below to its own effects.
+  provider-resolver  Which adapter serves a provider id. Zero provider ids; a test enforces it.
+  request-executor   The failover chain: hedge, retry, next route, attempt ledger. Zero ids.
+  health.ts          Probing, ejection and recovery, asked two questions only.
+  api-key-manager    API keys and the two user-facing messages about them.
   routing.ts         Provider-agnostic selection, ejection and recovery. Zero provider ids.
   transport.ts       One configured HTTP client, bounded bodies, URL validation.
 

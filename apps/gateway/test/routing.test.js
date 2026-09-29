@@ -455,6 +455,37 @@ test('retryable classification keeps permanent failures out of the retry loop', 
   assert.equal(isRetryableFailure(new Error('boom')), false);
 });
 
+test('an unusable answer is a provider failure, not a reason to give up on the request', () => {
+  // The four permanent codes above describe *this request* or *this credential* — another provider
+  // refuses them the same way. `INVALID_RESPONSE` is the opposite: the provider took the request
+  // and returned a body nobody could read. Before this was retryable the gateway contradicted
+  // itself — it recorded the failure as a provider health problem, ejected nothing, and then
+  // stopped instead of trying a connection it had just judged healthy.
+  assert.equal(isRetryableFailure(new ProviderError('INVALID_RESPONSE', 'x')), true);
+  // The one boundary that must not move: a cancelled request is not a provider problem, and
+  // retrying it would ignore the caller who asked us to stop.
+  assert.equal(isRetryableFailure(new ProviderError('CANCELLED', 'x')), false);
+});
+
+test('one provider returning an unreadable body no longer takes down a healthy second provider', async () => {
+  // The end-to-end shape of the bug above: an adapter that accepts the request and hands back
+  // something unparseable used to end the whole chain.
+  const broken = chattyAdapter('broken', { fail: async () => { throw new ProviderError('INVALID_RESPONSE', 'the body was not what this adapter expects.'); } });
+  const healthy = chattyAdapter('healthy');
+  const store = await storeWith([
+    { id: 'broken', priority: 1 },
+    { id: 'healthy', priority: 2 },
+  ]);
+  const service = buildService([broken, healthy], store);
+  const outcome = await service.chatWithFailover(chatRequest, undefined);
+  // Asserting on the *set* of routes, because `broken` legitimately appears twice: the default
+  // resilience allows one retry, and a retryable failure is retried before the chain moves on.
+  // What this test is about is which providers were reached, not how many times.
+  assert.deepEqual([...new Set(outcome.attempts.map((attempt) => attempt.providerId))], ['broken', 'healthy']);
+  assert.deepEqual(outcome.attempts.filter((attempt) => attempt.providerId === 'broken').map((attempt) => attempt.ok), [false, false]);
+  assert.equal(outcome.response.providerId, 'healthy', 'the healthy provider served the request');
+});
+
 test('route resolution reports why a connection was skipped', () => {
   const health = new HealthRegistry();
   health.recordFailure('unhealthy', 'PROVIDER_UNAVAILABLE', 'down');

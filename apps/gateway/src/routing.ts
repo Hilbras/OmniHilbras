@@ -126,6 +126,22 @@ export function isRetryableFailure(error: unknown) {
   if (!(error instanceof ProviderError)) return false;
   if (error.code === 'CANCELLED') return false;
   if (error.code === 'INVALID_REQUEST' || error.code === 'AUTHENTICATION_FAILED' || error.code === 'NOT_SUPPORTED' || error.code === 'NOT_FOUND') return false;
+  /**
+   * `INVALID_RESPONSE` is about the *answer*, not the request, and that distinction is the whole
+   * reason it is here.
+   *
+   * Every code above describes this request or this credential: the model is wrong, the key is
+   * refused, the lane does not exist. Another provider will refuse them the same way, so trying one
+   * spends an upstream request to learn nothing. `INVALID_RESPONSE` is the opposite — the provider
+   * accepted the request and returned a body nobody could read, which is 23 sites across the
+   * adapters and says nothing at all about whether the *next* provider can answer.
+   *
+   * Before this, the system contradicted itself: the failover loop called `recordFailure` with this
+   * code, marking the connection unhealthy, and then immediately stopped instead of trying a
+   * connection the health system had just judged capable. One provider returning an empty stream
+   * took down a request a healthy second provider would have served.
+   */
+  if (error.code === 'INVALID_RESPONSE') return true;
   return error.retryable || error.code === 'PROVIDER_TIMEOUT' || error.code === 'PROVIDER_UNAVAILABLE' || error.code === 'RATE_LIMITED' || error.code === 'PROVIDER_REQUEST_FAILED';
 }
 
