@@ -104,6 +104,18 @@ export const providerCatalog: ProviderRecord[] = [
      * says — and the dialog is where the blocker is explained and testable.
      */
     status: 'available',
+    /**
+     * A caution, and a real one: this is a whole-account session, not a key scoped to inference.
+     *
+     * It was missing, which is not a cosmetic oversight. The connect dialog gates its textarea
+     * on the acknowledgement, and renders the acknowledgement only when a notice exists — so a
+     * provider without one got a permanently disabled field and no way to unlock it. The dialog's
+     * own footer already says "treat this like a password", so it was promising a warning it had
+     * no way to show.
+     */
+    riskNotice:
+      'This is your Qwen account session, not an API key. Anyone holding it can act as you at chat.qwen.ai until it expires or you revoke it. OmniHilbras sends it only to your local gateway and stores it encrypted in the local vault; it never reaches browser storage.',
+    riskSeverity: 'high',
     auth: 'Session cookie',
     models: '—',
     latency: '—',
@@ -115,9 +127,15 @@ export const providerCatalog: ProviderRecord[] = [
     logo: providerLogoMap.qwen,
     endpoint: 'https://chat.qwen.ai',
     /**
-     * Read from the live `GET /api/v2/models/`, which answers guests. Three, not the ten a
-     * plausible-looking guess produces — the probe is what caught it. No context window is
-     * claimed because Qwen publishes none on that endpoint.
+     * A dated snapshot of the guest catalog, not a promise.
+     *
+     * Read from `GET /api/v2/models/`, which answers guests. It has returned three here
+     * consistently — and **seven** to someone running the probe minutes apart, with four extra
+     * models, while repeated requests from here kept returning the same three. Cookies were
+     * ruled out: none, `cna`, `isg` and a pasted pair all agreed. So the list moves, and the
+     * connect dialog always shows the live one rather than this.
+     *
+     * No context window is claimed because Qwen publishes none on that endpoint.
      */
     modelList: ['qwen3.7-plus', 'qwen3.8-max', 'qwen3.8-omni-flash'],
     /** Why it is not built, in one sentence a user can act on. */

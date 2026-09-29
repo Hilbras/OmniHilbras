@@ -179,7 +179,16 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
 
   if (!portalNode) return null;
   const high = riskSeverity === 'high';
-  const pasteReady = exported.trim().length > 0 && (!riskNotice || acknowledged);
+  /**
+   * Whether there is anything to acknowledge at all.
+   *
+   * The textarea used to be gated on `!acknowledged` unconditionally, while the checkbox that
+   * sets `acknowledged` renders only when `riskNotice` is set. A provider without a risk notice
+   * therefore got a permanently disabled field and no way to unlock it — which reads as a broken
+   * dialog, not as a lock. The gate and the thing that can open it have to be the same condition.
+   */
+  const mustAcknowledge = Boolean(riskNotice);
+  const pasteReady = exported.trim().length > 0 && (!mustAcknowledge || acknowledged);
   // The models the account would get, narrowed by the toggle — the same narrowing the save
   // applies, so what is shown here is what will be there afterwards.
   const offered = freeOnly && checked ? checked.models.filter((model) => model.id.includes('free')) : checked?.models ?? [];
@@ -338,7 +347,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
               rows={3}
               spellCheck={false}
               autoComplete="off"
-              disabled={!acknowledged}
+              disabled={mustAcknowledge && !acknowledged}
               placeholder={descriptor.paste?.placeholder ?? 'name=value; name=value'}
               className="mt-1.5 w-full resize-y rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-text outline-none focus:border-gold/50 disabled:opacity-50"
             />

@@ -147,6 +147,16 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 42: The cookie field was disabled with no way to enable it, and the catalog overclaim.
+  - Acceptance: a provider with no risk notice gets a typeable field, Qwen carries the caution its own dialog promises, and the model list is labelled as the moving thing it is.
+  - Verify: on `qwen-web` the caution and its checkbox render, the textarea is enabled once ticked, `Ask Qwen` enables on input, and the probe resolves in 1.4 s. 419 tests pass.
+  - Findings: **a gate that could not be opened.** The textarea was `disabled={!acknowledged}`, while the checkbox that sets `acknowledged` renders **only when `riskNotice` is set**. Qwen had no notice, so it got a permanently disabled field and no visible way to unlock it — which reads as a broken dialog, not as a lock. The gate and the thing that can open it have to be the same condition: `disabled={mustAcknowledge && !acknowledged}`. This was latent for every provider without a notice, not something I introduced with Qwen.
+  - Qwen also **needed** the notice. A Qwen session cookie is a whole-account session, and the dialog's own footer already says *"treat this like a password: it may access your signed-in web account"* — it was promising a warning it had no way to show.
+  - **Then the probe reported seven models where it had reported three.** Repeated requests from here returned the same three every time; cookies were ruled out (none, `cna`, `isg`, and a pasted pair all agreed), and the gateway probe agreed with the direct one. So Qwen's guest catalog **varies**, and the "it answers three" I shipped in v1.12.0 was an overclaim. That is the second overclaim in a row on the same fact — first ten invented ids, then a hard "three" — and both came from treating an observed value as a constant. `QWEN_WEB_MODELS` is now a **dated snapshot** with `QWEN_WEB_MODELS_OBSERVED_AT`, and the dialog is the authority because it always shows the live list.
+  - Files: `src/components/WebCookieConnectDialog.tsx`, `src/data/providers.ts`, `packages/omnihilbras-sdk/src/adapters/qwen-web.ts`, docs.
+  - Depends on: Task 41.
+  - Scope: Small.
+
 - [x] Task 41: Make the Qwen dialog look like it works, because it did not.
   - Acceptance: the probe cannot wait forever, a slow answer reads as progress rather than a dead button, and the disabled button says what it wants.
   - Verify: the three questions are asked concurrently (`models` still precedes `turn`, since the turn names a model from it); a stalling transport returns an answer in ~120 ms with a reason rather than hanging; the disabled primary button carries "Paste the credential above first."; the in-flight state names the three questions and the 20 s ceiling. 419 tests pass.

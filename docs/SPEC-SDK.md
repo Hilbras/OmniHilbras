@@ -1387,21 +1387,35 @@ is 404 — v2 is the only turn path. And asking the turn from inside the page **
 because the failing body never ends; a probe has to run from Node with a byte cap, which is why
 `readCapped` exists.
 
-### The catalog is read, not remembered
+### The catalog is read, not remembered — and it moves
 
-`GET /api/v2/models/` answers guests, and it answers **three** models:
+`GET /api/v2/models/` answers guests. Two overclaims had to be undone to get here.
+
+**First:** ten plausible ids were written from memory — `qwen3.7-flash`, `qwen3.7-coder-plus`,
+`qwen3.7-vl-plus` and so on — and the probe caught it. Guessing a catalog is the same fault as
+guessing a capability: the card would have advertised models that do not exist and offered turns
+guaranteed to fail, with nothing on the page to say why.
+
+**Second:** replacing those with a flat *"it answers three"* was also wrong. Someone running the
+probe minutes later saw **seven**:
 
 ```
-qwen3.7-plus   Qwen3.7-Plus
-qwen3.8-max    Qwen3.8-Max
-qwen3.8-omni-flash  Qwen3.8-Omni-Flash
+qwen3.7-plus  qwen3.8-max  qwen3.8-omni-flash  qwen3.7-max
+qwen3.6-plus  qwen3.5-plus  qwen3.5-omni-plus
 ```
 
-Ten plausible ids were written first — `qwen3.7-flash`, `qwen3.7-coder-plus`, `qwen3.7-vl-plus` and
-so on — and the probe caught the difference. Guessing a catalog is the same fault as guessing a
-capability: the card would have advertised models that do not exist and offered turns guaranteed
-to fail, with nothing on the page to say why. Qwen publishes no context length on that endpoint,
-so none is claimed.
+while repeated requests from here returned the same **three** every time. Cookies were ruled out —
+none, `cna`, `isg`, and a pasted `cna`+`isg` pair all agreed — and the gateway probe agreed with
+the direct request. So the guest catalog **varies**, and a constant is wrong by construction: it
+will disagree with the provider on some day, and a card listing models the endpoint no longer
+serves is worse than one that admits the list moves.
+
+Consequences, both deliberate:
+
+- `QWEN_WEB_MODELS` is a **dated snapshot** for the card, with `QWEN_WEB_MODELS_OBSERVED_AT`.
+- **The dialog is the authority** — it always shows the live list the probe read.
+
+Qwen publishes no context length on that endpoint, so none is claimed.
 
 ### Qwen is `available`, not `planned`
 

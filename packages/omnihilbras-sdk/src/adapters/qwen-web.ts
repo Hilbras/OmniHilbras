@@ -238,16 +238,26 @@ export async function probeQwenWeb(
  */
 
 /**
- * The catalog, read from the live `GET /api/v2/models/` rather than written from memory.
+ * A **snapshot** of the guest catalog, for the card. The live list is what `probeQwenWeb`
+ * returns, and that is the authority.
  *
- * I first wrote ten plausible ids — `qwen3.7-flash`, `qwen3.7-coder-plus`, `qwen3.7-vl-plus` and
- * so on. The endpoint answers **three**, and running the probe against the live site is what
- * showed it. Guessing a catalog is the same fault as guessing a capability: the card would have
- * advertised models that do not exist and offered turns guaranteed to fail, with nothing on the
- * page to say why. Qwen publishes no context length on this endpoint, so none is claimed.
+ * I first wrote ten plausible ids — `qwen3.7-flash`, `qwen3.7-coder-plus` and so on — and the
+ * probe caught it. Then I replaced them with a hard "it answers three" and **that was an
+ * overclaim too**: a user running the probe minutes later saw **seven**, including
+ * `qwen3.7-max`, `qwen3.6-plus`, `qwen3.5-plus` and `qwen3.5-omni-plus`, while repeated requests
+ * from here returned three every time. Cookies were ruled out — none, `cna`, `isg` and a pasted
+ * pair all returned the same three.
+ *
+ * So the endpoint's guest catalog **varies**, and a constant is wrong by construction: it will
+ * disagree with the provider on some day, and a card that lists models the endpoint no longer
+ * serves is worse than one that says the list moves. This is a dated snapshot for the catalog
+ * only, and the dialog always shows the live list.
  */
 export const QWEN_WEB_MODELS: Model[] = [
   { id: 'qwen3.7-plus', providerId: qwenWebProviderId },
   { id: 'qwen3.8-max', providerId: qwenWebProviderId },
   { id: 'qwen3.8-omni-flash', providerId: qwenWebProviderId },
 ];
+
+/** When the snapshot above was read, so a reader can tell a stale list from a wrong one. */
+export const QWEN_WEB_MODELS_OBSERVED_AT = '2026-09-29';
