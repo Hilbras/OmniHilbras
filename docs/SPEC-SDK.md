@@ -1023,6 +1023,41 @@ Replaying a refusal as though the model had said it is a subtle way to corrupt e
 **It is not offered when it cannot work.** No connection, or a provider the gateway cannot serve,
 gets a sentence saying why instead of a control that can only fail.
 
+### Logo tiles follow the logo, and the index is generated
+
+`ProviderMark` used to hard-code `backgroundColor: logo ? '#ffffff' : …`. Any light mark was
+therefore **a white glyph on a white tile**:
+
+- `chatgpt.svg` is `fill="#fff"`
+- `qwen.svg` is `fill="#ffff"` — a four-digit hex, i.e. white at full alpha, which a `#rgb` check
+  misses entirely
+
+It was never only those two. **151 of the 157 bundled assets are light** — including `anthropic`,
+`openai`, `gemini`, `google`, `openrouter` and `kiro` — and **63 are dark**. One tile colour
+satisfies one group and hides the other, in whichever theme it did not match. The rule is now the
+simple one: **the tile is the opposite of the mark**, which is theme-independent.
+
+The classification is **generated from the asset files by a Vite plugin**, not hand-written:
+
+```
+buildStart → read public/providers/*.svg and *.png → src/lib/logoPolarity.generated.ts
+```
+
+A hand-written list goes stale the moment a logo is added, and a stale entry fails *silently* —
+an invisible logo rather than an error. There is no app test runner to catch that, so the assets
+are the input, and both `pnpm dev` and `pnpm build` keep the module true.
+
+**SVGs and PNGs need different rules**, and the difference is the point:
+
+| Format | Rule | Why |
+| --- | --- | --- |
+| SVG | any fill > 0.72 → dark tile; else any fill < 0.15 → light tile | fills are sparse, so an average hides the part that matters |
+| PNG | average > 0.45 → dark tile; else average < 0.25 → light tile | pixels fill the box, so extremes mislead |
+
+`tokenharbor.svg` is a single `#16190e`-scale path — one `#16191e` fill — that averages to a
+harmless mid-tone while being invisible on a dark card. `openai.png` is a black knot on a white
+field whose brightest pixel is always `1`, so only the average says it belongs on a dark tile.
+
 ### Provider cards: the grid follows the container, not the viewport
 
 The card grid is `repeat(auto-fit, minmax(272px, 1fr))` — compact cards — and

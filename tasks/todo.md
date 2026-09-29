@@ -147,6 +147,17 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 38: Stop painting white tiles behind white logos.
+  - Acceptance: no bundled logo is invisible on its card, in either theme, and the classification cannot go stale.
+  - Verify: ChatGPT Web and Qwen Web render on a dark tile instead of white-on-white; `tokenharbor.svg` (`#16191e`) and `ollama.png` (pure black) get a light tile so they are visible in dark mode; 151 assets indexed as light, 63 as dark, no overlap; `pnpm build` regenerates the index. 409 tests pass.
+  - Findings: **`ProviderMark` hard-coded `backgroundColor: logo ? '#ffffff' : …`**, so any light mark was a white glyph on a white tile. `chatgpt.svg` is `fill="#fff"`, and `qwen.svg` is `fill="#ffff"` — a four-digit hex meaning white at full alpha, which a naive `#rgb` check misses entirely. It was never only those two: **151 of the 157 bundled assets are light**, including `anthropic`, `openai`, `gemini`, `google`, `openrouter` and `kiro`, and **63 are dark**. One tile colour satisfies one group and hides the other, in whichever theme it did not match.
+  - The classification is **generated from the asset files by a Vite plugin, not hand-written**. A hand-written list goes stale the moment a logo is added, and a stale entry fails *silently* — an invisible logo rather than an error — and there is no app test runner to catch it. `buildStart` reads every SVG and PNG and writes `src/lib/logoPolarity.generated.ts`, so `pnpm dev` and `pnpm build` both keep it true.
+  - **SVGs and PNGs need different rules, and the difference is the interesting part.** An SVG's fills are sparse, so the test is on the extremes: any fill above 0.72 luminance needs a dark tile, and failing that any below 0.15 needs a light one. An average hides exactly the part that matters — `tokenharbor.svg` is a single `#16191e` path that averages to a harmless mid-tone while being invisible on a dark card. A PNG's pixels fill the whole box, so the average is right and the extremes are not: `openai.png` is a black knot on a white field whose brightest pixel is always 1, and only the average says it belongs on a dark tile.
+  - Rasters needed a decoder — `pngjs` and `@types/pngjs`, dev-only. Before adding it I measured the eight PNGs the catalog actually uses: `openai`, `anthropic`, `gemini` and `mistral` are light, `ollama` is pure black, `opencode` is dark, `cline` and `openrouter` are mid. Four of the eight were broken in one theme or the other.
+  - Files: `vite.config.ts` (`logoPolarity` plugin), `src/lib/logoPolarity.generated.ts` (generated), `src/components/ProviderMark.tsx`.
+  - Depends on: Task 37.
+  - Scope: Medium — a build step, a dependency, and a component.
+
 - [x] Task 37: Make the provider cards fit the space they are actually given.
   - Acceptance: no provider name, status, or metric is clipped at any content width, and the card count follows the container rather than the viewport.
   - Verify: 0 of 13 cards have a truncated name; "ChatGPT Web" needs 200 px and gets 200 px; Qwen Web's reason shows two full lines where it showed 176 px of 905; the simple and advanced grids are both 2 × 344 px with 0 overflowing elements at an 800 px viewport; column counts across content widths 360 → 1920 px: 1, 1, 2, 2, 2, 3, 3, 4, 5, 5, 6. 409 tests pass.
