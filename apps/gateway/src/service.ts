@@ -7,6 +7,7 @@ import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSign
 import { createChatGptWebDriver } from './chatgptWeb.js';
 import { SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
 import { HealthManager } from './health.js';
+import { ProviderResolver } from './provider-resolver.js';
 import { ApiKeyManager } from './api-key-manager.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -137,6 +138,14 @@ export class GatewayService {
   private readonly clineSessions = new ClineSessionStore();
   /** API keys, extracted so key policy can be tested without a service around it. */
   private readonly apiKeys: ApiKeyManager;
+  /**
+   * Provider resolution, so the algorithm that picks an adapter knows no provider's name.
+   *
+   * The registrations are in the constructor. A provider still names itself once, in one place,
+   * which is the step short of "a provider adds itself" — and that step is worth taking
+   * separately rather than pretending this is already it.
+   */
+  private readonly providers: ProviderResolver;
   private readonly rateLimiter: SlidingWindowRateLimiter;
   private readonly rateLimitWaitMs = new Map<string, number>();
   /**
@@ -170,6 +179,13 @@ export class GatewayService {
     const now = options.now ?? (() => Date.now());
     this.rateLimiter = new SlidingWindowRateLimiter(now);
     this.apiKeys = new ApiKeyManager(this.apiKeyStore);
+    this.providers = new ProviderResolver(registry)
+      .onDemand('cline', () => this.clineAdapter())
+      .onDemand('opencode', () => this.zenAdapter())
+      .onDemand(opencodeConsoleProviderId, (providerId) => this.opencodeConsoleAdapter(providerId))
+      .onDemand(kiroProviderId, (providerId) => this.kiroAdapter(providerId))
+      .onDemand(chatGptWebProviderId, () => this.chatGptWebAdapter())
+      .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter());
     this.healthManager = new HealthManager(
       {
         adapters: () => this.activeAdapters(),
@@ -1339,49 +1355,32 @@ export class GatewayService {
     }
   }
 
-  private requireAdapter(providerId: string): ProviderAdapter {
-    return this.registry.require(providerId);
-  }
-
   /**
-   * Resolves the adapter for a provider, building one on demand for a saved
-   * connection that has no registered adapter. That is what lets any
-   * OpenAI-compatible endpoint added through the dashboard serve traffic, using
-   * the same transport and credential vault as the built-in adapters.
+   * The adapter for a provider, building it when it has to be built.
+   *
+   * Resolved on demand for a saved connection that has no registered adapter, which is what lets
+   * any OpenAI-compatible endpoint added through the dashboard serve traffic using the same
+   * transport and credential vault as the built-in ones.
+   *
+   * Every branch that used to live here is now a `.onDemand()` registration below. The resolution
+   * algorithm itself is in `ProviderResolver` and contains no provider id, so adding a provider
+   * is a registration rather than a new case in someone else's control flow.
    */
   private async resolveAdapter(providerId: string, pendingEndpoint?: { endpoint: string; name: string }): Promise<ProviderAdapter> {
-    if (providerId === 'cline') return this.clineAdapter();
-    if (providerId === 'opencode') return this.zenAdapter();
-    if (providerId === opencodeConsoleProviderId) return this.opencodeConsoleAdapter(providerId);
-    if (providerId === kiroProviderId) return this.kiroAdapter(providerId);
-    if (providerId === chatGptWebProviderId) return this.chatGptWebAdapter();
-    if (providerId === deepseekWebProviderId) return this.deepSeekAdapter();
-    const registered = this.registry.get(providerId);
-    if (registered) return registered;
-    // A connection being saved is not in the store yet, so the caller can pass
-    // the endpoint it is about to use.
-    const connection = (await this.listConnections()).find((item) => item.providerId === providerId);
-    const endpoint = pendingEndpoint ?? (connection ? { endpoint: connection.endpoint, name: connection.name } : undefined);
-    if (!endpoint) return this.registry.require(providerId);
-    const cached = this.dynamicAdapters.get(providerId);
-    if (cached && cached.endpoint === endpoint.endpoint) return cached.adapter;
-    const adapter = new OpenAICompatibleAdapter({ id: providerId, name: endpoint.name, baseUrl: endpoint.endpoint });
-    this.dynamicAdapters.set(providerId, { endpoint: endpoint.endpoint, adapter });
-    return adapter;
+    return this.providers.resolve(providerId, pendingEndpoint, () => this.listConnections());
   }
 
-  /**
-   * The credential belongs to a connection, not to a provider: one provider can
-   * hold several. The provider id is still passed so an environment credential
-   * keeps resolving.
-   */
+  private requireAdapter(providerId: string): ProviderAdapter {
+    return this.providers.require(providerId);
+  }
+
   /**
    * The context a health check should be asked in.
    *
    * Health is checked per *provider* while credentials are stored per *connection*, so this
-   * resolves the provider's first credentialed connection and then defers to the same
-   * `context()` the request path uses. One place builds a request context, so a credential
-   * cannot be assembled one way for a health check and another for a real request.
+   * resolves the provider's first credentialed connection and then defers to the same `context()`
+   * the request path uses. One place builds a request context, so a credential cannot be
+   * assembled one way for a health check and another for a real request.
    */
   private async contextForAdapter(providerId: string, signal?: AbortSignal): Promise<ProviderRequestContext> {
     const owner = await this.connectionFor(providerId);

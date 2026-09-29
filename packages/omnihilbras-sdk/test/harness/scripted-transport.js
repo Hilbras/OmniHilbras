@@ -86,7 +86,13 @@ export function scriptedTransport({ wireFormat = 'openai' } = {}) {
       // A non-streaming request gets a complete JSON completion. Serving SSE here made every
       // `chat` assertion fail with "returned no choices", which reads as a provider bug and is
       // entirely the harness's fault.
-      const data = isModelsRequest(request) ? modelsPayload(wireFormat) : completionPayload(wireFormat, state.parts);
+      // Kiro is not JSON at all: its frames are a length-prefixed binary envelope, and the
+      // adapter reads them with a DataView. A harness that returned parsed JSON could not have
+      // exercised it, and pretending otherwise would be a pass that proved nothing.
+      if (request.responseAs === 'bytes') {
+        return { status: state.status, headers: new Headers(), data: binaryFrames(state.parts) };
+      }
+      const data = isModelsRequest(request) || isConsoleConfigRequest(request) ? modelsPayload(wireFormat) : completionPayload(wireFormat, state.parts);
       return { status: state.status, headers: new Headers({ 'content-type': 'application/json' }), data };
     },
     async *stream(request) {
@@ -110,6 +116,17 @@ function isModelsRequest(request) {
   return /\/models\b/.test(request.url) && !/:(generateContent|streamGenerateContent|countTokens)/.test(request.url);
 }
 
+/**
+ * Whether this is the console's config read.
+ *
+ * OpenCode Console resolves an org *before* it will list its lanes — `/api/config` answers
+ * `400 {"code":"org_required"}` without one — so a harness that only knew about `/models` left
+ * the adapter looking for a lane it had never been told about.
+ */
+function isConsoleConfigRequest(request) {
+  return /\/api\/config\b/.test(request.url);
+}
+
 function contentTypeFor(request) {
   return isModelsRequest(request) ? 'application/json' : 'text/event-stream';
 }
@@ -120,6 +137,27 @@ function providerIdFor() {
 }
 
 function modelsPayload(wireFormat) {
+  if (wireFormat === 'console') {
+    /**
+     * OpenCode Console does not publish a model list — it publishes a *routing table*, mapping
+     * each model to the lane that serves it. An adapter that cannot find a lane refuses the
+     * model by name, so an OpenAI-shaped catalog answers a question nobody asked and the
+     * refusal looks like a bug in the adapter rather than in the fixture.
+     */
+    return {
+      config: {
+        provider: {
+          opencode: {
+            api: 'https://lane.invalid/v1',
+            models: { 'contract-model': { provider: { api: 'https://lane.invalid/v1' } } },
+          },
+        },
+      },
+    };
+  }
+  if (wireFormat === 'console') {
+    return { config: { provider: { opencode: { api: 'https://lane.invalid/v1', models: { 'contract-model': { provider: { api: 'https://lane.invalid/v1' } } } } } } };
+  }
   if (wireFormat === 'gemini') {
     // Gemini requires the method it claims, and the adapter filters on it — so a fixture that
     // omits it returns an empty catalog and the attribution assertion fails for the wrong reason.
@@ -176,6 +214,55 @@ function geminiFrames(parts) {
   // truncated stream.
   frames.push(`data: ${JSON.stringify({ candidates: [{ content: { role: 'model', parts: [] }, finishReason: 'STOP' }] })}\n\n`);
   return frames;
+}
+
+/**
+ * Kiro's binary framing, built the way `decodeKiroStream` reads it.
+ *
+ * `[totalLength:u32][headersLength:u32][?:u32][headers][payload][crc:u32]`, where `totalLength`
+ * counts itself, headers are `nameLen:u8 name type:u8 valueLen:u16 value`, and the frame must
+ * satisfy `12 + headersLength + 4 <= totalLength` or the decoder stops.
+ *
+ * Each part is a **separate frame**, for the same reason every other fixture in this harness is
+ * multi-part: a single joined frame cannot detect a decoder that drops the rest, which is the
+ * failure this whole suite exists to catch.
+ */
+function binaryFrames(parts) {
+  const encoder = new TextEncoder();
+  const frames = parts.map((text) => {
+    // The header name is `:event-type` — the plain form does not fit the u8 length the
+    // decoder reads it with, and using it produced frames that decoded to no text at all.
+    const name = encoder.encode(':event-type');
+    const value = encoder.encode('assistantResponseEvent');
+    const headerBytes = new Uint8Array(1 + name.length + 1 + 2 + value.length);
+    const view = new DataView(headerBytes.buffer);
+    let cursor = 0;
+    headerBytes[cursor++] = name.length;
+    headerBytes.set(name, cursor); cursor += name.length;
+    // 7 is the decoder's string-header type. Any other value makes it stop reading headers
+    // mid-frame, so the frames still parse and still count — and every one of them arrives with
+    // no event type and no text, which reads as "the adapter dropped the answer" rather than
+    // "the fixture declared the wrong enum".
+    headerBytes[cursor++] = 7;
+    view.setUint16(cursor, value.length); cursor += 2;
+    headerBytes.set(value, cursor);
+
+    const payload = encoder.encode(JSON.stringify({ content: text }));
+    const total = 12 + headerBytes.length + payload.length + 4;
+    const frame = new Uint8Array(total);
+    const frameView = new DataView(frame.buffer);
+    frameView.setUint32(0, total);
+    frameView.setUint32(4, headerBytes.length);
+    frameView.setUint32(8, 0);
+    frame.set(headerBytes, 12);
+    frame.set(payload, 12 + headerBytes.length);
+    return frame;
+  });
+  // One joined buffer, because that is what the transport delivers.
+  const joined = new Uint8Array(frames.reduce((sum, frame) => sum + frame.length, 0));
+  let offset = 0;
+  for (const frame of frames) { joined.set(frame, offset); offset += frame.length; }
+  return joined;
 }
 
 /** The frames as complete SSE payloads, so a test can inspect them individually. */

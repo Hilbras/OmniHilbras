@@ -78,7 +78,13 @@ export const CONTRACT_TEXT = CONTRACT_PARTS.join('');
  * @param provider.adapter the adapter under test
  * @param provider.script  installs an upstream answer. `(parts, { refuseWith }) => cleanup`
  */
-export function runProviderContract({ name, adapter, script, credential = { type: 'api-key', value: 'contract-test-key' } }) {
+/**
+ * @param provider.model  a model id, for a provider whose catalog cannot be *asked* for.
+ *   Kiro publishes a fixed list and refuses anything else by name, so asking it what it has and
+ *   using the answer is right for OpenAI and wrong for Kiro. Declaring the model is how a
+ *   provider says "this is the one to use", and it costs one line.
+ */
+export function runProviderContract({ name, adapter, script, model: nominated, credential = { type: 'api-key', value: 'contract-test-key' } }) {
   /**
    * A real request always carries a credential, so the contract must supply one.
    *
@@ -115,7 +121,7 @@ export function runProviderContract({ name, adapter, script, credential = { type
     const cleanup = script(CONTRACT_PARTS);
     try {
       const chunks = [];
-      for await (const chunk of adapter.streamChat({ model: await firstModel(adapter, context), messages: [{ role: 'user', content: 'hi' }] }, context)) {
+      for await (const chunk of adapter.streamChat({ model: await firstModel(adapter, context, nominated), messages: [{ role: 'user', content: 'hi' }] }, context)) {
         if (chunk.delta?.content) chunks.push(chunk.delta.content);
       }
       assert.equal(chunks.join(''), CONTRACT_TEXT, 'a stream dropped or reordered part of the answer');
@@ -128,7 +134,7 @@ export function runProviderContract({ name, adapter, script, credential = { type
     if (adapter.capabilities?.chat !== true) return;
     const cleanup = script(CONTRACT_PARTS);
     try {
-      const response = await adapter.chat({ model: await firstModel(adapter, context), messages: [{ role: 'user', content: 'hi' }] }, context);
+      const response = await adapter.chat({ model: await firstModel(adapter, context, nominated), messages: [{ role: 'user', content: 'hi' }] }, context);
       assert.equal(response.message.role, 'assistant');
       // Exact equality, and the fixture is multi-part, so a decoder that keeps only the first
       // fragment cannot pass. This is the assertion DeepSeek Web's own test file lacked.
@@ -143,7 +149,7 @@ export function runProviderContract({ name, adapter, script, credential = { type
     const cleanup = script(CONTRACT_PARTS, { refuseWith: 401 });
     try {
       await assert.rejects(
-        async () => adapter.chat({ model: await firstModel(adapter, context), messages: [{ role: 'user', content: 'hi' }] }, context),
+        async () => adapter.chat({ model: await firstModel(adapter, context, nominated), messages: [{ role: 'user', content: 'hi' }] }, context),
         (error) => {
           // The routing engine reads `code` and nothing else. A plain Error, or a code outside
           // the set, means it cannot decide whether to retry, fail over, or stop.
@@ -162,7 +168,7 @@ export function runProviderContract({ name, adapter, script, credential = { type
     if (adapter.capabilities?.chat !== true) return;
     const cleanup = script(CONTRACT_PARTS, { refuseWith: 401 });
     try {
-      await adapter.chat({ model: await firstModel(adapter, context), messages: [{ role: 'user', content: 'hi' }] }, context).catch((error) => {
+      await adapter.chat({ model: await firstModel(adapter, context, nominated), messages: [{ role: 'user', content: 'hi' }] }, context).catch((error) => {
         // 401 is an authentication refusal everywhere. "Something went wrong" would fail over to
         // another provider for no reason and tell the user nothing about the key that is wrong.
         assert.equal(error.code, 'AUTHENTICATION_FAILED', `a 401 mapped to ${error.code}`);
@@ -225,7 +231,8 @@ export function runProviderContract({ name, adapter, script, credential = { type
 }
 
 /** The first model the adapter offers, so the fixtures do not have to know its catalog. */
-async function firstModel(adapter, context) {
+async function firstModel(adapter, context, nominated) {
+  if (nominated) return nominated;
   if (typeof adapter.listModels === 'function') {
     const models = await adapter.listModels(context).catch(() => []);
     if (models.length > 0) return models[0].id;

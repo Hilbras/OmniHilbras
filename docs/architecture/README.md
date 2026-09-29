@@ -20,13 +20,14 @@ refactor, and several of them contradict what an outsider might assume.
 
 | Surface | Lines | Provider-id literals | Note |
 | --- | --- | --- | --- |
-| `apps/gateway/src/routing.ts` | 186 | **0** | routing is already provider-agnostic |
-| `apps/gateway/src/service.ts` | 1500 | 12 | clustered in one method — see below |
+| `apps/gateway/src/routing.ts` | 186 | **0** | routing was already provider-agnostic |
+| `apps/gateway/src/provider-resolver.ts` | ~120 | **0** | enforced by a test that greps the file |
+| `apps/gateway/src/service.ts` | 1409 | 9 | down from 12, all `.onDemand()` registrations |
 | `apps/gateway/src/server.ts` | 1202 | 5 | all in connection lifecycle routes |
 
-**The Core is far more provider-neutral than it looks.** Twelve literals in 1500 lines is not a
-codebase littered with provider conditionals. And the ones that exist are not scattered — they
-concentrate in a single factory:
+**The Core was far more provider-neutral than it looked.** Twelve literals in 1500 lines is not a
+codebase littered with provider conditionals, and the ones that existed were not scattered — they
+concentrated in a single factory:
 
 ```ts
 private async resolveAdapter(providerId: string, pendingEndpoint?: {...}) {
@@ -40,8 +41,23 @@ private async resolveAdapter(providerId: string, pendingEndpoint?: {...}) {
 }
 ```
 
-Six lines. That is the entire provider-coupled execution surface, and it is the seam worth
-closing first.
+Those six branches existed for one reason, and it was not that those providers were special: they
+must be **built on demand**, because each needs a connection id, a lazily-created browser driver,
+or a shared access-token cache. That is a factory, and a factory is a registration:
+
+```ts
+this.providers = new ProviderResolver(registry)
+  .onDemand('cline', () => this.clineAdapter())
+  .onDemand('opencode', () => this.zenAdapter())
+  // … six registrations, in one place
+```
+
+`ProviderResolver` now contains **zero** provider ids, and a test strips the comments and fails if
+a provider-shaped string appears. That is the whole provider-coupled execution surface, closed.
+
+**What remains, honestly:** the service still names each on-demand provider *once*, in that
+constructor. The step from here to "a provider adds itself" is for adapter modules to carry their
+own registration.
 
 ### What the numbers mean
 

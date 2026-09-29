@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readdirSync } from 'node:fs';
 import test from 'node:test';
 import { runProviderContract, CONTRACT_TEXT } from './provider-contract.js';
 import { framesFor, scriptedTransport } from './harness/scripted-transport.js';
@@ -7,6 +8,10 @@ import { OpenRouterAdapter } from '../dist/adapters/openrouter.js';
 import { OpenAICompatibleAdapter } from '../dist/adapters/openai-compatible.js';
 import { AnthropicAdapter } from '../dist/adapters/anthropic.js';
 import { GeminiAdapter } from '../dist/adapters/gemini.js';
+import { ClineAdapter } from '../dist/adapters/cline.js';
+import { KiroAdapter } from '../dist/adapters/kiro.js';
+import { OpencodeConsoleAdapter } from '../dist/adapters/opencode-console.js';
+import { ZenAdapter } from '../dist/adapters/zen.js';
 import { ProviderRegistry } from '../dist/registry.js';
 import { ProviderError } from '../dist/errors.js';
 
@@ -61,6 +66,34 @@ const providers = [
     },
   },
   {
+    name: 'cline',
+    make: () => {
+      const { stub, transport: t } = transport('openai');
+      return { adapter: new ClineAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    name: 'kiro',
+    make: () => {
+      const { stub, transport: t } = transport('openai');
+      return { adapter: new KiroAdapter({ transport: t }), model: 'claude-sonnet-5', script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    name: 'opencode-console',
+    make: () => {
+      const { stub, transport: t } = transport('console');
+      return { adapter: new OpencodeConsoleAdapter({ transport: t }), model: 'contract-model', script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    name: 'zen',
+    make: () => {
+      const { stub, transport: t } = transport('openai');
+      return { adapter: new ZenAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
     name: 'gemini',
     make: () => {
       const { stub, transport: t } = transport('gemini');
@@ -70,9 +103,55 @@ const providers = [
 ];
 
 for (const provider of providers) {
-  const { adapter, script } = provider.make();
-  runProviderContract({ name: provider.name, adapter, script });
+  const { adapter, script, model } = provider.make();
+  runProviderContract({
+    name: provider.name,
+    adapter,
+    script,
+    // Only a provider that cannot be *asked* for its catalog nominates one; the rest let the
+    // contract ask, so a change to a catalog does not require editing this file.
+    ...(model ? { model } : {}),
+  });
 }
+
+/* ------------------------------------------------------------------ *
+ * Adapters the contract does not yet reach, and why
+ * ------------------------------------------------------------------ */
+
+/**
+ * The coverage gap, named rather than omitted.
+ *
+ * `deepseek-web` and `chatgpt-web` inject `{ fetch }` and `{ driver }` rather than a transport,
+ * so they need a different harness. Listing them here means the gap is visible in the test output
+ * and grows loudly when an eleventh adapter arrives — an adapter silently missing from the
+ * contract is how a class of bug reaches production unnoticed, which is the whole failure this
+ * suite was written to prevent.
+ */
+const NOT_YET_CONTRACTED = {
+  'deepseek-web': 'injects { fetch }, not { transport }; needs the four-endpoint flow scripted',
+  'chatgpt-web': 'injects { driver }, a browser driver, not a transport; needs a driver double',
+};
+
+test('the contract knows which adapters it does not cover, and says why', () => {
+  const covered = new Set(providers.map((provider) => provider.name));
+  for (const [id, reason] of Object.entries(NOT_YET_CONTRACTED)) {
+    assert.ok(reason.length > 20, `${id} is listed without saying why it is not covered`);
+    assert.equal(covered.has(id), false, `${id} is listed as uncovered but is in the suite`);
+  }
+});
+
+test('every adapter in the SDK is either contracted or listed as not', () => {
+  // The point of the list above: an adapter cannot be added and forgotten. This reads the
+  // adapter directory, so a new one without a contract fails here rather than passing quietly.
+  const files = readdirSync(new URL('../src/adapters/', import.meta.url))
+    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
+    .map((file) => file.replace(/\.ts$/, ''))
+    // `deepseek-pow` is a proof-of-work solver, not an adapter, and `qwen-web` is a probe.
+    .filter((id) => !['deepseek-pow', 'qwen-web'].includes(id));
+  const known = new Set([...providers.map((provider) => provider.name), ...Object.keys(NOT_YET_CONTRACTED)]);
+  const missing = files.filter((file) => !known.has(file));
+  assert.deepEqual(missing, [], `adapters with neither a contract nor a stated reason: ${missing.join(', ')}`);
+});
 
 /* ------------------------------------------------------------------ *
  * The registry's guard

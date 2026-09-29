@@ -147,6 +147,28 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 48: Phase 2 — close the `resolveAdapter` seam with a `ProviderResolver`.
+  - Acceptance: the resolution algorithm names no provider, and a test fails if one is added.
+  - Verify: 12 `ProviderResolver` tests, including *"THE INVARIANT: the resolver names no provider"*, which strips comments and then greps for any provider-shaped string. `service.ts` 1410 → 1390 lines.
+  - Findings: **the six `if` branches existed for one reason, and it was not that those providers were special.** They must be *built on demand*, because each needs a connection id, a lazily-created browser driver, or a shared access-token cache. That is a factory, and a factory is a registration — so the branches became `.onDemand(providerId, factory)` calls and the algorithm lost all knowledge of provider names.
+  - **What this does and does not achieve, stated plainly.** The resolution algorithm now contains zero provider ids, and a test enforces that. But the service still names each on-demand provider *once*, in the constructor. The remaining step towards "a provider adds itself" is for adapter modules to carry their own registration — worth doing, but pretending this file has already solved it would be the kind of claim that reads as progress and is not.
+  - Order is load-bearing and now tested twice: a deliberate `.onDemand()` registration beats a registry entry, and **a registered adapter is never shadowed by the synthesised OpenAI-compatible one**. The second matters more — a saved endpoint exists for plenty of providers that also have a registered adapter, and serving those generically would be *wrong* rather than merely imprecise.
+  - I wrote the first version of the on-demand-ordering test asserting the opposite of what the code should do, and it failed. I had a passing-looking test written against my own wrong belief; the code was right and the test was the error, which is the only good outcome and still worth noticing.
+  - Files: `apps/gateway/src/provider-resolver.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/test/provider-resolver.test.js` (new).
+  - Depends on: Task 47.
+  - Scope: Medium.
+
+- [x] Task 47: Take the provider contract from 5 adapters to 9, and make the gap visible.
+  - Acceptance: every adapter in the SDK is either contracted or listed with a reason, and adding an eleventh fails the suite until it is dealt with.
+  - Verify: 94 contract assertions across nine adapters; a deliberately added `zz-probe.ts` is caught by name with *"adapters with neither a contract nor a stated reason: zz-probe"*.
+  - Findings: **three adapters were structurally different from the rest, and the contract found it.** `cline`, `kiro` and `zen` needed nothing new. `opencode-console` publishes a **routing table**, not a model list — each model maps to the lane that serves it — and refuses a model by name when it cannot find a lane, so an OpenAI-shaped catalog answered a question nobody asked. `kiro` is **not JSON at all**: its answer is a length-prefixed binary eventstream read with a `DataView`, and a text decode corrupts it. Both needed harness support rather than a looser assertion, because a fixture that does not speak the provider's protocol cannot exercise it and a pass that way proves nothing.
+  - The binary fixture is where the harness's own bug count is highest, and every one of them looked like an adapter bug. **A wrong header *type* byte** (`1` where the decoder requires `7`) made the frames still parse and still count, and every one arrived with no event type and no text — which reads as "the adapter dropped the answer" rather than "the fixture declared the wrong enum". A wrong header *name* did the same. The frames that fail to decode are the honest kind; the ones that decode to nothing are not.
+  - A provider may now **nominate its model**, because asking and being told is right for OpenAI and wrong for Kiro — which publishes a fixed catalog and refuses anything else by name. One line, and a catalog change does not require editing the suite.
+  - **The gap is named, not omitted.** `deepseek-web` (injects `{ fetch }`, needs its four-endpoint flow scripted) and `chatgpt-web` (injects `{ driver }` — a browser driver) are listed with reasons, and a test reads the adapter directory so a new one cannot be added and forgotten. An adapter silently missing from a contract is how a class of bug reaches production unnoticed, which is the failure this suite exists to prevent.
+  - Files: `test/provider-contract.test.js`, `test/provider-contract.js`, `test/harness/scripted-transport.js`.
+  - Depends on: Task 46.
+  - Scope: Medium.
+
 - [x] Task 46: Phase 2 — extract `ApiKeyManager`.
   - Acceptance: key policy is a separate concern with its own tests; the public surface and every user-facing string are unchanged.
   - Verify: 10 `ApiKeyManager` tests; the 13 pre-existing `api-keys` tests pass **unchanged**, including the enforcement path.
