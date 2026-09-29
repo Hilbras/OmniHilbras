@@ -103,9 +103,30 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
    * message would be the last thing the tab ever said. `/v1/connections` answers in about
    * five milliseconds, so the poll costs nothing.
    */
-  const { reachable } = useGatewayStatus();
+  const { reachable, problem } = useGatewayStatus();
   const gatewayUp = reachable !== false;
-  const gatewayLabel = reachable === undefined ? 'Checking gateway' : reachable ? 'Gateway online' : 'Gateway offline';
+  /**
+   * A refusal is not an outage, and the wording has to say which one it is.
+   *
+   * The gateway answers 403 when this browser's origin is not on its allowlist — it is
+   * running, and declining. Reporting that as "offline" points the user at restarting a
+   * server that is already correct, which is what happened four times over while a stray
+   * `vite preview` on another port was the actual cause.
+   */
+  const gatewayLabel =
+    reachable === undefined
+      ? 'Checking gateway'
+      : reachable
+        ? 'Gateway online'
+        : problem === 'refused'
+          ? 'Gateway refused this page'
+          : 'Gateway offline';
+  const gatewayHint =
+    reachable === false
+      ? problem === 'refused'
+        ? 'this page’s origin is not allowed'
+        : 'not answering · pnpm dev:gateway'
+      : 'localhost:8787 · local mode';
   return (
     <aside className={`dashboard-sidebar flex h-full w-[252px] shrink-0 flex-col border-r border-line bg-bg-soft/90 backdrop-blur-xl transition-[width] duration-200 ${collapsed ? 'lg:w-[76px]' : 'lg:w-[252px]'}`}>
       <div className={`flex items-center gap-1 pb-4 pt-5 ${collapsed ? 'justify-center px-2' : 'justify-between px-5'}`}>
@@ -147,8 +168,8 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
           {!collapsed && <span className={`text-xs font-semibold ${gatewayUp ? 'text-success' : 'text-danger'}`}>{gatewayLabel}</span>}
         </div>
         {!collapsed && (
-          <p className="mt-1.5 pl-4 font-mono text-[10px] text-muted">
-            {gatewayUp ? 'localhost:8787 · local mode' : 'not answering · pnpm dev:gateway'}
+          <p className="mt-1.5 pl-4 font-mono text-[10px] text-muted" title={gatewayHint}>
+            {gatewayHint}
           </p>
         )}
       </div>

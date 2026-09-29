@@ -21,9 +21,21 @@ import { gatewayBase, isGatewayReachable, onGatewayReachabilityChange } from './
  */
 const POLL_MS = 4_000;
 
+/**
+ * Why the gateway is not answering, when it is not.
+ *
+ * `refused` is the case worth separating: the gateway is **up** and returned 403 because this
+ * browser's origin is not on its allowlist. Calling that "offline" sends the user to restart
+ * a server that is already running correctly — which is exactly what happened here, four
+ * times, while a stray `vite preview` on :4173 was the actual cause.
+ */
+export type GatewayProblem = 'unreachable' | 'refused';
+
 export type GatewayState = {
   /** `undefined` until the first probe answers — "not known yet", not "up". */
   reachable: boolean | undefined;
+  /** Set when reachable is false, so the reason is available without a second probe. */
+  problem?: GatewayProblem;
   /** Ticks once each time the gateway comes back after being down. */
   restoredAt: number | null;
   /** Probes immediately, rather than waiting out the interval. */
@@ -35,6 +47,7 @@ export const GATEWAY_RESTORED_EVENT = 'omnihilbras:gateway-restored';
 
 export function useGatewayStatus(): GatewayState {
   const [reachable, setReachable] = useState<boolean | undefined>(() => isGatewayReachable());
+  const [problem, setProblem] = useState<GatewayProblem | undefined>(() => (isGatewayReachable() === false ? 'unreachable' : undefined));
   const [restoredAt, setRestoredAt] = useState<number | null>(null);
   const wasDown = useRef(false);
 
@@ -51,8 +64,20 @@ export function useGatewayStatus(): GatewayState {
         });
         if (cancelled) return;
         setReachable(response.ok);
-        if (!response.ok) wasDown.current = true;
-        else if (wasDown.current) {
+        if (!response.ok) {
+          /**
+           * A 403 here is a CORS refusal, not an outage. The gateway is running and has
+           * declined this origin, and saying "offline" about that is a lie that points the
+           * user at the wrong thing entirely.
+           */
+          setProblem(response.status === 403 || response.status === 401 ? 'refused' : 'unreachable');
+          wasDown.current = true;
+        } else {
+          setProblem(undefined);
+        }
+        if (!response.ok) {
+          // nothing to announce yet
+        } else if (wasDown.current) {
           // Only announce a *restoration*, never the first success — otherwise every page
           // load would fire the event and every listener would refetch for no reason.
           wasDown.current = false;
@@ -62,6 +87,8 @@ export function useGatewayStatus(): GatewayState {
       } catch {
         if (cancelled) return;
         setReachable(false);
+        // A thrown fetch means nothing answered at all, as opposed to a refusal.
+        setProblem('unreachable');
         wasDown.current = true;
       }
     })();
@@ -87,7 +114,7 @@ export function useGatewayStatus(): GatewayState {
     };
   }, [checkNow]);
 
-  return { reachable, restoredAt, checkNow };
+  return { reachable, problem, restoredAt, checkNow };
 }
 
 /**

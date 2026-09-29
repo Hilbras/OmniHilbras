@@ -1036,6 +1036,26 @@ learn it stopped failing. Verified end to end: with the gateway stopped the badg
 `Gateway offline` / `not answering · pnpm dev:gateway`, and with it restarted — **no reload** —
 it read `Gateway online` again.
 
+### A refusal is not an outage
+
+The gateway answers **`403 CORS_ORIGIN_DENIED`** when a request carries an `Origin` that is not
+on its allowlist (`http://localhost:5173` and `http://127.0.0.1:5173` are). The browser cannot
+read that response, so from the dashboard it is indistinguishable from a dead server — and the
+badge said `Gateway offline`, which points the user at restarting a server that is running
+perfectly and refusing correctly.
+
+This was the actual cause behind four separate "restart the servers" requests. The trigger was
+a stray `vite preview` left running on `:4173` by an earlier verification attempt; a `pkill`
+whose pattern did not match missed it.
+
+So the two are now distinct states with distinct wording:
+
+| state | badge | hint |
+| --- | --- | --- |
+| up | `Gateway online` | `localhost:8787 · local mode` |
+| nothing answered | `Gateway offline` | `not answering · pnpm dev:gateway` |
+| answered, refused this origin | `Gateway refused this page` | `this page's origin is not allowed` |
+
 One trap worth recording: the poll must use the **absolute** gateway base. A relative
 `/v1/connections` reaches Vite, which answers `200` with the app's own HTML — so the badge
 would have reported the gateway as up for exactly as long as it was down.

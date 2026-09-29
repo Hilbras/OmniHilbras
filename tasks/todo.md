@@ -147,6 +147,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 29: Stop calling a CORS refusal "offline".
+  - Acceptance: a 403 from the gateway is reported as a refusal with its own wording, not as an outage.
+  - Verify: on `http://localhost:5173` the badge reads `Gateway online` with 13 cards. The refusal case was reproduced by hand — `Origin: http://localhost:4173` is answered `403 CORS_ORIGIN_DENIED` while `:5173` gets `200` — and the two are now distinct states with distinct wording. 401 tests pass.
+  - Findings: **the cause of four "restart the servers" requests was a stray `vite preview` I had left running on :4173** during browser verification, and a `pkill` that matched the wrong pattern missed it. The gateway was up the whole time and correctly refusing an origin that is not its dashboard; only the browser could not read the 403, so it looked like a dead server. Two lessons, both about my own process: leaving a server running after a verification attempt, and reporting a refusal as an outage. The second is the durable fix — `Gateway refused this page` / `this page's origin is not allowed` now says what is actually true, so the next person does not restart a correct server.
+  - Files: `src/lib/useGatewayStatus.ts`, `src/components/DashboardShell.tsx`, docs.
+  - Depends on: Task 28.
+  - Scope: Small.
+
 - [x] Task 28: Make the gateway badge tell the truth, and make an offline page recover by itself.
   - Acceptance: the badge reflects a real probe, and a page whose only request failed reloads itself when the gateway returns — with no manual refresh.
   - Verify: with the gateway stopped the sidebar read `Gateway offline` in red and `not answering · pnpm dev:gateway`; with it restarted, **without a reload**, it read `Gateway online`, `localhost:8787 · local mode`, 13 cards. The provider list also painted 13 cards immediately instead of after ~24 s. 401 tests pass.
