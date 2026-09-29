@@ -177,7 +177,9 @@ next to the four that already exist.
 
 `packages/omnihilbras-sdk/test/provider-contract.js` holds the invariants the Core is entitled to
 assume, and `provider-contract.test.js` runs them against every adapter that can be driven offline
-— currently `openai`, `openrouter`, `openai-compatible`, `anthropic` and `gemini`.
+— **all eleven adapters**, which is the point of the coverage guard below: every `.ts` in
+`src/adapters/` is either contracted or listed with a reason why not, and adding an eleventh (or a
+twelfth) fails the suite until it is dealt with.
 
 The split is the design: **the contract owns the invariants, a provider supplies only its wire
 format.** Asking a provider to describe its own expectations would make this a second copy of its
@@ -214,13 +216,18 @@ Four adapters reported `unavailable` from a bare `catch {}` with **no message** 
 the key was rejected, the endpoint was wrong, or the provider was down, which are three different
 things to go and fix. Six other adapters already carried the reason, so the shape existed to copy.
 
-### Three injection styles, and why that matters next
+### Three injection styles, and three harnesses
 
-| Style | Adapters |
-| --- | --- |
-| `{ transport }` | openai, openrouter, openai-compatible, anthropic, gemini, cline, kiro, opencode-console |
-| `{ fetch }` | deepseek-web |
-| `{ driver }` | chatgpt-web |
+| Style | Adapters | Harness |
+| --- | --- | --- |
+| `{ transport }` | openai, openrouter, openai-compatible, anthropic, gemini, cline, kiro, opencode-console | `test/harness/scripted-transport.js` |
+| `{ fetch }` | deepseek-web | `test/harness/scripted-fetch.js` |
+| `{ driver }` | chatgpt-web | `test/harness/scripted-driver.js` |
+
+Each harness implements the *real* interface it stands in for, because a harness that implements a
+similar one cannot exercise the adapter at all. The `fetch` double is built from real `Response`
+objects, because DeepSeek's reader streams `response.body` and refuses a body past 8 MB; the driver
+double has no HTTP request to intercept, so the driver interface *is* the seam.
 
 Every contract test needs a harness per style, so a single seam here would remove real cost. It
 ranks below closing `resolveAdapter` but above decomposing the service.

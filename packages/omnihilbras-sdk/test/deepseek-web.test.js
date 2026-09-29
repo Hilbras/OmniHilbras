@@ -210,6 +210,21 @@ test('an untyped append follows the last stated path, not the default', () => {
   assert.equal(answer.content, 'then I answer');
 });
 
+test('an answer keeps the whitespace the model produced', () => {
+  // This decoder used to end with `content.trim()`, which removed the leading and trailing
+  // whitespace of every answer. It was the only adapter in the SDK that did so, and the loss is
+  // not detectable by a client: an answer asked to be exactly "  indented  " arrives as
+  // "indented", and a code answer loses its trailing newlines — visible as badly-indented code
+  // rather than as a truncated one. The provider contract found this because its hostile fixture
+  // ends in a single space, which looks like nothing and is the whole point.
+  const body = [
+    'data: ' + JSON.stringify({ p: 'response/fragments', v: { content: '  indented  ' } }),
+    'data: ' + JSON.stringify({ p: 'response/status', v: 'FINISHED' }),
+    '',
+  ].join('\n');
+  assert.equal(decodeDeepSeekAnswer(body).content, '  indented  ');
+});
+
 test('a stream with no fragments yields nothing rather than throwing', () => {
   // `finished: false`, and that is correct rather than a gap: no FINISHED was ever sent, so the
   // stream genuinely did not complete. An empty body that never finished is not a short answer.

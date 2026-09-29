@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
+import { scriptedFetch } from './harness/scripted-fetch.js';
+import { scriptedDriver, chatGptWebFixtureCredential, CHATGPT_WEB_CONTRACT_MODEL } from './harness/scripted-driver.js';
 import test from 'node:test';
 import { runProviderContract, CONTRACT_TEXT } from './provider-contract.js';
 import { framesFor, scriptedTransport } from './harness/scripted-transport.js';
@@ -8,6 +10,8 @@ import { OpenRouterAdapter } from '../dist/adapters/openrouter.js';
 import { OpenAICompatibleAdapter } from '../dist/adapters/openai-compatible.js';
 import { AnthropicAdapter } from '../dist/adapters/anthropic.js';
 import { GeminiAdapter } from '../dist/adapters/gemini.js';
+import { DeepSeekWebAdapter } from '../dist/adapters/deepseek-web.js';
+import { ChatGptWebAdapter } from '../dist/adapters/chatgpt-web.js';
 import { ClineAdapter } from '../dist/adapters/cline.js';
 import { KiroAdapter } from '../dist/adapters/kiro.js';
 import { OpencodeConsoleAdapter } from '../dist/adapters/opencode-console.js';
@@ -94,6 +98,52 @@ const providers = [
     },
   },
   {
+    name: 'deepseek-web',
+    make: () => {
+      // A `fetch` double, not a transport. Its four-endpoint flow is scripted in full, because an
+      // adapter that needs a proof of work and a chat session cannot be exercised by returning
+      // parsed JSON — and a pass that way would prove nothing about either.
+      const fetchImpl = scriptedFetch();
+      return {
+        adapter: new DeepSeekWebAdapter({ fetch: fetchImpl }),
+        // An api-key, because that is what a DeepSeek Web connection holds: the userToken
+        // DeepSeekWeb parses out of localStorage, wrapped by deepSeekWebCredential.
+        credential: { type: 'api-key', value: 'fixture-user-token' },
+        script: (parts, options) => {
+          fetchImpl.set(parts);
+          if (options?.refuseWith !== undefined) fetchImpl.setStatus(options.refuseWith);
+          return async () => { fetchImpl.setStatus(200); };
+        },
+        // A fixed catalog, like Kiro's: the contract cannot ask for it and be believed.
+        model: 'deepseek-v4-pro',
+      };
+    },
+  },
+  {
+    name: 'chatgpt-web',
+    make: () => {
+      // A browser driver, not a transport. There is no HTTP request to intercept here, so the
+      // driver interface *is* the seam, and a transport-shaped harness could not have stood in
+      // for it at all.
+      const driver = scriptedDriver();
+      return {
+        adapter: new ChatGptWebAdapter({ driver }),
+        credential: chatGptWebFixtureCredential(),
+        model: CHATGPT_WEB_CONTRACT_MODEL,
+        script: (parts, options) => {
+          driver.set(parts);
+          if (options?.refuseWith !== undefined) {
+            // The page refusing is a plain Error from the driver; the adapter's job is to turn it
+            // into a ProviderError the router can classify, and that is what the refusal
+            // assertions are checking.
+            driver.setThrow(new Error('The page said the session is no longer signed in.'));
+          }
+          return async () => { driver.setThrow(undefined); };
+        },
+      };
+    },
+  },
+  {
     name: 'gemini',
     make: () => {
       const { stub, transport: t } = transport('gemini');
@@ -103,11 +153,12 @@ const providers = [
 ];
 
 for (const provider of providers) {
-  const { adapter, script, model } = provider.make();
+  const { adapter, script, model, credential } = provider.make();
   runProviderContract({
     name: provider.name,
     adapter,
     script,
+    credential,
     // Only a provider that cannot be *asked* for its catalog nominates one; the rest let the
     // contract ask, so a change to a catalog does not require editing this file.
     ...(model ? { model } : {}),
@@ -127,10 +178,16 @@ for (const provider of providers) {
  * contract is how a class of bug reaches production unnoticed, which is the whole failure this
  * suite was written to prevent.
  */
-const NOT_YET_CONTRACTED = {
-  'deepseek-web': 'injects { fetch }, not { transport }; needs the four-endpoint flow scripted',
-  'chatgpt-web': 'injects { driver }, a browser driver, not a transport; needs a driver double',
-};
+/**
+ * Adapters the contract does not yet reach.
+ *
+ * Empty on purpose. When it is not, every entry must say why, and adding a new adapter to the SDK
+ * fails this suite until it is either contracted or accounted for. The entries this list has held —
+ * `deepseek-web` needing its four-endpoint `fetch` flow, `chatgpt-web` needing a browser-driver
+ * double — were both resolved by a harness that speaks the provider's real protocol rather than by
+ * a looser assertion.
+ */
+const NOT_YET_CONTRACTED = {};
 
 test('the contract knows which adapters it does not cover, and says why', () => {
   const covered = new Set(providers.map((provider) => provider.name));
@@ -146,8 +203,9 @@ test('every adapter in the SDK is either contracted or listed as not', () => {
   const files = readdirSync(new URL('../src/adapters/', import.meta.url))
     .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
     .map((file) => file.replace(/\.ts$/, ''))
-    // `deepseek-pow` is a proof-of-work solver, not an adapter, and `qwen-web` is a probe.
-    .filter((id) => !['deepseek-pow', 'qwen-web'].includes(id));
+    // Not adapters: `deepseek-pow` is a proof-of-work solver, `chatgpt-first-party` is the
+    // first-party client behind the ChatGPT Web driver, and `qwen-web` is a probe.
+    .filter((id) => !['deepseek-pow', 'chatgpt-first-party', 'qwen-web'].includes(id));
   const known = new Set([...providers.map((provider) => provider.name), ...Object.keys(NOT_YET_CONTRACTED)]);
   const missing = files.filter((file) => !known.has(file));
   assert.deepEqual(missing, [], `adapters with neither a contract nor a stated reason: ${missing.join(', ')}`);

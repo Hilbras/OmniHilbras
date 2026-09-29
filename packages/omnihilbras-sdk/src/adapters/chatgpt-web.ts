@@ -495,6 +495,32 @@ export function assistantTextsFromSnapshot(snapshot: { texts: readonly string[] 
 }
 
 /**
+ * What a page's refusal actually is.
+ *
+ * The driver reports plain errors, and flattening them all to one code loses the only thing the
+ * user can act on. Three cases, in the order they should win:
+ *
+ * - **signed out.** The session cookie has expired or was revoked. No retry and no other provider
+ *   fixes this; the user's next action is to sign in again. Reported as `AUTHENTICATION_FAILED` so
+ *   the router stops instead of failing over, and so the dashboard says *"sign in again"* rather
+ *   than *"ChatGPT is unavailable"*.
+ * - **blocked.** A bot-protection challenge. Also not retryable, and not the user's fault, so
+ *   `PROVIDER_UNAVAILABLE` — the operator has to wait, not sign in.
+ * - **anything else.** `PROVIDER_REQUEST_FAILED`, which the router may retry.
+ *
+ * The signed-out case was previously folded into the last bucket, so a dead session was reported
+ * as a retryable request failure: the gateway failed over to another provider and the user was
+ * never told their cookie had gone.
+ */
+function driverFailureCode(message: string): ProviderError['code'] {
+  if (/sign(ed)?[ -]?in|signed[ -]?out|logged[ -]?out|session (has )?expired|no longer|unauthori[sz]ed|401|log in again/i.test(message)) {
+    return 'AUTHENTICATION_FAILED';
+  }
+  if (/challenge|unable to load|bot-protection|anti-bot/i.test(message)) return 'PROVIDER_UNAVAILABLE';
+  return 'PROVIDER_REQUEST_FAILED';
+}
+
+/**
  * True when the page is showing a sign-in wall rather than a conversation.
  *
  * This is the failure that matters most, and it is silent otherwise: a signed-out browser
@@ -940,16 +966,23 @@ export class ChatGptWebAdapter implements ProviderAdapter {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The ChatGPT page could not be driven.';
-      const blocked = /challenge|unable to load|bot-protection|anti-bot/i.test(message);
-      throw new ProviderError(blocked ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_REQUEST_FAILED', message, {
+      throw new ProviderError(driverFailureCode(message), message, {
         providerId: this.id,
         publicMessage: message,
         cause: error,
       });
     }
 
-    const text = (result.text ?? '').trim();
-    if (!text) {
+    /**
+     * Not trimmed, deliberately — the same reasoning as the DeepSeek Web decoder, and found the
+     * same way: by the provider contract's exact-equality assertion, whose hostile fixture ends in
+     * a single space. Trimming here silently removed the leading and trailing whitespace of every
+     * answer, so an answer asked to be exactly `"  indented  "` arrived as `"indented"` and a code
+     * answer lost its trailing newlines. A client cannot detect that; it looks like a short answer.
+     */
+    const text = result.text ?? '';
+    const saidNothing = text.trim().length === 0;
+    if (saidNothing) {
       throw new ProviderError('INVALID_RESPONSE', 'The ChatGPT page rendered no answer.', {
         providerId: this.id,
         publicMessage: 'The ChatGPT page rendered no answer. If you were signed out, the export is stale — export a new one.',

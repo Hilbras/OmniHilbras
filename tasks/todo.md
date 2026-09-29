@@ -147,6 +147,20 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 53: Take the provider contract from 9 adapters to all 11, and fix the three defects it found.
+  - Acceptance: every adapter in the SDK is contracted; the gap list is empty; adding a twelfth fails the suite.
+  - Verify: 112 contract assertions across 11 adapters. A deliberately added `zz-probe.ts` is still caught by name: *"adapters with neither a contract nor a stated reason: zz-probe"*. 377 SDK tests.
+  - Findings: **the last two adapters were the two that needed the most, and the gap list is now empty.**
+  - `deepseek-web` injects `{ fetch }`, and its flow is four endpoints: exchange the user token, solve a proof of work, open a chat session, then stream. **A fixture cannot invent a solvable proof-of-work challenge** — the solver tries `nonce` from 0 to `difficulty` and compares the *whole digest* for equality, so the challenge has to be the real hash of one of those nonces. My first fixture used `'a'.repeat(64)` and the adapter correctly reported *"no answer within the range it announced"*, which reads like a provider fault and is really a fixture that did not do the arithmetic. The harness now computes one from `deepSeekHashV1`.
+  - **My `setStatus` did nothing.** The closures read the destructured `status` parameter while `setStatus` mutated `state.status`, so every refusal test ran at 200. A fixture that ignores its own control is the worst kind, because it presents as an adapter bug.
+  - **A 401 was classified by which endpoint it landed on, and which endpoint that was depended on invisible state.** `users/current` and `completion` mapped 401 to `AUTHENTICATION_FAILED`; `create_pow_challenge` and `chat_session/create` mapped the *same* 401 to `PROVIDER_UNAVAILABLE`. Whether a user's dead session read as *"sign in again"* or *"the provider is down"* therefore depended on whether the access token happened to be cached. `PROVIDER_UNAVAILABLE` is retryable, so the router would fail over for a session that can never recover, and the dashboard would show an outage where the truth is an expired cookie. One `refusalFor` now handles all four endpoints, and evicts the cached token on any auth failure.
+  - **The DeepSeek Web decoder trimmed every answer.** `content.trim()` on the return silently removed the leading and trailing whitespace of every answer. It was the only adapter in the SDK that did it, and the loss is not detectable by a client: an answer asked to be exactly `"  indented  "` arrives as `"indented"`, and a code answer loses its trailing newlines — visible as badly-indented code rather than as a truncated one. The contract found it because its hostile fixture ends in a single space, which looks like nothing and is the whole point.
+  - `chatgpt-web` had **both defects again**: the same trim at `result.text.trim()`, and a signed-out page folded into `PROVIDER_REQUEST_FAILED`, which is retryable — so a dead session failed over to another provider and the user was never told to sign in again. `driverFailureCode` now separates *signed out* (auth), *blocked* (unavailable) and *anything else* (retryable).
+  - So the last two adapters found **three** defects in code that had passing tests: two lossy trims and one refusal flattened into a retryable code. Neither file had a contract, and neither had a test that could have caught these.
+  - Files: `test/harness/scripted-fetch.js` (new), `test/harness/scripted-driver.js` (new), `test/provider-contract.test.js`, `src/adapters/deepseek-web.ts`, `src/adapters/chatgpt-web.ts`, `test/deepseek-web.test.js`.
+  - Depends on: Task 52.
+  - Scope: Medium.
+
 - [x] Task 52: One sign-in session lifecycle, and a units bug I inherited from both copies.
   - Acceptance: `KiroSessionStore` and `OpencodeConsoleSessionStore` share one lifecycle, and the "a grant is spent once" rule exists in exactly one function across all four stores.
   - Verify: 19 tests; 252 gateway tests. `kiro.ts` 268 → 258, `opencodeConsole.ts` 261 → 239, one new 200-line shared file.

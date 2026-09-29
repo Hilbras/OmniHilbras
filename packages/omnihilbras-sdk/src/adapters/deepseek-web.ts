@@ -156,6 +156,37 @@ export function deepSeekWebCredential(raw: string): ProviderCredential {
   return { type: 'api-key', value: parseDeepSeekUserToken(raw) };
 }
 
+/**
+ * Turns a non-ok status into the refusal it actually is.
+ *
+ * Every endpoint in this adapter's four-step flow goes through here, because the alternative was
+ * the bug this replaces: `users/current` and `completion` mapped 401 to `AUTHENTICATION_FAILED`
+ * while `create_pow_challenge` and `chat_session/create` mapped the *same* 401 to
+ * `PROVIDER_UNAVAILABLE`. Which branch a user hit therefore depended on whether the access token
+ * happened to be cached — invisible state deciding whether a dead session reads as "sign in again"
+ * or as "the provider is down".
+ *
+ * The second mapping is the costly one. `PROVIDER_UNAVAILABLE` is retryable, so the router would
+ * fail over to another provider for a session that can never recover, and the dashboard would show
+ * a provider outage where the truth is an expired cookie.
+ */
+function refusalFor(status: number, what: string, onExpired?: () => void) {
+  if (status === 401 || status === 403) {
+    // The cached token is known bad now, so dropping it stops the next request from being sent
+    // with a credential the provider has already refused.
+    onExpired?.();
+    return fail(
+      'AUTHENTICATION_FAILED',
+      `DeepSeek refused this session while ${what} (${status}). Sign in to chat.deepseek.com again and export a fresh userToken.`,
+    );
+  }
+  if (status === 429) {
+    const message = `DeepSeek is rate limiting this session (${status}) while ${what}.`;
+    return new ProviderError('RATE_LIMITED', message, { providerId: deepseekWebProviderId, publicMessage: message, retryable: true });
+  }
+  return fail('PROVIDER_UNAVAILABLE', `DeepSeek answered ${status} while ${what}.`);
+}
+
 function userTokenFromCredential(credential: ProviderCredential | undefined): string {
   if (!credential || credential.type !== 'api-key' || !credential.value.trim()) {
     throw new ProviderError('AUTHENTICATION_FAILED', 'This DeepSeek Web connection has no userToken.', {
@@ -239,13 +270,17 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
       headers: { ...FINGERPRINT_HEADERS, Authorization: `Bearer ${userToken}` },
       ...(signal ? { signal } : {}),
     });
-    if (response.status === 401 || response.status === 403) {
-      throw fail(
-        'AUTHENTICATION_FAILED',
-        'DeepSeek rejected that userToken. Sign in to chat.deepseek.com again and export a fresh one — a token from another account or a signed-out session looks exactly like this.',
-      );
+    if (!response.ok) {
+      // The 401 here is a *user* token rather than an access token, and a token from another
+      // account or a signed-out session looks exactly like a dead one, so this says so.
+      if (response.status === 401 || response.status === 403) {
+        throw fail(
+          'AUTHENTICATION_FAILED',
+          'DeepSeek rejected that userToken. Sign in to chat.deepseek.com again and export a fresh one — a token from another account or a signed-out session looks exactly like this.',
+        );
+      }
+      throw refusalFor(response.status, 'exchanging the userToken for an access token');
     }
-    if (!response.ok) throw fail('PROVIDER_UNAVAILABLE', `chat.deepseek.com answered ${response.status} for the userToken.`);
 
     const biz = unwrap(await response.json(), 'sign-in');
     const token = biz.token;
@@ -263,14 +298,14 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
    * A challenge per completion, not per session: the answer is bound to the target path and
    * carries the challenge's own expiry, so caching one would be reusing spent work.
    */
-  private async proofOfWork(accessToken: string, signal?: AbortSignal): Promise<string> {
+  private async proofOfWork(accessToken: string, signal: AbortSignal | undefined, onAuthFailure: () => void): Promise<string> {
     const response = await this.fetchImpl(`${API_BASE}/v0/chat/create_pow_challenge`, {
       method: 'POST',
       headers: { ...FINGERPRINT_HEADERS, 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ target_path: '/api/v0/chat/completion' }),
       ...(signal ? { signal } : {}),
     });
-    if (!response.ok) throw fail('PROVIDER_UNAVAILABLE', `DeepSeek would not issue a proof of work (${response.status}).`);
+    if (!response.ok) throw refusalFor(response.status, 'issuing a proof of work', onAuthFailure);
     const challenge = unwrap(await response.json(), 'proof of work').challenge as
       | { algorithm?: string; challenge?: string; salt?: string; difficulty?: number; signature?: string; target_path?: string; expire_at?: number }
       | undefined;
@@ -303,14 +338,14 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
     ).toString('base64');
   }
 
-  private async createSession(accessToken: string, signal?: AbortSignal): Promise<string> {
+  private async createSession(accessToken: string, signal: AbortSignal | undefined, onAuthFailure: () => void): Promise<string> {
     const response = await this.fetchImpl(`${API_BASE}/v0/chat_session/create`, {
       method: 'POST',
       headers: { ...FINGERPRINT_HEADERS, 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({}),
       ...(signal ? { signal } : {}),
     });
-    if (!response.ok) throw fail('PROVIDER_UNAVAILABLE', `DeepSeek would not start a chat session (${response.status}).`);
+    if (!response.ok) throw refusalFor(response.status, 'starting a chat session', onAuthFailure);
     const session = unwrap(await response.json(), 'chat session').chat_session as { id?: string } | undefined;
     if (!session?.id) throw fail('PROVIDER_REQUEST_FAILED', 'DeepSeek started no chat session.');
     return session.id;
@@ -351,8 +386,11 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
     }
     const userToken = userTokenFromCredential(context.credential);
     const accessToken = await this.accessToken(userToken, context.signal);
-    const sessionId = await this.createSession(accessToken, context.signal);
-    const pow = await this.proofOfWork(accessToken, context.signal);
+    // One eviction for the whole flow: whichever of the three mid-flight endpoints answers 401,
+    // the cached access token is now known bad and the next attempt must not reuse it.
+    const onAuthFailure = () => this.accessTokens.delete(userToken);
+    const sessionId = await this.createSession(accessToken, context.signal, onAuthFailure);
+    const pow = await this.proofOfWork(accessToken, context.signal, onAuthFailure);
 
     /**
      * The endpoint takes one flat `prompt`, not a message array.
@@ -385,11 +423,7 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
       ...(context.signal ? { signal: context.signal } : {}),
     });
 
-    if (response.status === 401 || response.status === 403) {
-      this.accessTokens.delete(userToken);
-      throw fail('AUTHENTICATION_FAILED', 'DeepSeek refused the request. The session may have ended — sign in again.');
-    }
-    if (!response.ok) throw fail('PROVIDER_UNAVAILABLE', `DeepSeek answered ${response.status} for the completion.`);
+    if (!response.ok) throw refusalFor(response.status, 'answering the completion', () => this.accessTokens.delete(userToken));
 
     const answer = decodeDeepSeekAnswer(await readBodyCapped(response, context.signal));
     if (!answer.content) {
@@ -580,7 +614,19 @@ export function decodeDeepSeekAnswer(body: string): { content: string; reasoning
     // Most of a normal answer, and the part that was being dropped.
     if (typeof value === 'string') append(value);
   }
-  return { content: content.trim(), reasoning: reasoning.trim(), finished };
+  /**
+   * Not trimmed, deliberately.
+   *
+   * This decoder used to end with `content.trim()` and `reasoning.trim()`, which silently removed
+   * the leading and trailing whitespace of every answer. It was the only adapter in the SDK that
+   * did this, and the loss is not something a client can detect: an answer that was asked to be
+   * exactly `"  indented  "` arrives as `"indented"`, and a code answer loses its trailing
+   * newlines, which is visible as badly-indented code rather than as a truncated one.
+   *
+   * The provider contract's exact-equality assertion is what found it, and it found it because the
+   * hostile fixture ends in a single space — a part that looks like nothing and is the whole point.
+   */
+  return { content, reasoning, finished };
 }
 
 /**
