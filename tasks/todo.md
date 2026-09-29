@@ -147,6 +147,15 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 33: Register DeepSeek Web for health, and give it a health check.
+  - Acceptance: "Test provider" works on a DeepSeek connection, and health says healthy rather than "not connected".
+  - Verify: `GET /health` reports `deepseek-web -> healthy`; a real turn through the gateway returns `'working'` in 7.9 s (proof of work solved); `GET /v1/connections` shows `deepseek-web | hasCredential: True | models: 14`. 397 tests pass.
+  - Findings: **two** separate defects, both silent. `activeAdapters()` registers a real adapter for `chatgpt-web` but not for `deepseek-web`, so the DeepSeek connection fell through to a generic OpenAI-compatible adapter pointed at `chat.deepseek.com` — which is not an OpenAI endpoint — and health reported `unavailable` with an **empty message**. Routing was unaffected, because `resolveAdapter` was already correct, so the provider worked while reporting that it did not. Then, once registered, it reported `Health checks are not supported.`: `DeepSeekWebAdapter` had no `healthCheck` at all. Fixed at both levels, and the health check is a **credential check** (`users/current`) rather than a completion, so it costs one round trip and no proof of work — which is what makes it cheap enough for every poll.
+  - Also: **`apps/gateway/test/deepseek-web-check.test.js` was never committed.** It ran locally, so the numbers in several releases counted tests that were not in the repository, and four of them had gone stale when `checkChatGptWeb` started verifying against a live page. Rewritten to assert what is true offline, and now tracked. The real lesson is not the missing `git add` — it is that "397 tests pass" was never a statement about the repository.
+  - Files: `apps/gateway/src/service.ts`, `packages/omnihilbras-sdk/src/adapters/deepseek-web.ts`, `apps/gateway/test/deepseek-web-check.test.js` (now tracked), docs.
+  - Depends on: Task 32.
+  - Scope: Small.
+
 - [x] Task 32: Refuse the signed-out `userToken`, and make copying it one line.
   - Acceptance: `{"value":null}` is refused by name, and the fastest extraction step is a copyable console line.
   - Verify: `parseDeepSeekUserToken('{"value":null}')` throws `AUTHENTICATION_FAILED`; `{"value":"real"}` and a bare token still work; an object with no `value` key is still used as-is. The DeepSeek dialog offers one link, one clickable snippet — `copy(JSON.parse(localStorage.userToken).value)` — and one `Connect` button. 390 tests pass.

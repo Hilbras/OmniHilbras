@@ -309,6 +309,31 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
     return session.id;
   }
 
+  /**
+   * Reports whether the saved credential still works.
+   *
+   * Without this the provider's health is reported as `Health checks are not supported.` and
+   * the dashboard's "Test provider" fails on a connection that can answer — which is exactly
+   * what happened, and it looked like a broken credential rather than a missing method.
+   *
+   * A credential check, not a completion: it costs one round trip and no proof of work, which
+   * is what makes it cheap enough to run on every health poll.
+   */
+  async healthCheck(context: ProviderRequestContext = {}): Promise<{ status: 'healthy' | 'degraded' | 'unavailable'; checkedAt: string; message?: string }> {
+    try {
+      await this.validateCredential(context.credential);
+      return { status: 'healthy', checkedAt: new Date(this.now()).toISOString() };
+    } catch (error) {
+      return {
+        status: 'unavailable',
+        checkedAt: new Date(this.now()).toISOString(),
+        // The provider's own words, because "not connected" tells the user nothing about
+        // whether to sign in again or to wait.
+        message: error instanceof Error ? error.message : 'The DeepSeek Web session could not be checked.',
+      };
+    }
+  }
+
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
     const model = lookupModel(request.model);
     if (!model) {

@@ -274,6 +274,15 @@ export class GatewayService {
     if (chatGptWebConnection) {
       adapters.set(chatGptWebProviderId, this.chatGptWebAdapter());
     }
+    // DeepSeek Web needs the same treatment, and the omission was silent: without it the
+    // connection fell through to a generic OpenAI-compatible adapter pointed at
+    // chat.deepseek.com, which is not an OpenAI endpoint. Health then reported the provider as
+    // `unavailable` with an empty message while routing worked perfectly — so "Test
+    // provider" failed on a connection that could answer.
+    const deepSeekWebConnection = connections.find((connection) => connection.providerId === deepseekWebProviderId && connection.hasCredential);
+    if (deepSeekWebConnection) {
+      adapters.set(deepseekWebProviderId, this.deepSeekAdapter());
+    }
     for (const connection of connections) {
       if (adapters.has(connection.providerId)) continue;
       const cached = this.dynamicAdapters.get(connection.providerId);

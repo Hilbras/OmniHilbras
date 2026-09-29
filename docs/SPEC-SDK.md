@@ -921,6 +921,27 @@ Patch's third slot writes `undefined` at every path and builds a document full o
 containers — both of which read as a model that answered nothing. A message with no path is
 a new turn, and `content_type` is not always `text`: a `reasoning_recap` is not the answer.
 
+### Health, and two ways it was silently wrong
+
+`GET /health` probes **every** provider, so it takes seconds to tens of seconds, and two
+providers were being probed by the wrong adapter without anyone noticing:
+
+**`deepseek-web` was never registered in `activeAdapters()`.** `chatgpt-web` has an entry;
+`deepseek-web` did not, so its connection fell through to a generic OpenAI-compatible adapter
+pointed at `chat.deepseek.com` — which is not an OpenAI endpoint. Health reported
+`unavailable` with an **empty message**, and the dashboard's "Test provider" said *"DeepSeek
+Web is not connected to the local gateway"* on a connection that answered in under eight
+seconds. Routing was unaffected, because `resolveAdapter` was already correct — which is what
+made it so confusing: the provider worked while reporting that it did not.
+
+**`DeepSeekWebAdapter` had no `healthCheck` at all.** Once registered it reported *"Health
+checks are not supported."* It now has one, and it is a **credential check** — `users/current`,
+one round trip, no proof of work, no session — which is what makes it cheap enough to run on
+every poll rather than being a second completion.
+
+Both are the same shape of bug: a missing registration is silent, and the symptom
+("not connected") points at the credential rather than at the wiring.
+
 ### The catalog: 13 cards, and why the plan does not narrow them
 
 Five Sol rungs, two Luna free, six for GPT-5.5:
