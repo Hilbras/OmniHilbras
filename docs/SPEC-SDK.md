@@ -1036,26 +1036,33 @@ learn it stopped failing. Verified end to end: with the gateway stopped the badg
 `Gateway offline` / `not answering · pnpm dev:gateway`, and with it restarted — **no reload** —
 it read `Gateway online` again.
 
-### Why the sign-in opens a separate window
+### Getting the credential: one button, in your own browser
 
-It opens one, and it always will. The session is read out of a browser profile OmniHilbras
-owns — `launchPersistentContext` against `~/.config/omnihilbras/<provider>/<hash>` — and a tab
-in the user's own browser belongs to a *different* browser, whose cookies and localStorage are
-not readable from here. Signing in your own tab and having OmniHilbras magically see it would
-mean asking you to relaunch your browser with a debugging port, which is a much worse thing to
-ask than "a window will open".
+There is one control, and it opens the provider in a **new tab in the current browser**. Sign in
+there, copy the one value, paste it.
 
-What was actually wrong was the silence. The copy said nothing about the window, so a required
-behaviour read as a bug. Now, before the click:
+There used to be a second path: OmniHilbras launching its own Chromium and reading the session
+out of that. It opened a window on the desktop that the user could not tell from an unrelated
+browser, and it was **broken** — the window showed the provider's home page and the flow never
+detected the sign-in, so it sat there indefinitely. Two buttons, one of them broken and
+unexplained, is worse than the paste path alone.
 
-> A separate browser window will open on your desktop. That is required: the userToken is read
-> out of a browser profile OmniHilbras owns, and a tab in this browser is a different browser
-> whose localStorage cannot be read from here. To sign in inside this browser instead, use the
-> paste option below.
+So the window flow is **removed rather than demoted**: both sign-in modules, both session
+stores, four service methods, four routes and thirteen tests are gone. The persistent profile
+is still used for *turns* when it happens to be signed in; it is simply no longer how a
+connection is made.
 
-And there is a real link — **Sign in inside this browser instead** — so the in-browser route is
-a first-class choice rather than a fallback. The extraction guides now open with "With … open
-and signed in **in this browser**" for the same reason.
+```
+POST /v1/web-cookie/chatgpt/connect    { storageState }        -> 201
+POST /v1/web-cookie/deepseek/connect   { userToken }           -> 201
+POST /v1/web-cookie/chatgpt/check      { storageState }        -> 200
+```
+
+**The trade-off, stated plainly.** A pasted credential is replayed into the gateway's browser
+on each turn, rather than that browser keeping a fresh session of its own. The Cloudflare
+clearance therefore can go stale, and an edge challenge is somewhat more likely than with a
+profile that stays signed in. That is the cost of "do not open a window I did not ask for", and
+it is the right trade.
 
 ### A refusal is not an outage
 

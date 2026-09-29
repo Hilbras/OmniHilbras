@@ -5,8 +5,6 @@ import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, creat
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialSignIn, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
-import { ChatGptWebSignInStore, startChatGptWebSignIn } from './chatgptWebSignIn.js';
-import { DeepSeekSignInStore, startDeepSeekWebSignIn } from './deepseekWebSignIn.js';
 import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -146,10 +144,6 @@ export class GatewayService {
   private failureThreshold = defaultFailureThreshold;
   private healthIntervalMs = defaultHealthIntervalMs;
   private healthTimer?: NodeJS.Timeout;
-  /** Sign-in attempts in progress. Each holds a browser window open until it is claimed. */
-  private readonly chatGptSignIns = new ChatGptWebSignInStore();
-  /** Sign-in attempts in progress. Each holds a browser window open until it is claimed. */
-  private readonly deepSeekSignIns = new DeepSeekSignInStore();
   /** Kept whole, because the ChatGPT Web driver is built lazily on first use. */
   private readonly options: GatewayServiceOptions;
 
@@ -667,64 +661,7 @@ export class GatewayService {
     };
   }
 
-  /**
-   * Opens chatgpt.com in a window the user signs in to.
-   *
-   * The alternative was asking for a cookie out of DevTools, which is four ways to fail at
-   * something the browser can just do. The session that comes back is read out of the browser
-   * that created it, so the Cloudflare clearance the edge set is the one that gets kept.
-   */
-  async startChatGptWebSignIn() {
-    const started = await startChatGptWebSignIn();
-    if ('error' in started) throw new ProviderError('PROVIDER_UNAVAILABLE', started.error, {
-      providerId: chatGptWebProviderId,
-      publicMessage: started.error,
-    });
-    return {
-      sessionId: this.chatGptSignIns.create(started),
-      /**
-       * Told plainly, because the window is on the gateway's machine and not in the browser.
-       * Saying "a window opened" when none did is worse than saying there is nowhere to sign in.
-       */
-      headed: started.headed,
-    };
-  }
 
-  /**
-   * Reports whether a sign-in has finished, and saves the connection when it has.
-   *
-   * Polled by the dashboard on a timer, and claimed before the page is read — two polls
-   * arriving together must not both see a signed-in page and save two connections from one
-   * sign-in.
-   */
-  async pollChatGptWebSignIn(sessionId: string, freeOnly = false): Promise<
-    | { status: 'pending' }
-    | { status: 'denied'; error: string }
-    | { status: 'connected'; connection: unknown; plan: string | null }
-  > {
-    const session = this.chatGptSignIns.claim(sessionId);
-    if (!session) {
-      return {
-        status: 'denied',
-        error: 'That sign-in has expired or was already completed. Start it again.',
-      };
-    }
-    const outcome = await session.read();
-    if (outcome.status === 'pending') {
-      // Released so the next poll can look again; `claim` is only held across one read.
-      Reflect.set(session, 'claimed', false);
-      return { status: 'pending' };
-    }
-    if (outcome.status === 'denied') {
-      await this.chatGptSignIns.discard(sessionId);
-      return { status: 'denied', error: outcome.error };
-    }
-    // Connected: save, then close the window. The profile keeps the session, so closing the
-    // browser loses nothing — which is the whole reason this flow can be one-shot.
-    const connection = await this.connectChatGptWeb(outcome.storageState, undefined, freeOnly);
-    await this.chatGptSignIns.discard(sessionId);
-    return { status: 'connected', connection, plan: outcome.plan };
-  }
 
   /**
    * The DeepSeek Web adapter, built once so its access-token cache is shared.
@@ -738,45 +675,7 @@ export class GatewayService {
     return this.deepSeek;
   }
 
-  async startDeepSeekWebSignIn() {
-    const started = await startDeepSeekWebSignIn();
-    if ('error' in started) throw new ProviderError('PROVIDER_UNAVAILABLE', started.error, {
-      providerId: deepseekWebProviderId,
-      publicMessage: started.error,
-    });
-    return { sessionId: this.deepSeekSignIns.create(started), headed: started.headed };
-  }
 
-  /**
-   * Reports whether a DeepSeek sign-in has finished, and saves the connection when it has.
-   *
-   * The token is read out of the browser that signed in, so it is the session DeepSeek
-   * actually issued rather than something reconstructed. The claim is taken before the page
-   * is read, so two concurrent polls cannot save two connections from one sign-in.
-   */
-  async pollDeepSeekWebSignIn(sessionId: string): Promise<
-    | { status: 'pending' }
-    | { status: 'denied'; error: string }
-    | { status: 'connected'; connection: unknown }
-  > {
-    const session = this.deepSeekSignIns.claim(sessionId);
-    if (!session) return { status: 'denied', error: 'That sign-in has expired or was already completed. Start it again.' };
-    const outcome = await session.read();
-    if (outcome.status === 'pending') {
-      session.claimed = false;
-      return { status: 'pending' };
-    }
-    if (outcome.status === 'denied') {
-      await this.deepSeekSignIns.discard(sessionId);
-      return { status: 'denied', error: outcome.error };
-    }
-    // Verified against DeepSeek before it is saved, so a connection is never created that
-    // cannot answer. The error names the real cause — expired, refused, no network.
-    await this.deepSeekAdapter().validateCredential(deepSeekWebCredential(outcome.userToken));
-    const connection = await this.connectDeepSeekWeb(outcome.userToken);
-    await this.deepSeekSignIns.discard(sessionId);
-    return { status: 'connected', connection };
-  }
 
   /** Stores a DeepSeek Web userToken, after checking DeepSeek accepts it. */
   async connectDeepSeekWeb(userToken: string, signal?: AbortSignal) {

@@ -29,26 +29,6 @@ export type WebSessionDescriptor = {
   /** How to get it, in the order a person should try. */
   extractionSteps: Array<{ label: string; body: string }>;
   /** The sign-in routes, when the provider has them. */
-  /**
-   * The sign-in routes, when the provider has them, and what to tell the user about them.
-   *
-   * The note lives here rather than in the dialog body because the dialog used to hardcode a
-   * ChatGPT sentence and cheerfully told DeepSeek users that a chatgpt.com window was about to
-   * open. Anything provider-specific belongs to the provider.
-   */
-  signIn?: {
-    start: string;
-    status: (sessionId: string, freeOnly: boolean) => string;
-    note: string;
-    /** The button. */
-    label: string;
-    /** Why a separate window opens, said before the click. */
-    whySeparateWindow: string;
-    /** Shown when the gateway has no display to open a window on. */
-    noDisplay: string;
-    /** Shown while the window is open and waiting. */
-    opened: string;
-  };
   /** The paste route, when there is one. */
   paste?: {
     path: string;
@@ -85,9 +65,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
   const [exported, setExported] = useState('');
   const [freeOnly, setFreeOnly] = useState(false);
   const [checked, setChecked] = useState<CheckResult | null>(null);
-  const [phase, setPhase] = useState<'idle' | 'checking' | 'signing-in' | 'running' | 'done'>('idle');
-  /** What the sign-in flow last said, shown verbatim so a failure is never vague. */
-  const [signIn, setSignIn] = useState<{ state: 'waiting' | 'headless' | 'error'; message: string } | null>(null);
+  const [phase, setPhase] = useState<'idle' | 'checking' | 'running' | 'done'>('idle');
   const [error, setError] = useState('');
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
   const settledRef = useRef(false);
@@ -137,74 +115,6 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
       setError(checkError instanceof Error ? checkError.message : 'That export could not be read.');
     }
   }, [descriptor, exported]);
-
-  /**
-   * Sign in through a real browser window, rather than by hand.
-   *
-   * This is the primary path and the paste is the fallback. The four ways the paste could go
-   * wrong — wrong cookie, a `Cookie:` prefix, numbered chunks, a truncated header — are all
-   * things the browser can simply do, and a session read out of the browser that created it
-   * keeps the Cloudflare clearance that a copied one tends to lose.
-   *
-   * The window opens on the **gateway's** machine, so when there is no display the flow says
-   * so and points at the paste path instead of waiting for a sign-in nobody can perform.
-   */
-  const signInWithBrowser = useCallback(async () => {
-    setPhase('signing-in');
-    setError('');
-    try {
-      if (!descriptor.signIn) return;
-      const started = await requestJson<{ sessionId: string; headed: boolean }>(descriptor.signIn.start, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{}',
-      });
-      if (!started.headed) {
-        setPhase('idle');
-        setSignIn({
-          state: 'headless',
-          message:
-            descriptor.signIn?.noDisplay ?? 'A window would open on the machine running OmniHilbras, and there is no display there — so there is nowhere to sign in. Paste a credential below instead, or start OmniHilbras on a machine with a display.',
-        });
-        return;
-      }
-      setSignIn({
-        state: 'waiting',
-        message: descriptor.signIn?.opened ?? 'A window has opened on your desktop. Sign in there — this closes itself once you are signed in.',
-      });
-
-      for (let attempt = 0; attempt < 120; attempt += 1) {
-        // A visible wait rather than a tight loop: the page needs time to fetch the account,
-        // and polling harder than that only costs the machine.
-        await new Promise((resolve) => setTimeout(resolve, 2_500));
-        const status = await requestJson<{ status: string; error?: string; connection?: GatewayConnection }>(
-          descriptor.signIn.status(started.sessionId, freeOnly),
-        );
-        if (status.status === 'pending') continue;
-        if (status.status === 'denied') {
-          setPhase('idle');
-          setSignIn({ state: 'error', message: status.error ?? 'Sign-in did not complete.' });
-          return;
-        }
-        if (status.connection) {
-          settledRef.current = true;
-          setPhase('done');
-          setSignIn(null);
-          await onConnected(status.connection);
-          onClose();
-          return;
-        }
-      }
-      setPhase('idle');
-      setSignIn({ state: 'error', message: 'That window was left without being signed in. Start again when you are ready.' });
-    } catch (signInError) {
-      setPhase('idle');
-      setSignIn({
-        state: 'error',
-        message: signInError instanceof Error ? signInError.message : 'Sign-in could not be started.',
-      });
-    }
-  }, [descriptor, freeOnly, onClose, onConnected]);
 
   const submit = useCallback(async () => {
     if (settledRef.current) return;
@@ -283,73 +193,42 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
             </div>
           )}
 
-          {/* Sign-in first. It is the path that cannot be got wrong, and the paste below is
-              the fallback for a gateway with nowhere to open a window. */}
+          {/*
+            One button, and it opens the provider in **this** browser.
+
+            There used to be a second path: OmniHilbras launching its own Chromium and
+            reading the session out of that. It opened a window on the desktop, the user could
+            not tell it from an unrelated browser, and it was broken — the window showed the
+            provider's home page and the flow never detected the sign-in, so it just sat
+            there. Two buttons, one of which was broken and unexplained, is worse than the
+            paste path on its own, so the window flow is gone rather than demoted.
+
+            The profile the window used to populate is still used for *turns* when it happens
+            to be signed in; it is just no longer how a connection is made.
+          */}
           <div className="mt-4">
             <p className="text-[11px] font-semibold">Sign in</p>
             <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-              {/* The note comes from the provider, not from here. */}
-              {descriptor.signIn?.note}
+              Opens {website.replace(/^https?:\/\//, '').replace(/\/$/, '')} in a new tab in this browser.
+              Sign in there, then copy {descriptor.credentialName} as described below and paste it.
             </p>
-            {/*
-              Why a separate window opens, before the click rather than after it.
-              It is not a bug: the session is read out of a browser profile OmniHilbras owns,
-              and a tab in this browser belongs to a browser whose storage cannot be read from
-              here. The link below is the alternative — sign in here, copy one value.
-            */}
-            <p className="mt-1.5 text-[10px] leading-relaxed text-muted">{descriptor.signIn?.whySeparateWindow}</p>
-            {descriptor.paste && (
-              <a
-                href={website}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-gold-text hover:underline"
-              >
-                Sign in inside this browser instead
-                <ExternalLink className="h-2.5 w-2.5" aria-hidden="true" />
-              </a>
-            )}
-            <button
-              type="button"
-              onClick={() => void signInWithBrowser()}
-              disabled={!descriptor.signIn || !acknowledged || phase === 'signing-in' || phase === 'running'}
-              className="btn-gold mt-2.5 w-full !h-9 !text-xs"
+            <a
+              href={website}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-gold mt-2.5 flex w-full !h-9 items-center justify-center !text-xs no-underline"
             >
-              {phase === 'signing-in' ? (
-                <>
-                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                  Waiting for you to sign in
-                </>
-              ) : (
-                <>
-                  <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
-                  {descriptor.signIn?.label ?? 'Sign in'}
-                </>
-              )}
-            </button>
-            {signIn && (
-              <p
-                role="status"
-                className={`mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed ${signIn.state === 'error' || signIn.state === 'headless' ? 'text-amber-600 dark:text-amber-400' : 'text-muted'}`}
-              >
-                {signIn.state === 'waiting' ? (
-                  <LoaderCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
-                ) : (
-                  <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                )}
-                {signIn.message}
-              </p>
-            )}
+              <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
+              Open {website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+              <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            </a>
           </div>
 
           {descriptor.paste && (
-          <details className="mt-4 rounded-xl border border-line bg-bg-soft/40 p-3">
-            <summary className="cursor-pointer text-[11px] font-semibold text-text">
-              {descriptor.paste?.sectionLabel ?? 'Or paste a credential instead'}
-            </summary>
-            <p className="mt-2 text-[11px] leading-relaxed text-muted">
-              For a gateway with no display to open a window on. The same credential either way — this is
-              just the part you do by hand.
+          <section className="mt-4 rounded-xl border border-line bg-bg-soft/40 p-3">
+            <p className="text-[11px] font-semibold">Copy the credential</p>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+              This is the only step that has to be done by hand, and it is one value.
             </p>
             {/* The guide belongs beside the manual route it describes, not above a button that
               does it for you. */}
@@ -490,7 +369,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
                 'Connect'
               )}
             </button>
-          </details>
+          </section>
           )}
 
           {error && (

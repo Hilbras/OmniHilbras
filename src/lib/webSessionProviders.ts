@@ -34,18 +34,6 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
         body: 'Open the browser developer tools (F12 → Network), reload, click any authenticated request, and copy the Cookie header value from Request Headers. Omit the `Cookie:` prefix.',
       },
     ],
-    signIn: {
-      label: 'Sign in with ChatGPT',
-      whySeparateWindow:
-        'A separate browser window will open on your desktop. That is required: the session is read out of a browser profile OmniHilbras owns, and a tab in this browser is a different browser whose storage cannot be read from here. To sign in inside this browser instead, use the paste option below.',
-      opened: 'A ChatGPT window has opened on your desktop. Sign in there — this closes itself once you are signed in.',
-      noDisplay:
-        'A ChatGPT window would open on the machine running OmniHilbras, and there is no display there — so there is nowhere to sign in. Paste a Cookie header below instead, or start OmniHilbras on a machine with a display.',
-      note: 'Opens chatgpt.com in a window on the machine running OmniHilbras. Sign in with your own password and second factor, and the session is read straight out of that browser — including the Cloudflare clearance that a copied cookie tends to lose.',
-      start: '/v1/oauth/chatgpt/start',
-      status: (sessionId, freeOnly) =>
-        `/v1/oauth/chatgpt/status?sessionId=${encodeURIComponent(sessionId)}&freeOnly=${freeOnly ? 'true' : 'false'}`,
-    },
     paste: {
       path: '/v1/web-cookie/chatgpt/connect',
       field: 'storageState',
@@ -77,17 +65,6 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
         body: 'Use the sign-in button above. A window opens, you sign in, and the token is read out of that browser — including any wrapper, so there is nothing to unwrap by hand.',
       },
     ],
-    signIn: {
-      label: 'Sign in with DeepSeek',
-      whySeparateWindow:
-        'A separate browser window will open on your desktop. That is required: the userToken is read out of a browser profile OmniHilbras owns, and a tab in this browser is a different browser whose localStorage cannot be read from here. To sign in inside this browser instead, use the paste option below and copy the userToken.',
-      opened: 'A DeepSeek window has opened on your desktop. Sign in there — this closes itself once you are signed in.',
-      noDisplay:
-        'A DeepSeek window would open on the machine running OmniHilbras, and there is no display there — so there is nowhere to sign in. Paste a userToken below instead, or start OmniHilbras on a machine with a display.',
-      note: 'Opens chat.deepseek.com in a window on the machine running OmniHilbras. Sign in with your own account, and the userToken is read out of that browser’s local storage — so there is no cookie header to copy and no value to unwrap by hand.',
-      start: '/v1/oauth/deepseek/start',
-      status: (sessionId) => `/v1/oauth/deepseek/status?sessionId=${encodeURIComponent(sessionId)}`,
-    },
     paste: {
       path: '/v1/web-cookie/deepseek/connect',
       field: 'userToken',

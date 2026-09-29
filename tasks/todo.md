@@ -147,6 +147,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 31: Remove the separate-browser sign-in entirely. One button, and it opens in your browser.
+  - Acceptance: the connect dialog has one sign-in control, it opens the provider in a new tab in the current browser, and nothing in the gateway launches a browser.
+  - Verify: the DeepSeek dialog shows one link — `Open chat.deepseek.com`, `target="_blank"` — and the only button is `Connect`. `POST /v1/oauth/chatgpt/start` and `GET /v1/oauth/deepseek/status` are now `404`; `POST /v1/web-cookie/deepseek/connect` is `400` on an empty body and `POST /v1/connections` is `200`. 388 tests pass.
+  - Findings: the user reported the window "opens the home page of DeepSeek and nothing happens" — **it was broken**, not merely surprising: the flow navigated but never detected the sign-in, so it sat there indefinitely. On top of that it was a second button next to the paste path, so the dialog offered two ways to connect and one of them silently failed. Two buttons, one broken and unexplained, is worse than one honest path, so the window flow is **removed rather than demoted**: both sign-in modules, both session stores, four service methods, four routes and thirteen tests are gone. The persistent profile is still used for *turns* when it happens to be signed in — it is just no longer how a connection is made. The trade-off, stated plainly: a pasted credential is replayed into the gateway's browser on each turn rather than the browser keeping it fresh, so the Cloudflare clearance can go stale and an edge challenge is somewhat more likely than with a signed-in profile. That is the cost of the user's choice, and it is the right trade for "do not open a window I did not ask for".
+  - Files: `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, `apps/gateway/src/service.ts`, `apps/gateway/src/server.ts`, `apps/gateway/src/index.ts`, deleted `chatgptWebSignIn.ts` / `deepseekWebSignIn.ts` and their tests, docs.
+  - Depends on: Task 30.
+  - Scope: Medium.
+
 - [x] Task 30: Say why a separate window opens, and offer signing in inside the browser instead.
   - Acceptance: the reason is stated *before* the click, and there is a link that opens the provider in the user's own tab.
   - Verify: the DeepSeek dialog now contains "A separate browser window will open on your desktop…" and a `Sign in inside this browser instead` link pointing at `https://chat.deepseek.com`, `target="_blank"`. 401 tests pass.
