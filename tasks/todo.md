@@ -147,6 +147,19 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 61: Phase 3 — `HedgePolicy`, the last of the four mechanisms separated from their rules.
+  - Acceptance: whether a second request is worth sending, and which route, is one decision with a named reason for every refusal.
+  - Verify: 14 tests; 360 gateway tests, all 346 previous ones unchanged. `request-executor.ts` 372 → 362, `service.ts` 994 → 985.
+  - Findings: **`tryHedgedRace` was 107 lines, and every one was either bookkeeping or a decision about spending the operator's money.** A decision that decides how many paid requests a gateway makes should not be discoverable only by reading a timer callback, so the seven conditions moved out and the bookkeeping stayed.
+  - **Three of the seven cannot change while a request is in flight** — no leader, no alternative, not configured — so they are decided once in `planFor` rather than re-decided per tick. Re-deciding what cannot change is how two things that must agree drift apart, and this is the fourth time that shape has been the bug.
+  - **The clause that costs the most is `leader-settled`.** A hedge is only worth sending while the leader is *still in flight*: once it has answered, a second request buys an answer nobody will read, paid for in full. It is the one condition checked every tick, so it is the one most likely to drift if the tick and the settle bookkeeping live apart. A test asserts it, and another asserts the *property* — that no sequence of ticks can start a route twice or invent one.
+  - **Every refusal names a reason, and that is the point of the extraction.** *"No hedge fired"* and *"a hedge fired and lost"* are completely different outcomes for a client reading the ledger. The old code had three bare `return`s in a timer callback, so the only way to learn why a configured `hedgeAfterMs` did nothing was to read the loop.
+  - **I wrote a variable that was written and never read**, caught by the compiler, and removed it. I had been about to add a public field to surface the reason, which would have been a behaviour change to make a diagnostic available — the wrong trade for a release about extraction. The comment now says why the reason is *not* recorded, rather than claiming it was.
+  - The hedge delay is taken from the **leader**, not from the candidate being hedged: the delay is a property of the request being slow, and taking it from a candidate would let a second request's settings silently retime the first.
+  - Files: `apps/gateway/src/hedge-policy.ts` (new), `apps/gateway/src/request-executor.ts`, `apps/gateway/test/hedge-policy.test.js` (new).
+  - Depends on: Task 60.
+  - Scope: Medium.
+
 - [x] Task 60: Phase 3 — `TimeoutPolicy` and `RateLimitPolicy`, so each policy is one object.
   - Acceptance: what a timeout value means is answered in one file; what a request limit means and when it is spent is answered in one file.
   - Verify: 22 tests; 346 gateway tests.

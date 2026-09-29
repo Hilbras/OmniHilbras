@@ -1,6 +1,7 @@
 import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse } from '@hilbras/omnihilbras';
 import { noCandidateMessage, type RouteCandidate, type RouteDecision } from './routing.js';
 import { RetryPolicy } from './retry-policy.js';
+import { HedgePolicy } from './hedge-policy.js';
 
 /**
  * Trying routes until one answers.
@@ -84,6 +85,9 @@ export class RequestExecutor {
    */
   private readonly retryPolicy = new RetryPolicy();
 
+  /** Whether a second request is worth sending, and which route. The *why* lives in the policy. */
+  private readonly hedges = new HedgePolicy();
+
   constructor(private readonly deps: RequestExecutorDeps) {}
 
   async chat(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal): Promise<GatewayChatOutcome> {
@@ -144,8 +148,9 @@ export class RequestExecutor {
    * model, so a single connection never pays the extra cost.
    */
   private async tryHedgedRace(candidates: RouteCandidate[], request: ChatRequest, signal: AbortSignal | undefined) {
-    const [leader, ...rest] = candidates;
-    if (!leader || rest.length === 0 || leader.resilience.hedgeAfterMs <= 0) return undefined;
+    const plan = this.hedges.planFor(candidates);
+    if (!plan.enabled || !plan.leader) return undefined;
+    const leader = plan.leader;
 
     type Outcome = { candidate: RouteCandidate; ok: boolean; latencyMs: number; response?: ChatResponse; error?: unknown };
     const attempts: GatewayFailoverAttempt[] = [];
@@ -205,26 +210,20 @@ export class RequestExecutor {
     start(leader);
     let hedgePending = true;
     const hedgeTimer = setInterval(() => {
-      if (winner || signal?.aborted) {
+      const decision = this.hedges.nextHedge({ plan, started, settledCount: settled.size, hasWinner: Boolean(winner), aborted: Boolean(signal?.aborted) });
+      if (!decision.hedge) {
+        // The reason is deliberately not recorded anywhere: there is nowhere in the outcome to put
+        // it without changing the public shape, and a variable written and never read is worse than
+        // no variable. It is the policy's to answer, and the tests below ask it directly — which is
+        // the part that matters, because a decision that decides how many paid requests a gateway
+        // makes should be assertable rather than discoverable by reading a timer callback.
         clearInterval(hedgeTimer);
         hedgePending = false;
         return;
       }
-      // Only hedge while the leader is still in flight.
-      if (settled.size > 0) {
-        clearInterval(hedgeTimer);
-        hedgePending = false;
-        return;
-      }
-      const next = rest.find((candidate) => !started.has(candidate));
-      if (next) {
-        start(next);
-        onChange();
-      } else {
-        clearInterval(hedgeTimer);
-        hedgePending = false;
-      }
-    }, leader.resilience.hedgeAfterMs);
+      start(decision.candidate);
+      onChange();
+    }, plan.delayMs);
     hedgeTimer.unref?.();
 
     // Wait for the first success, or until every candidate has been tried.

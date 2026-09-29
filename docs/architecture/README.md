@@ -117,6 +117,7 @@ apps/gateway/src/
   retry-policy        Retry this route, next route, or stop. One decision, two callers. Zero ids.
   timeout-policy      What a timeout value means, and the deadline that enforces it. Owns the default.
   rate-limit-policy   What a request limit means, and when it is spent.
+  hedge-policy        Whether a second request is worth sending, and which route. Every refusal is named.
   capability          A named "this adapter does not do that", for two consumers that needed it.
   health.ts          Probing, ejection and recovery, asked two questions only.
   api-key-manager    API keys and the two user-facing messages about them.
