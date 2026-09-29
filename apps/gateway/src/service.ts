@@ -8,6 +8,7 @@ import { createChatGptWebDriver } from './chatgptWeb.js';
 import { SlidingWindowRateLimiter, resolveRoute, type RouteCandidate } from './routing.js';
 import { HealthManager } from './health.js';
 import { ProviderResolver } from './provider-resolver.js';
+import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
@@ -417,61 +418,50 @@ export class GatewayService {
    * saving would spend the same code, be told `The device code is invalid`, and
    * overwrite a success that had already happened.
    */
+  /**
+   * Polls an OpenCode Console sign-in to its conclusion.
+   *
+   * The order — claim, poll, save, then publish — is in `completeSignIn`, because getting it wrong
+   * spends an OAuth grant twice or reports a connection that does not exist.
+   */
   async opencodeConsoleSignInStatus(sessionId: string, signal?: AbortSignal): Promise<OpencodeConsoleSessionStatus | undefined> {
-    const session = this.opencodeConsoleSessions.get(sessionId);
-    if (!session) return undefined;
-    if (session.status !== 'pending') return this.opencodeConsoleSessions.publicStatus(session);
-
-    // Another poll owns the exchange. Report the session as it stands rather than
-    // racing it, and let that poll publish the outcome.
-    if (!this.opencodeConsoleSessions.claim(sessionId)) {
-      return this.opencodeConsoleSessions.publicStatus(session);
-    }
-
-    const outcome = await pollOpencodeConsoleSignIn(session.deviceCode);
-    if (outcome.status === 'pending') {
-      // Nothing was spent, so the next poll may try again.
-      this.opencodeConsoleSessions.release(session);
-      return this.opencodeConsoleSessions.publicStatus(session);
-    }
-    if (outcome.status === 'denied') {
-      this.opencodeConsoleSessions.resolve(session.id, { status: 'failed', error: outcome.error });
-      return this.opencodeConsoleSessions.publicStatus(session);
-    }
-    try {
-      // `orgName` only exists on the OAuth variant, so the union is narrowed rather
-      // than read blind.
-      const orgName = outcome.credential.type === 'oauth' ? outcome.credential.orgName : undefined;
-      const connection = await this.saveConnection({
-        id: opencodeConsoleProviderId,
-        providerId: opencodeConsoleProviderId,
-        name: `OpenCode Console${orgName ? ` (${orgName})` : ''}`,
-        endpoint: 'https://opencode.ai/inference/openai/v1',
-        priority: 1,
-        proxyPool: 'none',
-        modelPolicy: 'all',
-      }, outcome.credential, signal, { tolerateDiscoveryFailure: true });
-      const note = this.lastDiscoveryNote;
-      this.lastDiscoveryNote = undefined;
-      // The whole record, so the dashboard can render the page without a second fetch.
-      this.opencodeConsoleSessions.resolve(session.id, {
-        status: 'connected',
-        connection,
-        ...(note ? { error: `Connected, but the model list could not be read: ${note}` } : {}),
-      });
-    } catch (error) {
-      // The transport's generic refusal hides the status and body that explain it,
-      // so the provider's own words are preferred over `error.message`.
-      const said = error instanceof ProviderError ? providerSaid(error) : undefined;
-      const message = error instanceof ProviderError
-        ? [error.publicMessage ?? error.message, said].filter(Boolean).join(' ')
-        : error instanceof Error
-          ? error.message
-          : 'The sign-in could not be completed.';
-      this.opencodeConsoleSessions.resolve(session.id, { status: 'failed', error: message });
-    }
-    return this.opencodeConsoleSessions.publicStatus(session);
+    return completeSignIn({
+      sessions: this.opencodeConsoleSessions,
+      sessionId,
+      signal,
+      fallback: 'The sign-in could not be completed.',
+      poll: async () => {
+        const session = this.opencodeConsoleSessions.get(sessionId);
+        if (!session) return { status: 'denied', error: 'This sign-in no longer exists.' };
+        const outcome = await pollOpencodeConsoleSignIn(session.deviceCode);
+        if (outcome.status === 'pending') return { status: 'pending' };
+        if (outcome.status === 'denied') return { status: 'denied', error: outcome.error };
+        return { status: 'connected', credential: outcome.credential };
+      },
+      connection: (credential) => {
+        // `orgName` only exists on the OAuth variant, so the union is narrowed rather than read
+        // blind — a blind read is a runtime failure on exactly the accounts that paid.
+        const orgName = credential.type === 'oauth' ? credential.orgName : undefined;
+        return {
+          id: opencodeConsoleProviderId,
+          providerId: opencodeConsoleProviderId,
+          name: `OpenCode Console${orgName ? ` (${orgName})` : ''}`,
+          endpoint: 'https://opencode.ai/inference/openai/v1',
+          priority: 1,
+          proxyPool: 'none',
+          modelPolicy: 'all',
+        };
+      },
+      save: (input, credential, withSignal) => this.saveConnection(input, credential, withSignal, { tolerateDiscoveryFailure: true }),
+      takeDiscoveryNote: () => {
+        // Taken, not read, so one failure cannot be shown twice on a healthy connection.
+        const note = this.lastDiscoveryNote;
+        this.lastDiscoveryNote = undefined;
+        return note;
+      },
+    });
   }
+
 
   /**
    * Starts a Cline sign-in and returns the URL to send the browser to. The
@@ -517,12 +507,11 @@ export class GatewayService {
       this.clineSessions.resolve(session.id, { status: 'connected', connection });
       return { ok: true, message: `Connected to ${connection.name} with ${connection.modelIds.length} models.`, connection };
     } catch (error) {
-      // Prefer the provider's own words over a generic failure, so the operator
-      // can see why Cline turned the sign-in away.
-      const reason = error instanceof ProviderError ? providerSaid(error) : undefined;
-      const message = error instanceof ProviderError
-        ? [error.publicMessage ?? error.message, reason].filter(Boolean).join(' ')
-        : 'The sign-in could not be completed.';
+      // The provider's own words first, so the operator can see why Cline turned the sign-in
+      // away. This branch used to fall straight to the generic fallback for anything that was not
+      // a `ProviderError`, so a socket that closed mid-exchange reported *"The sign-in could not be
+      // completed."* and nothing else — the user was told the sign-in failed and not why.
+      const message = describeSignInFailure(error, 'The sign-in could not be completed.');
       this.clineSessions.resolve(session.id, { status: 'failed', error: message });
       return { ok: false, message };
     }
@@ -773,37 +762,31 @@ export class GatewayService {
    * poll that finds it approved.
    */
   async kiroSignInStatus(sessionId: string, signal?: AbortSignal): Promise<KiroSignInStatus | undefined> {
-    const session = this.kiroSessions.get(sessionId);
-    if (!session) return undefined;
-    const outcome = await pollKiroSignInWithClaim(this.kiroSessions, sessionId);
-    if (outcome === 'in-progress') return this.kiroSessions.publicStatus(session);
-    if (outcome.status !== 'connected') return this.kiroSessions.publicStatus(session);
-    try {
-      const connection = await this.saveConnection(
-        {
-          id: kiroProviderId,
-          providerId: kiroProviderId,
-          name: 'Kiro',
-          endpoint: 'https://codewhisperer.us-east-1.amazonaws.com',
-          priority: 1,
-          proxyPool: 'none',
-          modelPolicy: 'all',
-        },
-        outcome.credential,
-        signal,
-      );
-      this.kiroSessions.resolve(sessionId, { status: 'connected', connection });
-    } catch (error) {
-      const said = error instanceof ProviderError ? providerSaid(error) : undefined;
-      const message = error instanceof ProviderError
-        ? [error.publicMessage ?? error.message, said].filter(Boolean).join(' ')
-        : error instanceof Error
-          ? error.message
-          : 'The Kiro sign-in could not be completed.';
-      this.kiroSessions.resolve(sessionId, { status: 'failed', error: message });
-    }
-    return this.kiroSessions.publicStatus(session);
+    return completeSignIn({
+      sessions: this.kiroSessions,
+      sessionId,
+      signal,
+      fallback: 'The Kiro sign-in could not be completed.',
+      poll: async () => {
+        const outcome = await pollKiroSignInWithClaim(this.kiroSessions, sessionId);
+        if (outcome === 'in-progress') return { status: 'pending' };
+        if (outcome.status !== 'connected') return { status: 'denied', error: describeSignInFailure(outcome, 'The Kiro sign-in could not be completed.') };
+        return { status: 'connected', credential: outcome.credential };
+      },
+      connection: () => ({
+        id: kiroProviderId,
+        providerId: kiroProviderId,
+        name: 'Kiro',
+        endpoint: 'https://codewhisperer.us-east-1.amazonaws.com',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      }),
+      save: (input, credential, withSignal) => this.saveConnection(input, credential, withSignal),
+      takeDiscoveryNote: () => this.lastDiscoveryNote,
+    });
   }
+
 
   opencodeConsoleAdapter(connectionId: string): ProviderAdapter {
     if (!this.opencodeConsole) {

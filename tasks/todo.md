@@ -147,6 +147,19 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 54: Extract `SignInCoordinator`, and fix a copy that had lost its error branch.
+  - Acceptance: the claim → poll → save → publish loop exists once, and the failure describer exists once.
+  - Verify: 14 tests; 266 gateway tests. `service.ts` 1098 → 1081 lines.
+  - Findings: **the three copies of the failure describer had already drifted, and one had lost a branch.** Cline's fell straight to the generic fallback for anything that was not a `ProviderError`, so a socket that closed mid-exchange reported *"The sign-in could not be completed."* and nothing else. That is the one thing a failed sign-in must never do: the user is told the sign-in failed and not why. The three copies also carried three different generic fallbacks, so there was nothing holding them equal.
+  - **The order of the loop is the substance, so each step is asserted separately.** Claim before polling (two tabs would otherwise both spend one OAuth grant, and the second fails at the provider with something that looks like a bug rather than a race); release on `pending` (not releasing would strand the sign-in — the claim is spent, so no later poll could ever finish it); save *before* publishing as connected (the reverse is the half-connect the file exists to prevent); a failed save resolves as `failed`, never `connected`.
+  - A discovery note is **taken, not read**, so a second poll cannot re-show a stale message on a healthy connection.
+  - The coordinator takes the session store **structurally** rather than as a concrete class, because the two flows hold differently shaped sessions — Kiro nests its device authorization and Console flattens it — and the coordinator has no business knowing which. That is also what makes `SignInSessionStore` usable here without a change.
+  - I declared a `tolerateDiscoveryFailure` option and then found it was **never read** — the tolerance actually lives in the `save` callback, which is where it belongs. A dead option is worse than no option, so it is gone rather than left to look meaningful.
+  - One of my own tests ran the coordinator against a session that did not exist yet, so it returned at the first line and asserted nothing: a test that passes for no reason. The helper now opens the session and hands its id over.
+  - Files: `apps/gateway/src/sign-in-coordinator.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/test/sign-in-coordinator.test.js` (new).
+  - Depends on: Task 53.
+  - Scope: Medium.
+
 - [x] Task 53: Take the provider contract from 9 adapters to all 11, and fix the three defects it found.
   - Acceptance: every adapter in the SDK is contracted; the gap list is empty; adding a twelfth fails the suite.
   - Verify: 112 contract assertions across 11 adapters. A deliberately added `zz-probe.ts` is still caught by name: *"adapters with neither a contract nor a stated reason: zz-probe"*. 377 SDK tests.
