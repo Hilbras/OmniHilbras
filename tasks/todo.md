@@ -147,6 +147,17 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 43: Phase 1 — one version stated once, a CI that runs, and an honest architecture map.
+  - Acceptance: `pnpm verify` is the release gate, version drift fails CI, the committed probe is gone, and the architecture doc is measured rather than aspirational.
+  - Verify: `pnpm version:check` fails on a real mismatch and passes when fixed; `pnpm version:fix` rewrites the derived copies; `.github/workflows/verify.yml` runs version → typecheck → test → build on Node 24 with pnpm 12.5.1 pinned. 419 tests pass.
+  - Findings: **there was no CI at all.** `.github/workflows/` was empty, so 419 tests only ever ran when I happened to run them. That is not a safety net, it is a habit — and a habit does not run on someone else's machine, or on a machine too loaded to be paying attention. That is the largest single gap in the release process, and it is invisible until it is named.
+  - **Version drift was one line, not a systemic problem.** I reported "six stale versions" and was wrong: five were `127.0.0.1` inside URLs and legitimate history. The real drift is `README.md` line 6, which advertised **0.2.0** while the project was at **1.12.2** — a hundred minor versions, unnoticed. `scripts/check-version.mjs` now checks the three manifests, the README line, the `X-CLIENT-VERSION` constant, and the latest tag, and it **fails** rather than generating: a generator is itself something that can go wrong silently, whereas a failing check cannot. The README match is anchored to the line's own shape, because a loose regex "fixes" the bump table's `0.2.0 → 1.0.0` examples and the URLs.
+  - Removed the committed `apps/gateway/qwen_probe3.mjs` and added `tools/` for experiments. A throwaway probe in the gateway's source tree is how production and throwaway stop being distinguishable.
+  - `docs/architecture/README.md` documents the architecture **as measured**, and two of its findings contradict what an outsider would assume. `routing.ts` is 186 lines with **zero** provider ids — routing is already provider-agnostic. `service.ts` is 1500 lines with **12**, and they are not scattered: six of them are one factory, `resolveAdapter`. So the Core is far cleaner than the "Core is full of provider conditionals" framing suggests, and the real gap is narrower and sharper: the Core has **no lifecycle concept at all** (`lifecycle`, `revoke`, `onboard`, `provision` — zero occurrences). Stateless providers already need no Core changes, because nine connections are live and the OpenAI-compatible ones take the generic branch untouched. What does not fit is a credential that must be created, refreshed and revoked — a Cline session, an OAuth grant — because there is nowhere for that to live. One `CredentialLifecycle` contract would absorb every hand-wired branch, which is a refactor's size rather than a rewrite's.
+  - Files: `scripts/check-version.mjs` (new), `.github/workflows/verify.yml` (new), `docs/architecture/README.md` (new), `package.json`, `README.md`, removed `apps/gateway/qwen_probe3.mjs`.
+  - Depends on: Task 42.
+  - Scope: Medium.
+
 - [x] Task 42: The cookie field was disabled with no way to enable it, and the catalog overclaim.
   - Acceptance: a provider with no risk notice gets a typeable field, Qwen carries the caution its own dialog promises, and the model list is labelled as the moving thing it is.
   - Verify: on `qwen-web` the caution and its checkbox render, the textarea is enabled once ticked, `Ask Qwen` enables on input, and the probe resolves in 1.4 s. 419 tests pass.

@@ -23,9 +23,16 @@ version.
 
 ## Definition of done for a change
 
-1. `pnpm typecheck`, `pnpm test`, and `pnpm build` pass.
-2. `README.md`, `docs/SPEC-SDK.md`, and `tasks/` reflect the new behavior.
-3. Version bumped per the table above.
+1. `pnpm verify` passes. That is `version:check`, then `typecheck`, then `test`,
+   then `build`, in that order — the order that fails fastest. CI runs the same
+   command, so a change that passes locally passes in CI by construction.
+2. `README.md`, `docs/SPEC-SDK.md`, `docs/architecture/`, and `tasks/` reflect the
+   new behavior.
+3. Version bumped per the table above, and `pnpm version:check` passes. The
+   workspace version is duplicated in three `package.json` files, the README
+   headline, and the `X-CLIENT-VERSION` constant; the README once advertised
+   `0.2.0` while the project was at `1.12.2`, which is why the check exists. Run
+   `pnpm version:fix` to rewrite the derived copies, then re-run the check.
 4. Committed, tagged `v<version>`, and pushed to `origin/main`.
 5. A GitHub release exists for the tag with notes that say what changed and how
    to verify it.

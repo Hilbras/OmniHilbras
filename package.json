@@ -1,7 +1,8 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "1.12.2",
+  "version": "1.13.0",
+  "packageManager": "pnpm@12.5.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,7 +17,10 @@
     "typecheck:gateway": "pnpm --filter @omnihilbras/gateway typecheck",
     "test": "pnpm test:sdk && pnpm test:gateway",
     "test:sdk": "pnpm --filter @hilbras/omnihilbras test",
-    "test:gateway": "pnpm --filter @omnihilbras/gateway test"
+    "test:gateway": "pnpm --filter @omnihilbras/gateway test",
+    "version:check": "node scripts/check-version.mjs",
+    "version:fix": "node scripts/check-version.mjs --fix",
+    "verify": "pnpm version:check && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
     "@hilbras/omnihilbras": "workspace:*",
@@ -37,5 +41,8 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.0",
     "vite": "^8.3.0"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

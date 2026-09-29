@@ -3,7 +3,7 @@
 A self-hosted, local-first AI gateway: one OpenAI-compatible endpoint in front of
 every provider, with API keys, routing, and per-connection reliability.
 
-**Current version: 0.2.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.13.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras)
 
 ```bash
@@ -358,7 +358,24 @@ pnpm dev:gateway
 pnpm build
 pnpm typecheck
 pnpm test
+pnpm verify        # the release gate: version, typecheck, test, build
+pnpm version:check # one version, stated once — fails if the copies disagree
+pnpm version:fix   # rewrite the derived copies from package.json
 ```
+
+`pnpm verify` is what CI runs on every push and pull request. `version:check` exists because the
+README advertised `0.2.0` while the project was at `1.12.2` — a hundred minor versions, unnoticed.
+
+## Architecture
+
+See [`docs/architecture/README.md`](docs/architecture/README.md) for how the gateway, the SDK and
+the provider adapters are separated, measured against the tree rather than described aspirationally.
+The short version: the organisation principle is
+
+> **The Core provides capabilities; providers provide integrations.**
+
+and the two numbers worth knowing are that `routing.ts` contains **zero** provider ids, while the
+twelve in `service.ts` are clustered in a single factory rather than scattered.
 
 ## Local Gateway
 

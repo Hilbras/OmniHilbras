@@ -1,0 +1,42 @@
+# Every check that must pass before a change lands.
+#
+# There was no CI at all, which meant the 419 tests only ever ran when I happened to run them.
+# That is not a safety net, it is a habit — and a habit does not run on someone else's machine,
+# or on a machine that is too loaded to be paying attention.
+name: verify
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The version check compares the tree against the latest tag, so it needs the history
+          # and the tags. A shallow clone would make it silently skip the comparison.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.5.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: One version, stated once
+        run: pnpm version:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
