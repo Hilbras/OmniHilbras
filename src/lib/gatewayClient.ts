@@ -112,6 +112,14 @@ export type GatewayApiKeyList = {
 
 const gatewayBaseUrl = normalizeGatewayBaseUrl(import.meta.env.VITE_GATEWAY_URL ?? 'http://127.0.0.1:8787');
 
+/**
+ * The gateway's base URL, for callers that need to reach it outside `requestJson`.
+ *
+ * The status poller is one of them, and it cannot use a relative path: the gateway is on a
+ * different port from the dashboard, so `/v1/connections` would reach Vite instead.
+ */
+export const gatewayBase = gatewayBaseUrl;
+
 function normalizeGatewayBaseUrl(value: string) {
   try {
     const url = new URL(value);

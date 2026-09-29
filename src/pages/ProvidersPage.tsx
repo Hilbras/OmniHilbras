@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -18,6 +18,7 @@ import { ProviderCard, providerGroupLabels, providerGroupOrder, type ProviderCar
 import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection, type GatewayHealth } from '../lib/gatewayClient';
 import { ProviderMark } from '../components/ProviderMark';
 import { providerRoute } from '../lib/routes';
+import { useGatewayReload } from '../lib/useGatewayStatus';
 import { webSessionProviderIds } from '../lib/webSessionProviders';
 import { providerCatalog } from '../data/providers';
 
@@ -127,19 +128,45 @@ export function ProvidersContent() {
   const [gatewayConnections, setGatewayConnections] = useState<GatewayConnection[]>([]);
   const [notice, setNotice] = useState('');
 
-  useEffect(() => {
+  /**
+   * Connections first, health second.
+   *
+   * These were awaited together, in the wrong order: `/health` probes every provider and
+   * takes around 24 seconds, so the list sat empty for 24 seconds on every load even though
+   * `/v1/connections` answers in five milliseconds. The connections are what the page is
+   * actually about, so they are set first and the health pass refines them when it lands.
+   */
+  const load = useCallback(() => {
     let active = true;
     void listGatewayConnections()
-      .then(async (connections) => {
-        let health: GatewayHealth | undefined;
-        try { health = await getGatewayHealth(); } catch { /* metadata can load before health */ }
+      .then((connections) => {
         if (!active) return;
         setGatewayConnections(connections);
-        setProviders((current) => mergeGatewayConnections(current, connections, health));
+        // Rendered against no health data, which merges to connected-or-attention from the
+        // credential and enabled flags alone — a truthful intermediate, not a blank page.
+        setProviders((current) => mergeGatewayConnections(current, connections));
+        return getGatewayHealth()
+          .then((health) => {
+            if (active) setProviders((current) => mergeGatewayConnections(current, connections, health));
+          })
+          .catch(() => undefined);
       })
       .catch(() => undefined);
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, []);
+
+  useEffect(() => load(), [load]);
+
+  /**
+   * Reload when the gateway comes back.
+   *
+   * A page whose load already failed makes no further requests, so without this the offline
+   * message is the last thing the tab ever says — and the only way out is a manual reload,
+   * which is the wrong instinct when the fix is "nothing, it already recovered".
+   */
+  useGatewayReload(load);
 
   /**
    * Whether a connection is actually saved, kept apart from the merged display

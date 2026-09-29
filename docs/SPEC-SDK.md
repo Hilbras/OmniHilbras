@@ -1019,6 +1019,38 @@ client-attestation token from obfuscated JS, is deliberately omitted — reprodu
 porting that JS, and the endpoint does not currently require it. If it ever does, requests will
 fail with a 401 that says nothing about attestation, which is when to come back to it.
 
+### The gateway badge, and recovering from an outage
+
+The sidebar badge used to be the literal string **"Gateway online"**. It asserted rather than
+asked, so during an outage the dashboard reported the one thing that was false — and looked
+correct afterwards, so there was no reason to distrust it.
+
+A page that failed its only request made **no further requests**, so nothing could notice the
+gateway coming back. The offline message was the last thing the tab ever said, and the only way
+out was a manual reload — the wrong instinct when the fix is "nothing, it already recovered".
+This is what made the same complaint appear four times.
+
+Both are fixed by polling `/v1/connections` every four seconds. It answers in about five
+milliseconds, so the poll is free, and it is the only way a page that has already failed can
+learn it stopped failing. Verified end to end: with the gateway stopped the badge read
+`Gateway offline` / `not answering · pnpm dev:gateway`, and with it restarted — **no reload** —
+it read `Gateway online` again.
+
+One trap worth recording: the poll must use the **absolute** gateway base. A relative
+`/v1/connections` reaches Vite, which answers `200` with the app's own HTML — so the badge
+would have reported the gateway as up for exactly as long as it was down.
+
+### `/health` is 24 seconds, and it was blocking the list
+
+`GET /health` probes **every** provider, so it takes around 24 seconds. `ProvidersPage` awaited
+it *before* setting the connections, so the provider list sat empty for 24 seconds on every
+load — even though `/v1/connections` answers in five milliseconds and is what the page is
+actually about. Connections are now set first and the health pass refines them when it lands.
+
+This is a real cost that remains: the health pass itself is still a full probe of every
+provider on every call. Caching it, or separating "is the process up" from "how is each
+provider doing", is the honest fix and has not been done.
+
 ### Where a Connect click goes, and why it is not the API-key modal
 
 `AddProviderModal` collects an **API key**, and `resolveProviderOption` falls through to

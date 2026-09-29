@@ -27,6 +27,7 @@ import {
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
 import { KiroConnectDialog } from '../components/KiroConnectDialog';
 import { WebCookieConnectDialog } from '../components/WebCookieConnectDialog';
+import { useGatewayReload } from '../lib/useGatewayStatus';
 import { webSessionDescriptor, webSessionProviderIds } from '../lib/webSessionProviders';
 import { OauthConnectDialog } from '../components/OauthConnectDialog';
 import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, filterAvailability, modelFacets, priceLabel, type ModelFacets, type ModelFilterState, type ModelMetaMap } from '@hilbras/omnihilbras';
@@ -271,6 +272,27 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
    */
   const descriptor = webSessionDescriptor(provider.id);
   /**
+   * Reads this provider's saved connection.
+   *
+   * Kept as a named callback because the gateway-restore hook has to be able to run it: a
+   * page whose only fetch failed makes no further requests, so it would never learn the
+   * gateway came back.
+   */
+  const loadConnection = useCallback(() => {
+    let active = true;
+    void listGatewayConnections()
+      .then((connections) => {
+        if (!active) return;
+        const savedConnection = connections.find((item) => item.providerId === provider.id && item.hasCredential);
+        setConnection(savedConnection);
+        setConnectionAdded(Boolean(savedConnection));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [provider.id]);
+  /**
    * A catalogued provider with no working connection offers no Connect action. The card says
    * why; repeating it here is what stops a shared page-level control from offering one anyway.
    */
@@ -306,17 +328,12 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     // Any provider can have a saved connection, not just the first one that
     // shipped with a flow. Gating this on one id made every other provider
     // report "No connection" on a fresh load, however it was added.
-    let active = true;
-    void listGatewayConnections()
-      .then((connections) => {
-        if (!active) return;
-        const savedConnection = connections.find((item) => item.providerId === provider.id && item.hasCredential);
-        setConnection(savedConnection);
-        setConnectionAdded(Boolean(savedConnection));
-      })
-      .catch(() => undefined);
-    return () => { active = false; };
+    void loadConnection();
   }, [provider.id]);
+
+  // Reload when the gateway comes back, for the same reason as the list: a page that failed
+  // to load makes no further requests, so nothing else would ever notice the change.
+  useGatewayReload(loadConnection, [provider.id]);
   useEffect(() => () => {
     modelTestAbortRef.current?.abort();
     bulkAbortRef.current?.abort();

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { dashboardRoutes } from '../lib/routes';
+import { useGatewayStatus } from '../lib/useGatewayStatus';
 
 type DashboardPage = 'overview' | 'providers' | 'routing' | 'keys';
 
@@ -94,6 +95,17 @@ function SidebarLink({ item, activePage, collapsed, onNavigate }: { item: Sideba
 }
 
 function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose: () => void; activePage: DashboardPage; collapsed: boolean; onToggleCollapse: () => void }) {
+  /**
+   * The badge is driven by a real probe, polled every few seconds.
+   *
+   * Polling is what makes recovery work: a page whose only request already failed makes no
+   * further requests, so nothing would ever notice the gateway coming back and the offline
+   * message would be the last thing the tab ever said. `/v1/connections` answers in about
+   * five milliseconds, so the poll costs nothing.
+   */
+  const { reachable } = useGatewayStatus();
+  const gatewayUp = reachable !== false;
+  const gatewayLabel = reachable === undefined ? 'Checking gateway' : reachable ? 'Gateway online' : 'Gateway offline';
   return (
     <aside className={`dashboard-sidebar flex h-full w-[252px] shrink-0 flex-col border-r border-line bg-bg-soft/90 backdrop-blur-xl transition-[width] duration-200 ${collapsed ? 'lg:w-[76px]' : 'lg:w-[252px]'}`}>
       <div className={`flex items-center gap-1 pb-4 pt-5 ${collapsed ? 'justify-center px-2' : 'justify-between px-5'}`}>
@@ -116,15 +128,29 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
         </button>
       </div>
 
-      <div className={`mx-4 mb-5 rounded-xl border border-success/20 bg-success/10 ${collapsed ? 'flex justify-center p-2.5' : 'p-3'}`} title={collapsed ? 'Gateway online · localhost:8787' : undefined} aria-label={collapsed ? 'Gateway online' : undefined}>
+      {/*
+        The badge asks the gateway rather than asserting it. It used to be the literal string
+        "Gateway online", which meant the dashboard reported the one thing that was false for
+        exactly as long as the outage lasted — and looked fine afterwards, so nobody trusted
+        it before this either.
+      */}
+      <div
+        className={`mx-4 mb-5 rounded-xl border ${gatewayUp ? 'border-success/20 bg-success/10' : 'border-danger/30 bg-danger/10'} ${collapsed ? 'flex justify-center p-2.5' : 'p-3'}`}
+        title={collapsed ? `${gatewayLabel} · localhost:8787` : undefined}
+        aria-label={gatewayLabel}
+      >
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'}`}>
           <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+            {gatewayUp && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />}
+            <span className={`relative inline-flex h-2 w-2 rounded-full ${gatewayUp ? 'bg-success' : 'bg-danger'}`} />
           </span>
-          {!collapsed && <span className="text-xs font-semibold text-success">Gateway online</span>}
+          {!collapsed && <span className={`text-xs font-semibold ${gatewayUp ? 'text-success' : 'text-danger'}`}>{gatewayLabel}</span>}
         </div>
-        {!collapsed && <p className="mt-1.5 pl-4 font-mono text-[10px] text-muted">localhost:8787 · local mode</p>}
+        {!collapsed && (
+          <p className="mt-1.5 pl-4 font-mono text-[10px] text-muted">
+            {gatewayUp ? 'localhost:8787 · local mode' : 'not answering · pnpm dev:gateway'}
+          </p>
+        )}
       </div>
 
       <nav className={`dashboard-scroll flex-1 overflow-y-auto ${collapsed ? 'px-2' : 'px-3'}`} aria-label="Dashboard navigation">
@@ -176,6 +202,7 @@ export function DashboardShell({
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(getInitialCollapsed);
+
 
   useEffect(() => {
     try {

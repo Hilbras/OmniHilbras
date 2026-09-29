@@ -147,6 +147,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 28: Make the gateway badge tell the truth, and make an offline page recover by itself.
+  - Acceptance: the badge reflects a real probe, and a page whose only request failed reloads itself when the gateway returns — with no manual refresh.
+  - Verify: with the gateway stopped the sidebar read `Gateway offline` in red and `not answering · pnpm dev:gateway`; with it restarted, **without a reload**, it read `Gateway online`, `localhost:8787 · local mode`, 13 cards. The provider list also painted 13 cards immediately instead of after ~24 s. 401 tests pass.
+  - Findings: **the badge was the literal string "Gateway online"** — it asserted rather than asked, so during an outage the dashboard reported the one thing that was false, and looked correct afterwards so nobody had cause to distrust it. And a page that failed its only request made **no further requests**, so nothing could ever notice the gateway coming back; the offline message was the last thing the tab ever said and the only exit was a manual reload. Both are fixed by a 4 s poll of `/v1/connections`, which answers in ~5 ms. A caveat worth writing down: the poll had to use the **absolute** gateway base — a relative `/v1/connections` reaches Vite, which answers 200 with the app's own HTML, so the badge would have reported the gateway as up for as long as it was down. Separately, `/health` (24 s, probes every provider) was awaited **before** the connections on the list, so the list sat empty for 24 seconds on every load; connections now set first and health refines them.
+  - Files: `src/lib/useGatewayStatus.ts` (new), `src/lib/gatewayClient.ts`, `src/components/DashboardShell.tsx`, `src/pages/ProvidersPage.tsx`, `src/pages/ProviderDetailPage.tsx`, docs.
+  - Depends on: Task 27.
+  - Scope: Medium.
+
 - [x] Task 27: Stop the provider list opening the API-key modal for a web-session provider.
   - Acceptance: Connect on a web-session card goes to the page that can actually sign you in, and no path opens the API-key modal for a provider with no API key.
   - Verify: 401 tests pass; typecheck and build clean. **The browser click-through could not be completed** — the dev server's module fetches keep failing with `ERR_NETWORK_CHANGED` on this network and the built bundle serves the marketing site at `/dashboard/providers`, so both routes to verifying it were blocked. The change is three lines and unambiguous, but it is unverified in the browser and should be checked by hand.
