@@ -147,6 +147,21 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 50: Phase 2 — split `server.ts` into `http.ts` and five route modules.
+  - Acceptance: one 373-line `if` chain becomes five modules and a five-line dispatcher, and a test fails if any module claims a route that is not its own.
+  - Verify: 4 structural tests; 37 route conditions before, 37 after (5 + 9 + 2 + 17 + 4), plus the auth gate. 210 gateway tests, all of the previous 206 unchanged.
+  - Findings: **"the tests still pass" is weak evidence for a move like this, because a route that quietly stopped being reachable fails nothing.** Every existing test either still works or was never exercising that path. So the structure itself is now asserted: each module must decline every probe owned by another module, every module must decline an unroutable path so the 404 stays reachable, and the dispatcher's order is checked as a list.
+  - **Why that failure mode is worse than it looks.** The dispatcher stops at the first handler that returns true. So one over-eager module — a dropped `&&`, a moved brace — silently shadows every module after it, and a 404 arrives in place of a real route. Proven rather than asserted: changing one condition to `startsWith('/v1')` in `connections.ts` made the guard fail with `connections claimed GET /v1/keys, which belongs to api-keys`, which is the whole bug in one line.
+  - **Order is load-bearing and is now written down in one readable list.** The connection routes match on `startsWith('/v1/connections/')`, so `/check` and `/models/refresh` are only reached because they are tried first, and `inference` is last because it carries the authentication gate. That is no longer inferable from reading 373 lines.
+  - `sendJson` was called from **43 places across all five modules** — the most-reached function in the file, and the clearest evidence the helpers were already a shared layer that had simply never been separated from the routes using them. They are `http.ts` now, and the rule they encode is that a route decides *which* resource and never how the bytes get there.
+  - **The auth gate stayed with the routes it protects** rather than moving to the dispatcher. A gate in the dispatcher is one edit away from guarding the wrong thing, and it protects exactly two routes.
+  - **A pre-existing test was network-dependent, and my own gate reporting hid it.** `pnpm verify` showed one failure — *"a check with no browser available is refused rather than passed"*, at 27.8 seconds — and then printed `verify exit: 0`. That zero was `echo`'s exit code, not `pnpm`'s: I had piped `pnpm verify` into `grep` and read `$?` afterwards. **A gate that reports green while a test fails is worse than no gate**, because it is believed. Fixed the capture and fixed the test.
+  - The test called `checkChatGptWeb` with no driver injected, so the real driver launched a browser and reached for chatgpt.com — in a file whose own header says *"The DeepSeek connect flow, without a network"*. A test whose entire claim is *"with no browser, refuse rather than pass"* was depending on whether this machine happened to have one. The sibling file already injected a stub; this one now injects **the absence of one**, which is what it was always describing: `available()` answering `ok: false`. 28s → 1.2s, deterministic over three runs.
+  - It now also asserts the driver's reason reaches the client (`/No browser is available/`). `PROVIDER_UNAVAILABLE` alone is the generic message this project does not ship, and a user cannot act on *"unavailable"* — they can act on *"install a browser"*.
+  - Files: `apps/gateway/src/http.ts` (new), `apps/gateway/src/routes/{route-context,status,connections,oauth,api-keys,inference}.ts` (new), `apps/gateway/src/server.ts`, `apps/gateway/test/routes.test.js` (new).
+  - Depends on: Task 49.
+  - Scope: Medium.
+
 - [x] Task 49: Phase 2 — extract `RequestExecutor`, and fix a routing defect it exposed.
   - Acceptance: the failover loop, the attempt ledger and the ordering live outside the composition root; a test says the executor names no provider.
   - Verify: 15 `RequestExecutor` tests and 2 new routing tests; `service.ts` 1409 → 1174 lines. The hedge test was run 5× consecutively to confirm it is not load-flaky.

@@ -25,7 +25,13 @@ refactor, and several of them contradict what an outsider might assume.
 | `apps/gateway/src/provider-resolver.ts` | 120 | **0** | enforced by a test that greps the file |
 | `apps/gateway/src/request-executor.ts` | 331 | **0** | the failover loop, the attempt ledger, the ordering |
 | `apps/gateway/src/service.ts` | 1174 | 9 | down from 12, all `.onDemand()` registrations |
-| `apps/gateway/src/server.ts` | 1202 | 5 | all in connection lifecycle routes |
+| `apps/gateway/src/http.ts` | 256 | **0** | the vocabulary every route shares |
+| `apps/gateway/src/routes/oauth.ts` | 249 | 4 | the module a provider split would help most |
+| `apps/gateway/src/routes/connections.ts` | 233 | 5 | all in connection lifecycle |
+| `apps/gateway/src/routes/inference.ts` | 386 | **0** | `/v1/models`, `/v1/chat/completions`, and the auth gate |
+| `apps/gateway/src/routes/api-keys.ts` | 71 | **0** | |
+| `apps/gateway/src/routes/status.ts` | 37 | **0** | `/health`, `/v1/routing` |
+| `apps/gateway/src/server.ts` | 155 | **0** | was 1202 with 5 provider ids |
 
 **The Core was far more provider-neutral than it looked.** Twelve literals in 1500 lines is not a
 codebase littered with provider conditionals, and the ones that existed were not scattered — they
@@ -95,7 +101,9 @@ the adapter owning *how* — would absorb every one of those hand-wired branches
 
 ```text
 apps/gateway/src/
-  server.ts          HTTP: routes, CORS, body limits. Translates requests; no provider logic.
+  server.ts          CORS, body limits, and a five-line route dispatcher. No provider logic.
+  http.ts            Read a request, write a response, turn a failure into an envelope.
+  routes/            One module per resource: status, connections, oauth, api-keys, inference.
   service.ts         Composition root. Wires the managers below to its own effects.
   provider-resolver  Which adapter serves a provider id. Zero provider ids; a test enforces it.
   request-executor   The failover chain: hedge, retry, next route, attempt ledger. Zero ids.
@@ -155,8 +163,10 @@ adapter is asking the Core to do something it should be doing itself. That is th
 abstraction instead of a branch.
 
 Web-session providers additionally need a connect route, because the credential is obtained by a
-manual step rather than a request body. Those routes live in `server.ts` and are the one
-*intentional* provider-specific surface in the HTTP layer.
+manual step rather than a request body. Those routes live in `routes/oauth.ts` and are the one
+*intentional* provider-specific surface in the HTTP layer. It is also the module where a provider
+split would pay for itself fastest: a fifth OAuth provider is five more `if` blocks in one file,
+next to the four that already exist.
 
 ---
 

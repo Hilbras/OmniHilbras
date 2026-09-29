@@ -31,8 +31,27 @@ const secretStore = {
   },
 };
 
+/**
+ * A service with **no browser**, stated rather than left to chance.
+ *
+ * This file's header says "without a network", and until now two of its tests broke that: they
+ * called `checkChatGptWeb` with no driver injected, so the real driver launched a browser and
+ * reached for chatgpt.com. That made a test whose entire claim is *"with no browser, refuse rather
+ * than pass"* depend on whether this machine happened to have one — and it cost 28 seconds of DNS
+ * timeouts when it did not.
+ *
+ * `available()` answering `ok: false` is the honest way to say "no browser": it is the question the
+ * adapter asks before it does anything, and the refusal it produces is the one a user with no
+ * browser installed actually gets. The sibling file `chatgpt-web-check.test.js` already injects a
+ * driver; this one now injects the absence of one, which is what it was always describing.
+ */
 function service() {
-  return new GatewayService(createProviderRegistry(loadGatewayConfig({})), { get: async () => undefined });
+  return new GatewayService(createProviderRegistry(loadGatewayConfig({})), { get: async () => undefined }, undefined, undefined, {
+    chatGptWebDriver: {
+      available: async () => ({ ok: false, reason: 'No browser is available on this machine.' }),
+      ask: async () => { throw new Error('the driver must not be used once it reports no browser'); },
+    },
+  });
 }
 
 /**
@@ -45,9 +64,19 @@ test('a check with no browser available is refused rather than passed', async ()
   // The check opens chatgpt.com. In an environment with no browser it must say so, because
   // the alternative — reporting `verified: true` without having verified anything — is the
   // thing this whole change exists to prevent.
+  //
+  // The `ask` in the stub throws if reached, so this also proves the check stops at
+  // `available()` rather than reporting a result it could not have obtained.
   await assert.rejects(
     () => service().checkChatGptWeb('__Secure-next-auth.session-token=abc; oai-did=xyz'),
-    (error) => error.code === 'PROVIDER_UNAVAILABLE',
+    (error) => {
+      assert.equal(error.code, 'PROVIDER_UNAVAILABLE');
+      // The reason has to survive to the client. `PROVIDER_UNAVAILABLE` on its own is the generic
+      // message this project does not ship, and a user cannot act on "unavailable" — they can act
+      // on "install a browser".
+      assert.match(error.publicMessage ?? error.message, /No browser is available/);
+      return true;
+    },
   );
 });
 
