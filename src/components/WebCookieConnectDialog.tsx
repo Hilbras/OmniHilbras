@@ -42,6 +42,8 @@ export type WebSessionDescriptor = {
     note: string;
     /** The button. */
     label: string;
+    /** Why a separate window opens, said before the click. */
+    whySeparateWindow: string;
     /** Shown when the gateway has no display to open a window on. */
     noDisplay: string;
     /** Shown while the window is open and waiting. */
@@ -289,6 +291,24 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
               {/* The note comes from the provider, not from here. */}
               {descriptor.signIn?.note}
             </p>
+            {/*
+              Why a separate window opens, before the click rather than after it.
+              It is not a bug: the session is read out of a browser profile OmniHilbras owns,
+              and a tab in this browser belongs to a browser whose storage cannot be read from
+              here. The link below is the alternative — sign in here, copy one value.
+            */}
+            <p className="mt-1.5 text-[10px] leading-relaxed text-muted">{descriptor.signIn?.whySeparateWindow}</p>
+            {descriptor.paste && (
+              <a
+                href={website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-gold-text hover:underline"
+              >
+                Sign in inside this browser instead
+                <ExternalLink className="h-2.5 w-2.5" aria-hidden="true" />
+              </a>
+            )}
             <button
               type="button"
               onClick={() => void signInWithBrowser()}

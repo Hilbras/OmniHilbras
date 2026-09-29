@@ -147,6 +147,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 30: Say why a separate window opens, and offer signing in inside the browser instead.
+  - Acceptance: the reason is stated *before* the click, and there is a link that opens the provider in the user's own tab.
+  - Verify: the DeepSeek dialog now contains "A separate browser window will open on your desktop…" and a `Sign in inside this browser instead` link pointing at `https://chat.deepseek.com`, `target="_blank"`. 401 tests pass.
+  - Findings: the complaint was "it does not open a new tab in the browser I am using, it opens another browser" — and the copy was silent about it, so a required behaviour read as a bug. **The window cannot be removed**: the session is read out of a browser profile OmniHilbras owns (`launchPersistentContext` against `~/.config/omnihilbras/<provider>/<hash>`), and a tab in the user's own browser is a different browser whose cookies and localStorage are not readable from here. So the fix is to say that first and give the other route a real link: sign in inside this browser, copy the `userToken` from localStorage, paste it. The extraction guides now also open with "With … open and signed in **in this browser**", because the copy path is now a first-class route rather than a fallback. What was genuinely wrong was not the window but the silence.
+  - Files: `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, docs.
+  - Depends on: Task 29.
+  - Scope: Small.
+
 - [x] Task 29: Stop calling a CORS refusal "offline".
   - Acceptance: a 403 from the gateway is reported as a refusal with its own wording, not as an outage.
   - Verify: on `http://localhost:5173` the badge reads `Gateway online` with 13 cards. The refusal case was reproduced by hand — `Origin: http://localhost:4173` is answered `403 CORS_ORIGIN_DENIED` while `:5173` gets `200` — and the two are now distinct states with distinct wording. 401 tests pass.

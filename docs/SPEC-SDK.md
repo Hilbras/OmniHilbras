@@ -1036,6 +1036,27 @@ learn it stopped failing. Verified end to end: with the gateway stopped the badg
 `Gateway offline` / `not answering · pnpm dev:gateway`, and with it restarted — **no reload** —
 it read `Gateway online` again.
 
+### Why the sign-in opens a separate window
+
+It opens one, and it always will. The session is read out of a browser profile OmniHilbras
+owns — `launchPersistentContext` against `~/.config/omnihilbras/<provider>/<hash>` — and a tab
+in the user's own browser belongs to a *different* browser, whose cookies and localStorage are
+not readable from here. Signing in your own tab and having OmniHilbras magically see it would
+mean asking you to relaunch your browser with a debugging port, which is a much worse thing to
+ask than "a window will open".
+
+What was actually wrong was the silence. The copy said nothing about the window, so a required
+behaviour read as a bug. Now, before the click:
+
+> A separate browser window will open on your desktop. That is required: the userToken is read
+> out of a browser profile OmniHilbras owns, and a tab in this browser is a different browser
+> whose localStorage cannot be read from here. To sign in inside this browser instead, use the
+> paste option below.
+
+And there is a real link — **Sign in inside this browser instead** — so the in-browser route is
+a first-class choice rather than a fallback. The extraction guides now open with "With … open
+and signed in **in this browser**" for the same reason.
+
 ### A refusal is not an outage
 
 The gateway answers **`403 CORS_ORIGIN_DENIED`** when a request carries an `Origin` that is not

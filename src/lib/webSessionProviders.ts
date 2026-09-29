@@ -27,7 +27,7 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     extractionSteps: [
       {
         label: 'Fast path',
-        body: `Install the Cookie Editor extension (chromewebstore.google.com → Cookie Editor), open it on the signed-in chatgpt.com tab, find ${CHATGPT_WEB_SESSION_COOKIE} — select every numbered chunk if it is split — and choose Export → Copy with the export format set to "Cookie header".`,
+        body: `With chatgpt.com open and signed in in this browser, install the Cookie Editor extension (chromewebstore.google.com → Cookie Editor), open it on that tab, find ${CHATGPT_WEB_SESSION_COOKIE} — select every numbered chunk if it is split — and choose Export → Copy with the export format set to "Cookie header".`,
       },
       {
         label: 'Manual path',
@@ -36,6 +36,8 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     ],
     signIn: {
       label: 'Sign in with ChatGPT',
+      whySeparateWindow:
+        'A separate browser window will open on your desktop. That is required: the session is read out of a browser profile OmniHilbras owns, and a tab in this browser is a different browser whose storage cannot be read from here. To sign in inside this browser instead, use the paste option below.',
       opened: 'A ChatGPT window has opened on your desktop. Sign in there — this closes itself once you are signed in.',
       noDisplay:
         'A ChatGPT window would open on the machine running OmniHilbras, and there is no display there — so there is nowhere to sign in. Paste a Cookie header below instead, or start OmniHilbras on a machine with a display.',
@@ -68,7 +70,7 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     extractionSteps: [
       {
         label: 'Fast path',
-        body: 'Sign in, then open the browser developer tools (F12 → Application → Local Storage → https://chat.deepseek.com) and copy the value of `userToken`. It is sometimes stored as {"value":"…"} — either form is accepted.',
+        body: 'With chat.deepseek.com open and signed in in this browser, open the developer tools (F12 → Application → Local Storage → https://chat.deepseek.com) and copy the value of `userToken`. It is sometimes stored as {"value":"…"} — either form is accepted.',
       },
       {
         label: 'Or let OmniHilbras read it',
@@ -77,6 +79,8 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     ],
     signIn: {
       label: 'Sign in with DeepSeek',
+      whySeparateWindow:
+        'A separate browser window will open on your desktop. That is required: the userToken is read out of a browser profile OmniHilbras owns, and a tab in this browser is a different browser whose localStorage cannot be read from here. To sign in inside this browser instead, use the paste option below and copy the userToken.',
       opened: 'A DeepSeek window has opened on your desktop. Sign in there — this closes itself once you are signed in.',
       noDisplay:
         'A DeepSeek window would open on the machine running OmniHilbras, and there is no display there — so there is nowhere to sign in. Paste a userToken below instead, or start OmniHilbras on a machine with a display.',
