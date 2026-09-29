@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
@@ -71,7 +71,6 @@ export type GatewayServiceOptions = {
 
 export class GatewayService {
   private readonly connectionLocks = new Map<string, Promise<void>>();
-  private readonly dynamicAdapters = new Map<string, { endpoint: string; adapter: ProviderAdapter }>();
   private readonly transport: HttpTransport;
   private cline?: ProviderAdapter;
   private zen?: ProviderAdapter;
@@ -165,8 +164,8 @@ export class GatewayService {
     this.providers = new ProviderResolver(registry)
       .onDemand('cline', () => this.clineAdapter(), { validateOnSave: true })
       .onDemand('opencode', () => this.zenAdapter())
-      .onDemand(opencodeConsoleProviderId, (providerId) => this.opencodeConsoleAdapter(providerId))
-      .onDemand(kiroProviderId, (providerId) => this.kiroAdapter(providerId))
+      .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId))
+      .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId))
       .onDemand(chatGptWebProviderId, () => this.chatGptWebAdapter())
       .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter());
     this.healthManager = new HealthManager(
@@ -248,47 +247,19 @@ export class GatewayService {
    * Adapters that can actually serve traffic: registered ones plus an
    * OpenAI-compatible adapter per saved connection endpoint.
    */
+  /**
+   * Every adapter worth probing, registered plus on-demand.
+   *
+   * The on-demand half is `ProviderResolver.active()`: a provider with no static configuration is
+   * only polled once it has a credential, because probing without one spends a request that cannot
+   * succeed. That used to be six hand-written branches, and two of them passed the connection id
+   * while the resolution path passed the provider id to the same factory.
+   */
   private async activeAdapters(): Promise<ProviderAdapter[]> {
     const connections = await this.listConnections();
-    const adapters = new Map(this.registry.list().map((adapter) => [adapter.id, adapter]));
-    // Cline has no static configuration, so it is only polled once a saved
-    // connection with a credential exists.
-    if (connections.some((connection) => connection.providerId === 'cline' && connection.hasCredential)) {
-      adapters.set('cline', this.clineAdapter());
-    }
-    if (connections.some((connection) => connection.providerId === 'opencode' && connection.hasCredential)) {
-      adapters.set('opencode', this.zenAdapter());
-    }
-    const consoleConnection = connections.find((connection) => connection.providerId === opencodeConsoleProviderId && connection.hasCredential);
-    if (consoleConnection) {
-      adapters.set(opencodeConsoleProviderId, this.opencodeConsoleAdapter(consoleConnection.id));
-    }
-    const kiroConnection = connections.find((connection) => connection.providerId === kiroProviderId && connection.hasCredential);
-    if (kiroConnection) {
-      adapters.set(kiroProviderId, this.kiroAdapter(kiroConnection.id));
-    }
-    const chatGptWebConnection = connections.find((connection) => connection.providerId === chatGptWebProviderId && connection.hasCredential);
-    if (chatGptWebConnection) {
-      adapters.set(chatGptWebProviderId, this.chatGptWebAdapter());
-    }
-    // DeepSeek Web needs the same treatment, and the omission was silent: without it the
-    // connection fell through to a generic OpenAI-compatible adapter pointed at
-    // chat.deepseek.com, which is not an OpenAI endpoint. Health then reported the provider as
-    // `unavailable` with an empty message while routing worked perfectly — so "Test
-    // provider" failed on a connection that could answer.
-    const deepSeekWebConnection = connections.find((connection) => connection.providerId === deepseekWebProviderId && connection.hasCredential);
-    if (deepSeekWebConnection) {
-      adapters.set(deepseekWebProviderId, this.deepSeekAdapter());
-    }
-    for (const connection of connections) {
-      if (adapters.has(connection.providerId)) continue;
-      const cached = this.dynamicAdapters.get(connection.providerId);
-      adapters.set(connection.providerId, cached && cached.endpoint === connection.endpoint
-        ? cached.adapter
-        : new OpenAICompatibleAdapter({ id: connection.providerId, name: connection.name, baseUrl: connection.endpoint }));
-    }
-    return [...adapters.values()];
+    return [...this.registry.list(), ...(await this.providers.active(connections))];
   }
+
 
   async listAllModels(signal?: AbortSignal): Promise<GatewayModelList> {
     const connections = (await this.listConnections()).filter((connection) => connection.enabled && connection.hasCredential);

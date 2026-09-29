@@ -32,18 +32,49 @@ test('an on-demand adapter is built when first needed, not at registration', asy
   // driver, or a shared access-token cache. Building one eagerly would mean a driver per
   // provider id, created whether or not anyone ever asked it.
   let built = 0;
-  const resolver = new ProviderResolver(new ProviderRegistry()).onDemand('lazy', (id) => { built += 1; return stubAdapter(id); });
+  const resolver = new ProviderResolver(new ProviderRegistry()).onDemand('lazy', ({ providerId }) => { built += 1; return stubAdapter(providerId); });
   assert.equal(built, 0, 'registration must not build anything');
   const adapter = await resolver.resolve('lazy');
   assert.equal(built, 1);
   assert.equal(adapter.id, 'lazy');
 });
 
-test('the factory is given the provider id, so a multi-connection provider can be per-connection', async () => {
+test('the factory is given the saved connection, not just the provider id', async () => {
+  // This is the fix. Two callers used to supply different values: the resolution path passed the
+  // provider id where the health path passed the connection id, and the adapters built from it
+  // write refreshed credentials back to the store under that value. The adapter is cached, so
+  // whichever caller built first decided the key.
   const seen = [];
-  const resolver = new ProviderResolver(new ProviderRegistry()).onDemand('multi', (id) => { seen.push(id); return stubAdapter(id); });
+  const resolver = new ProviderResolver(new ProviderRegistry()).onDemand('multi', (context) => { seen.push(context); return stubAdapter(context.providerId); });
+  await resolver.resolve('multi', undefined, async () => [
+    { id: 'connection-7', providerId: 'multi', endpoint: 'https://m.invalid/v1', name: 'Multi' },
+  ]);
+  assert.deepEqual(seen, [{ providerId: 'multi', connection: { id: 'connection-7' } }]);
+});
+
+test('the resolution path and the health path now agree on the connection', async () => {
+  // Both go through the same lookup, so a Kiro adapter built by a health probe keys its
+  // refreshed-credential writes to the same connection as one built by a request.
+  const built = [];
+  const factory = (context) => { built.push(context.connection?.id); return stubAdapter(context.providerId); };
+  const connections = [{ id: 'connection-7', providerId: 'multi', hasCredential: true, endpoint: 'https://m.invalid/v1', name: 'Multi' }];
+  const resolver = new ProviderResolver(new ProviderRegistry()).onDemand('multi', factory);
+  await resolver.resolve('multi', undefined, async () => connections);
+  const active = await resolver.active(connections);
+  assert.equal(active.length, 1);
+  assert.deepEqual(built, ['connection-7', 'connection-7'], 'one answer, not two');
+});
+
+test('a provider with no credential is not probed, and an on-demand adapter that needs one is told so', async () => {
+  // Probing without a credential spends a request that cannot succeed, so an unconnected
+  // provider contributes no adapter at all. The factory is told the connection is absent rather
+  // than being handed a provider id to mistake for one.
+  const seen = [];
+  const resolver = new ProviderResolver(new ProviderRegistry()).onDemand('multi', (context) => { seen.push(context.connection); return stubAdapter(context.providerId); });
+  assert.deepEqual(await resolver.active([{ id: 'c', providerId: 'multi', hasCredential: false }]), [], 'no credential, no adapter');
+  assert.deepEqual(seen, [], 'and the factory is not even called');
   await resolver.resolve('multi');
-  assert.deepEqual(seen, ['multi']);
+  assert.deepEqual(seen, [undefined], 'a resolution with no saved connection is told so plainly');
 });
 
 test('an on-demand factory wins over a registry entry for the same id', async () => {
@@ -54,6 +85,16 @@ test('an on-demand factory wins over a registry entry for the same id', async ()
   const registry = new ProviderRegistry().register(stubAdapter('both'));
   const resolver = new ProviderResolver(registry).onDemand('both', () => fromFactory);
   assert.equal(await resolver.resolve('both'), fromFactory);
+});
+
+test('active() lists the registered adapters as well as the credentialed on-demand ones', async () => {
+  // The registered half is free, and a provider with static configuration is always worth probing;
+  // only a provider with none needs a credential to have anything to probe *with*.
+  const registered = stubAdapter('openai');
+  const resolver = new ProviderResolver(new ProviderRegistry().register(registered)).onDemand('multi', ({ providerId }) => stubAdapter(providerId));
+  const adapters = await resolver.active([{ id: 'c', providerId: 'multi', hasCredential: true }]);
+  assert.deepEqual(adapters.map((adapter) => adapter.id), ['multi']);
+  assert.equal(adapters.includes(registered), false, 'the caller adds the registry itself; duplicating it here would double-probe');
 });
 
 test('a registered adapter is never shadowed by the synthesised one', async () => {

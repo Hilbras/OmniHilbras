@@ -39,8 +39,26 @@ import { OpenAICompatibleAdapter, type ProviderAdapter, type ProviderRegistry } 
  */
 export type PendingEndpoint = { endpoint: string; name: string };
 
+/** What this resolver needs to know about a saved connection. */
+type SavedConnection = { id: string; providerId: string; endpoint: string; name: string };
+
+/** The connection an on-demand adapter should be built for, when one exists. */
+export type AdapterContext = {
+  providerId: string;
+  /**
+   * The saved connection for this provider, if it has one.
+   *
+   * Supplied rather than looked up by the factory, because two callers used to look it up
+   * *differently* — the resolution path passed the provider id where the health path passed the
+   * connection id — and the adapters built from it write refreshed credentials back to the store
+   * under that value. Whichever caller built first won, which made the key depend on whether a
+   * health probe or a request happened to arrive first.
+   */
+  connection?: { id: string };
+};
+
 /** Builds an adapter that cannot be constructed up front, because it needs per-connection state. */
-export type AdapterFactory = (providerId: string) => ProviderAdapter;
+export type AdapterFactory = (context: AdapterContext) => ProviderAdapter;
 
 /**
  * What an on-demand provider needs from the save path.
@@ -101,24 +119,65 @@ export class ProviderResolver {
   }
 
   /**
+   * The on-demand adapters whose provider actually has a credential.
+   *
+   * This replaces six hand-written branches, one per provider, that each looked for a connection
+   * with a credential and built an adapter. Two of them needed the connection id and four did not,
+   * so the six shapes were not the same shape — and the two that took an id were called with the
+   * provider id from one path and the connection id from the other.
+   *
+   * A provider with no static configuration is only polled once a credential exists, because
+   * probing it without one costs a request that cannot succeed. That rule is the whole of this
+   * method.
+   */
+  async active(connections: ReadonlyArray<{ id: string; providerId: string; hasCredential: boolean }>): Promise<ProviderAdapter[]> {
+    const adapters: ProviderAdapter[] = [];
+    for (const [providerId, factory] of this.onDemandFactories) {
+      const connection = connections.find((item) => item.providerId === providerId && item.hasCredential);
+      if (!connection) continue;
+      adapters.push(factory({ providerId, connection: { id: connection.id } }));
+    }
+    return adapters;
+  }
+
+  /**
+   * The connection this provider has, if any.
+   *
+   * Asked for rather than passed in, so a caller cannot supply a different answer to this and to
+   * `active()`.
+   */
+  private async savedConnectionFor(
+    providerId: string,
+    listConnections?: () => Promise<ReadonlyArray<SavedConnection>>,
+  ): Promise<SavedConnection | undefined> {
+    if (!listConnections) return undefined;
+    return (await listConnections()).find((item) => item.providerId === providerId);
+  }
+
+  /**
    * The adapter for a provider, building it if it has to be built.
    *
    * Order matters and is not arbitrary: on-demand first, because those adapters are *specific* to
    * their provider and a generic OpenAI-compatible one would be wrong; then the registry; then the
    * saved-endpoint fallback, which is the only path that invents an adapter.
    */
-  async resolve(providerId: string, pendingEndpoint?: PendingEndpoint, listConnections?: () => Promise<Array<{ providerId: string; endpoint: string; name: string }>>): Promise<ProviderAdapter> {
+  async resolve(providerId: string, pendingEndpoint?: PendingEndpoint, listConnections?: () => Promise<ReadonlyArray<SavedConnection>>): Promise<ProviderAdapter> {
     const factory = this.onDemandFactories.get(providerId);
-    if (factory) return factory(providerId);
+    if (factory) {
+      // Only the id crosses. The saved connection is looked up here rather than in the factory, so
+      // this path and `active()` cannot disagree about which connection an adapter belongs to — and
+      // the rest of the record stays the connection layer's business rather than becoming a second
+      // opinion about the endpoint.
+      const saved = await this.savedConnectionFor(providerId, listConnections);
+      return factory({ providerId, ...(saved ? { connection: { id: saved.id } } : {}) });
+    }
 
     const registered = this.registry.get(providerId);
     if (registered) return registered;
 
     // A connection being saved is not in the store yet, so the caller can pass the endpoint it is
     // about to use.
-    const connection = listConnections
-      ? (await listConnections()).find((item) => item.providerId === providerId)
-      : undefined;
+    const connection = await this.savedConnectionFor(providerId, listConnections);
     const endpoint = pendingEndpoint ?? (connection ? { endpoint: connection.endpoint, name: connection.name } : undefined);
     if (!endpoint) return this.registry.require(providerId);
 

@@ -147,6 +147,19 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 55: One way to ask "which adapters are worth probing", and one answer to which connection.
+  - Acceptance: `activeAdapters()` names no provider; the resolution path and the health path cannot disagree about which connection an adapter belongs to.
+  - Verify: 5 new resolver tests, including *"the resolution path and the health path now agree on the connection"*. 269 gateway tests. `service.ts` 1081 → 1052 lines, provider-id literals 8 → 5 in code (`defaultProviderId`, the Cline registration, and three in the Cline connect path).
+  - Findings: **`activeAdapters()` was six hand-written branches**, one per provider, each looking for a connection with a credential and building an adapter. Two of the six needed the connection id and four did not, so the six were not the same shape.
+  - **The two that took an id were called with two different values.** `resolveAdapter` passed the *provider id*; `activeAdapters` passed the *connection id*. And that id is where the adapter writes refreshed credentials back to the store. So the key a Kiro adapter used for its token refresh depended on which caller built it first — the adapter is cached, so first wins, and whether a health probe or a request arrived first is invisible state. **This one is latent, not firing:** both sign-in flows set `id === providerId`, so the two values happen to be the same string today. A connection created through the generic `PUT /v1/connections/:id` route could differ, and then refreshed tokens would be written under the wrong key.
+  - The factory now takes `{ providerId, connection }`, and **only the id crosses**. The rest of the record stays the connection layer's business rather than becoming a second opinion about the endpoint inside a provider adapter.
+  - A provider with no static configuration is only probed once it has a credential, because probing without one spends a request that cannot succeed. That rule is now `ProviderResolver.active()` and is the whole of the method.
+  - Two of my own resolver tests asserted the *old* factory contract and failed — correctly, since the contract had changed for a reason. Rewritten to assert the new one, including that an uncredentialed provider's factory is **never called** rather than called with a provider id it could mistake for a connection.
+  - I also found `dynamicAdapters` left behind in the service by the `ProviderResolver` extraction in 1.16.0 — dead state from three releases ago, removed here rather than left to look load-bearing.
+  - Files: `apps/gateway/src/provider-resolver.ts`, `apps/gateway/src/service.ts`, `apps/gateway/test/provider-resolver.test.js`.
+  - Depends on: Task 54.
+  - Scope: Medium.
+
 - [x] Task 54: Extract `SignInCoordinator`, and fix a copy that had lost its error branch.
   - Acceptance: the claim → poll → save → publish loop exists once, and the failure describer exists once.
   - Verify: 14 tests; 266 gateway tests. `service.ts` 1098 → 1081 lines.
