@@ -194,12 +194,23 @@ function fromCookieHeader(raw: string): ParsedChatGptStorageState {
   const values = new Map<string, string>();
   // Sparse on purpose: a gap is a gap, and `undefined` is how it shows up.
   const chunked = new Map<string, Array<string | undefined>>();
+  /**
+   * Whether *any* NextAuth cookie was present, including ones the allowlist drops.
+   *
+   * Tracked from the raw names rather than from `values`, because the cookie that identifies
+   * a signed-in browser — `__Secure-next-auth.callback-url` — is deliberately not forwarded, so
+   * by the time the check below runs there is no trace of it. Without this, a header copied from
+   * the Console of a signed-in browser is indistinguishable from one copied while signed out,
+   * and the message tells a signed-in user to sign in.
+   */
+  let sawNextAuthCookie = false;
   for (const pair of pairs) {
     const at = pair.indexOf('=');
     if (at <= 0) continue;
     const name = pair.slice(0, at).trim();
     const value = pair.slice(at + 1).trim();
     if (!value) continue;
+    if (name.startsWith('__Secure-next-auth.')) sawNextAuthCookie = true;
     // A chunked session token: `…session-token.0`, `…session-token.1`, and so on.
     const chunk = name.match(/^(.*)\.(\d+)$/);
     const family = chunk?.[1];
@@ -239,7 +250,23 @@ function fromCookieHeader(raw: string): ParsedChatGptStorageState {
   }
 
   if (!values.has(CHATGPT_WEB_SESSION_COOKIE)) {
-    const message = `That header has no ${CHATGPT_WEB_SESSION_COOKIE} in it. Sign in to chatgpt.com, then copy the Cookie header from a request that is already authenticated.`;
+    /**
+     * Two different mistakes produce this same header, and they need opposite fixes.
+     *
+     * NextAuth sets the session cookie `HttpOnly`, so `document.cookie` **cannot** read it —
+     * a console one-liner can never return a credential, however it is written. Meanwhile
+     * `__Secure-next-auth.callback-url` is not HttpOnly, so a signed-in browser still leaks
+     * *some* of the family through `document.cookie`. That is the discriminator: seeing a
+     * sibling cookie means you are signed in and copied from the wrong place, while seeing none
+     * of the family means you are not signed in at all.
+     *
+     * Telling those apart matters because the first is a dead end for the obvious move — you
+     * cannot fix it by trying the console again.
+     */
+    const hasNextAuthSibling = sawNextAuthCookie;
+    const message = hasNextAuthSibling
+      ? `That header has chatgpt cookies but no ${CHATGPT_WEB_SESSION_COOKIE}, because the session cookie is HttpOnly and a console command cannot read it. Copy the Cookie header from the Network tab instead: F12 → Network → reload → click a request to chatgpt.com → Headers → Request Headers → Cookie, and copy that whole line.`
+      : `That header has no ${CHATGPT_WEB_SESSION_COOKIE} in it, and no other signed-in cookie either, so this browser is not signed in to chatgpt.com. Sign in first, then copy the Cookie header from the Network tab: F12 → Network → reload → click a request to chatgpt.com → Headers → Request Headers → Cookie.`;
     throw new ProviderError('AUTHENTICATION_FAILED', message, {
       providerId: chatGptWebProviderId,
       publicMessage: message,

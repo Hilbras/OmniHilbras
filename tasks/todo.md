@@ -147,6 +147,16 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 39: Retract the ChatGPT console one-liner, and re-test the Qwen gate.
+  - Acceptance: the dialog never tells the user to use the Console for ChatGPT, and the error distinguishes "signed in, copied from the Console" from "not signed in".
+  - Verify: the dialog offers only the Network and Application routes and no `copy(document.cookie)`; a header containing `__Secure-next-auth.callback-url` is told the cookie is HttpOnly and pointed at the Network tab, while a header with no NextAuth cookie is told the browser is not signed in. 411 tests pass.
+  - Findings: **`copy(document.cookie)` cannot work, for anyone, ever.** NextAuth sets `__Secure-next-auth.session-token` `HttpOnly`, and `document.cookie` cannot read an HttpOnly cookie. I put it in v1.10.1 as the "fastest" path and it was the *only* path offered. What made it worse than simply not working is the shape of the failure: the header it returns is a plausible-looking set of chatgpt cookies with no session token, which reads exactly like being signed out — so it sent a signed-in user to sign in again. `__Secure-next-auth.callback-url` is *not* HttpOnly, so a signed-in browser still leaks part of the family, and that is now the discriminator: a sibling means signed in and copied from the wrong place, no sibling means signed out. The two need opposite instructions, and "sign in" is the wrong one half the time. Tracked from the raw cookie names, because the allowlist drops `callback-url` before the check runs.
+  - **Qwen: the gate is real, unconditional for a guest, and not a clearance flow.** Re-tested against the live site (app v0.4.4, model list now `qwen3.7-plus`). The turn endpoint answers **HTTP 200** with `{"ret":["FAIL_SYS_USER_VALIDATE","RGV587_ERROR::SM::哎哟喂,被挤爆啦,请稍后重试"],"data":{"url":"…/_____tmd_____/punish?x5secdata=…"}}`. Visiting that challenge URL returns 200, displays "Please connect them in order", **grants no cookie**, and the retry is refused with a freshly minted challenge. So it is a human puzzle, not something a client can satisfy. `/api/v1/chat/completions` is 404 — the v2 path is the only one. Also confirmed: asking the turn from inside the page **kills the renderer**, so a probe has to be made from Node with the harvested cookies and a byte cap.
+  - The one untested hypothesis is the same one that unblocked DeepSeek: **a signed-in Qwen session may not be gated.** That needs a credential only the user has. The card stays `planned` with the reason updated to the measured verdict.
+  - Files: `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, `src/lib/webSessionProviders.ts`, `src/data/providers.ts`, tests, docs.
+  - Depends on: Task 38.
+  - Scope: Small.
+
 - [x] Task 38: Stop painting white tiles behind white logos.
   - Acceptance: no bundled logo is invisible on its card, in either theme, and the classification cannot go stale.
   - Verify: ChatGPT Web and Qwen Web render on a dark tile instead of white-on-white; `tokenharbor.svg` (`#16191e`) and `ollama.png` (pure black) get a light tile so they are visible in dark mode; 151 assets indexed as light, 63 as dark, no overlap; `pnpm build` regenerates the index. 409 tests pass.

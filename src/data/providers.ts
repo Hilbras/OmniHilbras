@@ -108,7 +108,7 @@ export const providerCatalog: ProviderRecord[] = [
     modelList: [],
     /** Why it is not built, in one sentence a user can act on. */
     unavailableReason:
-      'The models are served to guests, but every turn is gated by Alibaba’s bot-protection captcha, which has to be solved in a browser. Not built on a maybe — see docs/SPEC-SDK.md for what was found.',
+      'Models are served to guests, but every turn is refused by Alibaba’s bot-protection gate (RGV587_ERROR). Visiting the challenge it hands back grants no cookie and the retry is refused identically, so it is a human puzzle rather than a clearance flow. Needs a signed-in Qwen session; not built on a maybe — see docs/SPEC-SDK.md.',
   },
   {
     id: 'deepseek-web',

@@ -26,13 +26,25 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
      */
     extractionSteps: [
       {
-        label: 'Fastest',
-        body: 'With chatgpt.com signed in, open the developer tools (F12) → Console, paste this line and press Enter. It copies the Cookie header, which is the complete set.',
-        snippet: 'copy(document.cookie)',
+        label: 'Copy the header',
+        /**
+         * The Network tab, not the Console — and that is not a preference.
+         *
+         * NextAuth sets the session cookie `HttpOnly`, so `document.cookie` **cannot** read it.
+         * I once put `copy(document.cookie)` here as the "fastest" path; it cannot work, for
+         * anyone, ever. It fails in a way that looks like the user is signed out, which sends
+         * them off to sign in again when they are already signed in. Only the raw request header
+         * and the Application panel can see an HttpOnly cookie.
+         *
+         * The whole `Cookie:` line is wanted, not just the session cookie: a token over the size
+         * limit is split into numbered chunks, and a header copied without its siblings is a
+         * broken session that fails later as an unexplained refusal.
+         */
+        body: 'With chatgpt.com open and signed in: F12 → Network → reload → click any request to chatgpt.com → Headers → Request Headers → Cookie. Copy that entire line and paste it here. Do not use the Console — the session cookie is HttpOnly, so no console command can read it.',
       },
       {
-        label: 'Manual path',
-        body: 'Open the browser developer tools (F12 → Network), reload, click any authenticated request, and copy the Cookie header value from Request Headers. Omit the `Cookie:` prefix.',
+        label: 'Or the Application panel',
+        body: `F12 → Application → Storage → Cookies → https://chatgpt.com. Copy the whole value of \`${CHATGPT_WEB_SESSION_COOKIE}\`. If it is split into numbered rows, join them in order with no separator.`,
       },
     ],
     paste: {

@@ -803,6 +803,24 @@ test('a header with the wrong cookie in it names what is missing', () => {
   );
 });
 
+test('"signed in but copied from the Console" is told apart from "not signed in"', () => {
+  // Two different mistakes produce the same header, and they need opposite fixes. NextAuth sets
+  // the session cookie HttpOnly, so `document.cookie` cannot read it — a console one-liner can
+  // never work — but `__Secure-next-auth.callback-url` is not HttpOnly, so a signed-in browser
+  // still leaks part of the family. Seeing a sibling means signed in; seeing none means signed
+  // out. Saying only "sign in" sends a signed-in user round in circles.
+  assert.throws(
+    () => parseChatGptStorageState('__Secure-next-auth.callback-url=https%3A%2F%2Fchatgpt.com%2F; oai-did=abc'),
+    (error) => error.code === 'AUTHENTICATION_FAILED' && /HttpOnly/.test(error.publicMessage) && /Network tab/.test(error.publicMessage),
+    'a header with a NextAuth sibling should say the cookie is HttpOnly and point at the Network tab',
+  );
+  assert.throws(
+    () => parseChatGptStorageState('oai-did=abc; _cfuvid=xyz'),
+    (error) => error.code === 'AUTHENTICATION_FAILED' && /not signed in/.test(error.publicMessage),
+    'a header with no NextAuth cookies at all should say the browser is not signed in',
+  );
+});
+
 test('a request line is refused as a request line', () => {
   assert.throws(() => parseChatGptStorageState('GET /backend-api/conversation HTTP/1.1'), /not the request line/);
 });

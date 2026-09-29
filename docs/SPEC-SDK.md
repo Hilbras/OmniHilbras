@@ -1335,6 +1335,31 @@ Two levels, because one is not enough:
 `isWebSessionProvider` is exported from the modal so the check is available rather than
 re-derived at each call site.
 
+### The Console cannot supply the ChatGPT credential, at all
+
+NextAuth sets `__Secure-next-auth.session-token` `HttpOnly`, and `document.cookie` cannot read an
+HttpOnly cookie. A console one-liner is therefore not a slower route — **it is a route that does
+not exist.** It was offered here as the *fastest* path, and it was the only path offered.
+
+What made it worse than not working is the shape of the failure. The header it returns is a
+plausible set of chatgpt cookies with no session token, which reads exactly like being signed
+out — so it sent a **signed-in** user off to sign in again. `__Secure-next-auth.callback-url` is
+not HttpOnly, so a signed-in browser still leaks part of the family, and that is the
+discriminator:
+
+| The pasted header contains | What happened | What to do |
+| --- | --- | --- |
+| any other `__Secure-next-auth.*` | signed in, copied from the Console | the cookie is HttpOnly — use the **Network** tab |
+| no `__Secure-next-auth.*` at all | not signed in | sign in, then use the **Network** tab |
+
+The sibling has to be detected from the **raw** cookie names: the allowlist drops `callback-url`
+on the way in, so by the time the check runs there is no trace of it.
+
+The two routes that do work are **Network → Headers → Request Headers → Cookie** (copy the whole
+line) and **Application → Storage → Cookies**. The whole line matters: a token over the size
+limit is split into numbered chunks, and a header copied without its siblings is a broken session
+that fails later as an unexplained refusal.
+
 ### Qwen Web: a card that says why it cannot be connected
 
 There **is** a card, and it is the honest kind. `status: 'planned'` is a distinct status rather
@@ -1355,6 +1380,30 @@ cannot work.
 
 The detail page enforces it too, and its empty state says the real reason rather than
 "add an API key" for a provider that has no API key.
+
+
+**Re-tested against the live site** (app `0.4.4`, model list now `qwen3.7-plus`). The verdict is
+unchanged and now precisely known:
+
+```
+POST /api/v2/chat/completions  →  200 application/json
+{"ret":["FAIL_SYS_USER_VALIDATE","RGV587_ERROR::SM::哎哟喂,被挤爆啦,请稍后重试"],
+ "data":{"url":"https://chat.qwen.ai/api/v2/chat/completions/_____tmd_____/punish?x5secdata=…"}}
+```
+
+Note the **200**. The refusal is a body, not a status, so a client that only checks the status
+code sees success. Three further facts, each measured:
+
+- **The challenge is not a clearance flow.** Visiting that `_____tmd_____/punish` URL returns 200,
+  renders "Please connect them in order", **sets no cookie**, and the retry is refused with a
+  freshly minted challenge. It is a human puzzle, not something a client can satisfy.
+- **`/api/v1/chat/completions` is 404.** v2 is the only turn path.
+- **Asking the turn from inside the page kills the renderer.** Any probe has to be made from Node
+  with the harvested cookies and a hard byte cap, because the failing response never ends.
+
+The one untested hypothesis is the one that unblocked DeepSeek: **a signed-in Qwen session may
+not be gated.** That needs a credential only the operator has, so the card stays `planned` rather
+than claiming a connection that cannot serve a token.
 
 ### What was found on the way
 
