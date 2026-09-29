@@ -119,11 +119,33 @@ test('the userToken is read whether it is bare or still wrapped', () => {
   // Requiring the user to know that is a papercut for no benefit.
   assert.equal(parseDeepSeekUserToken('  raw-token-123  '), 'raw-token-123');
   assert.equal(parseDeepSeekUserToken('{"value":"wrapped-456"}'), 'wrapped-456');
-  assert.equal(parseDeepSeekUserToken('{"other":"x"}'), '{"other":"x"}', 'an unexpected shape is used as-is, not silently emptied');
+  // A JSON object that is not the wrapper is used as-is, rather than silently emptied.
+  assert.equal(parseDeepSeekUserToken('{"other":"x"}'), '{"other":"x"}');
 });
 
 test('an empty paste says what to paste', () => {
   assert.throws(() => parseDeepSeekUserToken('   '), /Paste the userToken/);
+});
+
+test('the signed-out placeholder is refused, and named', () => {
+  // chat.deepseek.com stores `{"value":null,"__version":N}` when nobody is signed in. Falling
+  // through to "treat the raw string as the token" turned that into a credential that looked
+  // valid, and the failure surfaced much later as DeepSeek refusing a session nobody could
+  // explain. This is the most likely thing to be handed here, so it is named.
+  for (const signedOut of ['{"value":null,"__version":1}', '{"value":null}', '{"value":""}', '{"value":null,"__version":3}']) {
+    assert.throws(
+      () => parseDeepSeekUserToken(signedOut),
+      (error) => error.code === 'AUTHENTICATION_FAILED' && /not signed in/.test(error.publicMessage),
+      `accepted the signed-out placeholder: ${signedOut}`,
+    );
+  }
+});
+
+test('a real wrapped token is still read, and a bare one too', () => {
+  assert.equal(parseDeepSeekUserToken('{"value":"abc","__version":2}'), 'abc');
+  assert.equal(parseDeepSeekUserToken('bare-token'), 'bare-token');
+  // Something that is not the wrapper is used as-is rather than refused.
+  assert.equal(parseDeepSeekUserToken('{not json'), '{not json');
 });
 
 test('history is flattened into one prompt, and kept apart', () => {

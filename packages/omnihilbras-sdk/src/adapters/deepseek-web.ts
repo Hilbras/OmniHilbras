@@ -121,12 +121,33 @@ export function parseDeepSeekUserToken(raw: string): string {
     });
   }
   if (trimmed.startsWith('{')) {
+    /**
+     * The wrapper is `{"value":"…","__version":N}` — and **signed out it is
+     * `{"value":null}`**, which is exactly what a page that is not signed in stores.
+     *
+     * Falling through to "treat the raw string as the token" turned that null wrapper into a
+     * credential: it looked like a token, it was accepted, and the failure surfaced much later
+     * as DeepSeek refusing a session nobody could explain. An empty value is the single most
+     * likely thing to be handed here, so it is named rather than passed along.
+     */
+    let parsed: { value?: unknown };
     try {
-      const parsed = JSON.parse(trimmed) as { value?: unknown };
-      if (typeof parsed.value === 'string' && parsed.value.trim()) return parsed.value.trim();
+      parsed = JSON.parse(trimmed) as { value?: unknown };
     } catch {
-      // Not the wrapper after all; fall through to the raw value.
+      // Not the wrapper at all; a bare token is fine.
+      return trimmed;
     }
+    if (typeof parsed.value === 'string' && parsed.value.trim()) return parsed.value.trim();
+    // No `value` key at all means this was never the wrapper — some other object, pasted by
+    // mistake or from somewhere else. That is not the signed-out state, so it is used as-is
+    // rather than being told to sign in.
+    if (!('value' in parsed)) return trimmed;
+    const message =
+      'That userToken is empty, which is what chat.deepseek.com stores when you are not signed in. Open chat.deepseek.com, sign in, and copy it again.';
+    throw new ProviderError('AUTHENTICATION_FAILED', message, {
+      providerId: deepseekWebProviderId,
+      publicMessage: message,
+    });
   }
   return trimmed;
 }

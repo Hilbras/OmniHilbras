@@ -147,6 +147,14 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 32: Refuse the signed-out `userToken`, and make copying it one line.
+  - Acceptance: `{"value":null}` is refused by name, and the fastest extraction step is a copyable console line.
+  - Verify: `parseDeepSeekUserToken('{"value":null}')` throws `AUTHENTICATION_FAILED`; `{"value":"real"}` and a bare token still work; an object with no `value` key is still used as-is. The DeepSeek dialog offers one link, one clickable snippet — `copy(JSON.parse(localStorage.userToken).value)` — and one `Connect` button. 390 tests pass.
+  - Findings: probed the live site, and **`userToken` is `{"value":null,"__version":N}` when nobody is signed in** — that is the signed-out placeholder, and it is what the page actually stores. The parser fell through to "treat the raw string as the token", so that null wrapper became a **credential**: it looked valid, was accepted, and the failure surfaced much later as DeepSeek refusing a session nobody could explain. Deciding on **presence of the `value` key** rather than its emptiness matters: `{"other":"x"}` is some other object pasted by mistake and is used as-is, while `{"value":null}` is the signed-out state and is named as such. The old sign-in window had the identical hole — it read the null wrapper and declared itself signed in immediately, which is why the window "opened the home page and nothing happened". Also: extraction is now a **console one-liner** rather than a DevTools navigation, because the navigation is where people go wrong — a mis-click yields a cookie object or the signed-out placeholder, and neither is obvious at the point of failure. `copy(document.cookie)` for ChatGPT Web, `copy(JSON.parse(localStorage.userToken).value)` for DeepSeek.
+  - Files: `packages/omnihilbras-sdk/src/adapters/deepseek-web.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, tests, docs.
+  - Depends on: Task 31.
+  - Scope: Small.
+
 - [x] Task 31: Remove the separate-browser sign-in entirely. One button, and it opens in your browser.
   - Acceptance: the connect dialog has one sign-in control, it opens the provider in a new tab in the current browser, and nothing in the gateway launches a browser.
   - Verify: the DeepSeek dialog shows one link — `Open chat.deepseek.com`, `target="_blank"` — and the only button is `Connect`. `POST /v1/oauth/chatgpt/start` and `GET /v1/oauth/deepseek/status` are now `404`; `POST /v1/web-cookie/deepseek/connect` is `400` on an empty body and `POST /v1/connections` is `200`. 388 tests pass.

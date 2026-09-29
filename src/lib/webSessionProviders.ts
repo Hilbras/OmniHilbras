@@ -26,8 +26,9 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
      */
     extractionSteps: [
       {
-        label: 'Fast path',
-        body: `With chatgpt.com open and signed in in this browser, install the Cookie Editor extension (chromewebstore.google.com → Cookie Editor), open it on that tab, find ${CHATGPT_WEB_SESSION_COOKIE} — select every numbered chunk if it is split — and choose Export → Copy with the export format set to "Cookie header".`,
+        label: 'Fastest',
+        body: 'With chatgpt.com signed in, open the developer tools (F12) → Console, paste this line and press Enter. It copies the Cookie header, which is the complete set.',
+        snippet: 'copy(document.cookie)',
       },
       {
         label: 'Manual path',
@@ -57,8 +58,9 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
      */
     extractionSteps: [
       {
-        label: 'Fast path',
-        body: 'With chat.deepseek.com open and signed in in this browser, open the developer tools (F12 → Application → Local Storage → https://chat.deepseek.com) and copy the value of `userToken`. It is sometimes stored as {"value":"…"} — either form is accepted.',
+        label: 'Fastest',
+        body: 'With chat.deepseek.com signed in, open the developer tools (F12) → Console, paste this line and press Enter. It copies the userToken.',
+        snippet: 'copy(JSON.parse(localStorage.userToken).value)',
       },
       {
         label: 'Or let OmniHilbras read it',

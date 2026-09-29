@@ -26,8 +26,15 @@ export type WebSessionDescriptor = {
   website: string;
   /** The one credential that matters, named in the guide. */
   credentialName: string;
-  /** How to get it, in the order a person should try. */
-  extractionSteps: Array<{ label: string; body: string }>;
+  /**
+   * How to get it, in the order a person should try.
+   *
+   * The first step is a console one-liner rather than a DevTools navigation, because the
+   * navigation is where people get lost: a wrong click yields a cookie object, or the signed
+   * out placeholder, and neither is obvious at the point of failure. Pasting the value of
+   * `localStorage` is one line and it is the same value either way.
+   */
+  extractionSteps: Array<{ label: string; body: string; snippet?: string }>;
   /** The sign-in routes, when the provider has them. */
   /** The paste route, when there is one. */
   paste?: {
@@ -264,6 +271,19 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
                   </span>
                   <span>
                     <span className="font-semibold text-text">{step.label}:</span> {step.body}
+                    {step.snippet && (
+                      <>
+                        {' '}
+                        <button
+                          type="button"
+                          onClick={() => void navigator.clipboard?.writeText(step.snippet as string).catch(() => undefined)}
+                          title="Copy this line"
+                          className="mt-1 block w-full overflow-x-auto rounded border border-line bg-bg-soft px-1.5 py-1 text-left font-mono text-[10px] text-gold-text hover:border-gold/50"
+                        >
+                          {step.snippet}
+                        </button>
+                      </>
+                    )}
                   </span>
                 </li>
               ))}

@@ -1012,6 +1012,26 @@ up answering with its reasoning.
 nothing useful and the connection looks signed out forever. DeepSeek stores it sometimes as
 `{"value":"…"}` and sometimes bare, so both are read.
 
+**`{"value":null}` is the signed-out placeholder, and it is refused by name.** Probed against
+the live site: that is exactly what the page stores when nobody is signed in, and falling
+through to "treat the raw string as the token" turned it into a credential that looked valid,
+was accepted, and surfaced much later as DeepSeek refusing a session nobody could explain. The
+decision is on the **presence of the `value` key**, not its emptiness — `{"other":"x"}` is some
+other object pasted by mistake and is used as-is, while `{"value":null}` is the signed-out state
+and is named:
+
+> That userToken is empty, which is what chat.deepseek.com stores when you are not signed in.
+> Open chat.deepseek.com, sign in, and copy it again.
+
+Extraction is a **console one-liner** rather than a DevTools navigation, because the navigation
+is where people go wrong — a mis-click yields a cookie object or the signed-out placeholder, and
+neither is obvious at the point of failure:
+
+```
+ChatGPT Web   copy(document.cookie)
+DeepSeek Web  copy(JSON.parse(localStorage.userToken).value)
+```
+
 The request headers are DeepSeek's own web-client fingerprint, and the header *set* is itself
 a bot-detection signal: the 2.0.0 build dropped `X-App-Version` and added
 `X-Client-Bundle-Id`, so sending the stale stamp is itself suspicious. `x-hif-leim`, a signed
