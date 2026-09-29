@@ -2105,7 +2105,10 @@ Behavior when serving a request:
   deadline, and is only reachable by asking for it.
 - Rate limiting uses a sliding window per connection, so a burst cannot
   straddle a minute boundary and double the effective rate. A limited
-  connection hands the request to the next route. Asking whether a request may
+  connection hands the request to the next route **without being retried**,
+  on the first attempt as much as any other: a provider that has said
+  "you have reached your limit" has said it about the connection, so the next
+  request to that connection is one it has already refused. Asking whether a request may
   be sent costs nothing: a refused request spends no budget, because nothing was
   sent, and a request that *was* sent and then failed still spends it, because
   it still cost the provider a call. The default limit is none, which is right

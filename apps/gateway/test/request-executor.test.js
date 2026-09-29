@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { RequestExecutor } from '../dist/request-executor.js';
 import { ProviderError } from '@hilbras/omnihilbras';
 
@@ -274,10 +274,20 @@ test('a stream that dies mid-answer still counts as a success for the health cou
 });
 
 test('THE INVARIANT: the executor names no provider', () => {
-  // Same rule as the resolver. An invariant nobody checks is a comment, and a provider id
-  // appearing here would mean the loop had gone back to branching on who the provider is.
+  // Checked against the SDK's actual adapter ids rather than "any hyphenated string".
+  //
+  // My first version matched a pattern for any hyphenated word, which passed only because no such
+  // word happened to appear in the file — the moment RetryPolicy introduced 'next-route' it failed,
+  // on a name that is not a provider. A guard that can be silenced by a naming choice is a weak
+  // guard, and worse, it trains you to reach for an allowlist instead of fixing the code.
+  //
+  // Reading the adapter directory makes it self-maintaining: a new provider cannot be added without
+  // this noticing, and nothing else in the file can trip it.
+  const adapters = readdirSync(new URL('../../../packages/omnihilbras-sdk/src/adapters/', import.meta.url))
+    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
+    .map((file) => file.replace(/\.ts$/, ''));
   const source = readFileSync(new URL('../src/request-executor.ts', import.meta.url), 'utf8');
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-  const offenders = [...code.matchAll(/['"]([a-z0-9]+(?:-[a-z0-9]+)+)['"]/g)].map((match) => match[1]);
-  assert.deepEqual(offenders, [], `the executor must contain no provider id, found: ${offenders.join(', ')}`);
+  const found = adapters.filter((id) => new RegExp("['\"\`]" + id + "['\"\`]").test(code));
+  assert.deepEqual(found, [], `the request-executor must name no provider, found: ${found.join(', ')}`);
 });

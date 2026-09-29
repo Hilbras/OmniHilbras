@@ -1,5 +1,6 @@
 import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse } from '@hilbras/omnihilbras';
-import { isRetryableFailure, noCandidateMessage, type RouteCandidate, type RouteDecision } from './routing.js';
+import { noCandidateMessage, type RouteCandidate, type RouteDecision } from './routing.js';
+import { RetryPolicy } from './retry-policy.js';
 
 /**
  * Trying routes until one answers.
@@ -75,6 +76,14 @@ export type RequestExecutorDeps = {
 };
 
 export class RequestExecutor {
+  /**
+   * One decision, consulted by every path a request can fail on.
+   *
+   * It was inline at two of them and had already diverged — see `RetryPolicy` for the measurement.
+   * A third copy inside this file would have been the fourth.
+   */
+  private readonly retryPolicy = new RetryPolicy();
+
   constructor(private readonly deps: RequestExecutorDeps) {}
 
   async chat(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal): Promise<GatewayChatOutcome> {
@@ -111,11 +120,16 @@ export class RequestExecutor {
           const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
           this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.');
           attempts.push({ providerId: candidate.providerId, attempt, ok: false, latencyMs, errorCode: code });
-          // A per-connection limit should hand off to the next route, not retry here.
-          if (error instanceof ProviderError && error.code === 'RATE_LIMITED' && attempts.length > 1) break;
-          if (!isRetryableFailure(error)) throw attachAttempts(error, attempts);
           lastError = error;
-          if (signal?.aborted) break;
+          const action = this.retryPolicy.afterFailure({
+            error,
+            candidate,
+            attemptsOnThisRoute: attempt,
+            aborted: Boolean(signal?.aborted),
+            canRetry: true,
+          });
+          if (action === 'stop') throw attachAttempts(error, attempts);
+          if (action === 'next-route') break;
         }
       }
     }
@@ -272,7 +286,15 @@ export class RequestExecutor {
         this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.');
         attempts.push({ providerId: candidate.providerId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
         lastError = error;
-        if (!isRetryableFailure(error) || signal?.aborted) break;
+        // `canRetry: false`, because a stream walks the route chain once: once the first chunk has
+        // not been sent there is still a chain to walk, and once it has, the client already holds a
+        // partial answer a second provider would not match. The policy is asked anyway rather than
+        // trusting that this loop happens to be the shape that needs no answer.
+        //
+        // `stop` leaves the loop and reports; anything else walks to the next connection, which is
+        // what `continue` does here and what the old inline check was doing with its two branches.
+        const action = this.retryPolicy.afterFailure({ error, candidate, attemptsOnThisRoute: 1, aborted: Boolean(signal?.aborted), canRetry: false });
+        if (action === 'stop') break;
         continue;
       }
       attempts.push({ providerId: candidate.providerId, attempt: 1, ok: true, latencyMs: Date.now() - startedAt });

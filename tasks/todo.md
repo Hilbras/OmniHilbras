@@ -147,6 +147,24 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 59: Phase 3 — extract `RetryPolicy`, and fix a rule that asked again after being told no.
+  - Acceptance: one decision — retry, next route, or stop — consulted by every path a request can fail on, and it does not depend on which path asked.
+  - Verify: 12 policy tests plus the rewritten invariant guards; 324 gateway tests. Measured with the attempt ledger as the source of truth, before and after.
+  - Findings: **the decision was inline at two places and had already diverged**, and the divergence was the bug. The chat path had `if (code === 'RATE_LIMITED' && attempts.length > 1) break;` and the streaming path had no rate-limit rule at all. Measured:
+  - ```
+    chat  / RATE_LIMITED   primary → primary → backup     3 attempts
+    stream/ RATE_LIMITED   primary → backup                2 attempts
+    ```
+  - **Chat asked a connection that had just answered "you have reached your limit" a second time.** The condition was gated on the *global* attempt count, so a fresh request on a limited connection — global count of one — read as "not the first attempt" and was retried. The second request is not optimism; it is a request the provider has already refused, and it is paid for. The line's own comment said the opposite of what the code did.
+  - The policy keys off `attemptsOnThisRoute`, the connection's own retry budget, and hands off for `RATE_LIMITED` **unconditionally**. A test asserts the answer is the same whether this was the first request or the fifth, because the original bug was exactly that the answer depended on the global count.
+  - **A property worth pinning that I had not considered:** a provider marking a *terminal* code `retryable: true` is still stopped, because `isRetryableFailure` consults the code list before the flag. Trusting the flag would let a mistyped code fan out across every route.
+  - **The totality test is the one that matters here** — every code the SDK can raise, in both retryable states, asserting the two paths differ in exactly one way (a stream never retries) and agree everywhere else. A policy that is merely correct on the cases you thought of is not a policy.
+  - **My "no provider ids" guard was weak, and I only found out because it failed for the wrong reason.** It matched any hyphenated word, so it passed only because no such word happened to appear — and the moment `RetryPolicy` introduced `'next-route'` it failed on a name that is not a provider. It now reads the SDK's adapter directory, so it is self-maintaining: a new provider cannot be added without it noticing, and nothing else in the file can trip it. Rewritten in four files, and **verified by planting a real provider id**, which it caught: *"the model-catalog must name no provider, found: openrouter"*.
+  - **I nearly concluded the rewritten guard was broken**, because my first planting attempt appeared to pass. The build had failed — I had piped `tsc` to `/dev/null`, so I could not see it — and I was reading a stale `dist`. Suppressing a command's output and then trusting its result is the same mistake as writing a test that asserts nothing.
+  - Files: `apps/gateway/src/retry-policy.ts` (new), `apps/gateway/src/request-executor.ts`, `apps/gateway/test/retry-policy.test.js` (new), four invariant guards, `docs/SPEC-SDK.md`.
+  - Depends on: Task 58.
+  - Scope: Medium.
+
 - [x] Task 58: Extract `ModelCatalog` — the last Phase 2 item in the plan.
   - Acceptance: the client list, the per-provider list, model-to-provider resolution and discovery all live together; the catalog names no provider.
   - Verify: 20 tests; 312 gateway tests. `service.ts` 1013 → 994 lines, which is **1,506 lines below where this phase started**.

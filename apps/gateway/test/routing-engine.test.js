@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { RoutingEngine } from '../dist/routing-engine.js';
 import { HealthRegistry, SlidingWindowRateLimiter } from '../dist/routing.js';
 import { ProviderError } from '@hilbras/omnihilbras';
@@ -175,10 +175,20 @@ test('the waits are readable, and a sent request is not a wait', async () => {
 });
 
 test('THE INVARIANT: the engine names no provider', () => {
-  // `defaultProviderId` is a constructor parameter for exactly this reason. If a provider name ever
-  // appears in this file, a routing change has gone back to needing a Core edit.
+  // Checked against the SDK's actual adapter ids rather than "any hyphenated string".
+  //
+  // My first version matched a pattern for any hyphenated word, which passed only because no such
+  // word happened to appear in the file — the moment RetryPolicy introduced 'next-route' it failed,
+  // on a name that is not a provider. A guard that can be silenced by a naming choice is a weak
+  // guard, and worse, it trains you to reach for an allowlist instead of fixing the code.
+  //
+  // Reading the adapter directory makes it self-maintaining: a new provider cannot be added without
+  // this noticing, and nothing else in the file can trip it.
+  const adapters = readdirSync(new URL('../../../packages/omnihilbras-sdk/src/adapters/', import.meta.url))
+    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
+    .map((file) => file.replace(/\.ts$/, ''));
   const source = readFileSync(new URL('../src/routing-engine.ts', import.meta.url), 'utf8');
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-  const offenders = [...code.matchAll(/['"]([a-z0-9]+(?:-[a-z0-9]+)+)['"]/g)].map((match) => match[1]);
-  assert.deepEqual(offenders, [], `the engine must contain no provider id, found: ${offenders.join(', ')}`);
+  const found = adapters.filter((id) => new RegExp("['\"\`]" + id + "['\"\`]").test(code));
+  assert.deepEqual(found, [], `the routing-engine must name no provider, found: ${found.join(', ')}`);
 });
