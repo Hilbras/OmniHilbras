@@ -1,6 +1,6 @@
 import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
-import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, modelMetaPriceOrder, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ModelMeta, type ModelMetaMap, type ResilienceSettings } from './connections.js';
+import { defaultResilienceSettings, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialSignIn, type KiroSignInStatus } from './kiro.js';
@@ -9,6 +9,7 @@ import { SlidingWindowRateLimiter, resolveRoute, type RouteCandidate } from './r
 import { HealthManager } from './health.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayStreamOutcome } from './request-executor.js';
+import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -99,6 +100,15 @@ export class GatewayService {
    * it performs is one of this service's methods, passed in above.
    */
   private readonly requests: RequestExecutor;
+  /**
+   * Storing and changing connections, with one error mapper and one catalog-merge policy.
+   *
+   * `canValidate` is what removed the Core's last reason to know a provider's name: it used to be
+   * `if (this.registry.get(id)?.validateCredential) … else if (id === 'cline') …`, because Cline is
+   * not in the registry and its adapter is built on demand. Asking the resolver instead means a
+   * second on-demand provider needs no edit here.
+   */
+  private readonly connections: ConnectionManager;
   private readonly rateLimiter: SlidingWindowRateLimiter;
   private readonly rateLimitWaitMs = new Map<string, number>();
   /**
@@ -132,6 +142,15 @@ export class GatewayService {
     const now = options.now ?? (() => Date.now());
     this.rateLimiter = new SlidingWindowRateLimiter(now);
     this.apiKeys = new ApiKeyManager(this.apiKeyStore);
+    this.connections = new ConnectionManager(this.connectionStore, {
+      lock: (operation) => this.withProviderLock(connectionMutationLock, operation),
+      canValidate: (providerId) => this.providers.canValidateCredential(providerId),
+      validate: async (providerId, credential, signal) => { await this.validateConnectionCredentialUnlocked(providerId, credential, signal); },
+      discover: ({ providerId, credential, policy, signal, pendingEndpoint }) =>
+        this.discoverConnectionModels(providerId, credential, policy, signal, pendingEndpoint),
+      readCredential: (connectionId, providerId) => this.secretStore.get(connectionId, providerId),
+      noteDiscoveryFailure: (error) => { this.lastDiscoveryNote = error instanceof ProviderError ? providerSaid(error) : error instanceof Error ? error.message : undefined; },
+    });
     this.requests = new RequestExecutor({
       planRoute: (model, explicitProviderId) => this.planRoute(model, explicitProviderId),
       chat: (providerId, request, signal) => this.chat(providerId, request, signal),
@@ -143,7 +162,7 @@ export class GatewayService {
       recordRateLimitUse: (connectionId) => this.rateLimiter.record(connectionId),
     });
     this.providers = new ProviderResolver(registry)
-      .onDemand('cline', () => this.clineAdapter())
+      .onDemand('cline', () => this.clineAdapter(), { validateOnSave: true })
       .onDemand('opencode', () => this.zenAdapter())
       .onDemand(opencodeConsoleProviderId, (providerId) => this.opencodeConsoleAdapter(providerId))
       .onDemand(kiroProviderId, (providerId) => this.kiroAdapter(providerId))
@@ -327,53 +346,15 @@ export class GatewayService {
     return this.withProviderLock(providerId, () => this.validateConnectionCredentialUnlocked(providerId, credential, signal));
   }
 
+  /**
+   * Stores a connection, after proving its credential.
+   *
+   * The store, the mutation lock, the catalog merge and the error mapping live in
+   * `ConnectionManager`. What stays here is the provider-facing half — proving a credential and
+   * reading a catalog — because both need the registry and the resolver.
+   */
   async saveConnection(input: ConnectionInput, credential: ProviderCredential, signal?: AbortSignal, options: { tolerateDiscoveryFailure?: boolean } = {}): Promise<ConnectionRecord> {
-    if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
-    // An unregistered provider is configuration for a custom endpoint, which is
-    // validated when it is first used rather than at save time.
-    this.registry.get(input.providerId);
-    return this.withProviderLock(connectionMutationLock, async () => {
-      // Not every provider can be probed without spending a request, so a
-      // capability without a validator is saved without a pre-flight check.
-      if (this.registry.get(input.providerId)?.validateCredential) {
-        await this.validateConnectionCredentialUnlocked(input.providerId, credential, signal);
-      } else if (input.providerId === 'cline') {
-        // Cline is not in the registry; its adapter is resolved on demand.
-        await (await this.resolveAdapter('cline')).validateCredential!(credential, signal ? { signal } : {});
-      }
-      let saveInput = input;
-      if (input.modelPolicy) {
-        // A sign-in that already came from the provider's own flow has proven the
-        // credential, so a catalog that will not read is not a reason to throw the
-        // session away. The connection is saved and the models arrive on the next read.
-        const discovered = await this.discoverConnectionModels(input.providerId, credential, input.modelPolicy, signal, { endpoint: input.endpoint, name: input.name }).catch((error: unknown) => {
-          if (!options.tolerateDiscoveryFailure) throw error;
-          const said = error instanceof ProviderError ? providerSaid(error) : error instanceof Error ? error.message : undefined;
-          this.lastDiscoveryNote = said;
-          return [] as Model[];
-        });
-        const discoveredModelIds = discovered.map((model) => model.id);
-        const existing = (await this.connectionStore!.list()).find((connection) => (input.id ? connection.id === input.id : connection.providerId === input.providerId));
-        const customModelIds = input.customModelIds ?? existing?.customModelIds ?? [];
-        const discoveredMeta = GatewayService.modelMetaFor(discovered);
-        saveInput = {
-          ...input,
-          modelIds: [...discoveredModelIds, ...customModelIds],
-          customModelIds,
-          // Custom ids are the operator's own and carry no catalog metadata, so only the
-          // discovered half is described here.
-          ...(discoveredMeta ? { modelMeta: { ...(input.modelMeta ?? {}), ...discoveredMeta } } : {}),
-        };
-      }
-      if (signal?.aborted) throw new ProviderError('CANCELLED', 'The connection save was cancelled.', { providerId: input.providerId });
-      try {
-        return await this.connectionStore!.save(saveInput, credential);
-      } catch (error) {
-        if (error instanceof ProviderError) throw error;
-        if (error instanceof ConnectionModelLimitError || error instanceof ConnectionMetadataLimitError) throw new ProviderError('INVALID_REQUEST', error.message, { cause: error });
-        throw new ProviderError('CONFIGURATION_ERROR', 'The local connection could not be saved.', { cause: error });
-      }
-    });
+    return this.connections.save(input, credential, signal, options);
   }
 
   /**
@@ -406,31 +387,9 @@ export class GatewayService {
    * in again, which for a device flow means a browser approval.
    */
   async refreshConnectionModels(connectionId: string, signal?: AbortSignal): Promise<ConnectionRecord> {
-    if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
-    const record = (await this.connectionStore.list()).find((item) => item.id === connectionId);
-    if (!record) throw new ProviderError('NOT_FOUND', 'That connection no longer exists.', { providerId: connectionId });
-    const credential = await this.secretStore.get(connectionId, record.providerId);
-    const policy = record.modelPolicy ?? 'all';
-    const discovered = await this.discoverConnectionModels(
-      record.providerId,
-      credential ?? { type: 'none' },
-      policy,
-      signal,
-      { endpoint: record.endpoint, name: record.name },
-    );
-    // Custom models are the operator's own additions and survive a rescan.
-    const merged = [...new Set([...discovered.map((model) => model.id), ...(record.customModelIds ?? [])])];
-    // `replace`, not add: the provider is the authority on what it serves, and a union here
-    // would keep a withdrawn model forever and file it as a custom addition besides.
-    const updated = await this.connectionStore.updateModels(
-      connectionId,
-      merged,
-      GatewayService.modelMetaFor(discovered),
-      { replace: true },
-    );
-    if (!updated) throw new ProviderError('NOT_FOUND', 'That connection no longer exists.', { providerId: connectionId });
-    return updated;
+    return this.connections.refreshModels(connectionId, signal);
   }
+
 
   /**
    * Starts an OpenCode Console sign-in. This is a device flow: the Console hands back a
@@ -874,30 +833,15 @@ export class GatewayService {
   }
 
   async listConnections() {
-    return this.connectionStore?.list() ?? [];
+    return this.connections.list();
   }
 
   async addConnectionModels(connectionId: string, modelIds: string[]) {
-    if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
-    return this.withProviderLock(connectionMutationLock, async () => {
-      try {
-        const connection = await this.connectionStore!.updateModels(connectionId, modelIds);
-        if (!connection) throw new ProviderError('NOT_FOUND', 'The local connection was not found.');
-        return connection;
-      } catch (error) {
-        if (error instanceof ProviderError) throw error;
-        if (error instanceof ConnectionModelLimitError || error instanceof ConnectionMetadataLimitError) throw new ProviderError('INVALID_REQUEST', error.message, { cause: error });
-        throw new ProviderError('CONFIGURATION_ERROR', 'The local model catalog could not be saved.', { cause: error });
-      }
-    });
+    return this.connections.setModels(connectionId, modelIds);
   }
 
   async removeConnection(connectionId: string) {
-    if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
-    return this.withProviderLock(connectionMutationLock, async () => {
-      const removed = await this.connectionStore!.remove(connectionId);
-      if (!removed) throw new ProviderError('NOT_FOUND', 'The local connection was not found.');
-    });
+    return this.connections.remove(connectionId);
   }
 
   /** The API keys this gateway knows about, and whether a key is required to use it. */
@@ -931,24 +875,12 @@ export class GatewayService {
   }
 
   async updateConnectionResilience(connectionId: string, resilience: Partial<ResilienceSettings>) {
-    if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
-    return this.withProviderLock(connectionMutationLock, async () => {
-      try {
-        const connection = await this.connectionStore!.updateResilience(connectionId, resilience);
-        if (!connection) throw new ProviderError('NOT_FOUND', 'The local connection was not found.');
-        return connection;
-      } catch (error) {
-        if (error instanceof ProviderError) throw error;
-        if (error instanceof ConnectionMetadataLimitError) throw new ProviderError('INVALID_REQUEST', error.message, { cause: error });
-        throw new ProviderError('CONFIGURATION_ERROR', 'The connection settings could not be saved.', { cause: error });
-      }
-    });
+    return this.connections.setResilience(connectionId, resilience);
   }
 
   /** The connection that serves a provider: the only one, or the first enabled. */
   private async connectionFor(providerId: string) {
-    const matches = (await this.listConnections()).filter((connection) => connection.providerId === providerId && connection.hasCredential);
-    return matches[0];
+    return this.connections.firstWithCredentialFor(providerId);
   }
 
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
@@ -1080,26 +1012,18 @@ export class GatewayService {
    * provider described only as an id yields no entry at all, so the dashboard can tell
    * "nothing was stated" from "stated as zero".
    */
-  private static modelMetaFor(models: readonly Model[]): ModelMetaMap | undefined {
-    const meta: ModelMetaMap = {};
-    for (const model of models) {
-      const prices = modelMetaPriceOrder
-        .map((key) => model.pricing?.[key])
-        .filter((value): value is number => typeof value === 'number');
-      const entry: ModelMeta = {
-        ...(model.displayName ? { n: model.displayName } : {}),
-        ...(model.contextWindow ? { c: model.contextWindow } : {}),
-        ...(model.inputModalities?.length ? { i: [...model.inputModalities] } : {}),
-        ...(model.outputModalities?.length ? { o: [...model.outputModalities] } : {}),
-        ...(prices.length ? { p: prices } : {}),
-      };
-      if (Object.keys(entry).length > 0) meta[model.id] = entry;
-    }
-    return Object.keys(meta).length > 0 ? meta : undefined;
-  }
+
 
   private async validateConnectionCredentialUnlocked(providerId: string, credential: ProviderCredential, signal?: AbortSignal): Promise<GatewayConnectionValidation> {
-    const adapter = this.requireAdapter(providerId);
+    /**
+     * Resolved, not required.
+     *
+     * `requireAdapter` is the registry-only lookup and throws for a provider whose adapter is built
+     * on demand — which is how a ChatGPT Web or Cline credential could be saved at all before
+     * `ConnectionManager` asked this question itself. It used to reach those through a literal
+     * branch; asking the resolver covers every one of them.
+     */
+    const adapter = await this.resolveAdapter(providerId);
     const context: ProviderRequestContext = { credential, ...(signal ? { signal } : {}) };
     if (!adapter.validateCredential) throw notSupported(adapter, 'credential validation');
     const result = await adapter.validateCredential(credential, context);

@@ -147,6 +147,18 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 51: Phase 2 — extract `ConnectionManager`, and declare a capability instead of inferring it.
+  - Acceptance: the store, the mutation lock, the catalog merge and the error mapping live in one file; the Core names no provider when saving a connection.
+  - Verify: 20 `ConnectionManager` tests and 4 new `ProviderResolver` tests; `service.ts` 1174 → 1103 lines; 233 gateway tests (591 with the SDK).
+  - Findings: **the duplication was the point worth fixing, not the moving.** Four near-identical error mappers differed only in their final sentence — *which* thing could not be saved. Four copies is four places for the next one to drift, and the copy that drifts is the one that starts blaming the operator for a disk error. There is now one mapper, and it takes the one sentence that varies.
+  - **Lock scope is deliberately not uniform, and that surprised me.** `save` holds the lock across prove → read catalog → store, because two concurrent saves would otherwise interleave a catalog read between writes. `refreshModels` holds **no** lock: it is a slow read of a third party, and locking it would make every save in the gateway queue behind one provider. I had "helpfully" given it the lock while de-duplicating, which would have made a background rescan a stall on the dashboard's save button. Three tests now pin the asymmetry.
+  - **A capability I inferred, and should have declared.** The Core used to ask "can this credential be proven before it is stored?" by naming Cline — Cline is absent from the registry, so `registry.get(id)?.validateCredential` was false for it and a literal was the only way through. I replaced it with "any on-demand provider can be validated". **Every on-demand provider has a `validateCredential`, so saving a ChatGPT Web credential started opening a real browser** — the two affected tests went from instant to 14 seconds each and failed. The fix is `onDemand(id, factory, { validateOnSave })`, **defaulting to false**: a factory cannot be inspected without building the adapter, and building it to answer a question is how a save button ends up launching a browser. Cline declares it; nothing else does.
+  - **I rewrote `modelMetaFor` from memory instead of moving it**, and it was wrong on sight — the real one stores `n`/`c`/`i`/`o`/`p` single letters and reads pricing through `modelMetaPriceOrder`. Re-deriving a function from its *shape* rather than its text silently changes a stored format. This is the third time this session a plausible-looking fixture or a from-memory reimplementation has been the bug.
+  - Three of my own tests were wrong before the code was: I made the store refuse when the claim was about the *validator*; I asserted "no calls recorded" when a `list` legitimately happens during a save; and I nested the store's recording state, so three tests passed the wrapper where the store was wanted. All three failed for reasons that had nothing to do with what they were testing.
+  - Files: `apps/gateway/src/connection-manager.ts` (new), `apps/gateway/src/provider-resolver.ts`, `apps/gateway/src/service.ts`, `apps/gateway/test/connection-manager.test.js` (new), `apps/gateway/test/provider-resolver.test.js`.
+  - Depends on: Task 50.
+  - Scope: Medium.
+
 - [x] Task 50: Phase 2 — split `server.ts` into `http.ts` and five route modules.
   - Acceptance: one 373-line `if` chain becomes five modules and a five-line dispatcher, and a test fails if any module claims a route that is not its own.
   - Verify: 4 structural tests; 37 route conditions before, 37 after (5 + 9 + 2 + 17 + 4), plus the auth gate. 210 gateway tests, all of the previous 206 unchanged.

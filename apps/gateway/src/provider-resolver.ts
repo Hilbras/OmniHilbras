@@ -42,8 +42,29 @@ export type PendingEndpoint = { endpoint: string; name: string };
 /** Builds an adapter that cannot be constructed up front, because it needs per-connection state. */
 export type AdapterFactory = (providerId: string) => ProviderAdapter;
 
+/**
+ * What an on-demand provider needs from the save path.
+ *
+ * `validateOnSave` exists because a capability cannot be inferred from the factory. Several
+ * on-demand adapters *do* have a `validateCredential`, and for most of them running it at save time
+ * is wrong: proving a ChatGPT Web credential means opening a browser, so a save would launch one
+ * and could fail on a network the connection does not otherwise need. The original code handled
+ * this by naming Cline in a literal branch; this is the same decision, stated where it is visible.
+ */
+export type OnDemandOptions = {
+  /**
+   * Prove the credential before storing it, for a provider that is absent from the registry and
+   * therefore invisible to the registry's own capability check.
+   *
+   * Defaults to false. Guessing `true` because an adapter happens to have a validator is how a save
+   * button starts opening browsers.
+   */
+  validateOnSave?: boolean;
+};
+
 export class ProviderResolver {
   private readonly onDemandFactories = new Map<string, AdapterFactory>();
+  private readonly onDemandOptions = new Map<string, OnDemandOptions>();
   private readonly dynamic = new Map<string, { endpoint: string; adapter: ProviderAdapter }>();
 
   constructor(private readonly registry: ProviderRegistry) {}
@@ -55,9 +76,23 @@ export class ProviderResolver {
    * need different credentials. The factory receives the provider id so a multi-connection
    * provider can build a per-connection adapter.
    */
-  onDemand(providerId: string, factory: AdapterFactory) {
+  onDemand(providerId: string, factory: AdapterFactory, options: OnDemandOptions = {}) {
     this.onDemandFactories.set(providerId, factory);
+    this.onDemandOptions.set(providerId, options);
     return this;
+  }
+
+  /**
+   * Whether a credential for this provider should be proven before the connection is stored.
+   *
+   * A registered adapter is asked what it can do. An on-demand one is asked what it *declared*,
+   * because a factory cannot be inspected without building the adapter — and building it to answer
+   * a question is how a save button ends up opening a browser.
+   */
+  canValidateCredential(providerId: string): boolean {
+    const registered = this.registry.get(providerId);
+    if (registered) return Boolean(registered.validateCredential);
+    return this.onDemandOptions.get(providerId)?.validateOnSave === true;
   }
 
   /** The ids this resolver builds on demand, in registration order. */

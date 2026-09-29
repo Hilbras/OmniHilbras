@@ -24,7 +24,8 @@ refactor, and several of them contradict what an outsider might assume.
 | `apps/gateway/src/routing.ts` → see above | 195 | **0** | `isRetryableFailure` now judges an unreadable answer a provider fault |
 | `apps/gateway/src/provider-resolver.ts` | 120 | **0** | enforced by a test that greps the file |
 | `apps/gateway/src/request-executor.ts` | 331 | **0** | the failover loop, the attempt ledger, the ordering |
-| `apps/gateway/src/service.ts` | 1174 | 9 | down from 12, all `.onDemand()` registrations |
+| `apps/gateway/src/connection-manager.ts` | 241 | **0** | one error mapper, one catalog merge, one lock scope |
+| `apps/gateway/src/service.ts` | 1103 | 8 | down from 12, all `.onDemand()` registrations |
 | `apps/gateway/src/http.ts` | 256 | **0** | the vocabulary every route shares |
 | `apps/gateway/src/routes/oauth.ts` | 249 | 4 | the module a provider split would help most |
 | `apps/gateway/src/routes/connections.ts` | 233 | 5 | all in connection lifecycle |
@@ -107,6 +108,7 @@ apps/gateway/src/
   service.ts         Composition root. Wires the managers below to its own effects.
   provider-resolver  Which adapter serves a provider id. Zero provider ids; a test enforces it.
   request-executor   The failover chain: hedge, retry, next route, attempt ledger. Zero ids.
+  connection-manager  Storing connections: one error mapper, one catalog merge, one lock scope.
   health.ts          Probing, ejection and recovery, asked two questions only.
   api-key-manager    API keys and the two user-facing messages about them.
   routing.ts         Provider-agnostic selection, ejection and recovery. Zero provider ids.

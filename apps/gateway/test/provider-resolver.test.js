@@ -119,6 +119,37 @@ test('the registrations are inspectable', () => {
   assert.deepEqual(resolver.onDemandIds(), ['a', 'b']);
 });
 
+test('save-time validation is declared, not inferred from the adapter', async () => {
+  // The failure this prevents: I first read "any on-demand provider with a `validateCredential`"
+  // and every on-demand provider has one, so saving a ChatGPT Web credential started opening a
+  // browser. Real requests only — and a save button that silently launches one is worse.
+  const withValidator = { ...stubAdapter('web'), validateCredential: async () => ({}) };
+  const resolver = new ProviderResolver(new ProviderRegistry())
+    .onDemand('web', () => withValidator)
+    .onDemand('declared', () => withValidator, { validateOnSave: true });
+
+  assert.equal(resolver.canValidateCredential('web'), false, 'having a validator is not a declaration');
+  assert.equal(resolver.canValidateCredential('declared'), true);
+  assert.equal(resolver.canValidateCredential('absent'), false);
+});
+
+test('a registered adapter is asked what it can do, rather than declaring', () => {
+  const registry = new ProviderRegistry()
+    .register({ ...stubAdapter('yes'), validateCredential: async () => ({}) })
+    .register(stubAdapter('no'));
+  const resolver = new ProviderResolver(registry);
+  assert.equal(resolver.canValidateCredential('yes'), true);
+  assert.equal(resolver.canValidateCredential('no'), false);
+});
+
+test('a registration cannot be used to shadow a registered adapter’s own capability', () => {
+  // A registered adapter is asked directly, so there is no way to talk the resolver out of a
+  // provider's real capability — the declaration only covers providers the registry cannot see.
+  const registry = new ProviderRegistry().register(stubAdapter('registered'));
+  const resolver = new ProviderResolver(registry).onDemand('registered', () => ({ ...stubAdapter('registered'), validateCredential: async () => ({}) }));
+  assert.equal(resolver.canValidateCredential('registered'), false);
+});
+
 test('THE INVARIANT: the resolver names no provider', () => {
   // The whole point of the extraction. If a provider id ever appears in this file, the abstraction
   // has leaked and adding a provider has gone back to being an edit to someone else's code.
