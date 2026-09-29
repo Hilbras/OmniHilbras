@@ -3,6 +3,7 @@ import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { assertSafeProviderRequestUrl, type ModelImportPolicy, type ProviderCredential, type ProviderId, type SecretStore } from '@hilbras/omnihilbras';
 import { atomicWrite, defaultStateDirectory, ensureSecureDirectory, isNodeError, readOptionalFile, readOptionalText } from './secure-store.js';
+import { DEFAULT_TIMEOUT_MS } from './timeout-policy.js';
 
 /**
  * What a provider's catalog said about one model, kept so the dashboard can filter on it
@@ -84,21 +85,18 @@ export type ConnectionInput = {
 
 export const defaultResilienceSettings: ResilienceSettings = {
   /**
-   * Two minutes, and it used to be zero — which meant *no deadline at all*.
+   * `DEFAULT_TIMEOUT_MS`, and it used to be zero — which meant *no deadline at all*.
    *
-   * `withDeadline` treats a non-positive timeout as "run without a deadline", and a connection
-   * saved without an explicit timeout inherited that zero. So by default a provider that stopped
-   * responding held the request open indefinitely: the client hung, the browser spun, and nothing
-   * in the gateway noticed. Both `withDeadline` and `docs/SPEC-SDK.md` state the opposite — that a
-   * provider which ignores its abort signal still cannot hold a request open — so the code
-   * contradicted its own documented guarantee.
+   * A connection saved without an explicit timeout inherited that zero, so by default a provider
+   * that stopped responding held the request open indefinitely: the client hung, the browser spun,
+   * and nothing in the gateway noticed. Both the deadline enforcement and `docs/SPEC-SDK.md` state
+   * the opposite, so the code contradicted its own documented guarantee.
    *
-   * Two minutes is long enough for a large-context reasoning turn and short enough that a dead
-   * provider is reported rather than waited on. Zero still means unlimited, so an operator who wants
-   * no deadline can ask for one. Only connections saved *after* this change are affected, because an
-   * existing connection's own settings win over the default.
+   * The value comes from `timeout-policy.ts` so that "what does a timeout of 0 mean" is answered in
+   * one place. Only connections saved *after* this change are affected, because an existing
+   * connection's own settings win over the default.
    */
-  timeoutMs: 120_000,
+  timeoutMs: DEFAULT_TIMEOUT_MS,
   maxRetries: 1,
   /** Zero means no limit, which is right for a local single-user gateway. Deliberate. */
   requestsPerMinute: 0,

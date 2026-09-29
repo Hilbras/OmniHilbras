@@ -1,4 +1,4 @@
-import { ProviderError } from '@hilbras/omnihilbras';
+import { RateLimitPolicy } from './rate-limit-policy.js';
 import { defaultResilienceSettings, type ConnectionRecord, type ResilienceSettings } from './connections.js';
 import { SlidingWindowRateLimiter, resolveRoute, type RouteCandidate, type RouteDecision } from './routing.js';
 import type { HealthManager } from './health.js';
@@ -44,14 +44,15 @@ export type RoutingEngineOptions = {
 };
 
 export class RoutingEngine {
-  /** How long each connection was asked to wait, read back by the dashboard. */
-  private readonly rateLimitWaitMs = new Map<string, number>();
+  private readonly limits: RateLimitPolicy;
 
-  constructor(private readonly options: RoutingEngineOptions) {}
+  constructor(private readonly options: RoutingEngineOptions) {
+    this.limits = new RateLimitPolicy({ limiter: options.rateLimiter });
+  }
 
   /** The wait each connection was last told to observe, keyed by connection id. */
   waits(): ReadonlyMap<string, number> {
-    return this.rateLimitWaitMs;
+    return this.limits.observed();
   }
 
   /**
@@ -74,7 +75,7 @@ export class RoutingEngine {
       ...(input.explicitProviderId === undefined ? {} : { explicitProviderId: input.explicitProviderId }),
       health: this.options.health.registry(),
       failureThreshold: this.options.health.getFailureThreshold(),
-      rateLimitWaitMs: this.rateLimitWaitMs,
+      rateLimitWaitMs: new Map(this.limits.observed()),
     });
     if (decision.candidates.length > 0) return decision;
     if (input.connections.length > 0) return decision;
@@ -91,25 +92,16 @@ export class RoutingEngine {
   }
 
   /**
-   * Refuses a candidate whose connection is over its per-minute limit.
-   *
-   * The wait is *recorded* as well as thrown, because the dashboard shows a connection as cooling
-   * down and a check that never recorded its wait would leave a connection that refuses traffic
-   * while looking ready.
+   * Refuses a candidate whose connection is over its per-minute limit, or hands it to the limit
+   * policy to do so. The *rule* — what a limit means and when it is spent — is `RateLimitPolicy`;
+   * this engine's job is only which routes a request may take.
    */
   enforceRateLimit(candidate: RouteCandidate): void {
-    const waitMs = this.options.rateLimiter.check(candidate.connectionId, candidate.resilience.requestsPerMinute);
-    this.rateLimitWaitMs.set(candidate.connectionId, waitMs);
-    if (waitMs > 0) {
-      throw new ProviderError('RATE_LIMITED', `This connection reached its limit of ${candidate.resilience.requestsPerMinute} requests per minute.`, {
-        providerId: candidate.providerId,
-        retryable: true,
-      });
-    }
+    this.limits.enforce(candidate);
   }
 
-  /** Credits a connection for a request that was actually sent. */
+  /** Credits a connection for a request that was dispatched. */
   recordRequest(connectionId: string): void {
-    this.options.rateLimiter.record(connectionId);
+    this.limits.spend(connectionId);
   }
 }

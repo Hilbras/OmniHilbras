@@ -12,6 +12,7 @@ import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js'
 import { CredentialManager } from './credential-manager.js';
 import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
+import { TimeoutPolicy } from './timeout-policy.js';
 import { notSupported } from './capability.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { ConnectionManager } from './connection-manager.js';
@@ -128,6 +129,13 @@ export class GatewayService {
    */
   private readonly models: ModelCatalog;
   /**
+   * What a timeout value means, and the deadline that enforces it.
+   *
+   * "0 means no deadline" was decided in two files — here and in `connections.ts` — which is how
+   * the default came to be 0 while the code claimed a provider could never hold a request open.
+   */
+  private readonly timeouts: TimeoutPolicy;
+  /**
    * Storing and changing connections, with one error mapper and one catalog-merge policy.
    *
    * `canValidate` is what removed the Core's last reason to know a provider's name: it used to be
@@ -191,6 +199,7 @@ export class GatewayService {
       activeAdapters: () => this.activeAdapters(),
       defaultProviderId,
     });
+    this.timeouts = new TimeoutPolicy();
     this.requests = new RequestExecutor({
       planRoute: (model, explicitProviderId) => this.planRoute(model, explicitProviderId),
       chat: (providerId, request, signal) => this.chat(providerId, request, signal),
@@ -887,27 +896,9 @@ export class GatewayService {
    * the provider call, and the timer is always released once the call settles.
    */
   private async withDeadline<T>(signal: AbortSignal | undefined, timeoutMs: number, providerId: string, run: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
-    if (timeoutMs <= 0) return run(signal);
-    const controller = new AbortController();
-    const onAbort = () => controller.abort(signal?.reason);
-    signal?.addEventListener('abort', onAbort, { once: true });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    // The deadline is enforced here rather than trusted to the adapter, so a
-    // provider that ignores the abort signal still cannot hang the request.
-    const deadline = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => {
-        controller.abort();
-        reject(new ProviderError('PROVIDER_TIMEOUT', `The provider did not respond within ${timeoutMs} ms.`, { providerId, retryable: true }));
-      }, timeoutMs);
-      timer.unref?.();
-    });
-    try {
-      return await Promise.race([run(controller.signal), deadline]);
-    } finally {
-      if (timer) clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-    }
+    return this.timeouts.within({ timeoutMs, providerId, ...(signal ? { signal } : {}) }, run);
   }
+
 
   /**
    * Reads a provider's catalog. Returns the full records, not just ids, because the

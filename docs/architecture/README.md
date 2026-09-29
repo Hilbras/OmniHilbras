@@ -115,6 +115,8 @@ apps/gateway/src/
   routing-engine      Which routes a request may take, given health and limits. Zero ids.
   model-catalog       What this gateway serves, and which provider serves what. Zero ids.
   retry-policy        Retry this route, next route, or stop. One decision, two callers. Zero ids.
+  timeout-policy      What a timeout value means, and the deadline that enforces it. Owns the default.
+  rate-limit-policy   What a request limit means, and when it is spent.
   capability          A named "this adapter does not do that", for two consumers that needed it.
   health.ts          Probing, ejection and recovery, asked two questions only.
   api-key-manager    API keys and the two user-facing messages about them.

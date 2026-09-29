@@ -147,6 +147,18 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 60: Phase 3 — `TimeoutPolicy` and `RateLimitPolicy`, so each policy is one object.
+  - Acceptance: what a timeout value means is answered in one file; what a request limit means and when it is spent is answered in one file.
+  - Verify: 22 tests; 346 gateway tests.
+  - Findings: **`withDeadline` and `connections.ts` were two files answering one question** — "what does a timeout of 0 mean". The mechanism decided a non-positive timeout means no deadline, and the store decided the default, and the default had been `0`. That duplication is how the two of them disagreed for long enough for a hung provider to hold requests open. `DEFAULT_TIMEOUT_MS` now lives in `timeout-policy.ts` and `connections.ts` imports it, so the interpretation and the default cannot be changed apart.
+  - `RateLimitPolicy` gathers three things that were in three files: the window's answer, the refusal built from it, and the commit. The disagreement between them was the defect fixed in 1.25.0. The engine's remaining job is only *which routes a request may take*.
+  - **A test I wrote found a hole in my own code.** I typed `observed()` as `ReadonlyMap` and returned the real `Map` behind it — and `ReadonlyMap` is only a *type*, so the value was still mutable. A caller that could `set` a wait could make a throttled connection look ready, which is the exact confusion the waits exist to prevent. It is now a genuine read-only view rather than a copy, because `plan()` reads it on every request and copying a map per request to defend against a caller that does not exist is the wrong trade.
+  - **A test of mine asserted a timeout's `publicMessage` equalled its `message`, and failed — and the code was right.** A client gets the provider-neutral wording and the dashboard gets the detail separately, so leaving `publicMessage` unset is deliberate: the generic sentence is accurate, and it is the one that should not name a provider's internals to a caller holding only a key. The test now asserts the real property — the code is classified, and the public message is safe to show.
+  - Another test of mine called `enforce` twice expecting two records and got an exception for the second. Correct: the refusal *and* the wait are both expected, and the wait is recorded before the throw — which is the whole point of recording it.
+  - Files: `apps/gateway/src/timeout-policy.ts` (new), `apps/gateway/src/rate-limit-policy.ts` (new), `apps/gateway/src/connections.ts`, `apps/gateway/src/routing-engine.ts`, `apps/gateway/src/service.ts`, `apps/gateway/test/timeout-policy.test.js` (new), `apps/gateway/test/rate-limit-policy.test.js` (new).
+  - Depends on: Task 59.
+  - Scope: Medium.
+
 - [x] Task 59: Phase 3 — extract `RetryPolicy`, and fix a rule that asked again after being told no.
   - Acceptance: one decision — retry, next route, or stop — consulted by every path a request can fail on, and it does not depend on which path asked.
   - Verify: 12 policy tests plus the rewritten invariant guards; 324 gateway tests. Measured with the attempt ledger as the source of truth, before and after.
