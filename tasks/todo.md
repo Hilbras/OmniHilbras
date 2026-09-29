@@ -147,6 +147,27 @@
   - Depends on: Task 9g.
   - Scope: Medium.
 
+- [x] Task 46: Phase 2 — extract `ApiKeyManager`.
+  - Acceptance: key policy is a separate concern with its own tests; the public surface and every user-facing string are unchanged.
+  - Verify: 10 `ApiKeyManager` tests; the 13 pre-existing `api-keys` tests pass **unchanged**, including the enforcement path.
+  - Findings: **I reworded two user-facing messages while moving the code, and a test caught it.** The original was `The API key is invalid or paused.` and I had written *"That API key was not recognised, or it has been disabled."* Both read better; both are also a behaviour change, and this phase exists explicitly not to make one. Restored verbatim, with a note saying why they were left alone. The lesson generalises: a refactor that quietly rewords what a user reads is the same failure as one that quietly changes what it returns, and only here did a test happen to notice.
+  - The store keeps the security properties — random keys, SHA-256, one-time reveal, constant-time comparison. This adds only the two a store cannot decide: **whether enforcement is on at all** (no store means "not configured", not "accept everything", and the distinction is visible in `list()`), and **that a mutation is a unit** — a create racing a remove is a lost update on a file-backed store, and the store has no way to know two operations were meant to be sequential.
+  - One test that encodes a fault that has not happened yet: **a lock whose promise chain dies on rejection turns one error into a permanently broken gateway**, because every later key operation then waits on a promise that will never settle. The chain catches.
+  - Files: `apps/gateway/src/api-key-manager.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/test/api-key-manager.test.js` (new).
+  - Depends on: Task 45.
+  - Scope: Medium.
+
+- [x] Task 45: Phase 2 — extract `HealthManager` out of `GatewayService`.
+  - Acceptance: health is a separate concern with its own tests, `service.ts` no longer holds health state, and the public surface is unchanged.
+  - Verify: 12 `HealthManager` tests run with no gateway, no stores and no network; all 155 pre-existing gateway tests pass unchanged. `service.ts` 1500 → 1432 lines.
+  - Findings: **the extraction immediately caught a gap the contract could not close.** The manager passed an adapter's `unavailable` straight through, so a verdict with no `message` reached the dashboard unchanged — the same fault just fixed in four adapters. The contract catches that at build time, but a manager that merely forwards the omission will keep producing it for anything the contract does not cover, so **the boundary now fills the gap**. Two layers, deliberately: a test that fails, and a runtime that cannot be wrong.
+  - The boundary is two questions and nothing else — *which adapters exist*, and *what context should this adapter be asked in* — supplied as closures. Passing the service itself would have made the extraction cosmetic; passing these two makes the manager testable in isolation and makes the coupling visible. If health ever needs a third thing from the gateway, that is the signal a boundary is wrong, not a reason to widen the interface.
+  - `HealthRegistry` stays in `routing.ts` and is reached through one accessor. Routing *reads* failure counts to decide ejection and should not know where the counters live, and exposing the registry rather than new counting methods keeps `resolveRoute`'s provider-agnostic signature — which is well tested — untouched. Health keeps sole ownership of writing them, so a failure recorded by a request and one recorded by a sweep cannot disagree.
+  - Tests that were impossible before, because health was only reachable through the service: three `report()` calls probe once; three concurrent `refresh()` calls are one sweep; asking about one provider probes one provider; an aborted or missing provider is *named* rather than reported unhealthy; a thrown check keeps the real cause instead of a generic failure. Each of those encodes a fault that shipped.
+  - Files: `apps/gateway/src/health.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/test/health-manager.test.js` (new).
+  - Depends on: Task 44.
+  - Scope: Medium.
+
 - [x] Task 44: A provider contract, and the four health checks it caught.
   - Acceptance: every adapter that can be driven offline passes a shared contract, and the contract has been seen to fail on the bug it exists to catch.
   - Verify: 56 contract assertions across `openai`, `openrouter`, `openai-compatible`, `anthropic` and `gemini`, all passing; the DeepSeek decoder passes a captured multi-frame stream; a decoder that keeps only the first fragment is **rejected** by the multi-part assertion. 475 tests pass.

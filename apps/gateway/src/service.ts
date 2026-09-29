@@ -1,11 +1,13 @@
 import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
-import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
+import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, modelMetaPriceOrder, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ModelMeta, type ModelMetaMap, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialSignIn, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
-import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
+import { SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
+import { HealthManager } from './health.js';
+import { ApiKeyManager } from './api-key-manager.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
   providerId: string;
@@ -29,12 +31,9 @@ export type GatewayApiKeyList = {
 };
 
 const connectionMutationLock = 'connection-mutations';
-const apiKeyMutationLock = 'api-key-mutations';
 const defaultProviderId = 'openai';
 /** Consecutive failures before routing stops sending traffic to a connection. */
-const defaultFailureThreshold = 3;
 /** How often background health polling runs. 0 disables it. */
-const defaultHealthIntervalMs = 60_000;
 
 export type GatewayFailoverAttempt = {
   providerId: string;
@@ -118,8 +117,6 @@ function attachAttempts(error: unknown, attempts: GatewayFailoverAttempt[]) {
   const message = `Every provider route failed.${failedProviders.length > 0 ? ` Tried: ${failedProviders.join(', ')}.` : ''}`;
   return new ProviderError('PROVIDER_REQUEST_FAILED', message, { retryable: true, publicMessage: message, cause: error });
 }
-const missingApiKeyMessage = 'This gateway requires an API key. Create one on the API keys page and send it as "Authorization: Bearer <key>".';
-const invalidApiKeyMessage = 'The API key is invalid or paused.';
 
 export class GatewayService {
   private readonly connectionLocks = new Map<string, Promise<void>>();
@@ -138,16 +135,18 @@ export class GatewayService {
   /** Why the last model discovery failed, when it was tolerated rather than fatal. */
   private lastDiscoveryNote?: string;
   private readonly clineSessions = new ClineSessionStore();
-  private readonly providerHealth: HealthRegistry;
+  /** API keys, extracted so key policy can be tested without a service around it. */
+  private readonly apiKeys: ApiKeyManager;
   private readonly rateLimiter: SlidingWindowRateLimiter;
   private readonly rateLimitWaitMs = new Map<string, number>();
-  private failureThreshold = defaultFailureThreshold;
-  private healthIntervalMs = defaultHealthIntervalMs;
-  /** The most recent full sweep, served to every `GET /health` until the next one lands. */
-  private lastHealth: { status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] } | undefined;
-  /** The sweep in flight, so concurrent callers share it rather than each starting one. */
-  private healthSweep: Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> | undefined;
-  private healthTimer?: NodeJS.Timeout;
+  /**
+   * Health, extracted so it can be tested without routing.
+   *
+   * The manager is given two questions and nothing else — which adapters exist, and what context
+   * to ask one in — so it has no knowledge of connections, OAuth or model discovery. The public
+   * methods below are kept so callers and the HTTP layer are unchanged.
+   */
+  private readonly healthManager: HealthManager;
   /** Kept whole, because the ChatGPT Web driver is built lazily on first use. */
   private readonly options: GatewayServiceOptions;
 
@@ -164,165 +163,86 @@ export class GatewayService {
     private readonly apiKeyStore?: ApiKeyStore,
     options: GatewayServiceOptions = {},
   ) {
-    if (options.failureThreshold !== undefined) this.failureThreshold = options.failureThreshold;
     // Kept, not just read: the ChatGPT Web driver is built lazily on first use, long after
     // the constructor has returned, so the override has to outlive this call.
     this.options = options;
     this.transport = options.transport ?? new FetchHttpTransport();
     const now = options.now ?? (() => Date.now());
-    this.providerHealth = new HealthRegistry(now, options.recoveryCooldownMs);
     this.rateLimiter = new SlidingWindowRateLimiter(now);
+    this.apiKeys = new ApiKeyManager(this.apiKeyStore);
+    this.healthManager = new HealthManager(
+      {
+        adapters: () => this.activeAdapters(),
+        contextFor: (adapterId, signal) => this.contextForAdapter(adapterId, signal),
+      },
+      {
+        now,
+        ...(options.recoveryCooldownMs === undefined ? {} : { recoveryCooldownMs: options.recoveryCooldownMs }),
+        ...(options.failureThreshold === undefined ? {} : { failureThreshold: options.failureThreshold }),
+      },
+    );
+  }
+
+  /**
+   * The ejection registry, for `resolveRoute`.
+   *
+   * Routing needs to *read* failure counts to decide who is ejected, and it should not need to
+   * know that the counters live inside the health manager. Exposing the registry rather than the
+   * counters keeps `resolveRoute`'s signature — which is provider-agnostic and well tested —
+   * unchanged, while the health concern still has exactly one owner.
+   */
+  private healthRegistry() {
+    return this.healthManager.snapshotRegistry();
   }
 
   /** How often background health polling runs. 0 keeps polling off. */
   setHealthInterval(intervalMs: number) {
-    this.healthIntervalMs = intervalMs;
-    if (this.healthTimer) this.startHealthMonitor();
+    this.healthManager.setInterval(intervalMs);
   }
 
   /** Starts background health polling so routing reflects reality without a request. */
-  startHealthMonitor(intervalMs = this.healthIntervalMs) {
-    this.stopHealthMonitor();
-    this.healthIntervalMs = intervalMs;
-    if (intervalMs <= 0) return;
-    this.healthTimer = setInterval(() => { void this.refreshHealth(); }, intervalMs);
-    this.healthTimer.unref?.();
-    void this.refreshHealth();
+  startHealthMonitor(intervalMs?: number) {
+    this.healthManager.start(intervalMs);
   }
 
   stopHealthMonitor() {
-    if (this.healthTimer) clearInterval(this.healthTimer);
-    this.healthTimer = undefined;
+    this.healthManager.stop();
   }
 
   /**
    * Polls every configured adapter and folds the result into routing state.
    *
-   * Also stores the result, so `health()` can answer from it instead of starting a second
-   * sweep per HTTP request. Concurrent callers share one sweep: without that, a page reload
-   * and the background timer landing together would each start their own thirteen probes.
+   * Delegates. The caching, the shared in-flight sweep, and the reason-carrying failures all live
+   * in `HealthManager` now, where they can be tested without a routing decision in the way.
    */
-  async refreshHealth(signal?: AbortSignal): Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> {
-    if (!this.healthSweep) {
-      this.healthSweep = this.runHealthSweep(signal).finally(() => {
-        this.healthSweep = undefined;
-      });
-    }
-    return this.healthSweep;
+  refreshHealth(signal?: AbortSignal) {
+    return this.healthManager.refresh(signal);
   }
 
-  private async runHealthSweep(signal?: AbortSignal): Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> {
-    const providers = await Promise.all((await this.activeAdapters()).map((adapter) => this.probeAdapter(adapter, signal)));
-    const result = {
-      status: providers.some((provider) => provider.status !== 'healthy') ? 'degraded' as const : 'ok' as const,
-      checkedAt: new Date().toISOString(),
-      providers,
-    };
-    this.lastHealth = result;
-    this.rateLimiter.prune();
-    return result;
+  /** Health for a single provider, without the cost of the whole sweep. */
+  healthForProvider(providerId: string, signal?: AbortSignal) {
+    return this.healthManager.forProvider(providerId, signal);
   }
 
-  /**
-   * Probes one adapter and folds the result into routing state.
-   *
-   * Extracted from the full sweep so that "Test provider" can ask about the one provider the
-   * user is looking at. Reading `/health` to answer that question meant waiting for all
-   * thirteen providers to be probed — and on a loaded machine that was long enough that the
-   * button looked permanently stuck, which is the same failure as a wrong answer: the user
-   * learns nothing.
-   */
-  private async probeAdapter(adapter: ProviderAdapter, signal?: AbortSignal): Promise<GatewayProviderHealth> {
-    if (!adapter.healthCheck) {
-      return { providerId: adapter.id, status: 'unavailable' as const, checkedAt: new Date().toISOString(), message: 'Health checks are not supported.' };
-    }
-    const startedAt = Date.now();
-    try {
-      // Health is reported per provider, so it is checked with that provider's
-      // first credentialed connection.
-      const owner = await this.connectionFor(adapter.id);
-      const health = await adapter.healthCheck(await this.context(owner?.id ?? adapter.id, adapter.id, signal));
-      // An adapter may report `unavailable` instead of throwing. Recording
-      // that as a success made routing report a healthy provider with zero
-      // failures while `/health` said unavailable, and it corrupted the
-      // failure counting that drives ejection.
-      if (health.status === 'unavailable') {
-        this.providerHealth.recordFailure(adapter.id, 'PROVIDER_UNAVAILABLE', health.message ?? 'The provider reported itself unavailable.');
-        // The reason is returned too, so /health and the dashboard can say why
-        // rather than only that something is wrong.
-        return { providerId: adapter.id, ...health };
-      }
-      this.providerHealth.recordSuccess(adapter.id, health.latencyMs ?? Date.now() - startedAt, health.checkedAt);
-      return { providerId: adapter.id, latencyMs: Date.now() - startedAt, ...health };
-    } catch (error) {
-      this.providerHealth.recordFailure(adapter.id, 'PROVIDER_UNAVAILABLE', 'The provider health check failed.');
-      // The underlying reason, because "The provider health check failed" sends the user
-      // looking at the provider when the cause was their own connection.
-      return {
-        providerId: adapter.id,
-        status: 'unavailable' as const,
-        checkedAt: new Date().toISOString(),
-        message: error instanceof Error ? error.message : 'The provider health check failed.',
-      };
-    }
-  }
-
-  /**
-   * Health for a single provider, without the cost of the whole sweep.
-   *
-   * A provider that is not in the active set is named in the error rather than reported
-   * unhealthy: "no such provider" and "this provider is down" are different problems, and
-   * the second one sends the user to fix a credential that was never the issue.
-   */
-  async healthForProvider(providerId: string, signal?: AbortSignal): Promise<GatewayProviderHealth> {
-    const adapters = await this.activeAdapters();
-    const adapter = adapters.find((item) => item.id === providerId);
-    if (!adapter) {
-      throw new ProviderError('NOT_FOUND', `OmniHilbras has no active connection for ${providerId}. Connect it first, then test it.`, {
-        providerId,
-        publicMessage: `OmniHilbras has no active connection for ${providerId}. Connect it first, then test it.`,
-      });
-    }
-    return this.probeAdapter(adapter, signal);
+  /** The health report, from the last sweep rather than a new one. */
+  health(signal?: AbortSignal) {
+    return this.healthManager.report(signal);
   }
 
   /** Live routing state for the dashboard. */
   async describeRouting() {
     const connections = await this.listConnections();
     return {
-      failureThreshold: this.failureThreshold,
+      failureThreshold: this.healthManager.getFailureThreshold(),
       connections: connections.map((connection) => ({
         connectionId: connection.id,
         providerId: connection.providerId,
         enabled: connection.enabled,
         hasCredential: connection.hasCredential,
         resilience: connection.resilience,
-        ...(this.providerHealth.snapshot(connection.providerId, this.failureThreshold) ?? {}),
+        ...(this.healthManager.snapshot(connection.providerId) ?? {}),
       })),
     };
-  }
-
-  /**
-   * The health report, from the last sweep rather than a new one.
-   *
-   * This used to call `refreshHealth()` on every request, which probes **every** active
-   * adapter — thirteen providers, around 8.5 seconds, each one a real request to somebody's
-   * API. Two things were wrong with that. A dashboard that reloaded the page, or two tabs
-   * open, multiplied the cost, and a status page is exactly the thing that gets polled.
-   *
-   * Worse, it was not just slow. The browser allows only six connections per origin, the page
-   * asks for health on load, and a sweep that outlives the poll interval queued the next one
-   * behind it — so health requests monopolised the pool and ordinary requests to the same
-   * gateway queued behind them. A chat turn that answers in six seconds took over a minute,
-   * which looked like the model hanging.
-   *
-   * A background sweep already runs every 60 seconds, so the freshest honest answer is almost
-   * always at most that old. `checkedAt` is reported precisely so the caller can see the age
-   * rather than being handed a report that implies it was just measured.
-   */
-  async health(signal?: AbortSignal): Promise<{ status: 'ok' | 'degraded'; checkedAt: string; providers: GatewayProviderHealth[] }> {
-    if (this.lastHealth) return this.lastHealth;
-    return this.refreshHealth(signal);
   }
 
   /**
@@ -1001,44 +921,34 @@ export class GatewayService {
     });
   }
 
-  async listApiKeys(): Promise<GatewayApiKeyList> {
-    if (!this.apiKeyStore) return { keys: [], requireApiKey: false };
-    const [keys, requireApiKey] = await Promise.all([this.apiKeyStore.list(), this.apiKeyStore.isEnforced()]);
-    return { keys, requireApiKey };
+  /** The API keys this gateway knows about, and whether a key is required to use it. */
+  listApiKeys(): Promise<GatewayApiKeyList> {
+    return this.apiKeys.list();
   }
 
-  async createApiKey(name: string): Promise<CreatedApiKey> {
-    return this.withApiKeyMutation(() => this.apiKeyStore!.create(name));
+  /** Creating a key returns its secret exactly once; it is never readable again. */
+  createApiKey(name: string) {
+    return this.apiKeys.create(name);
   }
 
-  async setApiKeyEnabled(id: string, enabled: boolean) {
-    return this.withApiKeyMutation(async () => {
-      const record = await this.apiKeyStore!.setEnabled(id, enabled);
-      if (!record) throw new ProviderError('NOT_FOUND', 'The API key was not found.');
-      return record;
-    });
+  setApiKeyEnabled(id: string, enabled: boolean) {
+    return this.apiKeys.setEnabled(id, enabled);
   }
 
-  async removeApiKey(id: string) {
-    return this.withApiKeyMutation(async () => {
-      const removed = await this.apiKeyStore!.remove(id);
-      if (!removed) throw new ProviderError('NOT_FOUND', 'The API key was not found.');
-    });
+  removeApiKey(id: string) {
+    return this.apiKeys.remove(id);
   }
 
-  async setRequireApiKey(value: boolean) {
-    return this.withApiKeyMutation(() => this.apiKeyStore!.setEnforced(value));
+  setRequireApiKey(value: boolean) {
+    return this.apiKeys.setEnforced(value);
   }
 
   /**
-   * Guards the public LLM surface. Callers that are already trusted local
-   * administration surfaces (the dashboard) must not call this.
+   * Guards the public LLM surface. Callers that are already trusted local administration
+   * surfaces (the dashboard) must not call this.
    */
-  async authorizePublicRequest(presentedKey: string | undefined) {
-    // Embedders and unit tests construct the service without key storage.
-    if (!this.apiKeyStore || !(await this.apiKeyStore.isEnforced())) return;
-    if (!presentedKey) throw new ProviderError('AUTHENTICATION_FAILED', missingApiKeyMessage, { publicMessage: missingApiKeyMessage });
-    if (!(await this.apiKeyStore.authenticate(presentedKey))) throw new ProviderError('AUTHENTICATION_FAILED', invalidApiKeyMessage, { publicMessage: invalidApiKeyMessage });
+  authorizePublicRequest(presentedKey: string | undefined) {
+    return this.apiKeys.authorize(presentedKey);
   }
 
   async updateConnectionResilience(connectionId: string, resilience: Partial<ResilienceSettings>) {
@@ -1102,14 +1012,14 @@ export class GatewayService {
           this.enforceRateLimit(candidate);
           const response = await this.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.chat(candidate.providerId, request, deadline));
           const latencyMs = Date.now() - startedAt;
-          this.providerHealth.recordSuccess(candidate.providerId, latencyMs);
+          this.healthManager.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString());
           this.rateLimiter.record(candidate.connectionId);
           attempts.push({ providerId: candidate.providerId, attempt, ok: true, latencyMs });
           return { response, attempts };
         } catch (error) {
           const latencyMs = Date.now() - startedAt;
           const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
-          this.providerHealth.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.');
+          this.healthManager.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.');
           attempts.push({ providerId: candidate.providerId, attempt, ok: false, latencyMs, errorCode: code });
           // A per-connection limit should hand off to the next route, not retry here.
           if (error instanceof ProviderError && error.code === 'RATE_LIMITED' && attempts.length > 1) break;
@@ -1156,10 +1066,10 @@ export class GatewayService {
           settled.add(done);
           const code = outcome.ok ? undefined : outcome.error instanceof ProviderError ? outcome.error.code : 'PROVIDER_REQUEST_FAILED';
           if (outcome.ok) {
-            this.providerHealth.recordSuccess(candidate.providerId, outcome.latencyMs);
+            this.healthManager.recordSuccess(candidate.providerId, outcome.latencyMs, new Date().toISOString());
             this.rateLimiter.record(candidate.connectionId);
           } else {
-            this.providerHealth.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.');
+            this.healthManager.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.');
           }
           attempts.push({ providerId: candidate.providerId, attempt: 1, ok: outcome.ok, latencyMs: outcome.latencyMs, ...(code ? { errorCode: code } : {}) });
           if (outcome.ok) {
@@ -1266,7 +1176,7 @@ export class GatewayService {
         rest = opened.remainder[Symbol.asyncIterator]();
       } catch (error) {
         const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
-        this.providerHealth.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.');
+        this.healthManager.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.');
         attempts.push({ providerId: candidate.providerId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
         lastError = error;
         if (!isRetryableFailure(error) || signal?.aborted) break;
@@ -1286,7 +1196,7 @@ export class GatewayService {
               yield next.value;
             }
           } finally {
-            self.providerHealth.recordSuccess(candidate.providerId, Date.now() - startedAt);
+            self.healthManager.recordSuccess(candidate.providerId, Date.now() - startedAt, new Date().toISOString());
           }
         })(this),
       };
@@ -1300,8 +1210,8 @@ export class GatewayService {
       connections,
       model,
       ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
-      health: this.providerHealth,
-      failureThreshold: this.failureThreshold,
+      health: this.healthRegistry(),
+      failureThreshold: this.healthManager.getFailureThreshold(),
       rateLimitWaitMs: this.rateLimitWaitMs,
     });
     if (decision.candidates.length > 0) return decision;
@@ -1415,19 +1325,6 @@ export class GatewayService {
     return { providerId, valid: true, checkedAt: result?.checkedAt ?? new Date().toISOString(), ...(result?.latencyMs === undefined ? {} : { latencyMs: result.latencyMs }) };
   }
 
-  private async withApiKeyMutation<T>(operation: () => Promise<T>) {
-    if (!this.apiKeyStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local API key storage is not configured.');
-    return this.withProviderLock(apiKeyMutationLock, async () => {
-      try {
-        return await operation();
-      } catch (error) {
-        if (error instanceof ProviderError) throw error;
-        if (error instanceof ApiKeyLimitError) throw new ProviderError('INVALID_REQUEST', error.message, { cause: error });
-        throw new ProviderError('CONFIGURATION_ERROR', 'The local API key store could not be updated.', { cause: error });
-      }
-    });
-  }
-
   private async withProviderLock<T>(providerId: string, operation: () => Promise<T>) {
     const previous = this.connectionLocks.get(providerId) ?? Promise.resolve();
     let release!: () => void;
@@ -1478,6 +1375,19 @@ export class GatewayService {
    * hold several. The provider id is still passed so an environment credential
    * keeps resolving.
    */
+  /**
+   * The context a health check should be asked in.
+   *
+   * Health is checked per *provider* while credentials are stored per *connection*, so this
+   * resolves the provider's first credentialed connection and then defers to the same
+   * `context()` the request path uses. One place builds a request context, so a credential
+   * cannot be assembled one way for a health check and another for a real request.
+   */
+  private async contextForAdapter(providerId: string, signal?: AbortSignal): Promise<ProviderRequestContext> {
+    const owner = await this.connectionFor(providerId);
+    return this.context(owner?.id ?? providerId, providerId, signal);
+  }
+
   private async context(connectionId: string, providerId: string, signal?: AbortSignal): Promise<ProviderRequestContext> {
     const [credential, policy] = await Promise.all([
       this.secretStore.get(connectionId, providerId),
