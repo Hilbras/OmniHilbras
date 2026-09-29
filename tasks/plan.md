@@ -242,6 +242,42 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 | Local/cloud behavior diverges | Medium | Share the SDK and gateway service; keep auth/storage as outer runtime concerns. |
 | Frontend and backend build systems conflict | Medium | Separate workspace packages and checkpoints after each phase. |
 
+### Audit: the risk table, checked rather than believed
+
+The task list above is 50 of 50. Its **risk table** was not audited until the end, and one of its
+mitigations is not implemented:
+
+| Risk | Claimed mitigation | Measured |
+| --- | --- | --- |
+| Provider APIs change independently (**High**) | pin response fixtures per adapter | **1 of 11 adapters** — only `kiro-stream.bin` |
+| Streaming formats differ (**High**) | test event boundaries explicitly | real: frame-level assertions across the adapter tests |
+| Secrets leak through logs/errors (**High**) | redaction helpers and tests that scan errors/log output | real: error-output scanning tests exist |
+| Gateway becomes coupled to one provider | no provider IDs in shared service logic | real: 12 files carry a zero-provider-id invariant test |
+| Local/cloud behavior diverges (**Medium**) | keep auth/storage as outer runtime concerns | real: `runtime.ts` (Task 10) |
+| Frontend/backend builds conflict | separate workspace packages | real |
+
+**The contract suite does not substitute for the fixtures, and the two are different jobs.** The
+contract proves an adapter satisfies an *invariant*. A pinned capture proves the adapter still
+understands *that provider's wire format*. When a provider renames a frame key the contract still
+passes, and the first sign is a broken request in production.
+
+That is not hypothetical. DeepSeek Web's tests asserted two hand-written frame shapes, passed, and
+shipped — while live traffic used bare-string appends and the adapter was silently truncating every
+answer to one character. The tests agreed with their author.
+
+**`packages/omnihilbras-sdk/test/fixture-coverage.test.js` makes the gap enforceable.** Every
+adapter must have a pinned capture *or say why it does not*, with a reason long enough to argue
+with, and the count is asserted so it cannot drift quietly. Verified by planting a fabricated
+capture, which the guard rejected twice over: *"deepseek-web-challenge.json is pinned but no test
+reads it"* and *"fixtures on disk (2) and adapters with a capture (1) disagree"*.
+
+**No fixture was manufactured.** A fabricated capture is worse than none: it is indistinguishable
+from a real one in review, and it is the exact artefact that hid the DeepSeek bug. Taking the
+remaining captures means making live provider requests, which costs money and needs credentials —
+so it is a decision for the operator, not a task for an agent.
+
+---
+
 ## Open Questions
 
 - Whether to publish the SDK under a public package name after the contract stabilizes.
