@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, CircleAlert, Cookie, ExternalLink, LoaderCircle, LogIn, ShieldAlert, Tag } from 'lucide-react';
-import { CHATGPT_WEB_SESSION_COOKIE } from '@hilbras/omnihilbras';
 import { requestJson, type GatewayConnection } from '../lib/gatewayClient';
 
 /**
@@ -17,10 +16,37 @@ import { requestJson, type GatewayConnection } from '../lib/gatewayClient';
  * appears after you have pasted your session cookie is not a warning.
  */
 
-type Props = {
-  providerName: string;
-  /** The origin to send the user to, and to name in the guide. */
+/**
+ * What a web-session provider has to tell the dialog, so the dialog itself is not a
+ * ChatGPT dialog with the names swapped.
+ */
+export type WebSessionDescriptor = {
+  id: string;
+  name: string;
   website: string;
+  /** The one credential that matters, named in the guide. */
+  credentialName: string;
+  /** How to get it, in the order a person should try. */
+  extractionSteps: Array<{ label: string; body: string }>;
+  /** The sign-in routes, when the provider has them. */
+  /**
+   * The sign-in routes, when the provider has them, and what to tell the user about them.
+   *
+   * The note lives here rather than in the dialog body because the dialog used to hardcode a
+   * ChatGPT sentence and cheerfully told DeepSeek users that a chatgpt.com window was about to
+   * open. Anything provider-specific belongs to the provider.
+   */
+  signIn?: { start: string; status: (sessionId: string, freeOnly: boolean) => string; note: string };
+  /** The paste route, when there is one. */
+  paste?: { path: string; field: string; placeholder: string; supportsFreeOnly?: boolean };
+  /** The check route, when a check exists. */
+  check?: { path: string; field: string };
+  /** What a signed-in account offers, when the provider varies its models by plan. */
+  planNote?: string;
+};
+
+type Props = {
+  provider: WebSessionDescriptor;
   riskNotice?: string;
   riskSeverity?: 'standard' | 'high';
   onConnected: (connection: GatewayConnection) => void | Promise<void>;
@@ -33,29 +59,8 @@ type CheckResult = {
   models: Array<{ id: string; name: string }>;
 };
 
-const credential = CHATGPT_WEB_SESSION_COOKIE;
-
-/**
- * The two ways out of a browser, in the order a person should try them.
- *
- * Both end at the same place — the value of the `Cookie` request header — because that is the
- * one string that is guaranteed to be complete. Asking for a single cookie instead gets you
- * `__Secure-next-auth.session-token` on its own, which is what a first reading of the
- * requirement suggests and is not enough: the export is only useful with the cookies
- * chatgpt.com mints alongside it.
- */
-const extractionSteps = [
-  {
-    label: 'Fast path',
-    body: `Install the Cookie Editor extension (chromewebstore.google.com → Cookie Editor), open it on the signed-in chatgpt.com tab, find ${credential} — select every numbered chunk if it is split — and choose Export → Copy with the export format set to "Cookie header".`,
-  },
-  {
-    label: 'Manual path',
-    body: 'Open the browser developer tools (F12 → Network), reload, click any authenticated request, and copy the Cookie header value from Request Headers. Omit the `Cookie:` prefix.',
-  },
-];
-
-export function WebCookieConnectDialog({ providerName, website, riskNotice, riskSeverity = 'standard', onConnected, onClose }: Props) {
+export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskSeverity = 'standard', onConnected, onClose }: Props) {
+  const { name: providerName, website, credentialName: credential } = descriptor;
   const [acknowledged, setAcknowledged] = useState(false);
   const [exported, setExported] = useState('');
   const [freeOnly, setFreeOnly] = useState(false);
@@ -98,10 +103,11 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
     setPhase('checking');
     setError('');
     try {
-      const result = await requestJson<CheckResult>('/v1/web-cookie/chatgpt/check', {
+      if (!descriptor.check) return;
+      const result = await requestJson<CheckResult>(descriptor.check.path, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ storageState: exported }),
+        body: JSON.stringify({ [descriptor.check.field]: exported }),
       });
       setChecked(result);
       setPhase('idle');
@@ -110,7 +116,7 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
       setPhase('idle');
       setError(checkError instanceof Error ? checkError.message : 'That export could not be read.');
     }
-  }, [exported]);
+  }, [descriptor, exported]);
 
   /**
    * Sign in through a real browser window, rather than by hand.
@@ -127,7 +133,8 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
     setPhase('signing-in');
     setError('');
     try {
-      const started = await requestJson<{ sessionId: string; headed: boolean }>('/v1/oauth/chatgpt/start', {
+      if (!descriptor.signIn) return;
+      const started = await requestJson<{ sessionId: string; headed: boolean }>(descriptor.signIn.start, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: '{}',
@@ -148,7 +155,7 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
         // and polling harder than that only costs the machine.
         await new Promise((resolve) => setTimeout(resolve, 2_500));
         const status = await requestJson<{ status: string; error?: string; connection?: GatewayConnection }>(
-          `/v1/oauth/chatgpt/status?sessionId=${encodeURIComponent(started.sessionId)}&freeOnly=${freeOnly ? 'true' : 'false'}`,
+          descriptor.signIn.status(started.sessionId, freeOnly),
         );
         if (status.status === 'pending') continue;
         if (status.status === 'denied') {
@@ -174,19 +181,20 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
         message: signInError instanceof Error ? signInError.message : 'Sign-in could not be started.',
       });
     }
-  }, [freeOnly, onClose, onConnected]);
+  }, [descriptor, freeOnly, onClose, onConnected]);
 
   const submit = useCallback(async () => {
     if (settledRef.current) return;
     setPhase('running');
     setError('');
     try {
-      const result = await requestJson<{ connection: GatewayConnection }>('/v1/web-cookie/chatgpt/connect', {
+      if (!descriptor.paste) return;
+      const result = await requestJson<{ connection: GatewayConnection }>(descriptor.paste.path, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         // Sent to the gateway and nowhere else, so the browser is not trusted to decide
         // which cookies belong to this connection.
-        body: JSON.stringify({ storageState: exported, freeOnly }),
+        body: JSON.stringify({ [descriptor.paste.field]: exported, freeOnly }),
       });
       settledRef.current = true;
       setPhase('done');
@@ -257,14 +265,13 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
           <div className="mt-4">
             <p className="text-[11px] font-semibold">Sign in</p>
             <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-              Opens chatgpt.com in a window on the machine running OmniHilbras. Sign in with your own
-              password and second factor, and the session is read straight out of that browser — including
-              the Cloudflare clearance that a copied cookie tends to lose.
+              {/* The note comes from the provider, not from here. */}
+              {descriptor.signIn?.note}
             </p>
             <button
               type="button"
               onClick={() => void signInWithBrowser()}
-              disabled={!acknowledged || phase === 'signing-in' || phase === 'running'}
+              disabled={!descriptor.signIn || !acknowledged || phase === 'signing-in' || phase === 'running'}
               className="btn-gold mt-2.5 w-full !h-9 !text-xs"
             >
               {phase === 'signing-in' ? (
@@ -294,6 +301,7 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
             )}
           </div>
 
+          {descriptor.paste && (
           <details className="mt-4 rounded-xl border border-line bg-bg-soft/40 p-3">
             <summary className="cursor-pointer text-[11px] font-semibold text-text">
               Or paste a session cookie instead
@@ -329,7 +337,7 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
                   </a>
                 </span>
               </li>
-              {extractionSteps.map((step, index) => (
+              {descriptor.extractionSteps.map((step, index) => (
                 <li key={step.label} className="flex gap-2 text-[11px] leading-relaxed text-muted">
                   <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border border-line font-mono text-[9px] text-gold-text">
                     {index + 2}
@@ -349,7 +357,7 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
             </p>
           </section>
             <div className="mt-3">
-            <label htmlFor="web-cookie-export" className="block text-[11px] font-semibold">
+              <label htmlFor="web-cookie-export" className="block text-[11px] font-semibold">
               Session cookie
             </label>
             <textarea
@@ -364,14 +372,15 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
               spellCheck={false}
               autoComplete="off"
               disabled={!acknowledged}
-              placeholder="__Secure-next-auth.session-token=…; oai-did=…"
+              placeholder={descriptor.paste?.placeholder ?? ''}
               className="mt-1.5 w-full resize-y rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-text outline-none focus:border-gold/50 disabled:opacity-50"
             />
             <div className="mt-2 flex flex-wrap items-center gap-2">
+              {descriptor.check && (
               <button
                 type="button"
                 onClick={() => void check()}
-                disabled={!pasteReady || phase === 'checking' || phase === 'running'}
+                disabled={!descriptor.check || !pasteReady || phase === 'checking' || phase === 'running'}
                 className="btn-ghost !h-8 !px-2.5 !text-[11px]"
               >
                 {phase === 'checking' ? (
@@ -383,6 +392,8 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
                   'Check cookie'
                 )}
               </button>
+              )}
+              {descriptor.paste?.supportsFreeOnly && (
               <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted">
                 <input
                   type="checkbox"
@@ -392,12 +403,13 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
                 />
                 Import only the free models
               </label>
+              )}
             </div>
             {checked && (
               <div className="mt-2.5 rounded-lg border border-success/30 bg-success/10 p-2.5">
                 <p className="flex items-center gap-1.5 text-[11px] font-semibold text-success">
                   <Check className="h-3 w-3" aria-hidden="true" />
-                  {checked.planType ? `${checked.planType} plan` : 'Plan not stated by the export'}
+                  {checked.planType ? `${checked.planType} plan` : 'Signed in'}
                 </p>
                 <p className="mt-1 text-[10px] leading-relaxed text-muted">
                   {offered.length} model{offered.length === 1 ? '' : 's'} would be imported.
@@ -417,27 +429,28 @@ export function WebCookieConnectDialog({ providerName, website, riskNotice, risk
             )}
             </div>
 
-                      <button
-                        type="button"
-                        onClick={() => void submit()}
-                        disabled={!pasteReady || phase === 'running' || phase === 'checking'}
-                        className="btn-gold mt-4 w-full !h-9 !text-xs"
-                      >
-                        {phase === 'running' ? (
-                          <>
-                            <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                            Connecting
-                          </>
-                        ) : phase === 'done' ? (
-                          <>
-                            <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                            Connected
-                          </>
-                        ) : (
-                          'Connect'
-                        )}
-                      </button>
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={!descriptor.paste || !pasteReady || phase === 'running' || phase === 'checking'}
+              className="btn-gold mt-3 w-full !h-9 !text-xs"
+            >
+              {phase === 'running' ? (
+                <>
+                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  Connecting
+                </>
+              ) : phase === 'done' ? (
+                <>
+                  <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                  Connected
+                </>
+              ) : (
+                'Connect'
+              )}
+            </button>
           </details>
+          )}
 
           {error && (
             <p role="alert" className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-danger">

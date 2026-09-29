@@ -206,6 +206,18 @@ account that can use a model should be able to see it. The effort rungs collapse
 because ChatGPT picks the effort itself, and `pro` is a different model string with the
 thinking hint deliberately withheld.
 
+**DeepSeek Web works the same way, and its request path has no browser in it at all.**
+chat.deepseek.com is an HTTP API behind a session token, so a turn is a `fetch` with a bearer
+credential. A browser is used once, to read the `userToken` out of your own signed-in
+localStorage. Every completion is gated by DeepSeek's proof of work — a 23-round Keccak
+variant of SHA3-256 that the platform cannot compute — which OmniHilbras solves in a bounded
+search.
+
+**Qwen Web has a catalog and no card.** Its models endpoint answers a guest with 1M-context
+Qwen3.7-Plus, Qwen3.8-Max and Qwen3.8-Omni-Flash, and the chat endpoint is a plain
+unobfuscated `POST /api/v2/chat/completions`. The turn is refused by Alibaba's TMD anti-bot,
+which returns a captcha that has to be rendered in a browser. Not built on a maybe.
+
 **Signing in is one button.** It opens chatgpt.com in a window on the machine running
 OmniHilbras, you sign in with your own password and second factor, and the session is read
 straight out of that browser — including the Cloudflare clearance a copied cookie tends to

@@ -16,4 +16,6 @@ export * from './adapters/zen.js';
 export * from './adapters/opencode-console.js';
 export * from './adapters/kiro.js';
 export * from './adapters/chatgpt-web.js';
+export * from './adapters/deepseek-pow.js';
+export * from './adapters/deepseek-web.js';
 export * from './url.js';

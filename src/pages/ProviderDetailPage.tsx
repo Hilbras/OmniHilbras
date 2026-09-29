@@ -27,6 +27,7 @@ import {
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
 import { KiroConnectDialog } from '../components/KiroConnectDialog';
 import { WebCookieConnectDialog } from '../components/WebCookieConnectDialog';
+import { webSessionDescriptor, webSessionProviderIds } from '../lib/webSessionProviders';
 import { OauthConnectDialog } from '../components/OauthConnectDialog';
 import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, filterAvailability, modelFacets, priceLabel, type ModelFacets, type ModelFilterState, type ModelMetaMap } from '@hilbras/omnihilbras';
 import { DashboardShell } from '../components/DashboardShell';
@@ -178,7 +179,7 @@ const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, req
 const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro']);
 
 /** Providers whose flow is a pasted credential rather than a browser sign-in. */
-const webCookieProviders = new Set(['chatgpt-web']);
+const webCookieProviders = new Set(webSessionProviderIds());
 
 function ResiliencePanel({ connection, routingState, onSave }: { connection: GatewayConnection; routingState?: GatewayRoutingState; onSave: (next: GatewayResilience) => void | Promise<void> }) {
   const [open, setOpen] = useState(false);
@@ -263,6 +264,12 @@ function AddModelForm({ onAdd, providerId }: { onAdd: (model: string) => void | 
 }
 
 export function ProviderDetailContent({ provider }: { provider: ProviderRecord }) {
+  /**
+   * The connect dialog's per-provider instructions. A web-session card with no descriptor
+   * has no connect path at all, which is deliberate: it is better than a card whose button
+   * opens a dialog that cannot describe its own credential.
+   */
+  const descriptor = webSessionDescriptor(provider.id);
   const [addOpen, setAddOpen] = useState(false);
   const [signInWindow, setSignInWindow] = useState<Window | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
@@ -832,10 +839,9 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       {/* Not for a web-cookie provider: that one connects by pasting an exported session,
           so the API-key modal would open underneath the right one and be the one on top. */}
       <AddProviderModal open={addOpen && !isOauth && !webCookieProviders.has(provider.id)} initialProviderId={provider.id} initialModelPolicy={connection?.modelPolicy} onClose={() => setAddOpen(false)} onSave={handleAddConnection} onSaveMany={handleAddConnections} />
-      {webCookieProviders.has(provider.id) && addOpen && (
+      {descriptor && addOpen && (
         <WebCookieConnectDialog
-          providerName={provider.name}
-          website={provider.endpoint}
+          provider={descriptor}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           {...(provider.riskSeverity ? { riskSeverity: provider.riskSeverity } : {})}
           onClose={() => { setAddOpen(false); setSignInWindow(null); }}

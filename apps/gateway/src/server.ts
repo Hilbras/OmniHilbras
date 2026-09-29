@@ -331,6 +331,23 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/deepseek/start') {
+      sendJson(response, 201, await service.startDeepSeekWebSignIn(), origin);
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/v1/oauth/deepseek/status') {
+      const sessionId = url.searchParams.get('sessionId') ?? '';
+      sendJson(response, 200, await service.pollDeepSeekWebSignIn(sessionId), origin);
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/deepseek/connect') {
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      sendJson(response, 201, { connection: await service.connectDeepSeekWeb(readRequiredString(body, 'userToken'), controller.signal) }, origin);
+      return;
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/web-cookie/chatgpt/check') {
       // Deliberately before the connect route and deliberately storing nothing: this is the
       // "check the cookie" answer, which is which models the account will actually get.

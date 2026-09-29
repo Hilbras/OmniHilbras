@@ -964,6 +964,98 @@ symmetric. Showing a model the account cannot use costs one visible test failure
 itself; hiding a model it *can* use hides something that works, with no way to tell that apart
 from "not supported". The plan is still **reported** — the connect dialog shows it.
 
+### DeepSeek Web
+
+The second web-session provider, and the one that shows what the shape is *for*.
+
+**No browser is in the request path.** chat.deepseek.com is an HTTP API behind a session
+token, so a turn is a `fetch` with a bearer credential — the same shape as any other HTTP
+provider. A browser is involved only in *getting* the credential, and only once.
+
+```
+POST /api/v0/users/current            userToken  ->  data.biz_data.token   (an accessToken, ~1h)
+POST /api/v0/chat/create_pow_challenge { target_path }  ->  a challenge
+POST /api/v0/chat_session/create                              ->  a chat session
+POST /api/v0/chat/completion         X-Ds-Pow-Response: <base64 proof>
+```
+
+Three things are load-bearing and none is obvious:
+
+**The token is exchanged, not used.** `userToken` authorises `users/current` and nothing else.
+Sending it at the completion endpoint gets a 401 that looks exactly like an expired session.
+The access token is cached for an hour with a minute of slack, so a turn does not spend two
+round trips before it sends anything.
+
+**Every completion is gated by a proof of work.** `DeepSeekHashV1` is SHA3-256's sponge at
+**23** Keccak rounds instead of 24, which is why `node:crypto` cannot do it. The nonce is found
+by scanning `<salt>_<expireAt>_<nonce>` for a full 32-byte digest match, bounded at 250 000, and
+returned base64 in `X-Ds-Pow-Response`. A challenge is taken per completion, not cached: the
+answer is bound to the target path and carries its own expiry.
+
+**The endpoint takes one flat `prompt`, not messages.** History is flattened with the turns
+labelled, because a bare join of `["You are terse.", "2+2?"]` loses which was which and the
+instruction is the part that gets lost.
+
+The SSE answer arrives in two frame shapes and both are read:
+
+```json
+{"v":{"response":{"thinking_enabled":true,"fragments":[{"type":"THINK","content":"…"}]}}}
+{"p":"response/fragments","o":"append","v":[{"type":"ANSWER","content":"working"}]}
+```
+
+The append frames often arrive with **no `type`**, addressed relative to the current message —
+so `thinking_enabled` from the last whole response decides which side of the split a bare
+fragment belongs to. Treating every append as the answer is how a model that thinks first ends
+up answering with its reasoning.
+
+**The credential is `userToken` in localStorage, not a cookie.** `context.cookies()` returns
+nothing useful and the connection looks signed out forever. DeepSeek stores it sometimes as
+`{"value":"…"}` and sometimes bare, so both are read.
+
+The request headers are DeepSeek's own web-client fingerprint, and the header *set* is itself
+a bot-detection signal: the 2.0.0 build dropped `X-App-Version` and added
+`X-Client-Bundle-Id`, so sending the stale stamp is itself suspicious. `x-hif-leim`, a signed
+client-attestation token from obfuscated JS, is deliberately omitted — reproducing it means
+porting that JS, and the endpoint does not currently require it. If it ever does, requests will
+fail with a 401 that says nothing about attestation, which is when to come back to it.
+
+### Qwen Web, and why there is no card
+
+The catalog is open and the turn is not:
+
+```
+GET  chat.qwen.ai/api/v2/models/      200, three models, 1,000,000 ctx each
+POST chat.qwen.ai/api/v2/chat/completions   -> 200, with this body:
+
+{"ret":["FAIL_SYS_USER_VALIDATE","RGV587_ERROR::SM::哎哟喂,被挤爆啦,请稍后重试"],
+ "data":{"url":".../_____tmd_____/punish?...&action=captchaconnect",
+         "dialogSize":{"width":"375px","height":"665px"}}}
+```
+
+That is Alibaba's TMD anti-bot, and it returns a captcha that has to be **rendered in a
+browser**. A guest session has no XSRF cookie at all, so the `X-XSRF-TOKEN` header the bundle
+sends is not even obtainable without an account. The models endpoint is free and easy; the turn
+needs a solved captcha per challenge — a harder version of the problem ChatGPT Web already
+turned out to be, with no reference implementation anywhere to lean on. So there is a catalog
+and no card, and the honest state is "known, not built".
+
+Two findings kept from that probe: the endpoint is a plain `POST /api/v2/chat/completions` with
+`X-XSRF-TOKEN` / `X-Request-Id` / `x-request-origin` and no obfuscation, and calling it from
+inside the page kills the renderer — which is what buffering an endless SSE stream with
+`response.text()` does. Both are why a Qwen driver must read its body incrementally with a cap.
+
+### One dialog, driven by a descriptor
+
+The connect dialog is not a ChatGPT dialog with the names swapped. Each provider supplies its
+own credential name, extraction steps, sign-in note, routes and paste placeholder, in
+`src/lib/webSessionProviders.ts`.
+
+That is not tidiness for its own sake. The ChatGPT guide once told people to paste a Cookie
+header the parser refused, because the instruction and the parser were written in different
+places. And the generalised dialog still shipped a hardcoded ChatGPT sentence that told
+DeepSeek users a chatgpt.com window was about to open — caught by looking at the rendered
+dialog rather than the code. Anything provider-specific belongs to the provider.
+
 ### Signing in, which is how you get the session
 
 ```

@@ -7,3 +7,4 @@ export * from './secure-store.js';
 export * from './server.js';
 export * from './service.js';
 export * from './chatgptWebSignIn.js';
+export * from './deepseekWebSignIn.js';

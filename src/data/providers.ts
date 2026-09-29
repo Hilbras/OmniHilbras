@@ -9,6 +9,8 @@ export const providerLogoMap = {
   openrouter: '/providers/openrouter.png',
   cline: '/providers/cline.png',
   chatgpt: '/providers/chatgpt.svg',
+  deepseek: '/providers/deepseek.svg',
+  qwen: '/providers/qwen.svg',
   kiro: '/providers/kiro.svg',
   opencode: '/providers/opencode.png',
   nara: '/providers/bynara-logo-icon-light.svg',
@@ -72,6 +74,41 @@ export const providerCatalog: ProviderRecord[] = [
     riskNotice:
       'OpenAI’s terms do not permit automating chatgpt.com, and the credential here is a live session for your whole account — not a token limited to inference. OmniHilbras opens chatgpt.com in a browser and lets its page solve the anti-bot challenges. Only continue if that is a trade you have decided to make.',
     riskSeverity: 'high',
+  },
+  {
+    id: 'deepseek-web',
+    name: 'DeepSeek Web',
+    description:
+      'chat.deepseek.com through the session you sign in with. Plain HTTP behind a userToken — no browser in the request path.',
+    category: 'Web session',
+    group: 'web-cookie',
+    status: 'available',
+    auth: 'Web session',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#4d6bfe',
+    initial: 'D',
+    logo: providerLogoMap.deepseek,
+    endpoint: 'https://chat.deepseek.com',
+    modelList: [],
+    /**
+     * Real, and worth reading before connecting.
+     *
+     * DeepSeek publishes an official API and this is not it. The credential is a `userToken`
+     * from a signed-in web session, which is a live session for a whole account rather than a
+     * token scoped to inference, and using it means sending DeepSeek's own web-client
+     * fingerprint so the requests are not trivially distinguishable from the site's.
+     *
+     * Also worth saying plainly: DeepSeek gates every completion with a proof of work, and
+     * solving it is what OmniHilbras does in `deepseek-pow.ts`. That is a bounded search
+     * (~250k hashes at worst), not a wall, but it is a real cost on every request.
+     */
+    riskNotice:
+      'DeepSeek publishes an official API, and this is not it. The credential is a userToken from your signed-in chat.deepseek.com session — a live session for a whole account, not a token limited to inference — and requests carry DeepSeek\'s own web-client fingerprint. Every completion is also gated by a proof of work that OmniHilbras solves. If you have an API key, prefer it.',
+    riskSeverity: 'standard',
   },
   {
     id: 'kiro',

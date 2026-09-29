@@ -1,0 +1,499 @@
+import { ProviderError } from '../errors.js';
+import type {
+  ChatMessage,
+  ChatRequest,
+  ChatResponse,
+  CredentialValidation,
+  FinishReason,
+  Model,
+  ProviderAdapter,
+  ProviderCredential,
+  ProviderId,
+  ProviderRequestContext,
+} from '../types.js';
+import { MAX_DEEPSEEK_POW_DIFFICULTY, findDeepSeekPowNonce } from './deepseek-pow.js';
+
+/**
+ * DeepSeek Web, driven by a `userToken` from a signed-in chat.deepseek.com.
+ *
+ * **No browser is needed for a turn.** The web client is an HTTP API behind a session token,
+ * so unlike ChatGPT Web this is a normal fetch with a bearer credential. A browser is only
+ * involved in *getting* the token, which the gateway does in a visible sign-in window.
+ *
+ * That difference is why this provider exists as it does: the fragile parts of a web-session
+ * provider are all in obtaining the credential, and the request path is plain.
+ *
+ * Two things make the request path non-obvious, and both are load-bearing:
+ *
+ *  - **The token is exchanged, not used.** `userToken` only authorises `users/current`,
+ *    which hands back a short-lived `accessToken` for everything else. Sending the userToken
+ *    at the completion endpoint gets a 401 that looks like an expired session.
+ *  - **Every completion is gated by a proof of work** — see `deepseek-pow.ts`. It is a
+ *    bounded search, not a wall, and the answer goes in `X-Ds-Pow-Response`.
+ */
+
+export const deepseekWebProviderId: ProviderId = 'deepseek-web';
+
+const WEB_ORIGIN = 'https://chat.deepseek.com';
+const API_BASE = `${WEB_ORIGIN}/api`;
+const COMPLETION_URL = `${API_BASE}/v0/chat/completion`;
+
+/**
+ * The fingerprint the web client sends on every `/api/v0/*` call.
+ *
+ * The header set is a bot-detection signal in itself, not decoration: the 2.0.0 web build
+ * dropped `X-App-Version` and added `X-Client-Bundle-Id`, so sending the *stale* stamp is
+ * itself suspicious. These are the ones the current build sends.
+ *
+ * `x-hif-leim`, a signed client-attestation token from obfuscated JS, is deliberately
+ * omitted — reproducing it means porting that JS, and the completion endpoint does not
+ * currently require it. If it ever does, requests will fail with a 401 that says nothing
+ * about attestation, which is when to come back to it.
+ */
+const FINGERPRINT_HEADERS: Readonly<Record<string, string>> = {
+  Accept: '*/*',
+  'Accept-Language': 'en-US,en;q=0.9',
+  Origin: WEB_ORIGIN,
+  Referer: `${WEB_ORIGIN}/`,
+  'User-Agent':
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
+  'X-Client-Bundle-Id': 'com.deepseek.chat',
+  'X-Client-Locale': 'en-US',
+  'X-Client-Platform': 'web',
+  'X-Client-Version': '2.0.0',
+};
+
+export const DEEPSEEK_WEB = {
+  origin: WEB_ORIGIN,
+  apiBase: API_BASE,
+  /** The localStorage key the web client keeps its session token under. */
+  tokenStorageKey: 'userToken',
+  navigationTimeoutMs: 60_000,
+} as const;
+
+/**
+ * The models chat.deepseek.com serves.
+ *
+ * Two axes, and both are in the id rather than a separate parameter: `think` and `search`
+ * are model variants the page offers, not request options. A Pro model is `model_type:
+ * "expert"`; everything else is `"default"`.
+ */
+const DEEPSEEK_WEB_MODELS: ReadonlyArray<{ id: string; name: string; expert: boolean; thinking: boolean; search: boolean }> = [
+  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', expert: true, thinking: false, search: false },
+  { id: 'deepseek-v4-pro-think', name: 'DeepSeek V4 Pro Think', expert: true, thinking: true, search: false },
+  { id: 'deepseek-v4-pro-search', name: 'DeepSeek V4 Pro Search', expert: true, thinking: false, search: true },
+  { id: 'deepseek-v4-pro-think-search', name: 'DeepSeek V4 Pro Think+Search', expert: true, thinking: true, search: true },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', expert: false, thinking: false, search: false },
+  { id: 'deepseek-v4-flash-think', name: 'DeepSeek V4 Flash Think', expert: false, thinking: true, search: false },
+  { id: 'deepseek-v4-flash-search', name: 'DeepSeek V4 Flash Search', expert: false, thinking: false, search: true },
+  { id: 'deepseek-v4-flash-think-search', name: 'DeepSeek V4 Flash Think+Search', expert: false, thinking: true, search: true },
+  { id: 'deepseek-chat', name: 'DeepSeek Chat', expert: false, thinking: false, search: false },
+  { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', expert: false, thinking: true, search: false },
+  { id: 'DeepSeek-R1', name: 'DeepSeek R1', expert: false, thinking: true, search: false },
+  { id: 'DeepSeek-R1-Search', name: 'DeepSeek R1 Search', expert: false, thinking: true, search: true },
+  { id: 'DeepSeek-V3.2', name: 'DeepSeek V3.2', expert: false, thinking: false, search: false },
+  { id: 'DeepSeek-Search', name: 'DeepSeek Search', expert: false, thinking: false, search: true },
+];
+
+/** Every id, plus the spelling variants that normalise to the same model. */
+export function allDeepSeekWebModels(): string[] {
+  return DEEPSEEK_WEB_MODELS.map((model) => model.id);
+}
+
+function lookupModel(id: string) {
+  const wanted = id.trim().toLowerCase();
+  return DEEPSEEK_WEB_MODELS.find((model) => model.id.toLowerCase() === wanted);
+}
+
+/**
+ * Reads the token out of whatever the user pasted.
+ *
+ * DeepSeek stores it as `{"value":"…"}`, so a copy out of localStorage is sometimes the
+ * wrapper and sometimes the bare string. Accepting both is the difference between "paste it"
+ * working and "paste it" working only if you know to unwrap it first.
+ */
+export function parseDeepSeekUserToken(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    throw new ProviderError('INVALID_REQUEST', 'Paste the userToken from chat.deepseek.com.', {
+      providerId: deepseekWebProviderId,
+      publicMessage: 'Paste the userToken from chat.deepseek.com.',
+    });
+  }
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { value?: unknown };
+      if (typeof parsed.value === 'string' && parsed.value.trim()) return parsed.value.trim();
+    } catch {
+      // Not the wrapper after all; fall through to the raw value.
+    }
+  }
+  return trimmed;
+}
+
+export function deepSeekWebCredential(raw: string): ProviderCredential {
+  return { type: 'api-key', value: parseDeepSeekUserToken(raw) };
+}
+
+function userTokenFromCredential(credential: ProviderCredential | undefined): string {
+  if (!credential || credential.type !== 'api-key' || !credential.value.trim()) {
+    throw new ProviderError('AUTHENTICATION_FAILED', 'This DeepSeek Web connection has no userToken.', {
+      providerId: deepseekWebProviderId,
+      publicMessage: 'This DeepSeek Web connection has no userToken. Sign in again.',
+    });
+  }
+  return credential.value.trim();
+}
+
+/** One place to build a provider error, so every failure carries the id and the public message. */
+function fail(code: ProviderError['code'], message: string): ProviderError {
+  return new ProviderError(code, message, { providerId: deepseekWebProviderId, publicMessage: message });
+}
+
+/** DeepSeek wraps every response in `{ code, msg, data: { biz_data } }` and `code !== 0` means trouble. */
+function unwrap(json: unknown, what: string): Record<string, unknown> {
+  const body = (json ?? {}) as { code?: unknown; msg?: unknown; data?: { biz_data?: Record<string, unknown>; biz_msg?: string } };
+  if (typeof body.code === 'number' && body.code !== 0) {
+    const message = typeof body.msg === 'string' && body.msg ? body.msg : (body.data?.biz_msg ?? `error code ${body.code}`);
+    throw fail('PROVIDER_REQUEST_FAILED', `DeepSeek rejected the ${what}: ${message}`);
+  }
+  const biz = body.data?.biz_data;
+  if (!biz || typeof biz !== 'object') throw fail('PROVIDER_REQUEST_FAILED', `DeepSeek returned no data for the ${what}.`);
+  return biz;
+}
+
+type AccessToken = { token: string; expiresAt: number };
+
+export class DeepSeekWebAdapter implements ProviderAdapter {
+  readonly id = deepseekWebProviderId;
+  readonly name = 'DeepSeek Web';
+  /**
+   * Streaming is not claimed. The upstream answer is an SSE stream, but every artifact this
+   * provider was built against describes a completed turn, and presenting a whole answer as
+   * a stream would imply tokens arriving over time when none were observed doing so.
+   */
+  readonly capabilities = { chat: true, streaming: false, models: true } as const;
+
+  private readonly now: () => number;
+  private readonly fetchImpl: typeof fetch;
+  /** Keyed by userToken, because the access token is per-account and lasts about an hour. */
+  private readonly accessTokens = new Map<string, AccessToken>();
+
+  constructor(options: { now?: () => number; fetch?: typeof fetch } = {}) {
+    this.now = options.now ?? (() => Date.now());
+    this.fetchImpl = options.fetch ?? fetch;
+  }
+
+  async listModels(): Promise<Model[]> {
+    return DEEPSEEK_WEB_MODELS.map((model) => ({ id: model.id, providerId: this.id, displayName: model.name }));
+  }
+
+  async validateCredential(credential: ProviderCredential | undefined): Promise<CredentialValidation> {
+    // A real call, because a token's only meaningful test is whether DeepSeek accepts it.
+    // Cheap: `users/current` is a single round trip and needs no proof of work.
+    await this.accessToken(userTokenFromCredential(credential), undefined);
+    return { status: 'valid', checkedAt: new Date(this.now()).toISOString() };
+  }
+
+  /**
+   * Exchanges the userToken for a short-lived access token.
+   *
+   * The userToken authorises this call and nothing else. Cached for an hour because it is
+   * the same value for every request in that window, and a turn otherwise spends two
+   * round trips before it sends anything.
+   */
+  private async accessToken(userToken: string, signal?: AbortSignal): Promise<string> {
+    const cached = this.accessTokens.get(userToken);
+    if (cached && cached.expiresAt > this.now()) return cached.token;
+
+    const response = await this.fetchImpl(`${API_BASE}/v0/users/current`, {
+      method: 'GET',
+      headers: { ...FINGERPRINT_HEADERS, Authorization: `Bearer ${userToken}` },
+      ...(signal ? { signal } : {}),
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw fail(
+        'AUTHENTICATION_FAILED',
+        'DeepSeek rejected that userToken. Sign in to chat.deepseek.com again and export a fresh one — a token from another account or a signed-out session looks exactly like this.',
+      );
+    }
+    if (!response.ok) throw fail('PROVIDER_UNAVAILABLE', `chat.deepseek.com answered ${response.status} for the userToken.`);
+
+    const biz = unwrap(await response.json(), 'sign-in');
+    const token = biz.token;
+    if (typeof token !== 'string' || !token) {
+      throw fail('AUTHENTICATION_FAILED', 'DeepSeek accepted the request but returned no access token.');
+    }
+    // A minute of slack, so a token cannot expire between the check and the request.
+    this.accessTokens.set(userToken, { token, expiresAt: this.now() + 55 * 60_000 });
+    return token;
+  }
+
+  /**
+   * Solves a fresh proof of work for the completion endpoint.
+   *
+   * A challenge per completion, not per session: the answer is bound to the target path and
+   * carries the challenge's own expiry, so caching one would be reusing spent work.
+   */
+  private async proofOfWork(accessToken: string, signal?: AbortSignal): Promise<string> {
+    const response = await this.fetchImpl(`${API_BASE}/v0/chat/create_pow_challenge`, {
+      method: 'POST',
+      headers: { ...FINGERPRINT_HEADERS, 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ target_path: '/api/v0/chat/completion' }),
+      ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) throw fail('PROVIDER_UNAVAILABLE', `DeepSeek would not issue a proof of work (${response.status}).`);
+    const challenge = unwrap(await response.json(), 'proof of work').challenge as
+      | { algorithm?: string; challenge?: string; salt?: string; difficulty?: number; signature?: string; target_path?: string; expire_at?: number }
+      | undefined;
+    if (!challenge?.challenge || typeof challenge.salt !== 'string' || typeof challenge.difficulty !== 'number') {
+      throw fail('PROVIDER_REQUEST_FAILED', 'DeepSeek returned a proof-of-work challenge with no answer in it.');
+    }
+    if (challenge.algorithm !== undefined && challenge.algorithm !== 'DeepSeekHashV1') {
+      // A new hash would silently produce a wrong answer, which DeepSeek reports as a plain
+      // 401. Saying which algorithm arrived is the difference between a fixable error and a
+      // mystery.
+      throw fail('PROVIDER_REQUEST_FAILED', `DeepSeek changed its proof-of-work algorithm to ${challenge.algorithm}; this version solves DeepSeekHashV1.`);
+    }
+    const prefix = `${challenge.salt}_${challenge.expire_at ?? 0}_`;
+    const nonce = findDeepSeekPowNonce(prefix, challenge.challenge, Math.min(challenge.difficulty, MAX_DEEPSEEK_POW_DIFFICULTY));
+    if (nonce < 0) {
+      throw fail(
+        'PROVIDER_REQUEST_FAILED',
+        `DeepSeek's proof of work had no answer within the range it announced (${challenge.difficulty}). The challenge may have expired before it was solved.`,
+      );
+    }
+    return Buffer.from(
+      JSON.stringify({
+        algorithm: challenge.algorithm ?? 'DeepSeekHashV1',
+        challenge: challenge.challenge,
+        salt: challenge.salt,
+        answer: nonce,
+        signature: challenge.signature,
+        target_path: challenge.target_path ?? '/api/v2/chat/completion',
+      }),
+    ).toString('base64');
+  }
+
+  private async createSession(accessToken: string, signal?: AbortSignal): Promise<string> {
+    const response = await this.fetchImpl(`${API_BASE}/v0/chat_session/create`, {
+      method: 'POST',
+      headers: { ...FINGERPRINT_HEADERS, 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({}),
+      ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) throw fail('PROVIDER_UNAVAILABLE', `DeepSeek would not start a chat session (${response.status}).`);
+    const session = unwrap(await response.json(), 'chat session').chat_session as { id?: string } | undefined;
+    if (!session?.id) throw fail('PROVIDER_REQUEST_FAILED', 'DeepSeek started no chat session.');
+    return session.id;
+  }
+
+  async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
+    const model = lookupModel(request.model);
+    if (!model) {
+      throw new ProviderError('NOT_SUPPORTED', `DeepSeek Web does not offer a model called ${request.model}.`, {
+        providerId: this.id,
+        publicMessage: `DeepSeek Web does not offer a model called ${request.model}. The models it serves are the ones on this page.`,
+      });
+    }
+    const userToken = userTokenFromCredential(context.credential);
+    const accessToken = await this.accessToken(userToken, context.signal);
+    const sessionId = await this.createSession(accessToken, context.signal);
+    const pow = await this.proofOfWork(accessToken, context.signal);
+
+    /**
+     * The endpoint takes one flat `prompt`, not a message array.
+     *
+     * History is flattened into it: a system turn is prefixed as an instruction and earlier
+     * turns are labelled, because there is nowhere else to put them. Dropping them silently
+     * would answer the last line and look like it had read the rest.
+     */
+    const prompt = flattenToPrompt(request.messages.map((message) => ({ role: message.role, text: messageText(message.content) })));
+
+    const response = await this.fetchImpl(COMPLETION_URL, {
+      method: 'POST',
+      headers: {
+        ...FINGERPRINT_HEADERS,
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        'X-Ds-Pow-Response': pow,
+        'X-Client-Timezone-Offset': String(new Date().getTimezoneOffset() * -60),
+      },
+      body: JSON.stringify({
+        chat_session_id: sessionId,
+        parent_message_id: null,
+        model_type: model.expert ? 'expert' : 'default',
+        prompt,
+        ref_file_ids: [],
+        thinking_enabled: model.thinking,
+        search_enabled: model.search,
+        preempt: false,
+      }),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      this.accessTokens.delete(userToken);
+      throw fail('AUTHENTICATION_FAILED', 'DeepSeek refused the request. The session may have ended — sign in again.');
+    }
+    if (!response.ok) throw fail('PROVIDER_UNAVAILABLE', `DeepSeek answered ${response.status} for the completion.`);
+
+    const answer = decodeDeepSeekAnswer(await readBodyCapped(response, context.signal));
+    if (!answer.content) {
+      throw fail('PROVIDER_REQUEST_FAILED', 'DeepSeek answered, but the stream carried no text. Its response format may have changed.');
+    }
+
+    const message: ChatMessage = {
+      role: 'assistant',
+      content: answer.content,
+      ...(answer.reasoning ? { reasoningContent: answer.reasoning } : {}),
+    };
+    return {
+      id: `chatcmpl-${Math.floor(this.now() / 1000)}-${Math.random().toString(36).slice(2, 8)}`,
+      providerId: this.id,
+      model: model.id,
+      createdAt: new Date(this.now()).toISOString(),
+      message,
+      finishReason: 'stop' satisfies FinishReason,
+    };
+  }
+}
+
+function messageText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (part && typeof part === 'object' && 'text' in part) return String((part as { text?: unknown }).text ?? '');
+      return '';
+    })
+    .join('');
+}
+
+/**
+ * Flattens a message list into the single prompt the endpoint takes.
+ *
+ * Labelled rather than concatenated, because a bare join of `["You are terse.", "2+2?"]`
+ * loses which was which.
+ */
+export function flattenToPrompt(messages: ReadonlyArray<{ role: string; text: string }>): string {
+  const kept = messages.filter((message) => message.text.trim());
+  const system = kept.filter((message) => message.role === 'system');
+  const rest = kept.filter((message) => message.role !== 'system');
+  const lines: string[] = [];
+  if (system.length > 0) {
+    lines.push('Follow these instructions:', ...system.map((message) => `- ${message.text.trim()}`), '');
+  }
+  for (const message of rest) {
+    lines.push(`${message.role === 'assistant' ? 'Assistant' : 'User'}: ${message.text.trim()}`);
+  }
+  return lines.join('\n').trim();
+}
+
+/**
+ * Reads a completed answer out of DeepSeek's SSE body.
+ *
+ * Two frame shapes arrive and both matter:
+ *
+ * ```json
+ * {"v":{"response":{"thinking_enabled":true,"fragments":[{"type":"THINK","content":"…"}]}}}
+ * {"p":"response/fragments","o":"append","v":[{"type":"ANSWER","content":"working"}]}
+ * ```
+ *
+ * The first is a whole response with its fragments inline. The second appends more, and those
+ * fragments often arrive **without a type**, addressed relative to the current message —
+ * which is why `thinking_enabled` from the last whole response decides which side of the
+ * reasoning/content split a bare fragment belongs to. Dropping that state and treating every
+ * append as the answer is how a model that thinks first ends up answering with its
+ * reasoning.
+ */
+export function decodeDeepSeekAnswer(body: string): { content: string; reasoning: string } {
+  let content = '';
+  let reasoning = '';
+  // Which side an untyped append belongs to, from the last whole response that said so.
+  let currentPath: 'thinking' | 'content' = 'content';
+
+  const take = (fragment: unknown, typed: boolean) => {
+    if (!fragment || typeof fragment !== 'object') return;
+    const record = fragment as { type?: unknown; content?: unknown };
+    if (typeof record.content !== 'string' || record.content.length === 0) return;
+    if (typed) {
+      const type = String(record.type ?? '').toUpperCase();
+      if (type === 'THINK') currentPath = 'thinking';
+      else if (type === 'ANSWER' || type === 'RESPONSE') currentPath = 'content';
+    }
+    if (currentPath === 'thinking') reasoning += record.content;
+    else content += record.content;
+  };
+
+  for (const rawLine of body.replace(/\r\n?/g, '\n').split('\n')) {
+    const line = rawLine.trim();
+    if (!line.startsWith('data:')) continue;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === '[DONE]') continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      continue;
+    }
+    if (typeof parsed !== 'object' || parsed === null) continue;
+    const frame = parsed as { p?: unknown; v?: unknown };
+    const value = frame.v;
+
+    // A whole response: it declares the path and carries its own fragments.
+    if (value && typeof value === 'object' && !Array.isArray(value) && 'response' in (value as Record<string, unknown>)) {
+      const response = (value as { response: { thinking_enabled?: unknown; fragments?: unknown } }).response;
+      if (response.thinking_enabled === true) currentPath = 'thinking';
+      else if (response.thinking_enabled === false) currentPath = 'content';
+      if (Array.isArray(response.fragments)) for (const fragment of response.fragments) take(fragment, true);
+    }
+
+    if (frame.p === 'response/fragments') {
+      if (Array.isArray(value)) for (const fragment of value) take(fragment, true);
+      else take(value, false);
+    }
+  }
+  return { content: content.trim(), reasoning: reasoning.trim() };
+}
+
+/**
+ * Reads the whole body, with a cap.
+ *
+ * The cap is not paranoia about a hostile server so much as about an endless one: a stream
+ * that never terminates will grow a buffer until the process is killed, and the failure then
+ * reads as an out-of-memory crash rather than as an upstream that never finished.
+ */
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+
+async function readBodyCapped(response: Response, signal?: AbortSignal): Promise<string> {
+  const body = response.body;
+  if (!body) return response.text();
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw fail('PROVIDER_REQUEST_FAILED', 'DeepSeek’s answer grew past 8 MB and was cut off.');
+      }
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Already released after a cancellation.
+    }
+  }
+  return chunks.join('');
+}

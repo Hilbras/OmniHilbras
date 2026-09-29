@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, OpenAICompatibleAdapter, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import { ApiKeyLimitError, type ApiKeyRecord, type ApiKeyStore, type CreatedApiKey } from './api-keys.js';
 import { ConnectionMetadataLimitError, ConnectionModelLimitError, defaultResilienceSettings, modelMetaPriceOrder, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ModelMeta, type ModelMetaMap, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
@@ -6,6 +6,7 @@ import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsol
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialSignIn, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
 import { ChatGptWebSignInStore, startChatGptWebSignIn } from './chatgptWebSignIn.js';
+import { DeepSeekSignInStore, startDeepSeekWebSignIn } from './deepseekWebSignIn.js';
 import { HealthRegistry, SlidingWindowRateLimiter, isRetryableFailure, noCandidateMessage, resolveRoute, type RouteCandidate } from './routing.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
@@ -133,6 +134,8 @@ export class GatewayService {
   private readonly kiroSessions = new KiroSessionStore();
   private readonly kiroSocial = new KiroSocialStore();
   private chatGptWeb?: ProviderAdapter;
+  /** DeepSeek Web, built once so its access-token cache is shared across requests. */
+  private deepSeek?: DeepSeekWebAdapter;
   private kiro?: ProviderAdapter;
   /** Why the last model discovery failed, when it was tolerated rather than fatal. */
   private lastDiscoveryNote?: string;
@@ -145,6 +148,8 @@ export class GatewayService {
   private healthTimer?: NodeJS.Timeout;
   /** Sign-in attempts in progress. Each holds a browser window open until it is claimed. */
   private readonly chatGptSignIns = new ChatGptWebSignInStore();
+  /** Sign-in attempts in progress. Each holds a browser window open until it is claimed. */
+  private readonly deepSeekSignIns = new DeepSeekSignInStore();
   /** Kept whole, because the ChatGPT Web driver is built lazily on first use. */
   private readonly options: GatewayServiceOptions;
 
@@ -719,6 +724,78 @@ export class GatewayService {
     const connection = await this.connectChatGptWeb(outcome.storageState, undefined, freeOnly);
     await this.chatGptSignIns.discard(sessionId);
     return { status: 'connected', connection, plan: outcome.plan };
+  }
+
+  /**
+   * The DeepSeek Web adapter, built once so its access-token cache is shared.
+   *
+   * Typed as the concrete class rather than `ProviderAdapter` on purpose: `validateCredential`
+   * is optional on the interface, and both the sign-in and the paste path depend on it being
+   * there. Narrowing the type makes the dependency a compile error instead of a runtime one.
+   */
+  deepSeekAdapter(): DeepSeekWebAdapter {
+    this.deepSeek ??= new DeepSeekWebAdapter();
+    return this.deepSeek;
+  }
+
+  async startDeepSeekWebSignIn() {
+    const started = await startDeepSeekWebSignIn();
+    if ('error' in started) throw new ProviderError('PROVIDER_UNAVAILABLE', started.error, {
+      providerId: deepseekWebProviderId,
+      publicMessage: started.error,
+    });
+    return { sessionId: this.deepSeekSignIns.create(started), headed: started.headed };
+  }
+
+  /**
+   * Reports whether a DeepSeek sign-in has finished, and saves the connection when it has.
+   *
+   * The token is read out of the browser that signed in, so it is the session DeepSeek
+   * actually issued rather than something reconstructed. The claim is taken before the page
+   * is read, so two concurrent polls cannot save two connections from one sign-in.
+   */
+  async pollDeepSeekWebSignIn(sessionId: string): Promise<
+    | { status: 'pending' }
+    | { status: 'denied'; error: string }
+    | { status: 'connected'; connection: unknown }
+  > {
+    const session = this.deepSeekSignIns.claim(sessionId);
+    if (!session) return { status: 'denied', error: 'That sign-in has expired or was already completed. Start it again.' };
+    const outcome = await session.read();
+    if (outcome.status === 'pending') {
+      session.claimed = false;
+      return { status: 'pending' };
+    }
+    if (outcome.status === 'denied') {
+      await this.deepSeekSignIns.discard(sessionId);
+      return { status: 'denied', error: outcome.error };
+    }
+    // Verified against DeepSeek before it is saved, so a connection is never created that
+    // cannot answer. The error names the real cause — expired, refused, no network.
+    await this.deepSeekAdapter().validateCredential(deepSeekWebCredential(outcome.userToken));
+    const connection = await this.connectDeepSeekWeb(outcome.userToken);
+    await this.deepSeekSignIns.discard(sessionId);
+    return { status: 'connected', connection };
+  }
+
+  /** Stores a DeepSeek Web userToken, after checking DeepSeek accepts it. */
+  async connectDeepSeekWeb(userToken: string, signal?: AbortSignal) {
+    const credential = deepSeekWebCredential(userToken);
+    // Verified before the save, so a refused token never becomes a connection.
+    await this.deepSeekAdapter().validateCredential(credential);
+    return this.saveConnection(
+      {
+        id: deepseekWebProviderId,
+        providerId: deepseekWebProviderId,
+        name: 'DeepSeek Web',
+        endpoint: 'https://chat.deepseek.com',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      },
+      credential,
+      signal,
+    );
   }
 
   async connectChatGptWeb(exported: string, signal?: AbortSignal, freeOnly = false) {
@@ -1379,6 +1456,7 @@ export class GatewayService {
     if (providerId === opencodeConsoleProviderId) return this.opencodeConsoleAdapter(providerId);
     if (providerId === kiroProviderId) return this.kiroAdapter(providerId);
     if (providerId === chatGptWebProviderId) return this.chatGptWebAdapter();
+    if (providerId === deepseekWebProviderId) return this.deepSeekAdapter();
     const registered = this.registry.get(providerId);
     if (registered) return registered;
     // A connection being saved is not in the store yet, so the caller can pass
