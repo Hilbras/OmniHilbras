@@ -435,6 +435,70 @@ finding — and it took a deliberately planted leak to surface, not a careful re
 tests    795 → 801
 ```
 
+---
+
+## Task 71: the secret scan was a ritual, and my first scanner had a hole in it
+
+`AGENTS.md` said:
+
+> Before any push, scan the tree for secret-shaped strings:
+> `git grep -nEI "ohk_…|sk-or-v1-…|ghp_…|npm_…"`
+
+That was carried out by hand before every push in this work — about twenty times — with **four**
+patterns, and it is the only security control in the repository that depended on me remembering. A
+manual pre-push ritual is a ritual: it is skipped under deadline, it does not run for whoever reviews
+a pull request, and it does not run at all on the twenty commits between the one you remembered and
+the tag you pushed. The 141 provider assets that 18 consecutive releases left out were missed for the
+same reason — a thing done by hand, with nothing to notice when it stopped happening.
+
+**`tests/no-secrets.test.js`.** Fifteen shapes instead of four, scanning the **tracked** tree. The
+oracle is `git ls-files` deliberately: the defect its sibling suites exist to catch was a working tree
+holding files the repository did not, so a scanner reading the working tree would have been blind to
+exactly its own subject. Measured across the tree, all fifteen patterns match nothing, so the wider
+net costs no false positives today — and a scanner that cries wolf on day one gets deleted rather than
+fixed. The exemption list exists, is empty, and is **asserted empty**, because a list of exemptions
+that accumulates quietly is how a scanner stops being one.
+
+Also asserted, because they are the ways a scanner quietly becomes a no-op: every pattern is shown a
+sample it must catch (a scanner that matches nothing is indistinguishable from a broken one), each
+sample must match only its own pattern so a finding is not misattributed, and the scanner must not
+match **itself or the rule documenting it** — it needs no self-exemption, because a regex source is
+not a match, and that is worth asserting so nobody adds the exemption later on a false premise.
+
+## The hole my own scanner had, found by its own test
+
+The first version skipped files **by extension**. Its binary-skip test immediately caught that 154
+skipped files were text:
+
+```
+.gitignore   LICENSE   public/_redirects   .env.example
+public/providers/*.svg   (149 of them)
+```
+
+So a secret pasted into an SVG — which is markup the browser executes — would have sailed straight
+through the scan. **A name is not a property of content**, and a maintained list of names is a list
+that is wrong the moment somebody adds a file. Replaced with a content test: a file whose bytes
+contain a NUL is binary, everything else is scanned. The whole asset directory is 2.8 MB, so reading
+it is free, and the check still has real work to do — 145 of the 294 marks are genuinely binary and
+all 149 SVGs are now inside the net.
+
+Proven by planting, in a file the extension version skipped:
+
+```
+public/providers/scan-probe.svg:1  AWS access key id
+src/zz-scan-probe.ts:1             OmniHilbras gateway key
+```
+
+Two smaller things the tests caught in me. **Four patterns had no sample**, so they were never proven
+to match anything — the check failed on the pattern table rather than on the tree. And the JWT sample
+was nine, nine and ten characters, which the pattern **correctly** refused, because its minimum segment
+length is eight after the leading `eyJ`; a hand-written sample is exactly how a pattern's minimum gets
+wrong. Replaced with the RFC 7515 example.
+
+```
+tests    801 → 807
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

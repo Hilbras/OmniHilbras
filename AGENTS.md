@@ -94,8 +94,15 @@ that is not on `main`.
   expect a reviewer to disagree with that sentence.
 - Never put a token, key, or password in a commit, a file, or a chat message.
   Use `npm login` or a local environment variable.
-- Before any push, scan the tree for secret-shaped strings:
-  `git grep -nEI "ohk_[A-Za-z0-9_-]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|npm_[A-Za-z0-9]{30,}"`
+- No credential-shaped string is committed. **This is now a check, not a ritual** —
+  `tests/no-secrets.test.js` scans every tracked file for 15 credential shapes (gateway keys,
+  npm, GitHub, OpenAI, Anthropic, OpenRouter, AWS, Google, Slack, Discord, private-key
+  blocks, JWTs, bearer values) and runs in CI on every push and pull request. The
+  four-pattern `git grep` this replaces was carried out by hand before every push, which
+  is a thing that is skipped under deadline and never runs on the twenty commits between
+  the one you remembered and the tag you pushed. A key that reached a commit has to be
+  **rotated**, not deleted — assume it is compromised. If the scan is wrong, widen the
+  pattern; do not add an exemption without saying what the string is and why it is dead.
 
 ## Boundaries
 
