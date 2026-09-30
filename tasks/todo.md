@@ -1252,6 +1252,140 @@ the exact place it existed to look.
 tests    854 → 859
 ```
 
+## Task 82: the frontend, checked in a browser instead of by reading it
+
+Every defect in this session so far was found by reading source and measuring the **gateway**. The
+dashboard's `.tsx` files had never been opened in a browser. This one was, with `browser_exec` driving
+the real page, and it found two things in the first ten minutes.
+
+### 1. `92%` — a fabricated metric, still rendering
+
+Verified live on `/dashboard/providers`:
+
+```
+CONNECTED | 7 | NEEDS ATTENTION | 2 | AVAILABLE | 4 | ROUTE HEALTH | 92% | last 24 hours
+```
+
+Three cards counted from `providers`. The fourth read **`92%`**, and its detail read **"last 24
+hours"**. Both are literals. The gateway keeps no request log, no success counter and no timing
+history, so there is no percentage to compute and no window to compute it over.
+
+This is the **same value that shipped three times** in 1.34.5 and was deleted from two components in
+1.37.0 and 1.38.0 — the `92 ms` / `1,417` Ollama figures from the fabricated Overview page. **The
+number outlived the component it belonged to**, which is the recurring defect one level up from the one
+I have been fixing: fixing the *card* is not fixing the *value*.
+
+And the reason it survived is the one this release is mostly about:
+
+```ts
+async function testAll() {
+  const health = await getGatewayHealth();
+  setProviders((current) => mergeGatewayConnections(current, gatewayConnections, health));
+  const healthyCount = health.providers.filter((p) => p.status === 'healthy').length;
+  setNotice(`${healthyCount} of ${health.providers.length} provider connections are healthy.`);
+}
+```
+
+**`GET /health` was called on every load and on every Test all. Its result was merged into the cards
+and then discarded.** The summary card had no report to read, so it invented one. The load path did
+the same, so it also needed `Test all` pressed before it showed anything.
+
+The card now reads `CREDENTIAL CHECK · 5 of 11 · credential accepted`, counted from the report the
+cards themselves were built from, and `—` until a report exists.
+
+### 2. Two pages, one fact, two answers
+
+```
+/providers            opencode   Credential check   100%
+/providers/opencode   opencode   ROUTE HEALTH       Pending
+```
+
+`ProviderDetailPage` **never called `getGatewayProviderHealth` on load**. It read health only when
+someone pressed **Test provider**, into a `connectionHealthy` boolean with no notion of *which*
+question had been asked. So a page opened cold said "Pending" — claiming a check was in progress when
+nothing had been asked — while the providers page, reading the same poll, showed its result.
+
+The detail page now reads health on load (same single-provider endpoint the Test button uses, because
+waiting for every adapter to be probed made the button look broken), carries the `verified` scope from
+1.40.0, and renders `Credential check · 100%` / `Not read yet` / `Failed` instead of a `100%`-or-
+`Pending` pair that meant neither. Its connection badge no longer calls a credential poll "healthy".
+
+### 3. The marketing page still illustrated the traces it no longer claims
+
+Continued the audit past the dashboard. On `/`, the route panel showed:
+
+```
+local preview · request trace        # and an animated green dot reading "listening"
+SELECTED ROUTE  200 OK  claude-sonnet-4
+LATENCY 412 ms   POLICY balanced
+1,284 req/min   p95 412ms   0 retries needed
+```
+
+**Every one of those is a literal, and the dot is a liveness claim.** There is no request counter, no
+timing history, no retry counter, no request log, and nothing polling.
+
+This is 1.37.0's fabrication, still on the page. That release deleted the "Live request traces" and
+"spend" **copy** from `App.tsx` and its guard went green — because the guard reads `src/App.tsx`, and
+this panel is **`src/components/RoutePreview.tsx`**, imported at `App.tsx:525` and rendered inside the
+very section whose copy was rewritten to say the product had no traces.
+
+> **The guard could not see a component the guard's own page rendered.** A check that reads the file
+> which imports a component is not reading what the visitor sees, and it reported the page honest
+> while the page was not.
+
+The panel keeps what is genuinely worth demonstrating — the shape of a request, and the fact that
+choosing a provider is a decision you can make — and loses everything that claimed a measurement:
+throughput, p95, retry count, the literal request id `#8f2a`, the per-route latencies, the "balanced /
+premium / efficient" cost labels, and the pulsing "listening" badge. What remains says **illustration**.
+
+### 4. The guard was widened, and the ban list corrected
+
+`marketing-claims.test.js` now scans every `.tsx` under `src/` instead of `App.tsx` alone, and records
+`listening` and `req/min` with their reasons. The count assertion moved 8 → 9, with the reasoning
+written down, because that test exists to stop the list being quietly emptied.
+
+One entry had to be corrected rather than added: the ban was the bare word **`spend`**, and
+`ProviderPlayground` legitimately says a provider "will spend" credits on a real request — which is
+true and is the point of the warning beside it. A guard that forbids a common English verb gets
+switched off rather than weakened, so the entry is now `spend tracking`, the phrase that would actually
+be a claim.
+
+## The guard was blind twice, and both times on the correct code
+
+`tests/health-surfaces.test.js`, 6 tests, asserts the property: **any page showing a health verdict
+must name what it established.** It scans every page in `src/pages`, so a fifth page is covered too.
+
+Both failures were in the guard, not the code:
+
+| Version | Blind because | Symptom |
+| --- | --- | --- |
+| window | looked for the scope in a **fixed 160 characters** before the label | flagged the one line doing it right — a ternary on one line fell outside the window |
+| `/verified/` | the flag is `connectionVerified`, and the match was **case-sensitive** | `/verified/` never matches `Verified` |
+
+Second one is the seventh guard bug of this shape, and the most embarrassing: the guard could not see
+the identifier it was written to look for. It passed the planted `92%` regression immediately, and
+failed the fixed code. A window is a guess about formatting; a case-sensitive pattern is a guess about
+a spelling. Both are guesses where the declaration was available.
+
+Both were found by **planting**, and both plants were caught by the corrected version: the original
+`92% / last 24 hours` card fails the label check, and the restored `1,284 req/min` / `listening` panel
+fails the claims check with `"listening"`.
+
+## Also measured, and clean
+
+Not everything in the audit was a defect, and it is worth saying so:
+
+- No horizontal overflow at **1440, 1024 or 390 px** on any dashboard page; no element past the right edge.
+- No text clipped by a fixed-height box. The `HEADE` I first read as truncation was `innerText` stopping
+  at a line break — `scrollWidth` equals `renderedWidth`.
+- **No button, link or `[role=button]` without an accessible name**, and no interactive target under 24px.
+- Mobile at 390px: the sidebar collapses to a hamburger, cards and key rows fit, nothing overlaps.
+- No console errors across the whole session.
+
+```
+tests    859 → 871
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

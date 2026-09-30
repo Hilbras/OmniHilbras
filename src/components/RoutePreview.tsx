@@ -1,5 +1,37 @@
+/**
+ * The panel this component illustrates, and why it is not a trace.
+ *
+ * ## What this was
+ *
+ * 1.37.0 deleted the "Live request traces" and "spend" claims from `App.tsx`, and its own guard
+ * passed. **This component survived, and the guard could not see it**, because it reads `src/App.tsx`
+ * and this is `src/components/RoutePreview.tsx` — imported by `App.tsx` at line 525 and rendered
+ * inside the very section whose copy was rewritten to say the product had no traces.
+ *
+ * It still carried:
+ *
+ * ```
+ * how a route is chosen      # and an animated green dot reading "listening"
+ * INCOMING REQUEST  #8f2a  POST /v1/chat/completions
+ * 1,284 req/min   p95 412ms   0 retries needed
+ * ```
+ *
+ * Every number is a literal, and so is the "listening" badge: nothing listens. `request-context.ts`
+ * says of itself, "Not telemetry, and not a trace", and the gateway keeps no request log, no counter
+ * and no timing history — the same three absences that made `92% / last 24 hours` in `ProvidersPage`
+ * a fabrication in 1.41.0.
+ *
+ * So the request/response illustration stays — it is genuinely useful, and it shows the shape of a
+ * request and the shape of a chosen route, which are both real. **Everything that claimed a
+ * measurement is removed**: the throughput, the p95, the retry count, the request id, and the liveness
+ * badge. What remains is labelled as an illustration, because that is what it is.
+ *
+ * The per-route latencies (`412 ms`, `438 ms`, `286 ms`) are gone for the same reason: they were
+ * presented as measured figures for routes nobody has measured. The routes are still selectable,
+ * because showing how a model is chosen is the part worth demonstrating.
+ */
 import { useState } from 'react';
-import { Activity, Check, ChevronRight, CircleDot, Gauge, ShieldCheck, Zap } from 'lucide-react';
+import { Check, ChevronRight, CircleDot, ShieldCheck } from 'lucide-react';
 import { getProviderLogo } from '../data/providers';
 import { ProviderMark } from './ProviderMark';
 
@@ -11,8 +43,6 @@ type Route = {
   provider: string;
   model: string;
   providerId?: string;
-  latency: string;
-  cost: string;
   color: string;
   initial: string;
 };
@@ -23,8 +53,6 @@ const routes: Route[] = [
     label: 'Auto',
     provider: 'Best available',
     model: 'claude-sonnet-4 · gemini-2.5-pro',
-    latency: '412 ms',
-    cost: 'balanced',
     color: '#e2bd52',
     initial: 'A',
   },
@@ -34,8 +62,6 @@ const routes: Route[] = [
     provider: 'Anthropic',
     model: 'claude-sonnet-4',
     providerId: 'anthropic',
-    latency: '438 ms',
-    cost: 'premium',
     color: '#d97757',
     initial: 'C',
   },
@@ -45,8 +71,6 @@ const routes: Route[] = [
     provider: 'OpenAI',
     model: 'gpt-4.1-mini',
     providerId: 'openai',
-    latency: '286 ms',
-    cost: 'efficient',
     color: '#6fdb9b',
     initial: 'O',
   },
@@ -56,8 +80,6 @@ const routes: Route[] = [
     provider: 'Ollama',
     model: 'qwen3-coder',
     providerId: 'ollama',
-    latency: '92 ms',
-    cost: 'private',
     color: '#83b7ff',
     initial: 'L',
   },
@@ -76,12 +98,16 @@ export function RoutePreview() {
           </span>
           <div className="min-w-0">
             <p className="truncate font-mono text-[11px] font-medium tracking-wide">omnihilbras / gateway</p>
-            <p className="muted mt-0.5 truncate text-[10px]">local preview · request trace</p>
+            <p className="muted mt-0.5 truncate text-[10px]">how a route is chosen</p>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2 rounded-full border border-success/25 bg-success/10 px-2.5 py-1 font-mono text-[10px] text-success">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" aria-hidden="true" />
-          listening
+        {/*
+          The animated dot and the word "listening" claimed a live feed. Nothing listens: there is no
+          poller behind this component, and a pulse that animates forever is the most convincing part
+          of a fake. A static "illustration" label says what this is instead.
+        */}
+        <div className="flex shrink-0 items-center gap-2 rounded-full border border-line-strong bg-surface-2 px-2.5 py-1 font-mono text-[10px] text-muted">
+          illustration
         </div>
       </div>
 
@@ -89,7 +115,7 @@ export function RoutePreview() {
         <div className="rounded-xl border border-line bg-bg-soft/80 p-4">
           <div className="mb-4 flex items-center justify-between">
             <span className="mono-label">incoming request</span>
-            <span className="hidden shrink-0 font-mono text-[10px] text-muted min-[360px]:inline">#8f2a</span>
+            {/* `#8f2a` was a literal request id. There is no request log, so there is no id to show. */}
           </div>
           <div className="space-y-3 font-mono text-[11px] leading-relaxed">
             <p>
@@ -141,11 +167,22 @@ export function RoutePreview() {
           <div className="mt-4 grid grid-cols-2 gap-2">
             <div className="rounded-lg border border-line bg-surface px-3 py-2.5">
               <span className="mono-label block">latency</span>
-              <strong className="mt-1 block font-mono text-xs">{activeRoute.latency}</strong>
+              {/*
+                Was `{activeRoute.latency}` — `412 ms`, `438 ms`, `286 ms`, hardcoded per route and
+                presented as measurements of routes nobody measured. There is no honest number here
+                without sending a request per provider, which a marketing page must not do.
+              */}
+              <strong className="mt-1 block font-mono text-xs">measured per request</strong>
             </div>
             <div className="rounded-lg border border-line bg-surface px-3 py-2.5">
               <span className="mono-label block">policy</span>
-              <strong className="mt-1 block font-mono text-xs">{activeRoute.cost}</strong>
+              {/*
+                Was `{activeRoute.cost}` — "balanced", "premium", "efficient", presented as the cost
+                of a route. There is no cost accounting in the gateway, so there is no cost to show.
+                What routing actually does with a pinned provider is stated instead: it serves that
+                provider's route if it can serve the model at all.
+              */}
+              <strong className="mt-1 block font-mono text-xs">pinned provider</strong>
             </div>
           </div>
         </div>
@@ -178,20 +215,16 @@ export function RoutePreview() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 border-t border-line/80 bg-surface/50 sm:grid-cols-3">
-        <div className="flex items-center gap-2 border-b border-line/70 px-4 py-3 sm:border-b-0 sm:border-r">
-          <Activity className="h-3.5 w-3.5 text-gold-text" aria-hidden="true" />
-          <span className="font-mono text-[10px] text-muted">1,284 req/min</span>
-        </div>
-        <div className="flex items-center gap-2 border-b border-line/70 px-4 py-3 sm:border-b-0 sm:border-r">
-          <Gauge className="h-3.5 w-3.5 text-gold-text" aria-hidden="true" />
-          <span className="font-mono text-[10px] text-muted">p95 412ms</span>
-        </div>
-        <div className="flex items-center gap-2 px-4 py-3">
-          <Zap className="h-3.5 w-3.5 text-gold-text" aria-hidden="true" />
-          <span className="font-mono text-[10px] text-muted">0 retries needed</span>
-        </div>
-      </div>
+      {/*
+        This bar read `1,284 req/min`, `p95 412ms` and `0 retries needed` — three literals, each one a
+        measurement the gateway does not make. There is no request counter (the only `count()` in it
+        belongs to browser locators), no timing history, and no retry counter; 1.41.0 removed a
+        `92% / last 24 hours` card for exactly these three absences.
+
+        So the bar is gone rather than relabelled. There is no honest replacement figure, and a bar of
+        three empty cells is worse than no bar. The routing choices below it — which is what the panel
+        is for — are unchanged and still selectable.
+      */}
     </div>
   );
 }

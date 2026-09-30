@@ -137,7 +137,7 @@ function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest,
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">{connectionName} · local connection</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[9px] ${healthy ? 'border-success/20 bg-success/10 text-success' : 'border-gold/30 bg-gold-soft text-gold-text'}`}><span className={`h-1.5 w-1.5 rounded-full ${healthy ? 'bg-success' : 'bg-gold'}`} />{healthy ? 'healthy' : 'health pending'}</span>
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[9px] ${healthy ? 'border-success/20 bg-success/10 text-success' : 'border-gold/30 bg-gold-soft text-gold-text'}`}><span className={`h-1.5 w-1.5 rounded-full ${healthy ? 'bg-success' : 'bg-gold'}`} />{healthy ? 'credential accepted' : 'not checked'}</span>
             {pingMs !== undefined && <span className="inline-flex items-center gap-1 rounded-full border border-line-strong bg-surface px-2 py-0.5 font-mono text-[9px] text-muted"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {pingMs} ms</span>}
             <span className="rounded-full border border-line-strong px-2 py-0.5 font-mono text-[9px] text-muted">{provider.auth}</span>
             <span className="font-mono text-[10px] text-muted">priority #{priority}</span>
@@ -358,6 +358,23 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const [testingConnection, setTestingConnection] = useState(false);
   const [connection, setConnection] = useState<GatewayConnection | undefined>();
   const [connectionHealthy, setConnectionHealthy] = useState(false);
+  /**
+   * What the last health read established, and whether one has happened yet.
+   *
+   * `connectionHealthy` alone was a second, thinner copy of the providers page's health — and it was
+   * only ever set by pressing **Test provider**. So the two pages described one fact differently
+   * about the same provider at the same moment:
+   *
+   * ```
+   * /providers            opencode   Credential check   100%
+   * /providers/opencode   opencode   ROUTE HEALTH       Pending
+   * ```
+   *
+   * Both were "correct" about their own state and the page was simply never told. `undefined` now
+   * means *not read yet*, which is the answer the old code rendered as "Pending" — a word that claimed
+   * a check was in progress when nothing had been asked.
+   */
+  const [connectionVerified, setConnectionVerified] = useState<'credential' | 'inference' | undefined>(undefined);
   const [connectionPingMs, setConnectionPingMs] = useState<number | undefined>();
   const [connectionAdded, setConnectionAdded] = useState(provider.status !== 'available');
   /**
@@ -406,6 +423,35 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   // Reload when the gateway comes back, for the same reason as the list: a page that failed
   // to load makes no further requests, so nothing else would ever notice the change.
   useGatewayReload(loadConnection, [provider.id]);
+
+  /**
+   * Read this provider's health on load, which is what the providers page already does.
+   *
+   * It used to be read only when someone pressed **Test provider**, so a page opened cold reported
+   * "ROUTE HEALTH: Pending" for a connection the providers page was simultaneously showing a live
+   * health poll for. Two pages, one fact, two answers, and nothing to reconcile them.
+   *
+   * The single-provider read is used rather than `/health` for the reason the Test button gives: this
+   * page asks about one provider, and waiting for every adapter to be probed made the button look
+   * broken. Same reason applies to a page load, which is worse — nobody is watching a button.
+   *
+   * A failure is swallowed rather than surfaced. Health is already shown on the providers page, and a
+   * detail page that replaced its content with an error because a *health* read failed would be worse
+   * than one that simply does not know. The connection state, which is what the page is about, has its
+   * own error path.
+   */
+  useEffect(() => {
+    let active = true;
+    void getGatewayProviderHealth(provider.id)
+      .then((health) => {
+        if (!active) return;
+        setConnectionHealthy(health.status === 'healthy');
+        setConnectionVerified(health.verified);
+        setConnectionPingMs(health.status === 'healthy' ? health.latencyMs : undefined);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [provider.id]);
   useEffect(() => () => {
     modelTestAbortRef.current?.abort();
     bulkAbortRef.current?.abort();
@@ -533,6 +579,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       setConnection(next);
       setConnectionAdded(true);
       setConnectionHealthy(false);
+      setConnectionVerified(undefined);
       flash(`Signed in to ${next.name} with ${next.modelIds.length} models.`);
       void getGatewayRoutingState().then(setRoutingState).catch(() => undefined);
     },
@@ -550,6 +597,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       const providerHealth = await getGatewayProviderHealth(provider.id);
       const healthy = providerHealth.status === 'healthy';
       setConnectionHealthy(healthy);
+      setConnectionVerified(providerHealth.verified);
       setConnectionPingMs(healthy ? providerHealth.latencyMs : undefined);
       if (!healthy) {
         // The provider's own reason, which distinguishes a dead credential from a provider
@@ -580,6 +628,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       setConnectionAdded(true);
       setAddOpen(false);
       setConnectionHealthy(false);
+      setConnectionVerified(undefined);
       flash(`OpenRouter saved with ${savedConnection.modelIds.length} models (${savedConnection.modelPolicy === 'free' ? 'free import' : 'all import'}).`);
       return;
     }
@@ -599,6 +648,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     setConnectionAdded(true);
     setAddOpen(false);
     setConnectionHealthy(false);
+      setConnectionVerified(undefined);
     flash(`${savedConnection.name} saved with ${savedConnection.modelIds.length} models.`);
   }
 
@@ -781,7 +831,17 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
         <DetailStat label="Connections" value={connectionState === 'ready' ? (connectionAdded ? '1 active' : '0') : '—'} icon={KeyRound} tone={connectionAdded && connectionState === 'ready' ? 'green' : 'muted'} />
         <DetailStat label="Models" value={allModels.length > 0 ? String(allModels.length) : '—'} icon={Cpu} tone="blue" />
         <DetailStat label="Latency" value={connectionPingMs === undefined ? (connectionHealthy ? 'Checked just now' : provider.latency) : `${connectionPingMs} ms`} icon={Clock3} tone="gold" />
-        <DetailStat label="Route health" value={connectionHealthy ? '100%' : connectionAdded ? 'Pending' : '—'} icon={Activity} tone={connectionHealthy ? 'green' : connectionAdded ? 'gold' : 'muted'} />
+        {/*
+          "Route health" claimed a question about traffic and answered it with a credential poll.
+          The label now follows what was actually established, exactly as the providers card does —
+          same fact, same wording, two places.
+        */}
+        <DetailStat
+          label={connectionVerified === 'inference' ? 'Route health' : 'Credential check'}
+          value={connectionVerified === undefined ? (connectionAdded ? 'Not read yet' : '—') : connectionHealthy ? '100%' : 'Failed'}
+          icon={Activity}
+          tone={connectionVerified === undefined ? 'muted' : connectionHealthy ? 'green' : 'gold'}
+        />
       </div>
 
       <section className="card mt-5 overflow-hidden" aria-labelledby="connections-title">

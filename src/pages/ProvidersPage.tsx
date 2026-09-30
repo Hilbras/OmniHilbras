@@ -15,7 +15,7 @@ import {
 import { AddProviderModal, isWebSessionProvider, providerOptions, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderCard, providerGroupLabels, providerGroupOrder, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
-import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection } from '../lib/gatewayClient';
+import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection, type GatewayHealth } from '../lib/gatewayClient';
 import { ProviderMark } from '../components/ProviderMark';
 import { providerRoute } from '../lib/routes';
 import { useGatewayReload } from '../lib/useGatewayStatus';
@@ -105,6 +105,15 @@ export function ProvidersContent() {
   const [initialModelPolicy, setInitialModelPolicy] = useState<'free' | 'all'>();
   const [testingAll, setTestingAll] = useState(false);
   const [gatewayConnections, setGatewayConnections] = useState<GatewayConnection[]>([]);
+  /**
+   * The last health report, kept so the summary can count from it.
+   *
+   * `getGatewayHealth()` was already called here on every load and on Test all. Its result went into
+   * `mergeGatewayConnections` and was then discarded — so the summary card beside the provider list had
+   * no report to read and used the literal `92%`. Held now, and `undefined` until one has been read,
+   * which the card renders as `—` rather than a number nobody measured.
+   */
+  const [healthReport, setHealthReport] = useState<GatewayHealth | undefined>();
   const [notice, setNotice] = useState('');
 
   /**
@@ -126,7 +135,12 @@ export function ProvidersContent() {
         setProviders((current) => mergeGatewayConnections(current, connections));
         return getGatewayHealth()
           .then((health) => {
-            if (active) setProviders((current) => mergeGatewayConnections(current, connections, health));
+            if (!active) return;
+            // Retained as well as merged, so the summary card counts from the same report the cards
+            // were built from. Dropping it here is what left that card showing `—` on every load and
+            // only filling in after someone pressed **Test all**.
+            setHealthReport(health);
+            setProviders((current) => mergeGatewayConnections(current, connections, health));
           })
           .catch(() => undefined);
       })
@@ -160,6 +174,8 @@ export function ProvidersContent() {
   const connectedCount = providers.filter((provider) => provider.status === 'connected').length;
   const attentionCount = providers.filter((provider) => provider.status === 'attention').length;
   const availableCount = providers.filter((provider) => provider.status === 'available').length;
+  /** Connections whose credential the gateway accepted on the last poll. */
+  const credentialCheckedCount = healthReport?.providers.filter((provider) => provider.status === 'healthy').length ?? 0;
   const normalizedQuery = query.trim().toLowerCase();
 
   /**
@@ -265,6 +281,10 @@ export function ProvidersContent() {
     try {
       const health = await getGatewayHealth();
       setProviders((current) => mergeGatewayConnections(current, gatewayConnections, health));
+      // Kept for the summary card. The report used to be read, folded into the cards, and dropped —
+      // which is why the card beside it had to invent a number: `92%`, "last 24 hours", neither
+      // measured. The data was in this function the whole time.
+      setHealthReport(health);
       const healthyCount = health.providers.filter((provider) => provider.status === 'healthy').length;
       setNotice(`${healthyCount} of ${health.providers.length} provider connections are healthy.`);
     } catch {
@@ -314,7 +334,28 @@ export function ProvidersContent() {
             <SummaryCard label="Connected" value={String(connectedCount)} detail="live" icon={Network} tone="border-success/20 bg-success/10 text-success" />
             <SummaryCard label="Needs attention" value={String(attentionCount)} detail="review" icon={CircleAlert} tone="border-gold/25 bg-gold-soft text-gold-text" />
             <SummaryCard label="Available" value={String(availableCount)} detail="ready to add" icon={Server} tone="border-line-strong bg-surface-2 text-muted" />
-            <SummaryCard label="Route health" value="92%" detail="last 24 hours" icon={Activity} tone="border-[#83b7ff]/25 bg-[#83b7ff]/10 text-[#5d98e8]" />
+            {/*
+              This card read `92%` with the detail "last 24 hours", and **both numbers were
+              literals** — verified in the running dashboard, where it rendered as
+              `ROUTE HEALTH | 92% | last 24 hours` beside three cards that are all counted from
+              `providers`. The gateway keeps no request log, no success counter and no timing
+              history, so there is no percentage to compute and no 24 hours to compute it over. The
+              figure is a leftover from the fabricated Overview page deleted in 1.38.0, which carried
+              the same `92 ms` / `1,417` Ollama numbers as the provider cards: the *value* outlived
+              the component it belonged to.
+
+              It is replaced with the one health fact this page has actually measured — how many of
+              the connections the gateway polled are reporting healthy — and labelled "Credential
+              check" rather than "Route health", because that is the question `GET /health` answered
+              (see 1.40.0: no adapter completes a request during a poll).
+            */}
+            <SummaryCard
+              label="Credential check"
+              value={healthReport ? `${credentialCheckedCount} of ${healthReport.providers.length}` : '—'}
+              detail="credential accepted"
+              icon={Activity}
+              tone="border-[#83b7ff]/25 bg-[#83b7ff]/10 text-[#5d98e8]"
+            />
           </section>
         )}
 

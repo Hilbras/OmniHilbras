@@ -114,6 +114,13 @@ The first local gateway exposes:
   `verified: 'credential'` while every model on them was refused by the provider, and the
   dashboard rendered that as "Route health 100%". A consumer that needs the stronger claim
   has to make a request.
+
+  **Every surface that shows a verdict names what it established**, and reads the same report. The
+  provider detail page used to read health only when **Test provider** was pressed, so it reported
+  "ROUTE HEALTH: Pending" for a connection the providers page was simultaneously showing a poll for —
+  two pages, one fact, two answers. The providers summary used to read a hardcoded `92%` labelled
+  "last 24 hours", with `GET /health` called on every load and its result merged into the cards and
+  then discarded. Both now read the report they display, and both label a credential check as one.
 - `GET /v1/models` — normalized models from configured adapters.
 - `GET /v1/connections` — connection metadata without credentials.
 - `POST /v1/connections/:providerId/check` — validate a candidate API key for any provider without

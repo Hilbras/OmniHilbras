@@ -46,7 +46,24 @@ import { dirname, join } from 'node:path';
  */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const MARKETING = join(ROOT, 'src', 'App.tsx');
+const SRC = join(ROOT, 'src');
+
+/**
+ * Every `.tsx` file under a directory, as source text.
+ *
+ * `.tsx` and not `.ts`: the panel that carried `1,284 req/min`, `p95 412ms` and an animated
+ * "listening" badge is `src/components/RoutePreview.tsx`, rendered by `App.tsx` inside the very
+ * section whose copy 1.37.0 rewrote to say the product has no traces. A guard that reads `App.tsx`
+ * cannot see a component `App.tsx` renders, and this one did not — the fix in 1.37.0 passed while
+ * the fabrication stayed on the page.
+ */
+function readAllTsx(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(directory, entry.name);
+    if (entry.isDirectory()) return readAllTsx(full);
+    return entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) ? [readFileSync(full, 'utf8')] : [];
+  });
+}
 
 /** Every `.ts` file under a directory, as source text. */
 function readAll(directory) {
@@ -71,14 +88,30 @@ const FALSE_CLAIMS = {
   'live request traces': 'the gateway keeps no request log and no trace; request-context.ts states "Not telemetry, and not a trace."',
   'request trace': 'same: there is no per-request record to trace.',
   'what it cost': 'there is no cost accounting in the gateway, so no response can state a cost.',
-  spend: 'no cost accounting exists; the only "cost" in the gateway is the word in prose comments.',
+  // Not the bare word "spend": `ProviderPlayground` legitimately says a provider "will spend" credits
+  // on a real request, which is true and is the point of the warning. A guard that forbids a common
+  // English verb gets switched off rather than weakened, so the phrase that is actually a claim is
+  // forbidden instead.
+  'spend tracking': 'no cost accounting exists; the only "cost" in the gateway is the word in prose comments.',
   'request activity': 'the panel that carried this heading reported hardcoded numbers and is gone.',
   'last 15 minutes': 'a time window implies a rolling feed; nothing on this page is fed.',
   'updated just now': 'nothing on the page updates, so a freshness claim is a claim about a poller that does not exist.',
+  'listening': 'a liveness badge is a claim about a feed, and nothing polls. The animated dot on the route panel was this claim in a component the guard could not see.',
+  'req/min': 'the gateway keeps no request counter, so no throughput figure exists to print.',
 };
 
+/**
+ * The marketing entry **and the components it renders**.
+ *
+ * Widened from `App.tsx` alone in 1.41.0, after `RoutePreview.tsx` survived 1.37.0's fix while being
+ * rendered inside the very section whose copy said the product had no traces. Reading only the file
+ * that imports a component is not reading what the visitor sees.
+ *
+ * Comments are stripped first, and that matters: every reason above is written in prose containing the
+ * very words it forbids, so a check that grepped raw source would fail on its own documentation.
+ */
 test('the page claims nothing it cannot back', () => {
-  const page = stripComments(readFileSync(MARKETING, 'utf8')).toLowerCase();
+  const page = stripComments(readAllTsx(SRC).join('\n')).toLowerCase();
   const present = Object.entries(FALSE_CLAIMS).filter(([claim]) => page.includes(claim));
   assert.deepEqual(
     present.map(([claim]) => claim),
@@ -99,7 +132,7 @@ test('every recorded claim carries a reason, so the list is findings rather than
 test('the claims that replaced them are the ones the product can back', () => {
   // The other direction, so the fix is not just subtraction. Each of these names something that
   // exists in the code, which is what makes the page a claim about this product rather than a category.
-  const page = stripComments(readFileSync(MARKETING, 'utf8')).toLowerCase();
+  const page = stripComments(readFileSync(join(SRC, 'App.tsx'), 'utf8')).toLowerCase();
   for (const claim of ['request id', 'named reasons', 'health that changes routing']) {
     assert.ok(page.includes(claim), `the page should still say "${claim}" — it is true, and it is the better claim`);
   }
@@ -119,6 +152,10 @@ test('the claims that replaced them are the ones the product can back', () => {
 test('THE COUNT, asserted so the list cannot be quietly emptied', () => {
   // An allowlist that shrinks is a hole: deleting an entry because it is inconvenient leaves no trace
   // that the claim was ever false.
-  assert.equal(Object.keys(FALSE_CLAIMS).length, 7, `the recorded-claims list now has ${Object.keys(FALSE_CLAIMS).length} entries`);
+  // 7 in 1.37.0. 8 in 1.38.0 (`request activity`). **9 in 1.41.0**: `listening` and `req/min`, both
+  // from `RoutePreview.tsx` — a component 1.37.0's fix never reached because the guard read
+  // `App.tsx` alone, and the two replacements of the `spend` entry for `spend tracking` are the same
+  // entry. The number only moves when a *new* false claim is recorded, not when one is renamed.
+  assert.equal(Object.keys(FALSE_CLAIMS).length, 9, `the recorded-claims list now has ${Object.keys(FALSE_CLAIMS).length} entries`);
   console.log(`    recorded false claims: ${Object.keys(FALSE_CLAIMS).length}   present on the page: 0`);
 });
