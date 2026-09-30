@@ -119,11 +119,22 @@ that is not on `main`.
   check, the check is what runs when the instruction is forgotten.
 - The dashboard has one React Router entry at `/dashboard`. Do not add
   `*.html` entry files or hash routes.
-- A provider card in `src/data/providers.ts` is catalog metadata. Before a card
-  claims a working connection, the gateway must be able to serve that provider:
-  a card with no connection stays `status: 'available'` with `—` metrics, and an
-  auth mode with no flow behind it (currently `OAuth`) must disable Save in
-  `AddProviderModal` and say so.
+- A provider card in `src/data/providers.ts` is catalog metadata, and it is the state a card shows
+  when **the gateway has no connection for that provider** — `ProvidersPage` seeds from it and
+  `mergeGatewayConnections` overlays only providers that have one. So **no card in it may claim a
+  measurement**: `status: 'available'`, `models: '—'`, `latency: '—'`, `requests: '0'`,
+  `lastUsed: 'never'`, `health: 0`, `modelList: []`. One card used to read `attention`, `6 models`,
+  `92 ms`, `1,417` requests, `2 min ago` and three named models, so a user with no Ollama connection
+  was shown a plausible week of traffic for a runtime they had never run.
+  `tests/provider-cards.test.js` asserts all of that, and also that a card claiming `auth: 'OAuth'`
+  has a matching `/v1/oauth/:id/start` route, that a card pasting a cookie has a descriptor in
+  `webSessionProviders.ts` whose routes the gateway really serves, and that every card has a bundled
+  mark **or** an `initial` for `ProviderMark` to fall back on.
+  **The clause this replaces — "an auth mode with no flow behind it (currently `OAuth`) must disable
+  Save in `AddProviderModal`" — described code that does not exist and a parenthetical that had gone
+  false.** `canSave` is computed from form fields alone and knows nothing about flows, and three
+  providers have since grown real OAuth flows. If you add an auth mode with no collector, disable Save
+  and say so in the UI, and add the mode to the set the card test knows about.
 - `public/providers/` is **input, not build output**. The `logoPolarity()` plugin reads it and
   writes `src/lib/logoPolarity.generated.ts`; nothing writes into the directory. Never stage with
   `':(exclude)public/providers'` — that silently dropped 141 required assets from 18 releases, two

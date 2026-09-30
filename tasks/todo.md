@@ -499,6 +499,80 @@ wrong. Replaced with the RFC 7515 example.
 tests    801 → 807
 ```
 
+---
+
+## Task 72: one card in thirteen was showing invented traffic
+
+`AGENTS.md` said a card with no connection stays `status: 'available'` with `—` metrics. Twelve of the
+thirteen cards did exactly that. One did not:
+
+```
+id: 'ollama'   status: 'attention'   models: '6 models'
+latency: '92 ms'   requests: '1,417'   lastUsed: '2 min ago'
+health: 72   modelList: ['qwen3-coder', 'llama3.2', 'nomic-embed-text']
+```
+
+**Every one of those numbers was invented**, left over from when the dashboard was a static mockup.
+`ProvidersPage` seeds its state from this catalog and `mergeGatewayConnections` overlays only the
+providers that have a connection, so a card here is *exactly* what a user sees when the gateway has
+never been asked about that provider. A user who had never run Ollama was shown an amber "attention"
+badge, a 92 ms latency, 1,417 requests and three named models — indistinguishable from a local runtime
+they had been using all week.
+
+The rule was written after the mockup and the data was never changed, which is the same shape as every
+other finding here: a decision stated once, nothing to compare it against, and no check. **One card out
+of thirteen is exactly what a spot check misses and a reader trusts.**
+
+## The invariant, restated so it can be asserted
+
+**The catalog is the no-connection fallback, so no card in it may claim a measurement.** That is a
+property of the data rather than an instruction about a UI state, which is the only reason it can be
+checked: if a card's number could only have come from a measurement, and the catalog is shown precisely
+when there is nothing to measure, then the number was invented. Live figures arrive from the gateway
+and overwrite all of it.
+
+`tests/provider-cards.test.js` also cross-checks **three files that have to agree** for a card's
+credential to be collectable, and nothing compared them: the card's `auth`, the collector, and the
+gateway route. A card claiming `auth: 'OAuth'` must have a `/v1/oauth/:id/start` route — three cards,
+three routes. A card pasting a cookie must have a descriptor in `webSessionProviders.ts` whose `check`
+and `paste` paths the gateway actually serves, matched against the route table so a renamed route stops
+counting. And every card needs a bundled mark **or** an `initial`, because `ProviderMark` takes
+`logo?` and falls back to a letter — which is how the user-defined `custom` card renders at all.
+
+Proven by planting both halves:
+
+```
+a card claiming 6 models / 92 ms / 1,417 requests      → 1 check fired
+a fourth OAuth card, 'newcomer', with no route         → 2 checks fired
+```
+
+## The clause I replaced described code that does not exist
+
+The old rule also said an auth mode with no flow behind it — *"currently `OAuth`"* — must disable Save
+in `AddProviderModal` and say so. Two separate problems:
+
+- **There is no such mechanism.** `canSave` is `mode === 'single' ? hasSingleConnection : …`, and
+  `hasSingleConnection` is `name && apiKey && endpoint`. It knows about form fields and nothing else. A
+  reader of `AGENTS.md` would reasonably have assumed the code had this.
+- **The parenthetical was false.** Three cards claim `auth: 'OAuth'` — `opencode-console`, `kiro`,
+  `cline` — and the gateway serves a start route for all three. OAuth grew a flow after the rule was
+  written and the rule was never updated.
+
+So it is restated as the part that is both true and enforceable, and the unimplemented half is recorded
+as what it is rather than left as a claim about code that is not there.
+
+## Two places my guard was wrong, both about over-specifying
+
+It required every card to have a logo; `custom` has none, **by design**, because `ProviderMark` falls
+back to `initial`. And it required every web descriptor to declare both a `check` and a `paste` path;
+the table legitimately varies per provider. Asserting a shape the data does not have is how a guard
+gets deleted — the first version of the logo check would have failed CI on a correct card, and a
+reviewer would have been right to switch it off rather than fix it.
+
+```
+tests    807 → 813
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

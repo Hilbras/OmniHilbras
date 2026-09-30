@@ -246,18 +246,31 @@ export const providerCatalog: ProviderRecord[] = [
     description: 'Private local inference for coding models and offline development.',
     category: 'Local runtime',
     group: 'local',
-    status: 'attention',
+    // Placeholders, and they have to be placeholders. This catalog is the state a card shows when the
+    // gateway has no connection for that provider — `ProvidersPage` seeds from it and
+    // `mergeGatewayConnections` overlays only the providers that actually have one. So every number on
+    // a card here is a number nobody measured.
+    //
+    // This card used to read `attention`, `6 models`, `92 ms`, `1,417` requests, `2 min ago`,
+    // `health: 72`, and a three-model `modelList`. Every one of those was invented, left over from when
+    // the dashboard was a static mockup, and a user with no Ollama connection was shown an amber
+    // "attention" badge and a plausible week of traffic for a runtime they had never run. Twelve of the
+    // thirteen cards already did the honest thing; this was the one that did not.
+    //
+    // When Ollama *is* connected, the real figures arrive from the gateway and overwrite all of this.
+    // `tests/provider-cards.test.js` fails if a catalog card claims a measurement again.
+    status: 'available',
     auth: 'No key',
-    models: '6 models',
-    latency: '92 ms',
-    requests: '1,417',
-    lastUsed: '2 min ago',
-    health: 72,
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
     color: '#e2bd52',
     initial: 'L',
     logo: providerLogoMap.ollama,
     endpoint: 'http://localhost:11434/v1',
-    modelList: ['qwen3-coder', 'llama3.2', 'nomic-embed-text'],
+    modelList: [],
   },
   {
     id: 'mistral',
