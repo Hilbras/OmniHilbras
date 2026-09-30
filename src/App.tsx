@@ -8,11 +8,9 @@ import {
   Braces,
   Check,
   CheckCircle2,
-  ChevronRight,
-  CircleHelp,
-  Clock3,
   Code2,
   Copy,
+  Fingerprint,
   Gauge,
   LockKeyhole,
   Network,
@@ -91,12 +89,6 @@ const steps = [
   },
 ] as const;
 
-const requestRows = [
-  { path: '/v1/chat/completions', provider: 'Anthropic', model: 'claude-sonnet-4', latency: '438 ms', status: '200' },
-  { path: '/v1/chat/completions', provider: 'OpenAI', model: 'gpt-4.1-mini', latency: '286 ms', status: '200' },
-  { path: '/v1/responses', provider: 'Ollama', model: 'qwen3-coder', latency: '92 ms', status: '200' },
-  { path: '/v1/embeddings', provider: 'OpenRouter', model: 'text-embedding-3', latency: '164 ms', status: '200' },
-];
 
 const codeSamples = {
   curl: `curl https://gateway.omnihilbras.dev/v1/chat/completions \\
@@ -400,13 +392,16 @@ function ObservabilitySection() {
             <span className="eyebrow">No black box</span>
             <h2 className="section-title mt-5">See the decision, not just the answer.</h2>
             <p className="muted mt-4 text-sm leading-relaxed sm:text-base">
-              Every request should tell you where it went, why it went there, and what it cost. OmniHilbras makes routing observable by default.
+              Every response says which provider served it, under which request id, and what was tried
+              before it. When a request fails, the reason is named rather than swallowed — and when a
+              provider is skipped, the skip has a reason too. OmniHilbras makes routing observable by
+              default.
             </p>
             <div className="mt-7 space-y-4">
               {[
-                { icon: Activity, title: 'Live request traces', body: 'Follow a request from policy to provider and back.' },
-                { icon: Gauge, title: 'Useful metrics', body: 'Track latency, retries, spend, and provider health.' },
-                { icon: CircleHelp, title: 'Human-readable reasons', body: 'Know when a fallback happened and what triggered it.' },
+                { icon: Fingerprint, title: 'A request id on every response', body: 'Every reply carries gateway.requestId, and the providers that were tried before it.' },
+                { icon: Activity, title: 'Named reasons, never generic errors', body: 'A skip is one of unhealthy, rate-limited, no-credential, no-models or disabled — not a silent fallback.' },
+                { icon: Gauge, title: 'Health that changes routing', body: 'Connections are polled; consecutive failures mark one unhealthy and routing stops choosing it, recording why.' },
               ].map(({ icon: Icon, title, body }) => (
                 <div key={title} className="flex gap-3">
                   <Icon className="mt-0.5 h-4 w-4 shrink-0 text-gold-text" aria-hidden="true" />
@@ -420,66 +415,21 @@ function ObservabilitySection() {
           </motion.div>
         </motion.div>
 
-        <motion.div
-          initial={false}
-          whileInView={{ opacity: 1, y: 0, scale: 1 }}
-          viewport={viewport}
-          transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
-          className="card overflow-hidden"
-        >
-          <div className="flex items-center justify-between border-b border-line px-4 py-4 sm:px-5">
-            <div>
-              <p className="text-sm font-semibold">Request activity</p>
-              <p className="muted mt-1 font-mono text-[10px]">last 15 minutes · all routes</p>
-            </div>
-            <span className="flex items-center gap-1.5 rounded-full border border-success/25 bg-success/10 px-2.5 py-1 font-mono text-[10px] text-success">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" /> live
-            </span>
-          </div>
-          <div className="grid grid-cols-3 border-b border-line bg-surface-2/60">
-            <div className="px-4 py-3 sm:px-5">
-              <span className="mono-label">requests</span>
-              <strong className="mt-1 block font-mono text-lg">18.4k</strong>
-            </div>
-            <div className="border-x border-line px-4 py-3 sm:px-5">
-              <span className="mono-label">p95 latency</span>
-              <strong className="mt-1 block font-mono text-lg">412<span className="text-xs text-muted">ms</span></strong>
-            </div>
-            <div className="px-4 py-3 sm:px-5">
-              <span className="mono-label">success</span>
-              <strong className="mt-1 block font-mono text-lg text-success">99.98%</strong>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[580px] text-left text-xs">
-              <thead className="border-b border-line bg-surface-2/40">
-                <tr className="mono-label">
-                  <th className="px-4 py-3 font-normal sm:px-5">route</th>
-                  <th className="px-3 py-3 font-normal">provider</th>
-                  <th className="px-3 py-3 font-normal">latency</th>
-                  <th className="px-3 py-3 font-normal">status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {requestRows.map((row) => (
-                  <tr key={`${row.path}-${row.provider}-${row.model}`} className="border-b border-line/70 last:border-0">
-                    <td className="px-4 py-3 font-mono text-[10px] text-muted sm:px-5">{row.path}</td>
-                    <td className="px-3 py-3">
-                      <span className="block text-xs font-medium">{row.provider}</span>
-                      <span className="muted block font-mono text-[10px]">{row.model}</span>
-                    </td>
-                    <td className="px-3 py-3 font-mono text-[10px] text-muted">{row.latency}</td>
-                    <td className="px-3 py-3"><span className="rounded-full bg-success/10 px-2 py-1 font-mono text-[10px] text-success">{row.status}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex items-center justify-between border-t border-line px-4 py-3 sm:px-5">
-            <span className="muted flex items-center gap-2 text-[11px]"><Clock3 className="h-3.5 w-3.5" aria-hidden="true" />Updated just now</span>
-            <a href="#start" className="btn-quiet !px-2 !py-1 text-[11px]">Open dashboard <ChevronRight className="h-3 w-3" aria-hidden="true" /></a>
-          </div>
-        </motion.div>
+        {/*
+          There was a panel here, and it was fiction.
+
+          A card headed "Request activity", captioned "last 15 minutes · all routes", carrying an
+          animated green dot and the word **live**, reporting `18.4k` requests, a `412 ms` p95 and a
+          `99.98%` success rate, over four hardcoded request rows — and closing with "Updated just
+          now". Every number was a literal in this file. It was not a screenshot of a real dashboard;
+          it was a mockup that outlived the mockup, and the gateway has no request log and no trace to
+          show. `request-context.ts` says so in as many words: *"Not telemetry, and not a trace."*
+
+          An operator running this locally knows exactly how many requests they have made. A panel
+          telling them 18.4k in the last fifteen minutes is not a decoration; it is a false claim about
+          their own installation, and it sat under a feature list promising the same fiction. The
+          dashboard shows real status, and that is the place to look.
+        */}
       </div>
     </section>
   );

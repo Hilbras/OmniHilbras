@@ -914,6 +914,69 @@ work that is not something I wrote.
 tests    834 → 835
 ```
 
+---
+
+## Task 78: the marketing page advertised a capability the product does not have
+
+`src/App.tsx` is the **marketing entry** — `main.tsx` renders `<App />`, and the dashboard has its own
+entries. Under the heading *"No black box — See the decision, not just the answer"* it said:
+
+> Every request should tell you where it went, why it went there, **and what it cost**. OmniHilbras makes
+> routing observable by default.
+>
+> - **Live request traces** — Follow a request from policy to provider and back.
+> - **Useful metrics** — Track latency, retries, **spend**, and provider health.
+
+And it illustrated all of it with a panel: `18.4k` requests, a `412 ms` p95, `99.98%` success, four
+hardcoded request rows, an **animated green dot labelled live**, the caption "last 15 minutes · all
+routes", and the footer **"Updated just now"**. Every number was a literal in that file.
+
+Measured against the product:
+
+| Claim | True? | Why |
+| --- | --- | --- |
+| Live request traces | **no** | the gateway keeps no request log and no trace. `request-context.ts` says so: *"Not telemetry, and not a trace."* |
+| …and what it cost / spend | **no** | no cost accounting anywhere; the only `cost` in the gateway is the word in prose comments |
+| Useful metrics | partly | provider health and per-provider latency are real and polled; aggregate counts and spend are not |
+| Human-readable reasons | **yes** | `RouteSkipReason` is `disabled`, `no-credential`, `unhealthy`, `rate-limited`, `no-models`, and routing records which applied |
+
+**And the two true claims were the better claims.** This product refuses to swallow a cause: every failure
+has a named code, every skip has a named reason, and consecutive health failures stop a provider being
+chosen. That is a stronger thing to sell than a request trace, and it is the thing that is actually built.
+The section now claims exactly that: a request id on every response (`gateway.requestId` plus the attempt
+ledger), named reasons rather than silent fallbacks, and health that changes routing.
+
+The panel is gone, replaced by a comment recording what it was — an operator running this locally knows
+exactly how many requests they have made, and a panel telling them 18.4k in the last fifteen minutes is a
+false claim about **their own installation**, not a decoration. One of the four fake rows was
+`Ollama · qwen3-coder · 92 ms` — **the same invented number** removed from the Ollama card in 1.34.5,
+still here in a second component.
+
+## The guard, and being honest that it is a list
+
+`tests/marketing-claims.test.js` records seven claims that were false, each with the reason, and asserts
+they are absent from the page. **That is a list, not a proof**: a new false claim phrased differently would
+not be caught, and catching that needs a human reading the page against the code. The file says so in its
+own header, and asserts the replacement claims are backed by gateway code (`gateway: { requestId:`, `type
+RouteSkipReason =`, `reason: 'unhealthy'`) so the fix is not subtraction alone.
+
+The mechanical rule is elsewhere and is stronger than word-matching: **no `animate-pulse` in the marketing
+entry.** A pulse is a liveness signal, and nothing on that page is fed. My first attempt matched the word
+`live` between two tags, which catches a standalone badge and misses the same lie inside a sentence — so
+planting "Requests are live · spend tracked" with a pulse beside it was caught only by the second rule. A
+fake feed needs a fake heartbeat whatever it calls itself.
+
+## A check that could not see the code it was checking
+
+The evidence test looked for `gateway: { requestId:` in `apps/gateway/src/*.ts` and did not find it,
+because the line is in **`src/routes/inference.ts`** and the scan read only the top level. It reported the
+marketing page as wrong when the gateway was right. Now recursive — a check that cannot see the code it is
+checking is worse than no check, because it produces a confident wrong answer.
+
+```
+tests    835 → 840
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

@@ -188,6 +188,47 @@ test('the modal asks the gateway rather than waiting', () => {
   );
 });
 
+test('the marketing page does not badge itself live, because nothing here is', () => {
+  // `src/App.tsx` is the **marketing entry** — `main.tsx` renders it, and the dashboard has its own
+  // entries. It carried a panel headed "Request activity", captioned "last 15 minutes · all routes",
+  // with an animated green dot and the word **live**, reporting `18.4k` requests, a `412 ms` p95 and a
+  // `99.98%` success rate over four hardcoded rows, closing with "Updated just now".
+  //
+  // Every number was a literal in that file. The gateway keeps no request log and no trace —
+  // `request-context.ts` says so outright: *"Not telemetry, and not a trace."* An operator running this
+  // locally knows exactly how many requests they have made, so a panel claiming 18.4k in the last
+  // fifteen minutes is a false claim about **their own installation**, not a decorative flourish.
+  //
+  // An earlier version of this matched the *word* `live` between two tags. It caught a standalone badge
+  // and missed the same lie inside a sentence, which is the more natural way to write one. Two rules
+  // instead, both cheap and both for the same reason:
+  //
+  // - **no `animate-pulse` anywhere in this file.** A pulse is a liveness signal, and there is no live
+  //   data on the page to be live about. This is the stronger of the two and the one that generalises: a
+  //   fake feed needs a fake heartbeat whatever it calls itself.
+  // - **no standalone liveness word as an element's whole text**, which is the shape a status badge
+  //   actually takes.
+  //
+  // Both are revisitable if this page ever gains a real feed, and the reason is written down so that is
+  // a decision rather than a deletion.
+  const marketing = stripComments(readFileSync(join(DASHBOARD, 'App.tsx'), 'utf8'));
+  const pulses = [...marketing.matchAll(/animate-pulse/g)];
+  assert.equal(
+    pulses.length,
+    0,
+    `the marketing page has ${pulses.length} pulsing element(s). A pulse says "this is updating", and ` +
+      'nothing on this page is fed — no request log, no trace, no poller.',
+  );
+  const badges = [...marketing.matchAll(/[>']([\s·-]*(?:live|real-?time|streaming)[\s·-]*)[<]/gi)].map((match) => match[1].trim());
+  assert.deepEqual(
+    badges,
+    [],
+    `the marketing page labels itself "${badges.join('", "')}". There is no request log, no trace and no ` +
+      'polling behind it, so a liveness badge is a claim about a feed that does not exist. ' +
+      'tests/marketing-claims.test.js records the specific claims that were removed and why.',
+  );
+});
+
 test('the clipboard receives a value, not a rendering of one', () => {
   // The clipboard is an API surface. Whatever lands there is what the user pastes somewhere else —
   // a `model:` field, a shell, a config file — and a rendering of a value is not the value.
