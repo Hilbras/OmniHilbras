@@ -171,6 +171,7 @@ it — which is exactly what happened to Qwen, and why its card says what it mea
 3. Export it from the SDK index
 4. Register it in the gateway registry
 5. Add adapter tests
+6. Drop the mark in public/providers/ and reference it from src/data/providers.ts
 ```
 
 If step 4 requires touching `routing.ts`, `service.ts` execution paths, or the SDK core, the
@@ -182,6 +183,18 @@ manual step rather than a request body. Those routes live in `routes/oauth.ts` a
 *intentional* provider-specific surface in the HTTP layer. It is also the module where a provider
 split would pay for itself fastest: a fifth OAuth provider is five more `if` blocks in one file,
 next to the four that already exist.
+
+### The marks are input, not build output
+
+`public/providers/` is written by a human and read by the `logoPolarity()` plugin in
+`vite.config.ts`, which samples each asset and writes `src/lib/logoPolarity.generated.ts` saying
+whether the mark needs a light or a dark tile. **The directory is never written to.** Excluding it
+from a commit as generated output therefore drops required assets, and it did: 141 of 294 were
+absent from 18 consecutive releases, two of them rendered directly by `src/data/providers.ts`.
+
+Nothing catches that on its own — a missing logo is a 404 in a browser, and the generated map
+degrades silently by applying its rule to files the checkout does not have. `tests/dashboard-assets.test.js`
+asserts it instead, and `pnpm test:assets` runs first in `pnpm test` for that reason.
 
 ## The outer runtime, and what it is not
 

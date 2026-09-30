@@ -42,6 +42,54 @@ tarball is staged and finalised a minute or two later, and a re-publish inside t
 with `409 Cannot publish over previously staged version`. A `409` means wait — not retry harder, and
 not bump the version.
 
+---
+
+## Task 65: 141 provider logos were excluded from 18 consecutive releases
+
+**Found by looking for a loose end, and the loose end was in the commit command itself.**
+
+Every commit in this work was staged with:
+
+```bash
+git add -A -- . ':(exclude)public/providers'
+```
+
+The stated reason was that `public/providers/` is build output. **It is not.** The only thing that
+reads the directory is the `logoPolarity()` plugin in `vite.config.ts`, and that plugin *writes*
+`src/lib/logoPolarity.generated.ts` — the assets are pure input, and the only thing that ever wrote
+into the directory was a human, once. The exclusion was silently dropping required assets from every
+release, and nothing failed, because a missing logo is a 404 in a browser and a missing file is not
+an error anywhere in a build.
+
+Measured against the committed tree (`git cat-file -e HEAD:public/providers/…`):
+
+```
+deepseek.svg   MISSING in git — the app will 404 on this logo
+qwen.svg       MISSING in git — the app will 404 on this logo
+```
+
+Both are referenced directly by `src/data/providers.ts`. A fresh clone of the released repository
+renders a broken image for DeepSeek and Qwen, and the developer who pushed the tag had both files
+sitting in their working tree the whole time.
+
+**141 of 294 assets were uncommitted.** The second-order failure is worse: of the 214 assets named in
+the committed `logoPolarity.generated.ts`, **96 were absent from a clone**. The tile-brightness rule
+was applied to files that did not exist, while the files that did render received no rule. That is
+the exact silent failure the generator was written to prevent — its own comment says so, naming
+"an invisible logo, not an error" — caused by the generator's inputs not being committed.
+
+**Fixed, and made unable to recur.** `tests/dashboard-assets.test.js` asserts every rendered mark is
+*committed* rather than merely present, that the brightness map names only assets the repository has,
+that no bundled SVG carries a script or a remote reference (141 files entered at once, and a
+vendored logo is markup a browser executes), and that no mark is an empty file. Wired as
+`pnpm test:assets`, run **first** in `pnpm test` so a missing binary fails fastest. Proven by
+reproducing the defect — `git rm --cached` on three files, which fails three of the seven checks.
+
+**Why it survived eighteen releases:** the exclusion existed only in shell history. Nothing in the
+repository recorded it, so nothing could contradict it. That is the same shape as every other
+finding this work has produced — a decision with no second copy to disagree with it is not a
+decision anyone can check.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

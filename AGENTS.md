@@ -97,6 +97,12 @@ that is not on `main`.
   a card with no connection stays `status: 'available'` with `—` metrics, and an
   auth mode with no flow behind it (currently `OAuth`) must disable Save in
   `AddProviderModal` and say so.
+- `public/providers/` is **input, not build output**. The `logoPolarity()` plugin reads it and
+  writes `src/lib/logoPolarity.generated.ts`; nothing writes into the directory. Never stage with
+  `':(exclude)public/providers'` — that silently dropped 141 required assets from 18 releases, two
+  of which the dashboard renders directly, and a missing logo is a browser 404 that no build reports.
+  `tests/dashboard-assets.test.js` asserts every rendered mark is committed; if it has to be
+  disabled to make a commit pass, the exclusion is the bug.
 
 ## Commands
 
