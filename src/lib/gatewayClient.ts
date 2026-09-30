@@ -3,6 +3,15 @@ import type { ModelMetaMap } from '@hilbras/omnihilbras';
 export type GatewayProviderHealth = {
   providerId: string;
   status: 'healthy' | 'degraded' | 'unavailable';
+  /**
+   * What the check established, from the SDK's own vocabulary.
+   *
+   * `credential` means the credential was accepted and the catalog or session is readable. It does
+   * **not** mean a model can answer — measured, two OpenCode connections reported `healthy` with
+   * `verified: 'credential'` while every model on them was refused by the provider. `inference` means a
+   * request actually completed, which is the only value that justifies calling a route usable.
+   */
+  verified: 'credential' | 'inference';
   latencyMs?: number;
   message?: string;
   checkedAt: string;

@@ -3,7 +3,7 @@ import { providerErrorDetail } from '../transport.js';
 import { FetchHttpTransport } from '../transport.js';
 import { OpenAICompatibleAdapter, type OpenAIResponse } from './openai-compatible.js';
 import type { HttpTransport } from '../transport.js';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderRequestContext } from '../types.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../types.js';
 
 /**
  * Cline serves an OpenAI-compatible API behind an OAuth authorization-code
@@ -57,7 +57,7 @@ export type ClineAdapterOptions = {
 const defaultRefreshSkewMs = 60_000;
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '1.39.0';
+const omnihilbrasVersion = '1.40.0';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {
@@ -299,17 +299,17 @@ export class ClineAdapter implements ProviderAdapter {
     yield* this.delegate.streamChat(request, this.context(await this.currentCredential(context.credential, context.signal)));
   }
 
-  async healthCheck(context: ProviderRequestContext = {}): Promise<{ status: 'healthy' | 'degraded' | 'unavailable'; latencyMs?: number; checkedAt: string; message?: string }> {
+  async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
     const startedAt = Date.now();
     try {
       const result = await this.validateCredential(context.credential ?? { type: 'api-key', value: '' }, context);
-      return { status: 'healthy', checkedAt: result.checkedAt, latencyMs: result.latencyMs ?? Date.now() - startedAt };
+      return { status: 'healthy', verified: 'credential', checkedAt: result.checkedAt, latencyMs: result.latencyMs ?? Date.now() - startedAt };
     } catch (error) {
       // The reason is carried through. Without it an expired token and an
       // unreachable endpoint are indistinguishable, and the only symptom is a
       // bare "unavailable" that gives the operator nothing to act on.
       return {
-        status: 'unavailable',
+        status: 'unavailable', verified: 'credential',
         checkedAt: new Date().toISOString(),
         latencyMs: Date.now() - startedAt,
         message: clineFailureReason(error),

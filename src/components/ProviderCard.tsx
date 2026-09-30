@@ -40,6 +40,14 @@ export type ProviderRecord = {
   requests: string;
   lastUsed: string;
   health: number;
+  /**
+   * What the health poll actually established.
+   *
+   * Absent for the catalog's placeholder cards, which have no poll behind them. When present with
+   * `'credential'`, the `health` number describes an accepted credential and a readable catalog — not
+   * a route that can serve traffic — and the card labels it accordingly instead of "Route health 100%".
+   */
+  healthVerified?: 'credential' | 'inference';
   color: string;
   initial: string;
   logo?: string;
@@ -233,12 +241,27 @@ export function ProviderCard({ provider, detailTo, onManage, onConnect, mode = '
         {provider.status !== 'available' && hasLiveHealth && (
           <div className="mt-5">
             <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="muted text-[10px]">Route health</span>
+              <span className="muted text-[10px]">{provider.healthVerified === 'inference' ? 'Route health' : 'Credential check'}</span>
               <span className={`font-mono text-[10px] ${provider.status === 'connected' ? 'text-success' : 'text-gold-text'}`}>{hasLiveHealth ? `${provider.health}%` : 'Not checked'}</span>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-line/70">
               <div className={`h-full rounded-full ${provider.status === 'connected' ? 'bg-success' : 'bg-gold'}`} style={{ width: `${provider.health}%` }} />
             </div>
+            {/*
+              The number above is a verdict about a credential, not about traffic.
+
+              No adapter completes a request during a health check — a poll runs every 60 seconds on
+              every adapter, so a real completion per poll would be a real bill every minute. Measured:
+              two OpenCode connections both showed this bar at 100% while every model on them was
+              refused by the provider. Labelling it "Route health" claimed the stronger thing, so the
+              label says which question was actually asked.
+            */}
+            {provider.healthVerified === 'credential' && (
+              <p className="muted mt-2 text-[10px] leading-relaxed">
+                The gateway can read this connection's catalog. Whether a model can answer is only
+                known by sending one.
+              </p>
+            )}
           </div>
         )}
 

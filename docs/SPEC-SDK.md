@@ -105,7 +105,15 @@ Provider modules may share small protocol-family helpers, but provider-specific 
 
 The first local gateway exposes:
 
-- `GET /health` — gateway and configured adapter health.
+- `GET /health` — gateway and configured adapter health. Each provider entry carries
+  **`verified`**: `credential` means the credential was accepted and the catalog or session is
+  readable; `inference` means a request actually completed. The field is **required**. A
+  health poll runs every 60 seconds on every adapter, so a real completion per poll would be
+  a real bill every minute, and a verdict that does not say which question it asked cannot be
+  read as a claim about traffic. Two OpenCode connections reported `healthy` with
+  `verified: 'credential'` while every model on them was refused by the provider, and the
+  dashboard rendered that as "Route health 100%". A consumer that needs the stronger claim
+  has to make a request.
 - `GET /v1/models` — normalized models from configured adapters.
 - `GET /v1/connections` — connection metadata without credentials.
 - `POST /v1/connections/:providerId/check` — validate a candidate API key for any provider without

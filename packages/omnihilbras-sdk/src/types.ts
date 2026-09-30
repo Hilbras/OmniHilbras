@@ -179,8 +179,54 @@ export type ProviderRequestContext = {
   requestId?: string;
 };
 
+/**
+ * What a health check actually established.
+ *
+ * ## Why this exists
+ *
+ * Two OpenCode connections both reported `healthy` while **no model on either could serve a single
+ * request** — measured:
+ *
+ * ```
+ * opencode (Zen API key)         free models  403  FreeTierError: free tier needs the OpenCode client
+ *                                qwen3.8-max  402  Insufficient account funds
+ * opencode-console (OAuth)       free models  403  FreeTierError
+ *                                gpt-5-mini   400  Model is unavailable
+ * ```
+ *
+ * Neither was lying about what it checked. Both asked "does this credential exist and can it read the
+ * catalog?", got yes, and returned `healthy` — a word that means *this route can serve traffic*. The
+ * check was cheap and correct; the **name of the answer** was the defect. This is the shape of the
+ * Check button fixed in 1.35.0 and the health manager's own note in `apps/gateway/src/health.ts`
+ * ("a check that proved nothing"): the question was not asked, and nothing said so.
+ *
+ * ## Why not simply send a real request
+ *
+ * Because it would be wrong in a different direction. A health poll runs every 60 seconds across every
+ * adapter, so a real completion per poll is a real bill for every user, on every minute, to answer a
+ * question that changes hourly at most. The SDK says so where the decision was made:
+ *
+ * > A signed-in probe would cost a billable request on every health poll, so the credential is checked
+ * > for presence and shape only.
+ *
+ * And for these two providers it could not even work: every free model is refused outright and the paid
+ * ones need account funds, so a probing request would report a working credential as a broken one.
+ *
+ * So the check stays free, and reports its own scope. `credential` means the credential is present and
+ * the catalog is readable; `inference` means a request actually completed. Omitting the field is not
+ * allowed — a health verdict that does not say what it established is the defect this type closes.
+ */
+export type HealthVerification = 'credential' | 'inference';
+
 export type ProviderHealth = {
   status: 'healthy' | 'degraded' | 'unavailable';
+  /**
+   * What the check established. Required, because a verdict without it claims more than it knows.
+   *
+   * `healthy` with `credential` means "this route is authenticated", **not** "this route can serve".
+   * A consumer that needs the stronger claim has to make a request.
+   */
+  verified: HealthVerification;
   latencyMs?: number;
   message?: string;
   checkedAt: string;

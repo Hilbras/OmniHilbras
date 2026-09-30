@@ -3,7 +3,7 @@ import { compactPricing, normalizeContextWindow, normalizeModalities, perTokenPr
 import { FetchHttpTransport, type HttpResponse, type HttpTransport } from '../transport.js';
 import { assertSafeProviderHeaderValue, assertSafeProviderRequestUrl, normalizeProviderBaseUrl, resolveProviderUrl } from '../url.js';
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterConfig } from './openai-compatible.js';
-import type { CredentialValidation, Model, ModelImportOptions, ProviderCredential, ProviderRequestContext } from '../types.js';
+import type { CredentialValidation, Model, ModelImportOptions, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../types.js';
 
 export type OpenRouterAdapterConfig = Omit<OpenAICompatibleAdapterConfig, 'id' | 'name' | 'auth' | 'baseUrl'> & {
   baseUrl?: string;
@@ -127,11 +127,11 @@ export class OpenRouterAdapter extends OpenAICompatibleAdapter {
     return models;
   }
 
-  async healthCheck(context: ProviderRequestContext = {}) {
+  async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
     const startedAt = performance.now();
     try {
       await this.validateCredential(context.credential, context);
-      return { status: 'healthy' as const, latencyMs: Math.round(performance.now() - startedAt), checkedAt: new Date().toISOString() };
+      return { status: 'healthy' as const, verified: 'credential', latencyMs: Math.round(performance.now() - startedAt), checkedAt: new Date().toISOString() };
     } catch (error) {
       /**
        * The reason, not just the verdict.
@@ -142,7 +142,7 @@ export class OpenRouterAdapter extends OpenAICompatibleAdapter {
        * none of them. Found by the provider contract on its first run.
        */
       return {
-        status: 'unavailable' as const,
+        status: 'unavailable' as const, verified: 'credential',
         checkedAt: new Date().toISOString(),
         message: error instanceof Error ? error.message : 'The health check failed without a reason.',
       };

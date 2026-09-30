@@ -4,7 +4,7 @@ import type { HttpTransport } from '../transport.js';
 import { compactPricing, normalizeContextWindow, normalizeModalities, perMillionPrice } from '../pricing.js';
 import { AnthropicAdapter } from './anthropic.js';
 import { OpenAICompatibleAdapter } from './openai-compatible.js';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderRequestContext } from '../types.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../types.js';
 
 /**
  * OpenCode Console is the credential that reaches OpenCode's free Zen models. An API
@@ -267,13 +267,22 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
     });
   }
 
-  async healthCheck(context: ProviderRequestContext = {}): Promise<{ status: 'healthy' | 'degraded' | 'unavailable'; checkedAt: string; message?: string }> {
+  /**
+   * `credential`, not `inference`, and that word is the fix.
+   *
+   * Reading `/api/user` proves the session is live, which is a real and useful thing — but "the session
+   * is live" is not "a model can answer". Measured on this connection: every free model is refused with
+   * `FreeTierError` and `gpt-5-mini` with `Model is unavailable`, while `/api/user` answers happily and
+   * the dashboard shows a green `healthy`.
+   */
+  async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
     try {
       await this.validateCredential(context.credential);
-      return { status: 'healthy', checkedAt: new Date().toISOString() };
+      return { status: 'healthy', verified: 'credential', checkedAt: new Date().toISOString() };
     } catch (error) {
       return {
         status: 'unavailable',
+        verified: 'credential',
         checkedAt: new Date().toISOString(),
         message: error instanceof Error ? error.message : 'The OpenCode Console session could not be checked.',
       };

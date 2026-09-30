@@ -1163,6 +1163,95 @@ failure and not a verdict on the route.
 tests    842 → 854
 ```
 
+## Task 81: a health check that proved nothing, and called itself route health
+
+Two OpenCode connections, two credential models, and every model on both refused. The dashboard showed
+both as **green**. Here is the whole finding, measured.
+
+### What the dashboard said
+
+```
+GET /health  ->  {"status":"degraded", "providers":[
+                   {"providerId":"opencode",         "status":"healthy", "latencyMs":1225},
+                   {"providerId":"opencode-console", "status":"healthy", "latencyMs": 841}, …]}
+```
+
+The provider cards rendered that as **"Route health 100%"** on both.
+
+### What the models actually did
+
+Through the gateway's own adapters and the gateway's own stored credentials:
+
+```
+opencode (Zen API key, 67 chars)    free models  403  FreeTierError: free tier can only be used from within OpenCode
+                                   qwen3.8-max  402  Insufficient account funds
+opencode-console (OAuth, 39 chars)  free models  403  FreeTierError (identical)
+                                   gpt-5-mini   400  Model is unavailable
+```
+
+Two different root causes, one invisible symptom. `opencode` needs account funds; `opencode-console` is
+refused for a reason of its own that still needs investigating.
+
+### Why they said `healthy`, honestly
+
+Both adapters asked the cheap question and answered it correctly:
+
+- `zen` calls `listModels` — the key is accepted, the catalog reads. **84 models listed happily.**
+- `opencode-console` calls `validateCredential` — `/api/user` answers, so the session is live.
+
+Neither was asked whether a model can answer. And **that is the right thing for a health check to do**,
+which is the part worth being careful about. A poll runs every 60 seconds on every adapter, so a real
+completion per poll is a real bill every minute. The SDK says so where it was decided:
+
+> A signed-in probe would cost a billable request on every health poll, so the credential is checked for
+> presence and shape only.
+
+So "make health send a request" was the wrong fix, and for these two providers it could not even work:
+every free model is refused outright, so a probe would report a working credential as a broken one.
+
+**The defect is that the cheap check borrowed the expensive check's word.** `healthy` reads as *this
+route can serve traffic*. It was returned for a fact about a credential. The session's recurring shape
+one level up from 1.35.0's Check button and `health.ts`'s own "a check that proved nothing" — the
+question was not asked, and nothing recorded which question had been asked instead.
+
+## What I did
+
+**`ProviderHealth.verified` is now required: `'credential' | 'inference'`.** Not optional with a
+default, because a default is the old behaviour wearing a new name. A new adapter cannot compile without
+choosing which question it answered.
+
+**All nine adapters say `credential`,** because all nine read a catalog or a session and none completes
+a request. That is the honest uniform answer; claiming `inference` would be the same overclaim pointed the
+other way, and a test now forbids it.
+
+**`/health` carries it through**, including the three verdicts `HealthManager` builds itself — an expired
+session, an adapter with no health check, and a thrown probe.
+
+**The card labels it.** `Route health 100%` is now `Credential check` plus one line: *"The gateway can
+read this connection's catalog. Whether a model can answer is only known by sending one."* The
+`inference` branch keeps the `Route health` label for a check that earned it.
+
+## The guard was blind, and planting found it
+
+`tests/health-verification.test.js`, 5 tests, asserts the property (**no consumer may present a
+credential check as evidence about traffic**) rather than a list of nine adapters.
+
+My first version counted `verified:` occurrences per file and required one. I planted the defect — deleted
+the scope from Kiro's `healthy` return — and **it passed**, because Kiro has two verdicts and the second
+one still carried its scope. A verdict belonging to a different branch satisfied a check about this one.
+The fix counts `status:` literals inside the method body and requires one scope per verdict:
+
+```
+AssertionError: kiro.ts: 2 verdict(s) returned, 1 scope(s) declared
+```
+
+That is the sixth guard bug this session, and the same shape as the others: green, plausible, and blind in
+the exact place it existed to look.
+
+```
+tests    854 → 859
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

@@ -2,7 +2,7 @@ import { ProviderError } from '../errors.js';
 import { FetchHttpTransport } from '../transport.js';
 import type { HttpTransport } from '../transport.js';
 import { OpenAICompatibleAdapter } from './openai-compatible.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderRequestContext, TokenUsage } from '../types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage } from '../types.js';
 
 /**
  * OpenCode Zen serves one catalog through three different wire formats. Which
@@ -318,13 +318,22 @@ export class ZenAdapter implements ProviderAdapter {
     yield* this.chatLane.streamChat(request, context);
   }
 
-  async healthCheck(context: ProviderRequestContext = {}): Promise<{ status: 'healthy' | 'degraded' | 'unavailable'; checkedAt: string; message?: string }> {
+  /**
+   * `credential`, not `inference`, and that word is the fix.
+   *
+   * Listing the catalog proves the key is accepted and the account is reachable. It does not prove a
+   * single model can answer: measured against this provider, the free models are refused with
+   * `FreeTierError` and paid ones with `Insufficient account funds`, while the catalog lists 84 models
+   * happily. So this reports what it established, and the dashboard says what that means.
+   */
+  async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
     try {
       await this.listModels(context);
-      return { status: 'healthy', checkedAt: new Date().toISOString() };
+      return { status: 'healthy', verified: 'credential', checkedAt: new Date().toISOString() };
     } catch (error) {
       return {
         status: 'unavailable',
+        verified: 'credential',
         checkedAt: new Date().toISOString(),
         message: error instanceof Error ? error.message : 'The OpenCode Zen model list could not be read.',
       };

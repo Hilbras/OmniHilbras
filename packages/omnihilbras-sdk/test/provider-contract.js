@@ -207,6 +207,30 @@ export function runProviderContract({ name, adapter, script, model: nominated, c
       if (health.status !== 'healthy') {
         assert.ok(typeof health.message === 'string' && health.message.length > 0, 'an unhealthy result must carry a reason');
       }
+      /**
+       * A verdict must say what it established — added in 1.40.0 after two OpenCode connections
+       * reported `healthy` while no model on either could serve a request.
+       *
+       * Measured, both connections "healthy", and the actual requests:
+       *
+       * ```
+       * opencode (Zen API key)     free  403 FreeTierError   paid  402 Insufficient account funds
+       * opencode-console (OAuth)   free  403 FreeTierError   paid  400 Model is unavailable
+       * ```
+       *
+       * Neither adapter lied: each checked that the credential was accepted and the catalog readable,
+       * which is cheap and correct for a check that runs every 60 seconds on every adapter. The defect
+       * was the *word* — `healthy` reads as "this route can serve traffic" — with nothing recording
+       * that the cheaper question had been asked instead.
+       *
+       * So the check stays free and names itself. `inference` is reserved for a check that actually
+       * completed a request; every adapter here reads its catalog or its session, so every one is
+       * `credential`, and claiming otherwise would be the same overclaim in the other direction.
+       */
+      assert.ok(
+        health.verified === 'credential' || health.verified === 'inference',
+        `health must say what it verified, got ${JSON.stringify(health.verified)}`,
+      );
     } finally {
       await cleanup();
     }

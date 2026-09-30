@@ -221,11 +221,11 @@ export class HealthManager {
       const standing = await this.source.credentialStanding(adapter.id, signal);
       if (standing.state === 'expired') {
         const message = 'This connection’s session has expired. Sign in again.';
-        return { providerId: adapter.id, status: 'unavailable', checkedAt: new Date().toISOString(), message };
+        return { providerId: adapter.id, status: 'unavailable', verified: 'credential', checkedAt: new Date().toISOString(), message };
       }
     }
     if (!adapter.healthCheck) {
-      return { providerId: adapter.id, status: 'unavailable', checkedAt: new Date().toISOString(), message: 'Health checks are not supported.' };
+      return { providerId: adapter.id, status: 'unavailable', verified: 'credential', checkedAt: new Date().toISOString(), message: 'Health checks are not supported.' };
     }
     const startedAt = Date.now();
     try {
@@ -256,6 +256,9 @@ export class HealthManager {
       return {
         providerId: adapter.id,
         status: 'unavailable',
+        // The probe never got as far as asking, so it established nothing about inference. Say so
+        // rather than letting a thrown check read as a verdict about the route.
+        verified: 'credential',
         checkedAt: new Date().toISOString(),
         // The underlying reason, because "The provider health check failed" points the user at the
         // provider when the cause was their own connection.

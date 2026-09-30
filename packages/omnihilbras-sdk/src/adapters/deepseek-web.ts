@@ -1,16 +1,5 @@
 import { ProviderError } from '../errors.js';
-import type {
-  ChatMessage,
-  ChatRequest,
-  ChatResponse,
-  CredentialValidation,
-  FinishReason,
-  Model,
-  ProviderAdapter,
-  ProviderCredential,
-  ProviderId,
-  ProviderRequestContext,
-} from '../types.js';
+import type { ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderId, ProviderRequestContext } from '../types.js';
 import { MAX_DEEPSEEK_POW_DIFFICULTY, findDeepSeekPowNonce } from './deepseek-pow.js';
 
 /**
@@ -361,13 +350,13 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
    * A credential check, not a completion: it costs one round trip and no proof of work, which
    * is what makes it cheap enough to run on every health poll.
    */
-  async healthCheck(context: ProviderRequestContext = {}): Promise<{ status: 'healthy' | 'degraded' | 'unavailable'; checkedAt: string; message?: string }> {
+  async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
     try {
       await this.validateCredential(context.credential);
-      return { status: 'healthy', checkedAt: new Date(this.now()).toISOString() };
+      return { status: 'healthy', verified: 'credential', checkedAt: new Date(this.now()).toISOString() };
     } catch (error) {
       return {
-        status: 'unavailable',
+        status: 'unavailable', verified: 'credential',
         checkedAt: new Date(this.now()).toISOString(),
         // The provider's own words, because "not connected" tells the user nothing about
         // whether to sign in again or to wait.

@@ -54,6 +54,10 @@ export function mergeGatewayConnections(providers: ProviderRecord[], connections
       latency: providerHealth?.latencyMs === undefined ? '—' : `${providerHealth.latencyMs} ms`,
       // Measured: the health poll's own verdict. Not a percentage of anything.
       health: liveHealthy ? 100 : 0,
+      // What that verdict established, carried so the card can name it rather than imply it.
+      // Every adapter checks its credential or its catalog, never a completed request — so this is
+      // `credential`, and the card must not read as "this route can serve traffic".
+      ...(providerHealth ? { healthVerified: providerHealth.verified } : {}),
       // Measured: the models the connection actually imported.
       models: modelIds.length > 0 ? `${modelIds.length} models · ${connection.modelPolicy === 'free' ? 'free import' : 'all import'}` : connection.hasCredential ? 'No imported models' : '—',
       modelList: modelIds,

@@ -1,16 +1,5 @@
 import { ProviderError } from '../errors.js';
-import type {
-  ChatChunk,
-  ChatRequest,
-  ChatResponse,
-  CredentialValidation,
-  MessageContent,
-  Model,
-  ProviderAdapter,
-  ProviderCredential,
-  ProviderRequestContext,
-  TokenUsage,
-} from '../types.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage } from '../types.js';
 
 /**
  * ChatGPT Web.
@@ -1045,13 +1034,13 @@ export class ChatGptWebAdapter implements ProviderAdapter {
     };
   }
 
-  async healthCheck(context: ProviderRequestContext = {}): Promise<{ status: 'healthy' | 'degraded' | 'unavailable'; checkedAt: string; message?: string }> {
+  async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
     try {
       await this.validateCredential(context.credential);
-      return { status: 'healthy', checkedAt: new Date().toISOString() };
+      return { status: 'healthy', verified: 'credential', checkedAt: new Date().toISOString() };
     } catch (error) {
       return {
-        status: 'unavailable',
+        status: 'unavailable', verified: 'credential',
         checkedAt: new Date().toISOString(),
         message: error instanceof Error ? error.message : 'The ChatGPT Web session could not be checked.',
       };

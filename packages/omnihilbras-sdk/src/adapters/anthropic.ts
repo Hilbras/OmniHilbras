@@ -2,22 +2,7 @@ import { ProviderError } from '../errors.js';
 import { parseSseJson, parseSseStream } from '../streaming.js';
 import { FetchHttpTransport, type HttpTransport } from '../transport.js';
 import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../url.js';
-import type {
-  ChatChunk,
-  ChatMessage,
-  ChatRequest,
-  ChatResponse,
-  FinishReason,
-  MessageContent,
-  Model,
-  ProviderAdapter,
-  ProviderCapabilities,
-  ProviderCredential,
-  ProviderRequestContext,
-  TokenUsage,
-  ToolCall,
-  ToolDefinition,
-} from '../types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '../types.js';
 
 export type AnthropicAdapterOptions = {
   baseUrl?: string;
@@ -220,11 +205,11 @@ export class AnthropicAdapter implements ProviderAdapter {
     }
   }
 
-  async healthCheck(context: ProviderRequestContext = {}) {
+  async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
     const startedAt = performance.now();
     try {
       await this.listModels(context);
-      return { status: 'healthy' as const, latencyMs: Math.round(performance.now() - startedAt), checkedAt: new Date().toISOString() };
+      return { status: 'healthy' as const, verified: 'credential', latencyMs: Math.round(performance.now() - startedAt), checkedAt: new Date().toISOString() };
     } catch (error) {
       /**
        * The reason, not just the verdict.
@@ -235,7 +220,7 @@ export class AnthropicAdapter implements ProviderAdapter {
        * none of them. Found by the provider contract on its first run.
        */
       return {
-        status: 'unavailable' as const,
+        status: 'unavailable' as const, verified: 'credential',
         checkedAt: new Date().toISOString(),
         message: error instanceof Error ? error.message : 'The health check failed without a reason.',
       };
