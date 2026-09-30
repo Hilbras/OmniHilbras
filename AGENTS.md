@@ -85,6 +85,13 @@ that is not on `main`.
 - Never commit credentials. The gateway vault and key material live in
   `$XDG_CONFIG_HOME/omnihilbras` and are gitignored.
 - Provider credentials and gateway keys are never handed to browser storage.
+  **This is asserted, not promised:** `tests/browser-storage.test.js` requires every
+  `localStorage`/`sessionStorage` key in `src/` to be on a two-entry allowlist — a sidebar
+  preference and a theme — with no credential-shaped name and no credential-shaped value, and
+  asserts `sessionStorage`, `document.cookie` writes, IndexedDB and the Cache API at **zero**. It
+  splits camelCase before matching, so `apiKey` and `REFRESH_TOKEN` are caught; a `\bkey\b` pattern
+  misses both. To add a key, add it to the allowlist with a sentence saying what it holds, and
+  expect a reviewer to disagree with that sentence.
 - Never put a token, key, or password in a commit, a file, or a chat message.
   Use `npm login` or a local environment variable.
 - Before any push, scan the tree for secret-shaped strings:

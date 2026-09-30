@@ -366,6 +366,75 @@ into a test of the annotation mechanism instead of a test of my assumption.
 tests    789 → 795
 ```
 
+---
+
+## Task 70: "credentials never reach browser storage" was true, and unenforced
+
+`AGENTS.md` and the gateway's design both say provider credentials and gateway keys never reach
+browser storage. `localStorage` is readable by any script on the origin, is not cleared on logout, and
+survives a restart — so a credential written there is a credential copied out by any future
+dependency, any injected snippet, and any user who opens devtools.
+
+The rule was true. It was also true by having only ever been *nearly* true:
+
+```
+localStorage.setItem(sidebarStorageKey, String(collapsed))   // sidebar collapsed
+localStorage.getItem(sidebarStorageKey)
+localStorage.setItem('omnihilbras-theme', theme)             // light or dark
+```
+
+Three accesses, two keys, both preferences, and **nothing anywhere in the repository that would notice
+the fourth**. The fourth is the change a well-meaning contributor makes — cache the key so the user
+does not retype it — and it is the one that cannot be undone for users who already pasted it.
+
+**`tests/browser-storage.test.js` makes it provable.** Every storage key must be on a two-entry
+allowlist, with a sentence per entry saying what it holds and why that is safe, so the list is a set of
+claims a reviewer can disagree with rather than a rule about the future. The allowlist is checked in
+**both directions**: an unused entry is worse than a missing one, because it widens what the list
+permits without widening what the product does, and the next key can then match it by accident.
+
+Stores the product does not use are asserted at **zero** rather than merely unreferenced. "We do not
+use this" and "we do not use this *yet*" look identical in a grep of what exists, and only one of them
+is a property.
+
+## What a comment and a user-facing snippet are not
+
+`src/lib/webSessionProviders.ts` tells the user, in a string, to run
+`copy(JSON.parse(localStorage.userToken).value)` in **their own** browser console. That is DeepSeek's
+storage, in their browser, and it is the instruction that makes the DeepSeek connect flow possible at
+all. `WebCookieConnectDialog.tsx` explains in a comment why the dialog does *not* use `localStorage`.
+
+Both mention credential-shaped storage; neither is this product storing a credential. So the guard
+matches **calls**, not mentions. A guard that cannot tell a helper aimed at the user from the product
+doing it would flag both, and a guard that cries wolf gets deleted — which is worse than no guard,
+because it looks like coverage. Those two files are the reason the guard passes today, and they are
+also its regression test.
+
+## The bug in my own guard, found by planting the leak twice
+
+The first version used `/\bkey\b/i`, which does **not** match `apiKey` — there is no word boundary
+inside a camelCase compound, and `apiKey`, `refreshToken`, `userToken` and `accessToken` are precisely
+how this codebase and every other JavaScript one names a credential.
+
+I only found it because I planted the second case, which the guard was written for and did not catch:
+
+```
+PLANT 1: a new key holding the api key     → 3 checks fired
+PLANT 2: an ALLOWED key handed a credential → 0 checks fired   ← the blind spot
+PLANT 3: userToken and REFRESH_TOKEN       → 2 checks fired
+```
+
+Plant 2 is the interesting one: the allowlist protects *which keys exist*, and nothing was watching
+what a permitted key was handed. Fixed by splitting camelCase and separators before matching, so
+`apiKey`, `API_KEY` and `api-key` are the same three words and all three are caught. All three plants
+now fire. A guard on a security rule that cannot see the most common spelling of the thing it guards
+reports having looked without having looked, which is the failure mode this whole refactoring keeps
+finding — and it took a deliberately planted leak to surface, not a careful reading.
+
+```
+tests    795 → 801
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.
