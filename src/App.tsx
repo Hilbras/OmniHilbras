@@ -53,11 +53,26 @@ const features = [
     detail: 'OpenAI-compatible by default',
   },
   {
+    /*
+      This advertised a policy engine: "Route on what matters", "fastest response, lowest cost, private
+      local inference", "Per-model rules and budgets".
+
+      The router sorts connections by exactly two things — `left.priority - right.priority ||
+      left.name.localeCompare(...)` in `apps/gateway/src/routing.ts` — then filters on health, credential
+      and rate limit. There is no cost, no quality, no privacy, no per-model rule and no spend budget. Every
+      `budget` in the gateway is a *retry* budget, which is a different word meaning a different thing, and
+      the model prices in `modelFilters.ts` are a dashboard sort comparator, not a routing input.
+
+      `RoutingPage.tsx` already says this in its own header: a "Create policy" dialog would be for a feature
+      that "does not exist anywhere in the gateway". So the product had already told the truth on the page
+      showing the real routing state, while the marketing page still claimed it. Now both agree, and what is
+      claimed is what `resolveRoute` does.
+    */
     icon: SlidersHorizontal,
-    label: 'Policy engine',
-    title: 'Route on what matters.',
-    body: 'Choose the right trade-off for each request: fastest response, lowest cost, private local inference, or a provider you already trust.',
-    detail: 'Per-model rules and budgets',
+    label: 'Priority routing',
+    title: 'You choose the order.',
+    body: 'Set a priority on each connection and the gateway serves them in that order, skipping any that are unhealthy, rate-limited, or missing a credential.',
+    detail: 'Deterministic, with health-aware failover',
   },
   {
     icon: ShieldCheck,
@@ -79,7 +94,7 @@ const steps = [
     number: '02',
     icon: Workflow,
     title: 'Define the policy',
-    body: 'Set priorities for quality, latency, cost, privacy, and the providers allowed to serve each route.',
+    body: 'Set a priority on each connection. The gateway serves them in order, skipping any that are unhealthy, rate-limited, or missing a credential.',
   },
   {
     number: '03',
@@ -91,7 +106,7 @@ const steps = [
 
 
 const codeSamples = {
-  curl: `curl https://gateway.omnihilbras.dev/v1/chat/completions \\
+  curl: `curl http://127.0.0.1:8787/v1/chat/completions \\
   -H "Authorization: Bearer $OMNIHILBRAS_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -99,7 +114,7 @@ const codeSamples = {
     "messages": [{ "role": "user", "content": "Hello" }]
   }'`,
   typescript: `const response = await fetch(
-  'https://gateway.omnihilbras.dev/v1/chat/completions',
+  'http://127.0.0.1:8787/v1/chat/completions',
   {
     method: 'POST',
     headers: {

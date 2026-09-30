@@ -148,7 +148,7 @@ export function RoutePreview() {
               aria-hidden="true"
             />
           ))}
-          <span className="mono-label absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap">policy engine</span>
+          <span className="mono-label absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap">priority order</span>
         </div>
 
         <div className="rounded-xl border border-line bg-bg-soft/80 p-4" aria-live="polite">

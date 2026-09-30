@@ -172,7 +172,7 @@ async function openSignedInPage(cookies: readonly ChatGptCookie[], profile: stri
   const playwright = await loadPlaywright();
   if (!playwright) {
     const message =
-      'ChatGPT Web needs a browser, and Playwright is not installed. Run `pnpm add -D playwright-core` in the gateway, then `npx playwright install chromium`.';
+      'ChatGPT Web needs a browser, and Playwright is not installed. Run `pnpm add playwright-core` in the gateway, then `npx playwright install chromium`.';
     throw new ProviderError('PROVIDER_UNAVAILABLE', message, {
       providerId: CHATGPT_WEB_PROVIDER_ID,
       publicMessage: message,
@@ -304,7 +304,7 @@ export function createChatGptWebDriver(connectionKey = 'default'): ChatGptWebDri
         return {
           ok: false,
           reason:
-            'ChatGPT Web needs a browser, and Playwright is not installed. Run `pnpm add -D playwright-core` in the gateway, then `npx playwright install chromium`.',
+            'ChatGPT Web needs a browser, and Playwright is not installed. Run `pnpm add playwright-core` in the gateway, then `npx playwright install chromium`.',
         };
       }
       return { ok: true };

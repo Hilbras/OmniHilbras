@@ -50,10 +50,16 @@ async function storeWith(entries) {
   return store;
 }
 
-function buildService(adapters, store, options) {
+/**
+ * `apiKeys` is threaded through rather than created inline so a test can mint a key without going over
+ * HTTP. Since 1.46.0 `POST /v1/keys` sits behind the management gate, so an HTTP mint is a bootstrap
+ * deadlock in any test that needs a key to get one. The store is the same object either way — this is
+ * about where the test gets it from, not a second code path.
+ */
+function buildService(adapters, store, options, apiKeys = new InMemoryApiKeyStore()) {
   const registry = new ProviderRegistry();
   for (const adapter of adapters) registry.register(adapter);
-  return new GatewayService(registry, new InMemorySecretStore({}), store, new InMemoryApiKeyStore(), options);
+  return new GatewayService(registry, new InMemorySecretStore({}), store, apiKeys, options);
 }
 
 const chatRequest = { model: 'shared/model', messages: [{ role: 'user', content: 'hi' }] };
@@ -73,6 +79,7 @@ test('a failing primary retries its own budget before failing over', async () =>
   });
   const backup = chattyAdapter('backup', { calls });
   const store = await storeWith([{ id: 'primary', priority: 1, maxRetries: 1, resilience: { maxRetries: 1 } }, { id: 'backup', priority: 2 }]);
+  const apiKeys = new InMemoryApiKeyStore();
   const service = buildService([primary, backup], store);
 
   const { response, attempts } = await service.chatWithFailover(chatRequest, undefined);
@@ -578,13 +585,18 @@ test('the gateway reports failover attempts and accepts resilience updates over 
   const primary = chattyAdapter('primary', { calls, fail: async (id) => { if (id === 'primary') throw new ProviderError('PROVIDER_UNAVAILABLE', 'down', { retryable: true }); } });
   const backup = chattyAdapter('backup', { calls });
   const store = await storeWith([{ id: 'primary', priority: 1, resilience: { maxRetries: 0 } }, { id: 'backup', priority: 2 }]);
-  const service = buildService([primary, backup], store);
+  const apiKeys = new InMemoryApiKeyStore();
+  const service = buildService([primary, backup], store, undefined, apiKeys);
   const server = createGatewayServer(service, { corsOrigin: 'http://localhost:5173' });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
 
-  const created = await (await fetch(`${baseUrl}/v1/keys`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Test' }) })).json();
+  // The key is minted through the store rather than over HTTP. Since 1.46.0 `POST /v1/keys` is itself
+  // behind the management gate, so minting over HTTP here would be the bootstrap problem: you cannot
+  // present a key to get a key. Enforcement is off in this test's store, which is why the gate lets it
+  // through — and asserting that here is what `admin-gate.test.js` does explicitly.
+  const created = await apiKeys.create('Test');
 
   const completion = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
@@ -598,7 +610,7 @@ test('the gateway reports failover attempts and accepts resilience updates over 
 
   const updated = await fetch(`${baseUrl}/v1/connections/primary/resilience`, {
     method: 'PUT',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${created.key}` },
     body: JSON.stringify({ maxRetries: 3, requestsPerMinute: 120, timeoutMs: 15_000, hedgeAfterMs: 400 }),
   });
   assert.equal(updated.status, 200);
@@ -606,26 +618,28 @@ test('the gateway reports failover attempts and accepts resilience updates over 
 
   const invalid = await fetch(`${baseUrl}/v1/connections/primary/resilience`, {
     method: 'PUT',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${created.key}` },
     body: JSON.stringify({ maxRetries: 99 }),
   });
   assert.equal(invalid.status, 400);
 
   const invalidHedge = await fetch(`${baseUrl}/v1/connections/primary/resilience`, {
     method: 'PUT',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${created.key}` },
     body: JSON.stringify({ hedgeAfterMs: 60_000 }),
   });
   assert.equal(invalidHedge.status, 400);
 
   const empty = await fetch(`${baseUrl}/v1/connections/primary/resilience`, {
     method: 'PUT',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${created.key}` },
     body: JSON.stringify({}),
   });
   assert.equal(empty.status, 400);
 
-  const routing = await (await fetch(`${baseUrl}/v1/routing`)).json();
+  // `/v1/routing` is a management route too (1.46.0): it enumerates every connection, its endpoint
+  // and its health, which is the same disclosure as `GET /v1/connections`.
+  const routing = await (await fetch(`${baseUrl}/v1/routing`, { headers: { authorization: `Bearer ${created.key}` } })).json();
   assert.equal(routing.failureThreshold, 3);
   assert.equal(routing.connections.find((connection) => connection.providerId === 'primary').resilience.maxRetries, 3);
 });

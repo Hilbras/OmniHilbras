@@ -25,13 +25,20 @@ function createService(apiKeyStore, connectionStore, seen) {
   return new GatewayService(new ProviderRegistry().register(fakeAdapter(seen)), new InMemorySecretStore({ fake: { type: 'api-key', value: 'secret' } }), connectionStore, apiKeyStore);
 }
 
+/**
+ * Starts a gateway and returns its base URL **and the key store behind it**.
+ *
+ * The store is returned because since 1.46.0 `POST /v1/keys` is behind the management gate, so a test
+ * cannot mint a key over HTTP and then present it — you cannot present a key to get a key. That is the
+ * gate working. `admin-gate.test.js` covers the HTTP mint path explicitly, with enforcement off.
+ */
 async function startServer(t, apiKeyStore = new InMemoryApiKeyStore(), connectionStore, seen) {
   const server = createGatewayServer(createService(apiKeyStore, connectionStore, seen), { corsOrigin: 'http://localhost:5173' });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const address = server.address();
   assert.equal(typeof address, 'object');
-  return `http://127.0.0.1:${address.port}`;
+  return { baseUrl: `http://127.0.0.1:${address.port}`, apiKeys: apiKeyStore };
 }
 
 function chat(baseUrl, headers = {}) {
@@ -42,10 +49,17 @@ function chat(baseUrl, headers = {}) {
   });
 }
 
-async function createKey(baseUrl, name = 'Local CLI') {
-  const response = await fetch(`${baseUrl}/v1/keys`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) });
-  assert.equal(response.status, 201);
-  return response.json();
+/**
+ * Mints through the store rather than over HTTP — see `startServer` for why.
+ *
+ * The shape is normalised to what `POST /v1/keys` returns (`{ apiKey, key }`), because the store's own
+ * `create()` answers `{ record, key }`. Returning the store shape directly made every `created.apiKey` in
+ * this suite read `undefined` — and `assert.equal(undefined, true)` fails loudly, which is the only reason
+ * it was caught rather than silently skipped.
+ */
+async function createKey(apiKeys, name = 'Local CLI') {
+  const { record, key } = await apiKeys.create(name);
+  return { apiKey: record, key };
 }
 
 /**
@@ -197,43 +211,50 @@ test('gateway rejects a corrupt key store instead of silently disabling access',
 });
 
 test('API key routes create, list, pause, and delete keys without returning secrets', async (t) => {
-  const baseUrl = await startServer(t);
+  const { baseUrl, apiKeys } = await startServer(t);
+  // No key exists yet, so this listing is refused — that is the gate working, and it is asserted
+  // rather than worked around. The empty-list shape it used to check is covered in
+  // `admin-gate.test.js`, which turns enforcement off for exactly that case.
+  const refused = await fetch(`${baseUrl}/v1/keys`);
+  assert.equal(refused.status, 401);
 
-  const empty = await (await fetch(`${baseUrl}/v1/keys`)).json();
-  assert.deepEqual(empty, { object: 'list', keys: [], requireApiKey: true });
-
-  const created = await createKey(baseUrl);
+  const created = await createKey(apiKeys);
   assert.match(created.key, /^ohk_/);
   assert.equal(created.apiKey.enabled, true);
 
-  const list = await (await fetch(`${baseUrl}/v1/keys`)).json();
+  const listed = await fetch(`${baseUrl}/v1/keys`, { headers: { authorization: `Bearer ${created.key}` } });
+  const list = await listed.json();
   assert.equal(list.keys.length, 1);
   assert.equal(JSON.stringify(list).includes(created.key), false, 'listing never returns the secret');
 
   const paused = await fetch(`${baseUrl}/v1/keys/${created.apiKey.id}`, {
     method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${created.key}` },
     body: JSON.stringify({ enabled: false }),
   });
   assert.equal(paused.status, 200);
   assert.equal((await paused.json()).apiKey.enabled, false);
 
+  // From here the first key is paused, and a paused key cannot authenticate itself — so it can no
+  // longer administer anything. A second key stands in for the operator, which is also the only way
+  // this works in reality: you cannot un-pause a key using that key.
+  const admin = await createKey(apiKeys, 'Admin');
   const rejected = await fetch(`${baseUrl}/v1/keys/${created.apiKey.id}`, {
     method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${admin.key}` },
     body: JSON.stringify({ name: 'renamed' }),
   });
   assert.equal(rejected.status, 400);
 
-  const removed = await fetch(`${baseUrl}/v1/keys/${created.apiKey.id}`, { method: 'DELETE' });
+  const removed = await fetch(`${baseUrl}/v1/keys/${created.apiKey.id}`, { method: 'DELETE', headers: { authorization: `Bearer ${admin.key}` } });
   assert.deepEqual(await removed.json(), { deleted: true, id: created.apiKey.id });
-  const missing = await fetch(`${baseUrl}/v1/keys/${created.apiKey.id}`, { method: 'DELETE' });
+  const missing = await fetch(`${baseUrl}/v1/keys/${created.apiKey.id}`, { method: 'DELETE', headers: { authorization: `Bearer ${admin.key}` } });
   assert.equal(missing.status, 404);
 });
 
 test('public LLM routes require a valid API key by default', async (t) => {
-  const baseUrl = await startServer(t);
-  const created = await createKey(baseUrl);
+  const { baseUrl, apiKeys } = await startServer(t);
+  const created = await createKey(apiKeys);
 
   const anonymous = await chat(baseUrl);
   assert.equal(anonymous.status, 401);
@@ -258,7 +279,7 @@ test('public LLM routes require a valid API key by default', async (t) => {
 
   const paused = await fetch(`${baseUrl}/v1/keys/${created.apiKey.id}`, {
     method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${created.key}` },
     body: JSON.stringify({ enabled: false }),
   });
   assert.equal(paused.status, 200);
@@ -266,8 +287,8 @@ test('public LLM routes require a valid API key by default', async (t) => {
 });
 
 test('allowlisted dashboard requests stay exempt from API key enforcement', async (t) => {
-  const baseUrl = await startServer(t);
-  await createKey(baseUrl);
+  const { baseUrl, apiKeys } = await startServer(t);
+  await createKey(apiKeys);
 
   const dashboard = await chat(baseUrl, { origin: 'http://localhost:5173' });
   assert.equal(dashboard.status, 200);
@@ -278,12 +299,15 @@ test('allowlisted dashboard requests stay exempt from API key enforcement', asyn
 });
 
 test('API key enforcement can be turned off and back on', async (t) => {
-  const baseUrl = await startServer(t);
-  await createKey(baseUrl);
+  const { baseUrl, apiKeys } = await startServer(t);
+  // The result is kept: `/v1/settings/require-api-key` is a management route, so turning enforcement
+  // OFF now requires a key. `created` was undefined here and the template literal silently produced
+  // the string "Bearer undefined".
+  const created = await createKey(apiKeys);
 
   const disabled = await fetch(`${baseUrl}/v1/settings/require-api-key`, {
     method: 'PUT',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${created.key}` },
     body: JSON.stringify({ requireApiKey: false }),
   });
   assert.deepEqual(await disabled.json(), { requireApiKey: false });
@@ -339,8 +363,8 @@ function agentChat(baseUrl, model, headers = {}) {
 test('a plain client with only a key and a model ID is routed to the saved catalog', async (t) => {
   const seen = [];
   const store = await connectionStoreWithCatalog(['stealth/space-bunny-alpha', 'qwen/qwen3.8-27b:free']);
-  const baseUrl = await startServer(t, new InMemoryApiKeyStore(), store, seen);
-  const created = await createKey(baseUrl);
+  const { baseUrl, apiKeys } = await startServer(t, new InMemoryApiKeyStore(), store, seen);
+  const created = await createKey(apiKeys);
 
   // No x-omnihilbras-provider header and no body provider field: the catalog decides.
   const imported = await agentChat(baseUrl, 'stealth/space-bunny-alpha', { authorization: `Bearer ${created.key}` });
@@ -354,8 +378,8 @@ test('a plain client with only a key and a model ID is routed to the saved catal
 
 test('an explicit provider header still overrides the catalog', async (t) => {
   const store = await connectionStoreWithCatalog(['stealth/space-bunny-alpha']);
-  const baseUrl = await startServer(t, new InMemoryApiKeyStore(), store, []);
-  const created = await createKey(baseUrl);
+  const { baseUrl, apiKeys } = await startServer(t, new InMemoryApiKeyStore(), store, []);
+  const created = await createKey(apiKeys);
 
   const response = await chat(baseUrl, { authorization: `Bearer ${created.key}`, 'x-omnihilbras-provider': 'fake' });
   assert.equal(response.status, 200);
@@ -366,8 +390,8 @@ test('an explicit provider header still overrides the catalog', async (t) => {
 
 test('the model catalog only advertises saved, credentialed models', async (t) => {
   const store = await connectionStoreWithCatalog(['stealth/space-bunny-alpha', 'qwen/qwen3.8-27b:free']);
-  const baseUrl = await startServer(t, new InMemoryApiKeyStore(), store, []);
-  const created = await createKey(baseUrl);
+  const { baseUrl, apiKeys } = await startServer(t, new InMemoryApiKeyStore(), store, []);
+  const created = await createKey(apiKeys);
 
   const listed = await (await fetch(`${baseUrl}/v1/models`, { headers: { authorization: `Bearer ${created.key}` } })).json();
   assert.deepEqual(listed.data.map((model) => model.id), ['stealth/space-bunny-alpha', 'qwen/qwen3.8-27b:free']);
@@ -377,8 +401,8 @@ test('the model catalog only advertises saved, credentialed models', async (t) =
 
 test('paused and credential-less connections are excluded from routing and the catalog', async (t) => {
   const store = await connectionStoreWithCatalog(['stealth/space-bunny-alpha'], { enabled: false });
-  const baseUrl = await startServer(t, new InMemoryApiKeyStore(), store, []);
-  const created = await createKey(baseUrl);
+  const { baseUrl, apiKeys } = await startServer(t, new InMemoryApiKeyStore(), store, []);
+  const created = await createKey(apiKeys);
 
   const listed = await (await fetch(`${baseUrl}/v1/models`, { headers: { authorization: `Bearer ${created.key}` } })).json();
   assert.deepEqual(listed.data.map((model) => model.id), ['fake-1', 'paid/never-imported'], 'a disabled connection falls back to live provider listing');

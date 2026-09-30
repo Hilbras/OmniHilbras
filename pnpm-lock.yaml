@@ -221,13 +221,13 @@ importers:
       '@hilbras/omnihilbras':
         specifier: workspace:*
         version: link:../../packages/omnihilbras-sdk
+      playwright-core:
+        specifier: 1.62.1
+        version: 1.62.1
     devDependencies:
       '@types/node':
         specifier: ^26.6.2
         version: 26.6.2
-      playwright-core:
-        specifier: 1.62.1
-        version: 1.62.1
       typescript:
         specifier: ^5.9.0
         version: 5.9.3

@@ -286,8 +286,9 @@ The gateway must validate request boundaries, apply request timeouts, never retu
 
 ## Gateway API Keys
 
-Keys authorize access to the LLM surface only; connection and key management stay
-reachable from the local dashboard. The contract:
+Keys authorize the LLM surface **and the management surface**; management routes
+additionally stay reachable from the local dashboard, which is identified by an
+allowlisted browser origin. The contract:
 
 - A key is `ohk_` plus 32 random bytes in base64url. Only its SHA-256 hash is
   persisted, so the secret is unrecoverable after creation and rotation means
@@ -303,6 +304,25 @@ reachable from the local dashboard. The contract:
   the cross-site request check, and the dashboard must keep working without
   holding a key. Anything else — CLI tools, IDE extensions, scripts — must
   present a key while enforcement is on.
+
+- **Enforcement also guards the management surface** (1.46.0). Until then the
+  only consumer of `ctx.auth` in the route layer was `handleInferenceRoute`, so
+  the routes that *mint* a key and *disable enforcement* sat outside the gate.
+  Measured against a running gateway with no `Origin` and no `Authorization` —
+  a plain local process — `POST /v1/keys` returned a full secret and
+  `PUT /v1/settings/require-api-key` turned the gate off. The gate now sits at
+  the single dispatch point in `server.ts` and covers
+  `/v1/connections`, `/v1/keys`, `/v1/oauth`, `/v1/settings`, `/v1/web-cookie`
+  and `/v1/routing`. `authorize()` returns early when enforcement is off, so
+  local mode and every test that builds a gateway without a key store are
+  unchanged.
+- **Known limitation, recorded not papered over.** `kind: 'dashboard'` is derived
+  from the `Origin` *header*, which any non-browser client can set, so a local
+  process can claim to be the dashboard and skip the gate. Closing that needs a
+  per-launch secret the browser presents, which is a design change rather than a
+  patch. Until then the gate raises the bar from *any local process* to *a local
+  process that also knows the key* — the difference between an accidental
+  postinstall script and a deliberate attacker.
 - `AUTHENTICATION_FAILED` maps to `401` with a `WWW-Authenticate: Bearer`
   challenge and an actionable message.
 - `lastUsedAt` is best effort: it is written at most once per 30 seconds so

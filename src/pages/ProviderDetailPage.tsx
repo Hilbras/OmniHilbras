@@ -402,7 +402,6 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const scrollAnchorRef = useRef<number | null>(null);
   const [customModels, setCustomModels] = useState<string[]>([]);
   const [filters, setFilters] = useState<ModelFilterState>(defaultModelFilters);
-  const [strategy, setStrategy] = useState('balanced');
   const [notice, setNotice] = useState('');
   const [noticeError, setNoticeError] = useState(false);
   const [copiedModel, setCopiedModel] = useState<string | null>(null);
@@ -988,7 +987,16 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
 
         <section className="card min-w-0 p-4 sm:p-5" aria-labelledby="policy-title">
           <div className="flex items-center gap-2"><span className="grid h-8 w-8 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><SlidersHorizontal className="h-4 w-4" aria-hidden="true" /></span><div><h2 id="policy-title" className="text-sm font-semibold">Routing policy</h2><p className="muted mt-0.5 text-xs">How this provider participates.</p></div></div>
-          <label className="mt-6 block"><span className="mono-label mb-2 block">Strategy</span><select value={strategy} onChange={(event) => { setStrategy(event.target.value); flash(`Policy changed to ${event.target.value}.`); }} className="input !py-2.5 !text-xs"><option value="balanced">Balanced · quality and cost</option><option value="fast">Fastest response</option><option value="cheap">Lowest cost</option><option value="private">Prefer private routes</option></select></label>
+          {/*
+  Removed 1.46.0: a "Strategy" select offering Balanced/Fastest/Lowest cost/Prefer private, which set
+  local state and flashed "Policy changed to X". `strategy` was never sent to the gateway and nothing
+  read it — the gateway has no policy, no strategy setting and no rules store, exactly as
+  `RoutingPage.tsx` states in its own header comment. So the control did nothing while appearing to
+  configure routing, which is the same defect as the 1.37.0 "Live request traces" panel: a plausible
+  surface for a capability that does not exist.
+
+  What routing actually does is set the priority on a connection, and that control exists and works.
+  */}
           <div className="mt-5 space-y-3 border-t border-line pt-5"><div className="flex items-center justify-between text-xs"><span className="muted">Endpoint</span><button type="button" onClick={() => document.getElementById('endpoint')?.scrollIntoView({ behavior: 'smooth' })} className="max-w-[180px] truncate text-left font-mono text-[10px] text-gold-text hover:underline">{connection?.endpoint ?? provider.endpoint}</button></div><div className="flex items-center justify-between text-xs"><span className="muted">Priority</span><span className="font-mono text-[10px]">#{connection?.priority ?? 1}</span></div><div className="flex items-center justify-between text-xs"><span className="muted">Credentials</span><span className="flex items-center gap-1.5 font-mono text-[10px] text-success"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />local only</span></div></div>
           {connection && <ResiliencePanel connection={connection} routingState={routingState} onSave={saveResilience} />}
           <div className="mt-5 rounded-lg border border-gold/20 bg-gold-soft/45 p-3 text-[11px] leading-relaxed text-muted"><Sparkles className="mr-1 inline h-3.5 w-3.5 text-gold-text" aria-hidden="true" />{provider.id === 'openrouter' ? 'OpenRouter credentials are managed by the local gateway.' : 'Policy changes are preview-only until a provider management API is connected.'}</div>

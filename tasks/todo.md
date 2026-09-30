@@ -1780,6 +1780,127 @@ because the patterns matched bare tokens. Each now requires an object-literal `{
 
 Verified in the browser: 22 cards render, `#root` mounts, and **"just now" appears nowhere on the page**.
 
+## Task 89: the management surface had no authentication at all
+
+Found by an independent audit pass, then reproduced against a running gateway before being believed.
+**This is the most serious defect of the session.**
+
+`handleInferenceRoute` was the **only** consumer of `ctx.auth` in the entire route layer. It gated
+`GET /v1/models` and `POST /v1/chat/completions`; nothing else checked anything. So the routes that *mint
+credentials* and *switch the gate off* sat entirely outside it.
+
+Measured with **no `Origin` and no `Authorization`** — a plain local process, nothing more:
+
+```
+200  GET  /v1/connections              → every configured connection and its endpoint
+201  POST /v1/keys                     → {"key":"ohk_..."}    the full secret
+200  PUT  /v1/settings/require-api-key {"requireApiKey":false}
+```
+
+The minted key is accepted by the one gate that does exist, so minting alone is a complete bypass of the
+LLM surface. Disabling enforcement needs no credential at all, and **persists**.
+
+`docs/SPEC-SDK.md` said "Keys authorize access to the LLM surface only; connection and key management stay
+reachable from the local dashboard" — the spec described the defect.
+
+### The gate sits at the single dispatch point, not in each handler
+
+A gate per handler is a gate a route added later forgets. It is one `if` in `handleRequest`, before the
+route loop, over `MANAGEMENT_PREFIXES`: `/v1/connections`, `/v1/keys`, `/v1/oauth`, `/v1/settings`,
+`/v1/web-cookie`, `/v1/routing`. `authorize()` returns early when enforcement is off, so local mode and
+every test that builds a gateway without a key store are unchanged.
+
+### The list-agreement test found a hole I had just written
+
+`/v1/web-cookie` — which stores a **whole-account session cookie** — was not in my first list of four. The
+test that reads the router and checks it against `MANAGEMENT_PREFIXES` failed on it, and `/v1/routing` was
+added alongside it (same disclosure as `/v1/connections`). The test earned its place within one run of
+being written.
+
+### What it cost an existing test, honestly
+
+`routing.test.js` had one test that minted a key **over HTTP** and then presented it. That is now a
+bootstrap deadlock — you cannot present a key to get a key. It mints through the store instead. Five
+requests in that test then needed the key added, which is the gate working rather than a regression.
+
+### Recorded limitation, not papered over
+
+`kind: 'dashboard'` is derived from the `Origin` **header**, which any non-browser client sets freely, so a
+local process can claim to be the dashboard and skip the gate. Closing that needs a per-launch secret the
+browser presents — a design change, not a patch. Until then this raises the bar from *any local process* to
+*a local process that also knows the key*: the difference between an accidental postinstall script and a
+deliberate attacker. Written into `docs/SPEC-SDK.md` next to the contract.
+
+## Task 90: three more false claims, a dead control, and a broken build script
+
+All from the same audit round as Task 89. Each verified by reading the claim and the code that is
+supposed to satisfy it.
+
+### "All systems operational" in the header of every page
+
+`DashboardShell.tsx` rendered a hardcoded green badge, unconditionally, 120 lines above a sidebar badge
+that had been carefully built to *ask* the gateway — its own comment records that a literal "Gateway
+online" reported the one thing that was false for exactly as long as the outage lasted. The header badge
+was the fabricated twin.
+
+It now calls the same `useGatewayStatus()` hook. **Proven in both directions**, which is the part that
+matters: with the gateway up it reads "Gateway reachable"; with the gateway killed it reads "Gateway
+unreachable" within one poll interval. The old string would have said "All systems operational" through
+exactly that outage.
+
+**I broke the dashboard doing it.** My first attempt appended the hook call *after* the component's
+closing brace, because I searched for the last `return (` in the file rather than the one inside
+`DashboardShell`. It **typechecked** — `gatewayUp` was in scope file-wide — and rendered a blank page,
+because a hook called at module scope has no React dispatcher. `tsc` cannot see that; the browser can.
+Found only because I checked the page rather than trusting the green typecheck.
+
+### A "Strategy" select that changed nothing
+
+`ProviderDetailPage.tsx` offered Balanced / Fastest response / Lowest cost / Prefer private, stored the
+choice in local state, and flashed **"Policy changed to balanced."** `strategy` was never sent to the
+gateway and nothing read it. The gateway has no policy, no strategy setting and no rules store — exactly
+as `RoutingPage.tsx` states in its own header. Removed, and the local state with it.
+
+The marketing page made the same claim in two more places, plus a decorative diagram labelled "policy
+engine" (now "priority order", which is what the dots actually depict) and a `curl` sample pointing at
+`gateway.omnihilbras.dev`, **a hostname with no DNS record** (now `http://127.0.0.1:8787`, which is where
+the product actually runs).
+
+`tests/marketing-claims.test.js` records all six with reasons; `FALSE_CLAIMS` goes 9 → 15. Both plants
+verified: restoring the budget claim, and restoring the hardcoded badge, each turn the suite red.
+
+The header comment on that count now says the uncomfortable part: five of the six were in files the guard
+had been reading all along. **It catches these claims when someone records them, not when they are
+written.** That dependency is stated rather than implied.
+
+### `pnpm build` fails on a clean checkout
+
+`build` ran `build:frontend` **before** `build:sdk`, and the dashboard imports the SDK barrel, which Vite
+resolves through `node_modules` to `dist/`. Verified by removing the SDK `dist/` and running the frontend
+build alone:
+
+```
+error during build:
+Error: [vite]: Rolldown failed to resolve import "@hilbras/omnihilbras" from "src/pages/ProviderDetailPage.tsx".
+```
+
+`pnpm build` is a documented command in AGENTS.md and the only Build step in CI. It worked **only** because
+`verify` runs `typecheck` first, and `typecheck` starts with `build:sdk`, priming the artifact. CI has been
+green by ordering luck. Reordered to `build:sdk && build:frontend && build:gateway`.
+
+### `playwright-core` was a devDependency that runtime code imports
+
+`apps/gateway/src/chatgptWeb.ts:97` does `await import('playwright-core')` from **shipped runtime code**.
+A `pnpm install --prod` gateway cannot load it, and the error message told users to run
+`pnpm add -D playwright-core` — reproducing the wrong classification. Moved to `dependencies`; the two
+install hints corrected.
+
+### A subagent finding I did not act on
+
+It reported `@types/pngjs` as an unused dependency. **`pngjs` ships no types** (`"types": None`) and
+`vite.config.ts:3` imports it, so the stub is required. Left alone. A finding is a claim; this one was
+wrong, and reading the cited evidence is what caught it.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

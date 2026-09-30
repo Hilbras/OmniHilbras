@@ -1,6 +1,6 @@
 {
   "name": "@omnihilbras/gateway",
-  "version": "1.45.0",
+  "version": "1.46.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,11 +11,11 @@
     "test": "pnpm --filter @hilbras/omnihilbras build && pnpm build && node --test test/*.test.js"
   },
   "dependencies": {
-    "@hilbras/omnihilbras": "workspace:*"
+    "@hilbras/omnihilbras": "workspace:*",
+    "playwright-core": "1.62.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
-    "playwright-core": "1.62.1",
     "typescript": "^5.9.0"
   }
 }

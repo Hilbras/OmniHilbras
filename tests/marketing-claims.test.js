@@ -98,6 +98,18 @@ const FALSE_CLAIMS = {
   'updated just now': 'nothing on the page updates, so a freshness claim is a claim about a poller that does not exist.',
   'listening': 'a liveness badge is a claim about a feed, and nothing polls. The animated dot on the route panel was this claim in a component the guard could not see.',
   'req/min': 'the gateway keeps no request counter, so no throughput figure exists to print.',
+  // 1.46.0. The router sorts on `left.priority - right.priority || left.name.localeCompare(...)`
+  // (`apps/gateway/src/routing.ts`) and then filters on health, credential and rate limit. There is no
+  // cost, no quality, no privacy and no spend budget — every `budget` in the gateway is a *retry* budget,
+  // which is a different word meaning a different thing. `RoutingPage.tsx` already said so in its own
+  // header ("a feature that does not exist anywhere in the gateway"), so the product had told the truth
+  // on the page showing real routing state while this page still claimed it.
+  'lowest cost': 'the router has no cost input; `modelFilters.ts` prices are a dashboard sort comparator.',
+  'per-model rules': 'there is no rules store and no per-model routing decision anywhere in the gateway.',
+  'quality, latency, cost, privacy': 'the router sorts by priority then name. Nothing else is an input.',
+  'policy engine': 'no policy, no strategy setting, no rules store — `RoutingPage.tsx` documents the absence.',
+  'all systems operational': 'a status claim with no probe behind it, rendered unconditionally in the header. It contradicted the sidebar badge in the same file, which does poll. Now reports the same hook.',
+  'gateway.omnihilbras.dev': 'no DNS record, and the product is local-first. The first thing a reader copies did not work.',
 };
 
 /**
@@ -155,7 +167,12 @@ test('THE COUNT, asserted so the list cannot be quietly emptied', () => {
   // 7 in 1.37.0. 8 in 1.38.0 (`request activity`). **9 in 1.41.0**: `listening` and `req/min`, both
   // from `RoutePreview.tsx` — a component 1.37.0's fix never reached because the guard read
   // `App.tsx` alone, and the two replacements of the `spend` entry for `spend tracking` are the same
-  // entry. The number only moves when a *new* false claim is recorded, not when one is renamed.
-  assert.equal(Object.keys(FALSE_CLAIMS).length, 9, `the recorded-claims list now has ${Object.keys(FALSE_CLAIMS).length} entries`);
+  // entry. **15 in 1.46.0**: the marketing page advertised a policy engine with cost, quality, privacy
+  // and budgets, the header of every page carried a hardcoded "All systems operational", the curl
+  // sample pointed at a hostname with no DNS record, and a decorative diagram was labelled
+  // "policy engine". Five of the six were in files this guard had been reading all along — it caught
+  // them only because the entries were added while fixing them, which is the dependency it has: a
+  // false claim is recorded when someone notices it, not when it is written.
+  assert.equal(Object.keys(FALSE_CLAIMS).length, 15, `the recorded-claims list now has ${Object.keys(FALSE_CLAIMS).length} entries`);
   console.log(`    recorded false claims: ${Object.keys(FALSE_CLAIMS).length}   present on the page: 0`);
 });

@@ -5,7 +5,7 @@ import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getReques
 import { isTrustedDashboard, type AuthContext } from './runtime.js';
 import { handleApiKeysRoute } from './routes/api-keys.js';
 import { handleConnectionsRoute } from './routes/connections.js';
-import { handleInferenceRoute } from './routes/inference.js';
+import { extractApiKey, handleInferenceRoute } from './routes/inference.js';
 import { handleOauthRoute } from './routes/oauth.js';
 import { handleStatusRoute } from './routes/status.js';
 import type { RouteContext } from './routes/route-context.js';
@@ -129,6 +129,55 @@ export async function startGatewayServer(options: {
   return { config, server, service };
 }
 
+/**
+ * The management surface: everything that is not an LLM inference call.
+ *
+ * ## Why this exists (1.46.0)
+ *
+ * `handleInferenceRoute` was the **only** consumer of `ctx.auth` in the whole route layer. It gated
+ * `/v1/models` and `/v1/chat/completions` on `authorizePublicRequest`, and nothing else checked anything.
+ * So the routes that mint credentials and turn the gate off sat entirely outside it. Measured against a
+ * running gateway with no `Origin` and no `Authorization` — a plain local process, nothing more:
+ *
+ * ```
+ * 200  GET  /v1/connections          → every configured connection and its endpoint
+ * 201  POST /v1/keys                 → {"key":"ohk_..."}   the full secret, minted
+ * 200  PUT  /v1/settings/require-api-key {"requireApiKey":false}   → the gate, switched off
+ * ```
+ *
+ * The key it mints is accepted by the one gate that does exist, so step one alone is a full bypass of
+ * the LLM surface. And step two is worse: it is permanent, and it needs no credential at all.
+ *
+ * `docs/SPEC-SDK.md` says "no authentication in local mode", which is a fair statement about
+ * `/v1/chat/completions`. What is not fair is a gateway that has since grown an API-key system whose
+ * *toggle* and *mint route* are unprotected. The key is the control; the switch that disables it was not
+ * behind it.
+ *
+ * ## The rule
+ *
+ * When key enforcement is on, the management surface requires the same key the LLM surface requires. When
+ * it is off — the documented local-mode default — nothing changes, because there is no key to present.
+ *
+ * `isTrustedDashboard` is what keeps the dashboard working: it is an allowlisted browser origin, and
+ * `authorize()` returns early when enforcement is off anyway. The honest limitation is recorded rather than
+ * papered over: `kind: 'dashboard'` is derived from the `Origin` **header**, which a non-browser client sets
+ * freely, so a local process can claim to be the dashboard. Closing that needs a per-launch secret the
+ * browser presents, which is a design change and not a patch. Until then this gate raises the bar from
+ * "any local process" to "a local process that also knows the key", which is the difference between an
+ * accidental postinstall script and a deliberate attacker.
+ */
+/**
+ * `/v1/web-cookie` was missing from this list at first, and the test that checks the list against the
+ * router is what said so — it found a route serving a whole-account session cookie that an
+ * unauthenticated local process could write. `/v1/routing` is included because it enumerates every
+ * configured connection, its endpoint, and its health.
+ */
+const MANAGEMENT_PREFIXES = ['/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing'] as const;
+
+function isManagementPath(pathname: string) {
+  return MANAGEMENT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
 async function handleRequest(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, auth: AuthContext) {
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -155,6 +204,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       signal: controller.signal,
       auth,
     };
+    // The management surface is gated here rather than in each handler, so a route added later cannot
+    // forget it. `authorize()` returns immediately when enforcement is off, which is what keeps local
+    // mode and every test that builds a gateway without a key store working unchanged.
+    if (isManagementPath(ctx.url.pathname) && !isTrustedDashboard(auth)) {
+      try {
+        await service.authorizePublicRequest(extractApiKey(request));
+      } catch (error) {
+        sendError(response, error, false);
+        return;
+      }
+    }
+
     for (const route of routes) {
       if (await route(ctx)) return;
     }

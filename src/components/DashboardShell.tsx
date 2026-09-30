@@ -230,6 +230,19 @@ export function DashboardShell({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(getInitialCollapsed);
 
+  /*
+    The same hook the sidebar badge uses, so the header badge and the sidebar cannot disagree — they were
+    two independent renderings of the same fact, one of which was a hardcoded string. It is called here
+    rather than threaded down as a prop because a shared hook is one source of truth; passing `reachable`
+    from Sidebar up to DashboardShell would be a second place the value could be read.
+
+    This is inside the component body on purpose. My first attempt appended it after the closing brace,
+    which typechecked — `gatewayUp` was in scope file-wide — and rendered a blank page, because a hook
+    called at module scope has no React dispatcher. `tsc` cannot see that; the browser can.
+  */
+  const { reachable } = useGatewayStatus();
+  const gatewayUp = reachable !== false;
+
 
   useEffect(() => {
     try {
@@ -255,7 +268,21 @@ export function DashboardShell({
           </div>
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            <span className="hidden items-center gap-2 rounded-full border border-success/25 bg-success/10 px-2.5 py-1.5 text-[11px] font-medium text-success md:flex"><span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />All systems operational</span>
+            {/*
+              This used to read "All systems operational", unconditionally, in the header of every page.
+              The sidebar badge 120 lines below this one was carefully built to ask the gateway rather
+              than assert it — its own comment records that a hardcoded "Gateway online" reported the one
+              thing that was false for exactly as long as the outage lasted. This badge was the fabricated
+              twin: green, always, saying something the component had already measured and was ignoring.
+
+              It now reports the same `gatewayUp` the sidebar uses. "All systems operational" was also a
+              claim about *more* than the gateway — a check that every configured provider answers — and
+              nothing here polls that, so the wording claims only what is known.
+            */}
+            <span
+              className={`hidden items-center gap-2 rounded-full border px-2.5 py-1.5 text-[11px] font-medium md:flex ${gatewayUp ? 'border-success/25 bg-success/10 text-success' : 'border-danger/30 bg-danger/10 text-danger'}`}
+              aria-label={gatewayUp ? 'Gateway reachable' : 'Gateway unreachable'}
+            ><span className={`h-1.5 w-1.5 rounded-full ${gatewayUp ? 'bg-success' : 'bg-danger'}`} aria-hidden="true" />{gatewayUp ? 'Gateway reachable' : 'Gateway unreachable'}</span>
             <Link to={dashboardRoutes.providers} aria-label="Go to providers" className="muted hidden h-9 w-9 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text sm:grid"><Gauge className="h-[17px] w-[17px]" aria-hidden="true" /></Link>
             <ThemeToggle />
             <span className="grid h-8 w-8 place-items-center rounded-full border border-gold/30 bg-gold-soft text-[10px] font-bold text-gold-text" aria-label="Local workspace">OH</span>
@@ -267,3 +294,4 @@ export function DashboardShell({
     </div>
   );
 }
+
