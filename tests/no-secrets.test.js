@@ -40,13 +40,24 @@ import { dirname, extname, join } from 'node:path';
  * cannot answer, this reports that it skipped rather than passing quietly — a test that silently
  * degrades to green is worse than no test, because it is a claim of coverage that does not exist.
  *
- * ## It does not need to exempt itself, and that is asserted
+ * ## It needs no self-exemption — and the reason is narrower than I first claimed
  *
- * The reflexive move when writing a scanner is to exempt the scanner. This one does not have to, and
- * the reason is worth stating so nobody adds the exemption later on a false premise: a **regex
- * source** is not a match. `/\bohk_[A-Za-z0-9_-]{20,}/g` in this file contains `[` where the pattern
- * wants a character class, and the same is true of the `git grep` line in `AGENTS.md`. Both are
- * verified below against a key that really is shaped like one.
+ * The reflexive move when writing a scanner is to exempt the scanner. This one does not, and the
+ * reason is worth stating precisely, because the first version of this file claimed it more broadly
+ * than was true and CI proved it:
+ *
+ * - **A pattern source is not a match.** `/\bohk_[A-Za-z0-9_-]{20,}/g` in this file contains `[`
+ *   where the pattern wants a character class, and the same is true of the `git grep` line that used
+ *   to live in `AGENTS.md`. Nothing needs exempting for those.
+ * - **But a sample is not a pattern source.** Four samples were originally written as complete
+ *   literals, and the scanner flagged its own file: `Slack token`, `Slack webhook URL`,
+ *   `private key block`, `JSON Web Token`. Those are real matches, of fake credentials — and a
+ *   repository that commits fake credentials shaped exactly like live ones has lost the property that
+ *   makes a grep useful, which is the whole reason this file exists.
+ *
+ * So every sample is assembled from pieces. The shape on disk is `'xoxb-' + '1'.repeat(10)`, which no
+ * pattern matches; the value at runtime is the real thing, which every pattern does. Both directions
+ * are asserted below, so neither half can be quietly given up.
  *
  * ## Binary files are skipped, on purpose and by name
  *
@@ -157,6 +168,19 @@ test('no credential-shaped string is committed', () => {
 test('the scanner matches a real key, so a clean tree means something', () => {
   // A scanner that matches nothing is indistinguishable from a scanner that is broken. This is the
   // check that keeps "all clear" a measurement: every pattern is shown a string it must catch.
+  /**
+   * Every sample is **assembled from pieces**, never written whole.
+   *
+   * This is not a style preference, and the first version of this file got it wrong and CI caught it:
+   * four samples were written as complete literals, so the file that proves each pattern is live was
+   * itself committing four fake credentials — indistinguishable from real ones in a diff, in a
+   * `git grep`, and in a leak triage. A reviewer cannot tell a dead sample from a live key by reading
+   * it, and neither can the next person grepping for one.
+   *
+   * So the shape on disk is `'xoxb-' + '1'.repeat(10)`, which no pattern matches, while the value at
+   * runtime is the real thing, which every pattern does. The eleven samples that were already built
+   * this way with `'a'.repeat(43)` were the only reason the rest of the suite was trustworthy.
+   */
   const samples = {
     'OmniHilbras gateway key': 'ohk_' + 'a'.repeat(43),
     'npm token': 'npm_' + 'b'.repeat(36),
@@ -167,15 +191,15 @@ test('the scanner matches a real key, so a clean tree means something', () => {
     'OpenRouter key': 'sk-or-v1-' + 'g'.repeat(40),
     'AWS access key id': 'AKIA' + 'H'.repeat(16),
     'Google API key': 'AIza' + 'i'.repeat(35),
-    'Slack token': 'xoxb-1234567890-abcdefghij',
-    'Slack webhook URL': `https://hooks.slack.com/services/T00000000/B00000000/${'j'.repeat(24)}`,
-    'Discord webhook URL': `https://discord.com/api/webhooks/123456789012345678/${'k'.repeat(24)}`,
-    'private key block': '-----BEGIN PRIVATE KEY-----',
+    'Slack token': 'xoxb-' + '1'.repeat(10) + '-' + 'a'.repeat(10),
+    'Slack webhook URL': 'https://hooks.slack.com/services/' + 'T'.repeat(8) + '/' + 'B'.repeat(8) + '/' + 'j'.repeat(24),
+    'Discord webhook URL': 'https://discord.com/api/webhooks/' + '1'.repeat(18) + '/' + 'k'.repeat(24),
+    'private key block': '-----BEGIN ' + 'PRIVATE KEY-----',
     // The RFC 7515 example, because a hand-written sample is how a pattern gets a minimum length
-    // wrong: this one is three segments of 36, 52 and 43 characters, and the first version of it was
-    // nine and nine and ten, which the pattern correctly refused.
-    'JSON Web Token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ.4pcPyMD09olPSyXnrXCjTwXyr4Bse-dGvsQ2Q',
-    'bearer header value': `Bearer ${'l'.repeat(44)}`,
+    // wrong: the first version of this was nine and nine and ten characters, which the pattern
+    // correctly refused, since its minimum segment is eight after the leading `eyJ`.
+    'JSON Web Token': 'eyJ' + 'hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9' + '.' + 'eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ' + '.' + '4pcPyMD09olPSyXnrXCjTwXyr4Bse-dGvsQ2Q',
+    'bearer header value': 'Bearer' + ' ' + 'l'.repeat(44),
   };
   // Both directions, because a sample that matches two patterns proves neither. `sk-or-v1-…` must
   // reach the OpenRouter pattern and *not* the OpenAI one, and the two overlap in their first three
@@ -199,12 +223,30 @@ test('the scanner matches a real key, so a clean tree means something', () => {
 });
 
 test('the scanner does not match itself, or the rule that documents it', () => {
-  // Asserted so nobody adds a self-exemption on a false premise later. A regex source is not a match:
-  // the pattern wants a character class where the source has a literal `[`.
+  // Asserted so nobody adds a self-exemption on a false premise later, and so the *samples* stay
+  // assembled. A pattern source is not a match, so this file's regexes are safe — but a sample written
+  // as a complete literal is, and the first version of this file had four of them. CI caught that,
+  // which is the only reason it is written down here rather than rediscovered.
   const found = findings();
   if (!found) return;
   const self = found.filter((entry) => entry.startsWith('tests/no-secrets.test.js') || entry.startsWith('AGENTS.md'));
-  assert.deepEqual(self, [], 'the scanner and the rule documenting it are being flagged; a pattern source is not a match, so the pattern needs widening rather than an exemption');
+  assert.deepEqual(self, [], 'the scanner, its samples, or the rule documenting it are being flagged. A pattern source is not a match, so a pattern needs widening; a sample needs assembling from pieces. Neither is a reason for an exemption.');
+});
+
+test('every sample is assembled, so no complete credential-shaped literal is committed', () => {
+  // The property that makes `grep` useful: a reader, a reviewer, and a leak triage can all see a
+  // credential-shaped string in this file and know it is not one. Asserted directly rather than left
+  // to the main scan, so the reason a failure happened here is obvious from the message.
+  const source = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  for (const { name, re } of PATTERNS) {
+    re.lastIndex = 0;
+    const whole = source.match(re);
+    assert.equal(whole, null, `a complete ${name} shape is written literally in this file; assemble it from pieces instead`);
+  }
+  // And the pieces still have to add up, or "assembled" could mean "weakened until it stopped matching".
+  const { name, re } = PATTERNS.find((pattern) => pattern.name === 'Slack token');
+  re.lastIndex = 0;
+  assert.ok(re.test('xoxb-' + '1'.repeat(10) + '-' + 'a'.repeat(10)), 'the assembled Slack sample still matches, so the sample table is not quietly inert');
 });
 
 test('the exemption list is empty, and adding one has to be a decision', () => {
