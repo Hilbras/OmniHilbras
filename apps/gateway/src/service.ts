@@ -297,6 +297,24 @@ export class GatewayService {
   }
 
   /**
+   * Releases everything this service holds, in the order that makes the release safe.
+   *
+   * Two resources, and the order is the point. The health monitor polls adapters, so it is stopped
+   * first — otherwise it can enqueue work while the drain is running. The API key store is drained
+   * second, because `authenticate` records `lastUsedAt` with a bare `void` (authentication is on
+   * every request, and awaiting a disk write there is a real cost) and that leaves a write in
+   * flight when `authenticate` resolves. Draining is what makes "the disk has caught up" a fact
+   * rather than a hope, so whatever calls this can exit knowing nothing is lost.
+   *
+   * **Call this after the HTTP server has stopped accepting.** The store's drain loops until its
+   * queue stops advancing, which terminates on an idle queue and does not terminate on a busy one.
+   */
+  async close(): Promise<void> {
+    this.stopHealthMonitor();
+    await this.apiKeyStore?.close?.();
+  }
+
+  /**
    * Polls every configured adapter and folds the result into routing state.
    *
    * Delegates. The caching, the shared in-flight sweep, and the reason-carrying failures all live

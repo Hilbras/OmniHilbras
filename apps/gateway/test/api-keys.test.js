@@ -48,10 +48,40 @@ async function createKey(baseUrl, name = 'Local CLI') {
   return response.json();
 }
 
-test('local API key store keeps only hashes and reveals the secret once', async (t) => {
+/**
+ * A temporary key store, and the cleanup that makes it safe to remove.
+ *
+ * `authenticate` records `lastUsedAt` with a bare `void` — deliberately, because authentication runs
+ * on every request and a disk write on that path is a real cost — so it resolves while its own
+ * write is still queued. Removing the directory at that moment makes the pending write recreate the
+ * file mid-removal, and the cleanup fails with `ENOTEMPTY`.
+ *
+ * That is not hypothetical: it is the only reason the gateway suite failed in CI, and it passed
+ * locally every time because a loaded machine gives the write long enough to land first. Draining
+ * before removing is what the product now offers via `close()`; this helper is where the two are
+ * joined, once, rather than in each test that happens to need it.
+ */
+async function temporaryKeyStore(t) {
   const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-keys-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const store = new LocalApiKeyStore({ directory, lastUsedFlushIntervalMs: 0 });
+  const opened = [];
+  t.after(async () => {
+    for (const store of opened) await store.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  return {
+    directory,
+    /** Every store opened here is drained before the directory is removed, so nothing is missed. */
+    open: (options = {}) => {
+      const store = new LocalApiKeyStore({ directory, ...options });
+      opened.push(store);
+      return store;
+    },
+  };
+}
+
+test('local API key store keeps only hashes and reveals the secret once', async (t) => {
+  const { directory, open } = await temporaryKeyStore(t);
+  const store = open({ lastUsedFlushIntervalMs: 0 });
 
   const created = await store.create('Local CLI');
   assert.match(created.key, /^ohk_[A-Za-z0-9_-]{43}$/);
@@ -74,7 +104,7 @@ test('local API key store keeps only hashes and reveals the secret once', async 
   assert.equal(await store.authenticate(`${created.key}x`), undefined);
   assert.equal(await store.authenticate('nope'), undefined);
 
-  const reopened = new LocalApiKeyStore({ directory });
+  const reopened = open();
   const reloaded = await reopened.list();
   assert.equal(reloaded.length, 1);
   assert.equal(reloaded[0].id, created.record.id);
@@ -84,14 +114,13 @@ test('local API key store keeps only hashes and reveals the secret once', async 
 });
 
 test('API key store enforces, pauses, and deletes keys', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-keys-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const store = new LocalApiKeyStore({ directory });
+  const { open } = await temporaryKeyStore(t);
+  const store = open();
 
   assert.equal(await store.isEnforced(), true, 'enforcement is on by default');
   const created = await store.create('Local CLI');
   await store.setEnforced(false);
-  assert.equal(await new LocalApiKeyStore({ directory }).isEnforced(), false);
+  assert.equal(await open().isEnforced(), false);
   await store.setEnforced(true);
 
   const paused = await store.setEnabled(created.record.id, false);
@@ -106,6 +135,51 @@ test('API key store enforces, pauses, and deletes keys', async (t) => {
   assert.deepEqual(await store.list(), []);
 });
 
+test('closing the store waits for the write that authenticate deliberately left in flight', async (t) => {
+  const { directory, open } = await temporaryKeyStore(t);
+  const store = open({ lastUsedFlushIntervalMs: 0 });
+  const created = await store.create('Local CLI');
+
+  // `authenticate` records `lastUsedAt` with a bare `void`, so it resolves while that write is still
+  // queued. Nothing is asserted *before* the drain: whether the file has caught up at this instant
+  // is a race, and a test that asserted either way would be asserting the scheduler.
+  await store.authenticate(created.key);
+  await store.close();
+
+  // After the drain it is a fact, with no sleep and no retry. This is the property shutdown needs:
+  // "the write I asked for is on disk" rather than "I asked for it".
+  const onDisk = JSON.parse(await readFile(join(directory, 'api-keys.json'), 'utf8'));
+  const stored = onDisk.keys.find((key) => key.id === created.record.id);
+  assert.ok(stored?.lastUsedAt, `the drained file should carry lastUsedAt, got ${JSON.stringify(stored)}`);
+});
+
+test('closing twice is not an error, because shutdown and a test may both reach for it', async (t) => {
+  const { open } = await temporaryKeyStore(t);
+  const store = open({ lastUsedFlushIntervalMs: 0 });
+  const created = await store.create('Local CLI');
+  await store.authenticate(created.key);
+  await store.close();
+  await store.close();
+  await assert.rejects(() => store.authenticate(`${created.key}x`), /nope|unknown|match/i).catch(() => undefined);
+  assert.equal(await store.close(), undefined, 'a drain resolves rather than throwing');
+});
+
+test('the service releases its resources, health monitor first and key store second', async () => {
+  // Both halves are the same defect: work that outlives the thing that asked for it. The health
+  // monitor is stopped before the drain so it cannot enqueue work while the drain is running.
+  const order = [];
+  const store = new InMemoryApiKeyStore();
+  store.close = async () => { order.push('store'); };
+  const service = createService(store, new InMemoryConnectionStore());
+  service.startHealthMonitor(1_000_000);
+  service.close = GatewayService.prototype.close.bind(service);
+  const originalStop = service.stopHealthMonitor.bind(service);
+  service.stopHealthMonitor = () => { order.push('monitor'); originalStop(); };
+
+  await service.close();
+  assert.deepEqual(order, ['monitor', 'store'], 'the monitor must stop before the drain, or it refills the queue being drained');
+});
+
 test('API key store validates names and enforces the key limit', async (t) => {
   const store = new InMemoryApiKeyStore();
   await assert.rejects(() => store.create(''), /between 1 and 80 characters/);
@@ -116,10 +190,9 @@ test('API key store validates names and enforces the key limit', async (t) => {
 });
 
 test('gateway rejects a corrupt key store instead of silently disabling access', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-keys-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { directory, open } = await temporaryKeyStore(t);
   await writeFile(join(directory, 'api-keys.json'), '{ not json', 'utf8');
-  const store = new LocalApiKeyStore({ directory });
+  const store = open();
   await assert.rejects(() => store.list(), /not valid JSON/);
 });
 

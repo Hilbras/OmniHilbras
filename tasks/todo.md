@@ -156,6 +156,73 @@ reason to touch it on a hunch.
 `AGENTS.md` now says to run `gh run list` before shipping instead of trusting the sentence that was
 wrong for twenty-five runs.
 
+**Then CI advanced to `Test` and found a second defect, in the product, that local timing had been
+hiding** — shipped as 1.33.3, see below.
+
+---
+
+## Task 67: a write with no way to ask whether it landed
+
+With typecheck fixed, the CI log reached the tests and failed on something local had never shown:
+
+```
+✖ local API key store keeps only hashes and reveals the secret once
+  [Error: ENOTEMPTY: directory not empty, rmdir '/tmp/omnihilbras-keys-VVUUui']
+```
+
+**The cause is one line.** `LocalApiKeyStore.authenticate` records `lastUsedAt` with a bare `void`:
+
+```ts
+if (matched) void this.touchLastUsed(matched.id);
+```
+
+That is *deliberate* — authentication runs on every request, and awaiting a disk write on that path
+is a real cost. The `void` is the right call and this change does not reverse it. The defect is what
+the decision left behind: the store could not be asked when it had caught up. The mutation queue was
+private and nothing drained it, so `authenticate` resolving said "I asked for this write" rather than
+"this write happened". Two consequences, both silent:
+
+- **Shutdown lost data.** `main.ts` did `server.close(() => process.exit(0))` and exited with a
+  `lastUsedAt` still queued. The gateway was told to record usage and then died without recording it.
+- **Cleanup raced.** Removing the store's directory — a test's `t.after`, an operator clearing state
+  — let the pending write recreate the file mid-removal. `ENOTEMPTY` is what that looks like, and it
+  is why the gateway suite failed in CI and passed locally every time: a loaded machine gives the
+  write long enough to land first, so the race is a machine-speed artefact, not a rare event.
+
+Measured, not assumed — without a drain, the file immediately after `authenticate` returns:
+
+```
+without a drain, lastUsedAt present right after authenticate: NO — the write is still in flight
+```
+
+**Fixed by making the deferred work drainable, not by making it synchronous.**
+
+- `LocalApiKeyStore.close()` awaits the mutation queue, looping until the queue stops advancing —
+  awaiting one snapshot only covers work already queued at that moment. It never rejects, because
+  `touchLastUsed` already swallows its errors by design: failing to record when a key was last used
+  must not fail the request that used it, and by drain time there is no request left to fail.
+- `ApiKeyStore.close?()` is on the interface, **optional**, so an in-memory store is not forced to
+  implement a drain it does not need. It is declared rather than duck-typed because a store that
+  defers a write and cannot be asked when it finished is the defect being fixed.
+- `GatewayService.close()` stops the health monitor **then** drains the store, in that order: the
+  monitor polls adapters, so leaving it running would let it enqueue work while the drain runs. The
+  drain terminates on an idle queue and not a busy one, which is why `main.ts` closes the HTTP server
+  first and drains second.
+
+Three tests, not just the one that stopped failing: the drain makes the file factually current with
+no sleep and no retry; closing twice is not an error, because shutdown and a test may both reach for
+it; and the service's release order is asserted as `['monitor', 'store']`, so a future reordering
+fails rather than being left to a comment.
+
+`main.ts` and the tests now join the same operation at one place each — a `temporaryKeyStore` helper
+that drains every store it opened before removing the directory. The three tests that each used to
+carry their own `mkdtemp`/`rm` pair are one decision, not three, which is the shape this whole
+refactoring has been trying to reach.
+
+```
+tests    785 → 788
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

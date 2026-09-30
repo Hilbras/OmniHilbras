@@ -29,6 +29,15 @@ export interface ApiKeyStore {
   authenticate(key: string): Promise<ApiKeyRecord | undefined>;
   isEnforced(): Promise<boolean>;
   setEnforced(value: boolean): Promise<boolean>;
+  /**
+   * Resolves once nothing this store was asked to write is still in flight.
+   *
+   * Optional because most implementations have nothing to flush — an in-memory store has no pending
+   * work. It is on the interface rather than checked for by type because a store that defers a
+   * write and cannot be asked when it finished is the defect this exists to prevent, so the
+   * capability is declared and `GatewayService.close()` relies on it.
+   */
+  close?(): Promise<void>;
 }
 
 export type LocalApiKeyStoreOptions = {
@@ -128,6 +137,37 @@ export class LocalApiKeyStore implements ApiKeyStore {
     this.directory = options.directory ?? defaultStateDirectory();
     this.filePath = join(this.directory, 'api-keys.json');
     this.lastUsedFlushIntervalMs = options.lastUsedFlushIntervalMs ?? defaultLastUsedFlushIntervalMs;
+  }
+
+  /**
+   * Waits until no write is in flight, and never rejects.
+   *
+   * `authenticate` records `lastUsedAt` with a bare `void`, and that is deliberate: authentication
+   * runs on every request, so awaiting a disk write would put I/O on the hot path. The cost of that
+   * decision is that `authenticate` resolves while its own write is still queued, so the store needs
+   * a way for a caller to find out when the disk has caught up. Without one, two things go wrong and
+   * both are silent:
+   *
+   * - a shutdown that calls `process.exit` drops the last `lastUsedAt` it was told to record;
+   * - anything that removes the store's directory — a test's cleanup, an operator clearing state —
+   *   races the pending write, which recreates the file mid-removal and fails with `ENOTEMPTY`.
+   *   That second one is not theoretical: it is the only reason the gateway suite failed in CI.
+   *
+   * The loop drains until the queue stops advancing, because awaiting a snapshot of the queue only
+   * covers work already queued at that moment. It assumes the caller has stopped accepting requests
+   * first — `GatewayService.close()` does exactly that, closing the server before draining — so
+   * there is no traffic to re-fill the queue and the loop terminates.
+   *
+   * Errors are swallowed for the same reason `touchLastUsed` swallows them: a failure to record
+   * when a key was last used must not fail the request that used it, and by the time a caller
+   * drains there is no request left to fail.
+   */
+  async close(): Promise<void> {
+    let queued: Promise<void>;
+    do {
+      queued = this.mutationQueue;
+      await queued;
+    } while (this.mutationQueue !== queued);
   }
 
   async list() {
