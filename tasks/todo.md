@@ -1534,6 +1534,61 @@ doing the work of a logo, which is the rule from 1.33.1 after 294 assets went mi
 tests    889 → 893
 ```
 
+## Task 85: the nine cards were claimed to work, and nothing had ever checked
+
+1.43.0 added nine providers with **no adapters**, on the stated grounds that the gateway serves them
+through `ProviderResolver`'s saved-endpoint fallback. That claim was in a comment, in a release note, and
+in `service.ts` — and it had never been tested for a **new** id, because every existing fallback test uses
+ids that predate the fallback. `service.ts` registers exactly six: `cline`, `opencode`,
+`opencode-console`, `kiro`, `chatgpt-web`, `deepseek-web`.
+
+So: saved four of the new ids as connections and routed a real request through each, pointed at a loopback
+port with nothing listening.
+
+```
+save kimi-probe    200   route 502 PROVIDER_UNAVAILABLE
+save qwen-probe    200   route 502
+save groq-probe    200   route 502
+save nvidia-probe  200   route 502
+
+refused as an UNKNOWN provider? no — the fallback engaged
+```
+
+A `502` from the dead port and a refusal for an unknown provider look identical from the client and mean
+opposite things to whoever is debugging. The `502` is the only evidence the fallback built an adapter.
+
+**The probe itself was wrong twice before it was right, and both failures were the kind that produce a
+confident answer.** It used `POST` where the route is `PUT`, got a 404, and then read the *authentication*
+failure of the follow-up request as "the fallback engaged" — a conclusion about a probe that had never saved
+anything. It then sent `providerId` in the body, which `assertOnlyFields` rejects. Only after both did the
+`502` mean anything. A probe that cannot fail loudly is not a probe, and I wrote one that reported success
+twice on the way.
+
+### The guard, and the three wrong shapes it took
+
+`tests/new-provider-cards.test.js`, 6 tests, from the static half — what CI can run. Each of the first four
+assertions was wrong before it was right:
+
+| Attempt | Claim | Why it was wrong |
+| --- | --- | --- |
+| 1 | a card may not share an id with a registered adapter | `opencode` and `mistral` legitimately do |
+| 2 | six registrations are readable from a literal match | four name constants — **two** were found |
+| 3 | `const X = 'literal'` | `const deepseekWebProviderId: ProviderId = 'deepseek-web'` carries a type |
+| 4 | the *derived* near-miss id must be unregistered | all three are, correctly |
+| 5 | the *base* near-miss id must be unregistered | `opencode` is, correctly |
+
+Four wrong guesses at the shape of the code, in a file whose whole job is to check the code. What it asserts
+now is the hazard that can still happen: **an API-key card listed in `webSessionProviders.ts`** would show
+"Sign in" on a card whose entire purpose is a key. Plus the near-misses must *be* web sessions, so the check
+stays a measurement rather than a tautology.
+
+Both properties were verified by planting: renaming the Groq card onto `deepseek-web`, and giving a new card
+a `92 ms` latency.
+
+```
+tests    899 → 905
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

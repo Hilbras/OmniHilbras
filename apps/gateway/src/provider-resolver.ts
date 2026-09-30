@@ -36,6 +36,22 @@ import { OpenAICompatibleAdapter, type ProviderAdapter, type ProviderRegistry } 
  * saved endpoint. That is what lets a dashboard-added custom endpoint serve traffic with no code
  * change at all, and it is why the registry lookup is tried *before* this fallback rather than
  * after: an explicitly registered adapter must never be shadowed by a generic one.
+ *
+ * **Measured for an id nothing registers** (1.44.0), because the claim above had only ever been tested
+ * with ids that predate the fallback. Four providers added as catalog cards with no adapter —
+ * `kimi`, `qwen`, `groq`, `nvidia` — were saved as connections against a loopback port with nothing
+ * listening, and a request routed through each:
+ *
+ * ```
+ * save 200   route 502 PROVIDER_UNAVAILABLE     ← reached the endpoint
+ * refused as an UNKNOWN provider? no — the fallback engaged
+ * ```
+ *
+ * The `502` is the whole point. A request refused for an unknown provider and a request that reached a
+ * dead endpoint look identical to the client and mean opposite things to whoever is debugging; only the
+ * second one proves the fallback built an adapter. `tests/new-provider-cards.test.js` covers the half CI
+ * can run — that a new card's id collides with no registered adapter and is not mistaken for a
+ * web-session provider.
  */
 export type PendingEndpoint = { endpoint: string; name: string };
 
