@@ -223,6 +223,68 @@ refactoring has been trying to reach.
 tests    785 → 788
 ```
 
+---
+
+## Task 68: a second credential-check route, registered ahead of the one that was better
+
+`routes/connections.ts` contained two handlers for `POST /v1/connections/:providerId/check`. One was
+generic; the other was pinned to `openrouter` and sat **first**, so it always won that path. And it
+was the worse of the two:
+
+```ts
+assertOnlyFields(body, ['apiKey']);            // the copy — endpoint refused
+...
+assertOnlyFields(body, ['apiKey', 'endpoint']); // the generic handler — endpoint allowed
+if (typeof body.endpoint === 'string' && body.endpoint.trim()) assertSafeEndpoint(…);
+```
+
+So the same request body got two answers, and the only difference between them was which branch the
+URL happened to match first. Measured against a gateway with both providers registered:
+
+```
+openrouter check with an endpoint → 400  Request contains unsupported fields.
+anthropic  check with an endpoint → 200  valid
+```
+
+`endpoint` is how a proxied or self-hosted provider is checked, so refusing it for one provider was
+not a restriction anyone had asked for. It was one provider written into a route that already handled
+every provider — the recurring shape, and the only one left in this file.
+
+**The hypothesis I started with was wrong, and measuring is the only reason I know that.** I read
+`service.validateConnectionCredential(providerId, …)`, saw the only caller pass a literal, and
+concluded no non-OpenRouter credential could be checked at all. I had read 40 of the file's lines. The
+generic handler at line 82 does exactly that job, and anthropic, gemini and zen all answer `200`.
+My first probe compounded it: it registered no providers, so the `404` I got was the *service*
+reporting an unknown provider, and I had already labelled it "no such route". Fix the probe before
+blaming the code — twice in one turn.
+
+**The fix is a deletion.** The copy was strictly redundant, so removing it is behaviour-preserving for
+every body the dashboard sends and strictly widening for the rest. `POST /v1/connections/openrouter/check`
+is now the generic route with a provider in the path, which is what it always was.
+
+`docs/SPEC-SDK.md` listed **only** the copy. The generic route — the one that has been serving every
+provider — was never documented at all, which is the same gap from the other side: the spec and the
+code each described one of the two handlers and agreed on neither.
+
+## Declined: collapsing the two body parsers
+
+`parseOpenRouterConnectionRequest` and `parseGenericConnectionRequest` are line-for-line copies that
+differ on exactly two things — `endpoint` is defaulted rather than required, and `id` is forced to
+`openrouter` rather than optional — and only the generic one calls `assertSafeEndpoint`. Unifying
+them is tempting and is **not** free: it would widen the fields OpenRouter accepts to include
+`endpoint`, `id` and `resilience`, which is a behaviour change, and `id` is what lets a caller add a
+second connection for a provider that already has one.
+
+So it is recorded rather than done. The `assertSafeEndpoint` asymmetry is currently harmless — only
+one of the two paths can take a caller-supplied endpoint, which is why the check is unnecessary in the
+other — and no test shows a wrong result today. When it is worth doing, the decision to widen should
+be made on purpose and the existing test at `server.test.js` that asserts `400` for an OpenRouter
+endpoint override will have to change meaning, not just value.
+
+```
+tests    788 → 789
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

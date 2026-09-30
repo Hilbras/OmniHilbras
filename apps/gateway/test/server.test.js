@@ -300,3 +300,41 @@ test('local gateway validates OpenRouter credentials before saving them', async 
   });
   assert.equal(endpointOverride.status, 400);
 });
+
+test('the credential check is one route, so a field legal for one provider is legal for all', async (t) => {
+  // A second copy of this route existed for a single provider, registered *before* the generic one,
+  // and it accepted a narrower set of fields. The observable result was that one request body was
+  // refused for OpenRouter and accepted for Anthropic, for no reason a caller could see or satisfy:
+  //
+  //   openrouter check with an endpoint → 400  Request contains unsupported fields.
+  //   anthropic  check with an endpoint → 200  valid
+  //
+  // `endpoint` is how a proxied or self-hosted provider is checked, so refusing it for one provider
+  // was not a restriction anyone asked for — it was one provider written into a route that already
+  // handled every provider. One route, one field list, one place to change either.
+  const seen = [];
+  const adapter = (id) => ({
+    id,
+    name: id,
+    capabilities: { chat: true, streaming: false, models: true },
+    async listModels() { return []; },
+    async chat() { throw new ProviderError('NOT_IMPLEMENTED', 'unused'); },
+    async validateCredential(credential) { seen.push(`${id}:${credential?.value}`); },
+  });
+  const store = new InMemoryConnectionStore();
+  const registry = new ProviderRegistry().register(adapter('openrouter')).register(adapter('anthropic'));
+  const baseUrl = await startServer(t, new GatewayService(registry, store, store));
+
+  for (const id of ['openrouter', 'anthropic']) {
+    const response = await fetch(`${baseUrl}/v1/connections/${id}/check`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ apiKey: `${id}-key`, endpoint: `https://${id}.example/api` }),
+    });
+    assert.equal(response.status, 200, `${id} must accept the same body as every other provider`);
+    const body = await response.json();
+    assert.equal(body.providerId, id, 'the provider comes from the URL, not from the route that happened to match it');
+    assert.equal(body.valid, true);
+  }
+  assert.deepEqual(seen, ['openrouter:openrouter-key', 'anthropic:anthropic-key'], 'each request reached its own adapter');
+});

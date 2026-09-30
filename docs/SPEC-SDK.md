@@ -108,7 +108,10 @@ The first local gateway exposes:
 - `GET /health` — gateway and configured adapter health.
 - `GET /v1/models` — normalized models from configured adapters.
 - `GET /v1/connections` — connection metadata without credentials.
-- `POST /v1/connections/openrouter/check` — validate a candidate OpenRouter key without saving it.
+- `POST /v1/connections/:providerId/check` — validate a candidate API key for any provider without
+  saving it. Accepts `{ apiKey }`, and optionally `endpoint` for a proxied or self-hosted provider; a
+  supplied endpoint goes through the same address check as a saved one. `/openrouter/check` is this
+  route with that provider in the path, not a second route — see below.
 - `PUT /v1/connections/openrouter` — validate again, discover the selected model policy, then upsert the single local OpenRouter connection.
 - `POST /v1/connections/:id/models` — add validated model IDs to a saved connection.
 - `DELETE /v1/connections/:id` — remove a local connection.
@@ -131,6 +134,24 @@ The first local gateway exposes:
   envelope with empty content is not a working model, and a `Ping` badge beside a
   model that answers nothing is a false report. A response carrying tool calls
   counts as an answer even with no text.
+
+**One provider must not be written into a route that already handles every provider.** The
+credential check existed twice: a generic `POST /v1/connections/:providerId/check` and a copy
+pinned to `openrouter`, registered *ahead* of it. The copy accepted fewer fields, so the same body
+was refused for OpenRouter and accepted for Anthropic:
+
+```
+openrouter check with an endpoint → 400  Request contains unsupported fields.
+anthropic  check with an endpoint → 200  valid
+```
+
+Nothing asked for that difference. The copy is gone; the generic route answers for every provider,
+and `/openrouter/check` is that route with a provider in the path. The rule that follows: if a route
+has to name a provider to work at all, that is the signal to ask what the generic route was missing
+— not to add a branch in front of it. A second handler for a case the general one covers is a copy
+that is free to disagree, and it will, because the narrower one is the one that gets registered
+first.
+
 - **The test budget is 1024 tokens.** Reasoning models spend their budget on
   chain-of-thought before emitting an answer, so a small probe starves the reply:
   `max_tokens: 16` yields `finish_reason: length` with no content and the model

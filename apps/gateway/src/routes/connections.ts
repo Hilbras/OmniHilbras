@@ -41,15 +41,14 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
       return true;
     }
 
-    if (request.method === 'POST' && url.pathname === '/v1/connections/openrouter/check') {
-      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
-      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
-      assertOnlyFields(body, ['apiKey']);
-      const credential = parseApiKey(body);
-      sendJson(response, 200, await service.validateConnectionCredential('openrouter', credential, signal), origin);
-      return true;
-    }
-
+    // Credential checking is handled once, generically, further down. It used to have a second copy
+    // here for one provider, registered ahead of the generic handler, and the copy was the *worse*
+    // of the two: it accepted fewer fields, so `POST /v1/connections/openrouter/check` refused an
+    // `endpoint` that every other provider accepted — one request body, two answers, and the only
+    // difference between them was which branch the URL happened to match first.
+    //
+    // The route that earns its keep is the one that needs a provider written into it: saving an
+    // OpenRouter connection without the caller repeating the endpoint the gateway already knows.
     if (request.method === 'PUT' && url.pathname === '/v1/connections/openrouter') {
       const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
       const { credential, ...input } = parseOpenRouterConnectionRequest(body);
