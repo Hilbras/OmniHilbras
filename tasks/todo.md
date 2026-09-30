@@ -852,6 +852,68 @@ The general property decided it correctly without knowing anything about `health
 tests    826 → 834
 ```
 
+---
+
+## Task 77: the copy button handed out a model id the provider would reject
+
+`ProviderDetailPage` had a function for how to show a model id:
+
+```ts
+function modelReference(providerId: string, model: string) {
+  return providerId === 'openrouter' ? model : `${providerId}/${model}`;
+}
+```
+
+and the row rendered the model name as `mistral-large` while the reference line directly beneath it
+read `mistral/mistral-large`. Then, at line 730:
+
+```ts
+await navigator.clipboard.writeText(modelReference(provider.id, model));
+```
+
+**The copy button put the qualified string on the clipboard.** A user on the Mistral page clicked copy
+beside `mistral-large` and pasted `mistral/mistral-large` into a `model:` field — an id Mistral does not
+know, which the provider rejects. The confirmation toast then said "Copied mistral/mistral-large", so the
+one place that could have corrected the impression repeated it.
+
+Checked the gateway before assuming: routing is by the `x-omnihilbras-provider` **header**, and
+`model` reaches the adapter verbatim (`model: request.model` in the OpenAI-compatible adapter). So a
+qualified string was never a friendlier spelling of the id — it was a different, invalid one.
+
+**The function was right for exactly one provider.** OpenRouter's ids genuinely carry their own
+`vendor/` namespace, which is why it declined to add a second one; for the other twelve the prefix was
+invented. And the provider is already the page this renders on, so the prefix carried no information
+even where it was harmless.
+
+This is the recurring shape at its smallest: one value, two renderings, and the one a user acts on
+disagreeing with the one they read. Three renderings, in fact — the bold name, the reference line, and
+the toast — and the two that agreed were the two nobody pastes.
+
+## The guard is about the clipboard, not about this function
+
+`tests/dashboard-truthfulness.test.js` asserts that **the clipboard receives a value, not a rendering of
+one**: the argument to `clipboard.writeText` must be a plain identifier or member expression — no
+template literal, no concatenation, no call. The clipboard is an API surface; whatever lands there is
+what the user pastes somewhere the product cannot see, and a rendering is not the value.
+
+Narrow on purpose, and it holds across all three call sites rather than one. If a composed string is
+genuinely what should be copied, compose it into a named value first, so the clipboard and the toast are
+visibly the same variable. Proven by putting the qualifier back:
+
+```
+clipboard.writeText(`${provider.id}/${model}`) — the clipboard gets a value, not a rendering of one
+```
+
+## And a prop that existed only to feed it
+
+`ModelRow` took a `providerId` that nothing else used. With the function gone the prop went too — the
+compiler found it (`'providerId' is declared but its value is never read`), which is the one check in this
+work that is not something I wrote.
+
+```
+tests    834 → 835
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

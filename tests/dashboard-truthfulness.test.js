@@ -188,6 +188,34 @@ test('the modal asks the gateway rather than waiting', () => {
   );
 });
 
+test('the clipboard receives a value, not a rendering of one', () => {
+  // The clipboard is an API surface. Whatever lands there is what the user pastes somewhere else —
+  // a `model:` field, a shell, a config file — and a rendering of a value is not the value.
+  //
+  // `ProviderDetailPage` used to write `modelReference(provider.id, model)`, which returned
+  // `${providerId}/${model}` for everything except OpenRouter. A user on the Mistral page clicked copy
+  // beside `mistral-large` and got `mistral/mistral-large` on their clipboard, then pasted it into a
+  // `model:` field, and Mistral rejected an id it does not know. The gateway routes by the
+  // `x-omnihilbras-provider` header and passes `model` to the adapter **verbatim**, so a qualified
+  // string was never a friendlier spelling — it was a different, invalid one.
+  //
+  // So the rule is deliberately narrow and mechanical: the argument must be a plain identifier or a
+  // member expression. No template literal, no concatenation, no call. If a composed string is
+  // genuinely what should be copied, compose it into a named value first, so the thing on the clipboard
+  // and the thing the toast confirms are visibly the same variable.
+  const offenders = [];
+  for (const file of dashboardFiles()) {
+    const source = stripComments(readFileSync(join(ROOT, file), 'utf8'));
+    for (const match of source.matchAll(/clipboard\.writeText\(([^;]*?)\)\s*;/g)) {
+      const argument = match[1].trim();
+      if (!/^[A-Za-z_$][\w$]*(\??\.[A-Za-z_$][\w$]*)*$/.test(argument)) {
+        offenders.push(`${file}: clipboard.writeText(${argument.slice(0, 60)}) — the clipboard gets a value, not a rendering of one`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], 'something transforms a value on its way to the clipboard, so what the user pastes is not what the product holds');
+});
+
 test('THE COUNT, asserted so it cannot drift quietly', () => {
   // The finding was one function in one file. The number is small on purpose: this suite is a tripwire
   // for one specific way the dashboard can lie, not a general audit of the frontend.

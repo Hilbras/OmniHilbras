@@ -95,9 +95,29 @@ function unknownStatusMeta(state: 'loading' | 'failed') {
   return { label: 'Checking…', className: 'border-line-strong bg-surface-2 text-muted', dot: 'bg-muted animate-pulse' };
 }
 
-function modelReference(providerId: string, model: string) {
-  return providerId === 'openrouter' ? model : `${providerId}/${model}`;
-}
+/**
+ * There is deliberately no `provider/model` qualifier here, and there used to be.
+ *
+ * `modelReference` returned the bare id for OpenRouter and `${providerId}/${model}` for everything
+ * else, so a user on the Mistral page saw `mistral-large` as the model name and
+ * `mistral/mistral-large` in the reference line directly beneath it — and the **copy button put the
+ * qualified string on the clipboard**:
+ *
+ * ```ts
+ * await navigator.clipboard.writeText(model);
+ * ```
+ *
+ * Pasting that into a `model:` field sends an id Mistral does not know, and the provider rejects it.
+ * The gateway routes by the `x-omnihilbras-provider` header and passes `model` to the adapter
+ * **verbatim**, so a qualified string is not a friendlier spelling of the id; it is a different,
+ * invalid one. The function was right for exactly one provider — OpenRouter's ids already carry their
+ * own `vendor/` namespace, which is why it declined to add a second one — and wrong for the other
+ * twelve.
+ *
+ * The provider is already the page this is rendered on, so the prefix carried no information either.
+ * One id, one string: what the row names, what the reference line shows, what the toast confirms, and
+ * what lands on the clipboard.
+ */
 
 type ModelTestState = 'idle' | 'testing' | 'ok' | 'error';
 
@@ -150,7 +170,7 @@ function omitNumberKey(record: Record<string, number>, key: string) {
   return next;
 }
 
-function ModelRow({ model, providerId, facets, onCopy, onTest, testing, disabled, testState, testError, testLatencyMs, testNote }: { model: string; providerId: string; facets: ModelFacets; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testError?: string; testLatencyMs?: number; testNote?: string }) {
+function ModelRow({ model, facets, onCopy, onTest, testing, disabled, testState, testError, testLatencyMs, testNote }: { model: string; facets: ModelFacets; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testError?: string; testLatencyMs?: number; testNote?: string }) {
   const input = priceLabel(facets.prices, 'input');
   const output = priceLabel(facets.prices, 'output');
   const context = contextLabel(facets.contextWindow);
@@ -169,7 +189,7 @@ function ModelRow({ model, providerId, facets, onCopy, onTest, testing, disabled
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? 'border-danger/25 bg-danger/10 text-danger' : 'border-line bg-surface text-muted'}`}>
           {testing ? <LoaderCircle className="h-4 w-4 animate-spin text-gold-text" aria-hidden="true" /> : testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
         </span>
-        <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><p className="truncate text-xs font-semibold">{model}</p>{facets.displayName && facets.displayName !== model && <p className="truncate text-[10px] text-muted">{facets.displayName}</p>}{testLatencyMs !== undefined && testState === 'ok' && <span title={testNote || undefined} className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms{testNote ? ' · reasoning only' : ''}</span>}{testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}{badges.map((badge) => <span key={badge} className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[9px] text-muted">{badge}</span>)}</div><code className="mt-1 block truncate font-mono text-[10px] text-muted">{modelReference(providerId, model)}</code>{testState === 'error' && testError && <p className="mt-1 text-[10px] leading-relaxed text-danger/90">{testError}</p>}</div>
+        <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><p className="truncate text-xs font-semibold">{model}</p>{facets.displayName && facets.displayName !== model && <p className="truncate text-[10px] text-muted">{facets.displayName}</p>}{testLatencyMs !== undefined && testState === 'ok' && <span title={testNote || undefined} className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms{testNote ? ' · reasoning only' : ''}</span>}{testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}{badges.map((badge) => <span key={badge} className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[9px] text-muted">{badge}</span>)}</div><code className="mt-1 block truncate font-mono text-[10px] text-muted">{model}</code>{testState === 'error' && testError && <p className="mt-1 text-[10px] leading-relaxed text-danger/90">{testError}</p>}</div>
       </div>
       <div className="flex items-center gap-1.5">
         <button type="button" onClick={onCopy} aria-label={`Copy ${model} model ID`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-gold-text"><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>
@@ -727,7 +747,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   async function copyModel(model: string) {
     if (!navigator.clipboard) return;
     try {
-      await navigator.clipboard.writeText(modelReference(provider.id, model));
+      await navigator.clipboard.writeText(model);
       setCopiedModel(model);
       window.setTimeout(() => setCopiedModel(null), 1600);
     } catch {
@@ -901,9 +921,9 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
               </label>
             </div>
           </div>
-          <div className="mt-3 space-y-2">{visibleModels.length > 0 ? visibleModels.map((entry) => <ModelRow key={entry.model} model={entry.model} facets={entry.facets} providerId={provider.id} onCopy={() => void copyModel(entry.model)} onTest={() => void testModel(entry.model)} testing={testingSet.has(entry.model)} disabled={testing || testingConnection} testState={modelTests[entry.model] ?? 'idle'} testError={modelTestErrors[entry.model]} testLatencyMs={modelTestLatencies[entry.model]} testNote={modelTestNotes[entry.model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{filters.query ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{filters.query ? <>Nothing in {allModels.length} models matches &ldquo;{filters.query.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}</div>
+          <div className="mt-3 space-y-2">{visibleModels.length > 0 ? visibleModels.map((entry) => <ModelRow key={entry.model} model={entry.model} facets={entry.facets} onCopy={() => void copyModel(entry.model)} onTest={() => void testModel(entry.model)} testing={testingSet.has(entry.model)} disabled={testing || testingConnection} testState={modelTests[entry.model] ?? 'idle'} testError={modelTestErrors[entry.model]} testLatencyMs={modelTestLatencies[entry.model]} testNote={modelTestNotes[entry.model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{filters.query ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{filters.query ? <>Nothing in {allModels.length} models matches &ldquo;{filters.query.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}</div>
           <div className="mt-5 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>
-          {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {modelReference(provider.id, copiedModel)}</p>}
+          {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {copiedModel}</p>}
         </section>
 
         <section className="card min-w-0 p-4 sm:p-5" aria-labelledby="policy-title">
