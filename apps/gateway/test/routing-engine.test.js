@@ -156,6 +156,67 @@ test('a rate-limited connection refuses by name and records the wait', async () 
   assert.doesNotThrow(() => instance.enforceRateLimit(candidate), 'and the window slides');
 });
 
+test('a limited connection recovers when the window slides, instead of latching itself off', async () => {
+  // THE BUG THIS FILE NOW EXISTS FOR, measured rather than inferred:
+  //
+  // ```
+  // 2nd request           -> REFUSED: RATE_LIMITED | limit of 1 requests per minute
+  // after 1 more minute   -> REFUSED: Skipped: p (rate-limited)
+  // after 60 more minutes -> REFUSED: Skipped: p (rate-limited)
+  // ```
+  //
+  // `plan()` built its skip list from `this.limits.observed()` — the waits *recorded* by the last
+  // dispatch — while `enforce()` was the only writer, and `enforce()` runs on the candidates `plan()`
+  // had already returned. So the refusal wrote a positive wait; the next plan skipped the connection
+  // for refusing; nothing ran that could ever write `0` again. The wait was not stale, it was
+  // unreachable, and a per-minute limit behaved as a one-way switch.
+  let clock = 1_000_000;
+  const { instance } = engine({ now: () => clock });
+  // Named `limited` rather than shadowing the `connection` factory, which is what my first pass did and
+  // which made the test fail with "Cannot access 'connection' before initialization" — a reader error,
+  // not a product one.
+  const limited = { ...connection(), resilience: resilience({ requestsPerMinute: 1 }) };
+  const candidate = { providerId: 'p', connectionId: 'c1', priority: 0, resilience: resilience({ requestsPerMinute: 1 }) };
+
+  assert.doesNotThrow(() => instance.enforceRateLimit(candidate));
+  instance.recordRequest('c1');
+  assert.throws(() => instance.enforceRateLimit(candidate), (error) => error.code === 'RATE_LIMITED', 'over its limit');
+
+  // Still refused for the rest of the window, and the reason is reported rather than guessed.
+  const refused = await instance.plan({ connections: [limited], model: 'm' });
+  assert.deepEqual(refused.candidates, [], 'a connection over its limit is not a candidate');
+  assert.deepEqual(refused.skipped, [{ providerId: 'p', reason: 'rate-limited' }]);
+
+  clock += 61_000;
+  const recovered = await instance.plan({ connections: [limited], model: 'm' });
+  assert.deepEqual(
+    recovered.candidates.map((one) => one.connectionId),
+    ['c1'],
+    'and after the window it is a candidate again — the plan asks the limiter, not its own last verdict',
+  );
+});
+
+test('the observed waits are what the dashboard is told, and a plan does not corrupt them', async () => {
+  // `observed()` is a report, and `plan()` used to *read* it as if it were a decision. Asking the
+  // limiter for the skip list must leave the report alone, or the dashboard starts describing a state
+  // no request produced.
+  let clock = 1_000_000;
+  const { instance } = engine({ now: () => clock });
+  const candidate = { providerId: 'p', connectionId: 'c1', priority: 0, resilience: resilience({ requestsPerMinute: 1 }) };
+  instance.enforceRateLimit(candidate);
+  instance.recordRequest('c1');
+  // Not `assert.throws` with a bare arrow: the throw is expected, so it is caught rather than left to
+  // escape — my first pass let it propagate and failed the test on the throw instead of the assertion.
+  assert.throws(() => instance.enforceRateLimit(candidate), (error) => error.code === 'RATE_LIMITED');
+  assert.ok(instance.waits().get('c1') > 0, 'the refusal is recorded');
+
+  await instance.plan({ connections: [{ ...connection(), resilience: resilience({ requestsPerMinute: 1 }) }], model: 'm' });
+  assert.ok(instance.waits().get('c1') > 0, 'and a plan that skips it does not overwrite the record');
+  clock += 61_000;
+  await instance.plan({ connections: [connection()], model: 'm' });
+  assert.ok(instance.waits().has('c1'), 'the entry still exists: absent means never checked, which is a different answer');
+});
+
 test('a connection that is not over its limit records a wait of zero rather than nothing', async () => {
   // Absent and zero are different answers: absent means "never checked", which the dashboard reads
   // as unknown rather than ready.

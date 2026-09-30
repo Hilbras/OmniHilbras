@@ -122,7 +122,7 @@ The first local gateway exposes:
 - `PATCH /v1/keys/:id` — pause or resume a key.
 - `DELETE /v1/keys/:id` — revoke a key.
 - `PUT /v1/connections/:id/resilience` — update one connection's retry, timeout, and rate-limit budget.
-- `GET /v1/routing` — live routing state: budgets, recent failures and successes, ejection, last latency, last error.
+- `GET /v1/routing` — live routing state: budgets, recent failures and successes, ejection, last latency, last error, and `rateLimitWaitMs` (absent when never checked, `0` when checked and free).
 - `POST /v1/oauth/cline/start` — begin a sign-in; returns the sign-in URL, a session id, and a single-use `state`.
 - `GET /v1/oauth/cline/authorize` — build the Cline sign-in URL for a loopback callback.
 - `GET /v1/oauth/cline/callback` — where the provider redirects the browser; completes the exchange and reports the outcome.
@@ -2162,7 +2162,15 @@ Behavior when serving a request:
   request to that connection is one it has already refused. Asking whether a request may
   be sent costs nothing: a refused request spends no budget, because nothing was
   sent, and a request that *was* sent and then failed still spends it, because
-  it still cost the provider a call. The default limit is none, which is right
+  it still cost the provider a call.
+
+  Whether a connection is *over* its limit is asked of the limiter at planning
+  time, per request. It is **not** read from the last recorded verdict: the
+  refusal records a wait, a plan that skipped on that recorded wait would never
+  run the code that records a zero, and a connection would latch itself off for
+  the life of the process. The recorded wait is a report for the dashboard
+  (`rateLimitWaitMs` on `GET /v1/routing`), never an input to a decision. The
+  default limit is none, which is right
   for a local single-user gateway.
 - Hedging: when the leading candidate has `hedgeAfterMs` set and another
   candidate can serve the same model, a second request is started after that

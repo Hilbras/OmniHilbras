@@ -56,6 +56,24 @@ export class RoutingEngine {
   }
 
   /**
+   * The wait a connection faces right now, for the skip decision.
+   *
+   * A query against the limiter rather than a read of `waits()`, and that distinction is the fix in
+   * 1.39.0. `plan()` used to skip on the *recorded* wait, which only `enforce()` ever wrote — and
+   * `enforce()` runs on the candidates `plan()` has already returned. So the first refusal wrote a
+   * positive wait, the next `plan()` skipped the connection for refusing, `enforce()` never ran again,
+   * and nothing cleared it: a connection that hit its limit could never serve another request for the
+   * life of the process.
+   *
+   * Asking the limiter is also the honest question. "Is this over its limit?" is about the window,
+   * which the limiter owns; "what did routing last decide?" is a report about the past, and it was
+   * standing in for the first.
+   */
+  private currentWait(candidate: RouteCandidate): number {
+    return this.limits.currentWait(candidate);
+  }
+
+  /**
    * The ordered candidates for a request, or a decision with the reasons each was skipped.
    *
    * "Unmanaged" is a last resort, not a fallback: it applies only when there are no connections at
@@ -67,15 +85,30 @@ export class RoutingEngine {
     model: string;
     explicitProviderId?: string;
   }): Promise<RouteDecision> {
+    const health = this.options.health.registry();
     const decision = resolveRoute({
       // Copied because `resolveRoute` types its input as mutable while nothing here mutates it.
       // The copy is here rather than at every call site so the looseness is paid for once.
       connections: [...input.connections],
       model: input.model,
       ...(input.explicitProviderId === undefined ? {} : { explicitProviderId: input.explicitProviderId }),
-      health: this.options.health.registry(),
+      health,
       failureThreshold: this.options.health.getFailureThreshold(),
-      rateLimitWaitMs: new Map(this.limits.observed()),
+      // Asked of the limiter, per connection, for this request — see `currentWait`. Passing
+      // `this.limits.observed()` here is what bricked a limited connection for the life of the
+      // process: the map only ever held the verdict of the last dispatch, and a refused connection
+      // produced no further dispatch to correct it.
+      rateLimitWaitMs: new Map(
+        input.connections.map((connection) => {
+          const candidate: RouteCandidate = {
+            providerId: connection.providerId,
+            connectionId: connection.id,
+            priority: connection.priority,
+            resilience: connection.resilience,
+          };
+          return [connection.id, this.currentWait(candidate)] as const;
+        }),
+      ),
     });
     if (decision.candidates.length > 0) return decision;
     if (input.connections.length > 0) return decision;

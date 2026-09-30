@@ -9,9 +9,11 @@ import {
   RefreshCw,
   ShieldCheck,
   Timer,
+  TimerOff,
 } from 'lucide-react';
 import { DashboardShell } from '../components/DashboardShell';
 import { getGatewayRoutingState, type GatewayRoutingState } from '../lib/gatewayClient';
+import { routingVerdict, eligibleCount } from '../lib/routingVerdict';
 
 /**
  * The routing control plane, showing what routing can actually use.
@@ -62,23 +64,23 @@ const HEALTH_TONE: Record<Health, { label: string; className: string }> = {
 };
 
 /**
- * Why routing would not choose a connection, named.
+ * Why routing would not choose the connection, named.
+ *
+ * The verdict itself lives in `lib/routingVerdict.ts`, derived from the same record fields routing
+ * reads, so it can be called by a test rather than read. This returns the reason string for the
+ * message row; an eligible connection has no reason and renders the confirmation instead.
  *
  * The reasons are the gateway's own `RouteSkipReason` values, so this is a rendering of a decision the
- * gateway already makes and records — not a second opinion about it. Ordered by how likely a user is to
- * be looking for them.
+ * gateway already makes and records — not a second opinion about it.
  */
 function whyNotUsable(connection: GatewayRoutingState['connections'][number], threshold: number): string | undefined {
-  if (!connection.enabled) return 'paused — routing skips it before health is considered';
-  if (!connection.hasCredential) return 'no credential saved';
-  if (connection.ejected) return `ejected after ${connection.failures ?? 0} consecutive failures (threshold ${threshold})`;
-  if (connection.lastError) return `last attempt failed: ${connection.lastError}`;
-  return undefined;
+  const verdict = routingVerdict(connection, threshold);
+  return verdict.eligible ? undefined : verdict.reason;
 }
 
 function ConnectionCard({ connection, threshold }: { connection: GatewayRoutingState['connections'][number]; threshold: number }) {
   const blocked = whyNotUsable(connection, threshold);
-  const health: Health = connection.ejected || connection.lastError ? 'degraded' : connection.lastCheckedAt ? 'healthy' : 'unknown';
+  const health: Health = blocked ? (connection.ejected || (connection.failures ?? 0) > 0 ? 'degraded' : 'unavailable') : connection.lastCheckedAt ? 'healthy' : 'unknown';
   const tone = HEALTH_TONE[health];
   return (
     <article className="card min-w-0 p-4 sm:p-5">
@@ -105,6 +107,19 @@ function ConnectionCard({ connection, threshold }: { connection: GatewayRoutingS
           <CircleCheck className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           eligible — routing can choose this
         </p>
+      )}
+
+      {/*
+        A past failure on an eligible connection is context, not a verdict.
+
+        It used to *be* the verdict: `lastError` with a non-zero presence blocked the route, so a
+        single timeout under a threshold of 3 read "last attempt failed" about a candidate the next
+        request would take. Shown here instead, it says what happened without claiming routing will
+        refuse it — and it is the only place the error text appears, so the reason and the evidence
+        cannot be printed by two different rules.
+      */}
+      {!blocked && connection.lastError && (
+        <p className="muted mt-3 font-mono text-[10px] leading-relaxed">last attempt: {connection.lastError}</p>
       )}
 
       <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-4 sm:grid-cols-4">
@@ -153,7 +168,10 @@ export function RoutingContent() {
   useEffect(() => { load(); }, [load]);
 
   const connections = state?.connections ?? [];
-  const eligible = connections.filter((connection) => !whyNotUsable(connection, state?.failureThreshold ?? 0)).length;
+  // Counted by the same function the cards render, so the number above cannot disagree with the
+  // cards below it. It used to be `!whyNotUsable(...)` inline — the same rules, written twice.
+  const eligible = eligibleCount(connections, state?.failureThreshold ?? 0);
+  const cooling = connections.filter((connection) => (connection.rateLimitWaitMs ?? 0) > 0).length;
 
   return (
     <div id="routing">
@@ -188,6 +206,7 @@ export function RoutingContent() {
           <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Routing summary">
             <SummaryCard label="Connections" value={state ? String(connections.length) : '—'} detail="saved" icon={GitBranch} tone="border-gold/25 bg-gold-soft text-gold-text" />
             <SummaryCard label="Eligible" value={state ? String(eligible) : '—'} detail="routing may choose" icon={ShieldCheck} tone="border-success/20 bg-success/10 text-success" />
+            <SummaryCard label="At their limit" value={state ? String(cooling) : '—'} detail="cooling down" icon={TimerOff} tone="border-gold/30 bg-gold-soft text-gold-text" />
             <SummaryCard label="Failure threshold" value={state ? String(state.failureThreshold) : '—'} detail="consecutive failures" icon={Gauge} tone="border-[#83b7ff]/25 bg-[#83b7ff]/10 text-[#5d98e8]" />
             <SummaryCard label="Health checks" value={state ? String(connections.filter((c) => c.lastCheckedAt).length) : '—'} detail="reported" icon={Timer} tone="border-[#b995e8]/25 bg-[#b995e8]/10 text-[#9b7bd1]" />
           </section>
@@ -205,6 +224,12 @@ export function RoutingContent() {
                 timing history, so there is nothing to report — an earlier version of this page showed
                 invented figures here, including a health-check result from a button that made no
                 request.
+              </p>
+              <p className="muted mt-1 text-[11px] leading-relaxed">
+                "Eligible" means routing would put this connection in the candidate list for a request:
+                it is enabled, holds a credential, is not ejected, and is not waiting on a rate limit.
+                That is the same rule <span className="font-mono text-[10px]">resolveRoute</span> applies,
+                and it used to be a second, looser copy of it here.
               </p>
             </div>
           </div>

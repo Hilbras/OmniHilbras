@@ -116,7 +116,10 @@ apps/gateway/src/
   model-catalog       What this gateway serves, and which provider serves what. Zero ids.
   retry-policy        Retry this route, next route, or stop. One decision, two callers. Zero ids.
   timeout-policy      What a timeout value means, and the deadline that enforces it. Owns the default.
-  rate-limit-policy   What a request limit means, and when it is spent.
+  rate-limit-policy   What a request limit means, when it is spent, and what it is *now*.
+                       `currentWait` is a query; `enforce` records the verdict. A plan asks
+                       `currentWait`, never the recorded map — 1.39.0, where reading the record
+                       latched a limited connection off for the life of the process.
   hedge-policy        Whether a second request is worth sending, and which route. Every refusal is named.
   request-context     One request's id, from the edge to whichever provider answered it.
   credential-lifecycle  Whether a stored credential still works, asked without a request.

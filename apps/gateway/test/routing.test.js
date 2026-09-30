@@ -511,6 +511,50 @@ test('one provider returning an unreadable body no longer takes down a healthy s
   assert.equal(outcome.response.providerId, 'healthy', 'the healthy provider served the request');
 });
 
+test('the routing report carries the rate-limit wait, and a limited connection still recovers', async () => {
+  // `RateLimitPolicy` records every wait for this report — its own comment says the wait is held so a
+  // cooling-down connection cannot look ready — and `RoutingEngine.waits()` had no caller outside
+  // tests. So a connection over its limit was skipped by routing with reason `rate-limited` and
+  // reported here as an ordinary connection, and the Routing page told an operator "eligible —
+  // routing can choose this" about it.
+  //
+  // Reading the report is also what exposed the worse half, in `routing-engine.ts`: `plan()` skipped on
+  // the *recorded* wait, which only `enforce()` wrote, and `enforce()` runs on the candidates `plan()`
+  // had already returned. The first refusal therefore latched the connection off permanently — measured
+  // as `Skipped: limited (rate-limited)` still being returned 60 minutes later.
+  let now = 1_000_000;
+  const adapter = chattyAdapter('limited');
+  const store = await storeWith([{ id: 'limited', priority: 1, resilience: { maxRetries: 0, requestsPerMinute: 1 } }]);
+  const service = buildService([adapter], store, { now: () => now });
+
+  const before = await service.describeRouting();
+  assert.equal('rateLimitWaitMs' in before.connections[0], false, 'no request has asked about its limit yet, so there is nothing to report');
+
+  await service.chatWithFailover(chatRequest, undefined);
+  const after = await service.describeRouting();
+  assert.equal(after.connections[0].rateLimitWaitMs, 0, 'checked and free is 0, not absent: never checked and not waiting are different answers');
+
+  await assert.rejects(
+    () => service.chatWithFailover(chatRequest, undefined),
+    (error) => {
+      // The code is `PROVIDER_UNAVAILABLE`, not `RATE_LIMITED`, and that is the honest answer: the
+      // connection is skipped by `plan()` before `enforce()` can refuse it, so at this point nothing
+      // can serve the model. What must survive is the cause, or the operator is sent to debug a
+      // provider that is working perfectly.
+      assert.equal(error.code, 'PROVIDER_UNAVAILABLE');
+      assert.match(error.message, /Skipped: limited \(rate-limited\)/, 'and the real cause is named');
+      assert.equal(error.retryable, true, 'a limited connection is retryable elsewhere, not a dead end');
+      return true;
+    },
+  );
+
+  // The recovery. A per-minute budget that can spend itself once is a switch, not a rate limit.
+  now += 61_000;
+  const recovered = await service.chatWithFailover(chatRequest, undefined);
+  assert.equal(recovered.response.providerId, 'limited', 'the window slides, and the connection serves again');
+  assert.equal((await service.describeRouting()).connections[0].rateLimitWaitMs, 0, 'and the recorded wait is corrected by a real dispatch');
+});
+
 test('route resolution reports why a connection was skipped', () => {
   const health = new HealthRegistry();
   health.recordFailure('unhealthy', 'PROVIDER_UNAVAILABLE', 'down');

@@ -73,10 +73,36 @@ export class RateLimitPolicy {
   }
 
   /**
+   * The wait a candidate faces *right now*, as a pure query.
+   *
+   * Separate from `enforce` on purpose, and the separation is the fix in 1.39.0. `plan()` used to
+   * build its skip list from the *recorded* wait, while `enforce()` was the only thing that recorded
+   * one — and `enforce()` runs on the candidate list `plan()` has already produced. So once a wait was
+   * positive, `plan()` skipped the connection for refusing, `enforce()` never ran, nothing ever
+   * recorded `0` again, and the connection could not recover for the life of the process:
+   *
+   * ```
+   * 2nd request           -> REFUSED: RATE_LIMITED | limit of 1 requests per minute
+   * after 1 more minute   -> REFUSED: Skipped: p (rate-limited)
+   * after 60 more minutes -> REFUSED: Skipped: p (rate-limited)
+   * ```
+   *
+   * Sixty minutes is longer than any rate limit anyone sets. A per-minute budget that can only ever
+   * spend itself once is not a rate limit, it is a switch.
+   *
+   * So the skip decision asks the limiter, which owns the window, and `enforce` records the verdict
+   * it actually acted on. A query records nothing, so asking twice costs no budget — the same rule
+   * that fixed the double-count in 1.25.0.
+   */
+  currentWait(candidate: RouteCandidate): number {
+    return this.options.limiter.check(candidate.connectionId, candidate.resilience.requestsPerMinute);
+  }
+
+  /**
    * Checks one candidate, and refuses it if its connection is over its limit.
    *
-   * The wait is recorded either way, so the dashboard sees a connection as cooling down rather
-   * than as unknown.
+   * The wait is recorded either way, so the dashboard sees a connection as cooling down rather than
+   * as unknown.
    */
   enforce(candidate: RouteCandidate): void {
     const waitMs = this.options.limiter.check(candidate.connectionId, candidate.resilience.requestsPerMinute);

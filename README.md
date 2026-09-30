@@ -3,7 +3,7 @@
 A self-hosted, local-first AI gateway: one OpenAI-compatible endpoint in front of
 every provider, with API keys, routing, and per-connection reliability.
 
-**Current version: 1.38.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.39.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras)
 
 ```bash
@@ -539,7 +539,15 @@ trace so a client can see what happened:
 ```
 
 `GET /v1/routing` reports live state: per-connection budgets, recent failures
-and successes, ejection, last latency, and the last error.
+and successes, ejection, last latency, the last error, and `rateLimitWaitMs` —
+the wait routing last recorded for that connection. Absent means no request has
+asked about its limit yet; `0` means it was asked and is free. A connection over
+its limit is skipped with reason `rate-limited` and is reported as such, so the
+Routing page does not describe it as eligible.
+
+A connection that hits its limit recovers when its window slides. The skip
+decision asks the limiter at planning time rather than reading the last recorded
+verdict, because a verdict nothing can revise is a latch, not a rate limit.
 
 OpenRouter model import is controlled by the dialog toggle and defaults to
 free mode when an API client omits the policy. Free mode keeps only discovered

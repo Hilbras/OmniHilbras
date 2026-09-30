@@ -1060,6 +1060,109 @@ these pages import no data source, so anything numeric on them is a literal: Orp
 tests    840 → 842
 ```
 
+## Task 80: a rate limit was a one-way switch, and the page could not see it
+
+Task 79 made the Routing page show `GET /v1/routing` instead of fiction. It took four real requests to
+notice that the endpoint it now renders **omitted the one field that decides eligibility**.
+
+### What the report was missing, and why
+
+`RateLimitPolicy` records every wait, and its own comment states the reason:
+
+> Held here rather than in the engine so the whole limit policy is one object, and so the dashboard's
+> view of a cooling-down connection cannot disagree with the limiter that made it cool.
+
+`RoutingEngine.waits()` existed to expose exactly that. Measured:
+
+```
+grep -rn "\.waits()" apps/gateway/src src   # excluding the tests
+(no matches)
+```
+
+**Nothing outside `routing-engine.test.js` ever called it.** The promise was in a comment and the value
+never left the object — so a connection over its limit was reported as an ordinary connection, and the
+Routing page (new in 1.38.0) rendered **"eligible — routing can choose this"** about a connection
+routing was actively refusing. The page was reading a real endpoint and still lying, which is a harder
+failure than the mockup it replaced: a fabricated page is at least consistently fabricated.
+
+### The second copy of the decision
+
+`RoutingPage.whyNotUsable()` also derived eligibility by hand, from four fields, in a `.tsx`. It
+disagreed with `resolveRoute` in both directions:
+
+| Connection | `resolveRoute` | the page said |
+| --- | --- | --- |
+| 1 failure, `lastError` set, threshold 3 | **candidate** | "last attempt failed" |
+| over its rate limit | skipped, `rate-limited` | **"eligible — routing can choose this"** |
+
+The first row is the session's recurring shape one level down: `lastError` survives long after the
+ejection it caused has decayed, and nothing told the two copies which of them was authoritative. The
+summary card counted eligible connections with a third, inline copy of the same rules.
+
+### What reading the report exposed: a permanent outage
+
+Wiring `rateLimitWaitMs` into the report meant writing a test for it, and the test refused to go green.
+It had been asserting the wrong thing:
+
+```
+2nd request           -> REFUSED: RATE_LIMITED | limit of 1 requests per minute
+after 1 more minute   -> REFUSED: Skipped: p (rate-limited)
+after 60 more minutes -> REFUSED: Skipped: p (rate-limited)
+```
+
+**A connection that hit its rate limit could never serve another request for the life of the
+process.** `plan()` built its skip list from `this.limits.observed()` — the waits *recorded* by the last
+dispatch — while `enforce()` was the only writer, and `enforce()` runs on the candidates `plan()` had
+already returned. So the refusal wrote a positive wait; the next plan skipped the connection *for
+refusing*; nothing ran that could ever write `0` again. A per-minute budget that can spend itself once
+is not a rate limit, it is a switch, and sixty minutes is longer than any limit anyone sets.
+
+This has shipped in every release since the limit existed, and 20 gateway tests missed it, because
+every test set a limit of 0 or sent fewer requests than the limit allowed.
+
+## What I did
+
+**The skip decision now asks the limiter.** `RateLimitPolicy.currentWait()` is a pure query over the
+window, and `plan()` calls it per connection per request. The recorded wait became what it always
+claimed to be — a *report*, never an input to a decision. A query records nothing, so the same rule that
+fixed the double-count in 1.25.0 holds here.
+
+**`GET /v1/routing` carries `rateLimitWaitMs`**, absent when no request has asked about the connection's
+limit and `0` when it was asked and is free. The distinction is the gateway's own, recorded deliberately
+in 1.25.0, and collapsing it would have made "never checked" look like "free".
+
+**`src/lib/routingVerdict.ts`** now owns the eligibility rule — extracted out of the `.tsx` so it can be
+called rather than read — and `RoutingPage` calls it for both the cards and the summary count. The rule
+follows `resolveRoute`'s order: enabled, credential, not ejected, not waiting. `lastError` is no longer a
+reason at all; on an eligible connection it is shown as *context*, because it is a record of one past
+failure and not a verdict on the route.
+
+**Two behaviour changes, both recorded rather than hidden:**
+
+- A connection over its limit is now refused with `PROVIDER_UNAVAILABLE` — "No enabled provider
+  connection can serve this model. Skipped: p (rate-limited)." — instead of `RATE_LIMITED`, because
+  `plan()` now skips it before `enforce()` can refuse it. That is the more honest code: at that point
+  nothing *can* serve the model. The cause is still named in the message, which is the part that matters,
+  and it stays `retryable` so failover still happens.
+- The recorded wait persists until a request re-checks it. `RateLimitPolicy` records a verdict per
+  request and holds no timer. I expected the report to expire the wait on its own; it does not, and
+  inventing a timer would let the dashboard describe a wait for a request that never happened.
+
+## Guards
+
+- `tests/routing-verdict.test.js` — 9 tests. The verdict must agree with `resolveRoute` on every input,
+  which is the property; the four rules are an implementation detail free to move. Plus: the rule lives
+  in `lib`, the page calls it, no hand-written eligibility chain survives in the `.tsx`, and the payload
+  type declares the wait.
+- `apps/gateway/test/routing-engine.test.js` — the latch itself: refused, then a candidate again after
+  the window slides, and `plan()` does not corrupt the reported waits.
+- `apps/gateway/test/routing.test.js` — end to end through the service and `describeRouting()`:
+  absent → `0` → refusal naming its cause → recovery.
+
+```
+tests    842 → 854
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

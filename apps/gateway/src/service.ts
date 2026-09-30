@@ -334,9 +334,22 @@ export class GatewayService {
     return this.healthManager.report(signal);
   }
 
-  /** Live routing state for the dashboard. */
+  /**
+   * Live routing state for the dashboard.
+   *
+   * The wait is included because `RateLimitPolicy` records it *for* this report — its own comment
+   * says the wait is held so a cooling-down connection cannot look ready — and nothing read it. A
+   * connection over its per-minute limit was skipped by routing with reason `rate-limited` and
+   * reported here as an ordinary eligible connection, so the page told an operator "routing can
+   * choose this" about a connection routing was refusing. The promise was in the code; the value
+   * never reached a caller.
+   *
+   * Absent when never checked, `0` when checked and not waiting. Collapsing those two is how a
+   * connection that has never been asked about its limit looks identical to one that is free.
+   */
   async describeRouting() {
     const connections = await this.listConnections();
+    const waits = this.routing.waits();
     return {
       failureThreshold: this.healthManager.getFailureThreshold(),
       connections: connections.map((connection) => ({
@@ -345,6 +358,7 @@ export class GatewayService {
         enabled: connection.enabled,
         hasCredential: connection.hasCredential,
         resilience: connection.resilience,
+        ...(waits.has(connection.id) ? { rateLimitWaitMs: waits.get(connection.id) } : {}),
         ...(this.healthManager.snapshot(connection.providerId) ?? {}),
       })),
     };

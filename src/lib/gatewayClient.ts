@@ -56,6 +56,14 @@ export type GatewayRoutingState = {
     enabled: boolean;
     hasCredential: boolean;
     resilience: GatewayResilience;
+    /**
+     * How long routing was last told this connection must wait, in ms.
+     *
+     * Absent when no request has asked about its limit; `0` when it was asked and is free. The
+     * difference matters because the gateway records a zero deliberately (`rate-limit-policy.ts`):
+     * *never checked* and *not waiting* are different answers.
+     */
+    rateLimitWaitMs?: number;
     failures?: number;
     successes?: number;
     ejected?: boolean;
