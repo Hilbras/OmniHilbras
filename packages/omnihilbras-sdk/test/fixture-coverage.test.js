@@ -66,6 +66,11 @@ const NO_CAPTURE_YET = {
   'chatgpt-web': 'the protocol is a browser DOM rather than a wire format, so a byte capture would pin nothing useful',
   'deepseek-web': 'its frames are hand-written in `deepseek-web.test.js`, and that is how a real truncation bug survived',
   zen: 'a composite of other providers\' protocols; a capture would pin the composite, not a provider',
+  // The free-tier contract is four request conditions measured against someone else's service on a
+  // date, and it changes: the working implementation in OmniRoute records the accepted placeholder
+  // tool name moving between models within a week. A byte capture would freeze one day of it and
+  // then be wrong, which is the reason the two moving parts are configuration and not constants.
+  'zen-free-tier': 'the gate is a request contract measured on a date and it drifts; pinning a capture would pin the drift',
 };
 
 test('the fixtures directory holds only captures, named for the adapter they came from', () => {

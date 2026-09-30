@@ -1386,6 +1386,96 @@ Not everything in the audit was a defect, and it is worth saying so:
 tests    859 → 871
 ```
 
+## Task 83: the free-tier gate is the request, not the credential — and I had it backwards
+
+Every free model on the `opencode` connection was refused:
+
+```
+mimo-v2.6-flash-free   403  {"type":"FreeTierError","message":"OpenCode's free tier can only be used from within OpenCode"}
+big-pickle             403  (identical)
+nemotron-3.5-…-free   403  (identical)
+```
+
+### What I concluded first, and why it was wrong
+
+The message names the OpenCode client, so I inferred the free tier wanted **the CLI's own credential** — a
+356-char account session token rather than the Zen API key the adapter holds. I measured a fingerprint
+comparison (67 chars in the vault, 356 in the CLI's `opencode.db`) and reported it as settled.
+
+**It was inferred from one refusal rather than measured.** The user pointed at
+`/home/gin/work/OmniRoute`, which serves the same models through the same base URL with
+`authType: "apikey"`, and `open-sse/executors/opencodeFreeTierContract.ts` records the contract it
+measured against the live endpoint on 2026-09-17:
+
+```
+1. stream: true in the body
+2. a non-empty tools array — the official client's placeholder name is _noop
+3. x-opencode-session shaped ses_ + 12 hex + 14 base62
+4. User-Agent carrying opencode/<version> with version >= 1.17
+
+"Removing any single one of the four turns a 200 into a 403."
+```
+
+A **Zen API key** reaches the free tier. The gate is the request. My conclusion was backwards, and a
+working implementation was sitting on the same disk the whole time.
+
+### What the adapter sends now
+
+`ZenAdapter` applies the contract to any model whose id ends `-free`, streaming upstream and
+re-aggregating the answer — because `stream: true` is one of the four conditions and there is no
+non-streaming path to take. A caller's own tools are kept; the placeholder is only a fallback.
+
+Two decisions worth recording:
+
+- **The suffix decides, not a list.** The upstream rotates its free lineup — six models delisted and
+  replaced inside a week, per the working implementation's own note. A hardcoded list would serve models
+  that no longer exist and refuse ones that do.
+- **The placeholder name is configuration.** One made-up name was accepted on `big-pickle` and refused on
+  two other free models the next day. That is an observation about someone else's service, so
+  `OMNIHILBRAS_ZEN_PLACEHOLDER_TOOL` and `OMNIHILBRAS_ZEN_USER_AGENT` override it without a release.
+
+### Measured after the change: still refused, and now it says why
+
+```
+mimo-v2.6-flash-free   PROVIDER_UNAVAILABLE: OpenCode Zen refused mimo-v2.6-flash-free after this
+                       gateway sent everything its free-tier request contract requires … The API key was
+                       accepted, so this is not a credential problem: OpenCode limits its free tier to
+                       non-datacenter networks, and this host's egress address is the likely cause.
+```
+
+All four conditions applied and the upstream still answers 403. The working implementation names the
+likely reason twice: the CLI identity headers exist because *"Cloudflare requires [them] on VPS egress"*,
+and the free tier *"rejects generic client UAs from datacenter IPs"*. This host's egress is `AS204044
+Packet Star Networks Limited`, a hosting provider. **That is a hypothesis, recorded as one** — proving it
+needs a request from a residential IP.
+
+So the contract is necessary and, from here, apparently not sufficient. What is not left to hypothesis is
+the message: a refused free model is not a key problem, and saying so is what stops the next person from
+rotating a working credential. I made exactly that mistake earlier this session.
+
+### The reasonless verdict was two layers deep
+
+The bare *"The provider refused the request."* was not only the adapter's. `FetchHttpTransport.stream`
+raises its own `ProviderError` for a non-2xx **before** yielding a single event, so the gate's refusal
+arrived as a throw that never reached the adapter's handler. `captureGateRefusal` wraps the stream and
+converts it — the only place that can still tell it was the gate, because by the time it throws the
+contract state is gone. `providerErrorFromResponse` maps every 403 to `PROVIDER_REQUEST_FAILED` and
+attaches no `statusCode`, so the gate is recognised by the provider's **own `FreeTierError` wording**
+instead; that keeps a 429 as `RATE_LIMITED` rather than collapsing every gated refusal into one code.
+
+### The guard was blind, and the same way
+
+`tests/provider-refusals.test.js`, 7 tests. The seam check used a 400-character window after `catch`, and
+deleting the `gatedRefusal(...)` call from the middle of that catch **still passed** — the window ran on
+and found the word in the *next* method's name.
+
+That is the same defect as `health-surfaces`' two blind spots in 1.41.0, and the third time a
+fixed-width window has been the wrong place to look. It now reads the wrapper's **body**.
+
+```
+tests    871 → 889
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

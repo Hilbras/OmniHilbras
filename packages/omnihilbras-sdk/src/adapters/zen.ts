@@ -2,7 +2,9 @@ import { ProviderError } from '../errors.js';
 import { FetchHttpTransport } from '../transport.js';
 import type { HttpTransport } from '../transport.js';
 import { OpenAICompatibleAdapter } from './openai-compatible.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage } from '../types.js';
+import { parseSseJson, parseSseStream } from '../streaming.js';
+import { isZenFreeTierRefusal, zenFreeTierHeaders, zenPlaceholderTool, zenSessionId, zenContractSatisfied } from './zen-free-tier.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../types.js';
 
 /**
  * OpenCode Zen serves one catalog through three different wire formats. Which
@@ -20,6 +22,66 @@ export const ZEN_LANES = {
   responses: `${ZEN_BASE_URL}/v1/responses`,
 } as const;
 
+/* ------------------------------------------------------------------ *
+ * Free-tier gated request
+ * ------------------------------------------------------------------ */
+
+/** The slice of an OpenAI chat stream this adapter reads. */
+type GatedStreamChunk = {
+  id?: string;
+  choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
+  error?: { message?: string } | string;
+};
+
+function toGatedMessage(message: ChatMessage) {
+  return {
+    role: message.role,
+    content: messageText(message),
+    ...(message.name ? { name: message.name } : {}),
+    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+  };
+}
+
+/**
+ * A tool in the shape the upstream expects.
+ *
+ * Kept local rather than imported because `openai-compatible.ts` keeps its own copy private, and a
+ * second export used once would be a wider surface than the duplication is worth.
+ */
+function toGatedTool(tool: ToolDefinition) {
+  return {
+    type: 'function' as const,
+    function: { name: tool.name, ...(tool.description ? { description: tool.description } : {}), parameters: tool.parameters },
+  };
+}
+
+function toGatedFinishReason(reason: string): FinishReason {
+  const map: Record<string, FinishReason> = {
+    stop: 'stop', length: 'length', tool_calls: 'tool_calls', function_call: 'tool_calls', content_filter: 'content_filter',
+  };
+  return map[reason] ?? 'stop';
+}
+
+/**
+ * The upstream's own words, wherever they ended up.
+ *
+ * Two shapes reach here: a payload envelope from the stream (`{error: {message}}`), and the
+ * `ProviderError` the transport raised, which carries the provider's text in `details.providerMessage`.
+ * Reading only the first is what produced a bare "The provider refused the request." on every gated
+ * model — the cause was in hand and the code was not looking at it.
+ */
+function readGatedErrorReason(payload: unknown): string | undefined {
+  const details = (payload as { details?: { providerMessage?: unknown } } | undefined)?.details;
+  if (typeof details?.providerMessage === 'string') return details.providerMessage;
+  const error = (payload as { error?: unknown } | undefined)?.error;
+  if (typeof error === 'string') return error;
+  const message = (error as { message?: unknown } | undefined)?.message;
+  if (typeof message === 'string') return message;
+  return typeof (payload as { message?: unknown } | undefined)?.message === 'string'
+    ? (payload as { message: string }).message
+    : undefined;
+}
+
 export type ZenLane = keyof typeof ZEN_LANES;
 
 /**
@@ -34,6 +96,18 @@ const responsesFamily = /^(gpt-|grok-|muse-spark-)/;
 /** Models Zen serves from an endpoint this adapter does not implement. */
 const unsupported = new Set(['jev-1.13', 'jev-1.13-free']);
 const unsupportedFamily = /^gemini-/;
+
+/**
+ * Whether a model is on the gated free tier, and so needs the request contract.
+ *
+ * The suffix is the whole test rather than a list, because **the upstream rotates its free lineup** —
+ * OmniRoute records `minimax-m2.5-free`, `ling-2.6-1t-free` and three others being delisted and
+ * replaced within a week. A list would be stale the day after it was written and would keep serving
+ * models that no longer exist while refusing ones that do. A suffix tracks the tier.
+ */
+function isFreeTierModel(id: string): boolean {
+  return /-free$/.test(id);
+}
 
 /** The lane a model is served from, and whether this adapter can speak it. */
 export function zenLaneFor(model: string): { lane: ZenLane; supported: boolean } {
@@ -273,7 +347,12 @@ export class ZenAdapter implements ProviderAdapter {
     const id = request.model.includes('/') ? request.model.slice(request.model.lastIndexOf('/') + 1) : request.model;
     if (!supported) throw unsupportedLane(request.model, id);
 
-    if (lane === 'chat') return this.chatLane.chat(request, context);
+    if (lane === 'chat') {
+      // Free-tier models need the request contract, which the delegated chat lane knows nothing
+      // about — it sends `stream: false` and whatever tools the caller declared, which is a refusal.
+      if (isFreeTierModel(id)) return this.gatedChat(request, context);
+      return this.chatLane.chat(request, context);
+    }
 
     const isResponses = lane === 'responses';
     const response = await this.transport.request<ResponsesPayload | MessagesPayload>({
@@ -315,6 +394,13 @@ export class ZenAdapter implements ProviderAdapter {
         publicMessage: `Streaming is not implemented for this OpenCode Zen model. Use a non-streaming request.`,
       });
     }
+    if (isFreeTierModel(id)) {
+      // The contract requires a stream, so a free model is streamed upstream **regardless** of what the
+      // caller asked for — `gatedChat` aggregates that same stream back into one response. Asking
+      // upstream for JSON instead is refused with `FreeTierError`, so there is no other path to take.
+      yield* this.streamGated(request, context);
+      return;
+    }
     yield* this.chatLane.streamChat(request, context);
   }
 
@@ -338,6 +424,150 @@ export class ZenAdapter implements ProviderAdapter {
         message: error instanceof Error ? error.message : 'The OpenCode Zen model list could not be read.',
       };
     }
+  }
+
+  /**
+   * A free-tier chat, with the request contract applied.
+   *
+   * The contract requires `stream: true`, so this always sends a stream and re-aggregates it into the
+   * `ChatResponse` the caller asked for. A caller that wanted JSON is not getting a different request;
+   * they are getting the same one the gate permits, decoded. That is stated in the method name rather
+   * than hidden in the body, because "why is a JSON request streaming?" is a fair question.
+   */
+  private async gatedChat(request: ChatRequest, context: ProviderRequestContext): Promise<ChatResponse> {
+    let text = '';
+    let finishReason: FinishReason | undefined;
+    let responseId = '';
+    for await (const chunk of this.streamGated(request, context)) {
+      responseId = chunk.id || responseId;
+      if (chunk.delta?.content) text += chunk.delta.content;
+      if (chunk.finishReason) finishReason = chunk.finishReason;
+    }
+    return {
+      id: responseId || `zen-${request.model}`,
+      providerId: this.id,
+      model: request.model,
+      createdAt: new Date().toISOString(),
+      message: { role: 'assistant', content: text },
+      finishReason: finishReason ?? 'stop',
+    };
+  }
+
+  /**
+   * The one request this adapter sends for a free model: contract applied, stream requested.
+   *
+   * The refusal below is the part worth reading. Measured from this machine, a request carrying **all
+   * four** conditions still answers `403 FreeTierError`, and the working implementation's own comments
+   * name the likely reason twice — the CLI identity headers exist because "Cloudflare requires [them]
+   * on VPS egress", and the free tier "rejects generic client UAs from datacenter IPs". So when the
+   * contract has been applied and the request is *still* refused, telling the user to check their
+   * access sends them to rotate a key that was already accepted. It says what was sent and names the
+   * network as the likely cause, which is the thing they can act on.
+   */
+  private async *streamGated(request: ChatRequest, context: ProviderRequestContext): AsyncIterable<ChatChunk> {
+    const id = request.model.includes('/') ? request.model.slice(request.model.lastIndexOf('/') + 1) : request.model;
+    const headers = this.authHeaders(context.credential, zenFreeTierHeaders(zenSessionId(this.conversationSeed(request))));
+    const body: Record<string, unknown> = {
+      model: id,
+      messages: request.messages.map(toGatedMessage),
+      stream: true,
+      // The caller's tools when there are any; the placeholder otherwise, because an empty array is a
+      // refusal. A tool the model could actually call is never removed to make room for the placeholder.
+      tools: request.tools && request.tools.length > 0 ? request.tools.map(toGatedTool) : [zenPlaceholderTool()],
+      ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
+      ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+      ...(request.topP === undefined ? {} : { top_p: request.topP }),
+    };
+    const satisfied = zenContractSatisfied(headers, body);
+
+    const events = this.captureGateRefusal(
+      this.transport.stream({
+        method: 'POST',
+        providerId: this.id,
+        url: ZEN_LANES.chat,
+        headers: { ...headers, accept: 'text/event-stream' },
+        body: JSON.stringify(body),
+        ...(context.signal ? { signal: context.signal } : {}),
+      }),
+      request.model,
+      satisfied,
+    );
+
+    let opened = false;
+    for await (const event of parseSseStream(events)) {
+      if (event.data.trim() === '[DONE]') return;
+      const chunk = parseSseJson<GatedStreamChunk>(event, this.id);
+      if (!chunk) continue;
+      opened = true;
+      if (chunk.error) throw this.gatedRefusal(request.model, chunk, satisfied);
+      const chunkId = chunk.id ?? `zen-${id}`;
+      const delta = chunk.choices?.[0]?.delta?.content;
+      if (delta) yield { id: chunkId, providerId: this.id, model: id, delta: { content: delta } };
+      const finish = chunk.choices?.[0]?.finish_reason;
+      if (finish) yield { id: chunkId, providerId: this.id, model: id, delta: {}, finishReason: toGatedFinishReason(finish) };
+    }
+
+    // The stream closed without a single payload: either the gate refused before the first event, or
+    // the answer was JSON rather than SSE. Those need different messages, so it is read rather than
+    // guessed at.
+    if (!opened) throw this.gatedRefusal(request.model, undefined, satisfied);
+  }
+
+  /**
+   * Pass the stream through, turning a transport-level refusal into the gated one.
+   *
+   * `transport.stream` raises its own `ProviderError` for a non-2xx **before** yielding a single event,
+   * so the gate's refusal arrives as a throw and never reaches the chunk loop below. Left alone the user
+   * sees the transport's generic *"The provider refused the request."* — the reasonless verdict this
+   * whole change exists to remove, arriving from the layer underneath. Wrapping is the only place that
+   * can still tell it was the gate, because by the time it throws the contract state is gone.
+   */
+  private async *captureGateRefusal(stream: AsyncIterable<string>, model: string, satisfied: boolean): AsyncIterable<string> {
+    try {
+      yield* stream;
+    } catch (error) {
+      throw error instanceof ProviderError && /refused the request/i.test(error.message)
+        ? this.gatedRefusal(model, error, satisfied)
+        : error;
+    }
+  }
+
+  /** The refusal, naming what was sent — the difference between a key problem and a network one. */
+  private gatedRefusal(model: string, payload: unknown, satisfied: boolean) {
+    // `providerErrorFromResponse` maps every 403 to `PROVIDER_REQUEST_FAILED` and attaches no
+    // `statusCode`, so the status cannot be recovered from the thrown error — but the **cause** can,
+    // and that is what decides the code. Recognising the gate by the provider's own `FreeTierError`
+    // wording rather than by status is therefore more honest than assuming a 403: a 429 on the free
+    // tier stays `RATE_LIMITED` and a 5xx stays `PROVIDER_UNAVAILABLE`, instead of every gated refusal
+    // collapsing into one code that means nothing to the retry policy.
+    const reason = readGatedErrorReason(payload);
+    const gated = isZenFreeTierRefusal(403, payload) || /freetiererror|free tier/i.test(reason ?? '');
+    const message = satisfied
+      ? `OpenCode Zen refused ${model} after this gateway sent everything its free-tier request contract requires — a streaming request, a declared tool, a session header and a client version. The API key was accepted, so this is not a credential problem: OpenCode limits its free tier to non-datacenter networks, and this host's egress address is the likely cause.`
+      : `OpenCode Zen refused ${model}, and this gateway could not satisfy its free-tier request contract.`;
+    return new ProviderError(
+      gated ? 'PROVIDER_UNAVAILABLE' : 'PROVIDER_REQUEST_FAILED',
+      message,
+      {
+        providerId: this.id,
+        publicMessage: message,
+        ...(reason ? { details: { providerReason: reason } } : {}),
+      },
+    );
+  }
+
+  /**
+   * A stable fingerprint of one conversation, so its turns share an upstream session.
+   *
+   * Only the shape of the conversation goes in, and only its digest reaches the network — the
+   * conversation itself is neither stored nor sent here.
+   */
+  private conversationSeed(request: ChatRequest): string {
+    return [
+      request.model,
+      request.messages.map((message) => `${message.role}:${typeof message.content === 'string' ? message.content : ''}`).join('|'),
+      (request.tools ?? []).map((tool) => ('name' in tool ? String(tool.name) : 'fn')).join(','),
+    ].join(' ');
   }
 
   /** The messages lane: raw key in `x-api-key`, plus the required version header. */

@@ -120,6 +120,11 @@ apps/gateway/src/
                        `currentWait` is a query; `enforce` records the verdict. A plan asks
                        `currentWait`, never the recorded map — 1.39.0, where reading the record
                        latched a limited connection off for the life of the process.
+  zen-free-tier       The four request conditions OpenCode Zen's free tier requires, in one place.
+                       A rule about a request, not a provider: `zen` applies it to any `-free` model.
+                       The two parts that drift (placeholder tool name, client version) are read from
+                       the environment, and a refusal after they are met names the network rather
+                       than the credential — 1.42.0.
   hedge-policy        Whether a second request is worth sending, and which route. Every refusal is named.
   request-context     One request's id, from the edge to whichever provider answered it.
   credential-lifecycle  Whether a stored credential still works, asked without a request.

@@ -242,8 +242,12 @@ test('every adapter in the SDK is either contracted or listed as not', () => {
     .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
     .map((file) => file.replace(/\.ts$/, ''))
     // Not adapters: `deepseek-pow` is a proof-of-work solver, `chatgpt-first-party` is the
-    // first-party client behind the ChatGPT Web driver, and `qwen-web` is a probe.
-    .filter((id) => !['deepseek-pow', 'chatgpt-first-party', 'qwen-web'].includes(id));
+    // first-party client behind the ChatGPT Web driver, `qwen-web` is a probe, and `zen-free-tier`
+    // is the free-tier request contract that `zen` uses — a rule about a request, not a provider.
+    //
+    // Each exclusion needs its reason here, because a bare name in this list is how a real adapter
+    // stops being contracted without anything saying so.
+    .filter((id) => !['deepseek-pow', 'chatgpt-first-party', 'qwen-web', 'zen-free-tier'].includes(id));
   const known = new Set([...providers.map((provider) => provider.name), ...Object.keys(NOT_YET_CONTRACTED)]);
   const missing = files.filter((file) => !known.has(file));
   assert.deepEqual(missing, [], `adapters with neither a contract nor a stated reason: ${missing.join(', ')}`);

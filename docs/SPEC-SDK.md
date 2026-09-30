@@ -339,11 +339,41 @@ Measured against the live catalog, which holds **82 models, 11 of them free**:
 | Refused by name, served from `/zen/v1/systemone` | `jev-1.13-free` |
 | `402`, the account holds no credits | the paid models |
 
-**One free model of eleven answers.** The restriction is not a header, a key, or a
-stream setting: it survives `x-opencode-client: desktop`, an `opencode/…` User-Agent,
-the sentinel `Bearer public`, and `stream: true`, and it is not lifted by a valid key.
-Sending those headers anyway was tried and removed, since impersonating the vendor's
-client unlocked nothing.
+**The restriction is a request contract, not a key and not a header in isolation.**
+Corrected in 1.42.0, after this document claimed otherwise. It previously read:
+
+> The restriction is not a header, a key, or a stream setting: it survives `x-opencode-client: desktop`,
+> an `opencode/…` User-Agent, the sentinel `Bearer public`, and `stream: true`, and it is not lifted by a
+> valid key.
+
+Each of those was tested **alone**, and the conclusion drawn was that the combination must not matter. It
+does. `/home/gin/work/OmniRoute` serves the same free models through the same base URL with
+`authType: "apikey"` — a Zen API key, not a session token — and records the four conditions the upstream
+requires together:
+
+1. `stream: true` in the body,
+2. a non-empty `tools` array, using the official client's placeholder name `_noop`,
+3. an `x-opencode-session` header shaped `ses_` + 12 hex + 14 base62 (the shape is checked, the value is
+   not),
+4. a `User-Agent` carrying `opencode/<version>` with version ≥ 1.17.
+
+Removing any one of the four turns a 200 into a 403. `ZenAdapter` now sends all four for any model whose
+id ends `-free`, and streams upstream to satisfy condition 1 — there is no non-streaming path, so a
+caller asking for JSON gets the permitted request decoded.
+
+**Measured from a datacenter egress, the contract is necessary but still not sufficient.** All four
+applied and the upstream answers 403 `FreeTierError`. The working implementation names the likely reason
+twice: the CLI identity headers exist because *"Cloudflare requires [them] on VPS egress"*, and the free
+tier *"rejects generic client UAs from datacenter IPs"*. That is a hypothesis, recorded as one — proving
+it needs a request from a residential IP. What is not a hypothesis is the error: a free model refused
+**after** the contract was applied is not a credential problem, and the message says so rather than
+sending the operator to rotate a working key.
+
+Two parts of the contract move, and are therefore configuration rather than constants:
+`OMNIHILBRAS_ZEN_PLACEHOLDER_TOOL` (the accepted placeholder name differs per model and changed within a
+week) and `OMNIHILBRAS_ZEN_USER_AGENT`. Which models are gated is decided by the `-free` suffix rather
+than a list, because the upstream rotates its free lineup — six models were delisted and replaced inside a
+week.
 
 ### Where the refusal actually happens
 

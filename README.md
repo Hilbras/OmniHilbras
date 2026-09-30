@@ -3,7 +3,7 @@
 A self-hosted, local-first AI gateway: one OpenAI-compatible endpoint in front of
 every provider, with API keys, routing, and per-connection reliability.
 
-**Current version: 1.41.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.42.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras)
 
 ```bash
@@ -142,11 +142,14 @@ implemented and are refused by name — Gemini, which Zen serves from its own pa
 and Jev, a decision model.
 
 Two things to expect. **Paid models need credits** — Zen charges per request, and
-without a balance they answer `402`. **Free models are restricted to the OpenCode
-client** and answer `403`; OpenCode's own words are "OpenCode's free tier can only be
-used from within OpenCode". That restriction is not a header or a key or a stream
-setting — it survives every one of them. Of the **11 free models in the catalog, one
-answers: `space-bunny-free`.**
+without a balance they answer `402`. **Free models are gated by a request contract** — a
+streaming request, a declared tool, a session header and a client version — and the
+gateway sends all four, streaming upstream and decoding the answer, because there is
+no non-streaming path. From a datacenter network the upstream still answers `403`
+("OpenCode's free tier can only be used from within OpenCode"), which is a network
+restriction rather than a credential problem; the error says so, so nobody rotates a
+key that already works. `OMNIHILBRAS_ZEN_PLACEHOLDER_TOOL` and
+`OMNIHILBRAS_ZEN_USER_AGENT` override the two parts of the contract that drift.
 
 Zen also returns an empty body to a caller holding a key and a real explanation to one
 that is not, so a refusal in the dashboard reads as a bare status code. Re-issue the
