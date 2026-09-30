@@ -430,3 +430,78 @@ test("the provider's own reason reaches the operator", async (t) => {
   assert.equal(status.status, 'failed');
   assert.match(status.error, /redirect_uri does not match/);
 });
+
+test('the pasted-token route refuses a bad paste before it spends anything, and never echoes it', async (t) => {
+  // `POST /v1/oauth/kiro/import-token` takes a secret off the user's clipboard. It is the one route
+  // where a bug is a credential leak rather than a wrong answer, and it had no test at all while
+  // AGENTS.md requires one per route.
+  //
+  // Only the paths that reject *before* any network call are exercised. A non-empty token would
+  // register a client with AWS and spend a real refresh token, so this test must not — and a test
+  // that quietly makes a live provider call is exactly the sort of thing that looks like coverage.
+  // What is asserted here is everything that can be asserted without one: the refusals happen, they
+  // name the real cause, and the submitted value does not come back in the response.
+  const attempts = [];
+  const service = createService();
+  // One implementation, so every call is recorded. What varies between the cases is the error it
+  // throws, which is the thing under test — not the plumbing that records it.
+  let exchange = new ProviderError('AUTHENTICATION_FAILED', 'unused', { providerId: 'kiro' });
+  service.importKiroRefreshToken = async (token) => {
+    attempts.push(token);
+    throw exchange;
+  };
+  const baseUrl = await startServer(t, service);
+
+  // A blank paste is rejected by the route, so the service is never reached — which is the property
+  // that keeps an empty paste from becoming a live exchange. The message is the route's own
+  // `refreshToken is required`, not the store's more specific one: the route validates first, so
+  // this asserts what the caller is actually told.
+  for (const body of [{ refreshToken: '' }, { refreshToken: '   \n\t ' }, {}]) {
+    const response = await fetch(`${baseUrl}/v1/oauth/kiro/import-token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 400, `a blank or missing token must be refused, not exchanged: ${JSON.stringify(body)}`);
+    assert.match(await response.text(), /refreshToken is required/, 'the error names the field the caller has to fix');
+  }
+  assert.deepEqual(attempts, [], 'no blank paste reached the provider exchange');
+
+  const missing = await fetch(`${baseUrl}/v1/oauth/kiro/import-token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ notAToken: 'x' }),
+  });
+  assert.equal(missing.status, 400);
+  assert.match(await missing.text(), /refreshToken is required/);
+
+  // A non-blank token does reach the exchange. What the caller is shown is the point of these two
+  // cases: a provider error may carry its own `publicMessage`, and the real `importKiroRefreshToken`
+  // does — that is how "Paste a Kiro refresh token to import." reaches a browser at all. Without one
+  // the gateway redacts, so a raw third-party string never crosses the wire.
+  const post = (refreshToken) => fetch(`${baseUrl}/v1/oauth/kiro/import-token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  });
+
+  exchange = new ProviderError('AUTHENTICATION_FAILED', 'AWS refused that token for reason X.', {
+    providerId: 'kiro',
+    publicMessage: 'Kiro refused that token. A token from the Kiro desktop app will not work here.',
+  });
+  const refused = await post('a-real-looking-token');
+  assert.equal(refused.status, 401);
+  const refusalText = await refused.text();
+  assert.match(refusalText, /Kiro refused that token/, "the provider's own public message is what the user sees");
+  assert.equal(refusalText.includes('reason X'), false, 'and the provider internals behind it are not');
+  assert.equal(refusalText.includes('a-real-looking-token'), false, 'and the pasted secret is never echoed back');
+
+  exchange = new ProviderError('AUTHENTICATION_FAILED', 'AWS refused that token for reason X.', { providerId: 'kiro' });
+  const unannotated = await post('another-real-looking-token');
+  assert.equal(unannotated.status, 401);
+  const unannotatedText = await unannotated.text();
+  assert.match(unannotatedText, /AUTHENTICATION_FAILED/, 'the code is preserved so a client can branch on it');
+  assert.equal(unannotatedText.includes('reason X'), false, 'a provider message with no publicMessage is redacted');
+  assert.equal(unannotatedText.includes('another-real-looking-token'), false);
+  assert.deepEqual(attempts, ['a-real-looking-token', 'another-real-looking-token'], 'both non-blank pastes reached the exchange, and only those');
+});

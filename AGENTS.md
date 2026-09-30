@@ -97,7 +97,12 @@ that is not on `main`.
 - Real requests only. A test, health check, or simulated result must not be
   presented as a live one. A new provider request costs money, so say so.
 - New gateway routes need tests in `apps/gateway/test/` and a line in
-  `docs/SPEC-SDK.md`.
+  `docs/SPEC-SDK.md`. **Both are now checked, not requested:**
+  `tests/gateway-routes.test.js` fails if a served path has no spec line, if the spec
+  advertises a path the gateway does not serve, or if a route path is built from
+  something that is not a literal or a named constant. A new route fails CI until the
+  spec line exists, which is the point — the instruction is not a substitute for the
+  check, the check is what runs when the instruction is forgotten.
 - The dashboard has one React Router entry at `/dashboard`. Do not add
   `*.html` entry files or hash routes.
 - A provider card in `src/data/providers.ts` is catalog metadata. Before a card

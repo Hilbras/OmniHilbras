@@ -82,7 +82,7 @@ the exact silent failure the generator was written to prevent — its own commen
 *committed* rather than merely present, that the brightness map names only assets the repository has,
 that no bundled SVG carries a script or a remote reference (141 files entered at once, and a
 vendored logo is markup a browser executes), and that no mark is an empty file. Wired as
-`pnpm test:assets`, run **first** in `pnpm test` so a missing binary fails fastest. Proven by
+`pnpm test:repo`, run **first** in `pnpm test` so a missing binary fails fastest. Proven by
 reproducing the defect — `git rm --cached` on three files, which fails three of the seven checks.
 
 **Why it survived eighteen releases:** the exclusion existed only in shell history. Nothing in the
@@ -283,6 +283,87 @@ endpoint override will have to change meaning, not just value.
 
 ```
 tests    788 → 789
+```
+
+---
+
+## Task 69: the "every route needs a spec line" rule had no mechanism, and one route had neither
+
+`AGENTS.md` says:
+
+> New gateway routes need tests in `apps/gateway/test/` and a line in `docs/SPEC-SDK.md`.
+
+A rule nobody can run is a rule that survives on attention. Measured against the code:
+
+```
+routes served: 32   documented: 22
+```
+
+**Eight served paths had no spec line**, and one of them was a route that ingests a secret pasted by
+the user:
+
+```
+/v1/oauth/kiro/import-token    ← undocumented, and untested
+```
+
+Every one of the eight is a Kiro or OpenCode Console sign-in route — added after the spec's route list
+was written, which got the Cline family and nothing after. The rule was followed for exactly as long
+as someone remembered it, which is the entire history of the rule.
+
+`POST /v1/oauth/kiro/import-token` took a refresh token off a user's clipboard, spent it against AWS,
+and stored the resulting access token instead. The implementation is careful — it trims, refuses an
+empty paste **before** any network call, and never stores the pasted secret. None of which was
+written down anywhere, and none of which was tested.
+
+**`tests/gateway-routes.test.js` makes the rule run.** Five checks, and the two directions are both
+there because each catches a different lie: every served path has a spec line, and every route the
+spec advertises is a path the code matches. A spec line for a route that no longer exists is *worse*
+than a missing one, because a reader cannot tell which kind of wrong they are looking at and the
+omission at least shows up as a 404. The reverse check is clean today, which is the reason to keep it
+rather than a reason to skip it.
+
+Two more checks earn their place by accident. **A route path must be text a machine can read** — a
+path assembled from a function call is invisible to every check here, and an invisible route is an
+undocumented one, so `clineCallbackPath` is resolved through the module constant that holds it. And
+**a route that accepts a pasted credential must be documented**, because for those routes the body
+shape, the validation order, and what actually gets stored *are* the design; `import-token` spends
+the paste and stores the access token, and `kiro/api-key` stores the paste itself because it cannot
+be renewed. Those are decisions a reader needs, and one of them is the only route in the gateway
+that keeps the secret you handed it.
+
+Comments are stripped before matching on both sides. `routes/oauth.ts` documents its handlers in doc
+comments that quote paths, and a naive matcher lets a comment vouch for a route the spec never
+mentions.
+
+**The first version of the guard had two bugs of its own, and both were in its matching, not its
+intent.** It reported five real routes as phantoms because it compared `startsWith('/v1/keys/')`
+against `PATCH /v1/keys/:id` as unrelated strings — a served *prefix* legitimately covers a documented
+route below it, which is how the gateway actually dispatches. And it counted 21 paths where it should
+have found 32, because its regex only matched string literals and missed paths held in constants.
+A guard that under-counts its own subject reports a smaller gap than the real one, which is the worst
+kind of wrong for a check whose entire job is to measure a gap.
+
+## The test for the credential route, and two wrong assertions of mine
+
+Only paths that reject **before** any network call are exercised. A non-blank token would register a
+client with AWS and spend a real refresh token, so the exchange is stubbed — a test that quietly
+makes a live provider call is exactly the thing that looks like coverage. Asserted: a blank or
+missing paste is refused with `refreshToken is required` and **never reaches the exchange**; a real
+paste does reach it; and the pasted value is never echoed back.
+
+Two of my assertions were wrong before the test was right. I asserted the error "names the field"
+with `/refresh token/i`, which does not match `refreshToken` — and the message that actually comes
+back is the route's `refreshToken is required`, not the store's more specific one, because the route
+validates first. Then I asserted the provider's message was surfaced verbatim, and the gateway
+**redacted** it: `{"code":"AUTHENTICATION_FAILED","message":"Provider authentication failed."}`. The
+redaction is correct, and the real `importKiroRefreshToken` supplies a `publicMessage` precisely so a
+safe sentence can reach a browser. The test now varies *only* whether `publicMessage` is present and
+asserts both halves: the provider's own sentence when it supplies one, redaction when it does not,
+and the raw third-party string in neither case. Probing the running gateway first is what turned that
+into a test of the annotation mechanism instead of a test of my assumption.
+
+```
+tests    789 → 795
 ```
 
 # OmniHilbras SDK Tasks

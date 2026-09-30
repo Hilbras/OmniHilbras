@@ -194,7 +194,7 @@ absent from 18 consecutive releases, two of them rendered directly by `src/data/
 
 Nothing catches that on its own — a missing logo is a 404 in a browser, and the generated map
 degrades silently by applying its rule to files the checkout does not have. `tests/dashboard-assets.test.js`
-asserts it instead, and `pnpm test:assets` runs first in `pnpm test` for that reason.
+asserts it instead, and `pnpm test:repo` runs first in `pnpm test` for that reason.
 
 ## The outer runtime, and what it is not
 

@@ -126,6 +126,24 @@ The first local gateway exposes:
 - `GET /v1/oauth/cline/callback` — where the provider redirects the browser; completes the exchange and reports the outcome.
 - `GET /v1/oauth/cline/session/:id` — whether a started sign-in is pending, connected, failed, or expired.
 - `POST /v1/oauth/cline/exchange` — exchange a pasted callback URL or code, prove the token against Cline, then save the connection.
+- `POST /v1/oauth/kiro/start` — begin a Kiro sign-in. A company IAM Identity Center tenant supplies its own `startUrl`; a plain Builder ID sign-in omits it and gets the public one.
+- `GET /v1/oauth/kiro/session/:id` — whether a Kiro sign-in is pending, connected, failed, or expired.
+- `POST /v1/oauth/kiro/import-token` — spend a refresh token the user exported from Kiro. **The pasted
+  token is spent once to obtain an access token, and the access token is what is stored**, so the
+  long-lived secret a user pastes is not the credential every later request authenticates with. A
+  refresh token is bound to the client it was issued to, so an imported one is redeemed against a
+  client registered here; AWS refuses a token from another client with `invalid_grant` and that
+  answer is passed through rather than reported as a bad paste.
+- `POST /v1/oauth/kiro/api-key` — store a long-lived Kiro/CodeWhisperer key **as given**. It has no
+  refresh token, so it cannot be renewed and has to be replaced by hand. This is the one credential
+  route that stores the pasted secret itself, which is why it is written down separately.
+- `POST /v1/oauth/kiro/social/start` — begin a Google or GitHub sign-in. The returned URL redirects
+  to a `kiro://` scheme only the Kiro desktop app handles, so the browser cannot return here on its own.
+- `POST /v1/oauth/kiro/social/exchange` — exchange the code the user pasted. The code is spent at
+  most once: a second attempt against the same session is refused rather than sending an
+  already-used code to Kiro.
+- `POST /v1/oauth/opencode-console/start` — begin an OpenCode Console device-flow sign-in.
+- `GET /v1/oauth/opencode-console/session/:id` — whether a device flow is awaiting approval, connected, or failed.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
 - `POST /v1/chat/completions` with `stream: true` — normalized SSE chunks.
