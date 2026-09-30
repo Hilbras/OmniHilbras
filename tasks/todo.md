@@ -977,6 +977,89 @@ checking is worse than no check, because it produces a confident wrong answer.
 tests    835 → 840
 ```
 
+---
+
+## Task 79: two of five dashboard pages were fabrications, and one covered a capability that already worked
+
+I fixed the invented card metrics in 1.34.5 and then measured which pages actually fetch anything:
+
+| Page | imports the client | `useEffect` | hardcoded metric rows |
+| --- | --- | --- | --- |
+| ApiKeysPage | yes | 4 | 0 |
+| **DashboardOverview** | **no** | **0** | **7** |
+| ProviderDetailPage | yes | 6 | 2 (placeholders) |
+| ProvidersPage | yes | 2 | 2 (placeholders) |
+| **RoutingPage** | **no** | **0** | **8** |
+
+**Two of five pages had no data source at all**, so every number on them was a literal. And `/`
+redirected to `/overview` — so `DashboardOverview` was the **first page every operator saw**.
+
+### What the landing page claimed
+
+A range selector (`24h` / `7d` / `30d`) that swapped between three invented counts — `18,492` /
+`124.8k` / `486.2k` — over four hardcoded provider rows carrying `8,921`, `5,284`, `2,870`, `1,417`
+requests and `286 ms`, `438 ms`, `512 ms`, `92 ms` latencies, plus a hardcoded traffic table. The
+`aria-label` said "over the last 24h", so a screen reader was told about a window too.
+
+**`92 ms` and `1,417` for Ollama were the exact numbers I removed from the card in 1.34.5.** They were
+in a second component, and a third. Fixing one instance and not asking where else the number lived is
+how the same figure shipped three times — the recurring defect, one level up: the *value* had copies
+even after the *card* was fixed.
+
+### What the routing page claimed
+
+Three clickable policies (`balanced`, `fast-local`, `private`) with `18.4k` / `6.8k` / `2.1k` requests;
+four togglable rules with invented matches and fallbacks; a **Create policy** dialog for a feature that
+does not exist anywhere in the gateway — no policy, no strategy setting, no rules store; and a simulator
+whose `simulate()` was a `setTimeout` reporting success without simulating anything.
+
+The summary cards read **"Fallback events 18 · last 24 hours"** and **"Decision time 4 ms p95"**. And the
+"Test policies" button flashed **"All active policies passed the preview health check"** — a health-check
+*result*, reported without a health check. That is the same defect as the Check button in
+`AddProviderModal` (1.35.0), in a second component, found because the first one made me look.
+
+**And the real capability was there the whole time.** `GET /v1/routing` exists, `service.describeRouting()`
+answers it, the client wraps it as `getGatewayRoutingState`, and `ProviderDetailPage` already calls it.
+The routing page was showing fiction *beside* a working endpoint.
+
+## What I did
+
+**RoutingPage now shows what routing can actually use** — per connection: enabled or paused, credential
+present or absent, the health verdict, the latency the last poll measured, success and failure counts,
+whether it has been ejected, the last error it produced, and its resilience budget, plus the failure
+threshold that decides ejection. The reasons are the gateway's own `RouteSkipReason` values, so the page
+renders a decision the gateway already makes rather than forming a second opinion. Loading, error and
+empty states are real, and the error state says nothing is shown from memory.
+
+**DashboardOverview is deleted** and `/` plus the catch-all now land on `/providers`. Its concept — a
+traffic history — cannot be made real, because the gateway keeps no request log. `/providers` already
+shows what the operator has and whether it is healthy, so the landing page is now the real version of
+what the mockup was gesturing at. The `Overview` nav entry went with it, the sidebar's "Connect a
+provider" CTA now points somewhere that can, and `dashboardRoutes` no longer names a route that does
+not exist.
+
+**The shell was already honest and I had not noticed.** `DashboardShell` has a `pending` flag that
+renders a disabled "soon" entry, and three items carry it: **Usage**, **Request log**, **Settings** —
+which is exactly what the fabricated pages were pretending to provide. The nav said those features did
+not exist; the pages invented them anyway. The nav is now the only place that has to be right.
+
+## Two guards, both mechanical
+
+- **Every dashboard page imports the data client.** A page that asks the gateway nothing cannot be
+  showing the gateway's state. That is the general form of this defect and it is what let two pages
+  through.
+- **A request count is only ever the placeholder `'0'`.** The gateway keeps no counter, so any other
+  value is a fabrication. Proven by planting both:
+
+```
+requests: '18,492' — nothing counts requests, so only the placeholder is available
+these pages import no data source, so anything numeric on them is a literal: OrphanPage.tsx
+```
+
+```
+tests    840 → 842
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

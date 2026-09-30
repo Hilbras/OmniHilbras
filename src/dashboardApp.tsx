@@ -2,7 +2,6 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from '
 import { DashboardShell } from './components/DashboardShell';
 import { getProviderById } from './data/providers';
 import { ApiKeysContent } from './pages/ApiKeysPage';
-import { DashboardOverviewContent } from './pages/DashboardOverview';
 import { ProviderDetailContent, fallbackProvider } from './pages/ProviderDetailPage';
 import { ProvidersContent } from './pages/ProvidersPage';
 import { RoutingContent } from './pages/RoutingPage';
@@ -42,13 +41,12 @@ function DashboardRoutes() {
     <DashboardShell activePage={activePage} pageTitle={pageTitle} pageDescription={pageDescription}>
       <div key={location.pathname} className="page-enter">
         <Routes>
-          <Route path="/" element={<Navigate to="/overview" replace />} />
-          <Route path="/overview" element={<DashboardOverviewContent />} />
+          <Route path="/" element={<Navigate to="/providers" replace />} />
           <Route path="/providers" element={<ProvidersContent />} />
           <Route path="/providers/:providerId" element={<ProviderRoute />} />
           <Route path="/routing" element={<RoutingContent />} />
           <Route path="/keys" element={<ApiKeysContent />} />
-          <Route path="*" element={<Navigate to="/overview" replace />} />
+          <Route path="*" element={<Navigate to="/providers" replace />} />
         </Routes>
       </div>
     </DashboardShell>

@@ -21,6 +21,11 @@ import { ThemeToggle } from './ThemeToggle';
 import { dashboardRoutes } from '../lib/routes';
 import { useGatewayStatus } from '../lib/useGatewayStatus';
 
+/**
+ * Which sidebar entry is active. `overview` is no longer a route — the page was a mockup — but the
+ * three disabled "soon" entries carry it as their page so a pending item never claims to be the active
+ * one while pointing nowhere.
+ */
 type DashboardPage = 'overview' | 'providers' | 'routing' | 'keys';
 
 type SidebarItem = {
@@ -32,8 +37,9 @@ type SidebarItem = {
   pending?: boolean;
 };
 
+// No Overview entry: that page was a mockup with no data source, and it is gone. `/` now lands on
+// Providers, so the sidebar starts there rather than offering a link to nowhere.
 const primaryItems: SidebarItem[] = [
-  { label: 'Overview', icon: LayoutDashboard, to: dashboardRoutes.overview, page: 'overview' },
   { label: 'Providers', icon: Network, to: dashboardRoutes.providers, page: 'providers' },
   { label: 'Routing', icon: RouteIcon, to: dashboardRoutes.routing, page: 'routing' },
   { label: 'API keys', icon: KeyRound, to: dashboardRoutes.keys, page: 'keys' },
@@ -188,7 +194,7 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
         </div>
 
         <div className={`mt-8 border-t border-line/70 pt-5 ${collapsed ? 'px-1' : ''}`}>
-          <Link to={dashboardRoutes.overview} onClick={onClose} className={`group block rounded-xl border border-gold/25 bg-gold-soft/60 transition-colors hover:border-gold/50 ${collapsed ? 'flex justify-center p-3' : 'p-3.5'}`} title={collapsed ? 'Connect a provider' : undefined} aria-label={collapsed ? 'Connect a provider' : undefined}>
+          <Link to={dashboardRoutes.providers} onClick={onClose} className={`group block rounded-xl border border-gold/25 bg-gold-soft/60 transition-colors hover:border-gold/50 ${collapsed ? 'flex justify-center p-3' : 'p-3.5'}`} title={collapsed ? 'Connect a provider' : undefined} aria-label={collapsed ? 'Connect a provider' : undefined}>
             <div className={`items-center gap-2 text-xs font-semibold text-gold-text ${collapsed ? 'flex justify-center' : 'flex'}`}>
               <Boxes className="h-3.5 w-3.5" aria-hidden="true" />
               {!collapsed && 'Connect a provider'}
@@ -212,7 +218,7 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
 
 export function DashboardShell({
   children,
-  activePage = 'overview',
+  activePage = 'providers',
   pageTitle = 'Overview',
   pageDescription = 'Your gateway at a glance',
 }: {
@@ -250,7 +256,7 @@ export function DashboardShell({
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <span className="hidden items-center gap-2 rounded-full border border-success/25 bg-success/10 px-2.5 py-1.5 text-[11px] font-medium text-success md:flex"><span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />All systems operational</span>
-            <Link to={dashboardRoutes.overview} aria-label="Go to dashboard overview" className="muted hidden h-9 w-9 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text sm:grid"><Gauge className="h-[17px] w-[17px]" aria-hidden="true" /></Link>
+            <Link to={dashboardRoutes.providers} aria-label="Go to providers" className="muted hidden h-9 w-9 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text sm:grid"><Gauge className="h-[17px] w-[17px]" aria-hidden="true" /></Link>
             <ThemeToggle />
             <span className="grid h-8 w-8 place-items-center rounded-full border border-gold/30 bg-gold-soft text-[10px] font-bold text-gold-text" aria-label="Local workspace">OH</span>
           </div>

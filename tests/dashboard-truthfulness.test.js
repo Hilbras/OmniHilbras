@@ -229,6 +229,52 @@ test('the marketing page does not badge itself live, because nothing here is', (
   );
 });
 
+test('every dashboard page asks the gateway for something', () => {
+  // The defect this catches appeared twice, and both times it was the same shape: a page that
+  // **imported no data source at all**, so every number on it had to be a literal.
+  //
+  // ```
+  // src/pages/DashboardOverview.tsx    client:0  useEffect:0  hardcoded metric rows: 7
+  // src/pages/RoutingPage.tsx          client:0  useEffect:0  hardcoded metric rows: 8
+  // ```
+  //
+  // `DashboardOverview` was the **landing page** — `/` redirected to it — with a range selector that
+  // swapped between three invented request counts. `RoutingPage` had three clickable policies and four
+  // togglable rules for features that do not exist anywhere in the gateway, plus a "Test policies"
+  // button that reported a health check passing without making a request. Both are gone: `/` now lands
+  // on Providers, and Routing shows what `GET /v1/routing` actually returns.
+  //
+  // The check is mechanical and it is the general one: **a page that asks the gateway nothing cannot be
+  // showing the gateway's state.** A page that legitimately needs no data would have to say so here.
+  const pages = readdirSync(join(DASHBOARD, 'pages')).filter((file) => file.endsWith('.tsx'));
+  const dataFree = pages.filter((file) => !/from '\.\.\/lib\/gatewayClient'/.test(readFileSync(join(DASHBOARD, 'pages', file), 'utf8')));
+  assert.deepEqual(
+    dataFree,
+    [],
+    `these pages import no data source, so anything numeric on them is a literal: ${dataFree.join(', ')}. ` +
+      'Either fetch from the gateway, or delete the page — do not fill it with plausible numbers.',
+  );
+  assert.ok(pages.length >= 4, `expected the dashboard pages, found ${pages.length}`);
+});
+
+test('a request count is only ever the placeholder, because nothing counts requests', () => {
+  // The gateway keeps no request counter. The only `count()` in it belongs to browser locators in the
+  // ChatGPT Web driver. So a request count on any dashboard page can only be the "not measured" value.
+  //
+  // Measured, the dashboard had `18,492`, `124.8k`, `486.2k`, `18.4k`, `8,921`, `8.9k` and more, across
+  // two pages, none of them backed by anything — and the same `92 ms` / `1,417` Ollama figures appeared
+  // in three components after the card that invented them was fixed in 1.34.5. Fixing one instance and
+  // not asking where else the number lived is how the same lie shipped three times.
+  const offenders = [];
+  for (const file of dashboardFiles()) {
+    const source = stripComments(readFileSync(join(ROOT, file), 'utf8'));
+    for (const match of source.matchAll(/requests:\s*'([^']*)'/g)) {
+      if (match[1] !== '0') offenders.push(`${file}: requests: '${match[1]}' — nothing counts requests, so only the placeholder is available`);
+    }
+  }
+  assert.deepEqual(offenders, [], 'a displayed request count can only be a measurement, and there is no counter to measure with');
+});
+
 test('the clipboard receives a value, not a rendering of one', () => {
   // The clipboard is an API surface. Whatever lands there is what the user pastes somewhere else —
   // a `model:` field, a shell, a config file — and a rendering of a value is not the value.
