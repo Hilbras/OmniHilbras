@@ -15,6 +15,16 @@ export const providerLogoMap = {
   opencode: '/providers/opencode.png',
   nara: '/providers/bynara-logo-icon-light.svg',
   tokenharbor: '/providers/tokenharbor.svg',
+  // Added 1.43.0 with the ten API-key cards. Every path is a file already committed under
+  // `public/providers/` — `tests/dashboard-assets.test.js` fails if a rendered mark is not, and 294
+  // assets went missing from 18 releases once because a blanket staging rule excluded that directory.
+  // No `initial` is doing the work of a logo here; these are the vendors' own marks.
+  kimi: '/providers/kimi.svg',
+  moonshot: '/providers/moonshot.svg',
+  groq: '/providers/groq.svg',
+  xai: '/providers/xai.svg',
+  grok: '/providers/grok.svg',
+  nvidia: '/providers/nvidia.svg',
 } as const;
 
 export function getProviderLogo(id: string | null | undefined) {
@@ -349,6 +359,213 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'T',
     logo: providerLogoMap.tokenharbor,
     endpoint: 'https://tokenharbor.ai/v1',
+    modelList: [],
+  },
+  {
+    id: 'kimi',
+    name: 'Kimi',
+    description: 'Moonshot AI long-context and agentic models, reached through their OpenAI-compatible endpoint.',
+    category: 'Model provider',
+    group: 'api-key',
+    // Placeholders, because this catalog is the state a card shows when the gateway has no connection
+    // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists, and
+    // `tests/provider-cards.test.js` fails if a card here claims a measurement — see the Ollama entry
+    // above for what that cost when one did.
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#1f6feb',
+    initial: 'K',
+    logo: providerLogoMap.kimi,
+    endpoint: 'https://api.moonshot.ai/v1',
+    modelList: [],
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    description: 'DeepSeek chat and reasoning models, served over the OpenAI-compatible API.',
+    category: 'Model provider',
+    group: 'api-key',
+    // Placeholders, because this catalog is the state a card shows when the gateway has no connection
+    // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists, and
+    // `tests/provider-cards.test.js` fails if a card here claims a measurement — see the Ollama entry
+    // above for what that cost when one did.
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#4d6bfe',
+    initial: 'D',
+    logo: providerLogoMap.deepseek,
+    endpoint: 'https://api.deepseek.com/v1',
+    modelList: [],
+  },
+  {
+    id: 'qwen',
+    name: 'Qwen',
+    description: 'Alibaba Cloud Qwen models through the DashScope OpenAI-compatible mode.',
+    category: 'Model provider',
+    group: 'api-key',
+    // Placeholders, because this catalog is the state a card shows when the gateway has no connection
+    // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists, and
+    // `tests/provider-cards.test.js` fails if a card here claims a measurement — see the Ollama entry
+    // above for what that cost when one did.
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#6f7cff',
+    initial: 'Q',
+    logo: providerLogoMap.qwen,
+    endpoint: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    modelList: [],
+  },
+  {
+    id: 'groq',
+    name: 'Groq',
+    description: 'Groq LPU inference. Very fast first tokens, which is what a router wants most.',
+    category: 'Model provider',
+    group: 'api-key',
+    // Placeholders, because this catalog is the state a card shows when the gateway has no connection
+    // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists, and
+    // `tests/provider-cards.test.js` fails if a card here claims a measurement — see the Ollama entry
+    // above for what that cost when one did.
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#f55036',
+    initial: 'G',
+    logo: providerLogoMap.groq,
+    endpoint: 'https://api.groq.com/openai/v1',
+    modelList: [],
+  },
+  {
+    id: 'grok',
+    name: 'Grok',
+    description: 'xAI Grok models through the OpenAI-compatible endpoint.',
+    category: 'Model provider',
+    group: 'api-key',
+    // Placeholders, because this catalog is the state a card shows when the gateway has no connection
+    // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists, and
+    // `tests/provider-cards.test.js` fails if a card here claims a measurement — see the Ollama entry
+    // above for what that cost when one did.
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#9c9584',
+    initial: 'X',
+    logo: providerLogoMap.grok,
+    endpoint: 'https://api.x.ai/v1',
+    modelList: [],
+  },
+  {
+    id: 'nvidia',
+    name: 'NVIDIA',
+    description: 'NVIDIA NIM catalog of open models on its OpenAI-compatible endpoint.',
+    category: 'Model provider',
+    group: 'api-key',
+    // Placeholders, because this catalog is the state a card shows when the gateway has no connection
+    // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists, and
+    // `tests/provider-cards.test.js` fails if a card here claims a measurement — see the Ollama entry
+    // above for what that cost when one did.
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#76b900',
+    initial: 'N',
+    logo: providerLogoMap.nvidia,
+    endpoint: 'https://integrate.api.nvidia.com/v1',
+    modelList: [],
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    description: 'GPT models on the OpenAI API, including the Responses surface.',
+    category: 'Model provider',
+    group: 'api-key',
+    // Placeholders, because this catalog is the state a card shows when the gateway has no connection
+    // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists, and
+    // `tests/provider-cards.test.js` fails if a card here claims a measurement — see the Ollama entry
+    // above for what that cost when one did.
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#6fdb9b',
+    initial: 'O',
+    logo: providerLogoMap.openai,
+    endpoint: 'https://api.openai.com/v1',
+    modelList: [],
+  },
+  {
+    id: 'anthropic',
+    name: 'Anthropic',
+    description: 'Claude models on the Anthropic API, on the Messages surface.',
+    category: 'Model provider',
+    group: 'api-key',
+    // Placeholders, because this catalog is the state a card shows when the gateway has no connection
+    // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists, and
+    // `tests/provider-cards.test.js` fails if a card here claims a measurement — see the Ollama entry
+    // above for what that cost when one did.
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#d97757',
+    initial: 'A',
+    logo: providerLogoMap.anthropic,
+    endpoint: 'https://api.anthropic.com/v1',
+    modelList: [],
+  },
+  {
+    id: 'gemini',
+    name: 'Gemini',
+    description: 'Google Gemini models on the Generative Language API.',
+    category: 'Model provider',
+    group: 'api-key',
+    // Placeholders, because this catalog is the state a card shows when the gateway has no connection
+    // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists, and
+    // `tests/provider-cards.test.js` fails if a card here claims a measurement — see the Ollama entry
+    // above for what that cost when one did.
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#83b7ff',
+    initial: 'G',
+    logo: providerLogoMap.google,
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta',
     modelList: [],
   },
   {

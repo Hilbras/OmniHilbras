@@ -115,11 +115,45 @@ test('an option is derived from its card, so the two cannot hold different copy'
   }
 });
 
+test('a provider is described in exactly one place, so two copies cannot disagree', () => {
+  // The rule `providerOptions.ts` states and this file could not enforce until now: a card plus a
+  // hand-written `withoutCard` entry is two copies of eight fields free to disagree, and that is how
+  // seven of seven shared providers ended up with two different descriptions before the dialog list was
+  // derived from the catalog.
+  //
+  // It bit this change immediately. `openai`, `anthropic` and `google` were in `withoutCard` because
+  // they had no card; adding the cards without deleting the entries would have produced the exact
+  // duplicate this forbids, and no existing test failed.
+  //
+  // Measured against `withoutCard` **only** — `providerOptions` is derived from `providerCatalog`, so a
+  // card legitimately appears in both the catalog and the dialog. My first version compared against
+  // `providerOptions` and flagged all sixteen cards, which is a check that cannot pass and is therefore
+  // a check nobody keeps.
+  const handWritten = providerOptions.filter((option) => !providerCatalog.some((card) => card.id === option.id));
+  assert.deepEqual(handWritten.map((option) => option.id), [], `hand-written entries that a card now duplicates: ${handWritten.map((o) => o.id).join(', ')}`);
+});
+
+test('the neutral custom option is still reachable, and nothing else shadows it', () => {
+  // Ten cards were added and `withoutCard` emptied, so the list the dialog renders changed shape. This
+  // is the check that the neutral option survived it — the fallback resolving to a named vendor is the
+  // defect `customOption()` was extracted to prevent.
+  assert.equal(providerOptions.some((option) => option.id === 'custom'), true, 'custom must be offered');
+  assert.equal(providerOptions[providerOptions.length - 1]?.id, 'custom', 'and it is last, which the by-id lookup no longer relies on');
+});
+
 test('THE COUNT, asserted so it cannot drift quietly', () => {
-  // Ten options from seven eligible cards and three declared exceptions, over thirteen cards. These
+  // Sixteen options from thirteen eligible cards and no declared exceptions, over twenty-two cards
+  // (1.43.0 added nine API-key providers and emptied `withoutCard`). These
   // were the counts when the list stopped being a second copy; a change to any of them is a product
   // decision, so it has to be made here rather than arriving as an off-by-one.
-  assert.equal(providerCatalog.length, 13, `the catalog now has ${providerCatalog.length} cards`);
-  assert.equal(providerOptions.length, 10, `the dialog now offers ${providerOptions.length} options`);
+  // Cards 13 -> 22 in 1.43.0: Kimi, DeepSeek, Qwen, Groq, Grok, NVIDIA, OpenAI, Anthropic, Gemini.
+  // Mistral was already a card, so it is not among the additions.
+  //
+  // Options 10 -> 16: +9 from the new cards, −3 because `openai`, `anthropic` and `google` left
+  // `withoutCard` for the catalog. I first wrote 19 by adding the nine to the old ten without noticing
+  // three had moved, which is the arithmetic of a list described in two places — the reason the next
+  // test exists.
+  assert.equal(providerCatalog.length, 22, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerOptions.length, 16, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

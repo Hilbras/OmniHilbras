@@ -30,7 +30,7 @@
  * descriptions.
  */
 
-import { getProviderLogo, providerCatalog } from '../data/providers.ts';
+import { providerCatalog } from '../data/providers.ts';
 import { webSessionProviderIds } from './webSessionProviders.ts';
 
 export type ProviderOption = {
@@ -47,15 +47,17 @@ export type ProviderOption = {
 /**
  * Providers this dialog can key that have **no card** on the providers page.
  *
- * The gateway serves `openai`, `anthropic` and `gemini`, so they are connectable; the page simply does
- * not list them. That is a decision about the card list, not about this dialog, so it is recorded here
- * rather than resolved by inventing three cards.
+ * **Empty since 1.43.0.** It held `openai`, `anthropic` and `google`, and those three now have cards in
+ * `providerCatalog`. A card plus a hand-written entry is two copies of eight fields free to disagree,
+ * which is how seven of seven shared providers ended up with two different descriptions before the list
+ * was derived — the dialog is now built from the catalog, so a card is the only place a provider is
+ * described.
+ *
+ * It is kept as an empty list rather than deleted because the module still spreads it, and an empty
+ * spread is the honest statement of "nothing is described twice". `tests/provider-options.test.js`
+ * fails if a provider appears in both places.
  */
-const withoutCard: ProviderOption[] = [
-  { id: 'openai', name: 'OpenAI', description: 'GPT and Responses APIs', auth: 'API key', color: '#6fdb9b', initial: 'O', logo: getProviderLogo('openai'), defaultEndpoint: 'https://api.openai.com/v1' },
-  { id: 'anthropic', name: 'Anthropic', description: 'Claude models', auth: 'API key', color: '#d97757', initial: 'A', logo: getProviderLogo('anthropic'), defaultEndpoint: 'https://api.anthropic.com/v1' },
-  { id: 'google', name: 'Google', description: 'Gemini models', auth: 'API key', color: '#83b7ff', initial: 'G', logo: getProviderLogo('google'), defaultEndpoint: 'https://generativelanguage.googleapis.com/v1beta' },
-];
+const withoutCard: ProviderOption[] = [];
 
 /**
  * Which kinds of card this dialog can collect a key for.

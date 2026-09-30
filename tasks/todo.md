@@ -1476,6 +1476,64 @@ fixed-width window has been the wrong place to look. It now reads the wrapper's 
 tests    871 → 889
 ```
 
+## Task 84: ten providers as catalog cards, and the two-copies rule finally enforced
+
+Asked for ten in the API-key group: Kimi, DeepSeek, Qwen, Mistral, Groq, Grok, NVIDIA, OpenAI, Gemini,
+Anthropic. Chose **cards only, no new adapters**, because nine of the ten are already reachable through
+the OpenAI-compatible path and writing an adapter for them would be building what exists.
+
+Endpoints probed rather than assumed:
+
+```
+moonshot 401   deepseek 401   dashscope 401   mistral 401   groq 401
+xai 401        nvidia 200      openai 401       gemini 403    anthropic 401
+```
+
+NVIDIA answers without a key — it publishes a public catalog at `integrate.api.nvidia.com/v1/models`. Every
+one is a real endpoint; none needed an adapter.
+
+### What the count guards caught, twice
+
+`provider-cards`, `provider-options` and `provider-card-merge` each pin the catalog size at **13**. Adding
+nine cards failed all three, which is the guard working: a catalog that changes silently is a catalog
+whose numbers nobody has looked at.
+
+The second failure was mine. Options went 10 → **16**, not 19. I added nine to ten without noticing that
+`openai`, `anthropic` and `google` had moved out of `withoutCard` into the catalog — **+9 −3**. That
+arithmetic error is itself an argument for the rule below: I could only get it wrong because the list was
+described in two places.
+
+### The rule that was documented, unenforced, and immediately broken
+
+`providerOptions.ts` says:
+
+> Adding a card for one of them means deleting its entry, and `tests/provider-cards.test.js` fails if both
+> exist.
+
+**It does not fail. No test checked.** So adding cards for `openai`, `anthropic` and `google` would have
+left them in both places — the exact duplicate the comment forbids, and precisely how seven of seven
+shared providers ended up with two different descriptions in 1.35.1. `withoutCard` is now empty and a test
+enforces it.
+
+My first version of that test compared against `providerOptions` and flagged **all sixteen cards**, because
+options are *derived* from the catalog and a card legitimately appears in both. A check that cannot pass is
+a check nobody keeps; it now measures the hand-written entries only.
+
+### Mistral
+
+You already had a Mistral card, so of the ten requested, **nine** are new. I added a second one before
+noticing — the same two-copies defect — and deleted mine rather than yours.
+
+### Verified in the browser, not just in tests
+
+All ten render on `/dashboard/providers` and appear in the Add-provider dialog, with **zero broken images**
+across 21 marks. Every logo path is a file already committed under `public/providers/` — no `initial` is
+doing the work of a logo, which is the rule from 1.33.1 after 294 assets went missing from 18 releases.
+
+```
+tests    889 → 893
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

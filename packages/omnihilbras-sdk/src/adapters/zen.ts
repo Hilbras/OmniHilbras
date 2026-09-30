@@ -3,7 +3,7 @@ import { FetchHttpTransport } from '../transport.js';
 import type { HttpTransport } from '../transport.js';
 import { OpenAICompatibleAdapter } from './openai-compatible.js';
 import { parseSseJson, parseSseStream } from '../streaming.js';
-import { isZenFreeTierRefusal, zenFreeTierHeaders, zenPlaceholderTool, zenSessionId, zenContractSatisfied } from './zen-free-tier.js';
+import { isZenFreeTierRefusal, zenFreeTierHeaders, zenPlaceholderTool, zenSessionId, zenContractSatisfied, zenConversationSeed } from './zen-free-tier.js';
 import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../types.js';
 
 /**
@@ -466,7 +466,7 @@ export class ZenAdapter implements ProviderAdapter {
    */
   private async *streamGated(request: ChatRequest, context: ProviderRequestContext): AsyncIterable<ChatChunk> {
     const id = request.model.includes('/') ? request.model.slice(request.model.lastIndexOf('/') + 1) : request.model;
-    const headers = this.authHeaders(context.credential, zenFreeTierHeaders(zenSessionId(this.conversationSeed(request))));
+    const headers = this.authHeaders(context.credential, zenFreeTierHeaders(zenSessionId(zenConversationSeed(request))));
     const body: Record<string, unknown> = {
       model: id,
       messages: request.messages.map(toGatedMessage),
@@ -556,19 +556,6 @@ export class ZenAdapter implements ProviderAdapter {
     );
   }
 
-  /**
-   * A stable fingerprint of one conversation, so its turns share an upstream session.
-   *
-   * Only the shape of the conversation goes in, and only its digest reaches the network — the
-   * conversation itself is neither stored nor sent here.
-   */
-  private conversationSeed(request: ChatRequest): string {
-    return [
-      request.model,
-      request.messages.map((message) => `${message.role}:${typeof message.content === 'string' ? message.content : ''}`).join('|'),
-      (request.tools ?? []).map((tool) => ('name' in tool ? String(tool.name) : 'fn')).join(','),
-    ].join(' ');
-  }
 
   /** The messages lane: raw key in `x-api-key`, plus the required version header. */
   private apiKeyHeaders(credential: ProviderCredential | undefined) {

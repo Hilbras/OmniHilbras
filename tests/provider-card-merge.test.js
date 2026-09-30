@@ -145,7 +145,10 @@ test('a card whose connection disappears goes back to being the catalog card', (
 });
 
 test('THE COUNT, asserted so it cannot drift quietly', () => {
-  assert.equal(providerCatalog.length, 13, `the catalog now has ${providerCatalog.length} cards`);
+  // 13 until 1.43.0, then 22. The nine added cards are all OpenAI-compatible or already adapted, so
+  // each is catalog metadata and no merge behaviour — which is why this suite needed no new cases: the
+  // property it asserts is about every card, and it holds for a new one without being extended.
+  assert.equal(providerCatalog.length, 22, `the catalog now has ${providerCatalog.length} cards`);
   const connected = mergeGatewayConnections(providerCatalog, [connection()], health());
   assert.equal(connected.length, providerCatalog.length, 'a merge must not add or drop a card');
   console.log(`    cards: ${providerCatalog.length}   fields that may change on a merge: 5   that may not: 2`);
