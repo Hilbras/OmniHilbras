@@ -573,6 +573,90 @@ reviewer would have been right to switch it off rather than fix it.
 tests    807 → 813
 ```
 
+---
+
+## Task 73: the Check button reported success for any key at all, for twelve of thirteen providers
+
+`AddProviderModal` asks for a provider key and offers a **Check** button. The function behind it
+branched on the provider:
+
+```ts
+if (selected.id === 'openrouter') {
+  await checkOpenRouterConnection(apiKey, controller.signal);
+  setTestState('success');
+} else {
+  await new Promise<void>((resolve) => {
+    window.setTimeout(() => { setTestState('success'); resolve(); }, 850);   // ← nothing was asked
+  });
+}
+```
+
+**For every provider except OpenRouter, the button waited 850 ms and reported success without making a
+request.** A key that was any string at all — `x`, a truncated paste, a key for the wrong service —
+produced a green "Key looks valid". The only thing distinguishing the two branches was which card was
+open, so the one provider whose key was really checked was the exception.
+
+This is the rule at the top of `AGENTS.md` — *"a test, health check, or simulated result must not be
+presented as a live one"* — broken in the single place the product tells a user their credential works.
+It is the same class as the invented card metrics from 1.34.5: mockup behaviour that outlived the
+mockup, surviving because nothing compared what the UI claimed against what it did.
+
+**The cause was not the timer.** It was that the client could not name a provider.
+`checkOpenRouterConnection` posted to a hardcoded `/v1/connections/openrouter/check` while the save beside
+it was already generic (`putGatewayConnection(providerId, …)`) — two spellings of one decision. The
+gateway has served `POST /v1/connections/:providerId/check` for every provider since the duplicated
+OpenRouter-only route was deleted in 1.34.0, so the real answer was available the whole time and
+unreachable. That is the fifth time the same shape has appeared: two copies of one decision, free to
+disagree, with the worse copy winning because it was written first.
+
+Fixed by making the check real for every provider: `checkConnectionCredential(providerId, { apiKey,
+endpoint? })`, carrying the endpoint when the card has one so a self-hosted or proxied provider is
+checked against the address it will be saved with. The hedged "Key looks valid" wording is gone, because
+with a real check there is one honest sentence, and the vestigial `testTimerRef` went with it — a ref
+that only ever held a fake delay is a ref that invites the fake delay back. The unreachable
+`mode === 'bulk'` guards went too: the Check button only renders in single mode.
+
+## `tests/dashboard-truthfulness.test.js`
+
+**No success state may be set inside a timer callback.** Deliberately narrow — it looks at *who sets
+success*, not at timers in general, because polling and debouncing are legitimate and a guard that flags
+all of them gets switched off. Plus: every provider the client names in a path is a real card on a route
+the gateway serves; the check goes through the gateway rather than waiting; and the one honest success
+sentence is the one that is there.
+
+## My guard could not see the timer it was written for
+
+Planting the original code back made **one** of the two relevant checks fire. The timer check missed it,
+because the scope was sliced from the innermost `=> {` **forward** — and that is the callback with the
+word `setTimeout` cropped off:
+
+```
+=> { setTestState('success'); resolve(); }, 850);
+```
+
+So the guard for "a timer must not produce a success" had no way to see a timer. Fixed by finding the
+innermost function start and then looking a short window *backwards* for the call that created it. Both
+the multi-line original and a one-line variant are caught now, with the line number in the message.
+
+**That is the third guard this session whose own detection was wrong in a way only a planted defect
+revealed** — after the browser-storage `camelCase` blind spot and the route guard under-counting its own
+subject. Each time the guard was green, correct-sounding, and blind in the specific place it existed to
+look. Planting the defect is not a formality; it is the only thing that has found these.
+
+## And one place I was wrong in the other direction
+
+The first version of the path check asserted "no provider may appear in a client path". The OAuth surface
+is not uniform, and the difference matters: `startGatewayOauthSignIn(providerId)` is generic, but
+`startGatewayDeviceSignIn` posts to `/v1/oauth/opencode-console/start` and gets back a `userCode` and a
+`verificationUrl`, and `getClineSignInStatus` hits a `/session/` route Cline alone has. **Different
+endpoints with different payloads are not two spellings of one decision** — that is what made the
+credential check wrong, where the request and response were identical and only the path differed. Narrowed
+to what is true regardless: the provider named is a card, and the path is served.
+
+```
+tests    813 → 818
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

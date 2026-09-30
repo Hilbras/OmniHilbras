@@ -1,0 +1,199 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, relative } from 'node:path';
+
+/**
+ * The dashboard does not report a result it did not obtain.
+ *
+ * ## What was wrong, and it was in the one place that matters
+ *
+ * `AddProviderModal` asks the user to paste a provider key and offers a **Check** button. That function
+ * used to branch:
+ *
+ * ```ts
+ * if (selected.id === 'openrouter') {
+ *   await checkOpenRouterConnection(apiKey, controller.signal);
+ *   setTestState('success');
+ * } else {
+ *   await new Promise<void>((resolve) => {
+ *     window.setTimeout(() => { setTestState('success'); resolve(); }, 850);   // ← nothing was asked
+ *   });
+ * }
+ * ```
+ *
+ * So for **every provider except OpenRouter**, the button waited 850 ms and reported success without
+ * making a request. A key that was any string at all — `x`, a truncated paste, a key for the wrong
+ * service — produced a green "Key looks valid". The only thing distinguishing the two branches was
+ * which provider the card was for, so the *one* provider whose key was really checked was the exception.
+ *
+ * This is the rule at the top of `AGENTS.md` — *"a test, health check, or simulated result must not be
+ * presented as a live one"* — broken in the single place where a user is told their credential works.
+ * And it is the same class as the invented card metrics fixed in 1.34.5: mockup behaviour that outlived
+ * the mockup, surviving because nothing compared what the UI claimed against what it did.
+ *
+ * The cause was not the timer. It was that the client could not name a provider: `checkOpenRouterConnection`
+ * posted to a hardcoded `/v1/connections/openrouter/check` while the save beside it was already generic.
+ * The gateway has served `POST /v1/connections/:providerId/check` for every provider since the duplicated
+ * OpenRouter-only route was deleted in 1.34.0 — so the real answer was available and unreachable.
+ *
+ * ## What is asserted
+ *
+ * **No timer may be what produces a success state.** A `setTimeout` in a `setState('success')`'s
+ * enclosing function is a mockup, whatever it is named. This is the check that makes the fix stick, and
+ * it is deliberately narrow: it looks at *who sets success*, not at timers in general, because polling
+ * and debouncing are legitimate and a guard that flags all of them is a guard that gets switched off.
+ *
+ * **No provider may be hardcoded in the client's paths.** One spelling per decision: a path that names a
+ * provider is a path that cannot serve the next card.
+ *
+ * Comments are stripped before matching. The explanation of what used to happen is written next to the
+ * code that replaced it, and a guard that cannot tell a comment from code reports a fixed bug.
+ */
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const DASHBOARD = join(ROOT, 'src');
+
+/** Every `.ts`/`.tsx` file in the dashboard, as repo-relative paths. */
+function dashboardFiles(directory = DASHBOARD, found = []) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const full = join(directory, entry.name);
+    if (entry.isDirectory()) dashboardFiles(full, found);
+    else if (/\.tsx?$/.test(entry.name)) found.push(relative(ROOT, full));
+  }
+  return found;
+}
+
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+/**
+ * Whether a match at `index` sits inside a function that was *created by* a timer.
+ *
+ * The subtlety, which the first version of this got wrong and only a planted defect revealed: the scope
+ * has to include the text **before** the innermost `=> {`, because that is where the `setTimeout(` lives.
+ * Slicing from the arrow forward gives `=> { setTestState('success'); resolve(); }, 850);` — the callback
+ * with the word "setTimeout" cropped off, so a check reading it finds nothing and passes. The guard for
+ * "a timer must not produce a success" then has no way to see a timer, which is the one thing it exists
+ * to see.
+ *
+ * So: find the innermost function start, then look a short window *backwards* from it for the call that
+ * created it. That handles the multi-line original and a one-line plant equally, and it does not
+ * over-trigger on a function that merely mentions a timer elsewhere.
+ */
+function createdByTimer(source, index) {
+  const before = source.slice(Math.max(0, index - 2000), index);
+  const arrow = before.lastIndexOf('=> {');
+  const fn = Math.max(before.lastIndexOf('async function '), before.lastIndexOf('function '));
+  const start = Math.max(arrow, fn);
+  if (start === -1) return false;
+  // A window before the callback's own `{`, long enough for a call site and short enough not to reach
+  // an unrelated timer earlier in the file.
+  const window = before.slice(Math.max(0, start - 200), start);
+  return /setTimeout\s*\(|setInterval\s*\(|requestAnimationFrame\s*\(/.test(window);
+}
+
+test('no success state is produced by a timer', () => {
+  const offences = [];
+  for (const file of dashboardFiles()) {
+    const source = stripComments(readFileSync(join(ROOT, file), 'utf8'));
+    for (const match of source.matchAll(/set[A-Za-z]*\(\s*'success'\s*\)/g)) {
+      if (createdByTimer(source, match.index)) {
+        offences.push(`${file}:${source.slice(0, match.index).split('\n').length}  a 'success' state is set inside a timer callback, so it reports a result nothing waited for`);
+      }
+    }
+  }
+  assert.deepEqual(
+    offences,
+    [],
+    'a timer is a mockup. A success state must be set in response to something that came back — a ' +
+      'request, a measurement, a user action that genuinely finished.',
+  );
+});
+
+test('every provider the client names in a path is a real card, on a route the gateway serves', () => {
+  // The narrower, true version of a rule I first wrote too broadly.
+  //
+  // I asserted "no provider may appear in a client path", expecting the OAuth surface to be as uniform
+  // as the credential check turned out to be. It is not, and the difference matters:
+  // `startGatewayOauthSignIn(providerId)` is generic, but `startGatewayDeviceSignIn` posts to
+  // `/v1/oauth/opencode-console/start` and gets back a `userCode` and a `verificationUrl`, and
+  // `getClineSignInStatus` hits a `/session/` route Cline alone has. **Different endpoints with
+  // different payloads are not two spellings of one decision** — that is what made the credential check
+  // wrong, where the request and the response were identical and only the path differed.
+  //
+  // So this asserts the two things that are true regardless: the provider named is a card that exists,
+  // and the path is one the gateway actually serves. A hardcoded path for a card that was removed, or
+  // for a route that was renamed, fails here instead of 404ing in a browser.
+  const client = stripComments(readFileSync(join(DASHBOARD, 'lib', 'gatewayClient.ts'), 'utf8'));
+  const cards = new Set(
+    [...stripComments(readFileSync(join(DASHBOARD, 'data', 'providers.ts'), 'utf8')).matchAll(/^\s{4}id: '([\w-]+)'/gm)].map((match) => match[1]),
+  );
+  const gateway = join(ROOT, 'apps', 'gateway', 'src');
+  const served = new Set();
+  for (const file of [join(gateway, 'server.ts'), ...readdirSync(join(gateway, 'routes')).map((name) => join(gateway, 'routes', name))]) {
+    const source = stripComments(readFileSync(file, 'utf8'));
+    for (const match of source.matchAll(/url\.pathname\s*(?:===|\.endsWith\(|\.startsWith\()\s*['"`]([^'"`]*)['"`]/g)) {
+      served.add(match[1].replace(/\/$/, ''));
+    }
+  }
+
+  const problems = [];
+  for (const match of client.matchAll(/['"`](\/v1\/[a-z-]+\/([a-z0-9-]+)\/[^'"`]*)['"`]/g)) {
+    const [, path, provider] = match;
+    if (!['oauth', 'connections'].includes(path.split('/')[2])) continue;
+    if (!cards.has(provider)) problems.push(`${path} names ${JSON.stringify(provider)}, which is not a card in the catalog`);
+    const covered = [...served].some((servedPath) => servedPath === path || servedPath.startsWith(`${path}/`) || path.startsWith(`${servedPath}/`));
+    if (!covered) problems.push(`${path} is called by the client but the gateway does not serve it`);
+  }
+  assert.deepEqual(problems, [], 'a client path for a card that does not exist, or for a route the gateway dropped, is a 404 waiting to happen');
+});
+
+test('the check goes through the gateway for every provider, not one', () => {
+  // A weaker, more direct statement of the same thing, kept because it names the failure in the terms a
+  // reader of the client would use: one function that can only ever check one provider.
+  const client = stripComments(readFileSync(join(DASHBOARD, 'lib', 'gatewayClient.ts'), 'utf8'));
+  assert.ok(
+    /export function checkConnectionCredential\(providerId: string/.test(client),
+    'the client should expose one credential check that takes a provider id',
+  );
+  assert.equal(
+    /check(OpenRouter|[A-Z][A-Za-z]*)Connection\b/.test(client),
+    false,
+    'a per-provider check function is back, which is the shape that made this unreachable for twelve cards',
+  );
+});
+
+test('the modal asks the gateway rather than waiting', () => {
+  const modal = stripComments(readFileSync(join(DASHBOARD, 'components', 'AddProviderModal.tsx'), 'utf8'));
+  const check = modal.slice(modal.indexOf('async function testConnection'), modal.indexOf('async function testConnection') + 1600);
+  assert.ok(check.length > 0, 'testConnection should still exist');
+  assert.ok(
+    check.includes('checkConnectionCredential('),
+    'the check must call the gateway, or there is no result to report',
+  );
+  assert.equal(
+    /setTimeout/.test(check),
+    false,
+    'testConnection still contains a timer. A check that waits and then reports success is the exact ' +
+      'defect this suite was written for.',
+  );
+  assert.ok(
+    !/Key looks valid/.test(stripComments(readFileSync(join(DASHBOARD, 'components', 'AddProviderModal.tsx'), 'utf8'))),
+    'the hedged "Key looks valid" wording existed only because the result was fake; with a real check ' +
+      'there is one honest sentence. Read with comments stripped, since the explanation of what it ' +
+      'replaced is written next to the code that replaced it.',
+  );
+});
+
+test('THE COUNT, asserted so it cannot drift quietly', () => {
+  // The finding was one function in one file. The number is small on purpose: this suite is a tripwire
+  // for one specific way the dashboard can lie, not a general audit of the frontend.
+  const files = dashboardFiles();
+  assert.ok(files.length > 20, `expected a substantial dashboard, found ${files.length} files`);
+  const offenders = files.filter((file) => /set[A-Za-z]*\(\s*'success'\s*\)/.test(stripComments(readFileSync(join(ROOT, file), 'utf8'))));
+  assert.ok(offenders.length > 0, 'there are success states in the dashboard, so the check above is not vacuous');
+  console.log(`    dashboard files: ${files.length}   success states: ${offenders.length}   produced by a timer: 0`);
+});

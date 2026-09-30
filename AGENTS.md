@@ -108,8 +108,13 @@ that is not on `main`.
 
 - Provider-specific wire formats stay inside `packages/omnihilbras-sdk/src/adapters/`.
   The gateway service and SDK index must stay provider-neutral.
-- Real requests only. A test, health check, or simulated result must not be
-  presented as a live one. A new provider request costs money, so say so.
+- Real requests only. A test, health check, or simulated result must not be presented as a live one.
+  A new provider request costs money, so say so. **Asserted where it is easiest to get wrong:**
+  `tests/dashboard-truthfulness.test.js` fails if a success state in `src/` is set inside a timer
+  callback. `AddProviderModal`'s Check button used to wait 850 ms and call `setTestState('success')`
+  for every provider except OpenRouter, so a key that was any string at all produced a green
+  "Key looks valid" — and only one provider's key was really checked. It now asks the gateway, for
+  every provider. If a check cannot be performed, say so; do not simulate the result.
 - New gateway routes need tests in `apps/gateway/test/` and a line in
   `docs/SPEC-SDK.md`. **Both are now checked, not requested:**
   `tests/gateway-routes.test.js` fails if a served path has no spec line, if the spec

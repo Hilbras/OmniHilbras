@@ -194,11 +194,25 @@ export async function getGatewayProviderHealth(providerId: string, signal?: Abor
   return body.provider;
 }
 
-export function checkOpenRouterConnection(apiKey: string, signal?: AbortSignal) {
-  return requestJson<GatewayConnectionValidation>('/v1/connections/openrouter/check', {
+/**
+ * Asks the gateway to check a candidate key for **any** provider.
+ *
+ * This used to be `checkOpenRouterConnection`, and it posted to a hardcoded
+ * `/v1/connections/openrouter/check` while the save beside it was already generic
+ * (`putGatewayConnection(providerId, …)`). Two spellings of one decision, and the consequence was not
+ * cosmetic: the dashboard could only test an OpenRouter key, because it had no way to name a different
+ * provider — even though the gateway has served `POST /v1/connections/:providerId/check` for every
+ * provider since the duplicate route was deleted.
+ *
+ * `endpoint` is passed when the card has one, because a self-hosted or proxied provider is checked
+ * against the address it will actually be saved with. The gateway puts it through the same address
+ * check a saved connection gets.
+ */
+export function checkConnectionCredential(providerId: string, input: { apiKey: string; endpoint?: string }, signal?: AbortSignal) {
+  return requestJson<GatewayConnectionValidation>(`/v1/connections/${encodeURIComponent(providerId)}/check`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ apiKey }),
+    body: JSON.stringify({ apiKey: input.apiKey, ...(input.endpoint ? { endpoint: input.endpoint } : {}) }),
     ...(signal ? { signal } : {}),
   });
 }

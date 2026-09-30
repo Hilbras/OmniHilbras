@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Check, CheckCircle2, ChevronDown, CircleAlert, LoaderCircle, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { getProviderLogo, providerCatalog } from '../data/providers';
 import { webSessionProviderIds } from '../lib/webSessionProviders';
-import { checkOpenRouterConnection } from '../lib/gatewayClient';
+import { checkConnectionCredential } from '../lib/gatewayClient';
 
 export type ProviderOption = {
   id: string;
@@ -98,7 +98,6 @@ type AddProviderModalProps = {
 export function AddProviderModal({ open, initialProviderId, initialModelPolicy, onClose, onSave, onSaveMany }: AddProviderModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
-  const testTimerRef = useRef<number | null>(null);
   const checkAbortRef = useRef<AbortController | null>(null);
   const [selectedId, setSelectedId] = useState(initialProviderId ?? 'openai');
   const [mode, setMode] = useState<AddMode>('single');
@@ -169,12 +168,18 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
   const canSave = mode === 'single' ? hasSingleConnection : Boolean(bulkText.trim());
   const title = `Add ${selected.name} ${requiresKey ? 'API Key' : 'Connection'}`;
 
+  /**
+   * Abandons an in-flight check.
+   *
+   * It used to clear a timer as well, because there used to be a timer: the 850 ms wait that reported
+   * success without asking anyone. With the real request in place, aborting the controller is the whole
+   * job — there is nothing pending locally to cancel, and a ref that only ever held a fake delay is a
+   * ref that invites the fake delay back.
+   */
   function cancelPendingCheck() {
     const controller = checkAbortRef.current;
     checkAbortRef.current = null;
     controller?.abort();
-    if (testTimerRef.current !== null) window.clearTimeout(testTimerRef.current);
-    testTimerRef.current = null;
   }
 
   function selectProvider(id: string) {
@@ -188,13 +193,27 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
     setError('');
   }
 
+  /**
+   * Checks the pasted key against the provider, for real.
+   *
+   * This used to branch: OpenRouter got a real request to the gateway, and **every other provider got
+   * an 850 ms timer whose callback called `setTestState('success')`**. No request was made, nothing was
+   * verified, and the dialog reported "Key looks valid" for a key that could have been any string at
+   * all. It was a mockup's loading animation that outlived the mockup, and it sat in the one place the
+   * product promises a credential was checked.
+   *
+   * The gateway has served `POST /v1/connections/:providerId/check` for every provider since the
+   * duplicated OpenRouter-only route was deleted, so there is a real answer to ask for. The endpoint
+   * rides along when the card has one, so a self-hosted or proxied provider is checked against the
+   * address it will be saved with.
+   *
+   * The unreachable `mode === 'bulk'` guards are gone with it. The Check button only renders in single
+   * mode, so those branches could not run — and leaving a fake-success path in a function called
+   * `testConnection` is precisely the hazard being removed.
+   */
   async function testConnection() {
-    if (mode === 'single' && requiresKey && !apiKey.trim()) {
+    if (requiresKey && !apiKey.trim()) {
       setError('Add an API key before checking this connection.');
-      return;
-    }
-    if (mode === 'bulk' && !bulkText.trim()) {
-      setError('Add at least one key before checking the batch.');
       return;
     }
     setError('');
@@ -203,24 +222,14 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
     const controller = new AbortController();
     checkAbortRef.current = controller;
     try {
-      if (selected.id === 'openrouter') {
-        await checkOpenRouterConnection(apiKey, controller.signal);
+      if (requiresKey) {
+        await checkConnectionCredential(selected.id, { apiKey: apiKey.trim(), ...(showsEndpoint && endpoint.trim() ? { endpoint: endpoint.trim() } : {}) }, controller.signal);
         setTestState('success');
       } else {
-        await new Promise<void>((resolve, reject) => {
-          const onAbort = () => {
-            if (testTimerRef.current !== null) window.clearTimeout(testTimerRef.current);
-            testTimerRef.current = null;
-            reject(new DOMException('The connection check was cancelled.', 'AbortError'));
-          };
-          controller.signal.addEventListener('abort', onAbort, { once: true });
-          testTimerRef.current = window.setTimeout(() => {
-            controller.signal.removeEventListener('abort', onAbort);
-            testTimerRef.current = null;
-            setTestState('success');
-            resolve();
-          }, 850);
-        });
+        // No key to check — a local runtime such as Ollama has no credential to verify, and the
+        // button is not rendered for it. Said plainly rather than reported as a pass.
+        setTestState('idle');
+        setError('This provider needs no key, so there is nothing to check. Save it and the gateway will confirm the address.');
       }
     } catch (testError) {
       if (!controller.signal.aborted) {
@@ -335,7 +344,7 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
                         {testing ? 'Checking' : 'Check'}
                       </button>
                     </div>
-                    {testState === 'success' && <p role="status" className="mt-2 flex items-center gap-1.5 text-[11px] text-success"><CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />{selected.id === 'openrouter' ? 'Key verified by the local gateway' : 'Key looks valid'}</p>}
+                    {testState === 'success' && <p role="status" className="mt-2 flex items-center gap-1.5 text-[11px] text-success"><CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />Key verified by the local gateway</p>}
                   </div>
                 )}
 

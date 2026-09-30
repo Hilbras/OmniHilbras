@@ -111,7 +111,9 @@ The first local gateway exposes:
 - `POST /v1/connections/:providerId/check` — validate a candidate API key for any provider without
   saving it. Accepts `{ apiKey }`, and optionally `endpoint` for a proxied or self-hosted provider; a
   supplied endpoint goes through the same address check as a saved one. `/openrouter/check` is this
-  route with that provider in the path, not a second route — see below.
+  route with that provider in the path, not a second route — see below. **The dashboard's Check button
+  uses this for every provider**, and reports only what comes back; a check that cannot be performed is
+  stated in the UI rather than simulated.
 - `PUT /v1/connections/openrouter` — validate again, discover the selected model policy, then upsert the single local OpenRouter connection.
 - `POST /v1/connections/:id/models` — add validated model IDs to a saved connection.
 - `DELETE /v1/connections/:id` — remove a local connection.
