@@ -1,6 +1,6 @@
 {
   "name": "@hilbras/omnihilbras",
-  "version": "1.33.1",
+  "version": "1.33.2",
   "description": "Typed provider SDK for the OmniHilbras gateway: normalized chat, streaming, model listing, and capability contracts for OpenAI, Anthropic, Gemini, and OpenAI-compatible providers.",
   "license": "MIT",
   "author": "Hilbras",
@@ -45,7 +45,7 @@
   },
   "sideEffects": false,
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node ../../scripts/clean-sdk-dist.mjs && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm build && node --test test/*.test.js",
     "prepublishOnly": "pnpm build"

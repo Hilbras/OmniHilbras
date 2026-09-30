@@ -26,6 +26,14 @@ version.
 1. `pnpm verify` passes. That is `version:check`, then `typecheck`, then `test`,
    then `build`, in that order — the order that fails fastest. CI runs the same
    command, so a change that passes locally passes in CI by construction.
+   **That sentence was false until 1.33.2.** CI had failed all 25 runs it had
+   ever executed, including the commit that introduced it, while every local
+   run passed — because `pnpm typecheck` typechecked the dashboard before
+   anything built the SDK, so it read a `dist/` that exists in a working tree
+   and not in a checkout. `build:sdk` now runs first, and the SDK build empties
+   `dist/` before emitting, so there is no leftover state for a local tree and
+   a fresh checkout to disagree about. **Check `gh run list` before shipping
+   rather than assuming this sentence is still true.**
 2. `README.md`, `docs/SPEC-SDK.md`, `docs/architecture/`, and `tasks/` reflect the
    new behavior.
 3. Version bumped per the table above, and `pnpm version:check` passes. The

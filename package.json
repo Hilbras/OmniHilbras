@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "1.33.1",
+  "version": "1.33.2",
   "packageManager": "pnpm@12.5.1",
   "type": "module",
   "scripts": {
@@ -12,7 +12,7 @@
     "build:sdk": "pnpm --filter @hilbras/omnihilbras build",
     "build:gateway": "pnpm --filter @omnihilbras/gateway build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit && pnpm typecheck:sdk && pnpm typecheck:gateway",
+    "typecheck": "pnpm build:sdk && tsc --noEmit && pnpm typecheck:gateway",
     "typecheck:sdk": "pnpm --filter @hilbras/omnihilbras typecheck",
     "typecheck:gateway": "pnpm --filter @omnihilbras/gateway typecheck",
     "test": "pnpm test:assets && pnpm test:sdk && pnpm test:gateway",

@@ -90,6 +90,72 @@ repository recorded it, so nothing could contradict it. That is the same shape a
 finding this work has produced — a decision with no second copy to disagree with it is not a
 decision anyone can check.
 
+---
+
+## Task 66: CI had never passed. Twenty-five runs, twenty-five failures
+
+`AGENTS.md` step 1 said:
+
+> CI runs the same command, so a change that passes locally passes in CI by construction.
+
+**Measured, that sentence was false for the whole session.**
+
+```
+total runs: 25
+ failure   25
+oldest: 2026-09-29T13:35:59Z  failure
+  "Phase 1: one version stated once, a CI that runs, an honest architect…"
+```
+
+Not one green run, ever — including the commit that introduced the workflow, whose title claims
+"a CI that runs". Nineteen releases were published on top of it, each one verified locally and each
+one shipping a red check that nobody had opened.
+
+**The cause is the same class of defect as Task 65: two copies of one decision, free to disagree,
+resolved by invisible state.** The dashboard imports `@hilbras/omnihilbras`, whose `types` is
+`./dist/index.d.ts` — a **build output** — and the root `tsconfig.json` has no `paths` mapping, so a
+build artifact *is* the type surface. But `pnpm typecheck` was:
+
+```
+tsc --noEmit && pnpm typecheck:sdk && pnpm typecheck:gateway
+```
+
+which typechecks the dashboard *first*, before anything builds the SDK. In a working tree `dist/`
+happens to exist from an earlier build, so `tsc` resolved it and passed. In a checkout it does not
+exist, so `tsc` reported 15 errors. Reproduced exactly by deleting `dist/` and re-running:
+
+```
+src/lib/gatewayClient.ts(1,35): error TS2307: Cannot find module '@hilbras/omnihilbras'
+… 15 errors, identical to the CI log
+```
+
+The 12 `TS7006`/`TS7053` errors are all downstream of the three `TS2307`s: unresolved module, so
+the SDK types become `any`, so `noImplicitAny` fires on every parameter that would have been typed.
+One missing artifact, fifteen errors, and not one of them named the cause.
+
+**Two fixes, because there were two ways for a local tree to differ from a clone.**
+
+1. **Order.** `typecheck` is now `pnpm build:sdk && tsc --noEmit && pnpm typecheck:gateway`. The
+   SDK's build *is* its typecheck — `tsc` emits only when the program has no type errors — so
+   building and typechecking it separately would run the same compiler twice for one guarantee.
+2. **Staleness.** `tsc` emits *over* `dist/` and never empties it, so an artifact outlives the
+   source that produced it and a local tree can typecheck against an export that exists in no
+   `.ts` file. `scripts/clean-sdk-dist.mjs` removes it first. Proven by planting
+   `dist/ghost.{js,d.ts}` for a symbol no source produces: the old pipeline kept them forever, the
+   new one cannot survive a build.
+
+Cleaning rather than testing is the point. Once `dist/` is rebuilt from scratch there is no leftover
+state for a working tree and a fresh checkout to disagree about, so the divergence is removed rather
+than asserted against — which is also why there is **no test here**: a guard that string-matches a
+shell command is the kind of guard that gets disabled instead of fixed.
+
+**Deliberately narrow.** Only the SDK's output is cleaned. The gateway's `dist` is the deployable and
+nothing in this repository imports it, so there is no demonstrated failure behind cleaning it and no
+reason to touch it on a hunch.
+
+`AGENTS.md` now says to run `gh run list` before shipping instead of trusting the sentence that was
+wrong for twenty-five runs.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.
