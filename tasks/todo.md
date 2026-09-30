@@ -793,6 +793,65 @@ case next to it is not a check; it is a coincidence that compiles.**
 tests    821 → 826
 ```
 
+---
+
+## Task 76: a health poll was being reported as usage
+
+The 1.34.5 fix made the **catalog** honest — no card may claim a measurement. But the catalog is only
+half of what a card shows; `mergeGatewayConnections` folds live gateway state over it, and that function
+was inventing two fields:
+
+```ts
+lastUsed: liveHealthy ? 'just now' : 'saved locally',   // ← health, not usage
+// `requests` was never set at all, so a connected card showed a permanent `0`
+```
+
+**`'just now'` claims a user did something.** `liveHealthy` is a health poll. A provider nobody had ever
+sent a request to, which answers a model listing perfectly well, reported itself healthy and therefore
+displayed **"just now"** under a heading about last use. So the mockup-era lie had a live twin: not
+invented numbers this time, but a *real measurement of the wrong thing*, presented under a label that
+promised a different one.
+
+**A permanent `0` is not a measurement either.** There is no request counter in the gateway at all — the
+only `count()` in it belongs to browser locators in the ChatGPT Web driver — so there is no number to
+show and none to zero.
+
+Both now stay exactly what the catalog said. The fields that *are* measured are untouched, including
+`health`, which is the poll's verdict rendered as a bar.
+
+## Extracted so the property can be stated generally
+
+`mergeGatewayConnections` moved from `ProvidersPage.tsx` to `lib/providerCards.ts` — pure, records in and
+records out — for the same reason `providerOptions` moved last release: the logic was in a `.tsx`, so the
+only available check was to read its text, and reading text cannot tell a correct implementation from a
+correct-looking one.
+
+`tests/provider-card-merge.test.js` does not list the fields that must not be invented. It states two
+properties that hold for every field, present and future:
+
+- **with no connection and no health, the output is the input** — deep-equal, not equal on the keys
+  someone remembered;
+- **with a connection, every field that changes is traceable to the input.**
+
+A field added next year that is invented from nothing fails the second check without this file knowing
+anything about that field. It also covers the disconnect path: merging from the catalog rather than from
+the previous state means a deleted connection's metrics cannot survive it.
+
+Both plants fire — putting `lastUsed: 'just now'` back fails two checks, and `requests: '1,417'` fails
+one.
+
+## My own assertion was wrong, in the direction the general property exists to prevent
+
+I first asserted that `health` could not change on a merge, carrying the degraded case's expectation
+across by mistake. But `health` **is** measured — it is the poll's verdict — so it moves, and the
+hand-written exception list was the thing at fault. That is exactly the failure mode a per-field list
+invites: it encodes today's fields, and the moment a field is misfiled the list defends the wrong side.
+The general property decided it correctly without knowing anything about `health`.
+
+```
+tests    826 → 834
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

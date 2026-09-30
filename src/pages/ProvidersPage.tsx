@@ -15,12 +15,13 @@ import {
 import { AddProviderModal, isWebSessionProvider, providerOptions, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderCard, providerGroupLabels, providerGroupOrder, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
-import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection, type GatewayHealth } from '../lib/gatewayClient';
+import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection } from '../lib/gatewayClient';
 import { ProviderMark } from '../components/ProviderMark';
 import { providerRoute } from '../lib/routes';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 import { webSessionProviderIds } from '../lib/webSessionProviders';
 import { providerCatalog } from '../data/providers';
+import { mergeGatewayConnections } from '../lib/providerCards';
 
 type Filter = 'all' | 'connected' | 'attention' | 'available';
 
@@ -67,28 +68,6 @@ function recordForNewProvider(newProvider: NewProvider, index = 0): ProviderReco
     endpoint: newProvider.endpoint,
     modelList: [],
   };
-}
-
-function mergeGatewayConnections(providers: ProviderRecord[], connections: GatewayConnection[], health?: GatewayHealth) {
-  const connectionByProvider = new Map(connections.map((connection) => [connection.providerId, connection]));
-  const healthByProvider = new Map(health?.providers.map((provider) => [provider.providerId, provider]));
-  return providers.map((provider) => {
-    const connection = connectionByProvider.get(provider.catalogId ?? provider.id);
-    if (!connection) return provider;
-    const providerHealth = healthByProvider.get(connection.providerId);
-    const liveHealthy = providerHealth?.status === 'healthy';
-    const modelIds = connection.modelIds ?? [];
-    return {
-      ...provider,
-      status: connection.hasCredential && connection.enabled && providerHealth?.status !== 'unavailable' && providerHealth?.status !== 'degraded' ? 'connected' : 'attention',
-      endpoint: connection.endpoint,
-      lastUsed: liveHealthy ? 'just now' : 'saved locally',
-      latency: providerHealth?.latencyMs === undefined ? '—' : `${providerHealth.latencyMs} ms`,
-      health: liveHealthy ? 100 : 0,
-      models: modelIds.length > 0 ? `${modelIds.length} models · ${connection.modelPolicy === 'free' ? 'free import' : 'all import'}` : connection.hasCredential ? 'No imported models' : '—',
-      modelList: modelIds,
-    } satisfies ProviderRecord;
-  });
 }
 
 function SummaryCard({ label, value, detail, icon: Icon, tone }: { label: string; value: string; detail: string; icon: typeof Activity; tone: string }) {

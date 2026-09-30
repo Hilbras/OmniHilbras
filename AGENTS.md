@@ -147,6 +147,15 @@ that is not on `main`.
   to that vendor. The only hand-written entries are the three providers the dialog can connect that have
   no card (`openai`, `anthropic`, `google`), and adding a card for one of them means deleting its entry.
   `customOption()` finds the neutral fallback **by id**, never by position.
+  **A card may only show what was measured.** `lib/providerCards.ts` folds gateway state into the
+  catalog, and it sets only what a connection or a health poll actually reports — `endpoint`, `latency`,
+  `status`, `health`, `models`, `modelList`. `lastUsed` and `requests` are deliberately left as
+  placeholders: the merge used to set `lastUsed: 'just now'` from a **health poll**, so a provider
+  nobody had ever sent a request to claimed a user had just used it, and `requests` was a permanent `0`
+  because the gateway keeps no request counter at all. If you add usage tracking, set those fields here
+  — from the tracking, not from health. `tests/provider-card-merge.test.js` asserts the general
+  property: with no connection the output is the input, and every field that changes is traceable to the
+  input.
 - `public/providers/` is **input, not build output**. The `logoPolarity()` plugin reads it and
   writes `src/lib/logoPolarity.generated.ts`; nothing writes into the directory. Never stage with
   `':(exclude)public/providers'` — that silently dropped 141 required assets from 18 releases, two
