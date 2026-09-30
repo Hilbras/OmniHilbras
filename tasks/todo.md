@@ -657,6 +657,83 @@ to what is true regardless: the provider named is a card, and the path is served
 tests    813 → 818
 ```
 
+---
+
+## Task 74: two lists of providers, and seven providers with two descriptions
+
+`src/data/providers.ts` holds `providerCatalog` — 13 cards. `src/components/AddProviderModal.tsx` held
+`providerOptions` — 10 entries — and it re-declared `name`, `description`, `auth`, `color`, `initial`,
+`logo` and the endpoint for each. Measured across the two:
+
+```
+FIELDS THAT DISAGREE: 7
+  ollama      catalog: "Private local inference for coding models and offline development."
+              modal:   "Local models on your machine"
+  openrouter  catalog: "One connection for a broad catalog of hosted models and providers."
+              modal:   "Many models through one API"
+  …all seven shared providers disagreed on description
+```
+
+**Every provider the dialog can open had two descriptions**, and the dialog's is the one a user reads
+while pasting a key into a form that will transmit it to that vendor. The two files also disagreed on
+*membership*: 3 options (`openai`, `anthropic`, `google`) had no card at all, and 6 cards had no option.
+
+## This duplication had already caused a real incident
+
+`resolveProviderOption`'s own comment records it:
+
+> This used to fall back to `providerOptions[0]`, which is OpenAI. A card the dialog did not know about
+> therefore became OpenAI, with OpenAI's endpoint — so a key typed for one provider was validated
+> against, and transmitted to, another.
+
+The fix hardened the fallback. That was the right thing to do and **it left the cause in place**. A
+second copy of a list is not a fallback hazard waiting to happen; it is one.
+
+## Fixed by deriving the list, not by patching the symptom
+
+`providerOptions` is now mapped from `providerCatalog`, filtered by `group` to the kinds of provider this
+dialog can key. The only hand-written entries left are the three with no card, in a named
+`withoutCard` list with the reason stated. The option set is **identical** to before — nothing lost,
+nothing added — and the seven duplicate descriptions are gone, because there is no second place to keep
+one.
+
+## And I reintroduced the incident while fixing it
+
+The filter's first version was `new Set(['api-key', 'local'])`. The `custom` card's group is `custom`,
+so the neutral option fell out of the list — and `customOption()` was
+`providerOptions[providerOptions.length - 1]`, so the last element became **Google**. An unknown
+provider id would have resolved to Google, with Google's endpoint: *a key typed for one provider
+transmitted to another*, which is the sentence the file's own comment uses to describe the original bug.
+
+Both halves are now fixed and pinned. `customOption()` finds the entry **by id** and throws if it is
+missing, because a positional lookup for "the neutral fallback" is a lookup that names a vendor the day
+the ordering changes. And `custom` is in the eligible groups.
+
+Three planted regressions, all caught:
+
+```
+PLANT A: drop 'custom' from the eligible groups      → the eligible groups must include 'custom'
+PLANT B: make the fallback positional again          → the neutral fallback is positional again
+PLANT C: hand-write an entry for a card that exists  → these have a hand-written dialog entry AND a catalog card: ollama
+```
+
+## A fourth guard bug, and the same shape as the first three
+
+The eligible-groups assertion read `modal.slice(modal.indexOf('eligibleGroups'))` — and the **doc comment
+above the declaration also names `eligibleGroups` and `custom`**, so the slice started in the comment and
+picked its words up as a third entry. The check failed on its own explanation. Now it matches the
+declaration, `/eligibleGroups\s*=\s*new Set\(\[([^\]]*)\]\)/`, and reads the initialiser rather than the
+first mention.
+
+That is the fourth time this session a guard's *own detection* has been wrong in a way only a planted
+defect revealed. The pattern is consistent enough to be worth naming: every one of them was green,
+plausible, and blind in the specific place it existed to look. The consistent remedy is also the same —
+plant the defect, or do not claim the guard works.
+
+```
+tests    818 → 821
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

@@ -140,6 +140,13 @@ that is not on `main`.
   false.** `canSave` is computed from form fields alone and knows nothing about flows, and three
   providers have since grown real OAuth flows. If you add an auth mode with no collector, disable Save
   and say so in the UI, and add the mode to the set the card test knows about.
+  **One description per provider.** `AddProviderModal`'s provider list is **derived** from
+  `providerCatalog`, never re-declared: it used to repeat `name`, `description`, `auth`, `color`,
+  `initial`, `logo` and the endpoint for ten providers, and seven of the seven shared providers had two
+  different descriptions — the dialog's being the one a user reads while pasting a key that will be sent
+  to that vendor. The only hand-written entries are the three providers the dialog can connect that have
+  no card (`openai`, `anthropic`, `google`), and adding a card for one of them means deleting its entry.
+  `customOption()` finds the neutral fallback **by id**, never by position.
 - `public/providers/` is **input, not build output**. The `logoPolarity()` plugin reads it and
   writes `src/lib/logoPolarity.generated.ts`; nothing writes into the directory. Never stage with
   `':(exclude)public/providers'` — that silently dropped 141 required assets from 18 releases, two

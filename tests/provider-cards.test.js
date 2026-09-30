@@ -252,6 +252,64 @@ test('no card claims an auth mode outside the set the collectors understand', ()
   console.log(`    auth modes in use: ${used.join(', ')}`);
 });
 
+test('every provider the dialog can open is either a card or a declared exception, and never both', () => {
+  // `AddProviderModal` used to re-declare `name`, `description`, `auth`, `color`, `initial`, `logo` and
+  // the endpoint for ten providers, beside the catalog's own copy of the same fields. Seven of the seven
+  // shared providers had two different descriptions, and the dialog's is the one a user reads while
+  // pasting a key that will be transmitted to that vendor.
+  //
+  // The list is now derived from the catalog, so the only hand-written entries are the providers the
+  // dialog can connect that have **no card** — `openai`, `anthropic`, `google`. This asserts that
+  // exception list stays exactly what it claims to be: the moment a card is added for one of them, the
+  // hand-written entry becomes a second copy free to disagree, and that is the state this whole change
+  // exists to remove.
+  const modal = stripComments(readFileSync(join(ROOT, 'src', 'components', 'AddProviderModal.tsx'), 'utf8'));
+  const declared = [...(modal.slice(modal.indexOf('withoutCard: ProviderOption[] = [')).matchAll(/id: '([\w-]+)'/g) || [])].map((match) => match[1]);
+  assert.ok(declared.length > 0, 'the exception list should still exist — a provider the gateway serves with no card');
+
+  const cardIds = cards().map((card) => card.id);
+  const shadowed = declared.filter((id) => cardIds.includes(id));
+  assert.deepEqual(
+    shadowed,
+    [],
+    `these have a hand-written dialog entry AND a catalog card: ${shadowed.join(', ')}. The card is the ` +
+      'source of truth, so the entry is a second copy of eight fields waiting to disagree — which is ' +
+      'how seven providers ended up with two different descriptions.',
+  );
+});
+
+test('the neutral fallback is a named entry, not whichever option happens to be last', () => {
+  // `customOption()` was `providerOptions[providerOptions.length - 1]`. That is a bet that the custom
+  // entry is last, and when this list was first derived from the catalog the `custom` card fell out of
+  // the group filter — so the last element became **Google**, and an unknown provider id would have
+  // resolved to Google with Google's endpoint.
+  //
+  // That is the incident `resolveProviderOption`'s own comment documents — a key typed for one provider
+  // transmitted to another — reintroduced by the fix for it. So the fallback is found by id, and this
+  // asserts both halves: that the lookup is not positional, and that a `custom` entry exists to find.
+  const modal = stripComments(readFileSync(join(ROOT, 'src', 'components', 'AddProviderModal.tsx'), 'utf8'));
+  assert.equal(
+    /providerOptions\s*\[\s*providerOptions\.length/.test(modal),
+    false,
+    'the neutral fallback is positional again, so the day the ordering changes it names a vendor',
+  );
+  assert.ok(
+    /find\(\(item\) => item\.id === 'custom'\)/.test(modal),
+    'the neutral fallback should be found by the id "custom"',
+  );
+  const customCard = cards().find((card) => card.id === 'custom');
+  assert.ok(customCard, 'the catalog still has a card for a custom endpoint, which is what the fallback resolves to');
+  // Read the declaration, not the first mention: the doc comment above it also names `eligibleGroups`
+  // and `custom`, and slicing from the first occurrence picks the comment's words up as a second entry.
+  const declaredGroups = modal.match(/eligibleGroups\s*=\s*new Set\(\[([^\]]*)\]\)/)?.[1]?.match(/'([\w-]+)'/g)?.map((value) => value.slice(1, -1)).sort();
+  assert.deepEqual(
+    declaredGroups,
+    ['api-key', 'custom', 'local'],
+    "the eligible groups must include 'custom' — leaving it out drops the neutral option from the dialog, " +
+      'and the positional fallback that used to depend on it',
+  );
+});
+
 test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 13 cards, 12 of which were already honest and 1 of which was not. The number is the finding: a
   // single card out of thirteen is exactly the kind of defect a spot check misses and a reader trusts.

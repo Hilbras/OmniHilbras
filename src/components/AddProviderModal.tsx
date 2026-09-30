@@ -16,21 +16,85 @@ export type ProviderOption = {
   defaultEndpoint?: string;
 };
 
-export const providerOptions: ProviderOption[] = [
+/**
+ * Providers this dialog can collect a key for that have **no card** on the providers page.
+ *
+ * The gateway serves `openai`, `anthropic` and `gemini`, so these are connectable — the page simply
+ * does not list them. That is a product decision about the card list, not about this dialog, so it is
+ * recorded here rather than resolved by inventing three cards. Everything else is derived from
+ * `providerCatalog` below, so this is the whole of the second list.
+ */
+const withoutCard: ProviderOption[] = [
   { id: 'openai', name: 'OpenAI', description: 'GPT and Responses APIs', auth: 'API key', color: '#6fdb9b', initial: 'O', logo: getProviderLogo('openai'), defaultEndpoint: 'https://api.openai.com/v1' },
   { id: 'anthropic', name: 'Anthropic', description: 'Claude models', auth: 'API key', color: '#d97757', initial: 'A', logo: getProviderLogo('anthropic'), defaultEndpoint: 'https://api.anthropic.com/v1' },
   { id: 'google', name: 'Google', description: 'Gemini models', auth: 'API key', color: '#83b7ff', initial: 'G', logo: getProviderLogo('google'), defaultEndpoint: 'https://generativelanguage.googleapis.com/v1beta' },
-  { id: 'ollama', name: 'Ollama', description: 'Local models on your machine', auth: 'No key', color: '#e2bd52', initial: 'L', logo: getProviderLogo('ollama'), defaultEndpoint: 'http://localhost:11434/v1' },
-  { id: 'mistral', name: 'Mistral', description: 'Efficient hosted models', auth: 'API key', color: '#f97316', initial: 'M', logo: getProviderLogo('mistral'), defaultEndpoint: 'https://api.mistral.ai/v1' },
-  { id: 'openrouter', name: 'OpenRouter', description: 'Many models through one API', auth: 'API key', color: '#b995e8', initial: 'R', logo: getProviderLogo('openrouter'), defaultEndpoint: 'https://openrouter.ai/api/v1' },
-  { id: 'opencode', name: 'OpenCode Zen', description: 'Curated gateway, key from opencode.ai/auth', auth: 'API key', color: '#8b8f96', initial: 'Z', logo: getProviderLogo('opencode'), defaultEndpoint: 'https://opencode.ai/zen/v1' },
-  { id: 'nara-router', name: 'NaraRouter', description: 'OpenAI-compatible router at router.bynara.id', auth: 'API key', color: '#2d3948', initial: 'N', logo: getProviderLogo('nara'), defaultEndpoint: 'https://router.bynara.id/v1' },
-  { id: 'tokenharbor', name: 'TokenHarbor', description: 'Unified gateway, key from tokenharbor.ai/dashboard', auth: 'API key', color: '#3859ff', initial: 'T', logo: getProviderLogo('tokenharbor'), defaultEndpoint: 'https://tokenharbor.ai/v1' },
-  { id: 'custom', name: 'Custom endpoint', description: 'Any OpenAI-compatible server', auth: 'API key', color: '#9c9584', initial: 'C', defaultEndpoint: 'http://localhost:8000/v1' },
 ];
 
-/** The neutral option. Never a named vendor. */
-const customOption = (): ProviderOption => providerOptions[providerOptions.length - 1];
+/**
+ * One list of providers, derived rather than re-declared.
+ *
+ * This used to be a hand-written list of ten, and it re-declared `name`, `description`, `auth`,
+ * `color`, `initial`, `logo` and the endpoint for every one of them — while `providerCatalog` held the
+ * same fields for the same providers. **Seven of the seven shared providers had two different
+ * descriptions**, and the dialog's copy is the one a user reads while pasting a key that will be
+ * transmitted to that vendor:
+ *
+ * ```
+ * ollama      catalog: "Private local inference for coding models and offline development."
+ *             modal:   "Local models on your machine"
+ * openrouter  catalog: "One connection for a broad catalog of hosted models and providers."
+ *             modal:   "Many models through one API"
+ * ```
+ *
+ * That duplication had already caused a real incident. The comment on `resolveProviderOption` below
+ * records it: a card the dialog did not know about fell back to `providerOptions[0]`, which was
+ * OpenAI, so **a key typed for one provider was validated against, and transmitted to, another**. The
+ * fix hardened the fallback, which was the right thing to do and left the cause in place. A second copy
+ * of a list is not a fallback hazard waiting to happen; it is one.
+ *
+ * `endpoint` and `defaultEndpoint` are the same field under two names, so the map below is the whole
+ * translation. The card's `group` decides eligibility: a web-session or OAuth card is signed into
+ * rather than keyed, and this dialog is the wrong tool for it — see `isWebSessionProvider`.
+ *
+ * **`custom` is eligible.** Writing this filter the first time round left it out, because its group is
+ * `custom` and not `api-key` — and `customOption()` reaches for `providerOptions[last]`, so the
+ * fallback for an unknown id became **Google**, with Google's endpoint. That is the incident described
+ * above, reintroduced by the fix for it: a key typed for an unknown provider would have been
+ * transmitted to Google. The group list is now correct, and `customOption` no longer depends on
+ * position.
+ */
+const eligibleGroups = new Set(['api-key', 'local', 'custom']);
+
+export const providerOptions: ProviderOption[] = [
+  ...providerCatalog
+    .filter((card) => eligibleGroups.has(card.group))
+    .map((card) => ({
+      id: card.id,
+      name: card.name,
+      description: card.description,
+      auth: card.auth,
+      color: card.color,
+      initial: card.initial,
+      logo: card.logo,
+      defaultEndpoint: card.endpoint,
+    })),
+  ...withoutCard,
+];
+
+/**
+ * The neutral option. Never a named vendor.
+ *
+ * Found **by id**, not by position. This was `providerOptions[providerOptions.length - 1]`, which is a
+ * bet that the custom entry is last — and when the list above was derived from the catalog and the
+ * `custom` card fell out of the filter, the last element became Google. A positional lookup for "the
+ * neutral fallback" is a lookup that names a vendor the day the ordering changes, and the whole point
+ * of the function is that it never does.
+ */
+const customOption = (): ProviderOption => {
+  const option = providerOptions.find((item) => item.id === 'custom');
+  if (!option) throw new Error('AddProviderModal: the neutral "custom" option is missing, so an unknown provider would fall back to a named vendor.');
+  return option;
+};
 
 /**
  * Whether this modal is the wrong tool for a provider.
