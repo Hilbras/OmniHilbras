@@ -43,6 +43,37 @@ sdk-core → provider-openai-compatible → provider-openai → provider-anthrop
 - The gateway's first public HTTP routes are OpenAI-compatible for client convenience, but adapters are not required to use OpenAI's wire format.
 - The first implementation slice contains the four core adapters below, plus the real OpenRouter adapter needed for the initial connection-management flow; the capability-based extension path remains part of the contract, and no fake provider is required.
 
+### Where a provider URL is allowed to point
+
+A connection's `endpoint` is operator-supplied, so it is the one string in the system that decides where a
+request carrying a credential actually goes. `assertSafeProviderRequestUrl` (`packages/omnihilbras-sdk/src/url.ts`)
+is the single decision point, and it is called in two places: on save, in `routes/connections.ts`, and again
+at the transport, in `transport.ts`. Both matter — a connection written before a rule tightened, or a
+resolved base URL that drifted, must not bypass the check that admission applied.
+
+The rules, in order:
+
+| Rule | Why |
+| --- | --- |
+| scheme must be `https:`, or `http:` to a loopback host | cleartext to a remote host would put a credential on the wire in the clear; local Ollama and LM Studio over `http` is the supported exception |
+| no `user:password@` in the authority | a secret smuggled into a URL ends up in logs and error messages |
+| no query or fragment on a base URL | they are not part of an endpoint's identity, and `resolveProviderUrl` compares against the base |
+| not a private, loopback, link-local, or unspecified destination | SSRF: `169.254.169.254` is the cloud instance-metadata endpoint, and reaching it from a gateway that holds provider credentials is the whole attack |
+
+**A private IPv4 address is also private when it is written as IPv6.** `isPrivateHostname` unwraps an
+IPv4-mapped (`::ffff:a.b.c.d`) or IPv4-compatible (`::a.b.c.d`) address and judges the embedded IPv4 by the
+same rules. This is not theoretical: `https://[::ffff:169.254.169.254]/` was accepted and stored by a
+running gateway while the plain form was correctly refused, and it carried a real TCP connection to a
+loopback listener. Note that `new URL()` normalises the address to `[::ffff:a9fe:a9fe]` before the guard
+sees it, so the hex spelling is the only one that ever arrives.
+
+`isLoopbackHostname` is deliberately **narrower** than `isPrivateHostname` — it is what permits cleartext
+`http:`, so it must not accept the mapped form, or arbitrary private hosts become reachable without TLS.
+
+Known gap, recorded rather than fixed: a hostname that resolves to a private address (`localtest.me` →
+`127.0.0.1`) is allowed, because deciding that requires resolving at request time — which needs a policy
+for DNS failure and adds a lookup to every provider call. That is a design decision, not a missing check.
+
 ## SDK Contract
 
 The core package exposes:

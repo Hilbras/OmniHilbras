@@ -59,7 +59,10 @@ function barrelExports() {
   while (queue.length > 0) {
     const file = queue.pop();
     const source = readFileSync(file, 'utf8');
-    for (const match of source.matchAll(/(?:export\s+(?:\*|\{[^}]*\})\s+from|import\s+[^;]*from)\s+['"]\.\/([\w.-]+)\.js['"]/g)) {
+    // The character class must include `/`, or `./adapters/anthropic.js` never matches and the
+    // resolver stops dead at the ten modules the barrel names without a directory. It read
+    // `['\w.-]+`, so every one of the fourteen adapters was invisible to it — see the header note.
+    for (const match of source.matchAll(/(?:export\s+(?:\*|\{[^}]*\})\s+from|import\s+[^;]*from)\s+['"]\.\/([\w.\/-]+)\.js['"]/g)) {
       const target = join(dirname(file), `${match[1]}.ts`);
       if (existsSync(target) && !seen.has(target)) {
         seen.add(target);
@@ -84,24 +87,67 @@ test('no SDK module imports a Node builtin, or the dashboard renders a blank pag
   assert.deepEqual(offenders, [], `${offenders.join('\n')}\nThe dashboard imports the SDK barrel, so Vite bundles these for the browser.`);
 });
 
-test('no SDK module uses Buffer, which is the same failure wearing a different name', () => {
-  // `Buffer` is Node-only, but unlike a `node:` import it does not fail at bundle time — it throws when
-  // the line runs. So the rule is scoped to the modules the dashboard actually pulls in, which is what
-  // `packages/omnihilbras-sdk/src/index.ts` exports.
+test('no SDK module uses Buffer at module scope, which breaks the bundle before it renders', () => {
+  // `Buffer` fails differently from a `node:` import: a `node:` import is externalized and blows up while
+  // the module graph is built, so the page never mounts. `Buffer` is an *undefined identifier* — the bundle
+  // builds fine and throws only when the line runs. That makes it safe in a function the browser never
+  // calls, and catastrophic in one it does.
   //
-  // Scoped deliberately: `adapters/cline.ts` uses `Buffer.from(padded, 'base64')` and has shipped for
-  // many releases without breaking anything, because no `.tsx` imports it — only its id appears in a
-  // gateway URL. A rule that flagged it would be wrong about a real, working module, and a check that
-  // cries wolf is one that gets switched off.
+  // So the rule is about WHERE, not whether. A module-scope `Buffer` — a top-level constant computed at
+  // import time — reaches the browser the moment the barrel is loaded, and that is the blank page again.
+  //
+  // ## Why this test now reaches fourteen files it could not see before
+  //
+  // The resolver's character class was `[\w.-]+`, so `./adapters/anthropic.js` never matched and the walk
+  // stopped after ten modules. Every adapter was invisible to it — including the three that use `Buffer`.
+  // The exemption that justified narrowing the rule ("no `.tsx` imports cline") was written from a graph
+  // that silently excluded the very modules it was reasoning about.
   const reachable = barrelExports();
+  assert.ok(
+    reachable.length >= 24,
+    `the resolver only reached ${reachable.length} SDK modules; it is probably not following subdirectory imports again`,
+  );
+
   const offenders = [];
   for (const file of reachable) {
+    // Module scope is everything before the first `export`/`function`/`class` declaration, which is where
+    // a top-level `const x = Buffer.from(...)` would live.
     const source = code(readFileSync(file, 'utf8'));
-    for (const match of source.matchAll(/(?<![.\w$])Buffer\s*[.@(]/g)) {
-      offenders.push(`${file.replace(ROOT + '/', '')}: uses Buffer at index ${match.index}`);
+    const lines = source.split('\n');
+    let depth = 0;
+    for (const [index, line] of lines.entries()) {
+      // Module scope is "brace depth is zero". My first attempt tracked a boolean set by any declaration
+      // line, and `const CLINE_MARKER = Buffer.from(...)` set it on the very line being checked — so a
+      // planted module-scope Buffer passed. Verified by planting, which is the only reason this is fixed.
+      const usesBuffer = /\bBuffer\b/.test(line);
+      if (usesBuffer && depth === 0) {
+        offenders.push(`${file.replace(ROOT + '/', '')}:${index + 1}: ${line.trim().slice(0, 80)}`);
+      }
+      for (const char of line) {
+        if (char === '{') depth += 1;
+        else if (char === '}') depth -= 1;
+      }
     }
   }
-  assert.deepEqual(offenders, [], `${offenders.join('\n')}\nEvery module the SDK barrel exports is bundled for the browser.`);
+  assert.deepEqual(offenders, [], `module-scope Buffer — the dashboard imports the barrel, so this runs at page load:\n${offenders.join('\n')}`);
+});
+
+test('every remaining Buffer use is inside a function, never at module scope', () => {
+  // Records the measured fact rather than a policy, so a future adapter that uses `Buffer` in a
+  // gateway-only path is a documented, reviewed decision instead of an accident.
+  //
+  // Measured 1.45.0: `cline.ts`, `kiro.ts` and `deepseek-web.ts` each use `Buffer` inside an exported
+  // function. The built browser bundle contains **zero** occurrences of the token `Buffer` across all
+  // three chunks, and the four `process.` hits are React's own dev shim behind `typeof process === 'object'`.
+  // Tree-shaking drops the unreferenced adapters; the module-scope test above is what stops a future one
+  // from being *used* rather than merely present.
+  const reachable = barrelExports();
+  const users = reachable.filter((file) => /\bBuffer\b/.test(code(readFileSync(file, 'utf8'))));
+  assert.deepEqual(
+    users.map((f) => f.replace(ROOT + '/', '')).sort(),
+    ['packages/omnihilbras-sdk/src/adapters/cline.ts', 'packages/omnihilbras-sdk/src/adapters/deepseek-web.ts', 'packages/omnihilbras-sdk/src/adapters/kiro.ts'],
+    'the set of Buffer users changed — re-measure the bundle before accepting this list',
+  );
 });
 
 test('no SDK source file contains a NUL byte or other control character', () => {

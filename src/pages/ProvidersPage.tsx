@@ -15,7 +15,14 @@ import {
 import { AddProviderModal, isWebSessionProvider, providerOptions, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderCard, providerGroupLabels, providerGroupOrder, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
-import { getGatewayHealth, listGatewayConnections, saveOpenRouterConnection, type GatewayConnection, type GatewayHealth } from '../lib/gatewayClient';
+import {
+  getGatewayHealth,
+  listGatewayConnections,
+  putGatewayConnection,
+  saveOpenRouterConnection,
+  type GatewayConnection,
+  type GatewayHealth
+} from '../lib/gatewayClient';
 import { ProviderMark } from '../components/ProviderMark';
 import { providerRoute } from '../lib/routes';
 import { useGatewayReload } from '../lib/useGatewayStatus';
@@ -46,7 +53,20 @@ function groupForNewProvider(providerId: string, auth: string): ProviderGroup {
   return 'hosted';
 }
 
-function recordForNewProvider(newProvider: NewProvider, index = 0): ProviderRecord {
+/**
+ * A card for a provider that has NOT been saved to the gateway.
+ *
+ * Every field here is a placeholder, because there is nothing to measure yet:
+ *   - `status: 'available'`, not `'connected'` — the gateway has no record of this provider,
+ *   - `health: 0` — no probe has run,
+ *   - `lastUsed: 'never'` — no request has been sent through it,
+ *   - `models: '—'` — the model list comes from the provider, not from us.
+ *
+ * The previous version of this function claimed `connected`, `100`, and `'just now'` for a credential
+ * that had never left the browser. `tests/provider-card-merge.test.js` could not catch it: that suite
+ * asserts the merge with a *connection*, and this path never had one.
+ */
+function recordForUnsavedProvider(newProvider: NewProvider, index = 0): ProviderRecord {
   const option = providerOptions.find((item) => item.id === newProvider.providerId) ?? providerOptions[0];
   return {
     id: `${option.id}-${Date.now()}-${index}`,
@@ -55,13 +75,13 @@ function recordForNewProvider(newProvider: NewProvider, index = 0): ProviderReco
     description: option.description,
     category: option.id === 'custom' ? 'Custom endpoint' : option.auth === 'No key' ? 'Local runtime' : 'New connection',
     group: groupForNewProvider(option.id, option.auth),
-    status: 'connected',
+    status: 'available',
     auth: option.auth,
-    models: 'Pending sync',
+    models: '—',
     latency: '—',
     requests: '0',
-    lastUsed: 'just now',
-    health: 100,
+    lastUsed: 'never',
+    health: 0,
     color: option.color,
     initial: option.initial,
     logo: option.logo,
@@ -241,13 +261,27 @@ export function ProvidersContent() {
     window.setTimeout(() => setNotice(''), 2500);
   }
 
-  function finishAdd(added: NewProvider[]) {
-    setProviders((current) => [...added.map((provider, index) => recordForNewProvider(provider, index)), ...current]);
+  /**
+   * Add cards to the local list only, and say they are not connected.
+   *
+   * This used to be the *whole* save path for every provider except OpenRouter, which is why
+   * `recordForNewProvider` claimed `status: 'connected'`, `health: 100` and `lastUsed: 'just now'` for a
+   * credential that had never been sent anywhere. That is the 1.34.5 Ollama defect and the 1.36.1
+   * `lastUsed` defect, reproduced in a third place, and it survived because both earlier fixes were made
+   * in `mergeGatewayConnections` — the function that folds a *reported* connection in. Nothing looked at
+   * the path that never had one.
+   *
+   * It is still used, for the two cases where a card genuinely has no gateway connection yet: a bulk
+   * entry the user has not saved, and a provider whose save failed. So the fields must be honest rather
+   * than removed: an unsaved card is `available`, not connected, and has never been used.
+   */
+  function finishAddLocally(added: NewProvider[]) {
+    setProviders((current) => [...added.map((provider, index) => recordForUnsavedProvider(provider, index)), ...current]);
     setAddOpen(false);
     setInitialProviderId(undefined);
     setInitialModelPolicy(undefined);
-    setNotice(`${added.length} ${added.length === 1 ? 'connection was' : 'connections were'} added to the local provider list.`);
-    window.setTimeout(() => setNotice(''), 3500);
+    setNotice(`${added.length} ${added.length === 1 ? 'connection was' : 'connections were'} added to the local list. Not saved to the gateway yet.`);
+    window.setTimeout(() => setNotice(''), 4000);
   }
 
   async function handleSave(newProvider: NewProvider, apiKey?: string) {
@@ -269,11 +303,61 @@ export function ProvidersContent() {
       window.setTimeout(() => setNotice(''), 3500);
       return;
     }
-    finishAdd([newProvider]);
+
+    // Every other provider takes the generic route. It used to skip this entirely and call `finishAdd`,
+    // which put a card on screen claiming `connected` / `100%` / `just now` and threw the pasted key away.
+    // `putGatewayConnection` was already implemented in `gatewayClient.ts` and had no caller: a working
+    // save path, unreachable. The card is now built from the connection the gateway *reports back*, which
+    // is the only thing that can honestly say whether the credential works.
+    // `apiKey` and `endpoint` are both required by `GatewayConnectionInput`. A keyless provider (Ollama,
+    // LM Studio) has no key to send, so it sends the placeholder the modal uses for "no key" and the
+    // gateway stores nothing secret for it. Building the object conditionally instead would not typecheck
+    // against a type that says both are required — which is the type telling us the save needs a decision
+    // here, not silently taking an undefined.
+    if (!newProvider.endpoint) throw new Error('Enter the provider endpoint before saving.');
+    const connection = await putGatewayConnection(newProvider.providerId, {
+      name: newProvider.name,
+      endpoint: newProvider.endpoint,
+      apiKey: apiKey ?? '',
+      ...(newProvider.priority ? { priority: newProvider.priority } : {}),
+      ...(newProvider.modelPolicy ? { modelPolicy: newProvider.modelPolicy } : {}),
+    });
+    setGatewayConnections((current) => [...current.filter((item) => item.providerId !== connection.providerId), connection]);
+    setProviders((current) => {
+      // Drop any unsaved card for this provider first: the gateway now reports the real state, and
+      // leaving the placeholder beside it would show the same provider twice with different numbers.
+      const withoutPlaceholder = current.filter((card) => card.id !== `${newProvider.providerId}-unsaved`);
+      const base = providerCatalog.find((item) => item.id === newProvider.providerId);
+      if (!base) return current;
+      return mergeGatewayConnections([...withoutPlaceholder, { ...base, name: newProvider.name }], [connection]);
+    });
+    setAddOpen(false);
+    setInitialProviderId(undefined);
+    setInitialModelPolicy(undefined);
+    setNotice(`${newProvider.name} connection saved. ${connection.modelIds.length} models available.`);
+    window.setTimeout(() => setNotice(''), 4000);
   }
 
-  function handleSaveMany(newProviders: NewProvider[]) {
-    finishAdd(newProviders);
+  async function handleSaveMany(newProviders: NewProvider[]) {
+    // Saved one at a time, and reported honestly. The bulk path used to add every card to the local list
+    // at once, so one rejected credential still produced a green card for it.
+    const saved: string[] = [];
+    const failed: string[] = [];
+    for (const provider of newProviders) {
+      try {
+        await handleSave(provider);
+        saved.push(provider.name);
+      } catch (error) {
+        failed.push(`${provider.name}: ${error instanceof Error ? error.message : 'the gateway refused it'}`);
+      }
+    }
+    if (failed.length > 0) {
+      finishAddLocally(newProviders.filter((provider) => failed.some((message) => message.startsWith(provider.name))));
+      setNotice(`${saved.length} saved. ${failed.length} not saved — ${failed.join('; ')}`);
+    } else if (saved.length > 0) {
+      setNotice(`${saved.length} ${saved.length === 1 ? 'connection was' : 'connections were'} saved.`);
+    }
+    window.setTimeout(() => setNotice(''), 5000);
   }
 
   async function testAll() {

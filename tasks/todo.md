@@ -1589,6 +1589,197 @@ a `92 ms` latency.
 tests    899 → 905
 ```
 
+## Task 86: the browser-safety guard could not see 14 of the 24 SDK modules
+
+1.42.0 shipped a blank dashboard (`node:crypto` in the barrel). 1.43.0 added
+`tests/sdk-browser-safety.test.js` to stop it recurring. That guard is **green, plausible, and blind in the
+exact place it exists to look** — the sixth such guard this session.
+
+`barrelExports()` walks the SDK barrel so the `Buffer` rule applies to what the dashboard actually loads.
+Its specifier pattern was `['"]\./([\w.-]+)\.js['"]`. The barrel's own lines are:
+
+```
+export * from './adapters/anthropic.js';    ← NO MATCH
+export * from './errors.js';                ← MATCH
+```
+
+`[\w.-]+` cannot match a `/`. **Every subdirectory import was invisible**, so the walk stopped after ten
+modules and fourteen adapters — including the three that use `Buffer` — were never examined:
+
+```
+barrelExports() reaches 10 files; src/ actually has 24
+```
+
+The exemption that justified narrowing the rule (*"no `.tsx` imports `cline`"*) was therefore reasoned from
+a graph that silently excluded the modules it was reasoning about.
+
+### The product is fine; the guard was not
+
+Measured against the **built** bundle, not the source:
+
+```
+src.js         Buffer tokens: 0     Buffer. occurrences: 0
+dashboard.js   Buffer tokens: 0     Buffer. occurrences: 0
+process. hits: 4 — all React's own shim behind typeof process === 'object'
+```
+
+Zero `Buffer` in all three chunks. The `deepseek-web`/`chatgpt-web` strings that appear in the bundle are
+the **catalog** in `src/data/providers.ts`, not the adapters. Tree-shaking drops the rest. So no blank page
+today — by luck of bundling, not by design.
+
+### Split by failure mode, because they are different
+
+`Buffer` is an undefined identifier, not a build error: the bundle builds and throws **when the line runs**.
+A `node:` import is externalized and fails while the graph loads. So module scope is what matters.
+
+- **module-scope `Buffer`** → reaches the browser at page load → blank page. Now fatal.
+- **in-function `Buffer`** in a function no `.tsx` calls → harmless, and three real modules do this.
+
+### The first scope check was blind too, and planting is the only reason I know
+
+```js
+if (/^(export\s+)?(async\s+)?(function|class|const|let|var)\s/.test(line)) inDeclaration = true;
+if (!inDeclaration && /\bBuffer\b/.test(line)) offenders.push(...)
+```
+
+`const CLINE_MARKER = Buffer.from(...)` sets the flag **on the line being checked**. Planted module-scope
+`Buffer` → `ℹ fail 0`. Now module scope is brace depth 0, and all three plants go red:
+
+| Plant | Result |
+| --- | --- |
+| module-scope `Buffer` in `cline.ts` | ✖ fatal test |
+| nested adapter via subdirectory import | ✖ resolver now sees it |
+| module-scope `Buffer` in that nested adapter | ✖ both |
+
+## Task 87: an SSRF bypass in the provider-URL guard, which had no test at all
+
+`isPrivateHostname` decides whether a user-supplied provider `endpoint` may be reached. Grepping the SDK
+suite, the gateway suite and `tests/` for `isPrivateHostname` or `assertSafeProviderRequestUrl` returned
+**nothing**. A security boundary with zero coverage, for its entire life.
+
+`169.254.169.254` — the cloud metadata endpoint — was correctly refused. The same host as an IPv4-mapped
+IPv6 address was not:
+
+```
+VERDICT  PRIVATE  URL
+blocked  true     https://169.254.169.254/latest/meta-data/
+ALLOWED  false    https://[::ffff:169.254.169.254]/
+ALLOWED  false    https://[0:0:0:0:0:ffff:a9fe:a9fe]/
+```
+
+**A running gateway accepted and stored it:**
+
+```
+500   plain metadata (should be refused)   ← the guard's error
+200   IPv4-mapped metadata                 ← saved as a connection
+```
+
+And it was not an inert string. Pointed at a loopback listener, the mapped form carried a real TCP connection
+to it — `ERR_SSL_WRONG_VERSION_NUMBER`, i.e. TLS bytes arriving at a plain HTTP server. The address is
+genuinely routable; the bypass is a real one.
+
+`::` (the IPv6 `0.0.0.0`) was also allowed.
+
+### Why the fix took three attempts, and what each one got wrong
+
+1. **Match a trailing dotted quad — dead code.** `new URL('https://[::ffff:169.254.169.254]/').hostname` is
+   `[::ffff:a9fe:a9fe]`. The WHATWG parser normalises to hex *before* the guard sees the string, so the only
+   spelling that ever arrives is the hex one. Every case in the new test is written as the parser delivers it.
+2. **Read the `ffff` marker from group 6 instead of group 5.** `numbers[6]` is `a9fe`, so the check returned
+   undefined for the exact input it was written to catch, and the endpoint stayed reachable through a
+   correctly-built, correctly-reasoned guard.
+3. **`fe80::1` also ends in `0x0001`.** Reading groups 6–7 unconditionally reports it as `0.0.0.1` — the right
+   verdict for the wrong reason, which is precisely how a future bug hides behind a passing test.
+
+### The suite, and the proof it can fail
+
+`packages/omnihilbras-sdk/test/url.test.js`, 9 tests on the compiled `dist`. It asserts the blocked set
+*and* the public set, because a guard that refuses everything passes the first. `::ffff:0808:0808` (mapped
+8.8.8.8) must stay **public** — the case that catches an over-broad fix. `isLoopbackHostname` must *not*
+accept the mapped form, or cleartext HTTP opens to arbitrary private hosts.
+
+Reverting the two new lines in `isPrivateHostname`:
+
+```
+✖ every private destination is refused, however it is spelled
+    https://[::ffff:169.254.169.254]/  (IPv4-mapped metadata — the bypass)
+✖ the mapped form is judged by its embedded IPv4, not by an IPv6 prefix
+✖ http is refused for everything but loopback
+ℹ pass 6  fail 3
+```
+
+### Still open, deliberately not fixed here
+
+`localtest.me` resolves to `127.0.0.1` and is **allowed**. Blocking it needs resolution at request time, which
+means deciding what to do when DNS fails and adds a lookup to every provider call. That is a design decision
+with a latency cost, not a one-line fix, so it is recorded rather than guessed at.
+
+## Task 88: adding a provider discarded the key and invented a healthy card
+
+Found by an independent audit pass, then verified by reading the cited lines myself. Both halves are real,
+and the second is the one that matters.
+
+`ProvidersPage.tsx` had exactly one save path, for OpenRouter. Every other provider fell through to:
+
+```ts
+async function handleSave(newProvider: NewProvider, apiKey?: string) {
+  if (newProvider.providerId === 'openrouter') { /* ... saveOpenRouterConnection ... */ return; }
+  finishAdd([newProvider]);          // apiKey is never read again
+}
+```
+
+So for **all nine providers added in 1.43.0**, and every other non-OpenRouter provider, the key the user
+had just pasted was **discarded** — the gateway was never called — and the card was built from
+`recordForNewProvider`:
+
+```ts
+status: 'connected',
+health: 100,
+lastUsed: 'just now',
+```
+
+A credential that had never left the browser, presented as a working, healthy, just-used connection. This is
+the 1.34.5 Ollama defect and the 1.36.1 `lastUsed` defect, in a third location, and it survived both fixes
+because **both of those were made inside `mergeGatewayConnections`** — the function that folds a connection
+the gateway *reported*. Nothing looked at the path where there is no report.
+
+`putGatewayConnection` was already implemented in `gatewayClient.ts` and had **no caller at all**. A
+complete, working save path, unreachable.
+
+### Fixed
+
+- `handleSave` now calls `putGatewayConnection` for every non-OpenRouter provider and builds the card from
+  the connection the gateway returns.
+- `handleSaveMany` saves each entry and reports failures by name, instead of green-stamping all of them.
+- `recordForNewProvider` → `recordForUnsavedProvider`, with `available` / `health: 0` / `lastUsed: 'never'` /
+  `models: '—'`. It is still used for genuinely unsaved entries, so its fields must be honest rather than
+  absent.
+- `finishAdd` → `finishAddLocally`, and its notice ends **"Not saved to the gateway yet."**
+
+### The guard, and the two plants that shaped it
+
+`tests/provider-card-honesty.test.js`, 4 tests. `provider-card-merge.test.js` could not see this and still
+cannot: it tests the merge, and the defect was in the non-merge path. "The merge is correct" is not the same
+claim as "every card is honest".
+
+Both of my first two versions were wrong, and planting is the only reason I know:
+
+| Plant | Result |
+| --- | --- |
+| restore `connected` / `100` / `just now` | ✖ 2 tests |
+| `void putGatewayConnection(...)` with a hand-built object | **passed** — the call was present, unreachably |
+| awaited, but its result discarded | ✖ |
+| `apiKey` removed from the request body | ✖ |
+
+The middle one is the lesson: asking whether a function name appears anywhere in a file is not asking
+whether it runs. The test now asserts the call is **awaited, its result bound, and that `apiKey` is in the
+request body** — the field that was being dropped.
+
+The first version also flagged five *correct* lines (a type union, a filter label, a function signature),
+because the patterns matched bare tokens. Each now requires an object-literal `{` or `,` before the field.
+
+Verified in the browser: 22 cards render, `#root` mounts, and **"just now" appears nowhere on the page**.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.
