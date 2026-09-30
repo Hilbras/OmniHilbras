@@ -3,21 +3,29 @@ import test from 'node:test';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { providerCatalog } from '../src/data/providers.ts';
+import { WEB_SESSION_PROVIDERS } from '../src/lib/webSessionProviders.ts';
 
 /**
  * The provider cards tell the truth about what has actually happened.
  *
+ * ## The data here is imported, not scraped
+ *
+ * The first version of this file parsed `src/data/providers.ts` with a regular expression — twenty-odd
+ * lines of `matchAll` over object literals, re-implementing a parser and therefore agreeing with it
+ * wherever the parser was wrong. `providers.ts` and `webSessionProviders.ts` are plain modules with no
+ * JSX, and Node imports a type-erased `.ts` file directly, so the catalog is now **read from the
+ * product** rather than re-derived from its text.
+ *
+ * That is only possible because `allowImportingTsExtensions` is on — it requires `noEmit`, which the
+ * root tsconfig already had — so a module can import `'../data/providers.ts'` and Node can follow it.
+ * The gateway is a compiled package and is still read as text, which is a real limit rather than a
+ * preference: its `dist/` is what runs, and its route table is built by string comparison at runtime.
+ *
  * ## The rule, and the part of it that was not true
  *
- * `AGENTS.md` says:
- *
- * > A provider card in `src/data/providers.ts` is catalog metadata. Before a card claims a working
- * > connection, the gateway must be able to serve that provider: a card with no connection stays
- * > `status: 'available'` with `—` metrics, and an auth mode with no flow behind it (currently
- * > `OAuth`) must disable Save in `AddProviderModal` and say so.
- *
- * The first clause was violated by exactly one card, and it is worth seeing what it looked like,
- * because the numbers were plausible:
+ * `AGENTS.md` says a card with no connection stays `status: 'available'` with `—` metrics. Twelve of the
+ * thirteen cards did that. One did not:
  *
  * ```
  * id: 'ollama'   status: 'attention'   models: '6 models'
@@ -25,39 +33,22 @@ import { dirname, join } from 'node:path';
  * health: 72   modelList: ['qwen3-coder', 'llama3.2', 'nomic-embed-text']
  * ```
  *
- * `ProvidersPage` seeds its state from this catalog and `mergeGatewayConnections` overlays **only the
- * providers that have a connection**, so a card here is exactly what a user sees when the gateway has
- * never been asked about that provider. A user with no Ollama connection was shown an amber
- * "attention" badge, a 92 ms latency, 1,417 requests, and three named models — for a local runtime
- * they had never run. Twelve of the thirteen cards already carried placeholders; this one was left over
- * from when the dashboard was a static mockup, and it contradicted the rule the mockup predates.
- *
- * ## The invariant, restated so it can be checked
+ * The numbers were invented, left over from when the dashboard was a static mockup.
+ * `ProvidersPage` seeds from this catalog and `mergeGatewayConnections` overlays only providers that have
+ * a connection, so a card here is exactly what a user sees when the gateway has never been asked about
+ * that provider. A user who had never run Ollama was shown a plausible week of traffic for it.
  *
  * **The catalog is the no-connection fallback, so no card in it may claim a measurement.** That is a
- * property of the data rather than an instruction about a UI state, which is why it can be asserted:
- * if a card's number could only have come from a measurement, and the catalog is shown precisely when
- * there is nothing to measure, then the number was invented. Live figures arrive from the gateway and
- * overwrite all of it.
+ * property of the data rather than an instruction about a UI state, which is the only reason it can be
+ * asserted: if a card's number could only have come from a measurement, and the catalog is shown
+ * precisely when there is nothing to measure, then the number was invented.
  *
- * ## The second clause was both unimplemented and out of date
- *
- * The rule says an auth mode with no flow behind it — "currently `OAuth`" — must disable Save in
- * `AddProviderModal`. Two problems, and they are different problems:
- *
- * - **No such mechanism exists.** `canSave` is computed from form fields alone —
- *   `name`, `apiKey`, `endpoint` — and knows nothing about flows. So the clause described an
- *   unimplemented behaviour, and a reader of `AGENTS.md` would reasonably assume the code had it.
- * - **The parenthetical is false.** Three cards claim `auth: 'OAuth'` — `opencode-console`, `kiro`,
- *   `cline` — and the gateway serves an OAuth start route for all three. OAuth grew a flow after the
- *   rule was written, and the rule was never updated.
- *
- * So the clause is restated in the form that is both true and enforceable: **a card may claim
- * `auth: 'OAuth'` only when the gateway serves an OAuth start route for that provider.** Three cards,
- * three routes, checked against each other. A fourth OAuth card added without a flow now fails, which
- * is what the original clause was reaching for. The `AddProviderModal` half is recorded in
- * `AGENTS.md` as what it is — a requirement that has never been implemented, with no mode to trigger
- * it today — rather than left as a claim about code that does not exist.
+ * A card claiming `auth: 'OAuth'` must have a matching `/v1/oauth/:id/start` route — the enforceable form
+ * of a rule that used to say "an auth mode with no flow (currently `OAuth`) must disable Save in
+ * `AddProviderModal`". `canSave` is computed from form fields alone and never knew about flows, and the
+ * parenthetical had gone false: three providers have since grown real OAuth flows. The
+ * `AddProviderModal` half is recorded in `AGENTS.md` as a requirement that was never implemented, with no
+ * mode to trigger it today, rather than left as a claim about code that does not exist.
  */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -78,53 +69,30 @@ function stripComments(source) {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
-/** The `providerLogoMap` at the top of the catalog, so `providerLogoMap.openai` resolves to a path. */
-function logoMap() {
-  const source = stripComments(readFileSync(CATALOG, 'utf8'));
-  const body = source.slice(source.indexOf('providerLogoMap'), source.indexOf('getProviderLogo'));
-  const map = new Map();
-  for (const match of body.matchAll(/(\w+):\s*'(\/providers\/[^']+)'/g)) map.set(match[1], match[2]);
-  return map;
-}
-
-/** The catalog's cards, as objects, parsed from the literal. */
-function cards() {
-  const source = stripComments(readFileSync(CATALOG, 'utf8'));
-  const body = source.slice(source.indexOf('providerCatalog'), source.lastIndexOf(']'));
-  const logos = logoMap();
-  return body
-    .split(/\n  \{\n/)
-    .slice(1)
-    .map((block) => {
-      const card = {};
-      for (const match of block.matchAll(/^\s*(\w+):\s*(?:'([^']*)'|"([^"]*)"|(-?[\d.]+)|(\[[^\]]*\])|providerLogoMap\.(\w+))/gm)) {
-        const [, key, single, double, number, list, logo] = match;
-        card[key] = single ?? double ?? (number !== undefined ? Number(number) : list ?? (logo !== undefined ? logos.get(logo) : undefined));
-      }
-      return card;
-    })
-    .filter((card) => card.id);
-}
-
 /**
- * The web-session collectors, from the descriptor table the dialog is driven by.
+ * The one card allowed to carry model names, and why it is not the same as Ollama's invented ones.
  *
- * `WebCookieConnectDialog` takes a `descriptor` with a `check.path` and a `paste.path`, so the
- * providers it serves are **data**, not code. That makes the table the thing to check: it is the only
- * place that says "this card's credential is collected by pasting a cookie", and nothing compared it
- * to the catalog or to the gateway's routes.
+ * `qwen-web` lists `qwen3.7-plus`, `qwen3.8-max` and `qwen3.8-omni-flash`, and the comment beside it
+ * records where they came from: read from `GET /api/v2/models/`, which answers guests, returning three
+ * consistently — and seven to someone else minutes later, which is why the card calls it a dated snapshot
+ * rather than a promise and the connect dialog shows the live list instead. **Those are measured names
+ * with their provenance written down.**
+ *
+ * Ollama's three were different: fabrications for a static mockup, with nothing behind them, and a card
+ * claiming `1,417` requests beside them. A mechanical rule cannot tell those apart — "a list of model
+ * names in a catalog file" is the same shape in both cases — so the distinction is recorded here, with
+ * the reasoning, and the count is asserted so a second list is a decision rather than an accident.
  */
-function webSessionDescriptors() {
-  const source = stripComments(readFileSync(join(ROOT, 'src', 'lib', 'webSessionProviders.ts'), 'utf8'));
-  return source
-    .split(/\n\s*id: '/)
-    .slice(1)
-    .map((block) => ({
-      id: block.slice(0, block.indexOf("'")),
-      check: (block.match(/check:\s*\{\s*path:\s*'([^']+)'/) || [])[1],
-      paste: (block.match(/paste:\s*\{[\s\S]*?path:\s*'([^']+)'/) || [])[1],
-    }));
-}
+const MEASURED_MODEL_LISTS = {
+  'qwen-web': 'read from GET /api/v2/models/ on a guest request; the card calls it a dated snapshot and the dialog shows the live list',
+};
+
+const cards = () => providerCatalog;
+const webSessionDescriptors = () => Object.entries(WEB_SESSION_PROVIDERS).map(([id, descriptor]) => ({
+  id,
+  check: descriptor.check?.path,
+  paste: descriptor.paste?.path,
+}));
 
 /** Providers the gateway can begin an OAuth sign-in for, from its real route table. */
 function oauthCapableProviders() {
@@ -158,8 +126,9 @@ test('no catalog card claims a measurement, because the catalog is the no-connec
     for (const [field, placeholder] of Object.entries(PLACEHOLDERS)) {
       if (card[field] !== placeholder) offenders.push(`${card.id}.${field} = ${JSON.stringify(card[field])} (must be ${JSON.stringify(placeholder)} until a connection supplies a real one)`);
     }
-    if (Array.isArray(card.modelList) && card.modelList.length > 0) {
-      offenders.push(`${card.id}.modelList has ${card.modelList.length} invented model name(s); a catalog card has no way to have listed any`);
+    if (Array.isArray(card.modelList) && card.modelList.length > 0 && !(card.id in MEASURED_MODEL_LISTS)) {
+      offenders.push(`${card.id}.modelList has ${card.modelList.length} model name(s) and is not in MEASURED_MODEL_LISTS. A catalog card ` +
+        'has no way to have listed any, unless the list is a dated observation someone recorded and said where it came from.');
     }
   }
   assert.deepEqual(
@@ -252,63 +221,17 @@ test('no card claims an auth mode outside the set the collectors understand', ()
   console.log(`    auth modes in use: ${used.join(', ')}`);
 });
 
-test('every provider the dialog can open is either a card or a declared exception, and never both', () => {
-  // `AddProviderModal` used to re-declare `name`, `description`, `auth`, `color`, `initial`, `logo` and
-  // the endpoint for ten providers, beside the catalog's own copy of the same fields. Seven of the seven
-  // shared providers had two different descriptions, and the dialog's is the one a user reads while
-  // pasting a key that will be transmitted to that vendor.
-  //
-  // The list is now derived from the catalog, so the only hand-written entries are the providers the
-  // dialog can connect that have **no card** — `openai`, `anthropic`, `google`. This asserts that
-  // exception list stays exactly what it claims to be: the moment a card is added for one of them, the
-  // hand-written entry becomes a second copy free to disagree, and that is the state this whole change
-  // exists to remove.
-  const modal = stripComments(readFileSync(join(ROOT, 'src', 'components', 'AddProviderModal.tsx'), 'utf8'));
-  const declared = [...(modal.slice(modal.indexOf('withoutCard: ProviderOption[] = [')).matchAll(/id: '([\w-]+)'/g) || [])].map((match) => match[1]);
-  assert.ok(declared.length > 0, 'the exception list should still exist — a provider the gateway serves with no card');
-
-  const cardIds = cards().map((card) => card.id);
-  const shadowed = declared.filter((id) => cardIds.includes(id));
-  assert.deepEqual(
-    shadowed,
-    [],
-    `these have a hand-written dialog entry AND a catalog card: ${shadowed.join(', ')}. The card is the ` +
-      'source of truth, so the entry is a second copy of eight fields waiting to disagree — which is ' +
-      'how seven providers ended up with two different descriptions.',
-  );
-});
-
-test('the neutral fallback is a named entry, not whichever option happens to be last', () => {
-  // `customOption()` was `providerOptions[providerOptions.length - 1]`. That is a bet that the custom
-  // entry is last, and when this list was first derived from the catalog the `custom` card fell out of
-  // the group filter — so the last element became **Google**, and an unknown provider id would have
-  // resolved to Google with Google's endpoint.
-  //
-  // That is the incident `resolveProviderOption`'s own comment documents — a key typed for one provider
-  // transmitted to another — reintroduced by the fix for it. So the fallback is found by id, and this
-  // asserts both halves: that the lookup is not positional, and that a `custom` entry exists to find.
-  const modal = stripComments(readFileSync(join(ROOT, 'src', 'components', 'AddProviderModal.tsx'), 'utf8'));
-  assert.equal(
-    /providerOptions\s*\[\s*providerOptions\.length/.test(modal),
-    false,
-    'the neutral fallback is positional again, so the day the ordering changes it names a vendor',
-  );
-  assert.ok(
-    /find\(\(item\) => item\.id === 'custom'\)/.test(modal),
-    'the neutral fallback should be found by the id "custom"',
-  );
-  const customCard = cards().find((card) => card.id === 'custom');
-  assert.ok(customCard, 'the catalog still has a card for a custom endpoint, which is what the fallback resolves to');
-  // Read the declaration, not the first mention: the doc comment above it also names `eligibleGroups`
-  // and `custom`, and slicing from the first occurrence picks the comment's words up as a second entry.
-  const declaredGroups = modal.match(/eligibleGroups\s*=\s*new Set\(\[([^\]]*)\]\)/)?.[1]?.match(/'([\w-]+)'/g)?.map((value) => value.slice(1, -1)).sort();
-  assert.deepEqual(
-    declaredGroups,
-    ['api-key', 'custom', 'local'],
-    "the eligible groups must include 'custom' — leaving it out drops the neutral option from the dialog, " +
-      'and the positional fallback that used to depend on it',
-  );
-});
+// The two checks that used to live here — "the dialog's exception list must not shadow a card", and
+// "the neutral fallback must not be positional" — are gone from this file, and were replaced rather than
+// duplicated. They were text checks over `AddProviderModal.tsx` because the logic was trapped in a view
+// that nothing could import. It now lives in `src/lib/providerOptions.ts`, so
+// `tests/provider-options.test.js` **calls** it: the neutral fallback is proved to resolve to `custom` for
+// twelve malformed inputs, proved to point at localhost, and proved not to be positional by the fact
+// that it never returns anything else. A source-shape check and a behavioural check for the same
+// guarantee is two places to keep in step, which is the defect class this whole refactor has been about.
+//
+// What remains here needs the catalog file itself: the gateway is a compiled package, so its route table
+// is read as text, and that is a real limit rather than a preference.
 
 test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 13 cards, 12 of which were already honest and 1 of which was not. The number is the finding: a

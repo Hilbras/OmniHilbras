@@ -1,0 +1,125 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { customOption, isWebSessionProvider, providerOptions, resolveProviderOption } from '../src/lib/providerOptions.ts';
+import { providerCatalog } from '../src/data/providers.ts';
+
+/**
+ * The dialog's provider resolution, called rather than read.
+ *
+ * ## Why this file exists instead of more text checks
+ *
+ * `resolveProviderOption` and the list it reads were in `AddProviderModal.tsx` — a view that imports
+ * React and renders a portal, so nothing could load it. The guarantees around it therefore had to be
+ * checked by scraping source, and that produced checks like *"the fallback must not be
+ * `providerOptions[providerOptions.length - 1]`"*, which infers behaviour from the shape of the code and
+ * then failed on its own doc comment.
+ *
+ * The logic moved to `src/lib/providerOptions.ts` because none of it needs a DOM. Node imports a
+ * type-erased `.ts` module directly, so the same guarantees are now **run**: call it with an input,
+ * assert what comes back. A text check cannot tell a correct implementation from a correct-looking one;
+ * this can.
+ *
+ * ## The guarantee, and why it is worth this much machinery
+ *
+ * A provider id resolves to itself or to the neutral custom option. **Never to a named vendor.**
+ *
+ * This is not hypothetical. `resolveProviderOption` used to fall back to `providerOptions[0]`, which was
+ * OpenAI, so a card the dialog did not know about became OpenAI with OpenAI's endpoint — **a key typed
+ * for one provider was validated against, and transmitted to, another.** The fix hardened the fallback
+ * and left the cause in place. A second copy of the provider list was not a hazard waiting to happen; it
+ * was one, and it shipped.
+ *
+ * The properties below are stated over *inputs* rather than over the source, so they keep holding if the
+ * implementation is rewritten — which is the point of moving it out of the view in the first place.
+ */
+
+/** Ids no card claims, to prove a near-miss is still a near-miss. */
+const UNKNOWN_IDS = [undefined, '', '   ', 'openai ', 'OpenAI', 'openrouter2', 'clines', '../openai', 'toString', 'constructor', '__proto__', 'constructor.name'];
+
+/** Every id the product knows about, from both lists. */
+function knownIds() {
+  return [...new Set([...providerCatalog.map((card) => card.id), ...providerOptions.map((option) => option.id)])];
+}
+
+test('THE GUARANTEE: a provider id resolves to itself, or to the neutral option, and never to a vendor', () => {
+  const neutral = customOption();
+  for (const id of UNKNOWN_IDS) {
+    const resolved = resolveProviderOption(id);
+    assert.equal(
+      resolved.id,
+      'custom',
+      `resolveProviderOption(${JSON.stringify(id)}) resolved to ${JSON.stringify(resolved.id)} — a key pasted for an unknown ` +
+        `provider would be sent to ${resolved.defaultEndpoint}, which is a vendor nobody named`,
+    );
+    assert.equal(resolved.id, neutral.id);
+  }
+});
+
+test('every id the product knows resolves to itself', () => {
+  // The other half of the same property: resolution is not lossy for anything real, or the fix would
+  // be "send it to the wrong place" rather than "ask the user".
+  for (const id of knownIds()) {
+    assert.equal(resolveProviderOption(id).id, id, `${id} did not resolve to itself`);
+  }
+});
+
+test('the neutral option is the local custom endpoint, not a hosted vendor', () => {
+  const neutral = customOption();
+  assert.equal(neutral.id, 'custom');
+  // A hostname check rather than a string match, because this is the property that matters: where does
+  // a key go? `localhost` and `127.0.0.1` are the only two answers that are safe by construction.
+  const host = new URL(neutral.defaultEndpoint ?? '').hostname;
+  assert.ok(host === 'localhost' || host === '127.0.0.1', `the neutral fallback points at ${host}, which is a machine the operator does not own`);
+  assert.equal(isWebSessionProvider(neutral.id), false);
+});
+
+test('a web-session provider is recognised, so the keyed dialog is never opened for one', () => {
+  // A card for a provider that is *signed into* has no key to collect, and opening the keyed dialog
+  // for one produces a form that asks for a credential the provider does not use.
+  const webSession = providerCatalog.filter((card) => ['chatgpt-web', 'qwen-web', 'deepseek-web'].includes(card.id));
+  assert.equal(webSession.length, 3, 'the fixture moved: update the ids here');
+  for (const card of webSession) assert.equal(isWebSessionProvider(card.id), true, `${card.id} is a web-session provider`);
+  for (const card of providerCatalog.filter((c) => !webSession.includes(c))) {
+    assert.equal(isWebSessionProvider(card.id), false, `${card.id} should not be treated as a web-session provider`);
+  }
+  assert.equal(isWebSessionProvider(undefined), false);
+  assert.equal(isWebSessionProvider('nope'), false);
+});
+
+test('no id appears twice, and every option is usable', () => {
+  const ids = providerOptions.map((option) => option.id);
+  assert.deepEqual([...new Set(ids)].sort(), [...ids].sort(), `duplicate option ids: ${ids.filter((id, index) => ids.indexOf(id) !== index).join(', ')}`);
+  for (const option of providerOptions) {
+    for (const field of ['id', 'name', 'description', 'auth', 'color', 'initial']) {
+      assert.equal(typeof option[field], 'string', `${option.id}.${field} is not a string`);
+      assert.ok(String(option[field]).length > 0, `${option.id}.${field} is empty`);
+    }
+    assert.match(option.color, /^#[0-9a-fA-F]{6}$/, `${option.id} has a colour that is not a hex triple`);
+    assert.equal(option.initial.length, 1, `${option.id} has a ${option.initial.length}-character initial`);
+    assert.ok(option.defaultEndpoint, `${option.id} has no default endpoint, so a key would be sent nowhere`);
+    assert.doesNotThrow(() => new URL(String(option.defaultEndpoint)), `${option.id} has an unparseable endpoint`);
+  }
+});
+
+test('an option is derived from its card, so the two cannot hold different copy', () => {
+  // The duplication this replaced: seven of seven shared providers had two different descriptions, and
+  // the dialog's was the one a user read while pasting a key that would be sent to that vendor. Now the
+  // dialog's text *is* the card's text, which is a stronger claim than "they agree today".
+  for (const card of providerCatalog) {
+    const option = providerOptions.find((item) => item.id === card.id);
+    if (!option) continue;
+    for (const field of ['name', 'description', 'auth', 'color', 'initial']) {
+      assert.equal(option[field], card[field], `${card.id}.${field} differs between the card and the dialog`);
+    }
+    assert.equal(option.defaultEndpoint, card.endpoint, `${card.id}'s endpoint differs between the card and the dialog`);
+  }
+});
+
+test('THE COUNT, asserted so it cannot drift quietly', () => {
+  // Ten options from seven eligible cards and three declared exceptions, over thirteen cards. These
+  // were the counts when the list stopped being a second copy; a change to any of them is a product
+  // decision, so it has to be made here rather than arriving as an off-by-one.
+  assert.equal(providerCatalog.length, 13, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerOptions.length, 10, `the dialog now offers ${providerOptions.length} options`);
+  console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
+});

@@ -734,6 +734,65 @@ plant the defect, or do not claim the guard works.
 tests    818 → 821
 ```
 
+---
+
+## Task 75: stop scraping the dashboard's source, and start calling it
+
+`resolveProviderOption`, the provider list it reads, and the two guards around them were inside
+`AddProviderModal.tsx` — a view that imports React and renders a portal, so **nothing could load it**.
+That is why the checks written for them were text checks: *"the fallback must not be
+`providerOptions[providerOptions.length - 1]`"*, which infers behaviour from the shape of the code, and
+which failed on its own doc comment when the comment happened to name `eligibleGroups` and `custom`.
+
+None of it needs a DOM. It moved to `src/lib/providerOptions.ts`, and `tests/provider-options.test.js`
+now **calls** it. That required `"allowImportingTsExtensions": true` in the root `tsconfig.json` — which
+`noEmit: true` already permitted, so it only allows the extension — and Node follows
+`'../data/providers.ts'` to the real module.
+
+The properties are stated over inputs, so they survive a rewrite of the implementation:
+
+- **the guarantee**: twelve malformed ids — `''`, `'openai '`, `'OpenAI'`, `'constructor'`, `'__proto__'`
+  and others — all resolve to `custom`, never to a named vendor. This is the incident from Task 74,
+  which shipped once already: a key typed for one provider transmitted to another.
+- every id the product knows resolves to itself, so the fix is not "send it somewhere else";
+- the neutral option's endpoint is checked by **hostname** — `localhost` or `127.0.0.1` — because "where
+  does a key go" is the property that matters;
+- every option's fields are present, its colour is a hex triple, its initial is one character, its
+  endpoint parses.
+
+**58 lines of text checks were deleted rather than kept.** A source-shape check and a behavioural check
+for the same guarantee is two places to keep in step, which is the defect class this refactoring has been
+about for thirty releases.
+
+## And reading the real data immediately found a second invented list
+
+Replacing the hand-rolled parser in `tests/provider-cards.test.js` with a real import of
+`providerCatalog` made a check fail that had been passing:
+
+```
+qwen-web.modelList has 3 invented model name(s)
+```
+
+`qwen-web` carries `qwen3.7-plus`, `qwen3.8-max` and `qwen3.8-omni-flash`. My regex parsed
+`\[[^\]]*\]` on one line, the list spans four, and **the parser silently saw no list at all** — the
+agreement-with-itself failure that is the whole theme of this work, in the guard written to end it.
+
+**And it was not the same defect.** Those three names are measured: the comment beside them records
+`GET /api/v2/models/`, which answers guests, returning three consistently and seven to someone else
+minutes later — which is why the card calls it a dated snapshot rather than a promise, and why the dialog
+shows the live list. Ollama's three were fabrications for a mockup beside a claim of `1,417` requests.
+A mechanical rule cannot tell them apart; "a list of model names in a catalog file" is the same shape in
+both. So the difference is recorded as a one-entry exemption with the provenance quoted, and the entry
+count is asserted so a second list is a decision.
+
+I was one command away from deleting a real, dated, documented measurement because my invariant did not
+distinguish *invented* from *observed*. **A check that is right for the case you found and wrong for the
+case next to it is not a check; it is a coincidence that compiles.**
+
+```
+tests    821 → 826
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

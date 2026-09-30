@@ -1,141 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, CheckCircle2, ChevronDown, CircleAlert, LoaderCircle, LockKeyhole, ShieldCheck } from 'lucide-react';
-import { getProviderLogo, providerCatalog } from '../data/providers';
-import { webSessionProviderIds } from '../lib/webSessionProviders';
 import { checkConnectionCredential } from '../lib/gatewayClient';
 
-export type ProviderOption = {
-  id: string;
-  name: string;
-  description: string;
-  auth: string;
-  color: string;
-  initial: string;
-  logo?: string;
-  defaultEndpoint?: string;
-};
+// The provider list, the fallback, and the two guards around them live in `lib/providerOptions`.
+//
+// They were in this file, and that is why the guarantees could only be checked by scraping text out of
+// a `.tsx`: the logic was trapped inside a view that imports React and renders a portal, so nothing
+// could load it. Nothing here needs a DOM, so it moved, and `tests/provider-options.test.js` now calls
+// it — which is how the "never substitute a different vendor" rule is checked as behaviour rather than
+// inferred from source.
+import { customOption, isWebSessionProvider, providerOptions, resolveProviderOption, type ProviderOption } from '../lib/providerOptions';
 
-/**
- * Providers this dialog can collect a key for that have **no card** on the providers page.
- *
- * The gateway serves `openai`, `anthropic` and `gemini`, so these are connectable — the page simply
- * does not list them. That is a product decision about the card list, not about this dialog, so it is
- * recorded here rather than resolved by inventing three cards. Everything else is derived from
- * `providerCatalog` below, so this is the whole of the second list.
- */
-const withoutCard: ProviderOption[] = [
-  { id: 'openai', name: 'OpenAI', description: 'GPT and Responses APIs', auth: 'API key', color: '#6fdb9b', initial: 'O', logo: getProviderLogo('openai'), defaultEndpoint: 'https://api.openai.com/v1' },
-  { id: 'anthropic', name: 'Anthropic', description: 'Claude models', auth: 'API key', color: '#d97757', initial: 'A', logo: getProviderLogo('anthropic'), defaultEndpoint: 'https://api.anthropic.com/v1' },
-  { id: 'google', name: 'Google', description: 'Gemini models', auth: 'API key', color: '#83b7ff', initial: 'G', logo: getProviderLogo('google'), defaultEndpoint: 'https://generativelanguage.googleapis.com/v1beta' },
-];
+export { customOption, isWebSessionProvider, providerOptions, resolveProviderOption };
+export type { ProviderOption };
 
-/**
- * One list of providers, derived rather than re-declared.
- *
- * This used to be a hand-written list of ten, and it re-declared `name`, `description`, `auth`,
- * `color`, `initial`, `logo` and the endpoint for every one of them — while `providerCatalog` held the
- * same fields for the same providers. **Seven of the seven shared providers had two different
- * descriptions**, and the dialog's copy is the one a user reads while pasting a key that will be
- * transmitted to that vendor:
- *
- * ```
- * ollama      catalog: "Private local inference for coding models and offline development."
- *             modal:   "Local models on your machine"
- * openrouter  catalog: "One connection for a broad catalog of hosted models and providers."
- *             modal:   "Many models through one API"
- * ```
- *
- * That duplication had already caused a real incident. The comment on `resolveProviderOption` below
- * records it: a card the dialog did not know about fell back to `providerOptions[0]`, which was
- * OpenAI, so **a key typed for one provider was validated against, and transmitted to, another**. The
- * fix hardened the fallback, which was the right thing to do and left the cause in place. A second copy
- * of a list is not a fallback hazard waiting to happen; it is one.
- *
- * `endpoint` and `defaultEndpoint` are the same field under two names, so the map below is the whole
- * translation. The card's `group` decides eligibility: a web-session or OAuth card is signed into
- * rather than keyed, and this dialog is the wrong tool for it — see `isWebSessionProvider`.
- *
- * **`custom` is eligible.** Writing this filter the first time round left it out, because its group is
- * `custom` and not `api-key` — and `customOption()` reaches for `providerOptions[last]`, so the
- * fallback for an unknown id became **Google**, with Google's endpoint. That is the incident described
- * above, reintroduced by the fix for it: a key typed for an unknown provider would have been
- * transmitted to Google. The group list is now correct, and `customOption` no longer depends on
- * position.
- */
-const eligibleGroups = new Set(['api-key', 'local', 'custom']);
-
-export const providerOptions: ProviderOption[] = [
-  ...providerCatalog
-    .filter((card) => eligibleGroups.has(card.group))
-    .map((card) => ({
-      id: card.id,
-      name: card.name,
-      description: card.description,
-      auth: card.auth,
-      color: card.color,
-      initial: card.initial,
-      logo: card.logo,
-      defaultEndpoint: card.endpoint,
-    })),
-  ...withoutCard,
-];
-
-/**
- * The neutral option. Never a named vendor.
- *
- * Found **by id**, not by position. This was `providerOptions[providerOptions.length - 1]`, which is a
- * bet that the custom entry is last — and when the list above was derived from the catalog and the
- * `custom` card fell out of the filter, the last element became Google. A positional lookup for "the
- * neutral fallback" is a lookup that names a vendor the day the ordering changes, and the whole point
- * of the function is that it never does.
- */
-const customOption = (): ProviderOption => {
-  const option = providerOptions.find((item) => item.id === 'custom');
-  if (!option) throw new Error('AddProviderModal: the neutral "custom" option is missing, so an unknown provider would fall back to a named vendor.');
-  return option;
-};
-
-/**
- * Whether this modal is the wrong tool for a provider.
- *
- * It collects an API key. A web-session provider has none — it is signed into — so opening
- * this for one asks for a credential the provider does not use, and the saved result is a
- * connection that cannot work. Checked here rather than only at the call site so no other
- * caller can repeat the mistake.
- */
-export function isWebSessionProvider(providerId: string | undefined): boolean {
-  if (!providerId) return false;
-  const card = providerCatalog.find((item) => item.id === providerId);
-  return Boolean(card && webSessionProviderIds().includes(card.id));
-}
-
-/**
- * Resolves a provider id to an option without ever substituting a different vendor.
- *
- * This used to fall back to `providerOptions[0]`, which is OpenAI. A card the dialog did
- * not know about therefore became OpenAI, with OpenAI's endpoint — so a key typed for one
- * provider was validated against, and transmitted to, another. A key must never be able
- * to reach a vendor the operator did not name, so an unknown id resolves to the catalog
- * card when there is one, and to the neutral custom option otherwise.
- */
-export function resolveProviderOption(providerId: string | undefined): ProviderOption {
-  const known = providerOptions.find((item) => item.id === providerId);
-  if (known) return known;
-  const card = providerCatalog.find((item) => item.id === providerId);
-  if (!card) return customOption();
-  return {
-    id: card.id,
-    name: card.name,
-    description: card.description,
-    // The catalog spells keyless auth as "No key", which is what the modal tests for.
-    auth: /no key/i.test(card.auth) ? 'No key' : card.auth,
-    color: card.color,
-    initial: card.initial,
-    ...(card.logo ? { logo: card.logo } : {}),
-    defaultEndpoint: card.endpoint,
-  };
-}
 
 export type NewProvider = {
   providerId: string;
