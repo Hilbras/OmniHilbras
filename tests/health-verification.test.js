@@ -59,9 +59,23 @@ test('every adapter that answers a health check declares what it verified', () =
     const body = source.slice(start);
     const verdicts = [...body.matchAll(/verified:\s*'([^']+)'/g)].map((match) => match[1]);
     const returns = [...body.matchAll(/status:\s*'(healthy|degraded|unavailable)'/g)].length;
-    // Every `status:` literal inside a health check is a verdict, so there must be one scope per verdict.
-    if (verdicts.length < returns) {
+
+    // **A health check that declares no scope is the defect, whether or not the counters disagree.**
+    //
+    // The counting rule alone is satisfied by `0 < 0`. A `healthCheck` whose status comes from a variable
+    // — `const st = 'healthy'; return { status: st }` — contributes 0 literals to `returns` and 0 to
+    // `verdicts`, so the comparison passed with no scope declared anywhere. Proven by planting exactly
+    // that as a second `healthCheck`: `ℹ pass 5  ℹ fail 0`.
+    //
+    // The narrow slice above fixed the *scope* problem it was written for — a verdict in another branch
+    // no longer counts for this one — and left this one, because both halves can be zero at once.
+    if (returns > 0 && verdicts.length < returns) {
       offenders.push(`${file}: ${returns} verdict(s) returned, ${verdicts.length} scope(s) declared`);
+    }
+    // So the floor is stated directly: a check that runs and answers must say what it verified. Counting
+    // how many literals a file happens to contain cannot establish that.
+    if (verdicts.length === 0) {
+      offenders.push(`${file}: a healthCheck declares no \`verified\` scope at all — every health answer must say whether it verified a credential or inference`);
     }
     for (const verdict of verdicts) {
       if (verdict !== 'credential' && verdict !== 'inference') offenders.push(`${file}: unknown scope '${verdict}'`);

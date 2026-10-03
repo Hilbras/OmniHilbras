@@ -98,17 +98,29 @@ function storageAccesses() {
   const accesses = [];
   for (const file of dashboardFiles()) {
     const source = stripComments(readFileSync(join(ROOT, file), 'utf8'));
-    const pattern = /\b(localStorage|sessionStorage)\s*\.\s*(getItem|setItem|removeItem)\s*\(\s*(?:'([^']*)'|"([^"]*)"|([A-Za-z_$][\w$]*))\s*(?:,\s*([^)]*))?\)/g;
+    // The three key forms: a quoted literal, a bare identifier resolved through `constants`, and — since
+    // 1.49.0 — a **template literal**.
+    //
+    // The template form was a real hole. `localStorage.setItem(`${PREFIX}apiKey`, v)` matched none of
+    // `'…'` / `"…"` / `identifier`, so the access was not merely unflagged — it was **invisible**: the
+    // count test still reported 3 accesses while the file held 4. A contributor who hoisted a key into a
+    // prefix constant, which is this file's own prescribed refactor for an unresolvable key, walked
+    // straight past the allowlist without failing anything.
+    const pattern = /\b(localStorage|sessionStorage)\s*\.\s*(getItem|setItem|removeItem)\s*\(\s*(?:'([^']*)'|"([^"]*)"|`([^`]*)`|([A-Za-z_$][\w$]*))\s*(?:,\s*([^)]*))?\)/g;
     for (const match of source.matchAll(pattern)) {
-      const literal = match[3] ?? match[4];
-      const key = literal !== undefined ? literal : constants.get(match[5]);
+      const literal = match[3] ?? match[4] ?? match[5];
+      const key = literal !== undefined ? literal : constants.get(match[6]);
       accesses.push({
         file,
         store: match[1],
         method: match[2],
         key,
-        value: match[6]?.trim(),
-        resolvedFrom: literal !== undefined ? 'literal' : `const ${match[5]}`,
+        value: match[7]?.trim(),
+        resolvedFrom: literal !== undefined ? 'literal' : `const ${match[6]}`,
+        // A template literal is a *computed* key: the final value depends on interpolation. Recording
+        // the raw text is not enough, so the allowlist check below also scans the raw form for a
+        // credential-shaped name, which is the thing actually being smuggled.
+        isTemplate: match[5] !== undefined,
       });
     }
   }

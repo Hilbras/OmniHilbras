@@ -2027,6 +2027,90 @@ There was nothing here to fix, which is worth stating plainly rather than report
 publish credential for a package that is public. The work above establishes it is not *leaked*; it does
 not make it *yours alone*. Only the owner can revoke and reissue it.
 
+## Task 94: three guards that were green, plausible, and blind — each proven by planting
+
+An audit pass claimed three guards could not fail. I reproduced all three before touching anything,
+because a claim about a guard is the same kind of claim this project keeps being wrong about.
+
+### 1. `provider-card-merge.test.js` — the "general property" was a two-field denylist
+
+The test is named *"every field the merge changes is traceable to the connection or the health reading"*
+and its header says the suite deliberately does **not** list forbidden fields. The implementation was:
+
+```js
+assert.equal(changed.includes('lastUsed'), false);
+assert.equal(changed.includes('requests'), false);
+```
+
+Its own comment called that "the list the general property reduces to for today's fields". It did not
+reduce to anything — it named two fields and stopped. So I planted a third:
+
+```ts
+spend: `$${(1200 + Math.round(Math.random() * 80)).toLocaleString('en-US')} this month`,
+```
+
+```
+✔ every field the merge changes is traceable to the connection or the health reading
+ℹ pass 8   ℹ fail 0
+```
+
+A fabricated monthly figure computed from `Math.random()`, on a card whose entire design rule is that no
+field claims what nobody measured — in the one file that documents forbidding exactly that list.
+
+Now asserts `MEASURED_FIELDS`, keyed by field name **with its source**, plus a second test that each
+permitted value equals the input it claims to come from. Both plants fail:
+
+| Plant | Result |
+| --- | --- |
+| `spend: \`$${1200 + random} this month\`` | ✖ |
+| `monthlySpendCents: 148023` | ✖ |
+
+The second is the one that matters: a name I had not written down.
+
+### 2. `browser-storage.test.js` — a template-literal key was invisible, not merely unflagged
+
+The parser matched three forms — `'…'`, `"…"`, and a bare identifier resolved through its constants table.
+**No backtick alternative.** So:
+
+```ts
+localStorage.setItem(`${PREFIX}apiKey`, v)
+```
+
+matched nothing at all. The access was not just unflagged; the count test still reported **3 accesses
+while the file held 4**. A contributor who hoisted a key into a prefix constant — which is this file's own
+prescribed refactor for an unresolvable key — walked past the allowlist without failing anything.
+
+Now matches `` `…` `` too, and records `isTemplate` so a computed key is treated as one. The same plant now
+fails two tests, including `THE COUNT`.
+
+### 3. `health-verification.test.js` — satisfied by `0 < 0`
+
+```js
+const verdicts = [...body.matchAll(/verified:\s*'([^']+)'/g)].length;
+const returns  = [...body.matchAll(/status:\s*'(healthy|degraded|unavailable)'/g)].length;
+if (verdicts.length < returns) offenders.push(...)
+```
+
+Both sides count **string literals**. A health check that returns its status through a variable
+contributes 0 to `returns` and 0 to `verdicts`, so the comparison passed with **no scope declared
+anywhere**.
+
+The narrow slice added earlier fixed the problem it was written for — a verdict in another branch no longer
+counts for this one — and left this one, because both halves can be zero at once.
+
+The floor is now stated directly: a `healthCheck` that answers must declare a scope, whatever the counts
+say. Verified by planting a `zen.ts` with every `verified:` removed.
+
+**A note on my own first plant here.** I appended a second `healthCheck` to `zen.ts` and it passed — which
+looked like the guard still being blind. It was not: the slice runs from the *first* `healthCheck` to
+end-of-file, so an appended check sits inside it and shares the first one's verdict. My plant was wrong,
+not the fix, and planting honestly (removing the scopes from a real check) caught it. Worth recording
+because "the plant did not fail" and "the fix does not work" are indistinguishable until you check which.
+
+```
+tests    918 → 921
+```
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

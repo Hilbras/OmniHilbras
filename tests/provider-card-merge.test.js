@@ -101,15 +101,89 @@ test('every field the merge changes is traceable to the connection or the health
   assert.equal(after.status, 'connected');
   assert.equal(after.endpoint, 'https://proxy.example/v1', 'the connection’s own endpoint is used verbatim');
 
-  // And the two that are not measured are not among them. This is the list the general property
-  // reduces to for today's fields, and it is here so a failure names them.
-  //
   // `health` *is* on the measured side — it is the poll's verdict rendered as a bar — so it changes to
   // 100 here. I first asserted it could not, having carried the degraded case's expectation across by
   // mistake: the general property is what decides, and the property says a measured field may move.
   assert.equal(after.health, 100, 'a healthy poll is the measurement behind the bar');
-  assert.equal(changed.includes('lastUsed'), false, `lastUsed changed to ${JSON.stringify(after.lastUsed)} and nothing measured it`);
-  assert.equal(changed.includes('requests'), false, `requests changed to ${JSON.stringify(after.requests)} and no counter exists`);
+});
+
+/**
+ * The fields a merge is allowed to change, and the sources each one is traceable to.
+ *
+ * ## Why this list replaced two assertions
+ *
+ * The previous version asserted `changed.includes('lastUsed') === false` and the same for `requests`.
+ * Its comment claimed it "is the list the general property reduces to for today's fields", which is not
+ * what it was — it was a **two-field denylist**, and the next invented field walked straight past it.
+ *
+ * Proven by planting a `spend` field computed from `Math.random()` in `mergeGatewayConnections`:
+ *
+ * ```
+ * ✔ every field the merge changes is traceable to the connection or the health reading
+ * ℹ pass 8   ℹ fail 0
+ * ```
+ *
+ * A fabricated `$1,200 this month`, sourced from nothing, on a card whose whole design rule is that no
+ * field may claim something nobody measured. And the header of the file says this suite deliberately
+ * does **not** list forbidden fields — so the file was doing precisely what its own documentation
+ * forbids, in the one place where it matters most.
+ *
+ * ## What is asserted now
+ *
+ * The set of keys a merge may change, **and** that each changed value is one of the inputs. A new field
+ * invented from nothing is not in `MEASURED_FIELDS`, so it fails whether it is called `spend`, `cost`,
+ * or anything else. Adding a genuinely measured field means adding it here with its source — which is
+ * the review a new field should have had.
+ */
+const MEASURED_FIELDS = {
+  status: 'the connection record: credential present, enabled, and not failing a health poll',
+  endpoint: 'the connection record, verbatim',
+  latency: 'the health poll latencyMs, rendered as a string',
+  health: "the health poll's own verdict, not a percentage of anything",
+  models: 'the connection modelIds and the model policy',
+  modelList: 'the connection modelIds',
+  modelMeta: 'the connection model metadata',
+};
+
+test('the merge changes only measured fields, whatever they are called', () => {
+  const before = providerCatalog.find((card) => card.id === 'openrouter');
+  const after = mergeGatewayConnections(
+    providerCatalog,
+    [connection({ endpoint: 'https://proxy.example/v1' })],
+    health('healthy', 137),
+  ).find((entry) => entry.id === 'openrouter');
+  const changed = Object.keys(after).filter((key) => JSON.stringify(after[key]) !== JSON.stringify(before[key]));
+
+  const unmeasured = changed.filter((key) => !(key in MEASURED_FIELDS));
+  assert.deepEqual(
+    unmeasured,
+    [],
+    `the merge changed ${unmeasured.join(', ')} and nothing measured it. A field that is genuinely\n` +
+      `measured belongs in MEASURED_FIELDS with its source; one invented from nothing does not belong\n` +
+      `in the merge at all. (${changed.join(', ')} all changed here.)`,
+  );
+  // And the reverse direction: a field in the list that did NOT move would mean the fixture is not
+  // exercising it, so the list cannot rot into a stale permission.
+  assert.ok(
+    changed.length > 0,
+    'nothing changed, so this test is asserting an empty list and would pass against any merge at all',
+  );
+});
+
+test('every changed value is one of the inputs, not something shaped like it', () => {
+  // The half that "changed only measured fields" does not cover: a field may be permitted AND still
+  // carry a fabricated value. So each permitted field is compared against the input it claims to come from.
+  const after = mergeGatewayConnections(
+    providerCatalog,
+    [connection({ endpoint: 'https://proxy.example/v1' })],
+    health('healthy', 137),
+  ).find((entry) => entry.id === 'openrouter');
+  const conn = connection({ endpoint: 'https://proxy.example/v1' });
+
+  assert.equal(after.endpoint, conn.endpoint, 'the endpoint must be the connection value verbatim');
+  assert.equal(after.latency, '137 ms', 'the latency must be the poll value, formatted and not invented');
+  assert.equal(after.health, 100, 'health is the poll verdict, not a percentage of a count');
+  assert.equal(after.models, `${conn.modelIds.length} models · free import`, 'the model count is the import size');
 });
 
 test('a connection with no credential and no models says so, rather than implying success', () => {
