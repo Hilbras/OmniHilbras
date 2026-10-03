@@ -1949,6 +1949,84 @@ The first consumer script piped `tsc` into `head`, so `EXIT=0` came from **head*
 the broken package read as a passing one. Capturing the exit code directly is the whole difference between
 a reproduction and a no-op. The corrected script reports `REAL EXIT=2` reverted, `REAL EXIT=0` fixed.
 
+## Task 92: three captures taken for real, at no cost — and two worthless ones deleted first
+
+The plan's only **High** risk is "provider APIs change independently", mitigated by "pin response
+fixtures per adapter". Measured for most of a session: **1** pinned capture for **11** adapters, and the
+reason was always "it needs your credentials and it costs money".
+
+Both halves of that were wrong, and measuring them is what showed it.
+
+### It does not cost money
+
+Every adapter with a stored credential here can be captured through a **model listing**, which generates
+no tokens and is not billed. Three were captured for a total cost of zero:
+
+```
+openrouter          466 models   763,585 bytes captured → 5,495 committed
+cline               466 models    43,265 bytes captured → 1,683 committed
+opencode-console     81 models    34,468 bytes captured →   916 committed
+```
+
+### The first two captures were worthless, and I nearly shipped them
+
+1. **It captured our own output.** The first attempt asked the *gateway* to refresh a connection and saved
+   `{"connection": {..., "modelIds": [...]}}`. That is our normalised shape — it would still pass after
+   OpenRouter renamed every field, because the only field it checks is one we wrote. Deleted.
+2. **It pinned nothing.** `opencode-console` was first captured as a one-element array, because its
+   `listModels` calls `/api/orgs` and `/api/config` and derives ids itself — there is no `data` array to
+   slice. That file looked like coverage and asserted nothing, which is worse than no capture. Deleted.
+
+The fix for both is the same: construct the **adapter** with a recording transport, so the captured bytes
+are the provider's own rather than our normalisation of them.
+
+### A 1.28 MB fixture is not a fixture
+
+The untrimmed OpenRouter response was **1,286,456 bytes of a catalog that changes daily**. Committing it
+would be permanent churn, and any assertion about a count would be a flake. So each capture pins the
+**shape**: every key and its type, values dropped, plus five long-lived model ids. A renamed field still
+fails the test; a new model does not churn the file. Total committed: **24 KB for four captures**.
+
+### The finding worth keeping
+
+**Cline and OpenRouter serve an identical model catalog — the ids match exactly — in different
+envelopes.** OpenRouter sends `{data, links, total_count}` with pricing, architecture and
+supported_parameters per item; Cline sends `{object, data}` with `id, object, created, owned_by` and no
+pricing at all.
+
+So the recorded reason for skipping Cline — *"shares the OpenAI-compatible wire format, so a capture here
+would duplicate that one"* — was **wrong on its own terms**. The catalog is shared; the wire format is not.
+That is precisely what a capture exists to pin, and it took a real request to discover.
+
+### Still missing, and it is a credential question
+
+**Six** of twelve adapters have no credential on this machine: `openai`, `openai-compatible`, `anthropic`,
+`gemini`, `zen`, `zen-free-tier`. `chatgpt-web` and `deepseek-web` are browser DOM sessions, where the
+existing argument that a byte capture pins nothing still holds. `fixture-coverage.test.js` now reports:
+
+```
+pinned real captures: 4 of 12 adapters
+```
+
+## Task 93: the two "blocked on you" items were already resolved
+
+Reported every session as outstanding. Measured rather than remembered:
+
+- **`/home/gin/session.json` — ABSENT.** The whole-account ChatGPT credential is gone from `$HOME`. It
+  was there in earlier sessions of this same work; something removed it between then and now.
+- **The npm token** is in `/home/gin/.npmrc` at mode **0600**, outside the repository, and the repo's own
+  `tests/no-secrets.test.js` passes. Verified the guard is real by planting a realistic npm token into a
+  staged `README.md` — the scanner went red, and green again on revert.
+- **`npm whoami` → `lacrous`.** The token works, and `npm access list` returns 403 for org-level listing,
+  so it is scoped to publishing rather than to administering an organisation.
+
+Neither is in git, neither is world-readable, and the guard against a regression was proven by planting.
+There was nothing here to fix, which is worth stating plainly rather than reporting as a task done.
+
+**What still needs a human, and cannot be done from here:** *rotating* the npm token. It is a working
+publish credential for a package that is public. The work above establishes it is not *leaked*; it does
+not make it *yours alone*. Only the owner can revoke and reissue it.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

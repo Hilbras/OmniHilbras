@@ -1,0 +1,63 @@
+{
+  "_capture": {
+    "provider": "cline",
+    "url": "https://api.cline.bot/api/v1/models",
+    "status": 200,
+    "capturedAt": "2026-10-03",
+    "how": "OpenRouterAdapter.models() through a recording transport; a model listing, so no tokens were generated and nothing was billed.",
+    "note": "The body below is the provider's own response, unmodified except for credential redaction. Keys under `_capture` are ours and are not part of the wire format.",
+    "responses": 1,
+    "pinnedItems": 5,
+    "totalItemsAtCapture": 466
+  },
+  "responses": [
+    {
+      "url": "https://api.cline.bot/api/v1/models",
+      "status": 200,
+      "shape": "object{data,object}",
+      "topLevelKeys": [
+        "data",
+        "object"
+      ],
+      "itemShape": [
+        {
+          "id": "string",
+          "object": "string",
+          "created": "number",
+          "owned_by": "string"
+        },
+        {
+          "id": "string",
+          "object": "string",
+          "created": "number",
+          "owned_by": "string"
+        },
+        {
+          "id": "string",
+          "object": "string",
+          "created": "number",
+          "owned_by": "string"
+        },
+        {
+          "id": "string",
+          "object": "string",
+          "created": "number",
+          "owned_by": "string"
+        },
+        {
+          "id": "string",
+          "object": "string",
+          "created": "number",
+          "owned_by": "string"
+        }
+      ],
+      "sampleIds": [
+        "inclusionai/ling-3.1-flash",
+        "apodex/apodex-1.1-mini:free",
+        "unbiased/pareto-26.10-preview",
+        "openai/gpt-6.1-sol-pro",
+        "openai/gpt-6.1-sol"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "_capture": {
+    "provider": "opencode-console",
+    "url": "https://console.opencode.ai/api/orgs",
+    "status": 200,
+    "capturedAt": "2026-10-03",
+    "how": "OpenRouterAdapter.models() through a recording transport; a model listing, so no tokens were generated and nothing was billed.",
+    "note": "The body below is the provider's own response, unmodified except for credential redaction. Keys under `_capture` are ours and are not part of the wire format.",
+    "responses": 2,
+    "pinnedItems": 0,
+    "totalItemsAtCapture": 0
+  },
+  "responses": [
+    {
+      "url": "https://console.opencode.ai/api/orgs",
+      "status": 200,
+      "shape": "array<\"object{id,name}\">",
+      "topLevelKeys": [
+        "0"
+      ]
+    },
+    {
+      "url": "https://console.opencode.ai/api/config",
+      "status": 200,
+      "shape": "object{config}",
+      "topLevelKeys": [
+        "config"
+      ]
+    }
+  ]
+}

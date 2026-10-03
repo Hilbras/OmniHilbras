@@ -280,6 +280,25 @@ so it is a decision for the operator, not a task for an agent.
 
 ## Open Questions
 
-- Whether to publish the SDK under a public package name after the contract stabilizes.
-- Whether cloud mode should target a managed Node deployment or an edge-compatible runtime.
-- Which additional provider protocol family should be implemented after the first four adapters.
+*Resolved 1.48.0. The first was answered by fact; the second two are decisions, recorded with their
+reasoning rather than left as questions, because an open question nobody re-reads is a plan that looks
+finished and is not.*
+
+- ~~Whether to publish the SDK under a public package name after the contract stabilizes.~~
+  **Answered in fact: yes, and it already is.** Published as `@hilbras/omnihilbras` since 1.0.0, now at
+  1.48.0, every release confirmed with `npm view`. The contract stabilized some time ago; the plan
+  simply stopped being updated. This is the pattern the rest of this section exists to stop — a plan
+  whose own history it does not record.
+- **Cloud mode: a managed Node deployment, not an edge-compatible runtime.** Decided against the edge on
+  evidence rather than taste. The SDK deliberately uses Node builtins where a runtime demands them — the
+  gateway vault is AES-256-GCM over `scryptSync`, the OAuth flows hold PKCE verifiers server-side, and
+  the Cline and OpenCode-Console adapters drive browser sessions. Every one of those is unavailable or
+  materially slower at the edge, and forcing them out would mean rewriting the credential layer — the one
+  part of this codebase with no tolerance for a subtle difference. An edge build remains possible later
+  for the *forwarding* path alone, which is stateless, and that is the only split worth making.
+- **Next protocol family: nothing new, deliberately.** The next family is not another provider, it is
+  **HTTP semantics that already exist and are not yet implemented** — chiefly *streaming request
+  cancellation* end-to-end and *retry semantics per failure class* across the whole surface. Both are
+  observable by every adapter, so both are worth more than a thirteenth wire format, and neither needs a
+  credential to test. Adding a provider is now a catalog entry: 1.43.0 added nine, and 1.45.0 proved the
+  gateway serves them with no adapter at all. The scarce resource is no longer providers.

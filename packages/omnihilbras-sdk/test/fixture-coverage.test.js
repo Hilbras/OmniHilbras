@@ -11,9 +11,16 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
  * > Keep adapters isolated, use official API documentation, and **pin response fixtures per
  * > adapter.**
  *
- * Measured, there is **one** pinned fixture for **eleven** adapters: `kiro-stream.bin`, and it is
- * done properly — a real captured binary eventstream, with tests asserting both the answer it
- * decoded to and the frame names the service really sends.
+ * Measured, there are **four** pinned fixtures for **twelve** adapters. `kiro-stream.bin` is a real
+ * captured binary eventstream, with tests asserting both the answer it decoded to and the frame names
+ * the service really sends. Since 1.48.0 there are three more — `openrouter`, `cline` and
+ * `opencode-console` — captured from the providers themselves, all three of them **model listings**, so
+ * the total cost was nothing.
+ *
+ * The remaining eight are accounted for by a stated reason, and the count is asserted so the two cannot
+ * drift apart. Six of those eight need a credential this machine does not have: `openai`,
+ * `openai-compatible`, `anthropic`, `gemini`, `zen` and `zen-free-tier`. `chatgpt-web` and
+ * `deepseek-web` are browser DOM sessions, where a byte capture pins nothing useful.
  *
  * ## Why one of eleven is a problem and not a detail
  *
@@ -58,11 +65,8 @@ const ADAPTERS = readdirSync(new URL('../src/adapters/', import.meta.url))
 const NO_CAPTURE_YET = {
   'openai-compatible': 'the shape is the SSE other adapters also produce; a capture would pin OpenAI\'s framing specifically',
   openai: 'shares the OpenAI-compatible wire format, so a capture here would duplicate that one',
-  openrouter: 'OpenAI-compatible in shape, with provider-specific headers that no response fixture would catch',
   anthropic: 'its frames are hand-written in `anthropic.test.js`; no real capture was taken',
   gemini: 'its frames are hand-written in `gemini.test.js`; no real capture was taken',
-  cline: 'the token exchange is asserted from recorded requests, not a captured response body',
-  'opencode-console': 'the device-flow responses are hand-written in `opencode-console.test.js`',
   'chatgpt-web': 'the protocol is a browser DOM rather than a wire format, so a byte capture would pin nothing useful',
   'deepseek-web': 'its frames are hand-written in `deepseek-web.test.js`, and that is how a real truncation bug survived',
   zen: 'a composite of other providers\' protocols; a capture would pin the composite, not a provider',
@@ -110,7 +114,17 @@ test('a stated reason is a reason, not a shrug', () => {
 
 test('THE COUNT, asserted so it cannot drift quietly', () => {
   // The number is the finding. It is asserted rather than merely recorded so that adding a capture
-  // has to update it, and so that a future reader sees 1/11 rather than having to count again.
+  // has to update it, and so that a future reader sees the real figure rather than having to count again.
+  //
+  // 1 of 12 in 1.32.0 → **4 of 12** in 1.48.0: `openrouter`, `cline` and `opencode-console` were captured
+  // for real. All three are **model listings**, so the total cost was nothing — no tokens, no billing.
+  //
+  // The capture is a *shape*, not a snapshot. OpenRouter's full `/models` response is 1,286,456 bytes of a
+  // catalog that changes daily; the committed fixture pins every key and its type and keeps five ids, so
+  // a renamed field fails the test while a new model does not churn the file. Two files were written and
+  // deleted first: one that captured our own normalised `{"connection": {...}}` instead of the provider's
+  // bytes, and one that recorded a single-element array because `opencode-console` has no `data` array to
+  // slice — a capture that looked like coverage and asserted nothing.
   const pinned = readdirSync(FIXTURES).length;
   const accounted = ADAPTERS.length - Object.keys(NO_CAPTURE_YET).length;
   assert.equal(pinned, accounted, `fixtures on disk (${pinned}) and adapters with a capture (${accounted}) disagree`);
