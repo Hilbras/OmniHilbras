@@ -57,7 +57,7 @@ export type ClineAdapterOptions = {
 const defaultRefreshSkewMs = 60_000;
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '1.46.0';
+const omnihilbrasVersion = '1.47.0';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {
@@ -67,7 +67,15 @@ export function toClineAccessToken(token: string) {
   return /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(trimmed) ? `workos:${trimmed}` : trimmed;
 }
 
-export function clineHeaders(token: string, extra: Record<string, string> = {}, userAgent = 'omnihilbras') {
+/**
+ * The return type is written out rather than inferred, so no ambient Node type can reach the emitted
+ * declaration. Every value here is a string; saying so is also the honest description.
+ */
+export function clineHeaders(
+  token: string,
+  extra: Record<string, string> = {},
+  userAgent = 'omnihilbras',
+): Record<string, string> {
   const accessToken = toClineAccessToken(token);
   return {
     // The public site, not the app host: this is the value Cline's own clients
@@ -79,6 +87,20 @@ export function clineHeaders(token: string, extra: Record<string, string> = {}, 
     // Cline identifies its clients by this set. A request that omits them is
     // answered with a 4xx that reads like a bad request rather than an
     // unrecognised client, so all of them are sent.
+    // **Annotated `string`, and that annotation is load-bearing.** `process.platform` infers as
+    // `NodeJS.Platform`, and TypeScript writes the inferred type straight into the emitted `.d.ts`:
+    //
+    //     'X-PLATFORM': NodeJS.Platform;      // in dist/adapters/cline.d.ts
+    //
+    // `NodeJS` only exists if the consumer has `@types/node`. A browser-targeted consumer does not, so the
+    // published package failed to compile for them:
+    //
+    //     cline.d.ts(57,19): error TS2503: Cannot find namespace 'NodeJS'.    REAL EXIT=2
+    //
+    // It passed every gate here because the SDK typechecks against its own `@types/node`, the repo's
+    // `skipLibCheck: true` skips the declaration entirely, and the dashboard consumes the *workspace link*
+    // rather than the tarball. Nothing in this repo ever compiled the published artifact from outside.
+    // Verified by packing the real tarball into a consumer with no `@types/node` and compiling it.
     'X-PLATFORM': process.platform || 'unknown',
     'X-PLATFORM-VERSION': process.version || 'unknown',
     'X-CLIENT-VERSION': omnihilbrasVersion,

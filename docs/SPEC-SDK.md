@@ -284,6 +284,29 @@ Encryption at rest does not protect against a compromised same-user process. On 
 
 The gateway must validate request boundaries, apply request timeouts, never return raw secrets, and preserve provider error codes in structured metadata.
 
+## Publishing: what a consumer actually receives
+
+The SDK is published as `@hilbras/omnihilbras`. Two facts about the artifact are not visible from
+inside this repository, and both have caused defects:
+
+- **`@types/node` is a devDependency here and absent from the published surface.** Anything inferred
+  from `process.*` or `Buffer` into an emitted declaration becomes a type the consumer may not have. This
+  shipped: `clineHeaders` had `'X-PLATFORM': process.platform`, which infers as `NodeJS.Platform`, and
+  `tsc` writes that inference straight into `dist/adapters/cline.d.ts`. Packed into a consumer with no
+  `@types/node`, it failed to compile — `error TS2503: Cannot find namespace 'NodeJS'`, exit 2.
+- **Four independent reasons hid it here:** the SDK typechecks against its own `@types/node`; the root
+  `tsconfig.json` sets `skipLibCheck: true`; the dashboard consumes the `workspace:*` link rather than
+  the tarball; and nothing compiled the artifact *from outside*.
+
+**The rule that follows: annotate a return type wherever a `process.*` value enters an object that is
+returned.** Inference is fine internally and is exactly what leaks. `tests/published-types.test.js`
+asserts the general property — no emitted declaration may name `NodeJS.*` or `Buffer` — rather than the
+one line, because the next instance would be a different file with a different suffix.
+
+The consumer check that found it is worth keeping: `npm pack`, install the tarball into a project with no
+`@types/node`, and compile with `skipLibCheck: false`. Capture `tsc`'s exit code directly — piping to
+`head` reports *head's* status, which is zero whether or not the compile failed.
+
 ## Gateway API Keys
 
 Keys authorize the LLM surface **and the management surface**; management routes

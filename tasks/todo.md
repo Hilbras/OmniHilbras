@@ -1901,6 +1901,54 @@ It reported `@types/pngjs` as an unused dependency. **`pngjs` ships no types** (
 `vite.config.ts:3` imports it, so the stub is required. Left alone. A finding is a claim; this one was
 wrong, and reading the cited evidence is what caught it.
 
+## Task 91: the published package did not compile for a consumer without `@types/node`
+
+`clineHeaders` built a header object with `'X-PLATFORM': process.platform`. TypeScript infers that as
+`NodeJS.Platform` and writes the inference straight into the emitted declaration:
+
+```ts
+// packages/omnihilbras-sdk/dist/adapters/cline.d.ts
+'X-PLATFORM': NodeJS.Platform;      // a type that does not exist without @types/node
+```
+
+Packed into a real consumer with no `@types/node` and compiled:
+
+```
+consumer has @types/node: no
+cline.d.ts(61,19): error TS2503: Cannot find namespace 'NodeJS'.   REAL EXIT=2
+```
+
+### Four independent reasons it survived every gate here
+
+1. the SDK typechecks against its own `@types/node`, so `NodeJS` resolves;
+2. the root `tsconfig.json` sets `skipLibCheck: true`, skipping declaration files entirely;
+3. the dashboard consumes the `workspace:*` link, never the tarball;
+4. **nothing compiled the artifact from outside**, so no consumer's view was ever checked.
+
+Point 4 is the class of defect. A guard reading this repository's own `dist/` would pass forever, because
+`dist/` here is always built in a tree that has `@types/node`.
+
+### Fixed, and asserted as the general property
+
+`clineHeaders` now declares `Record<string, string>` — every value in it is a string, so the annotation is
+also the honest description. `tests/published-types.test.js` asserts that **no emitted declaration may name
+`NodeJS.*` or `Buffer`**, not that this one line is absent: the next instance would be a different file
+with a different suffix. It also asserts the SDK has been built, so the file cannot pass by having no
+subject.
+
+Both plants verified:
+
+| Plant | Result |
+| --- | --- |
+| revert the explicit return type (the original defect) | ✖ |
+| a `Buffer` return in a *different* adapter | ✖ |
+
+### A measurement trap worth recording
+
+The first consumer script piped `tsc` into `head`, so `EXIT=0` came from **head**, not from `tsc` — and
+the broken package read as a passing one. Capturing the exit code directly is the whole difference between
+a reproduction and a no-op. The corrected script reports `REAL EXIT=2` reverted, `REAL EXIT=0` fixed.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.
