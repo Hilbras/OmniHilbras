@@ -2411,8 +2411,8 @@ measurement, and `apps/gateway/test/spec-success-criteria.mjs` fails if any stop
 - [x] A TypeScript SDK package builds independently of the React app. — its own `tsconfig.json` and
       `build` script; `packages/omnihilbras-sdk/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
-      and the 12-adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **12 adapters** in `packages/omnihilbras-sdk/src/adapters/`, each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
+      and the adapter contract suite runs against it.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **14 files** in `packages/omnihilbras-sdk/src/adapters/` — three of which (`deepseek-pow`, `chatgpt-first-party`, `qwen-web`) are not protocol adapters, which is why the capture guard counts 12 — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **7 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

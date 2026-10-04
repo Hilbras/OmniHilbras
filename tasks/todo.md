@@ -2432,6 +2432,71 @@ what the test actually sets up.
 3. **Two new tests declared `async () =>` while using `t.after(...)`** — a `ReferenceError` that hung the
    file for 90 seconds before I found it.
 
+## Task 100: numbers written in prose had rotted, and nothing recomputed them
+
+Working **Phase 7** of the roadmap ("restructure documentation") — but the substance is the same failure
+`plan.md` already records about itself: a claim in prose that reads as maintained and is not.
+
+### What was wrong
+
+Two live claims, both wrong:
+
+| where | claimed | real |
+| --- | --- | --- |
+| `docs/SPEC-SDK.md:2415` | "**12 adapters** in `packages/omnihilbras-sdk/src/adapters/`" | **14 files** |
+| `docs/architecture/README.md:316` | "keeps **419 tests** green throughout" | **939** (113 + 408 + 418) |
+
+The first is worse than a stale number, because the SPEC's own sentence said `12 adapters in <directory>` and
+the directory holds 14. Twelve is the *capture guard's* count — `fixture-coverage.test.js` filters out three
+files that are not protocol adapters (`deepseek-pow`, `chatgpt-first-party`, `qwen-web`). Both numbers were
+correct; the SPEC attributed the filtered count to the unfiltered directory.
+
+The second is the most rot-prone number in any repository: a test total only ever goes up, so 419 was wrong
+the moment anything was added. It had survived several releases.
+
+**README's "13 models" is correct** and was left alone — `chatGptWebModels()` returns exactly 13, and the
+"five Sol rungs, two Luna free, six for GPT-5.5" breakdown matches. I checked the near-misses too.
+
+### The fix is not restating numbers
+
+Replacing 419 with 939 buys about a week. So the docs now state **no bare counts at all**, and
+`tests/documentation-counts.test.js` enforces it:
+
+1. The SPEC's adapter count must equal the real file count.
+2. The SPEC must reconcile its file count with the capture guard's — asserting the exclusion is non-empty,
+   so "the guard counts 12" cannot silently become the same number as the file count and make the
+   reconciliation vacuous.
+3. `plan.md`'s quoted capture count must equal what is on disk.
+4. **No document may state a test count as a bare number.** `pnpm verify` prints the live counts.
+5. An adapter count with no stated denominator is rejected.
+
+### Mutation-tested — five times, because four of these could have been vacuous
+
+| mutation | caught |
+| --- | --- |
+| SPEC claims 12 files again | ✔ |
+| **an adapter file is added, SPEC not updated** | ✔ (3 tests fire) |
+| plan quotes 5 of 12 | ✔ |
+| **a new fixture lands, plan not updated** | ✔ |
+| prose quotes "939 tests" | ✔ |
+
+The two that matter are the *transitive* ones. A number that fails only when someone edits the paragraph
+protects the paragraph. These fail when someone changes the **repository**, which is the situation that
+produced the stale claim in the first place.
+
+### My guard had three bugs of its own
+
+- **`require is not defined`** — it is an ES module. Every test that ran `printedCaptureCount()` died on
+  that, and because I had written the guard, "5 passing" would have been my own reading of my own output.
+- **`spawnSync('node --test')` inside a test file** — Node refuses: *"run() is being called recursively
+  within a test file"*. Now the count is recomputed from the same directory listing the guard reads, which
+  is simpler and stricter: the plan's number fails whether or not the other guard runs.
+- **`assert.equal(files - considered, 3)`** — a hardcoded constant re-asserting the guard's own filter
+  list. If someone changed the filter, this test would enforce the stale value. Derived now.
+
+And one measurement error: I read `allChatGptWebModels` as a constant, called it without `()`, and measured
+**0 models**. It is a function. The real answer is 22.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

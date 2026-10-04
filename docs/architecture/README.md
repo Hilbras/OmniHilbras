@@ -313,6 +313,6 @@ Three things in this repository have earned their keep and should be protected:
 - **Splitting the SDK into per-provider packages.** The SDK is small and the adapters are the
   point. Package sprawl costs more than it saves until there is a size or ownership reason.
 - **A rewrite.** The provider-specific surface is twelve literals in one factory. That is a
-  refactor's size, and doing it incrementally keeps 419 tests green throughout.
+  refactor's size, and doing it incrementally keeps the whole suite green throughout.
 - **Cloud infrastructure.** The store interfaces are worth having; implementing remote stores
   before they are needed is speculative.
