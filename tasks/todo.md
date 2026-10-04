@@ -2111,6 +2111,66 @@ because "the plant did not fail" and "the fix does not work" are indistinguishab
 tests    918 → 921
 ```
 
+## Task 95: the last two audit findings — one real, one defensive
+
+Both were reproduced by planting before anything was changed, and the two came out very differently.
+
+### 1. `dashboard-truthfulness.test.js` — an import is not a call. REAL.
+
+The rule was *"a page that asks the gateway nothing cannot be showing the gateway's state"*, implemented as:
+
+```js
+!pages.some(f => /from '\.\.\/lib\/gatewayClient'/.test(readFileSync(...)))
+```
+
+One **unused** import satisfies that completely. Planted on `RoutingPage`:
+
+```ts
+import { getGatewayRouting } from '../lib/gatewayClient';   // never called
+const INVENTED = { p95: '412 ms', successRate: '99.98%', spend: '$14,802', tokensToday: '9.4M' };
+```
+
+```
+ℹ pass 13   ℹ fail 0
+```
+
+Four invented metrics on the routing page — the same page that was gutted in 1.37.0 for exactly this —
+and the guard that exists to prevent it reported green.
+
+Now requires a **call site** for every non-type name imported from `gatewayClient`. A `import { type X }`
+is exempt, and had to be: the first version flagged **seven** of them, all correct `import { type
+GatewayHealth }` annotations that are erased at compile time and never called. A check that reports seven
+false positives on idiomatic code is a check that gets deleted.
+
+### 2. `gateway-routes.test.js` — a narrower claim than the audit made. DEFENSIVE.
+
+`servedPaths()` matched `url.pathname === …`, `.startsWith(`, `.endsWith(`. The audit claimed a route
+dispatched through a `matches(pathname, …)` helper was invisible.
+
+Reproduced — and then found the plant was not faithful: **no such helper exists in this codebase.** I had
+invented `matches()`. The honest plant is a computed path, and the **pre-existing** guard already caught it:
+
+```
+if (url.pathname === `/v1/keys-${suffix}`)   →   ✖ every path the gateway serves has a line in the spec
+```
+
+So the resolver was narrower than a plausible refactor could produce, but nothing real was escaping it. The
+resolver now also understands the helper form — which is defensive depth, **not a live defect fix**, and is
+recorded as such rather than presented as one.
+
+The lookbehind I wrote first consumed its own delimiter, so `matches(url.pathname, '/v1/keys')` lost the
+subject and the resolver began matching unrelated calls: **16 documented routes reported as unserved**.
+Rewritten as an explicit alternation. Worth recording because a guard that suddenly reports 16 phantoms
+looks like the guard breaking rather than the fix breaking.
+
+### Both plants, honestly
+
+| Plant | Before | After |
+| --- | --- | --- |
+| unused import + invented metrics | pass 13, fail 0 | ✖ caught |
+| computed path `` `/v1/keys-${suffix}` `` | ✖ caught | ✖ caught (unchanged) |
+| `matches(url.pathname, …)` helper | pass 5 (plant unfaithful — no such helper) | unplantable in this codebase |
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

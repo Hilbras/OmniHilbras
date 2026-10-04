@@ -82,9 +82,29 @@ function servedPaths() {
     // literal with a constant interpolated into it. All three are resolved to text, because a path
     // that cannot be resolved to text cannot be checked against the spec — and a route nobody can
     // check is a route nobody can be reminded to document.
-    for (const match of source.matchAll(/url\.pathname\s*(?:===|\.endsWith\(|\.startsWith\()\s*(?:['"`]([^'"`]*)['"`]|([A-Za-z_$][\w$]*))/g)) {
-      let path = match[1];
-      if (path === undefined) path = constants.get(match[2]);
+    // The dispatch forms that carry a path: a direct comparison, `startsWith`/`endsWith`, and a call to a
+    // `matches(...)`-style helper.
+    //
+    // **The helper form was a real hole (1.49.0).** The pattern only knew `url.pathname === …`, so a
+    // route dispatched as `matches(url.pathname, '/v1/keys')` was invisible to *every* check in this
+    // suite — not undocumented, unseen. Proven by planting a credential-exporting route behind exactly
+    // that call: `ℹ pass 5  ℹ fail 0`, where the same route as a bare literal was correctly caught.
+    //
+    // A route nobody can check is a route nobody can be reminded to document, so the helper form is now
+    // resolved too rather than left as a documented limitation.
+    // A lookbehind was the obvious way to write this and it silently consumed the delimiter, so
+    // `matches(url.pathname, '/v1/keys')` lost its subject and the resolver started matching calls
+    // that had nothing to do with routing — 16 documented routes reported as unserved. The alternation
+    // is explicit instead: the helper form repeats the subject it needs.
+    const DISPATCH = new RegExp(
+      String.raw`url\.pathname\s*(?:===|\.endsWith\(|\.startsWith\()\s*(?:['"\`]([^'"\`]*)['"\`]|([A-Za-z_$][\w$]*))` +
+        String.raw`|matches\s*\(\s*url\.pathname\s*,\s*(?:['"\`]([^'"\`]*)['"\`]|([A-Za-z_$][\w$]*))`,
+      'g',
+    );
+    for (const match of source.matchAll(DISPATCH)) {
+      // Groups 1/2 are the direct-comparison form, 3/4 the helper form.
+      let path = match[1] ?? match[3];
+      if (path === undefined) path = constants.get(match[2] ?? match[4]);
       else path = path.replace(/\$\{([A-Za-z_$][\w$]*)\}/g, (_, name) => constants.get(name) ?? `\${${name}}`);
       if (path === undefined || path.includes('${')) unresolved.push(`${file}: ${match[0].trim()}`);
       else paths.add(path);

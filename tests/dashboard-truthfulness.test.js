@@ -246,13 +246,60 @@ test('every dashboard page asks the gateway for something', () => {
   //
   // The check is mechanical and it is the general one: **a page that asks the gateway nothing cannot be
   // showing the gateway's state.** A page that legitimately needs no data would have to say so here.
+  //
+  // **An import is not a call, and only a call counts.** The original check asked whether the file
+  // contained the text `from '../lib/gatewayClient'`, which a single unused import satisfies. Proven by
+  // planting exactly that on `RoutingPage` — an import plus four invented metrics, no call:
+  //
+  // ```
+  // const INVENTED = { p95: '412 ms', successRate: '99.98%', spend: '$14,802', tokensToday: '9.4M' };
+  // import { getGatewayRouting } from '../lib/gatewayClient';   // never called
+  // ℹ pass 13   ℹ fail 0
+  // ```
+  //
+  // So the rule is now: every name imported from `gatewayClient` must appear at a **call site** somewhere
+  // in the file. An import that is never used is dead code pretending to be a data source, and it is the
+  // cheapest possible way to satisfy this guard.
   const pages = readdirSync(join(DASHBOARD, 'pages')).filter((file) => file.endsWith('.tsx'));
-  const dataFree = pages.filter((file) => !/from '\.\.\/lib\/gatewayClient'/.test(readFileSync(join(DASHBOARD, 'pages', file), 'utf8')));
+
+  const noImport = [];
+  const unusedImports = [];
+  for (const file of pages) {
+    const source = stripComments(readFileSync(join(DASHBOARD, 'pages', file), 'utf8'));
+    const importBlock = source.match(/import\s*\{([^}]*)\}\s*from\s*'\.\.\/lib\/gatewayClient'/);
+    if (!importBlock) {
+      noImport.push(file);
+      continue;
+    }
+    // Everything after the import statement is where a call must appear.
+    const body = source.slice(source.indexOf(importBlock[0]) + importBlock[0].length);
+    for (const raw of importBlock[1].split(',')) {
+      const entry = raw.trim();
+      // A **type-only** import is erased at compile time and exists to annotate a value, so it is never
+      // called and never should be. All seven current hits were `import { type GatewayHealth }` — a
+      // correct and idiomatic import that this check initially reported as seven unused functions.
+      if (/^type\s/.test(entry)) continue;
+      const name = entry.split(/\s+as\s+/).pop()?.trim();
+      if (!name) continue;
+      // A call is `name(`. A bare mention in a comment is stripped already; a mention in code that is
+      // not a call is exactly the case this rejects.
+      if (!new RegExp(`\\b${name}\\s*\\(`).test(body)) {
+        unusedImports.push(`${file}: \`${name}\` is imported from gatewayClient but never called`);
+      }
+    }
+  }
+
   assert.deepEqual(
-    dataFree,
+    noImport,
     [],
-    `these pages import no data source, so anything numeric on them is a literal: ${dataFree.join(', ')}. ` +
+    `these pages import nothing from the gateway, so anything numeric on them is a literal: ${noImport.join(', ')}. ` +
       'Either fetch from the gateway, or delete the page — do not fill it with plausible numbers.',
+  );
+  assert.deepEqual(
+    unusedImports,
+    [],
+    `an unused gatewayClient import satisfies the "asks the gateway" rule without asking it anything:\n${unusedImports.join('\n')}\n` +
+      'Either call the function, or drop the import.',
   );
   assert.ok(pages.length >= 4, `expected the dashboard pages, found ${pages.length}`);
 });
