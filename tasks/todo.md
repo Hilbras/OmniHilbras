@@ -3066,6 +3066,74 @@ contention** — inside the window half the time. The delay is now a probe's mea
 
 I could not reproduce the original failure with synthetic load, so this is reasoned rather than proven.
 
+## Task 110: two maps that could not forget a deleted connection
+
+The one finding the Phase 6.1 audit recorded and this phase closed. It was labelled low severity, and the
+reason it was labelled that way is the interesting part.
+
+### Measured, before any code changed
+
+    dispatch to 2000 connections, delete all 2000:
+      RateLimitPolicy.waits          2000 entries retained   (live: 0)
+      SlidingWindowRateLimiter.windows 2000 entries retained
+
+Both maps are keyed by connection id, and neither had a way to forget. `SlidingWindowRateLimiter.prune()`
+**existed, was correct, and was called by nothing** — so every request ever dispatched was retained for the
+life of the process until someone invoked a method by hand.
+
+### Why it survived: it is invisible
+
+`describeRouting()` filters the waits by the live connections before reporting them, so no reader ever sees a
+stale id. Nothing crashes, nothing renders wrong, and the dashboard is identical at 0 connections and at
+2000. A leak whose only symptom is a number nobody reads is a leak that no test looking at behaviour finds.
+
+### Why the fix is `retain(liveIds)` and not a timer
+
+Two questions that must not be collapsed:
+
+| question | answered by |
+| --- | --- |
+| does this connection still exist? | `retain()` |
+| is this timestamp still inside the per-minute window? | `prune()` |
+
+Age cannot answer the first. A connection created ten minutes ago and dispatched to once has a window that is
+stale by `prune()`'s standard and current by the connection store's, and an age-based sweep would forgive the
+budget of a connection that still exists. And pruning waits by age would drop a recorded `0` for a
+deliberately idle connection, collapsing "checked and free" into "never checked" — which is the exact
+distinction `rateLimitWaitMs` documents.
+
+`plan()` drives it because that is where the live set is already in hand, already walked, and current.
+
+### Six mutations; two survived twice
+
+| mutation | caught |
+| --- | --- |
+| remove the `plan()` call | yes (4 failing) |
+| engine `retain()` a no-op | yes *(after the fix)* |
+| prune waits by age instead of existence | yes (6 failing) |
+| prune waits but not limiter windows | yes |
+| prune windows but not waits | yes *(after the fix)* |
+| delete `prune()`'s age sweep | yes |
+
+The two that survived were one bug wearing two faces: my test built a **second** `RateLimitPolicy` over the
+same limiter, so the wait landed in that map while the engine's own stayed empty — and
+`engine.waits().size === 0` passed no matter what `retain()` did. An assertion that passes because the thing
+it checks was never populated is the same class of bug as the `>= 1` count guard in Task 108.
+
+The fix was to use the engine's own `enforceRateLimit()`, which is what the executor actually calls at
+dispatch, and to assert the pre-condition (`waits().get('solo') === 0` **before** pruning) so the test cannot
+pass vacuously again.
+
+### A process failure worth recording
+
+My first mutation loop rebuilt `dist/` for each mutation, exceeded the 300 s cell timeout, and was killed
+mid-loop — **after** it had already written a mutation into `apps/gateway/src/`. I spent several steps
+chasing a failing test against source I believed was clean (`git diff --stat` showed insertions only, because
+the mutation was an edit inside a block I had added in the same session).
+
+Two lessons, both cost real time: mutate `dist/` and rebuild once, and check the source you are debugging
+against the mutation, not against your memory of it.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

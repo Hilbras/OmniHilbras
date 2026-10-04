@@ -56,6 +56,22 @@ export class RoutingEngine {
   }
 
   /**
+   * Releases what is held for connections that no longer exist.
+   *
+   * Called on the routing path with the live connection set, which is the only place in the process where
+   * that set is known to be current. Doing it on a timer would be a guess, and hooking the connection
+   * store's delete event would couple this engine to a store for no gain — `plan()` is already handed the
+   * truth and already walks the connections.
+   *
+   * Both maps it prunes are invisible in the rendered page, which filters by the live connections, and that
+   * invisibility is why the growth survived this long: nothing about the dashboard changes as it happens.
+   */
+  retain(liveConnectionIds: ReadonlySet<string>): void {
+    this.limits.retain(liveConnectionIds);
+    this.options.rateLimiter.retain(liveConnectionIds);
+  }
+
+  /**
    * The wait a connection faces right now, for the skip decision.
    *
    * A query against the limiter rather than a read of `waits()`, and that distinction is the fix in
@@ -85,6 +101,11 @@ export class RoutingEngine {
     model: string;
     explicitProviderId?: string;
   }): Promise<RouteDecision> {
+    // Before anything is read or written. Two maps are keyed by connection id and only ever grew, so a
+    // dashboard that deleted a connection kept its wait and its request window for the life of the process.
+    // Measured at 2000 and 3000 stale entries respectively.
+    this.retain(new Set(input.connections.map((connection) => connection.id)));
+
     const health = this.options.health.registry();
     const decision = resolveRoute({
       // Copied because `resolveRoute` types its input as mutable while nothing here mutates it.

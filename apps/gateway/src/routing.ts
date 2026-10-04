@@ -66,6 +66,26 @@ export class SlidingWindowRateLimiter {
     this.windows.set(key, recent);
   }
 
+  /**
+   * Drops the windows of connections that no longer exist.
+   *
+   * Distinct from `prune()`, and both are needed. `prune()` answers *"is this timestamp still inside the
+   * window?"* and is the right question for a live connection — which `prune()` could do but **nothing
+   * called**, so every window ever recorded was retained for the life of the process. Measured: 3000
+   * connections dispatched once each left 3000 windows behind, and `prune()` had to be called by hand to
+   * clear them.
+   *
+   * Age alone cannot answer this either. A connection created ten minutes ago and dispatched to once has a
+   * window that is stale by `prune()`'s standard and current by the connection store's, and pruning by age
+   * would forgive the budget of a connection that still exists. So the live set decides existence and
+   * `prune()` decides age, and neither is asked to do the other's job.
+   */
+  retain(liveKeys: ReadonlySet<string>): void {
+    for (const key of this.windows.keys()) {
+      if (!liveKeys.has(key)) this.windows.delete(key);
+    }
+  }
+
   /** Releases retained windows so an idle gateway does not grow without bound. */
   prune(maxAgeMs = 120_000) {
     const cutoff = this.now() - maxAgeMs;

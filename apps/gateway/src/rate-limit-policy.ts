@@ -111,6 +111,37 @@ export class RateLimitPolicy {
   }
 
   /**
+   * Drops the waits of connections that no longer exist.
+   *
+   * ## The leak this closes
+   *
+   * `waits` is keyed by connection id and was only ever added to. A dashboard that adds and removes
+   * connections — which is the normal way to work — left an entry behind for every connection it ever
+   * dispatched to. Measured: **2000 entries retained after all 2000 connections were deleted**, against
+   * `0` live.
+   *
+   * It is not visible. `describeRouting()` filters by the live connections, so no reader ever sees a stale
+   * id, which is exactly why it survived: the growth is in memory and in `waits().size`, and nothing about
+   * the rendered page changes as it happens.
+   *
+   * ## Why `retain` and not a timer
+   *
+   * Because age is the wrong question and the connection store already has the right one. `prune(120_000)`
+   * is what `SlidingWindowRateLimiter` uses, and it is right there — timestamps have an age. A recorded
+   * wait has only an *identity*: it means something about a connection that exists, and a wait of `0` for a
+   * connection that is deliberately idle must survive. Pruning on age would drop that one, and the dashboard
+   * would report "never checked" for a connection it checked an hour ago and found free.
+   *
+   * So this takes the live set and keeps exactly that. Zero waits and unknown waits both survive, which is
+   * the distinction `observed()` exists to preserve.
+   */
+  retain(liveConnectionIds: ReadonlySet<string>): void {
+    for (const connectionId of this.waits.keys()) {
+      if (!liveConnectionIds.has(connectionId)) this.waits.delete(connectionId);
+    }
+  }
+
+  /**
    * Counts one dispatched request against its connection's budget.
    *
    * Called when a request is sent — not when it succeeds, and not when the limit allowed it. The

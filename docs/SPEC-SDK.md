@@ -170,6 +170,19 @@ The first local gateway exposes:
 - `PUT /v1/connections/:id/resilience` — update one connection's retry, timeout, and rate-limit budget.
 - `PUT /v1/connections/:id` — save or update a connection. A discovered **model metadata map** (display name, context window, modalities, and per-1M prices) is preserved across a save that does not supply one, and replaced by one that does; it was silently dropped on every save before 1.62.0.
 - `GET /v1/routing` — live routing state: budgets, recent failures and successes, ejection, last latency, last error, and `rateLimitWaitMs` (absent when never checked, `0` when checked and free).
+
+  Routing holds two maps keyed by connection id — the recorded waits behind `rateLimitWaitMs`, and the
+  timestamps inside each connection's per-minute budget — and **both are released when a connection is
+  deleted**, from `RoutingEngine.plan()`, which is the only place in the process where the live set is known
+  to be current. Before 1.66.0 neither had a way to forget: dispatching to 2000 connections and then deleting
+  all 2000 left 2000 of each retained. Neither was visible — this route filters by the live connections — so
+  nothing about the rendered page changed as the maps grew.
+
+  Retention is by **existence**, not age. `SlidingWindowRateLimiter.prune()` already existed and answers a
+  different question ("is this timestamp still inside the window?"); it is kept and still needed, since a live
+  connection's window grows until pruned. Pruning waits by age would drop a recorded `0` for an
+  intentionally idle connection and report it as never checked, which is the distinction `rateLimitWaitMs`
+  exists to preserve.
 - `GET /v1/settings` — the configuration **this process loaded**, after defaults, parsing and validation.
   Read-only, and it answers `405` to anything else rather than accepting a write that does nothing. Reports
   `host`, `port`, `localOnly`, the four resilience values, `corsOrigins`, `dataDir`, the provider base URLs,
