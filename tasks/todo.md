@@ -2636,6 +2636,68 @@ abort during chunk delivery never reaches that block — it reaches the iterator
 CANCELLED check already lives. That line is covered by `request-executor.test.js`; duplicating it would add a
 test whose passing means nothing.
 
+## Task 103: SIGTERM during boot killed the process outright, and a second SIGTERM was discarded
+
+Working **Phase 9** ("production validation"). Everything so far has tested the gateway *as code*. This
+tests it *as a deploy target* — the real built binary, signalled from outside.
+
+### Two findings, both measured against `node dist/main.js`
+
+**1. The signal handlers were registered after startup.** `process.once('SIGTERM', shutdown)` sat below
+`await startGatewayServer()`, so until startup finished the process had Node's **default disposition** — the
+signal kills it, no drain, no cleanup:
+
+```
+SIGTERM after  0.05s -> DEFAULT-KILLED (-15)
+SIGTERM after  0.50s -> DEFAULT-KILLED (-15)
+SIGTERM after  1.00s -> DEFAULT-KILLED (-15)
+SIGTERM after  2.00s -> handled (0)
+```
+
+Not hypothetical for a container: an orchestrator replacing a pod while the old one is still booting sends
+SIGTERM straight into that window and gets a hard kill instead of the graceful shutdown the file implements.
+Startup does real work — config, stores, first health sweep — so 1.5s was not a pessimistic estimate.
+
+**2. A second SIGTERM was discarded.** `process.once` means a hung drain could not be escaped from the
+terminal at all; the only way out was SIGKILL from a second session.
+
+### Fixed, with the residual stated rather than papered over
+
+Handlers now register at the top of the entry module, holding a promise startup resolves. A signal that
+arrives before the server exists waits for it instead of killing the process. A second signal exits
+immediately with a message saying so.
+
+**The window that remains is Node's ESM module loading**, measured at **789 ms** for this import graph. No
+in-process code can cover it — only a `--import` preload, which is a packaging decision rather than a code
+fix. So it is documented, measured, and asserted to be *bounded*: a test fails if the import graph grows
+past 4 s, and asserts the constant the timing test uses still exceeds the real load time.
+
+### The signal tests, and what they got wrong first
+
+`apps/gateway/test/signal.test.js` spawns the real binary rather than calling a function, because every
+property here is a property of the process.
+
+- **`ROOT` was `../..`**, which lands on `apps/`, so `ENTRY` became `apps/dist/main.js` — a path that does
+  not exist. All four tests failed on "never listened" with **no mention of the missing file**, which reads
+  like a shutdown bug and is not one. There is now a test asserting the entry point exists, so this cannot
+  recur.
+- **Two assertions asserted more than is true.** "SIGTERM during startup does not hard-kill" cannot hold at
+  600 ms, because that is still inside the 789 ms module load — the honest claim is that the window
+  `main.ts` *owns* is closed, and the test now measures the real load time and signals after it. The
+  "the process explains itself" test was the same error: inside module load nothing has run, so there is
+  nothing to log, and that is a documented property rather than a defect.
+
+### Mutation-tested
+
+| mutation | caught |
+| --- | --- |
+| full revert to `process.once` after startup | ✔ (3 tests) |
+| listeners moved back below `await startGatewayServer()` | ✔ |
+| `process.once` restored, ordering kept | ✔ |
+
+The structural guard strips comments before reading order, because the comments carry the measured numbers
+and the string `process.once` — an earlier version of it matched its own documentation.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.
