@@ -443,6 +443,12 @@ for (const size of [192, 512]) {
   write(`logo-maskable-${size}.png`, png(tokens, size, { maskable: true }));
 }
 
+// `logo.png` at the repository root is the conventional place for a project's logo, and it is the file
+// GitHub and npm READMEs are pointed at by convention. It was uploaded by hand the first time, which is a
+// copy that ships whatever geometry was current on the day; now the generator writes it, so it cannot drift
+// from `brand/`.
+writeFileSync(join(ROOT, 'logo.png'), readFileSync(join(OUT, 'logo-512.png')));
+
 // The npm package renders its own README on npmjs.com, and that README references `./brand/wordmark.svg`
 // — a path relative to the package, not to the repository. So the tarball needs a copy of the mark, and a
 // copy made by hand is exactly the second source of truth this file exists to prevent: it would ship a logo

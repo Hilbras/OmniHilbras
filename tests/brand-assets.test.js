@@ -525,3 +525,16 @@ test('the wordmark does not clip its own text', () => {
     `the wordmark plate is ${width}px for ${Math.round(textWidth)}px of text; it is far wider than it needs to be`,
   );
 });
+
+test('the root logo.png is generated, not uploaded by hand', () => {
+  // `logo.png` at the repository root is the conventional project logo, and it was first committed by hand
+  // via the API — a copy that ships whatever geometry was current that day. The generator now writes it, so
+  // assert it is byte-identical to the source rather than merely present.
+  const root = join(ROOT, 'logo.png');
+  assert.ok(existsSync(root), 'logo.png is missing from the repository root; run `pnpm brand`');
+  assert.deepEqual(
+    readFileSync(root),
+    readFileSync(join(BRAND, 'logo-512.png')),
+    'logo.png differs from brand/logo-512.png; the root copy is stale',
+  );
+});
