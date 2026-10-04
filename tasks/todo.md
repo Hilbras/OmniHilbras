@@ -2872,6 +2872,67 @@ that had nothing to do with what they claimed to test.
 | drop normalization on load | "a hand-edited record with an extra field is normalized away" |
 | `writeFile` instead of `atomicWrite` | "written with the same 0600 as every other secret" |
 
+## Task 107: pricing wired to usage — and a bug that had been dropping every price silently
+
+Phase 6.3 of `docs/architecture/phase6-plan.md`. `packages/omnihilbras-sdk/src/pricing.ts` existed (89 lines)
+and normalized every provider quote to per-1M tokens. Nothing computed a cost from it.
+
+### The design rule, which is the whole point
+
+**A cost is only ever shown for a model whose provider published a price.** No defaults, no averages. Cost is
+computed at *read* time from recorded tokens and the connection's current catalog, so a price change is
+reflected immediately rather than leaving a stored figure that was right last week.
+
+`usage-pricing.ts` carries the honest absence through: `undefined` per request, `unpricedRequests` in the
+totals, `unpricedEntirely` when nothing could be priced, and a `caveat` string that is `null` when everything
+was priced — because a caveat printed every time is one nobody reads. Twelve tests, and most of them are about
+the cases where the answer is *not* a number.
+
+### The bug: `buildRecord` dropped `modelMeta`, so no price was ever kept
+
+Found by asking `/v1/usage` for a cost and getting `unpricedEntirely: true` on a connection whose catalog
+quoted a price. Measured against **both** stores:
+
+```
+InMemoryConnectionStore   -> saved modelMeta: undefined
+LocalConnectionStore      -> saved modelMeta: undefined
+```
+
+Five places in `connections.ts` handle `modelMeta`: `normalizeInput` accepted and normalized it, `parseRecord`
+read it back off disk, `cloneRecord` copied it, `updateModels` set it — and **`buildRecord`, the function every
+save goes through, never copied it onto the record it returned.**
+
+So `modelMetaFor()` in `connection-manager.ts` has been writing discovered prices, display names, context
+windows and modalities into a field nothing read. A missing display name is cosmetic; a missing **price** is
+the difference between "this connection costs nothing" and "this cost is unknown", and no page could tell those
+apart.
+
+It survived a long time because four of the five places agreed with each other and only the one that mattered
+disagreed — so reading the store end to end finds nothing wrong. The compiler agreed with everyone: `modelMeta`
+was an optional field on a type, and nothing complained that it was always absent.
+
+Mutation-tested both halves. Reverting the line: both new tests fail. Changing it so a re-save clears the
+metadata: only the second fails, which is the distinction that matters — dropping it *entirely* and clearing it
+*on an unrelated save* are different bugs, and only one is obvious.
+
+After the fix, end to end:
+
+```
+totals : {"requests":1,...,"inputTokens":1000,"outputTokens":500,...}
+cost   : {"costUsd":0.0105,"pricedRequests":1,"unpricedRequests":0,
+          "unpricedEntirely":false,"caveat":null}
+```
+
+1000×$3/1M + 500×$15/1M = 0.003 + 0.0075. Exactly as predicted before the run.
+
+### Three wrong guesses of mine, in one afternoon
+
+- `this.connections.get(connectionId)` — `ConnectionManager` has `list()`, not `get()`. The compiler caught it.
+- `enforceManagementAuth` and `error.attempts` (v1.61.0) — same class.
+- I twice inserted a method **between a doc comment and the member it documented**, producing an orphaned
+  fragment and a syntax error, and in one case splitting a getter's comment from its body. Both fixed by
+  reading the region before editing rather than trusting the anchor.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

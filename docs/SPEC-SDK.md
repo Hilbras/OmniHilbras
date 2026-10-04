@@ -168,6 +168,7 @@ The first local gateway exposes:
 - `PATCH /v1/keys/:id` — pause or resume a key.
 - `DELETE /v1/keys/:id` — revoke a key.
 - `PUT /v1/connections/:id/resilience` — update one connection's retry, timeout, and rate-limit budget.
+- `PUT /v1/connections/:id` — save or update a connection. A discovered **model metadata map** (display name, context window, modalities, and per-1M prices) is preserved across a save that does not supply one, and replaced by one that does; it was silently dropped on every save before 1.62.0.
 - `GET /v1/routing` — live routing state: budgets, recent failures and successes, ejection, last latency, last error, and `rateLimitWaitMs` (absent when never checked, `0` when checked and free).
 - `GET /v1/usage` — recorded per-request usage: totals, and the newest records first. Optional query
   parameters `provider`, `model`, `connection`, `since`, `until`, `outcome` (`success`/`failure`/`cancelled`)
@@ -2466,3 +2467,13 @@ Provider APIs change independently, so each adapter's request and response conve
 - Should the first gateway implementation use only Node's HTTP primitives, or add a framework after the first vertical slice? **Recommendation: Node primitives first.**
 - Should model discovery be enabled for every adapter in the first release, or only for providers with a documented model-list endpoint? **Recommendation: capability-based; unsupported operations return a typed `NOT_SUPPORTED` error.**
 - Should the normalized SDK eventually be published as a standalone npm package? **Recommendation: design it as publishable from the start, but keep it private until the contract stabilizes.**
+
+The response also carries a `cost` object. **A cost is only ever shown for a model whose provider published a
+price** — `pricing.ts` already normalises every quote to per-1M tokens, and `/v1/usage` multiplies recorded
+tokens by that quote at read time. There is no default price and no fallback: most connections to an API-key
+provider carry no price at all, because the provider does not publish one, so `cost.costUsd` sums only the
+records that could be priced and `cost.pricedRequests` / `cost.unpricedRequests` say how many. When nothing
+could be priced, `cost.unpricedEntirely` is `true` and `cost.caveat` explains that no cost is shown — a page
+that renders `$0.00` over three real requests is the failure this prevents. `caveat` is `null` when every
+record was priced, because a caveat printed every time is one nobody reads. Cache reads and writes bill at
+their own rates and are not folded into the input rate.

@@ -291,6 +291,21 @@ function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefi
     modelPolicy: normalized.modelPolicy ?? existing?.modelPolicy ?? 'all',
     modelIds: modelLists.modelIds,
     customModelIds: modelLists.customModelIds,
+    // **`modelMeta` was silently dropped here (1.62.0).**
+    //
+    // `normalizeInput` accepted and normalized it, `parseRecord` read it back off disk, `cloneRecord`
+    // copied it, and `updateModels` set it — but `buildRecord`, the function that builds the record every
+    // save goes through, never copied it onto the result. Measured against both stores, which is how it was
+    // found: `modelMeta` returned `undefined` for a connection saved with `{ m: { p: [3, 15] } }`.
+    //
+    // So `modelMetaFor()` in `connection-manager.ts` has been writing discovered prices — and display names,
+    // context windows, modalities — into a field nothing read. A display name missing from the model list is
+    // cosmetic; a **price** missing is the difference between "this connection costs nothing" and "this
+    // connection's cost is unknown", and the dashboard could not tell those apart.
+    //
+    // The four places that handle `modelMeta` all agreed with each other and disagreed with the one that
+    // mattered, which is why a full-file reading of the store found nothing wrong.
+    ...(normalized.modelMeta ?? existing?.modelMeta ? { modelMeta: normalized.modelMeta ?? existing?.modelMeta } : {}),
     resilience: { ...defaultResilienceSettings, ...existing?.resilience, ...normalized.resilience },
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,

@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
@@ -21,6 +21,7 @@ import { RequestExecutor, type GatewayChatOutcome, type GatewayStreamOutcome } f
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
 import type { UsageStore } from './usage-store.js';
+import { modelMetaPriceOrder } from './connections.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
   providerId: string;
@@ -1079,6 +1080,46 @@ export class GatewayService {
    */
   get usage(): UsageStore | undefined {
     return this.usageStore;
+  }
+
+  /**
+   * The price a connection's catalog quotes for a model, or `undefined` if it quotes nothing.
+   *
+   * ## Why this is a lookup and not a stored price on the record
+   *
+   * Prices live on the connection's model metadata — the `p` array, positionally `modelMetaPriceOrder` —
+   * because that is where a catalog rescan writes them. A usage record stores *tokens*, and the
+   * multiplication happens when `/v1/usage` is read, so a price change is reflected immediately rather than
+   * leaving a stored cost that was right last week.
+   *
+   * ## Why it returns `undefined` rather than a default
+   *
+   * Most connections to an API-key provider carry no price at all: the provider does not publish one. A
+   * default would put a plausible number in a column that otherwise holds measured ones, and nothing on the
+   * page could tell them apart. So the answer to "what did that cost" is sometimes "nobody has said", and
+   * `usage-pricing.ts` is written to carry that through rather than average it away.
+   *
+   * @param connectionId Which saved connection served the request.
+   * @param model The model id as it was requested.
+   */
+  async modelPrice(connectionId: string | undefined, model: string): Promise<ModelPricing | undefined> {
+    if (!connectionId) return undefined;
+    // `ConnectionManager` exposes `list()`, not `get()` — I wrote `get` from the shape of `ConnectionStore`
+    // and the compiler caught it. `list()` is a full array read, which is fine here: `/v1/usage` prices its
+    // own records once, and a second pass over a connection list per record would be the slower shape.
+    const record = (await this.connections.list()).find((connection) => connection.id === connectionId);
+    const prices = record?.modelMeta?.[model]?.p;
+    if (!Array.isArray(prices) || prices.length === 0) return undefined;
+    const pricing: ModelPricing = {};
+    modelMetaPriceOrder.forEach((key, index) => {
+      const value = prices[index];
+      // Validated rather than trusted: this array is read back from a file a user can edit, and a NaN or a
+      // negative rate would produce a negative total rather than an obviously wrong one.
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000) {
+        pricing[key] = value;
+      }
+    });
+    return Object.keys(pricing).length > 0 ? pricing : undefined;
   }
 
   private requireAdapter(providerId: string): ProviderAdapter {

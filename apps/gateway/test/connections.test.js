@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { InMemoryConnectionStore, LocalConnectionStore } from '../dist/index.js';
+import { mkdtempSync } from 'node:fs';
 
 const connectionInput = {
   id: 'openrouter',
@@ -162,4 +163,72 @@ test('a credential is never shared between two connections of one provider', asy
   await store.remove('opencode');
   assert.deepEqual(await store.get('opencode-backup'), { type: 'api-key', value: 'key-B' }, 'deleting one leaves the other intact');
   assert.equal(await store.get('opencode'), undefined, 'the removed one has no credential');
+});
+
+test('saving a connection KEEPS its model metadata — prices included', async (t) => {
+  // **A real bug found in 1.62.0, and it was never a deliberate omission.**
+  //
+  // `normalizeInput` accepted `modelMeta` and normalized it. `parseRecord` read it back off disk.
+  // `cloneRecord` copied it. `updateModels` set it. And `buildRecord` — the function every save goes
+  // through — never copied it onto the record it returned.
+  //
+  // Measured, before the fix, against **both** stores:
+  //
+  // ```
+  // InMemoryConnectionStore   -> saved modelMeta: undefined
+  // LocalConnectionStore      -> saved modelMeta: undefined
+  // ```
+  //
+  // So `modelMetaFor()` in `connection-manager.ts` has been writing discovered prices, display names,
+  // context windows and modalities into a field nothing read. A missing display name is cosmetic. A missing
+  // **price** is the difference between "this costs nothing" and "this cost is unknown", and no page could
+  // tell those apart.
+  //
+  // It survived because four of the five places that handle `modelMeta` agreed with each other and only the
+  // one that mattered disagreed — reading the store end to end finds nothing wrong.
+  const directory = mkdtempSync(join(tmpdir(), 'omnih-meta-'));
+  t.after(() => undefined);
+
+  for (const [label, store] of [
+    ['InMemoryConnectionStore', new InMemoryConnectionStore()],
+    ['LocalConnectionStore', new LocalConnectionStore({ directory })],
+  ]) {
+    const saved = await store.save(
+      {
+        id: 'rich', providerId: 'p', name: 'Priced', endpoint: 'https://rich.example/v1', priority: 1,
+        enabled: true, proxyPool: 'none', modelPolicy: 'all', modelIds: ['m'],
+        modelMeta: {
+          m: { n: 'Model M', c: 200_000, i: ['text'], o: ['text'], p: [3, 15] },
+        },
+        resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 },
+      },
+      { type: 'api-key', value: 'k' },
+    );
+    assert.deepEqual(saved.modelMeta?.m?.p, [3, 15], `${label} discarded the prices on save`);
+    assert.equal(saved.modelMeta?.m?.n, 'Model M', `${label} discarded the display name`);
+    assert.equal(saved.modelMeta?.m?.c, 200_000, `${label} discarded the context window`);
+
+    // And it must survive a round trip through disk, not just the returned record.
+    const reread = (await store.list()).find((connection) => connection.id === 'rich');
+    assert.deepEqual(reread?.modelMeta?.m?.p, [3, 15], `${label} did not return the prices from list()`);
+  }
+});
+
+test('a save without modelMeta does not invent one, and does not clear an existing one', async (t) => {
+  const store = new InMemoryConnectionStore();
+  const base = {
+    id: 'c', providerId: 'p', name: 'C', endpoint: 'https://p.example/v1', priority: 1,
+    enabled: true, proxyPool: 'none', modelPolicy: 'all', modelIds: ['m'],
+    resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 },
+  };
+  await store.save({ ...base, modelMeta: { m: { p: [3, 15] } } }, { type: 'api-key', value: 'k' });
+
+  // Re-saving without metadata is the shape `saveConnection` uses for an unrelated field change, and it
+  // must not silently drop what a catalog scan discovered.
+  const second = await store.save({ ...base, priority: 2 }, { type: 'api-key', value: 'k' });
+  assert.deepEqual(second.modelMeta?.m?.p, [3, 15], 're-saving a connection dropped its discovered prices');
+
+  // And a save that supplies new metadata replaces it, rather than merging two price lists.
+  const third = await store.save({ ...base, modelMeta: { m: { p: [7] } } }, { type: 'api-key', value: 'k' });
+  assert.deepEqual(third.modelMeta?.m?.p, [7]);
 });

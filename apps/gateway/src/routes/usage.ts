@@ -1,6 +1,7 @@
 import type { ProviderError } from '@hilbras/omnihilbras';
 import type { RouteContext } from './route-context.js';
 import type { UsageOutcome } from '../usage-store.js';
+import { priceUsage, pricingCaveat } from '../usage-pricing.js';
 import { sendJson } from '../http.js';
 
 /**
@@ -85,7 +86,27 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
       ...(outcomeParam ? { outcome: outcomeParam as UsageOutcome } : {}),
       ...(limitParam !== null ? { limit: Number(limitParam) } : {}),
     });
-    sendJson(response, 200, { recording: true, ...summary }, origin);
+    // Priced at read time from the connection's catalog, never stored and never defaulted. See
+    // `usage-pricing.ts`: a model whose provider publishes no price contributes tokens to the totals and
+    // nothing to the cost, and the response says how much of the page that covers.
+    const priced = priceUsage(
+      await Promise.all(
+        summary.records.map(async (record) => ({
+          ...record,
+          pricing: await service.modelPrice(record.connectionId, record.model),
+        })),
+      ),
+    );
+    sendJson(response, 200, {
+      recording: true,
+      ...summary,
+      cost: {
+        ...priced,
+        // `null` rather than a string nobody should show: a caveat printed every time is a caveat read
+        // never, so the route returns nothing when every record was priced.
+        caveat: pricingCaveat(priced),
+      },
+    }, origin);
     return true;
   } catch (error) {
     // A store that cannot be read is a report that is missing, not a request that failed. The error shape is
