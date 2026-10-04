@@ -2171,6 +2171,73 @@ looks like the guard breaking rather than the fix breaking.
 | computed path `` `/v1/keys-${suffix}` `` | ✖ caught | ✖ caught (unchanged) |
 | `matches(url.pathname, …)` helper | pass 5 (plant unfaithful — no such helper) | unplantable in this codebase |
 
+## Task 96: nine Success Criteria sat unticked for nineteen releases, beside a plan reading 50/50
+
+Asked what in the markdown plans had not been done. The answer was in the document nobody opens: the
+SPEC's own **Success Criteria**, where **nine of ten boxes were unticked** — while `tasks/plan.md` read
+50/50 complete in the same repository.
+
+A finished plan reads as a finished project. The criteria it was finished *against* were never revisited.
+
+**Every one of the nine turned out to be true**, verified by measurement rather than assumed:
+
+```
+sdkBuildsAlone                        true    (own tsconfig, no react dependency)
+registryExported                      true
+chatChunkInContract                   true
+serviceRegistrations                  7
+providerConditionalsInRouting         0      ← the "no adapter needed to add a provider" claim
+providerConditionalsInService         0
+streamRefsInContract                  13
+testsReadingRealCredentials           0
+cloudSdks                             []
+```
+
+All nine are now ticked, each with **how it was proved**, so the next reader can re-check rather than
+believe. Zero unticked boxes remain in `docs/SPEC-SDK.md`.
+
+### The same audit found a stale number
+
+`tasks/plan.md`'s risk table — the one claiming to mitigate the plan's only **High** risk — said
+**"1 of 11 adapters"**. It has said so since 1.32.0. It was **4 of 12** as of 1.48.0.
+
+A count in prose is a count that rots. The same number, printed by `fixture-coverage.test.js`, cannot.
+
+### `tests/documentation-honesty.test.js`, 4 tests
+
+Three plants verified:
+
+| Plant | Result |
+| --- | --- |
+| untick a criterion | ✖ |
+| restore `"1 of 11 adapters"` | ✖ |
+| `**Current version: 0.2.0**` in the README | ✖ |
+
+**The middle one passed the first time.** My check only asserted `1 <= pinned <= total` — which a stale
+`1 of 11` satisfies perfectly, while the tree holds 4 of 12. It now compares against the tree: the
+fixtures directory and the adapter directory, counted in the test.
+
+That is the seventh time this session that a check written to catch a specific defect turned out to
+satisfy the defect. The pattern is consistent enough to be worth naming as a rule: **a check that only
+tests that a number is *possible* is not a check that a number is *true*.**
+
+### One criterion is deliberately weaker than it looks
+
+"Provider errors never expose secrets" is enforced against **gateway** error paths. A provider that echoes
+a credential back in its own body is caught by shape-based redaction in `transport.ts`, which is a
+heuristic and not a boundary — a credential matching none of the redacted prefixes would pass through.
+Recorded in the SPEC as such rather than presented as a property the product has.
+
+### A fixture that failed six ways
+
+`apps/gateway/test/spec-success-criteria.mjs` originally stood up its own gateway and adapter to prove
+the streaming criterion. It failed six rounds, each time because the **fixture** was wrong and the
+gateway was right: it read `context.headers` when the credential arrives as `context.credential`; gave
+the connection `id: 'fixture'` while the adapter's id was `openai`; and pointed the endpoint at a dead
+port, getting a **byte-identical** error — which is what finally proved no network call was happening at
+all. Six rounds spent on a defect that was in the test. It now checks the code that already implements
+each criterion, and the SSE claim is carried by the contract suite that runs for all 12 adapters.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

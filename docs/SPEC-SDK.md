@@ -2404,16 +2404,38 @@ The existing Vite commands must continue to build the frontend successfully.
 
 ## Success Criteria
 
-- [ ] A TypeScript SDK package builds independently of the React app.
-- [ ] The SDK exposes stable normalized types and a provider registry.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management.
-- [ ] A provider with a different protocol can be added through a capability-specific adapter without modifying the gateway core.
-- [ ] Native streaming works through one normalized `AsyncIterable<ChatChunk>` contract.
-- [ ] Provider errors have stable codes and never expose secrets.
-- [ ] The local gateway starts on loopback and supports health, models, chat, and SSE streaming.
-- [ ] Tests run without real provider credentials.
-- [ ] The dashboard can use the local gateway without a document reload.
-- [ ] Cloud-specific concerns are represented by interfaces but are not implemented in the first slice.
+**Checked 1.51.0. Nine of these ten were unticked while `tasks/plan.md` read 50/50 complete** — the plan
+was finished and the criteria it was finished *against* were never revisited. Each is now verified by
+measurement, and `apps/gateway/test/spec-success-criteria.mjs` fails if any stops holding.
+
+- [x] A TypeScript SDK package builds independently of the React app. — its own `tsconfig.json` and
+      `build` script; `packages/omnihilbras-sdk/package.json` declares no React dependency.
+- [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
+      and the 12-adapter contract suite runs against it.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **12 adapters** in `packages/omnihilbras-sdk/src/adapters/`, each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
+- [x] A provider with a different protocol can be added through a capability-specific adapter without
+      modifying the gateway core. — **7 registrations in `service.ts`, 0 provider-id conditionals in
+      `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and
+      1.45.0, which showed the gateway serves all nine with no adapter at all.
+- [x] Native streaming works through one normalized `AsyncIterable<ChatChunk>` contract. — `ChatChunk` is in
+      the public types; `provider-contract.js` exercises streaming for every adapter.
+- [x] Provider errors have stable codes and never expose secrets. — `ProviderError` codes throughout, and
+      the transport redacts token-shaped substrings from any relayed provider body.
+- [x] The local gateway starts on loopback and supports health, models, chat, and SSE streaming. — measured
+      live: `GET /health` 200, `GET /v1/models` 200, and `POST /v1/chat/completions` streaming.
+- [x] Tests run without real provider credentials. — **0** test files in any of the three suites read a real
+      provider environment variable.
+- [x] The dashboard can use the local gateway without a document reload. — client-side React Router; no
+      full-page navigation on any view change.
+- [x] Cloud-specific concerns are represented by interfaces but are not implemented in the first slice. —
+      `DeploymentConfig` and `tenant` are types; **no cloud SDK appears anywhere in the gateway or SDK**
+      (the `aws-sdk` strings in `kiro.ts` are a User-Agent Cline/Kiro expects, not a dependency).
+
+**One criterion is deliberately weaker than it looks.** "Never expose secrets" is enforced against
+*gateway* error paths, not against a provider that echoes a credential back in its own body — that is
+caught by shape-based redaction in `transport.ts`, which is a heuristic, not a boundary. A provider whose
+credential matches none of the redacted prefixes would pass through. Recorded in
+`tasks/todo.md` rather than presented as a property the product has.
 
 ## Protocol References
 

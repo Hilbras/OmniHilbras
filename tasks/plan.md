@@ -245,11 +245,12 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 ### Audit: the risk table, checked rather than believed
 
 The task list above is 50 of 50. Its **risk table** was not audited until the end, and one of its
-mitigations is not implemented:
+mitigations was not implemented — and stayed that way for nineteen releases after this sentence was
+written, while the plan continued to read as finished:
 
 | Risk | Claimed mitigation | Measured |
 | --- | --- | --- |
-| Provider APIs change independently (**High**) | pin response fixtures per adapter | **1 of 11 adapters** — only `kiro-stream.bin` |
+| Provider APIs change independently (**High**) | pin response fixtures per adapter | **4 of 12 adapters** — `kiro-stream.bin` plus `openrouter`, `cline` and `opencode-console` (1.48.0). The other eight have a stated reason, and **six of those need a credential this machine does not have**. The count is printed by `fixture-coverage.test.js`, so it cannot go stale again without a test failing. |
 | Streaming formats differ (**High**) | test event boundaries explicitly | real: frame-level assertions across the adapter tests |
 | Secrets leak through logs/errors (**High**) | redaction helpers and tests that scan errors/log output | real: error-output scanning tests exist |
 | Gateway becomes coupled to one provider | no provider IDs in shared service logic | real: 12 files carry a zero-provider-id invariant test |
