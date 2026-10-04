@@ -170,7 +170,7 @@ The first local gateway exposes:
 - `PUT /v1/connections/:id/resilience` — update one connection's retry, timeout, and rate-limit budget.
 - `PUT /v1/connections/:id` — save or update a connection. A discovered **model metadata map** (display name, context window, modalities, and per-1M prices) is preserved across a save that does not supply one, and replaced by one that does; it was silently dropped on every save before 1.62.0.
 - `GET /v1/routing` — live routing state: budgets, recent failures and successes, ejection, last latency, last error, and `rateLimitWaitMs` (absent when never checked, `0` when checked and free).
-- `GET /v1/usage` — recorded per-request usage: totals, and the newest records first. Optional query
+- `GET /v1/usage` — recorded per-request usage: totals, the newest records first, and a `cost` object. Rendered by `UsagePage.tsx` at `/dashboard/usage`. Optional query
   parameters `provider`, `model`, `connection`, `since`, `until`, `outcome` (`success`/`failure`/`cancelled`)
   and `limit` (0–10000); an unknown `outcome` or a malformed `limit` is a 400 rather than a filter that
   silently matches nothing. **A record holds no prompt, no response, no headers and no credential** — the

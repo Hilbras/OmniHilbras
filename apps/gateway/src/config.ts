@@ -12,6 +12,7 @@ import {
   type SecretStore,
 } from '@hilbras/omnihilbras';
 import { LocalApiKeyStore, type ApiKeyStore } from './api-keys.js';
+import { LocalUsageStore } from './usage-store.js';
 import { defaultConnectionDirectory, LocalConnectionStore, parseMasterKey, type ConnectionStore } from './connections.js';
 import { GatewayService } from './service.js';
 import { localDeployment, type DeploymentConfig } from './runtime.js';
@@ -167,6 +168,16 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
   return new GatewayService(createProviderRegistry(config), store, store, keys, {
     failureThreshold: config.failureThreshold,
     recoveryCooldownMs: config.recoveryCooldownMs,
+    // **Wired here in 1.64.0, and it had never been.** `GatewayServiceOptions.usageStore` is optional by
+    // design — "this gateway records nothing" is a state a caller chose, not an accident — but the only
+    // caller that constructs a real gateway never passed one, so every deployed gateway answered
+    // `recording: false` and the Usage page had nothing to read. An optional dependency with no production
+    // caller is a feature that is off in every deployment, and no unit test noticed because every test
+    // constructs the service itself.
+    //
+    // `LocalUsageStore` writes through `atomicWrite`, so `usage.json` lands at 0600 in the same 0700
+    // directory as the credentials, and is bounded by `maxRecords` on write.
+    usageStore: new LocalUsageStore({ directory: config.dataDir }),
   }, deploymentFrom(config));
 }
 

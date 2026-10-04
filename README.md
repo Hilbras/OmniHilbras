@@ -9,7 +9,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.63.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.64.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -24,8 +24,10 @@ The dashboard is one React Router app mounted at `/dashboard`:
 - `/dashboard/routing`
 - `/dashboard/keys`
 
-Two more sidebar entries — **Usage** and **Request log** — are **disabled and have no route yet**. The gateway
-has recorded per-request usage since 1.61.0 and serves it at `GET /v1/usage`, but the pages are not built.
+- `/dashboard/usage`
+
+**Request log** is the one sidebar entry still disabled with no route: the gateway records per-request usage
+at `GET /v1/usage` and `Usage` renders it, but there is no separate browsable log.
 
 `/` lands on Providers, because there is no Overview page. An earlier one was a mockup with no data source
 behind a range selector that changed a hardcoded number, and it was deleted rather than kept.

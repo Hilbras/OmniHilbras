@@ -579,6 +579,74 @@ export function updateGatewayConnectionResilience(connectionId: string, resilien
   }).then((body) => body.connection);
 }
 
+/**
+ * One recorded request, as `GET /v1/usage` returns it.
+ *
+ * **`providerId` and `connectionId` are optional**, because a request can end before any route is tried: a
+ * client that disconnects during startup, or a request nothing could serve. The page shows those as
+ * unattributed rather than inventing a provider name — a request log that puts a provider on a request that
+ * provider never saw is the one thing a usage page must not do.
+ */
+export type GatewayUsageRecord = {
+  id: string;
+  at: string;
+  model: string;
+  providerId?: string;
+  connectionId?: string;
+  outcome: 'success' | 'failure' | 'cancelled';
+  errorCode?: string;
+  attempts: number;
+  latencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+};
+
+export type GatewayUsageTotals = {
+  requests: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+  inputTokens: number;
+  outputTokens: number;
+  /**
+   * True when **no** record carried token counts.
+   *
+   * The reason this field exists: an unmetered provider and a free provider both sum to zero, and a page that
+   * cannot tell them apart reports "$0 spent" for a connection that was never asked.
+   */
+  tokensUnmeasured: boolean;
+};
+
+export type GatewayUsageCost = {
+  costUsd: number;
+  pricedRequests: number;
+  unpricedRequests: number;
+  unpricedEntirely: boolean;
+  /** `null` when every record was priced; a caveat printed every time is one nobody reads. */
+  caveat: string | null;
+};
+
+export type GatewayUsage = {
+  /**
+   * False when the gateway was started without a usage store, so nothing has been recorded.
+   *
+   * Reported honestly rather than as `404` or as zeros that read as "nothing was spent".
+   */
+  recording: boolean;
+  reason?: string;
+  totals: GatewayUsageTotals;
+  records: GatewayUsageRecord[];
+  cost?: GatewayUsageCost;
+};
+
+export function getGatewayUsage(query?: { outcome?: 'success' | 'failure' | 'cancelled'; limit?: number }, signal?: AbortSignal) {
+  const params = new URLSearchParams();
+  if (query?.outcome) params.set('outcome', query.outcome);
+  if (query?.limit !== undefined) params.set('limit', String(query.limit));
+  const suffix = params.toString();
+  return requestJson<GatewayUsage>(`/v1/usage${suffix ? `?${suffix}` : ''}`, { signal });
+}
+
 export function getGatewayRoutingState(signal?: AbortSignal) {
   return requestJson<GatewayRoutingState>('/v1/routing', { signal });
 }

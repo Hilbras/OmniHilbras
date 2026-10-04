@@ -2933,6 +2933,70 @@ cost   : {"costUsd":0.0105,"pricedRequests":1,"unpricedRequests":0,
   fragment and a syntax error, and in one case splitting a getter's comment from its body. Both fixed by
   reading the region before editing rather than trusting the anchor.
 
+## Task 108: the Usage page — the first dashboard page built on measured data
+
+Phase 6.2 shipped a usage store and v1.61.0 left the nav entry disabled. This is the page.
+
+### The feature was off in every deployment
+
+`GatewayServiceOptions.usageStore` is optional by design — "this gateway records nothing" is a state a caller
+*chose*. But `createGatewayService` never passed one, so **every real gateway answered `recording: false`** and
+the page would have had nothing to read. An optional dependency with no production caller is a feature that is
+off everywhere, and no unit test noticed because every test constructs the service itself.
+
+### The three ways this page could lie, and what stops each
+
+The page is not a view over an existing table; it is the first consumer of a store that did not exist nine
+releases ago. So the risk is not a stale figure — it is **rendering a number that means nothing**.
+
+| the collapse | renders | must render |
+| --- | --- | --- |
+| `tokensUnmeasured` | `0 input tokens` | `—` and a sentence saying no provider reported usage |
+| `unpricedEntirely` | `$0.00` | **Not priced** plus the gateway's caveat |
+| absent `providerId` | some default | `unattributed` |
+
+Verified in the live DOM against a real gateway:
+
+```
+INPUT TOKENS  12k      OUTPUT TOKENS  1.9k     COST  Not priced
+  No cost shown: none of the 3 recorded requests had a price from its provider.
+
+1m ago   kimi-k2   unattributed   cancelled   — / —   40 ms   0
+5m ago   gpt-5.5   openai         failure RATE_LIMITED   — / —   220 ms  2
+15m ago  claude-sonnet-4  anthropic  success  12k / 1.9k  812 ms  1
+```
+
+Cancellations have their own card, because folding them into "failed" is what v1.52.0 removed from the health
+counter, and the same mistake in the same product would be found by nobody — the totals would still add up.
+
+### The guard caught me making a claim the product did not have
+
+I wrote the page description as *"What your gateway actually served, and what it cost"* — and
+`marketing-claims.test.js` failed it, because `FALSE_CLAIMS` contains `'what it cost'` and scans **all of
+`src/`**. The claim became true in v1.62.0, but the guard is a blunt substring match and "what it cost" with
+no published price is exactly the overstatement it exists to catch. Reworded to what the page actually shows.
+
+### My own guard was blind, and mutation testing found it
+
+The first version asserted the token figures were gated with `>= 1` match of `totals?.tokensUnmeasured`. I
+removed the **input**-token gate to test it: the **output** gate remained, the count stayed at 1, and the guard
+passed. A guard that counts occurrences cannot tell "both are gated" from "one is" — the same mistake as
+asserting two branches while checking one. Now each field is asserted by name, and both mutations fail.
+
+Four mutations, all caught by the right test: `$0.00` for unpriced, a fallback provider name, either token gate
+removed, and the nav entry re-disabled.
+
+### Layout, measured rather than eyeballed
+
+At 1280px: no page-level horizontal overflow, 4 summary columns, table `min-width: 640px` fitting in 952px.
+Shrunk to 390px: the table scrolls **inside its own container** (`640>388`) rather than pushing the page wide,
+and the summary drops to 4 narrow columns.
+
+### Also fixed
+
+The README claimed `/dashboard/usage` and `routes.ts` had no such route — the `documentation-counts` guard
+caught it the moment the page landed, which is the guard working as intended rather than as decoration.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

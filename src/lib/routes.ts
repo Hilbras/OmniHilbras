@@ -15,6 +15,17 @@ export const dashboardRoutes = {
   providers: '/providers',
   routing: '/routing',
   keys: '/keys',
+  /**
+   * Added in 1.64.0, with the page and with the gateway's usage store.
+   *
+   * This route was listed in the README as if it existed for several releases, and `tests/documentation-counts.test.js`
+   * caught it when the page actually landed — which is the guard doing exactly its job: a documented route
+   * that 404s reads as a bug in the app, and a reader cannot tell it from one that was never built.
+   *
+   * The nav entry existed the whole time as a disabled "soon" item, so the shell was honest and the README
+   * was not.
+   */
+  usage: '/usage',
 } as const;
 
 export function providerRoute(providerId: string) {

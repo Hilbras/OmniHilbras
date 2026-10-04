@@ -176,3 +176,103 @@ test('THE COUNT, asserted so the list cannot be quietly emptied', () => {
   assert.equal(Object.keys(FALSE_CLAIMS).length, 15, `the recorded-claims list now has ${Object.keys(FALSE_CLAIMS).length} entries`);
   console.log(`    recorded false claims: ${Object.keys(FALSE_CLAIMS).length}   present on the page: 0`);
 });
+
+
+// ---------------------------------------------------------------------------
+// The Usage page, specifically. (1.64.0)
+// ---------------------------------------------------------------------------
+//
+// `FALSE_CLAIMS` above scans all of `src/`, which catches a claim the page cannot back. It cannot catch the
+// opposite error, which is the one this page is most likely to make: **rendering a number that means
+// nothing**.
+//
+// Every figure on `UsagePage.tsx` comes from `GET /v1/usage`, and three of them have a "we don't know"
+// state that is easy to collapse into a zero. The collapse is the failure:
+//
+//   tokensUnmeasured  -> "0 input tokens"   (says: the provider reported none, i.e. it used none)
+//   unpricedEntirely  -> "$0.00"            (says: this was free, rather than nobody published a price)
+//   providerId absent -> some default      (says: that provider served it, when no provider was reached)
+//
+// So these are asserted structurally. A change that renders any of them as a value fails here rather than
+// shipping, and the reasoning lives next to the assertion rather than in a reviewer's memory.
+
+test('the Usage page renders an absent measurement as absent, never as a number', () => {
+  const page = readFileSync(join(SRC, 'pages', 'UsagePage.tsx'), 'utf8');
+
+  // `tokensUnmeasured` gates both token figures. Checked as a real conditional in the source, not by
+  // looking for the words, so renaming the variable does not silently disarm it.
+  // **Both** figures, named individually. The first version counted the gates (`>= 1`) and I removed the
+  // input-token one to test it: the output-token gate remained, the count stayed at 1, and the guard
+  // passed. A guard that counts occurrences of a pattern cannot tell "both are gated" from "one is", which
+  // is the same mistake as asserting two branches when only one was checked.
+  for (const field of ['inputTokens', 'outputTokens']) {
+    const gated = new RegExp(`tokensUnmeasured[^\\n]*${field}`).test(page);
+    assert.ok(
+      gated,
+      `the ${field} figure is not gated on \`tokensUnmeasured\`, so an unmetered provider renders as 0 tokens`,
+    );
+  }
+
+  // `unpricedEntirely` gates cost, and the alternative to a number is words rather than `$0`.
+  assert.ok(
+    /unpricedEntirely\s*\?\s*'Not priced'/.test(page),
+    "an entirely unpriced page must say so; `\"$0.00\"` would claim the requests were free",
+  );
+  assert.ok(
+    /cost\?\.caveat/.test(page),
+    'the cost caveat from the gateway is never rendered, so a partial total would look complete',
+  );
+
+  // A record with no provider says so. The alternative is a fallback provider name.
+  assert.ok(
+    /providerId\s*\?\?\s*'unattributed'/.test(page),
+    "a request with no provider must render as unattributed; any fallback name puts a provider on a " +
+      'request that provider never served',
+  );
+});
+
+test('the Usage page shows cancellations separately, because they are neither success nor failure', () => {
+  // The v1.52.0 rule, in the one place a reader will count them. Folding a cancellation into "failed" is
+  // what the health counter was fixed for, and the same mistake in the same product would be found by
+  // nobody, because the totals would still add up.
+  const page = readFileSync(join(SRC, 'pages', 'UsagePage.tsx'), 'utf8');
+  assert.ok(/label="Cancelled"/.test(page), 'cancellations have no summary card of their own');
+  // `totals.cancelled`, not `totals?.cancelled` — the page narrows with `totals ? String(...) : '—'`,
+  // so the optional chain never appears. My first assertion looked for the chain and reported the card
+  // as unread when it was reading the field perfectly well.
+  assert.ok(
+    /totals\s*\?[^\n]*totals\.cancelled/.test(page) || /totals\?\.cancelled/.test(page),
+    'the cancellation total is never read, so the card would show nothing',
+  );
+});
+
+test('the Usage page states that its window is bounded, because it is', () => {
+  // The store keeps a bounded number of records and drops the rest, so "requests" is a count of what is
+  // retained, not of everything ever sent. A page that shows a bare total without saying so invites the
+  // reader to treat it as a lifetime figure.
+  const page = stripComments(readFileSync(join(SRC, 'pages', 'UsagePage.tsx'), 'utf8')).toLowerCase();
+  assert.ok(
+    page.includes('tail') && page.includes('history'),
+    'the page must say its list is a bounded tail rather than a history; without that, the total reads as lifetime',
+  );
+});
+
+test('the Usage nav entry is live, and its route exists', () => {
+  // The nav had carried a disabled "soon" entry for this page since before the data existed. Two things
+  // must hold together: the entry is not pending, and the router serves the path. Either alone would be a
+  // link to nowhere or a page nothing can reach.
+  const shell = readFileSync(join(SRC, 'components', 'DashboardShell.tsx'), 'utf8');
+  const usageEntry = shell.match(/label: 'Usage'[^\n]*/)?.[0] ?? '';
+  assert.ok(usageEntry, 'the Usage nav entry is gone');
+  assert.ok(
+    !usageEntry.includes('pending'),
+    `the Usage nav entry is still disabled: ${usageEntry.trim()}`,
+  );
+  assert.ok(usageEntry.includes("to: '/usage'"), `the Usage nav entry points elsewhere: ${usageEntry.trim()}`);
+
+  const router = readFileSync(join(SRC, 'dashboardApp.tsx'), 'utf8');
+  assert.ok(
+    /path="\/usage"\s+element=\{<UsageContent \/>\}/.test(router),
+    'no route serves /usage, so a live nav entry would go nowhere',
+  );
+});

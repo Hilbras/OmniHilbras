@@ -26,7 +26,12 @@ import { useGatewayStatus } from '../lib/useGatewayStatus';
  * three disabled "soon" entries carry it as their page so a pending item never claims to be the active
  * one while pointing nowhere.
  */
-type DashboardPage = 'overview' | 'providers' | 'routing' | 'keys';
+/**
+ * `'usage'` was added in 1.64.0 when the page landed. The other three disabled "soon" entries
+ * (`Settings`, and `Request log`) still carry `'overview'`, which is no longer a route — so a pending
+ * item never claims to be the active one while pointing nowhere.
+ */
+type DashboardPage = 'overview' | 'providers' | 'routing' | 'keys' | 'usage';
 
 type SidebarItem = {
   label: string;
@@ -46,7 +51,10 @@ const primaryItems: SidebarItem[] = [
 ];
 
 const insightItems: SidebarItem[] = [
-  { label: 'Usage', icon: BarChart3, to: '/usage', page: 'overview', pending: true },
+  // Was `pending: true` behind a link to nowhere. Real since 1.64.0, when the page and the
+  // gateway's usage store both landed — the nav had been saying so honestly for longer than the
+  // data existed.
+  { label: 'Usage', icon: BarChart3, to: '/usage', page: 'usage' },
   { label: 'Request log', icon: ScrollText, to: '/request-log', page: 'overview', pending: true },
   { label: 'Settings', icon: Settings2, to: '/settings', page: 'overview', pending: true },
 ];
