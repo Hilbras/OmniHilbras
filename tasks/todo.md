@@ -2497,6 +2497,94 @@ produced the stale claim in the first place.
 And one measurement error: I read `allChatGptWebModels` as a constant, called it without `()`, and measured
 **0 models**. It is a function. The real answer is 22.
 
+## Task 101: a refusal by the rate limiter was recorded as a provider failure
+
+Working **Phase 8** ("regression testing around race conditions, hedging, cancellation, timeouts, retries,
+rate-limit reservations"). The hedge race was fixed in 1.52.0–1.53.0 and the planning-skip path in 1.54.0.
+The **enforce** path — the third place a rate limit can refuse a request — had not been examined.
+
+### The defect
+
+`enforceRateLimit` threw *inside* the dispatch `try`, so its refusal was caught by the provider's own error
+handling. Measured with the limiter refusing the only candidate:
+
+```
+client saw      : PROVIDER_REQUEST_FAILED
+provider calls  : 0   enforce calls: 1
+recordFailure   : ["p:PROVIDER_REQUEST_FAILED"]
+```
+
+**Nothing was sent** — the provider was never contacted — and it was recorded as having failed. The client
+got a 502 telling it to retry, against a connection at its RPM ceiling.
+
+Two concurrent requests against a limit of 1 show both halves at once; the loser of the race is the one
+refused at `enforce()`:
+
+```
+A: HTTP 502  code=PROVIDER_REQUEST_FAILED
+B: HTTP 429  code=RATE_LIMITED
+```
+
+This is the **fourth** instance of one class, and the class now has a name: *a health counter recording
+something that did not happen*. 1.52.0 `recordSuccess` in a `finally`; 1.53.0 an abandoned hedge settling; a
+cancellation recorded as failure; and now a limiter refusal recorded as a provider failure.
+
+### What was already right, and would have been easy to break
+
+`RetryPolicy` already stops on `RATE_LIMITED`, so **nothing was retried** — I checked, because "does a retry
+hammer a connection that cannot serve it?" was the worse version of this bug and it turned out to be already
+handled. My first test run "proved" it retried; it had not, because the whole request threw before I could
+read the ledger. The bug was the health record and the status code, nothing else.
+
+### Fixed
+
+`enforceRateLimit` is checked outside the dispatch `try` and rethrown as a `ProviderError` carrying
+`RATE_LIMITED`, so the code survives to `statusForError` — which already mapped it to 429 correctly. No
+`recordFailure`, no `recordSuccess`, and `recordRateLimitUse` stays where it is because nothing was sent.
+
+Over real HTTP with a slow provider and a limit of 1: `200 / 429`, provider calls `1`, and with
+`failureThreshold: 1` the connection is **not** ejected.
+
+### The `t` mistake, three times
+
+Every new HTTP test I wrote declared `async () => {` while calling `t.after(...)`. node:test reports that as a
+`ReferenceError` **plus** a file-level failure — *"Promise resolution is still pending but the event loop has
+already resolved"* — while the open server keeps the process alive. It cost 90s, then 180s, then again.
+
+The symptom pointed nowhere near the cause, and the fix was one character each time. A mistake worth making
+three times in one session is a mistake worth a guard, so `tests/test-context.test.js` now fails on
+`t.after()` without a declared `(t)`, across all three test directories.
+
+Mutation-tested both directions: reintroducing the exact mistake is caught, and a *legitimate* `(t)`
+declaration is not flagged. Its first version had two bugs of its own — it flagged **itself** (it contains
+both patterns as literals) and produced a false positive by slicing each test body to the next
+*declaration* instead of the next `test(`.
+
+### The same defect was in the streaming path too — and I nearly missed it
+
+I fixed the chat path, wrote its test, and moved on. `stream()` has **its own dispatch loop**, so it had the
+identical bug, and a *structural* test now covers all three paths (`chat`, `tryHedgedRace`, `stream`) by
+asserting `enforceRateLimit` is never called inside a block that records provider health.
+
+Found by enumerating `enforceRateLimit` call sites rather than by reasoning about them — which is the lesson,
+because I had reasoned and been wrong.
+
+Three wrong results along the way, all recorded because each would have been a false "no defect":
+
+1. **The first streaming probe said "no defect"** because I wrote `ex.stream(...)` without `await` inside the
+   try, so the rejection escaped it. Re-measured: `client saw PROVIDER_REQUEST_FAILED`, `stream calls 0`,
+   `recordFailure ["p:PROVIDER_REQUEST_FAILED"]`.
+2. **My first revert of the stream fix silently did nothing** — it replaced the first
+   `recordRateLimitUse` in the file, which is the *chat* path's. The test then passed against reverted code,
+   which is worse than no test: it is a test that reports green on the bug. Redone with the search anchored
+   after the stream comment, and it fails as it should.
+3. **The structural guard asserted `>= 4` call sites from memory**; there are 3, because the hedge has one,
+   not two. A guessed number in a guard is a guard someone will "fix" by relaxing rather than by counting.
+
+Both mutations re-verified after the correction: reverting the stream fix turns its test red, and a
+hypothetical fourth path that calls the limiter inside a health-recording block is caught by the structural
+guard.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

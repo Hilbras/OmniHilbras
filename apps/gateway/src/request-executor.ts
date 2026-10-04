@@ -109,8 +109,47 @@ export class RequestExecutor {
       for (let attempt = 1; attempt <= candidate.resilience.maxRetries + 1; attempt += 1) {
         if (signal?.aborted) throw new ProviderError('CANCELLED', 'The request was cancelled.', { cause: signal.reason });
         const startedAt = Date.now();
+        // **A refusal by the limiter is not a provider failure** (1.56.0).
+        //
+        // `enforceRateLimit` throwing is checked outside the dispatch `try`, so it could not reach the
+        // provider's own error handling — and that was the point of it: nothing has been sent, so
+        // nothing was spent and there is nothing to learn about the provider. Measured with the limiter
+        // refusing the only candidate:
+        //
+        // ```
+        // client saw      : PROVIDER_REQUEST_FAILED
+        // provider calls  : 0   enforce calls: 1
+        // recordFailure   : ["p:PROVIDER_REQUEST_FAILED"]
+        // ```
+        //
+        // So a provider that was **never contacted** was recorded as having failed, and the client got a
+        // 502 telling it to retry — against a connection that is at its RPM ceiling. This is the same
+        // class as the cancellation fix in 1.52.0 and the abandoned-hedge fix in 1.53.0: a health counter
+        // recording something that did not happen.
+        //
+        // Two requests raced against a limit of 1 showed both halves at once — the loser of the race is
+        // the one refused here:
+        //
+        // ```
+        // A: HTTP 502  code=PROVIDER_REQUEST_FAILED
+        // B: HTTP 429  code=RATE_LIMITED
+        // ```
+        //
+        // `RetryPolicy` already stops on `RATE_LIMITED`, so nothing was retried; the ledger entry and the
+        // status code were the whole of it. Throwing a `ProviderError` rather than the limiter's own error
+        // means the code survives to `statusForError`, which maps `RATE_LIMITED` to 429.
         try {
           this.deps.enforceRateLimit(candidate);
+        } catch (error) {
+          const code = error instanceof ProviderError ? error.code : 'RATE_LIMITED';
+          attempts.push({ providerId: candidate.providerId, attempt, ok: false, latencyMs: 0, errorCode: code });
+          throw new ProviderError(
+            code,
+            `The connection is at its rate limit.${code === 'RATE_LIMITED' ? '' : ''}`,
+            { retryable: false, publicMessage: 'This connection is at its rate limit. Wait for the window to reset.', cause: error },
+          );
+        }
+        try {
           // Counted here, at dispatch, rather than on success: a request that was sent and then
           // failed still cost the provider a call. A request the limit *refused* is not counted,
           // because nothing was sent.
@@ -303,8 +342,27 @@ export class RequestExecutor {
       const startedAt = Date.now();
       let opening: ChatChunk | undefined;
       let rest: AsyncIterator<ChatChunk> | undefined;
+      // Same rule as the chat path (1.56.0), and found by enumerating every `enforceRateLimit` call site
+      // rather than by reasoning about it. Measured here with the limiter refusing the only candidate:
+      //
+      //   client saw      : PROVIDER_REQUEST_FAILED
+      //   stream calls    : 0
+      //   recordFailure   : ["p:PROVIDER_REQUEST_FAILED"]
+      //
+      // The provider was never contacted. Streaming is where this matters most: a client that asked for a
+      // stream and is told "the provider failed" will go and debug a provider that is working perfectly.
       try {
         this.deps.enforceRateLimit(candidate);
+      } catch (error) {
+        const code = error instanceof ProviderError ? error.code : 'RATE_LIMITED';
+        attempts.push({ providerId: candidate.providerId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
+        throw new ProviderError(code, 'This connection is at its rate limit.', {
+          retryable: false,
+          publicMessage: 'This connection is at its rate limit. Wait for the window to reset.',
+          cause: error,
+        });
+      }
+      try {
         this.deps.recordRateLimitUse(candidate.connectionId);
         const opened = await this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, async (deadline) => {
           const source = this.deps.streamChat(candidate.providerId, request, deadline, scope)[Symbol.asyncIterator]();

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore, createGatewayServer } from '../dist/index.js';
 import { RequestExecutor } from '../dist/request-executor.js';
@@ -447,4 +448,163 @@ test('a refusal with any reason other than a limit is never reported as 429', as
   // failed.` — so the skipped-reason list never reaches this client. That is existing, deliberate
   // behaviour ("a single route keeps the adapter's own redacted public message"), not something this
   // change altered. The signal a client acts on is the code, which is asserted above.
+});
+
+test('a refusal by the rate limiter does not record a provider failure', async () => {
+  // Measured before the fix, with the limiter refusing the only candidate:
+  //
+  //   client saw      : PROVIDER_REQUEST_FAILED
+  //   provider calls  : 0   enforce calls: 1
+  //   recordFailure   : ["p:PROVIDER_REQUEST_FAILED"]
+  //
+  // Nothing was sent, so there was nothing to learn about the provider — and the provider was recorded as
+  // having failed anyway. Same class as the cancellation fix (1.52.0) and the abandoned hedge (1.53.0): a
+  // health counter recording something that did not happen.
+  const health = { success: [], failure: [] };
+  let calls = 0;
+  let enforced = 0;
+  const candidate = { providerId: 'p', connectionId: 'c', priority: 1, modelIds: ['m'], resilience: { maxRetries: 2, requestsPerMinute: 1, timeoutMs: 5_000, hedgeAfterMs: 0 } };
+  const executor = new RequestExecutor({
+    planRoute: async () => ({ candidates: [candidate] }),
+    chat: async () => { calls += 1; return { id: 'r', providerId: 'p', model: 'm', createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'x' }, finishReason: 'stop' }; },
+    streamChat: async function* () {},
+    withDeadline: (signal, _ms, _id, run) => run(signal),
+    enforceRateLimit: () => { enforced += 1; const error = new Error('at the limit'); error.code = 'RATE_LIMITED'; throw error; },
+    recordRateLimitUse: () => {},
+    recordSuccess: (id) => health.success.push(id),
+    recordFailure: (id, code) => health.failure.push(`${id}:${code}`),
+  });
+
+  await assert.rejects(() => executor.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, undefined));
+  assert.equal(calls, 0, 'the provider was never contacted, so it cannot have failed');
+  assert.deepEqual(health.failure, [], 'a provider the limiter kept us from calling must not be recorded as failing');
+  assert.deepEqual(health.success, [], 'nor as succeeding');
+  assert.equal(enforced, 1, 'the refusal was the limiter\'s, not a retry loop');
+});
+
+test('a limiter refusal answers 429 and is not retryable, not 502 telling the client to retry', async () => {
+  // `statusForError` maps RATE_LIMITED to 429, but the limiter's error never reached it — the refusal was
+  // caught and rewrapped as a generic provider failure. A client obeying that would retry a connection at
+  // its RPM ceiling, which is the same defect 1.54.0 fixed for the planning-skip path.
+  const candidate = { providerId: 'p', connectionId: 'c', priority: 1, modelIds: ['m'], resilience: { maxRetries: 2, requestsPerMinute: 1, timeoutMs: 5_000, hedgeAfterMs: 0 } };
+  const executor = new RequestExecutor({
+    planRoute: async () => ({ candidates: [candidate] }),
+    chat: async () => { throw new Error('the provider works; the limiter refused before this ran'); },
+    streamChat: async function* () {},
+    withDeadline: (signal, _ms, _id, run) => run(signal),
+    enforceRateLimit: () => { const error = new Error('at the limit'); error.code = 'RATE_LIMITED'; throw error; },
+    recordRateLimitUse: () => {}, recordSuccess: () => {}, recordFailure: () => {},
+  });
+
+  const error = await executor.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, undefined).then(() => null, (caught) => caught);
+  assert.equal(error.code, 'RATE_LIMITED', `the client saw ${error?.code}`);
+  assert.notEqual(error.retryable, true, 'retrying immediately is what produced the refusal');
+});
+
+test('two requests racing one connection: the loser gets 429 and the provider stays healthy', async (t) => {
+  // The end-to-end shape of the same defect, over real HTTP. Both requests pass planning — the provider is
+  // slow — and then race at `enforce()`. One gets the slot; the other is refused.
+  const adapter = {
+    id: 'p', name: 'p',
+    capabilities: { chat: true, streaming: true, models: true },
+    async listModels() { return [{ id: 'm', providerId: 'p' }]; },
+    async healthCheck() { return { status: 'healthy', verified: 'credential', checkedAt: new Date().toISOString() }; },
+    async chat() { await new Promise((resolve) => setTimeout(resolve, 60)); return { id: 'r', providerId: 'p', model: 'm', createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'x' }, finishReason: 'stop' }; },
+    async *streamChat() { yield { id: 'c', providerId: 'p', model: 'm', content: 'x' }; },
+  };
+  const registry = new ProviderRegistry().register(adapter);
+  const store = new InMemoryConnectionStore();
+  await store.save(
+    { id: 'p', providerId: 'p', name: 'P', endpoint: 'https://p.example/v1', priority: 1, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: { maxRetries: 0, requestsPerMinute: 1, timeoutMs: 5_000, hedgeAfterMs: 0 } },
+    { type: 'api-key', value: 'k' },
+  );
+  const apiKeys = new InMemoryApiKeyStore();
+  const key = (await apiKeys.create('enforce-race')).key;
+  // failureThreshold 1: a single false failure would eject this connection outright, which is the
+  // consequence being asserted against.
+  const service = new GatewayService(registry, new InMemorySecretStore({}), store, apiKeys, { failureThreshold: 1 });
+  service.setHealthInterval(0);
+  const server = createGatewayServer(service, { corsOrigins: ['http://localhost:5173'] });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = () => fetch(`${base}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+  });
+
+  const statuses = (await Promise.all([post(), post()])).map((response) => response.status).sort();
+  assert.deepEqual(statuses, [200, 429], `a refused race answered ${statuses.join('/')}; 429 is what tells the client to wait`);
+
+  // The connection is still usable: it was refused, not failed.
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const report = await (await fetch(`${base}/v1/routing`, { headers: { authorization: `Bearer ${key}` } })).json();
+  const connection = report.connections[0];
+  assert.notEqual(
+    connection.health?.status,
+    'unhealthy',
+    'a limiter refusal ejected a working provider; the operator would be sent to debug a provider that never failed',
+  );
+});
+
+test('a rate-limit refusal on the STREAMING path is not recorded as a provider failure either', async () => {
+  // The chat path was fixed first and I did not go looking for the others — I reasoned that streaming
+  // would share the code. It does not: `stream()` has its own dispatch loop. Enumerating every
+  // `enforceRateLimit` call site found it immediately.
+  //
+  //   client saw      : PROVIDER_REQUEST_FAILED
+  //   stream calls    : 0
+  //   recordFailure   : ["p:PROVIDER_REQUEST_FAILED"]
+  const health = { success: [], failure: [] };
+  let streamCalls = 0;
+  const candidate = { providerId: 'p', connectionId: 'c', priority: 1, modelIds: ['m'], resilience: { maxRetries: 0, requestsPerMinute: 1, timeoutMs: 5_000, hedgeAfterMs: 0 } };
+  const executor = new RequestExecutor({
+    planRoute: async () => ({ candidates: [candidate] }),
+    chat: async () => { throw new Error('not reached'); },
+    streamChat: async function* () { streamCalls += 1; yield { id: 'c', providerId: 'p', model: 'm', content: 'x' }; },
+    withDeadline: (signal, _ms, _id, run) => run(signal),
+    enforceRateLimit: () => { const error = new Error('at the limit'); error.code = 'RATE_LIMITED'; throw error; },
+    recordRateLimitUse: () => {},
+    recordSuccess: (id) => health.success.push(id),
+    recordFailure: (id, code) => health.failure.push(`${id}:${code}`),
+  });
+
+  // `await` matters: without it the rejection escapes the try and the probe reported "no defect".
+  // That was a false negative I believed for a minute, and it is the reason this test is written the way
+  // it is rather than around a `for await` drain.
+  const error = await executor.stream({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, undefined).then(() => null, (caught) => caught);
+  assert.equal(error?.code, 'RATE_LIMITED', `the client saw ${error?.code}`);
+  assert.equal(streamCalls, 0, 'the provider was never contacted, so it cannot have failed');
+  assert.deepEqual(health.failure, [], 'a provider the limiter kept us from calling must not be recorded as failing');
+});
+
+test('every dispatch path refuses on the limiter OUTSIDE its provider-error handling', () => {
+  // The structural rule behind the two bugs above, so a *third* dispatch path cannot reintroduce it.
+  //
+  // Both fixes work by hoisting `enforceRateLimit` out of the `try` that records provider health — one
+  // finds the same shape twice, the other reason about it. This enumerates the call sites instead, so the
+  // next path added is covered by being present rather than by being remembered.
+  const source = readFileSync(new URL('../src/request-executor.ts', import.meta.url), 'utf8');
+  const callSites = [...source.matchAll(/^(\s*)this\.deps\.enforceRateLimit\(candidate\);/gm)];
+
+  // Three dispatch paths dispatch a request: `chat` (sequential), `tryHedgedRace`, and `stream`. I wrote
+  // `>= 4` from memory of the file and it failed on the real count — the hedge has one call site, not two.
+  // A guard that encodes a guessed number is a guard that will be "fixed" by whoever hits it first.
+  assert.equal(callSites.length, 3, `expected one call site per dispatch path (chat, hedge, stream), found ${callSites.length}`);
+
+  for (const [index, site] of callSites.entries()) {
+    // Walk back to the enclosing `try {`, then forward to the `enforceRateLimit` call. If a
+    // `recordFailure` or `recordSuccess` appears in that window, the limiter is inside provider handling.
+    const before = source.slice(Math.max(0, site.index - 700), site.index);
+    const tryIndex = before.lastIndexOf('try {');
+    assert.ok(tryIndex >= 0, `call site ${index + 1} has no enclosing try; the refusal would not be handled at all`);
+    const window = source.slice(Math.max(0, site.index - 700) + tryIndex, site.index);
+    assert.ok(
+      !/recordFailure|recordSuccess/.test(window),
+      `call site ${index + 1} calls enforceRateLimit inside a block that records provider health, so a\n` +
+        'limiter refusal would be recorded as a provider failure. Hoist it above the try, as the chat and\n' +
+        'stream paths now do.',
+    );
+  }
 });
