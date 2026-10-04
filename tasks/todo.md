@@ -2585,6 +2585,57 @@ Both mutations re-verified after the correction: reverting the stream fix turns 
 hypothetical fourth path that calls the limiter inside a health-recording block is caught by the structural
 guard.
 
+## Task 102: Phase 10 — stress testing found no defect, so the load suite is the deliverable
+
+Every Phase 10 measurement **passed on the first run**. That is the reason this entry exists: the invariants
+below were only ever checked one request at a time, and a concurrency defect is by definition invisible to a
+sequential test. `apps/gateway/test/load.test.js` locks in what was measured.
+
+| scenario | measured |
+| --- | --- |
+| 700 concurrent chat | provider calls == 700, ok+err == 700, no id collisions, no leaks |
+| 60 concurrent streams | 300 chunks, 60/60 reached `[DONE]` |
+| 60 client aborts mid-stream | `failures: 0` — the 1.52.0 fix under load |
+| 5 × `/health`, sweep rejecting | 1 probe, no `unhandledRejection` |
+| 105 concurrent failures | 105 unique `requestId`s, 0 collisions, 0 stack frames |
+
+### Two "defects" I reported were my probe being wrong
+
+1. **Streaming looked completely broken** — every stream returned `event: error / INTERNAL_ERROR` after one
+   chunk. My stub adapter yielded `{ id, providerId, model, content }`; `ChatChunk` requires **`delta`**, so
+   `toOpenAIChunk` threw on the first chunk. The gateway was right, my stub was not a `ChatChunk`.
+2. **"0 request ids"** while the sample body plainly had one — I read `body.requestId` instead of
+   `body.error.requestId`.
+
+A stress suite built from a broken stub is worse than none, and both would have shipped as findings.
+
+### The load suite's own three bugs, and one that made it vacuous
+
+- **`gw.post(extra, controller)`** — I called it with a second argument the helper never accepted, so the
+  abort test was **not aborting anything**. Fixed the signature.
+- **One counter for two things** — `calls` counted `chat()` only, so the sweep-sharing assertion read 0 and
+  I briefly concluded sharing was broken. It works: 5 concurrent reads → 1 probe. Now `calls` and `probes`.
+- **Counters read off the wrong object** — `failures`/`successes` are spread in by
+  `healthManager.snapshot()`, which is `undefined` for a provider nothing has been recorded for.
+- **`counters()` was permanently undefined.** I first wrote `service.routing?.snapshot?.('p', 1)`, which is
+  not a method; `?? 0` then made every counter assertion pass forever. Caught by printing the accessor before
+  relying on it, and there is now a test that fails if it regresses — a completed stream **must** show
+  `successes: 1`.
+
+### A behaviour I did not call a bug
+
+20 aborts at 3 ms → `successes 13`, matching the 13 of 20 generators that ran to completion. Nobody read
+those answers — but the provider *did* serve them, and 1.52.0's rule is that a client decision is not a
+provider fault. Penalising a provider for a browser tab closing is the failure 1.52.0 fixed. Recorded as a
+decision, not an accident.
+
+### Known limit of this suite
+
+A mutation adding `recordSuccess` to the *opening* catch block is **not** caught here, because a client
+abort during chunk delivery never reaches that block — it reaches the iterator's own `catch`, where the
+CANCELLED check already lives. That line is covered by `request-executor.test.js`; duplicating it would add a
+test whose passing means nothing.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.
