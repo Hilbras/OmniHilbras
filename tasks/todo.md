@@ -2745,6 +2745,60 @@ rather than its effect. With it in place, the same mutation fails the file.
 Mutation-tested: never resetting the timer → the "healthy stream is not cut short" test fails; idle default
 to `0` → the defaults test and the shape test fail; duration default to `0` → the shape test fails.
 
+## Task 105: Phase 6.1 — auditing OmniHilbras against 9router's defect classes
+
+Plan: `docs/architecture/phase6-plan.md`. Findings: `docs/architecture/audit-9router-borrowing.md`.
+
+9router's own audit found four live defects in a mature codebase. Two are the exact classes v1.52.0-v1.56.0
+spent nine releases eliminating here, so the question was never whether 9router is better engineered — it is
+bigger and no — but whether OmniHilbras shares the bugs.
+
+| # | class | verdict |
+| --- | --- | --- |
+| 1 | truncated stream presented as complete | **CLEAN** |
+| 2 | dropped status making an error look like success | **NOT APPLICABLE** |
+| 3 | data files written with inherited umask | **CLEAN**, better than 9router's |
+| 4 | unbounded module-level cache | **1 DEFECT**, low severity |
+| 5 | a quietly broken regression gate | **CLEAN** |
+
+### Class 4 is the finding
+
+`rate-limit-policy.ts:45` `waits` — the only write is `.set` at `:109`, and **nothing ever deletes from it**.
+Measured: 50,000 distinct connection ids → 50,000 retained entries.
+
+Getting the severity right took two corrections, both of which would have been wrong in the release notes:
+
+1. **First measurement: 50,000 invented ids → 50,000 entries.** That reads as "any client can exhaust gateway
+   memory". It cannot. 300 requests naming nonexistent providers returned **404 x 300** —
+   `routing-engine.ts:119` calls `requireAdapter(providerId)` before the `unmanaged:` candidate is built, so
+   the key space is bounded by *registered adapters*, not by anything a caller says.
+2. **So what is reachable?** Saved connection ids — which grow on create and **never shrink on delete**.
+   Confirmed end to end through the real routes: 100 created, 100 deleted, `connections remaining: 0`, and
+   `waits` still holding an entry for each.
+
+**Low severity, honestly:** bounded by connections an operator creates and deletes over the gateway's
+lifetime — not by traffic, not by a remote caller.
+
+**And the obvious fix is the wrong one.** A TTL looks like the standard answer, but a wait of `0` is
+*meaningful* state ("checked and free", per `rate-limit-policy.ts:36-42`) and erasing it on a timer would make
+a cooling-down connection look ready — the exact confusion the map exists to prevent. Prune on the signal the
+sibling maps already use: a connection no longer existing.
+
+Recorded as a task, not fixed in passing. It is not urgent and Phase 6.2 does not depend on it.
+
+### Two classes worth stating positively
+
+**Class 3.** Every secret write goes through `secure-store.ts:atomicWrite` — `mkdir 0o700` then `chmod`,
+`open(temporaryPath, 'wx', 0o600)`, `sync`, `rename`, then **`chmod 0o600`**. Measured on a real filesystem
+with umask `0022`: directory `0700`, file `0600`, symlink refused. The `chmod` after `rename` is the part
+9router is missing: `open(…, 'wx', 0o600)` is still subject to umask, and the explicit `chmod` is not.
+
+**Class 1.** `[DONE]` is written *after* the loop, not in a `finally`, so a mid-answer death cannot emit it.
+Measured: a provider emitting two chunks then throwing produces `event: error` and **no** `[DONE]`. And the
+error is truthful — a typed `ProviderError` propagates with its real code (`RATE_LIMITED` →
+`RATE_LIMITED`), while an *untyped* `Error` is deliberately generic, which the audit confirmed by showing an
+error message containing `sk-abc…` never reaches the client. Specificity and redaction are not in conflict.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.
