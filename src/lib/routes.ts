@@ -26,6 +26,8 @@ export const dashboardRoutes = {
    * was not.
    */
   usage: '/usage',
+  /** Added in 1.65.0, with `GET /v1/settings` — see `SettingsPage.tsx`. */
+  settings: '/settings',
 } as const;
 
 export function providerRoute(providerId: string) {

@@ -2997,6 +2997,75 @@ and the summary drops to 4 narrow columns.
 The README claimed `/dashboard/usage` and `routes.ts` had no such route — the `documentation-counts` guard
 caught it the moment the page landed, which is the guard working as intended rather than as decoration.
 
+## Task 109: Settings — the last disabled page that had something real to show
+
+### Why it was disabled, stated precisely
+
+Because **there was nothing to show.** Every setting had been an environment variable, so the only honest
+Settings page would have restated `.env.example` — documentation wearing a UI, and wrong the moment someone
+forgot a row. Rather than build that, the entry stayed disabled for the whole life of the project.
+
+What there *is*: `GET /v1/settings`, returning the configuration the process resolved. `OMNIHILBRAS_PORT=0` is
+refused rather than clamped, so "what is my port" has exactly one answer at runtime and now there is a place
+to read it.
+
+### The cycle I created and then had to break
+
+`service.ts` needs the config to answer the route, so I imported it. But `config.ts` **already imports
+`service.ts`**, for `deploymentFrom` — so that one import closed `config.ts -> service.ts -> config.ts`.
+TypeScript would not have complained in one direction (the type import is erased), and the failure would have
+been at module init rather than at build. The fix is `import type { GatewayConfig }`, with the value handed
+over by the one factory that reads the environment. `settings-route.test.js` asserts both halves: the factory
+passes it, and `service.ts` imports **no value** from `config.ts`.
+
+### The guard I wrote first was dead code, and finding out why was the useful part
+
+I planted a credential in `config.compatible.apiKey` and asserted the response contained no credential. It
+passed — but not because it was safe. `publicSettings` is an allowlist that copies named fields, so the key
+was dropped **before** `assertNoSecrets` ever saw the object. The guard had never fired.
+
+An allowlist before a redaction pass is the right order, so the guard stays as the second line, and its job is
+now stated: catch the day someone widens the allowlist. It is tested directly, because testing it through the
+route would require breaking the allowlist to make it fire.
+
+### Eight mutations, and the two that got through
+
+| mutation | caught |
+| --- | --- |
+| decide mutability locally instead of reading the gateway's split | ✔ |
+| render an `<input>` for a restart-only setting | ✔ |
+| **drop the `dataDir` row so the vault's location is unfindable** | ✔ *(after the fix)* |
+| re-disable the Settings nav entry | ✔ |
+| **retarget the nav entry so it goes nowhere** | ✔ *(after the fix)* |
+| remove the `/settings` route from the router | ✔ |
+| point the `/settings` route at the wrong page | ✔ |
+| read a credential field the gateway does not serve | ✔ |
+
+The two that survived were both gaps in the same test: it asserted the shell said `/settings` and separately
+that the router had a `/settings` route, but nothing connected the two — so retargeting the nav entry passed
+both. And nothing at all cared whether `dataDir` was still shown, so a page could lose the one thing that
+tells an operator where their vault is and pass every check. Both are now asserted, and both mutations fail.
+
+### Two guards that fired on my own correct code
+
+Worth recording, because a guard that is wrong is worse than one that is absent:
+
+- `credential` in a forbidden-field list matched `authRequired` — a **boolean about** a credential, never a
+  credential. A substring cannot tell those apart, so the value-shaped word has to be excluded by hand, and
+  the boolean property is asserted separately so the exclusion cannot become a hole.
+- `<button>` in a "no edit controls" pattern matched the header's Refresh button, which mentions no setting
+  and merely carries a long class list. A guard that fires on the Refresh button is a guard that gets deleted.
+  Now only `<input>` and `<select>` count: value-entry controls, which is what the claim was about.
+
+### And a test that raced the clock
+
+`signal.test.js` failed in the full suite, passed 3/3 alone. `MODULE_LOAD_MS = 1_200` sat under a comment
+claiming it had been measured once; it had not been. Real load: **254 ms unloaded, 1615 ms under suite CPU
+contention** — inside the window half the time. The delay is now a probe's measurement, doubled. The old
+`MODULE_LOAD_MS > elapsed` assertion only held because the constant had been chosen to satisfy it.
+
+I could not reproduce the original failure with synthetic load, so this is reasoned rather than proven.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

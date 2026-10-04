@@ -170,6 +170,16 @@ The first local gateway exposes:
 - `PUT /v1/connections/:id/resilience` — update one connection's retry, timeout, and rate-limit budget.
 - `PUT /v1/connections/:id` — save or update a connection. A discovered **model metadata map** (display name, context window, modalities, and per-1M prices) is preserved across a save that does not supply one, and replaced by one that does; it was silently dropped on every save before 1.62.0.
 - `GET /v1/routing` — live routing state: budgets, recent failures and successes, ejection, last latency, last error, and `rateLimitWaitMs` (absent when never checked, `0` when checked and free).
+- `GET /v1/settings` — the configuration **this process loaded**, after defaults, parsing and validation.
+  Read-only, and it answers `405` to anything else rather than accepting a write that does nothing. Reports
+  `host`, `port`, `localOnly`, the four resilience values, `corsOrigins`, `dataDir`, the provider base URLs,
+  and two lists: `mutableAtRuntime` (`requireApiKey`, the only one) and `mutableByRestart` (everything else),
+  so the dashboard does not present a restart-only value as editable. **No secret is served** — the response
+  is built from an explicit field allowlist rather than by filtering, and `assertNoSecrets` then refuses
+  (rather than redacts) any credential-shaped key that appears, because a loud failure during review beats a
+  quiet one that ships. A service constructed without a loaded configuration reports `settings: null` with a
+  reason, because inventing defaults here would duplicate `config.ts`'s own and give one gateway two sets of
+  numbers.
 - `GET /v1/usage` — recorded per-request usage: totals, the newest records first, and a `cost` object. Rendered by `UsagePage.tsx` at `/dashboard/usage`. Optional query
   parameters `provider`, `model`, `connection`, `since`, `until`, `outcome` (`success`/`failure`/`cancelled`)
   and `limit` (0–10000); an unknown `outcome` or a malformed `limit` is a 400 rather than a filter that

@@ -6,6 +6,7 @@ import { ProviderDetailContent, fallbackProvider } from './pages/ProviderDetailP
 import { ProvidersContent } from './pages/ProvidersPage';
 import { RoutingContent } from './pages/RoutingPage';
 import { UsageContent } from './pages/UsagePage';
+import { SettingsContent } from './pages/SettingsPage';
 
 /** Public path the dashboard is served under. Every route hangs off it. */
 const dashboardBase = '/dashboard';
@@ -24,6 +25,7 @@ const activePageTitles = {
   // Added in 1.64.0 with the page itself. `overview` remains only as the fallback for an unrouted path,
   // which the catch-all `<Route path="*">` redirects to Providers — so it is a title nothing can reach.
   usage: 'Usage',
+  settings: 'Settings',
 } as const;
 
 const pageDescriptions = {
@@ -36,6 +38,7 @@ const pageDescriptions = {
   // exactly the overstatement the guard exists to catch, so the description says what the page
   // actually shows instead.
   usage: 'Requests your gateway actually served, and their measured cost',
+  settings: 'The configuration this gateway loaded at startup',
 } as const;
 
 function DashboardRoutes() {
@@ -49,7 +52,9 @@ function DashboardRoutes() {
         ? 'keys'
         : location.pathname.startsWith('/usage')
           ? 'usage'
-          : 'overview';
+          : location.pathname.startsWith('/settings')
+            ? 'settings'
+            : 'overview';
   const provider = isProviderDetail ? getProviderById(location.pathname.split('/').filter(Boolean).at(-1)) : undefined;
   const pageTitle = provider?.name ?? activePageTitles[activePage];
   const pageDescription = provider ? 'Provider connection details' : pageDescriptions[activePage];
@@ -64,6 +69,7 @@ function DashboardRoutes() {
           <Route path="/routing" element={<RoutingContent />} />
           <Route path="/keys" element={<ApiKeysContent />} />
           <Route path="/usage" element={<UsageContent />} />
+          <Route path="/settings" element={<SettingsContent />} />
           <Route path="*" element={<Navigate to="/providers" replace />} />
         </Routes>
       </div>

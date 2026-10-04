@@ -9,7 +9,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.64.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.65.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -23,11 +23,17 @@ The dashboard is one React Router app mounted at `/dashboard`:
 - `/dashboard/providers/:providerId`
 - `/dashboard/routing`
 - `/dashboard/keys`
-
 - `/dashboard/usage`
+- `/dashboard/settings`
 
-**Request log** is the one sidebar entry still disabled with no route: the gateway records per-request usage
-at `GET /v1/usage` and `Usage` renders it, but there is no separate browsable log.
+**Request log** is the one sidebar entry still disabled with no route. `Usage` and `Settings` were both
+disabled for the whole life of the project for the same reason — **there was nothing to show** — and both are
+now real: `Usage` over `GET /v1/usage`, `Settings` over the configuration the gateway actually loaded.
+
+`Settings` is the one page you might expect to be a form and is not. Every setting is an environment
+variable, so there is nothing to submit; what the page shows is the configuration **this process** resolved,
+after defaults and validation, plus which values need a restart. It is a read of real state, not a copy of
+`.env.example`.
 
 `/` lands on Providers, because there is no Overview page. An earlier one was a mockup with no data source
 behind a range selector that changed a hardcoded number, and it was deleted rather than kept.

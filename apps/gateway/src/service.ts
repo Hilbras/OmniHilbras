@@ -1,6 +1,7 @@
 import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
+import type { GatewayConfig } from './config.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialSignIn, type KiroSignInStatus } from './kiro.js';
@@ -68,6 +69,17 @@ export type CredentialSource = ConnectionSecretStore;
 
 export type GatewayServiceOptions = {
   /**
+   * The gateway's own configuration.
+   *
+   * **Required when the service is constructed directly**, which every test does and only `createGatewayService`
+   * does not. Optional because the alternative is a `GatewayConfig` default built here, and that would mean
+   * `service.ts` importing `config.ts` — which already imports `service.ts`, for `deploymentFrom`. The cycle
+   * would be invisible in TypeScript (type-only on one side) and a real hazard at module-init on the other.
+   *
+   * So: required here, supplied by the one factory that reads the environment.
+   */
+  config?: GatewayConfig;
+  /**
    * Where per-request records go. **Optional, and absent by default.**
    *
    * A caller that wants usage passes a store; a caller that does not, gets nothing written. That is
@@ -97,6 +109,7 @@ export class GatewayService {
   private readonly connectionLocks = new Map<string, Promise<void>>();
   /** Absent means the gateway records nothing; see `GatewayServiceOptions.usageStore`. */
   private readonly usageStore?: UsageStore;
+  private readonly gatewayConfig: GatewayConfig | undefined;
   private readonly transport: HttpTransport;
   private cline?: ProviderAdapter;
   private zen?: ProviderAdapter;
@@ -213,6 +226,7 @@ export class GatewayService {
   ) {
     this.deploymentConfig = deployment;
     this.usageStore = options.usageStore;
+    this.gatewayConfig = options.config;
     // Kept, not just read: the ChatGPT Web driver is built lazily on first use, long after
     // the constructor has returned, so the override has to outlive this call.
     this.options = options;
@@ -1070,6 +1084,21 @@ export class GatewayService {
    */
   private async resolveAdapter(providerId: string, pendingEndpoint?: { endpoint: string; name: string }): Promise<ProviderAdapter> {
     return this.providers.resolve(providerId, pendingEndpoint, () => this.listConnections());
+  }
+
+  /**
+   * The configuration this gateway loaded, after defaults and validation.
+   *
+   * Read-only, exposed for one consumer: `GET /v1/settings`. The gateway resolved these values once at
+   * startup and **validated** them — `OMNIHILBRAS_PORT=0` is refused rather than clamped — so the effective
+   * configuration is a fact about this process that nothing outside it can otherwise read.
+   *
+   * `undefined` when the service was constructed without one, which is every test. That is honest rather than
+   * convenient: a service with no loaded config has no settings to report, and inventing defaults here would
+   * duplicate `config.ts`'s own — two sources of truth for the same numbers, drifting apart silently.
+   */
+  config(): GatewayConfig | undefined {
+    return this.gatewayConfig;
   }
 
   /**

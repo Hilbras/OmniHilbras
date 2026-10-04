@@ -276,3 +276,107 @@ test('the Usage nav entry is live, and its route exists', () => {
     'no route serves /usage, so a live nav entry would go nowhere',
   );
 });
+
+// The Settings page (1.65.0). Same three failure modes as Usage, one of them new.
+// ---------------------------------------------------------------------------
+//
+// `read-only` is the claim most likely to be wrong here, because a page of nine values with no indication
+// of which can change invites the reader to treat all nine as editable. The gateway reports the split; the
+// page must use it rather than deciding for itself, or it will drift the first time a setting moves.
+
+test('the Settings page renders every value from the gateway, and decides nothing itself', () => {
+  const page = readFileSync(join(SRC, 'pages', 'SettingsPage.tsx'), 'utf8');
+
+  // The mutability split comes from the gateway, not from a local list.
+  assert.ok(
+    /settings\?\.mutableAtRuntime/.test(page),
+    'the page does not read `mutableAtRuntime`, so it must be deciding mutability locally and will drift',
+  );
+  // `settings.mutableByRestart`, not `settings?.` -- inside the non-null branch the optional chain never
+  // appears, and my first pattern looked for one and reported the field as unread when it was read plainly.
+  // Both spellings are accepted for the same reason the Usage guard accepts both: a page that has narrowed
+  // the type has no reason to re-narrow it.
+  assert.ok(
+    /settings\??\.mutableByRestart/.test(page),
+    'the page does not read `mutableByRestart`',
+  );
+
+  // A restart-only setting must not be rendered with an edit affordance.
+  //
+  // Only `<input>` and `<select>` count. My first pattern included `<button>`, which matched the header's
+  // Refresh button — it mentions `port` nowhere, but it carries a class list long enough to trip a loose
+  // keyword check, and a guard that fires on the Refresh button is a guard that gets deleted.
+  //
+  // So: value-entry controls, and only those. A restart-only setting needs an environment variable and a
+  // process restart, and there is no honest widget for that.
+  const inputs = page.match(/<(input|select)\b[^>]*>/g) ?? [];
+  assert.deepEqual(
+    inputs,
+    [],
+    `the page renders a value-entry control: ${inputs.join(' ')}. Every setting here is set by an ` +
+      'environment variable, so an input would be a control that changes nothing.',
+  );
+
+  // No secret can be displayed, because the response has no field that could carry one — asserted on the
+  // gateway side. Here, the page must not be reaching for anything beyond the named fields.
+  //
+  // `authRequired` is the exception, and it is not one by my leaving: it is a **boolean about** a credential,
+  // never a credential, and whether the compatible endpoint demands one is deployment information an
+  // operator needs. My first list included `credential`, which matched `authRequired`'s line and reported the
+  // page as reading a secret — a substring guard cannot tell "is a credential required" from "is a
+  // credential", so the value-shaped word has to be excluded by hand.
+  for (const field of ['apiKey', 'api_key', 'masterKey', 'accessToken', 'refreshToken', 'secretValue']) {
+    assert.ok(!new RegExp(`settings[^\\n]*${field}`, 'i').test(page), `the page reads a \`${field}\` field`);
+  }
+  // **The vault's location must be shown.** A settings page that hid `dataDir` would leave no way to find
+  // where the credentials are, and the value is a path the operator chose — not a secret. I dropped this row
+  // as a mutation and no test complained, which means the guard was silent about a page that had become
+  // less useful while passing every check.
+  assert.ok(/settings\.dataDir/.test(page),
+    'the page does not show `dataDir`, so there is no way to find where the vault and usage records live');
+  assert.ok(/Data directory/i.test(page), 'the data directory has no label a reader would recognise');
+
+  // `authRequired` is a boolean about a credential, and must stay that way: if it ever became a value the
+  // page would render, the guard above would not catch it and neither would this comment.
+  const authUse = page.match(/authRequired[^;\n]*/g) ?? [];
+  for (const use of authUse) {
+    assert.ok(!/authRequired\s*[:=]\s*['"$`]/.test(use),
+      `authRequired appears to carry a value rather than a boolean: ${use.trim()}`);
+  }
+});
+
+test('the Settings nav entry is live, and its route exists', () => {
+  // The last disabled nav item was Settings. Two things must hold together: the entry is not pending, and the
+  // router serves the path — either alone would be a link to nowhere or a page nothing can reach.
+  const shell = readFileSync(join(SRC, 'components', 'DashboardShell.tsx'), 'utf8');
+  const entry = shell.match(/label: 'Settings'[^\n]*/)?.[0] ?? '';
+  assert.ok(entry, 'the Settings nav entry is gone');
+  assert.ok(!entry.includes('pending'), `the Settings nav entry is still disabled: ${entry.trim()}`);
+  assert.ok(entry.includes("to: '/settings'"), `the Settings nav entry points elsewhere: ${entry.trim()}`);
+
+  // The router must serve the path the nav entry points at. Asserting only that *a* route exists would miss
+  // a nav entry retargeted somewhere else -- my first mutation edited the shell and no test noticed, because
+  // the router assertion was looking at the router and the nav assertion was looking at a string that still
+  // contained `/settings` in the comment above it.
+  const router = readFileSync(join(SRC, 'dashboardApp.tsx'), 'utf8');
+  const path = entry.match(/to: '([^']+)'/)?.[1];
+  assert.ok(path, `the Settings nav entry has no path: ${entry.trim()}`);
+  assert.ok(
+    new RegExp(`path="${path.replace('/', '\\/')}"\\s+element=\\{<[A-Za-z]+Content />\\}`).test(router),
+    `the router serves no page for the path the nav entry points at: ${path}`,
+  );
+  assert.ok(
+    router.includes("<Route path=\"/settings\" element={<SettingsContent />} />"),
+    'the /settings route is gone, so a live nav entry would go nowhere',
+  );
+});
+
+test('only Request log remains disabled, and it says why it has nothing to show', () => {
+  // Worth pinning: the day the last "soon" entry goes, this test should be the one that fails, because a
+  // `pending: true` list that nobody prunes is how a project ends up advertising features it removed.
+  const shell = readFileSync(join(SRC, 'components', 'DashboardShell.tsx'), 'utf8');
+  const pending = [...shell.matchAll(/label: '([^']+)'[^\n]*pending: true/g)].map((match) => match[1]);
+  assert.deepEqual(pending, ['Request log'],
+    `the disabled nav items changed: ${pending.join(', ') || 'none'}. If one shipped, delete its pending flag; ` +
+      'if one was removed, update this list.');
+});

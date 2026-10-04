@@ -22,16 +22,17 @@ import { dashboardRoutes } from '../lib/routes';
 import { useGatewayStatus } from '../lib/useGatewayStatus';
 
 /**
- * Which sidebar entry is active. `overview` is no longer a route — the page was a mockup — but the
- * three disabled "soon" entries carry it as their page so a pending item never claims to be the active
- * one while pointing nowhere.
+ * Which sidebar entry is active.
+ *
+ * `'overview'` is no longer a route — that page was a mockup with no data source and was deleted — but it is
+ * kept in the union for one reason: `Request log`, the single remaining disabled "soon" entry, carries it as
+ * its page so a pending item never claims to be the active one while pointing nowhere.
+ *
+ * `'usage'` arrived in 1.64.0 and `'settings'` in 1.65.0, each with the page and the gateway route behind
+ * it. `tests/marketing-claims.test.js` pins which entries are still disabled, so this comment going stale
+ * fails a test rather than misleading the next reader quietly.
  */
-/**
- * `'usage'` was added in 1.64.0 when the page landed. The other three disabled "soon" entries
- * (`Settings`, and `Request log`) still carry `'overview'`, which is no longer a route — so a pending
- * item never claims to be the active one while pointing nowhere.
- */
-type DashboardPage = 'overview' | 'providers' | 'routing' | 'keys' | 'usage';
+type DashboardPage = 'overview' | 'providers' | 'routing' | 'keys' | 'usage' | 'settings';
 
 type SidebarItem = {
   label: string;
@@ -56,7 +57,10 @@ const insightItems: SidebarItem[] = [
   // data existed.
   { label: 'Usage', icon: BarChart3, to: '/usage', page: 'usage' },
   { label: 'Request log', icon: ScrollText, to: '/request-log', page: 'overview', pending: true },
-  { label: 'Settings', icon: Settings2, to: '/settings', page: 'overview', pending: true },
+  // Real since 1.65.0, when `GET /v1/settings` and the page landed. The last disabled entry:
+  // every setting had been an environment variable, so there was nothing to show but a copy of
+  // `.env.example`.
+  { label: 'Settings', icon: Settings2, to: '/settings', page: 'settings' },
 ];
 
 const sidebarStorageKey = 'omnihilbras-sidebar-collapsed';

@@ -178,6 +178,10 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     // `LocalUsageStore` writes through `atomicWrite`, so `usage.json` lands at 0600 in the same 0700
     // directory as the credentials, and is bounded by `maxRecords` on write.
     usageStore: new LocalUsageStore({ directory: config.dataDir }),
+    // Passed so `GET /v1/settings` can report what this process actually loaded. `service.ts` cannot import
+    // `loadGatewayConfig` — this file already imports `service.ts`, for `deploymentFrom` — so the factory
+    // hands the value over rather than the service reaching back for it.
+    config,
   }, deploymentFrom(config));
 }
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,7 +25,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // **2. A second SIGTERM was discarded.** `process.once` meant a hung drain could not be escaped from
 // the terminal at all; the only way out was SIGKILL from a second session.
 //
-// Fixed in `main.ts`. The residual window is Node's ESM module loading — measured at **789 ms** for this
+// Fixed in `main.ts`. The residual window is Node's ESM module loading — measured per run, and over 1.6 s under suite load, for this
 // import graph — which no in-process code can cover. That is why the "during startup" test asserts the
 // graceful outcome at a delay chosen to be *inside* the module-loading window but *after* the entry
 // module's own statements would run, rather than pretending the window is gone.
@@ -43,8 +43,39 @@ test('the gateway entry point this suite signals actually exists', () => {
   assert.ok(ENTRY.endsWith('/dist/main.js'), `unexpected entry point: ${ENTRY}`);
 });
 
-/** How long this build takes to load its module graph, measured once and reused. */
-const MODULE_LOAD_MS = 1_200;
+/**
+ * How long this build takes to load its module graph.
+ *
+ * **Measured, not declared.** This used to be `1_200`, hand-written next to a comment claiming it had been
+ * "measured once and reused" — and it was wrong. Measured now: 254 ms unloaded, and **1615 ms under the CPU
+ * contention of a full gateway suite**, which is what runs when `pnpm test` executes this file alongside 490
+ * other tests. So the delay was inside the module-loading window about half the time, the signal took Node's
+ * default disposition, and the test failed for a reason that has nothing to do with shutdown.
+ *
+ * It failed once, in a full-suite run, and passed 3/3 in isolation — the exact signature of a clock race, and
+ * the reason to measure rather than pick a number large enough to have worked yesterday.
+ *
+ * The probe imports the entry the same way Node does, so it measures the same graph, and the caller doubles
+ * it: a factor is honest about the fact that this is a race, while a fixed constant is a claim that it is not.
+ */
+function measureModuleLoadMs() {
+  const probe = spawnSync(
+    process.execPath,
+    ['--input-type=module', '-e', `const t = Date.now();
+      await import(${JSON.stringify(ENTRY)}).catch(() => {});
+      process.stdout.write(String(Date.now() - t));`],
+    { cwd: ROOT, encoding: 'utf8', env: { ...process.env, OMNIHILBRAS_PORT: '0' } },
+  );
+  const measured = Number.parseInt(probe.stdout ?? '', 10);
+  // A probe that failed to measure must not silently become 0, which would restore the race this replaces.
+  return Number.isFinite(measured) && measured > 0 ? measured : 1_200;
+}
+
+let cachedModuleLoadMs = null;
+function moduleLoadMs() {
+  cachedModuleLoadMs ??= measureModuleLoadMs();
+  return cachedModuleLoadMs;
+}
 
 function launch(port) {
   const child = spawn(process.execPath, [ENTRY], {
@@ -110,7 +141,7 @@ test('SIGTERM after the entry module runs shuts down gracefully, not by default 
   // What `main.ts` controls is the window between "the entry module's statements begin running" and
   // "startup finished". The listeners are now installed at the top of that range.
   //
-  // It does **not** control Node's ESM module loading, measured at 789 ms for this import graph. A
+  // It does **not** control Node's ESM module loading, measured per run for this import graph. A
   // signal inside that window still gets Node's default disposition, and no in-process code can change
   // that — only a `--import` preload, which is a packaging decision rather than a code fix.
   //
@@ -119,7 +150,7 @@ test('SIGTERM after the entry module runs shuts down gracefully, not by default 
   // load time rather than a guessed delay.
   const child = launch(8943);
   t.after(() => child.kill('SIGKILL'));
-  await new Promise((resolve) => setTimeout(resolve, MODULE_LOAD_MS + 250));
+  await new Promise((resolve) => setTimeout(resolve, moduleLoadMs() * 2 + 250));
 
   child.kill('SIGTERM');
   const result = await settled(child);
@@ -135,11 +166,9 @@ test('SIGTERM after the entry module runs shuts down gracefully, not by default 
 test('the residual window is module loading, and it is bounded', () => {
   // The honest statement of what remains. Measured rather than asserted as gone:
   //
-  //   import graph loaded at +789ms
-  //
-  // Inside that window SIGTERM gets Node's default disposition, and the process cannot say anything
-  // about it because none of its code has run. This test exists so the number cannot silently grow: a
-  // heavier import graph widens the window in which an orchestrator's SIGTERM is a hard kill.
+  // Inside the ESM module-loading window SIGTERM gets Node's default disposition, and the process cannot say
+  // anything about it because none of its code has run. This test exists so the number cannot silently grow:
+  // a heavier import graph widens the window in which an orchestrator's SIGTERM is a hard kill.
   const serverModule = join(ROOT, 'dist/server.js');
   assert.ok(existsSync(serverModule), `${serverModule} is missing`);
 
@@ -149,9 +178,17 @@ test('the residual window is module loading, and it is bounded', () => {
     // 4 s is roughly five times the measured load. Generous enough not to flake on a loaded CI runner,
     // tight enough that a genuine regression in import weight is noticed.
     assert.ok(elapsed < 4_000, `the gateway's import graph took ${elapsed}ms to load, widening the window in which SIGTERM is a hard kill`);
+
+    // The startup delay is derived from a measurement, so the invariant is now that the derived delay
+    // **exceeds** this one — not that a hand-written constant does. The old assertion was
+    // `MODULE_LOAD_MS > elapsed`, which only held because the constant was picked large enough to satisfy it;
+    // under suite load the real graph took 1615 ms and 1200 did not, which is how that test failed in a full
+    // run while passing in isolation.
+    const delay = moduleLoadMs() * 2 + 250;
     assert.ok(
-      MODULE_LOAD_MS > elapsed,
-      `MODULE_LOAD_MS (${MODULE_LOAD_MS}) must exceed the measured load time (${elapsed}ms), or the startup test signals inside the window it claims to avoid`,
+      delay > elapsed,
+      `the startup delay (${delay}ms) must exceed the measured load time (${elapsed}ms), or the startup ` +
+        'test signals inside the window it claims to avoid',
     );
   });
 });

@@ -647,6 +647,42 @@ export function getGatewayUsage(query?: { outcome?: 'success' | 'failure' | 'can
   return requestJson<GatewayUsage>(`/v1/usage${suffix ? `?${suffix}` : ''}`, { signal });
 }
 
+/**
+ * The configuration this gateway process loaded, after defaults, parsing and validation.
+ *
+ * **`settings` can be `null`.** A service constructed without a loaded configuration reports a reason
+ * instead, and the page shows that rather than inventing values — the two sources of numbers in this project
+ * are `config.ts` and the environment, and a third would be a third thing to keep in step.
+ */
+export type GatewaySettings = {
+  host: string;
+  port: number;
+  /** Always true: the gateway refuses to bind anything but loopback. Shown because a reader wants to know. */
+  localOnly: boolean;
+  timeoutMs: number;
+  healthIntervalMs: number;
+  failureThreshold: number;
+  recoveryCooldownMs: number;
+  corsOrigins: string[];
+  dataDir: string;
+  endpoints: {
+    openai: string;
+    anthropic: string;
+    gemini: string;
+    openrouter: string;
+    compatible: { id: string; name: string; baseUrl: string; modelsPath?: string; chatPath?: string; authRequired: boolean };
+  };
+  /** The only setting changeable without a restart. */
+  mutableAtRuntime: string[];
+  mutableByRestart: string[];
+};
+
+export type GatewaySettingsResponse = { settings: GatewaySettings | null; reason?: string };
+
+export function getGatewaySettings(signal?: AbortSignal) {
+  return requestJson<GatewaySettingsResponse>('/v1/settings', { signal });
+}
+
 export function getGatewayRoutingState(signal?: AbortSignal) {
   return requestJson<GatewayRoutingState>('/v1/routing', { signal });
 }

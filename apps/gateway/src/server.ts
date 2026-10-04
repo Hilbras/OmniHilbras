@@ -9,6 +9,7 @@ import { extractApiKey, handleInferenceRoute } from './routes/inference.js';
 import { handleOauthRoute } from './routes/oauth.js';
 import { handleStatusRoute } from './routes/status.js';
 import { handleUsageRoute } from './routes/usage.js';
+import { handleSettingsRoute } from './routes/settings.js';
 import type { RouteContext } from './routes/route-context.js';
 import type { ApiKeyStore } from './api-keys.js';
 import type { ConnectionStore } from './connections.js';
@@ -45,6 +46,7 @@ const routes = [
   handleOauthRoute,
   handleApiKeysRoute,
   handleUsageRoute,
+  handleSettingsRoute,
   // Last, because it carries the authentication gate for the LLM surface and must not shadow
   // anything above.
   handleInferenceRoute,
