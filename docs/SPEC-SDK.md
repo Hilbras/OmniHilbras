@@ -2500,3 +2500,33 @@ could be priced, `cost.unpricedEntirely` is `true` and `cost.caveat` explains th
 that renders `$0.00` over three real requests is the failure this prevents. `caveat` is `null` when every
 record was priced, because a caveat printed every time is one nobody reads. Cache reads and writes bill at
 their own rates and are not folded into the input rate.
+
+## Brand
+
+The logo, favicon and wordmark are **generated**, not hand-drawn: `pnpm brand` writes every artefact from one
+geometry in `scripts/generate-brand.mjs`, and `pnpm test:brand` (run by `pnpm verify`) checks them.
+
+**Colours are read from `src/index.css`, never retyped.** Both themes define `--gold`, `--gold-bright` and
+`--bg`, so *which block is read* decides what the logo looks like; the generator reads the dark block, because
+that is what the shipped `public/favicon.svg` used and gold on a light plate has no contrast at 16 px. A
+retype in the generator would make it a second source of truth, and the drift guard would compare two stale
+values and agree with itself.
+
+`public/favicon.svg` predates the generator, so it is **asserted equal** to `brand/logo.svg` rather than
+replaced. Two copies of one drawing is the drift this project keeps removing elsewhere, and the assertion is
+what makes it a checked invariant rather than a habit.
+
+The maskable variant is **not** the normal icon with a different name. Android crops a maskable icon to a
+circle inscribed in the square, so the mark is inset to 78% on a full-bleed plate with square corners.
+Measured: the mark's bounding box is 124 px of 512 at the shipped scale and 160 px un-inset, and the guard
+asserts both bounds — an icon that survives the crop by being invisible is as wrong as one that gets cut.
+
+The npm package carries four of the generated files under `packages/omnihilbras-sdk/brand/`, because npmjs.com
+renders the *package's* README and its image reference is relative to the package. The copy is written by the
+generator and asserted byte-identical, since a copy made by hand ships whatever geometry was current when
+someone remembered to run `cp`.
+
+The wordmark's plate is sized from a table of glyph advances rather than a guessed ratio. The first version
+guessed, and rendering it showed **"Hilbras" clipped, with the final "s" missing** — while every other test
+passed, because they all checked colours, sizes and coordinates and none looked at the drawing.
+

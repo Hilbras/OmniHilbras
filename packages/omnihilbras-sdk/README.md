@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./brand/wordmark.svg" alt="OmniHilbras" width="320" />
+</p>
+
 # @hilbras/omnihilbras
 
 Typed provider SDK for the [OmniHilbras](https://github.com/Hilbras/OmniHilbras)

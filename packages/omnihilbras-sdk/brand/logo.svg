@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OmniHilbras">
+  <rect width="64" height="64" rx="16" fill="#0c0b09"/>
+  <polygon points="32,10 42,22 32,54 22,22" fill="#e2bd52"/>
+  <polygon points="32,10 36,24 32,54 28,24" fill="#f3d789" opacity=".8"/>
+</svg>

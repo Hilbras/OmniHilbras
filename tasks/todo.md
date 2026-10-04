@@ -3134,6 +3134,74 @@ the mutation was an edit inside a block I had added in the same session).
 Two lessons, both cost real time: mutate `dist/` and rebuild once, and check the source you are debugging
 against the mutation, not against your memory of it.
 
+## Task 111: the brand, generated from one geometry
+
+### A mark already existed, so nothing was invented
+
+`public/favicon.svg` was already shipping a gold kite on near-black, using `--gold` and `--gold-bright`. The
+Navbar had no glyph at all — just the word. So the task was **refining and codifying what shipped**, not
+drawing a second identity beside one the project already had.
+
+### One generator, thirteen artefacts, colours read from the stylesheet
+
+`scripts/generate-brand.mjs` writes the SVG, the wordmark, seven PNG sizes and two maskable PNGs. It parses
+`[data-theme='dark']` out of `src/index.css` for its colours — **read, not retyped** — because a retyped hex
+makes the script a second source of truth and the drift guard then compares two stale values and agrees with
+itself.
+
+The parser looked for `prefers-color-scheme: dark` first. There is no such block: the dashboard switches theme
+with a `data-theme` attribute, so the search found nothing and fell through to the light block. A generator
+that cannot find its source must throw rather than substitute — it does now, by name.
+
+### The bitmap was wrong and every other check passed
+
+The un-premultiply step read `(samples * 255) / a` instead of `255 / a`, multiplying every channel by 16. The
+dark plate `#0c0b09` came out `#c0b090` beige and the gold kite clipped to pure white.
+
+Vision described the result as "a beige plate with a white symbol", which I took for a rendering quirk. The
+raw pixels were unambiguous — plate `(192,176,144)`, centre `(255,255,255,204)` — and one command settled it.
+`tests/brand-assets.test.js` now asserts the plate is `--bg` and the mark is `--gold`, which is the check
+that would have caught it.
+
+### Three more guards, and two that could not see the bug
+
+| mutation | caught |
+| --- | --- |
+| change `--gold` without regenerating | yes |
+| generator retypes `--gold` to another colour | yes |
+| generator reads the light theme's gold | yes |
+| supersampling removed | yes *(after the fix)* |
+| maskable inset removed | yes *(after two fixes)* |
+
+**Supersampling** removed still produced a right-sized, right-coloured, transparent-cornered PNG — and a
+visibly stepped diagonal. The fix counts antialiased pixels: 194 at 4x4, 100 unsampled.
+
+**The maskable inset** is the interesting one. `0.78` was written out **twice** — once in `svg()`, once in
+`sample()` — so changing the first left the rasteriser drawing at the old scale, the PNG came out
+byte-identical, and every maskable assertion passed. Now one `MASKABLE_SCALE` constant, read by both.
+
+And my circle-distance assertion still could not tell the two apart: the kite is narrow, so its furthest pixel
+sits at 135 of a possible 256 either way — a threshold 130 units from every value it must distinguish. The
+bounding box separates them cleanly (124 px vs 160 px), with a lower bound too, because an icon that survives
+the crop by being invisible is also wrong.
+
+### The wordmark shipped clipped
+
+Rendering it in a browser showed **"OmniHilbra"** — the final "s" cut off at the plate edge. The width was
+`height * 4.1`, guessed. Every test passed while it was broken, because they all checked colours, sizes and
+coordinates and none looked at the drawing.
+
+The plate is now sized from a table of glyph advances, and a guard asserts the declared width covers the
+measured run. Calibrated against `getComputedTextLength()`: 554 px of text starting at 264 in an 860 px plate,
+42 px of slack. Reverting the *original* combination (bigger font **and** fixed width, slack −45) fails the
+guard; reverting either half alone does not, because the width now co-scales with the font.
+
+### A tool timeout wrote a mutation into `src/`
+
+Twice now: a mutation loop that exceeded the 300 s cell limit was killed mid-run after writing into a source
+file, and I debugged against source I believed clean because `git diff --stat` showed insertions only — the
+mutation was an edit *inside* a block added in the same session. Mutate `dist/`, and rebuild once.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.
