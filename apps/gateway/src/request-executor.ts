@@ -158,6 +158,8 @@ export class RequestExecutor {
     const inflight: Array<{ candidate: RouteCandidate; abort: () => void; done: Promise<Outcome>; startedAt: number }> = [];
     const settled = new Set<Promise<Outcome>>();
     const started = new Set<RouteCandidate>();
+    /** Attempts the winner abandoned: still paid for, but no longer ours to judge. */
+    const abandoned = new Set<RouteCandidate>();
     let winner: Outcome | undefined;
     let lastError: unknown;
     let onChange: () => void = () => undefined;
@@ -200,6 +202,22 @@ export class RequestExecutor {
         .then((outcome) => {
           settled.add(done);
           const code = outcome.ok ? undefined : outcome.error instanceof ProviderError ? outcome.error.code : 'PROVIDER_REQUEST_FAILED';
+          // **An attempt that was already abandoned must not record health again.**
+          //
+          // When a winner is chosen the losers are aborted and recorded `CANCELLED`. A provider that does
+          // not stop on the abort then settles normally, and this handler — which runs for *every*
+          // outcome — recorded a success or failure for an attempt the ledger had already closed. Measured:
+          // a hedge recorded `CANCELLED` and then `recordSuccess`, so a connection the gateway had stopped
+          // paying for still moved its health.
+          //
+          // The ledger was already correct in this case, which is why the duplicate was invisible there:
+          // the winner branch checks `!settled.has(other.done)` and this push happens after the method has
+          // returned. So the bug was never in the outcome — it was in the provider's health.
+          //
+          // `abandoned` is what the winner branch sets, and it means "we stopped paying for this". The
+          // attempt still cost money, so `recordRateLimitUse` stays where it is; only the *health* verdict
+          // belongs to the request we are no longer waiting on.
+          if (abandoned.has(candidate)) return outcome;
           if (outcome.ok) {
             this.deps.recordSuccess(candidate.providerId, outcome.latencyMs, new Date().toISOString());
           } else {
@@ -214,6 +232,7 @@ export class RequestExecutor {
               // a hedge was fired and won.
               for (const other of inflight) {
                 if (other.candidate === candidate) continue;
+                abandoned.add(other.candidate);
                 other.abort();
                 if (!settled.has(other.done)) {
                   attempts.push({ providerId: other.candidate.providerId, attempt: 1, ok: false, latencyMs: Date.now() - other.startedAt, errorCode: 'CANCELLED' });

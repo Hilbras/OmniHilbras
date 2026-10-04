@@ -2319,6 +2319,56 @@ Recording them because the count is the finding:
 3. **Asserting on `/health` measured the fixture.** `HealthRegistry.report()` re-probes, and a fixture whose `healthCheck` always answers `healthy` overwrites the recorded failure. Measured: exactly **1** `healthCheck` invocation, before and after identical. Now asserted on the attempt ledger, which is what routing reads.
 4. **The cancellation test never cancelled.** A controller created and never aborted leaves `signal.aborted === false`, so the executor could not tell it from a provider failure — and the test measured nothing.
 
+## Task 98: an abandoned hedge still recorded the provider's health — Phase 5 of the stabilization roadmap
+
+Phase 5 claims cancellation "can potentially produce duplicate or misleading attempt outcomes". Half of
+that is already handled; the other half is a real defect, and it is the more consequential one.
+
+### What was already right
+
+A hedge that loses is aborted and recorded `CANCELLED`, so the client can see a hedge was fired. That part
+worked, and an existing test covers it.
+
+### What was wrong
+
+The settlement handler runs for **every** outcome:
+
+```ts
+.then((outcome) => {
+  settled.add(done);
+  if (outcome.ok) this.deps.recordSuccess(...);
+  else            this.deps.recordFailure(...);
+```
+
+It had no regard for whether the attempt had already been abandoned by the winner. A provider that does
+not stop on the abort settles normally afterwards, and the handler recorded health for an attempt the
+ledger had already closed. Reproduced with the loser finishing 120ms after the winner:
+
+```
+winner            : fast
+recordSuccess     : ["fast","slow"]     ← `slow` was CANCELLED, and still recorded a success
+```
+
+So a connection the gateway had **stopped paying for** still moved its health, and routing decisions were
+made on a verdict for work nobody was waiting on. In the other direction it is the same class as the 1.52.0
+`recordSuccess`-in-a-`finally` defect: a health counter recording something that did not happen.
+
+**The ledger was already correct** in this race — the winner branch checks `!settled.has(other.done)`, and
+the late push lands after the method has returned, so the array the caller received does not change. That
+is precisely why the bug was invisible in the ledger and only visible in health: the defect was never in
+the outcome, it was in the provider.
+
+### Fixed
+
+An `abandoned` set, marked where the winner aborts each loser. The settlement handler returns early for an
+abandoned attempt — health only. `recordRateLimitUse` stays where it is, because the attempt *was* sent and
+did cost money; only the verdict belongs to a request nobody is waiting on.
+
+That distinction is the roadmap's Phase 5.4 question ("do cancelled hedge attempts affect rate-limit
+usage?") answered by measurement rather than assumption: **yes for the rate limit, no for health.**
+
+Reverting the guard turns the test red; 416 gateway tests green with it in place.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

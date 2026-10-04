@@ -3,7 +3,7 @@
 A self-hosted, local-first AI gateway: one OpenAI-compatible endpoint in front of
 every provider, with API keys, routing, and per-connection reliability.
 
-**Current version: 1.52.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.53.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras)
 
 ```bash

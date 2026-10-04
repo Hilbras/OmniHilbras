@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore, createGatewayServer } from '../dist/index.js';
+import { RequestExecutor } from '../dist/request-executor.js';
 import { InMemorySecretStore, ProviderRegistry } from '@hilbras/omnihilbras';
 
 /**
@@ -251,4 +252,98 @@ test('recordSuccess is not reachable from a finally block', async (t) => {
     }
   }
   assert.deepEqual(offenders, [], `recordSuccess is called from a finally block at line(s) ${offenders.join(', ')} — a finally runs on the failure path too`);
+});
+
+test('an abandoned hedge does not record health when it finishes anyway', async () => {
+  // A hedge that loses is aborted and recorded `CANCELLED`. A provider that does not stop on the abort
+  // then settles normally, and the settlement handler — which runs for every outcome — recorded a
+  // success for an attempt the ledger had already closed.
+  //
+  // Measured before the fix, with the loser finishing 120ms after the winner:
+  //
+  //   winner            : fast
+  //   recordSuccess     : ["fast","slow"]     ← `slow` was CANCELLED, and still recorded a success
+  //
+  // So the connection the gateway had stopped paying for still moved its health, and routing decisions
+  // were made on a verdict for work nobody was waiting on.
+  const health = { success: [], failure: [] };
+  const candidates = [
+    { providerId: 'slow', connectionId: 'c-slow', priority: 1, modelIds: ['m'], resilience: { maxRetries: 0, requestsPerMinute: 100, timeoutMs: 5_000, hedgeAfterMs: 10 } },
+    { providerId: 'fast', connectionId: 'c-fast', priority: 2, modelIds: ['m'], resilience: { maxRetries: 0, requestsPerMinute: 100, timeoutMs: 5_000, hedgeAfterMs: 10 } },
+  ];
+  const reply = (id) => ({ id: 'r', providerId: id, model: 'm', createdAt: new Date().toISOString(), message: { role: 'assistant', content: id }, finishReason: 'stop' });
+
+  const executor = new RequestExecutor({
+    planRoute: async () => ({ candidates }),
+    // `slow` ignores the abort and finishes well after the winner is chosen — a real provider that does
+    // not stop on SIGTERM. This is the race; a stub that honours the abort cannot reproduce it.
+    chat: async (id) => { await new Promise((resolve) => setTimeout(resolve, id === 'slow' ? 140 : 20)); return reply(id); },
+    streamChat: async function* () {},
+    withDeadline: (signal, _ms, _id, run) => run(signal),
+    enforceRateLimit: () => {},
+    recordRateLimitUse: () => {},
+    recordSuccess: (id) => health.success.push(id),
+    recordFailure: (id, code) => health.failure.push(`${id}:${code}`),
+  });
+
+  const outcome = await executor.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, undefined);
+  assert.equal(outcome.response?.providerId, 'fast', 'the faster route should win');
+
+  // The loser is recorded as abandoned at the moment the winner is chosen.
+  const abandoned = outcome.attempts.filter((attempt) => attempt.errorCode === 'CANCELLED');
+  assert.equal(abandoned.length, 1, `expected one abandoned attempt, got ${JSON.stringify(outcome.attempts)}`);
+  assert.equal(abandoned[0].providerId, 'slow');
+
+  // And long after it has settled, only the winner may have recorded health.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.deepEqual(
+    health.success,
+    ['fast'],
+    `only the winner may record a success; an abandoned attempt still settled and recorded ${JSON.stringify(health.success)}`,
+  );
+  assert.deepEqual(health.failure, [], 'an abandoned attempt must not record a provider failure either');
+});
+
+test('every attempt in the ledger has exactly one outcome', async () => {
+  // The roadmap's Phase 5.3: a logical request has one deterministic final outcome. Asserted as a
+  // property over the ledger rather than a list of expected entries, so a fourth state fails too.
+  const candidates = [
+    { providerId: 'slow', connectionId: 'c-slow', priority: 1, modelIds: ['m'], resilience: { maxRetries: 0, requestsPerMinute: 100, timeoutMs: 5_000, hedgeAfterMs: 10 } },
+    { providerId: 'fast', connectionId: 'c-fast', priority: 2, modelIds: ['m'], resilience: { maxRetries: 0, requestsPerMinute: 100, timeoutMs: 5_000, hedgeAfterMs: 10 } },
+  ];
+  const reply = (id) => ({ id: 'r', providerId: id, model: 'm', createdAt: new Date().toISOString(), message: { role: 'assistant', content: id }, finishReason: 'stop' });
+  const executor = new RequestExecutor({
+    planRoute: async () => ({ candidates }),
+    chat: async (id) => { await new Promise((resolve) => setTimeout(resolve, id === 'slow' ? 140 : 20)); return reply(id); },
+    streamChat: async function* () {},
+    withDeadline: (signal, _ms, _id, run) => run(signal),
+    enforceRateLimit: () => {}, recordRateLimitUse: () => {}, recordSuccess: () => {}, recordFailure: () => {},
+  });
+
+  const outcome = await executor.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, undefined);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  const winners = outcome.attempts.filter((attempt) => attempt.ok);
+  assert.equal(winners.length, 1, `exactly one attempt may succeed, got ${JSON.stringify(outcome.attempts)}`);
+
+  // Every unsuccessful attempt must say why — a bare `ok: false` is a ledger entry nobody can act on.
+  // `CANCELLED` is a legitimate loser outcome; what is forbidden is the **winner** carrying it, which
+  // would mean an attempt both succeeded and was abandoned.
+  for (const attempt of outcome.attempts) {
+    assert.ok(attempt.ok || attempt.errorCode, `an unsuccessful attempt must say why: ${JSON.stringify(attempt)}`);
+  }
+  assert.notEqual(
+    winners[0].errorCode,
+    'CANCELLED',
+    'the winning attempt must not also be recorded as abandoned',
+  );
+
+  // And no provider may appear twice: one dispatch, one ledger entry. The abandoned-hedge race was
+  // where a second push was most likely.
+  const seen = new Set();
+  for (const attempt of outcome.attempts) {
+    const key = `${attempt.providerId}#${attempt.attempt}`;
+    assert.ok(!seen.has(key), `${key} appears twice in the ledger: ${JSON.stringify(outcome.attempts)}`);
+    seen.add(key);
+  }
 });
