@@ -56,10 +56,13 @@ test('a failing route hands off to the next, and both appear in the ledger', asy
   });
   const outcome = await executor.chat(request(), undefined);
   assert.equal(outcome.response.message.content, 'b answered');
+  // `connectionId` was added in 1.60.0 so a usage record can attribute per connection rather than per
+  // provider. It was already in scope at every push site, so it is existing state surfacing, not new plumbing.
   assert.deepEqual(outcome.attempts, [
-    { providerId: 'a', attempt: 1, ok: false, latencyMs: outcome.attempts[0].latencyMs, errorCode: 'PROVIDER_UNAVAILABLE' },
-    { providerId: 'b', attempt: 1, ok: true, latencyMs: outcome.attempts[1].latencyMs },
+    { providerId: 'a', connectionId: outcome.attempts[0].connectionId, attempt: 1, ok: false, latencyMs: outcome.attempts[0].latencyMs, errorCode: 'PROVIDER_UNAVAILABLE' },
+    { providerId: 'b', connectionId: outcome.attempts[1].connectionId, attempt: 1, ok: true, latencyMs: outcome.attempts[1].latencyMs },
   ]);
+  assert.ok(outcome.attempts[0].connectionId, 'every attempt must name the connection it was served by');
 });
 
 test('a terminal failure stops the chain rather than trying routes that cannot help', async () => {

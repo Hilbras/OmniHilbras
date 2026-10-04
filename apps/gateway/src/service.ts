@@ -20,6 +20,7 @@ import { notSupported } from './capability.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
+import type { UsageStore } from './usage-store.js';
 
 export type GatewayProviderHealth = ProviderHealth & {
   providerId: string;
@@ -65,6 +66,14 @@ export type { GatewayFailoverAttempt, GatewayChatOutcome, GatewayStreamOutcome }
 export type CredentialSource = ConnectionSecretStore;
 
 export type GatewayServiceOptions = {
+  /**
+   * Where per-request records go. **Optional, and absent by default.**
+   *
+   * A caller that wants usage passes a store; a caller that does not, gets nothing written. That is
+   * deliberate: a default store would mean every existing test and every embedding silently started
+   * accumulating records, and "records nothing" would stop being a state anyone chose.
+   */
+  usageStore?: UsageStore;
   /** Consecutive failures before a connection stops receiving traffic. */
   failureThreshold?: number;
   /** How long an ejected connection waits before one probe request. */
@@ -85,6 +94,8 @@ export type GatewayServiceOptions = {
 
 export class GatewayService {
   private readonly connectionLocks = new Map<string, Promise<void>>();
+  /** Absent means the gateway records nothing; see `GatewayServiceOptions.usageStore`. */
+  private readonly usageStore?: UsageStore;
   private readonly transport: HttpTransport;
   private cline?: ProviderAdapter;
   private zen?: ProviderAdapter;
@@ -200,6 +211,7 @@ export class GatewayService {
     deployment: DeploymentConfig = localDeployment(),
   ) {
     this.deploymentConfig = deployment;
+    this.usageStore = options.usageStore;
     // Kept, not just read: the ChatGPT Web driver is built lazily on first use, long after
     // the constructor has returned, so the override has to outlive this call.
     this.options = options;
@@ -1057,6 +1069,16 @@ export class GatewayService {
    */
   private async resolveAdapter(providerId: string, pendingEndpoint?: { endpoint: string; name: string }): Promise<ProviderAdapter> {
     return this.providers.resolve(providerId, pendingEndpoint, () => this.listConnections());
+  }
+
+  /**
+   * The usage store, or `undefined` when the gateway was not given one.
+   *
+   * Exposed rather than the records, so a caller cannot write to the store through the service: the route
+   * serving `GET /v1/usage` needs to read it and nothing else.
+   */
+  get usage(): UsageStore | undefined {
+    return this.usageStore;
   }
 
   private requireAdapter(providerId: string): ProviderAdapter {

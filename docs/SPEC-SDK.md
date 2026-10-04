@@ -169,6 +169,15 @@ The first local gateway exposes:
 - `DELETE /v1/keys/:id` — revoke a key.
 - `PUT /v1/connections/:id/resilience` — update one connection's retry, timeout, and rate-limit budget.
 - `GET /v1/routing` — live routing state: budgets, recent failures and successes, ejection, last latency, last error, and `rateLimitWaitMs` (absent when never checked, `0` when checked and free).
+- `GET /v1/usage` — recorded per-request usage: totals, and the newest records first. Optional query
+  parameters `provider`, `model`, `connection`, `since`, `until`, `outcome` (`success`/`failure`/`cancelled`)
+  and `limit` (0–10000); an unknown `outcome` or a malformed `limit` is a 400 rather than a filter that
+  silently matches nothing. **A record holds no prompt, no response, no headers and no credential** — the
+  type has no field capable of holding one, so there is nothing to redact. Token totals sum only over records
+  whose provider reported usage, and `tokensUnmeasured` is `true` when *no* record did, so an absence is not
+  presented as a measured zero. A gateway started without a usage store answers `recording: false` with empty
+  totals rather than zeros that read as "nothing was spent". Behind the admin key when enforcement is on, with
+  `/v1/routing`: a record describes what this machine talks to.
 - `POST /v1/oauth/cline/start` — begin a sign-in; returns the sign-in URL, a session id, and a single-use `state`.
 - `GET /v1/oauth/cline/authorize` — build the Cline sign-in URL for a loopback callback.
 - `GET /v1/oauth/cline/callback` — where the provider redirects the browser; completes the exchange and reports the outcome.

@@ -8,6 +8,7 @@ import { handleConnectionsRoute } from './routes/connections.js';
 import { extractApiKey, handleInferenceRoute } from './routes/inference.js';
 import { handleOauthRoute } from './routes/oauth.js';
 import { handleStatusRoute } from './routes/status.js';
+import { handleUsageRoute } from './routes/usage.js';
 import type { RouteContext } from './routes/route-context.js';
 import type { ApiKeyStore } from './api-keys.js';
 import type { ConnectionStore } from './connections.js';
@@ -43,6 +44,7 @@ const routes = [
   handleConnectionsRoute,
   handleOauthRoute,
   handleApiKeysRoute,
+  handleUsageRoute,
   // Last, because it carries the authentication gate for the LLM surface and must not shadow
   // anything above.
   handleInferenceRoute,
@@ -79,7 +81,7 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     };
     const responseOrigin = requestOrigin && corsOrigins.includes(requestOrigin) ? requestOrigin : undefined;
     setCors(response, responseOrigin);
-    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings')) response.setHeader('cache-control', 'no-store');
+    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage')) response.setHeader('cache-control', 'no-store');
     if ((request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') && !isJsonRequest(request)) {
       sendJson(response, 415, { error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'JSON requests must use application/json.' } }, responseOrigin);
       return;
@@ -167,12 +169,18 @@ export async function startGatewayServer(options: {
  * accidental postinstall script and a deliberate attacker.
  */
 /**
+ * Routes that require the admin key when enforcement is on.
+ *
  * `/v1/web-cookie` was missing from this list at first, and the test that checks the list against the
  * router is what said so — it found a route serving a whole-account session cookie that an
  * unauthenticated local process could write. `/v1/routing` is included because it enumerates every
  * configured connection, its endpoint, and its health.
+ *
+ * `/v1/usage` is on the same footing as `/v1/routing` and for the same reason: a usage record names
+ * providers, connections, models and latencies, which describes what this machine talks to. It holds no
+ * credential and no prompt, so it is not as sensitive as `/v1/keys`.
  */
-const MANAGEMENT_PREFIXES = ['/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing'] as const;
+const MANAGEMENT_PREFIXES = ['/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage'] as const;
 
 function isManagementPath(pathname: string) {
   return MANAGEMENT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));

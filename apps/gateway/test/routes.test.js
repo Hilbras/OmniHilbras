@@ -105,7 +105,9 @@ test('the dispatcher tries every route module, in the order the old chain used',
   const list = source.match(/const routes = \[([\s\S]*?)\];/);
   assert.ok(list, 'the dispatcher must declare its route order in one readable list');
   const order = [...list[1].matchAll(/handle(\w+?)Route,?\s*$/gm)].map((match) => match[1]);
-  assert.deepEqual(order, ['Status', 'Connections', 'Oauth', 'ApiKeys', 'Inference']);
+  // `Usage` sits with the management routes and before `Inference`, which must stay last because it
+  // carries the authentication gate for the LLM surface.
+  assert.deepEqual(order, ['Status', 'Connections', 'Oauth', 'ApiKeys', 'Usage', 'Inference']);
   // Every module that exists must actually be wired in: a module with routes but no entry here is
   // a module whose routes 404, which no unit test would catch.
   for (const { name } of modules) {
@@ -116,7 +118,7 @@ test('the dispatcher tries every route module, in the order the old chain used',
 
 test('a 404 is only reachable after every module has declined', () => {
   // `handleRequest` ends in a 404, and that is the right place for it: it can only run once all
-  // five handlers returned false. Asserting the order is what makes the 404 trustworthy.
+  // six handlers returned false. Asserting the order is what makes the 404 trustworthy.
   const source = readFileSync(new URL('../src/server.ts', import.meta.url), 'utf8');
   const chain = source.match(/for \(const route of routes\) \{\s*if \(await route\(ctx\)\) return;\s*\}\s*\n\s*sendJson\(response, 404/);
   assert.ok(chain, 'the 404 must follow the loop that tries every route');

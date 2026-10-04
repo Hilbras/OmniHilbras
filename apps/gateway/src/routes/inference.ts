@@ -6,13 +6,15 @@
  * the wrong thing.
  */
 
-import { ProviderError, isLoopbackHostname, isPrivateHostname, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ToolDefinition } from '@hilbras/omnihilbras';
+import { ProviderError, isLoopbackHostname, type ProviderId, isPrivateHostname, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ToolDefinition } from '@hilbras/omnihilbras';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
 import { attachRequestId, type RequestScope } from '../request-context.js';
 import { isTrustedDashboard } from '../runtime.js';
 import type { GatewayServerOptions } from '../server.js';
 import type { GatewayService } from '../service.js';
+import type { UsageOutcome } from '../usage-store.js';
+import type { GatewayFailoverAttempt } from '../request-executor.js';
 import {
   invalidRequest,
   isRecord,
@@ -70,6 +72,55 @@ export async function handleChat(request: IncomingMessage, response: ServerRespo
 }
 
 /** The two response shapes, split out so the id can be attached to a failure from either. */
+/**
+ * Records one request, or explains why it was not recorded.
+ *
+ * **Failures here are swallowed on purpose.** Usage is a report; a gateway that cannot write its report must
+ * still answer the request that produced it. An `await` on a store write inside the response path would also
+ * add latency to every request for a number nobody is watching at that moment, so the write is deliberately
+ * not awaited — a dropped record under a hard exit is a better outcome than a failed request.
+ *
+ * The three outcomes are kept distinct, and `cancelled` is neither success nor failure: see the v1.52.0 note
+ * in `request-executor.ts`. A client that closed its connection did not make the provider slow.
+ */
+function recordUsage(
+  service: GatewayService,
+  input: {
+    model: string;
+    providerId?: string;
+    connectionId?: string;
+    outcome: UsageOutcome;
+    attempts: number;
+    latencyMs: number;
+    errorCode?: string;
+    usage?: { inputTokens?: number; outputTokens?: number };
+  },
+): void {
+  const store = service.usage;
+  if (!store) return;
+  // **No requirement that a provider was reached.** The first version returned early when `providerId` was
+  // missing, which silently dropped every request that ended before a route was tried — a client that
+  // disconnected during startup, or a request nothing could serve. Measured: 30 such requests produced **zero**
+  // records, so the page's request count was lower than the number of requests made, with no way to tell.
+  //
+  // The alternative — refusing to record an unattributable request — was the wrong instinct. The request
+  // happened and cost time; the record just says so with no provider on it.
+  void Promise.resolve(
+    store.record({
+      at: new Date().toISOString(),
+      model: input.model,
+      ...(input.providerId ? { providerId: input.providerId as ProviderId } : {}),
+      ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+      outcome: input.outcome,
+      attempts: input.attempts,
+      latencyMs: Math.max(0, Math.round(input.latencyMs)),
+      ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+      ...(input.usage?.inputTokens !== undefined ? { inputTokens: input.usage.inputTokens } : {}),
+      ...(input.usage?.outputTokens !== undefined ? { outputTokens: input.usage.outputTokens } : {}),
+    }),
+  ).catch(() => undefined);
+}
+
 async function handleChatRequest(input: {
   response: ServerResponse;
   service: GatewayService;
@@ -82,7 +133,48 @@ async function handleChatRequest(input: {
   const { response, service, origin, signal, scope, chatRequest, explicitProviderId } = input;
 
   if (!chatRequest.stream) {
-    const { response: completion, attempts } = await service.chatWithFailover(chatRequest, explicitProviderId, signal, scope);
+    const startedAt = Date.now();
+    // The failure path needs its own catch: `chatWithFailover` **throws**, so the success branch below is
+    // never reached for a request that failed — and a usage page that only counts successes is a page whose
+    // total is wrong in the direction that hides the problem. `error.attempts` carries the ledger, because
+    // `attachAttempts` puts it there precisely so a caller can read what was tried.
+    let completion: ChatResponse;
+    let attempts: GatewayFailoverAttempt[];
+    try {
+      ({ response: completion, attempts } = await service.chatWithFailover(chatRequest, explicitProviderId, signal, scope));
+    } catch (error) {
+      // Read from `details.attempts`, which is where `attachAttempts` puts it (1.60.0). My first version read
+      // `error.attempts`, which does not exist — the error is rebuilt by `attachAttempts` and the ledger was
+      // dropped. A wrong-property read here produced *no record at all* rather than a wrong one, which is a
+      // better failure mode but still a silent one.
+      const details = error instanceof ProviderError ? error.details : undefined;
+      const ledger: GatewayFailoverAttempt[] =
+        typeof details === 'object' && details !== null && Array.isArray((details as { attempts?: unknown }).attempts)
+          ? ((details as { attempts: GatewayFailoverAttempt[] }).attempts)
+          : [];
+      const cancelled = signal.aborted || (error instanceof ProviderError && error.code === 'CANCELLED');
+      recordUsage(service, {
+        model: chatRequest.model,
+        providerId: ledger[ledger.length - 1]?.providerId,
+        connectionId: ledger[ledger.length - 1]?.connectionId,
+        // The v1.52.0 rule, on usage as well as health: a cancellation is not a provider failure.
+        outcome: cancelled ? 'cancelled' : 'failure',
+        attempts: ledger.length,
+        latencyMs: Date.now() - startedAt,
+        ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+      });
+      throw error;
+    }
+    const serving = attempts.find((attempt) => attempt.ok);
+    recordUsage(service, {
+      model: completion.model,
+      providerId: completion.providerId,
+      connectionId: serving?.connectionId,
+      outcome: 'success',
+      attempts: attempts.length,
+      latencyMs: Date.now() - startedAt,
+      usage: completion.usage,
+    });
     sendJson(response, 200, {
       ...toOpenAICompletion(completion),
       // Always present, even on a success with one attempt. A client that was refused gets it from
@@ -94,6 +186,7 @@ async function handleChatRequest(input: {
 
   // The failover decision is made before any byte is written, so a stream that
   // cannot start returns a normal JSON error instead of a truncated SSE body.
+  const streamStartedAt = Date.now();
   const outcome = await service.streamChatWithFailover(chatRequest, explicitProviderId, signal, scope);
   response.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
@@ -107,9 +200,57 @@ async function handleChatRequest(input: {
     for await (const chunk of outcome.chunks) {
       await writeStreamData(response, `data: ${JSON.stringify(toOpenAIChunk(chunk))}\n\n`, signal);
     }
+    // **The signal is checked before success is claimed** (1.60.0).
+    //
+    // A client that disconnects does not make the iterator throw — the generator is *disposed*, so the
+    // `for await` above exits normally and this line is reached. Measured at four abort delays, every one
+    // recorded:
+    //
+    // ```
+    // abort@ 2ms -> 1 record(s): success/p
+    // abort@ 4ms -> 1 record(s): success/p
+    // abort@ 8ms -> 1 record(s): success/p
+    // abort@20ms -> 1 record(s): success/p
+    // ```
+    //
+    // So a tab closing mid-answer was recorded as a completed request nobody read. Health already got this
+    // right in 1.52.0; usage had the same shape of bug in the same place, because the two were fixed a year
+    // and eight releases apart and only one of them was looked for.
+    if (signal.aborted) {
+      recordUsage(service, {
+        model: chatRequest.model,
+        providerId: outcome.attempts.find((attempt) => attempt.ok)?.providerId,
+        connectionId: outcome.attempts.find((attempt) => attempt.ok)?.connectionId,
+        outcome: 'cancelled',
+        attempts: outcome.attempts.length,
+        latencyMs: Date.now() - streamStartedAt,
+      });
+      if (!response.destroyed && !response.writableEnded) response.end();
+      return;
+    }
     await writeStreamData(response, 'data: [DONE]\n\n', signal);
+    recordUsage(service, {
+      model: chatRequest.model,
+      providerId: outcome.attempts.find((attempt) => attempt.ok)?.providerId,
+      connectionId: outcome.attempts.find((attempt) => attempt.ok)?.connectionId,
+      outcome: 'success',
+      attempts: outcome.attempts.length,
+      latencyMs: Date.now() - streamStartedAt,
+    });
     response.end();
   } catch (error) {
+    // A client disconnect is the user's decision, not a provider outcome, and the v1.52.0 rule applies to
+    // usage exactly as it does to health: a cancellation is neither a success nor a failure.
+    const cancelled = signal.aborted || (error instanceof ProviderError && error.code === 'CANCELLED');
+    recordUsage(service, {
+      model: chatRequest.model,
+      providerId: outcome.attempts.find((attempt) => attempt.ok)?.providerId ?? outcome.attempts[0]?.providerId,
+      connectionId: outcome.attempts.find((attempt) => attempt.ok)?.connectionId ?? outcome.attempts[0]?.connectionId,
+      outcome: cancelled ? 'cancelled' : 'failure',
+      attempts: outcome.attempts.length,
+      latencyMs: Date.now() - streamStartedAt,
+      ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+    });
     if (!response.destroyed && !signal.aborted) {
       await writeStreamData(response, `event: error\ndata: ${JSON.stringify(toErrorEnvelope(error))}\n\n`, signal).catch(() => undefined);
       response.end();

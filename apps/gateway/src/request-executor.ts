@@ -34,6 +34,15 @@ import type { RequestScope } from './request-context.js';
 /** One attempt at one provider, whether it won, failed, or was abandoned. */
 export type GatewayFailoverAttempt = {
   providerId: string;
+  /**
+   * Which connection served this attempt.
+   *
+   * Added for the usage store, which attributes a request per connection rather than per provider: one
+   * provider with three saved connections is three separate budgets, three latencies and three things to fix.
+   * It was already in scope at every push site, so this surfaces existing state rather than threading a new
+   * value through the executor.
+   */
+  connectionId?: string;
   attempt: number;
   ok: boolean;
   latencyMs: number;
@@ -142,7 +151,7 @@ export class RequestExecutor {
           this.deps.enforceRateLimit(candidate);
         } catch (error) {
           const code = error instanceof ProviderError ? error.code : 'RATE_LIMITED';
-          attempts.push({ providerId: candidate.providerId, attempt, ok: false, latencyMs: 0, errorCode: code });
+          attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs: 0, errorCode: code });
           throw new ProviderError(
             code,
             `The connection is at its rate limit.${code === 'RATE_LIMITED' ? '' : ''}`,
@@ -157,13 +166,13 @@ export class RequestExecutor {
           const response = await this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.deps.chat(candidate.providerId, request, deadline, scope));
           const latencyMs = Date.now() - startedAt;
           this.deps.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString());
-          attempts.push({ providerId: candidate.providerId, attempt, ok: true, latencyMs });
+          attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: true, latencyMs });
           return { response, attempts };
         } catch (error) {
           const latencyMs = Date.now() - startedAt;
           const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
           this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.');
-          attempts.push({ providerId: candidate.providerId, attempt, ok: false, latencyMs, errorCode: code });
+          attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs, errorCode: code });
           lastError = error;
           const action = this.retryPolicy.afterFailure({
             error,
@@ -262,7 +271,7 @@ export class RequestExecutor {
           } else {
             this.deps.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.');
           }
-          attempts.push({ providerId: candidate.providerId, attempt: 1, ok: outcome.ok, latencyMs: outcome.latencyMs, ...(code ? { errorCode: code } : {}) });
+          attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: outcome.ok, latencyMs: outcome.latencyMs, ...(code ? { errorCode: code } : {}) });
           if (outcome.ok) {
             if (!winner) {
               winner = outcome;
@@ -274,7 +283,7 @@ export class RequestExecutor {
                 abandoned.add(other.candidate);
                 other.abort();
                 if (!settled.has(other.done)) {
-                  attempts.push({ providerId: other.candidate.providerId, attempt: 1, ok: false, latencyMs: Date.now() - other.startedAt, errorCode: 'CANCELLED' });
+                  attempts.push({ providerId: other.candidate.providerId, connectionId: other.candidate.connectionId, attempt: 1, ok: false, latencyMs: Date.now() - other.startedAt, errorCode: 'CANCELLED' });
                 }
               }
             }
@@ -355,7 +364,7 @@ export class RequestExecutor {
         this.deps.enforceRateLimit(candidate);
       } catch (error) {
         const code = error instanceof ProviderError ? error.code : 'RATE_LIMITED';
-        attempts.push({ providerId: candidate.providerId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
+        attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
         throw new ProviderError(code, 'This connection is at its rate limit.', {
           retryable: false,
           publicMessage: 'This connection is at its rate limit. Wait for the window to reset.',
@@ -383,7 +392,7 @@ export class RequestExecutor {
       } catch (error) {
         const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
         this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.');
-        attempts.push({ providerId: candidate.providerId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
+        attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
         lastError = error;
         // `canRetry: false`, because a stream walks the route chain once: once the first chunk has
         // not been sent there is still a chain to walk, and once it has, the client already holds a
@@ -396,7 +405,7 @@ export class RequestExecutor {
         if (action === 'stop') break;
         continue;
       }
-      attempts.push({ providerId: candidate.providerId, attempt: 1, ok: true, latencyMs: Date.now() - startedAt });
+      attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: true, latencyMs: Date.now() - startedAt });
       const settled = opening;
       return {
         attempts,
@@ -497,8 +506,31 @@ function noRouteAvailable(skipped: Array<{ providerId: string; reason: string }>
   return new ProviderError('PROVIDER_UNAVAILABLE', `${noCandidateMessage}${detail}`, { retryable: true, publicMessage: `${noCandidateMessage}${detail}` });
 }
 
+/**
+ * Wraps a failure with the ledger of what was tried.
+ *
+ * **The ledger travels in `details.attempts`** (1.60.0). It used to travel nowhere: this function rebuilt
+ * the error to carry a better message and dropped the attempt list on the floor, so a caller that had
+ * already received it — the usage recorder, for one — could not know which provider failed or that any
+ * provider was tried at all. Measured on a single-connection gateway whose provider throws:
+ *
+ * ```
+ * error.code   : PROVIDER_REQUEST_FAILED
+ * has .attempts: false
+ * own keys     : [ 'code', 'providerId', 'statusCode', 'retryable', 'name' ]
+ * ```
+ *
+ * So a failure produced **no usage record at all**, because the recorder correctly refused to attribute a
+ * request to a provider it could not identify. The honest reading of that is that the ledger should have
+ * been there to read.
+ *
+ * `details` rather than a new own-property, because every branch below constructs a fresh `ProviderError`
+ * and a bespoke property would have to be threaded through each one — which is the mechanism by which two
+ * branches come to disagree.
+ */
 function attachAttempts(error: unknown, attempts: GatewayFailoverAttempt[]) {
   const failedProviders = [...new Set(attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.providerId))];
+  const ledger = { attempts };
   if (error instanceof ProviderError) {
     // A single route keeps the adapter's own redacted public message, so existing
     // error semantics do not change when failover never engaged.
@@ -512,7 +544,7 @@ function attachAttempts(error: unknown, attempts: GatewayFailoverAttempt[]) {
         // Carried through: without this the provider's own wording is lost the
         // moment a request passes through the failover path, and the operator is
         // left with a generic refusal and no cause.
-        ...(error.details === undefined ? {} : { details: error.details }),
+        details: { ...(typeof error.details === 'object' && error.details !== null ? error.details : {}), ...ledger },
         cause: error,
       });
     }
@@ -521,13 +553,13 @@ function attachAttempts(error: unknown, attempts: GatewayFailoverAttempt[]) {
         ...(error.providerId ? { providerId: error.providerId } : {}),
         ...(error.statusCode ? { statusCode: error.statusCode } : {}),
         retryable: error.retryable,
-        ...(error.details === undefined ? {} : { details: error.details }),
+        details: { ...(typeof error.details === 'object' && error.details !== null ? error.details : {}), ...ledger },
         cause: error,
       });
     }
     const message = `Every provider route failed. Tried: ${failedProviders.join(', ')}.`;
-    return new ProviderError('PROVIDER_UNAVAILABLE', message, { retryable: true, publicMessage: message, cause: error });
+    return new ProviderError('PROVIDER_UNAVAILABLE', message, { retryable: true, publicMessage: message, details: ledger, cause: error });
   }
   const message = `Every provider route failed.${failedProviders.length > 0 ? ` Tried: ${failedProviders.join(', ')}.` : ''}`;
-  return new ProviderError('PROVIDER_REQUEST_FAILED', message, { retryable: true, publicMessage: message, cause: error });
+  return new ProviderError('PROVIDER_REQUEST_FAILED', message, { retryable: true, publicMessage: message, details: ledger, cause: error });
 }

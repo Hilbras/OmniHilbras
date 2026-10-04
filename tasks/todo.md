@@ -2799,6 +2799,79 @@ error is truthful — a typed `ProviderError` propagates with its real code (`RA
 `RATE_LIMITED`), while an *untyped* `Error` is deliberately generic, which the audit confirmed by showing an
 error message containing `sk-abc…` never reaches the client. Specificity and redaction are not in conflict.
 
+## Task 106: the usage store — Phase 6.2
+
+Plan: `docs/architecture/phase6-plan.md`. The measured gap it closes: the gateway had **no per-request record
+at all**, which is why `Usage` and `Request log` sit disabled and why `Overview` was deleted rather than built.
+
+### What it is
+
+`UsageStore` with an interface, `InMemoryUsageStore` and `LocalUsageStore`, mirroring `ConnectionStore` /
+`ApiKeyStore`. One route, `GET /v1/usage`, behind the admin key alongside `/v1/routing` — a usage record names
+providers, connections, models and latencies, which describes what this machine talks to.
+
+### The record cannot hold content, by construction
+
+No prompt, no response, no headers, no credential. Not a convention callers are trusted to follow — the type
+has no field capable of holding one, and `normalizeRecord` drops unknown keys on both write and load, so a
+JavaScript caller or a hand-edited file cannot widen it. The file is written through `atomicWrite`, so it
+lands at `0600` measured on disk like every other secret.
+
+**Two real bugs found by writing the tests, both mine:**
+
+1. `InMemoryUsageStore.record` did `{ ...entry, id }`, so every extra key a caller passed survived — while
+   `LocalUsageStore` normalized. Two implementations of one interface disagreeing about what a record is, which
+   is the same divergence this codebase already carries two comments about. Both normalize now.
+2. `providerId`/`connectionId` were **required**, so a request that ended before any route was tried recorded
+   nothing. Measured: 30 such requests → **zero records**, so the page's request count was below the number of
+   requests made with no way for a reader to tell. Both are optional now, and the test asserts it.
+
+### A genuine defect found on the way: a closed tab was recorded as a success
+
+v1.52.0 fixed exactly this for the health counter. Usage had the same shape of bug in the same place, because
+the two were fixed eight releases apart and only one of them was looked for:
+
+```
+abort@ 2ms -> 1 record(s): success/p
+abort@ 4ms -> 1 record(s): success/p
+abort@ 8ms -> 1 record(s): success/p
+abort@20ms -> 1 record(s): success/p
+```
+
+A client disconnect does not make the iterator throw — the generator is *disposed*, so the `for await` exits
+normally and the `[DONE]` branch claims success. `signal.aborted` is now checked before success is claimed.
+
+**And the probe was lying.** undici's `fetch` abort does not close the socket; it discards the body locally,
+so the server never sees a disconnect and the stream genuinely completed. The gateway was right. A real
+disconnect is a destroyed socket — measured with a raw socket destroyed mid-stream: `cancelled/p`.
+
+### A second real defect: failures produced no record at all
+
+`chatWithFailover` **throws**, so the success branch was never reached for a failed request, and the failure
+record had nowhere to come from. Two things were wrong:
+
+- **`attachAttempts` dropped the ledger.** It rebuilds the error to carry a better message and never put the
+  attempt list on it. Measured: `has .attempts: false`, own keys `[code, providerId, statusCode, retryable,
+  name]`. My comment claimed otherwise — I read the function's *name*, not its body. The ledger now travels in
+  `details.attempts`, merged through all four `ProviderError` constructions, because a bespoke property would
+  have to be threaded through each one and that is how branches come to disagree.
+
+### And two guesses that were wrong
+
+`enforceManagementAuth` and `error.attempts` are both things I wrote without reading. The real names are
+`setRequireApiKey` and `details.attempts`. The first cost a round of tests failing identically for a reason
+that had nothing to do with what they claimed to test.
+
+### Mutation-tested, five mutations, each caught by the right test
+
+| mutation | caught by |
+| --- | --- |
+| reintroduce the `{ ...entry }` spread | "an unknown key on the input is dropped" |
+| trim only on read | "bounded on write", "eviction drops the oldest" |
+| remove `mutationQueue` | "concurrent writes all land" |
+| drop normalization on load | "a hand-edited record with an extra field is normalized away" |
+| `writeFile` instead of `atomicWrite` | "written with the same 0600 as every other secret" |
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.
