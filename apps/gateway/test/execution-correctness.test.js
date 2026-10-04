@@ -347,3 +347,104 @@ test('every attempt in the ledger has exactly one outcome', async () => {
     seen.add(key);
   }
 });
+
+test('a request refused only because every connection is rate-limited answers 429, not 502', async (t) => {
+  // Measured before the fix, with a limit of 1:
+  //
+  //   req 1: HTTP 200
+  //   req 2: HTTP 502  code=PROVIDER_UNAVAILABLE  retryable=true
+  //
+  // The connection was skipped during *planning*, so no `RATE_LIMITED` error was ever thrown and
+  // `statusForError` — which maps `RATE_LIMITED` to 429 correctly — was never reached. The client was told
+  // to retry a connection that was at its RPM ceiling, and got a 502 where the standard answer is 429.
+  const adapter = {
+    id: 'p', name: 'p',
+    capabilities: { chat: true, streaming: true, models: true },
+    async listModels() { return [{ id: 'm', providerId: 'p' }]; },
+    async healthCheck() { return { status: 'healthy', verified: 'credential', checkedAt: new Date().toISOString() }; },
+    async chat() { return { id: 'r', providerId: 'p', model: 'm', createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'x' }, finishReason: 'stop' }; },
+    async *streamChat() { yield { id: 'c', providerId: 'p', model: 'm', content: 'x' }; },
+  };
+  const registry = new ProviderRegistry().register(adapter);
+  const store = new InMemoryConnectionStore();
+  await store.save(
+    { id: 'p', providerId: 'p', name: 'P', endpoint: 'https://p.example/v1', priority: 1, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: { maxRetries: 0, requestsPerMinute: 1, timeoutMs: 5_000, hedgeAfterMs: 0 } },
+    { type: 'api-key', value: 'k' },
+  );
+  const apiKeys = new InMemoryApiKeyStore();
+  const key = (await apiKeys.create('rate-limit-code')).key;
+  const service = new GatewayService(registry, new InMemorySecretStore({}), store, apiKeys, { failureThreshold: 5 });
+  service.setHealthInterval(0);
+  const server = createGatewayServer(service, { corsOrigins: ['http://localhost:5173'] });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = () => fetch(`${base}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+  });
+
+  assert.equal((await post()).status, 200, 'the first request is inside the limit');
+  const refused = await post();
+  assert.equal(refused.status, 429, `a rate-limited-only refusal answered ${refused.status}; 429 is what tells a client to back off rather than retry`);
+  const body = await refused.json();
+  assert.equal(body.error.code, 'RATE_LIMITED');
+  assert.notEqual(body.error.retryable, true, 'retrying immediately is what produced the refusal');
+});
+
+test('a refusal with any reason other than a limit is never reported as 429', async (t) => {
+  // If the only skipped connection is rate-limited, 429 is right. If something else is *also* wrong —
+  // no credential, say — then a 429 would send the client to wait when the real answer is "fix this".
+  // So the 429 is deliberately narrow.
+  const adapter = {
+    id: 'p', name: 'p',
+    capabilities: { chat: true, streaming: true, models: true },
+    async listModels() { return [{ id: 'm', providerId: 'p' }]; },
+    async healthCheck() { return { status: 'healthy', verified: 'credential', checkedAt: new Date().toISOString() }; },
+    async chat() { return { id: 'r', providerId: 'p', model: 'm', createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'x' }, finishReason: 'stop' }; },
+    async *streamChat() { yield { id: 'c', providerId: 'p', model: 'm', content: 'x' }; },
+  };
+  const registry = new ProviderRegistry().register(adapter);
+  const store = new InMemoryConnectionStore();
+  // Two connections: one rate-limited, one with no credential at all.
+  await store.save(
+    { id: 'a', providerId: 'a', name: 'A', endpoint: 'https://a.example/v1', priority: 1, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: { maxRetries: 0, requestsPerMinute: 1, timeoutMs: 5_000, hedgeAfterMs: 0 } },
+    { type: 'api-key', value: 'k' },
+  );
+  await store.save(
+    { id: 'b', providerId: 'b', name: 'B', endpoint: 'https://b.example/v1', priority: 2, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: { maxRetries: 0, requestsPerMinute: 60, timeoutMs: 5_000, hedgeAfterMs: 0 } },
+    { type: 'none' },
+  );
+  const apiKeys = new InMemoryApiKeyStore();
+  const key = (await apiKeys.create('mixed')).key;
+  const service = new GatewayService(registry, new InMemorySecretStore({}), store, apiKeys, { failureThreshold: 5 });
+  service.setHealthInterval(0);
+  const server = createGatewayServer(service, { corsOrigins: ['http://localhost:5173'] });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = () => fetch(`${base}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+  });
+
+  await post();  // spends A's single slot
+  const refused = await post();
+  const body = await refused.json();
+  // The assertion is **"not 429"**, and nothing stronger. My first version demanded
+  // `PROVIDER_UNAVAILABLE` and the gateway answered `AUTHENTICATION_FAILED` — which is *better*: the
+  // credential-less connection is the real problem and the code says so. Asserting a specific wrong code
+  // would have replaced a good answer with a merely-acceptable one.
+  assert.notEqual(
+    body.error.code,
+    'RATE_LIMITED',
+    `a mixed refusal answered ${body.error.code}; 429 would send the client to back off when the real ` +
+      'problem is something else entirely',
+  );
+  // The *message* is the single-route path's own redacted public text — `Provider authentication
+  // failed.` — so the skipped-reason list never reaches this client. That is existing, deliberate
+  // behaviour ("a single route keeps the adapter's own redacted public message"), not something this
+  // change altered. The signal a client acts on is the code, which is asserted above.
+});

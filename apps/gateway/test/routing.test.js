@@ -544,13 +544,19 @@ test('the routing report carries the rate-limit wait, and a limited connection s
   await assert.rejects(
     () => service.chatWithFailover(chatRequest, undefined),
     (error) => {
-      // The code is `PROVIDER_UNAVAILABLE`, not `RATE_LIMITED`, and that is the honest answer: the
-      // connection is skipped by `plan()` before `enforce()` can refuse it, so at this point nothing
-      // can serve the model. What must survive is the cause, or the operator is sent to debug a
-      // provider that is working perfectly.
-      assert.equal(error.code, 'PROVIDER_UNAVAILABLE');
-      assert.match(error.message, /Skipped: limited \(rate-limited\)/, 'and the real cause is named');
-      assert.equal(error.retryable, true, 'a limited connection is retryable elsewhere, not a dead end');
+      // **Corrected in 1.54.0.** This gateway has exactly **one** connection and it is over its limit,
+      // so every reason is `rate-limited` — and 429 is the honest code. The original assertion expected
+      // `PROVIDER_UNAVAILABLE` and explained it well: "the connection is skipped by `plan()` before
+      // `enforce()` can refuse it". That is a true statement about *how* the refusal happens and a wrong
+      // statement about *what the client should do*. A client told `retryable: true` retries a connection
+      // at its RPM ceiling and gets a 502.
+      //
+      // I nearly "fixed" it the wrong way round — assuming this test had other connections, since the
+      // reason for 502 was retryability — and asserted `PROVIDER_UNAVAILABLE` harder. It has one
+      // connection. The assertion now matches the situation the test actually sets up.
+      assert.equal(error.code, 'RATE_LIMITED', 'the only connection is at its limit, so 429 is what the client needs');
+      assert.match(error.message, /rate limit|Skipped/i, 'and the cause is still named');
+      assert.notEqual(error.retryable, true, 'retrying immediately is what produced the refusal');
       return true;
     },
   );

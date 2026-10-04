@@ -401,8 +401,41 @@ export class RequestExecutor {
   }
 }
 
+/**
+ * The error for a request with nowhere to go, and it is the *reason* that decides the code.
+ *
+ * ## Why the reason matters (1.54.0)
+ *
+ * Every skipped connection being rate-limited is not "the provider is unavailable" — it is "you asked
+ * too fast". The two need opposite client behaviour: one is worth retrying elsewhere, the other is worth
+ * backing off from and reporting as `429`. Measured with a limit of 1:
+ *
+ * ```
+ * req 1: HTTP 200
+ * req 2: HTTP 502  code=PROVIDER_UNAVAILABLE  retryable=true
+ * ```
+ *
+ * So a client obeying `retryable: true` retried a connection that was at its RPM ceiling, and got a 502
+ * where the standard answer is 429. `statusForError` already maps `RATE_LIMITED` to 429; this never
+ * reached it, because the connection was skipped during planning and no rate-limit error was ever
+ * thrown.
+ *
+ * The rule: **when every skipped connection is rate-limited, say so.** A mix still reports
+ * `PROVIDER_UNAVAILABLE`, because then something other than a limit is also wrong and one code cannot
+ * describe both.
+ */
 function noRouteAvailable(skipped: Array<{ providerId: string; reason: string }>) {
   const detail = skipped.length > 0 ? ` Skipped: ${skipped.map((entry) => `${entry.providerId} (${entry.reason})`).join(', ')}.` : '';
+  const allRateLimited = skipped.length > 0 && skipped.every((entry) => entry.reason === 'rate-limited');
+  if (allRateLimited) {
+    return new ProviderError(
+      'RATE_LIMITED',
+      `Every connection for this model is at its rate limit.${detail}`,
+      // Not retryable: retrying immediately is exactly what produced the refusal. The limit resets on its
+      // own window, and `GET /v1/routing` reports `rateLimitWaitMs` so a caller can wait the right amount.
+      { retryable: false, publicMessage: `Every connection for this model is at its rate limit.${detail}` },
+    );
+  }
   return new ProviderError('PROVIDER_UNAVAILABLE', `${noCandidateMessage}${detail}`, { retryable: true, publicMessage: `${noCandidateMessage}${detail}` });
 }
 

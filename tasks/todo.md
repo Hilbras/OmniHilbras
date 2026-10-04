@@ -2369,6 +2369,69 @@ usage?") answered by measurement rather than assumption: **yes for the rate limi
 
 Reverting the guard turns the test red; 416 gateway tests green with it in place.
 
+## Task 99: a gateway whose only connections were rate-limited answered 502 and "retryable"
+
+Found while testing the roadmap's **Phase 1.3** — *"ensure two simultaneous hedge dispatches cannot both
+pass a limit check based on stale state"*. That concern turned out not to apply: `enforceRateLimit` and
+`recordRateLimitUse` are adjacent synchronous statements on both paths, and Node cannot interleave them.
+Verified with 20 concurrent requests against a limit of 5:
+
+```
+limit=5  concurrent requests=20
+  200 OK        : 5
+  provider calls: 5
+  PASS: 5 <= 5, no oversubscription
+```
+
+But the test surfaced something else in the same code.
+
+### The defect
+
+With a limit of 1:
+
+```
+req 1: HTTP 200
+req 2: HTTP 502  code=PROVIDER_UNAVAILABLE  retryable=true
+```
+
+**Every connection was over its limit**, and the gateway said "the provider is unavailable, go ahead and
+retry". So a client obeying `retryable: true` retried a connection at its RPM ceiling and got a 502 where
+the standard answer is 429 — which is the one status that means *back off*, and `statusForError` already
+mapped `RATE_LIMITED` to 429 correctly.
+
+It never reached that mapping: the connection is skipped during **planning**, so no rate-limit error was
+ever thrown. The refusal was built from the skip list, which carried the reason but not the meaning.
+
+Fixed: when **every** skipped connection is rate-limited, the refusal is `RATE_LIMITED`, `retryable: false`,
+429. A *mix* still reports `PROVIDER_UNAVAILABLE`, because then something else is also wrong and one code
+cannot describe both — the credential-less case answers `AUTHENTICATION_FAILED`, which is better than
+either, and is left alone.
+
+### An existing test argued for the wrong behaviour, correctly
+
+`routing.test.js` asserted `PROVIDER_UNAVAILABLE` with a sound explanation:
+
+> The code is `PROVIDER_UNAVAILABLE`, not `RATE_LIMITED`, and that is the honest answer: the connection is
+> skipped by `plan()` before `enforce()` can refuse it.
+
+Every clause is true about **how** the refusal happens, and it says nothing about **what the client should
+do**. A true statement about mechanism was being used to settle a question about consequence — the same
+shape as the `recordSuccess`-in-a-`finally` comment in 1.52.0.
+
+**And I nearly fixed it backwards.** The reason for 502 was retryability, so I assumed the test had other
+connections available and asserted `PROVIDER_UNAVAILABLE` *harder*. It has exactly one. Corrected against
+what the test actually sets up.
+
+### Three wrong assertions of mine, in one test
+
+1. **`PROVIDER_UNAVAILABLE` demanded for the mixed case** — the gateway answered `AUTHENTICATION_FAILED`,
+   which is *better*. Asserting a specific wrong code would have replaced a good answer with a
+   merely-acceptable one. Now asserts only "not 429".
+2. **The message must contain `rate-limited`** — it does not, and that is existing deliberate behaviour: a
+   single route keeps the adapter's own redacted public text. The signal is the code, which is asserted.
+3. **Two new tests declared `async () =>` while using `t.after(...)`** — a `ReferenceError` that hung the
+   file for 90 seconds before I found it.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.
