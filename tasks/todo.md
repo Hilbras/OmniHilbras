@@ -2238,6 +2238,87 @@ port, getting a **byte-identical** error — which is what finally proved no net
 all. Six rounds spent on a defect that was in the test. It now checks the code that already implements
 each criterion, and the SSE claim is carried by the contract suite that runs for all 12 adapters.
 
+## Task 97: a hedge bypassed the rate limit, and a dead stream was recorded as a healthy provider
+
+A twelve-phase stabilization roadmap arrived describing this codebase. Two of its 🔴 Critical claims were
+real and are fixed here. One was **already done**. One of its phases was **already implemented** and the
+roadmap did not know. All four were verified by reading the code before acting, because the roadmap
+described `v1.50.0` and the project was at `v1.51.0` when it arrived.
+
+### Phase 1 — a hedge spent rate-limit budget it never checked. REAL.
+
+```ts
+// sequential path, in chat()
+this.deps.enforceRateLimit(candidate);        // refuses at the cap
+this.deps.recordRateLimitUse(candidate.connectionId);
+
+// the hedge path, in tryHedgedRace()
+this.deps.recordRateLimitUse(candidate.connectionId);   // ← no enforceRateLimit anywhere
+```
+
+Measured: `enforceRateLimit` appears **0** times inside `tryHedgedRace`, `recordRateLimitUse` once. So a
+connection sitting at its RPM ceiling accepted hedges **without bound** — spending budget it was not
+counting. The comment above the call said it was recorded "for the same reason as the sequential path",
+and the reason it gave is the one the sequential path does *both* of.
+
+Fixed: the hedge passes through the same enforcement, and a refused hedge is recorded as that attempt
+failing so the leader can still answer.
+
+### Phase 2 — a stream that died mid-answer was recorded as SUCCESS. REAL.
+
+```ts
+} finally {
+  // Recorded on the way out, not on the way in: a stream that opened and then died is a
+  // failure the client already knows about, and a health counter that cannot see it
+  // would keep sending traffic to a provider that is failing mid-answer.
+  executor.deps.recordSuccess(candidate.providerId, ...);
+}
+```
+
+The comment describes the correct behaviour. **The code does the opposite**: a `finally` runs on the throw
+path, so `recordSuccess` fired for every failure. The comment explains why the line is right, and the line
+is not — which is how a wrong line survives review.
+
+**And an existing test asserted the defect.** `request-executor.test.js` was titled *"a stream that dies
+mid-answer still counts as a success for the health counter"*, and its comment read *"This documents the
+choice the `finally` block makes."* It passed, so the defect was locked in by the suite meant to catch
+regressions here. My own earlier work, choosing the wrong side of a genuine trade-off: it correctly noticed
+that recording success on the *first chunk* would be wrong in the other direction, and then picked "success
+on every exit" instead of "failure when it throws".
+
+Three states, now all distinguishable:
+
+| exit | recorded |
+| --- | --- |
+| `done` | success |
+| threw after chunks | **failure** |
+| client cancelled | neither — the user decided |
+
+The third was missing entirely, and it matters in the other direction: any client could have closed a tab
+and poisoned a provider's health. The signal, not the error shape, is the discriminator.
+
+### Both proven by revert
+
+| Reverted | Result |
+| --- | --- |
+| hedge enforcement removed | ✖ |
+| `recordSuccess` restored to a `finally` | ✖ |
+
+### What the roadmap got wrong, and why it matters
+
+- **Phase 3 (streaming idle timeout) already exists** — `streamIdleTimeoutMs` in `packages/omnihilbras-sdk/src/transport.ts:78`, defaulting to the request timeout. Twelve phases of work described as needed, on a mechanism already shipped.
+- **Phase 4 (dashboard auth) is half done** — the management gate landed in 1.46.0. The `Origin` weakness it describes is real and is recorded in `docs/SPEC-SDK.md` as a known limitation with the reason closing it needs a design change, not a patch.
+- **Phase 11 recommends v1.51.0**, which shipped today as the documentation-honesty release.
+
+### My own test was wrong four times before it was right
+
+Recording them because the count is the finding:
+
+1. **A structural check passed for the wrong reason.** Slicing `tryHedgedRace` by character count ran past its end into `stream()`, whose `enforceRateLimit` satisfied the assertion — the exact defect this file exists to catch, reproduced in the test that catches it. Now brace-matched.
+2. **The behavioural hedge test asserted the wrong thing.** Two calls looked like a bypass; they were two *different connections* each with their own budget of 1. The real defect is a hedge ignoring **its own connection's** budget.
+3. **Asserting on `/health` measured the fixture.** `HealthRegistry.report()` re-probes, and a fixture whose `healthCheck` always answers `healthy` overwrites the recorded failure. Measured: exactly **1** `healthCheck` invocation, before and after identical. Now asserted on the attempt ledger, which is what routing reads.
+4. **The cancellation test never cancelled.** A controller created and never aborted leaves `signal.aborted === false`, so the executor could not tell it from a provider failure — and the test measured nothing.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.

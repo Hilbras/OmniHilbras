@@ -167,6 +167,28 @@ export class RequestExecutor {
       started.add(candidate);
       const controller = new AbortController();
       const startedAt = Date.now();
+      // Enforced, then accounted for — the same order as the sequential path, for the same reason.
+      //
+      // This call was **missing** (1.52.0). The hedge recorded a use but never asked whether the
+      // connection had capacity, so a connection sitting at its RPM ceiling accepted hedges without
+      // bound: it spent budget it was not counting. Measured with
+      // `enforceRateLimit` called 0 times inside `tryHedgedRace` while `recordRateLimitUse` was called
+      // once, and the same file's sequential path calling both.
+      //
+      // A hedge that is refused must not become a failure of the *request* either — the leader may still
+      // answer — so the refusal is recorded as this attempt failing and the race continues.
+      try {
+        this.deps.enforceRateLimit(candidate);
+      } catch (error) {
+        attempts.push({
+          providerId: candidate.providerId,
+          attempt: 1,
+          ok: false,
+          latencyMs: 0,
+          errorCode: error instanceof ProviderError ? error.code : 'RATE_LIMITED',
+        });
+        return;
+      }
       // Counted here for the same reason as the sequential path: a hedge that loses was still sent
       // and still cost money, and the ledger records it as such.
       this.deps.recordRateLimitUse(candidate.connectionId);
@@ -303,17 +325,55 @@ export class RequestExecutor {
         attempts,
         chunks: (async function* (executor: RequestExecutor) {
           if (settled) yield settled;
+          // Recorded on the way **out**, but only on the way out *successfully*.
+          //
+          // This was a `finally` block, so `recordSuccess` also ran when the stream threw — a provider
+          // that emitted one chunk and then died was recorded healthy, and routing kept selecting it. The
+          // comment above it already described the correct behaviour, which is how a wrong line survives
+          // review: the sentence explains why the line is right, and the line is not.
+          //
+          // A client that disconnects aborts the iterator and raises here like any other throw, so this
+          // `catch` cannot tell a provider failure from a cancellation by shape alone — the abort check
+          // below is what separates them. Cancelling a request is the user's decision and must not count
+          // against the provider.
           try {
             while (true) {
               const next = await rest!.next();
-              if (next.done) return;
+              // `done` is the only path that is not a throw, so it is the only path that is a success.
+              // Recording here rather than after the loop is deliberate: a `return` inside the loop
+              // skips whatever follows it, which is exactly why my first attempt at this fix — an
+              // `if (completed)` *after* the loop — was dead code, and the test that guards it said so.
+              if (next.done) {
+                executor.deps.recordSuccess(candidate.providerId, Date.now() - startedAt, new Date().toISOString());
+                return;
+              }
               yield next.value;
             }
-          } finally {
-            // Recorded on the way out, not on the way in: a stream that opened and then died is a
-            // failure the client already knows about, and a health counter that cannot see it
-            // would keep sending traffic to a provider that is failing mid-answer.
-            executor.deps.recordSuccess(candidate.providerId, Date.now() - startedAt, new Date().toISOString());
+          } catch (error) {
+            // The stream died mid-answer. That is the provider's fault whatever the client did next, and
+            // a health counter that cannot see it keeps sending traffic to a provider that is failing
+            // mid-answer.
+            // A cancellation is not a provider failure. The client's own abort reaches here shaped like
+            // any other throw, so the signal — not the error — is what separates "the provider died" from
+            // "the user closed the tab", and counting the second against the first would let any client
+            // poison a provider's health. That is the same defect as recording the failure as a success,
+            // pointed the other way.
+            const cancelled = signal?.aborted === true;
+            if (cancelled) throw error;
+            const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
+            executor.deps.recordFailure(
+              candidate.providerId,
+              code,
+              error instanceof Error ? error.message : 'The provider stream failed after it started.',
+            );
+            attempts.push({
+              providerId: candidate.providerId,
+              attempt: 1,
+              ok: false,
+              latencyMs: Date.now() - startedAt,
+              errorCode: code,
+            });
+            throw error;
           }
         })(this),
       };

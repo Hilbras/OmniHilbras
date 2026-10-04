@@ -256,10 +256,24 @@ test('a stream that ends before producing a chunk fails over rather than yieldin
   assert.equal(outcome.attempts[0].errorCode, 'INVALID_RESPONSE');
 });
 
-test('a stream that dies mid-answer still counts as a success for the health counter', async () => {
-  // The stream opened, so the route was reached and the model answered — recording success on the
-  // first chunk would have been wrong in the other direction, crediting a provider whose stream
-  // then failed every time. This documents the choice the `finally` block makes.
+test('a stream that dies mid-answer is a FAILURE for the health counter', async () => {
+  // **This test asserted the opposite for one release.** It was titled "still counts as a success", its
+  // comment said "This documents the choice the `finally` block makes", and it passed — so a provider
+  // that emitted one chunk and then died was recorded healthy, and routing kept selecting it.
+  //
+  // The reasoning it recorded was half right and the conclusion was wrong:
+  //
+  // > recording success on the first chunk would have been wrong in the other direction
+  //
+  // True, and irrelevant: the choice was never *first chunk* or *finally*, it was **success on every
+  // exit**, because `recordSuccess` sat in a `finally`. The three real states are:
+  //
+  // - completed → success  ← the `done` path
+  // - threw after chunks → **failure**  ← was recorded as success
+  // - cancelled by the client → neither; the user decided, not the provider
+  //
+  // Corrected in 1.52.0. `tests/execution-correctness.test.js` covers the same ground end to end through
+  // a real gateway; this one stays because it pins the decision at the executor's own boundary.
   const { executor, calls } = harness({
     candidates: [candidate('a')],
     streamChat: () => (async function* () {
@@ -270,7 +284,44 @@ test('a stream that dies mid-answer still counts as a success for the health cou
   const outcome = await executor.stream(request(), undefined);
   assert.deepEqual(calls.success, [], 'success is recorded as the stream finishes, not as it opens');
   await assert.rejects(async () => { for await (const _chunk of outcome.chunks) { /* drain */ } });
-  assert.deepEqual(calls.success, ['a']);
+
+  assert.deepEqual(calls.success, [], 'a stream that died mid-answer must NOT be recorded as a success');
+  assert.deepEqual(
+    calls.failure.map((entry) => entry.code),
+    ['PROVIDER_REQUEST_FAILED'],
+    'and it must be recorded as the failure it is, so routing stops choosing this provider',
+  );
+});
+
+test('a stream the client cancels is neither a success nor a provider failure', async () => {
+  // The third state, which the previous version had no way to express. A user closing the tab is not the
+  // provider's fault, and counting it as one would let any client poison a provider's health — the same
+  // class of defect as recording the failure as a success, pointed the other way.
+  const controller = new AbortController();
+  const { executor, calls } = harness({
+    candidates: [candidate('a')],
+    streamChat: () => (async function* () {
+      yield { delta: 'partial' };
+      // A real transport surfaces an abort as a throw; the shape is the same as a failure here, so what
+      // separates them is the signal, not the error.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      throw Object.assign(new Error('The request was cancelled.'), { code: 'CANCELLED' });
+    })(),
+  });
+  const outcome = await executor.stream(request(), undefined, controller.signal);
+  // Actually abort, mid-stream — a controller that is created and never aborted leaves
+  // `signal.aborted === false`, so the executor cannot tell this from a provider failure and the test
+  // measures nothing. The first chunk arrives, then the client goes away.
+  controller.abort();
+  await assert.rejects(async () => { for await (const _chunk of outcome.chunks) { /* drain */ } });
+
+  assert.deepEqual(calls.success, [], 'a cancelled stream is not a success');
+  // Whether a cancellation counts against the provider is a *policy* decision, recorded rather than
+  // assumed — but it must not be silently counted as a success, which is what the finally block did.
+  assert.ok(
+    calls.failure.every((entry) => entry.code !== 'PROVIDER_REQUEST_FAILED'),
+    'a cancellation must not be filed as a provider failure',
+  );
 });
 
 test('THE INVARIANT: the executor names no provider', () => {
