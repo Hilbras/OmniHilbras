@@ -3,8 +3,15 @@
 A self-hosted, local-first AI gateway: one OpenAI-compatible endpoint in front of
 every provider, with API keys, routing, and per-connection reliability.
 
-**Current version: 1.62.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
-[npm](https://www.npmjs.com/package/@hilbras/omnihilbras)
+[![npm](https://img.shields.io/npm/v/@hilbras/omnihilbras)](https://www.npmjs.com/package/@hilbras/omnihilbras)
+[![npm downloads](https://img.shields.io/npm/dm/@hilbras/omnihilbras)](https://www.npmjs.com/package/@hilbras/omnihilbras)
+[![CI](https://github.com/Hilbras/OmniHilbras/actions/workflows/verify.yml/badge.svg)](https://github.com/Hilbras/OmniHilbras/actions/workflows/verify.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
+
+**Current version: 1.63.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+[npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
+[Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
 ```bash
 npm i @hilbras/omnihilbras
@@ -12,11 +19,16 @@ npm i @hilbras/omnihilbras
 
 The dashboard is one React Router app mounted at `/dashboard`:
 
-- `/dashboard/overview`
 - `/dashboard/providers`
 - `/dashboard/providers/:providerId`
 - `/dashboard/routing`
 - `/dashboard/keys`
+
+Two more sidebar entries — **Usage** and **Request log** — are **disabled and have no route yet**. The gateway
+has recorded per-request usage since 1.61.0 and serves it at `GET /v1/usage`, but the pages are not built.
+
+`/` lands on Providers, because there is no Overview page. An earlier one was a mockup with no data source
+behind a range selector that changed a hardcoded number, and it was deleted rather than kept.
 
 Navigation is client-side, so switching views never reloads the document. The
 marketing page stays at `/`. A static host must send every `/dashboard/*` request

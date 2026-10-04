@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Hilbras/OmniHilbras/security/advisories/new
+    about: Report privately. Do not open a public issue for a credential leak or an auth bypass.
+  - name: Contributing guide
+    url: https://github.com/Hilbras/OmniHilbras/blob/main/CONTRIBUTING.md
+    about: How to build, test, and what "real requests only" means in review.

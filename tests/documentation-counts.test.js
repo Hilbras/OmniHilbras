@@ -1,4 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -19,6 +21,7 @@ import assert from 'node:assert/strict';
 // number against what the guard prints, which is what stops the two drifting apart.
 
 const ROOT = new URL('..', import.meta.url);
+const ROOT_URL = fileURLToPath(ROOT);
 const read = (file) => readFileSync(new URL(file, ROOT), 'utf8');
 
 /** Adapters the capture guard considers, which is the 12 behind the 14 files. */
@@ -114,6 +117,10 @@ test('no document states a test count as a bare number', () => {
     ['docs/SPEC-SDK.md', spec],
     ['docs/architecture/README.md', architecture],
     ['tasks/plan.md', plan],
+    // Added 1.63.0: the community files are read first by every new contributor and by every security
+    // reporter, so a stale figure in SECURITY.md is worse than one in the architecture notes.
+    ['SECURITY.md', read('SECURITY.md')],
+    ['CONTRIBUTING.md', read('CONTRIBUTING.md')],
   ]) {
     for (const [index, line] of text.split('\n').entries()) {
       // A count inside a code fence or a dated release note is history, not a live claim.
@@ -141,4 +148,50 @@ test('no document claims an adapter count without naming what it counted', () =>
     }
   }
   assert.deepEqual(offenders, [], `an adapter count with no stated denominator:\n  ${offenders.join('\n  ')}`);
+});
+
+test('every dashboard route the README lists is one the router serves', () => {
+  // The README listed `/dashboard/overview` for several releases after that page was deleted as a mockup with
+  // no data source. A documented route that 404s reads as a bug in the app, and a reader has no way to tell
+  // it apart from one that was never built.
+  //
+  // The same class as the gateway-route guard, one level up: that one checks `docs/SPEC-SDK.md` against the
+  // served paths, and this checks `README.md` against `src/lib/routes.ts`.
+  //
+  // **`routes.ts`, not the filenames.** The first version derived routes from `src/pages/*.tsx` and rejected
+  // `/dashboard/keys` — a real route — because the page file is `ApiKeysPage.tsx`. A guard that fails on
+  // correct documentation gets disabled, so it reads the router's own constant instead, which is what every
+  // `Link` in the app reads too.
+  const routesSource = read('src/lib/routes.ts');
+  // Comments stripped first: `routes.ts` *documents* the absence of an overview route in prose, so a
+  // substring check on the raw source finds the word and reports a route that does not exist. The
+  // gateway-route guard strips comments for exactly this reason.
+  const code = routesSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const block = code.slice(code.indexOf('export const dashboardRoutes'), code.indexOf('} as const'));
+  const served = [...block.matchAll(/^\s*(\w+):\s*'([^']+)'/gm)].map((match) => ({ name: match[1], path: match[2] }));
+
+  assert.ok(served.length > 0, 'no dashboard routes parsed; the guard would pass vacuously');
+  assert.ok(
+    !block.includes('overview'),
+    'an overview route is back in the router. The page it pointed at was a mockup with no data source; if ' +
+      'this is real work now, say so in routes.ts rather than restoring the route by accident.',
+  );
+
+  const claimed = [...readme.matchAll(/`\/dashboard(\/[a-z-]+)?`/g)]
+    .map((match) => (match[1] ?? '').replace(/^\//, '') || 'providers')
+    .filter((route) => route.length > 0);
+
+  assert.ok(claimed.length > 0, 'the README should list its dashboard routes');
+
+  const known = new Set(served.map((route) => route.path.replace(/^\//, '')));
+  // `/dashboard` with no suffix is the mount point and redirects to providers.
+  known.add('providers');
+
+  const phantoms = [...new Set(claimed)].filter((route) => !known.has(route));
+  assert.deepEqual(
+    phantoms,
+    [],
+    `the README lists ${phantoms.map((route) => `/dashboard/${route}`).join(', ')}, which the router does not ` +
+      `serve. Routes it does: ${[...known].map((route) => `/dashboard/${route}`).join(', ')}`,
+  );
 });
