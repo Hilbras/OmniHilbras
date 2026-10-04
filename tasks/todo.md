@@ -2698,6 +2698,53 @@ property here is a property of the process.
 The structural guard strips comments before reading order, because the comments carry the measured numbers
 and the string `process.once` — an earlier version of it matched its own documentation.
 
+## Task 104: the stream bounds worked, and nothing tested them
+
+Continuing after the twelve-phase roadmap finished. Went back to the phases I had marked **"already
+implemented"** and checked the claim instead of recording it — Phase 3's idle timeout had **zero tests** in
+the entire repository.
+
+### The claim held. The coverage did not exist.
+
+`createRequestLifecycle` in `transport.ts` implements both bounds, `lifecycle.resetTimeout()` is called before
+every `reader.read()`, and measured against a real server that emits one chunk then goes silent forever:
+
+```
+streamIdleTimeoutMs 400        chunks=1  outcome=PROVIDER_TIMEOUT  after 438ms
+streamIdleTimeoutMs 1500       chunks=1  outcome=PROVIDER_TIMEOUT  after 1511ms
+chunk every 150ms, budget 400  chunks=8  outcome=completed         (never cut short)
+never-idle + maxDuration 600   outcome=PROVIDER_TIMEOUT  after 658ms
+```
+
+All four correct. An inherited claim is exactly the kind that rots silently, because nothing fails when it
+does — so `packages/omnihilbras-sdk/test/stream-bounds.test.js` now covers both bounds and the interaction.
+
+### Three probe errors, all mine, and the middle one is the lesson
+
+1. `new HttpTransport(...)` — `HttpTransport` is an **interface**; the class is `FetchHttpTransport`.
+2. **`{ idleTimeoutMs: 400 }`** — the option is `streamIdleTimeoutMs`. An unknown property in an options
+   object is *silently dropped*, so the probe fell back to the 30 s default and reported a **30-second
+   timeout** as though a 400 ms budget had been ignored. I read that as "the idle timeout does not work" and
+   was about to ship a fix for working code.
+3. My first attempt at the "bounds are declared" test asserted only that the class name appears in
+   `String(FetchHttpTransport)` — which is true of any class and would pass if both bounds were deleted.
+
+There is now a test for the consequence rather than the shape: a **typo'd option must not fall back to 30
+seconds**, because that failure looks identical to a broken mechanism from the outside.
+
+### The gap mutation-testing found in my own tests
+
+Every behavioural test passed an **explicit** budget. Setting the idle default to `0` therefore failed only
+the source-shape assertion while **all five behavioural tests stayed green** — and the default is what
+production uses, because the gateway constructs the transport without `streamIdleTimeoutMs`.
+
+Added a test for the default path: construct the transport with only a `fetch`, stall the server, and assert
+the bound fires. It takes 30 s by design, because the alternative is asserting the *shape* of a default
+rather than its effect. With it in place, the same mutation fails the file.
+
+Mutation-tested: never resetting the timer → the "healthy stream is not cut short" test fails; idle default
+to `0` → the defaults test and the shape test fail; duration default to `0` → the shape test fails.
+
 # OmniHilbras SDK Tasks
 
 - [x] Task 1: Create the SDK package and normalized contracts.
