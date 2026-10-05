@@ -35,6 +35,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // "never listened" with no mention of the missing file. Asserted below so it cannot recur.
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const ENTRY = join(ROOT, 'dist/main.js');
+/**
+ * The graph whose load time is the residual SIGTERM window, named once so the probe and the assertion
+ * below cannot drift onto different modules. `main.js` imports `server.js`, so timing `main.js` measures
+ * the larger graph — but the bounded test imports `server.js` directly, and a delay derived from one
+ * graph is only safe if it exceeds the other, which is a claim about two files rather than one.
+ */
+const SERVER_MODULE = join(ROOT, 'dist/server.js');
 
 test('the gateway entry point this suite signals actually exists', () => {
   // These tests spawn a real process. If the path is wrong they all fail identically and misleadingly —
@@ -59,16 +66,30 @@ test('the gateway entry point this suite signals actually exists', () => {
  * it: a factor is honest about the fact that this is a race, while a fixed constant is a claim that it is not.
  */
 function measureModuleLoadMs() {
-  const probe = spawnSync(
-    process.execPath,
-    ['--input-type=module', '-e', `const t = Date.now();
-      await import(${JSON.stringify(ENTRY)}).catch(() => {});
-      process.stdout.write(String(Date.now() - t));`],
-    { cwd: ROOT, encoding: 'utf8', env: { ...process.env, OMNIHILBRAS_PORT: '0' } },
-  );
-  const measured = Number.parseInt(probe.stdout ?? '', 10);
+  // The graph this has to cover is the **server** module, because that is what the bounded test below
+  // times (`import(dist/server.js)`), and the invariant it checks is `delay > elapsed`. Comparing a
+  // probe of `main.js` against a measurement of `server.js` compares two different import graphs, and
+  // two independently-sampled clocks — which is how the suite failed on a loaded machine: the probe
+  // read 305 ms for `main.js` while the in-process import of `server.js` took 1045 ms, and the delay
+  // derived from the first (860 ms) was legitimately below the second.
+  //
+  // So: same module, and the worst of several samples rather than one. A single sample of a loaded
+  // machine is noise; the max of three is a bound, which is what a signal delay has to be.
+  const samples = [];
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const probe = spawnSync(
+      process.execPath,
+      ['--input-type=module', '-e', `const t = Date.now();
+        await import(${JSON.stringify(SERVER_MODULE)}).catch(() => {});
+        process.stdout.write(String(Date.now() - t));`],
+      { cwd: ROOT, encoding: 'utf8', env: { ...process.env, OMNIHILBRAS_PORT: '0' } },
+    );
+    const measured = Number.parseInt(probe.stdout ?? '', 10);
+    if (Number.isFinite(measured) && measured > 0) samples.push(measured);
+  }
   // A probe that failed to measure must not silently become 0, which would restore the race this replaces.
-  return Number.isFinite(measured) && measured > 0 ? measured : 1_200;
+  if (samples.length === 0) return 1_200;
+  return Math.max(...samples);
 }
 
 let cachedModuleLoadMs = null;
@@ -169,7 +190,7 @@ test('the residual window is module loading, and it is bounded', () => {
   // Inside the ESM module-loading window SIGTERM gets Node's default disposition, and the process cannot say
   // anything about it because none of its code has run. This test exists so the number cannot silently grow:
   // a heavier import graph widens the window in which an orchestrator's SIGTERM is a hard kill.
-  const serverModule = join(ROOT, 'dist/server.js');
+  const serverModule = SERVER_MODULE;
   assert.ok(existsSync(serverModule), `${serverModule} is missing`);
 
   const started = Date.now();
@@ -180,10 +201,16 @@ test('the residual window is module loading, and it is bounded', () => {
     assert.ok(elapsed < 4_000, `the gateway's import graph took ${elapsed}ms to load, widening the window in which SIGTERM is a hard kill`);
 
     // The startup delay is derived from a measurement, so the invariant is now that the derived delay
-    // **exceeds** this one — not that a hand-written constant does. The old assertion was
-    // `MODULE_LOAD_MS > elapsed`, which only held because the constant was picked large enough to satisfy it;
-    // under suite load the real graph took 1615 ms and 1200 did not, which is how that test failed in a full
-    // run while passing in isolation.
+    // **exceeds** the elapsed time here — not that a hand-written constant does. The old assertion was
+    // `MODULE_LOAD_MS > elapsed`, which only held because the constant was picked large enough to satisfy
+    // it; under suite load the real graph took 1615 ms and 1200 did not, which is how that test failed in
+    // a full run while passing in isolation.
+    //
+    // Both sides must be the same module on the same clock. The probe in `measureModuleLoadMs` now times
+    // `server.js` in a fresh process and takes the worst of three samples; this `elapsed` is a warm
+    // in-process import, which is *faster*, so the derived delay is an upper bound on it and the
+    // comparison holds. It compared a cold `main.js` probe against this warm `server.js` import before,
+    // which is why a loaded runner produced 860 ms < 1045 ms.
     const delay = moduleLoadMs() * 2 + 250;
     assert.ok(
       delay > elapsed,

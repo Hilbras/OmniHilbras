@@ -133,3 +133,70 @@ test('THE BOUNDARY: no cloud infrastructure was written', () => {
   });
   assert.deepEqual(offenders, [], `a cloud implementation crept in: ${offenders.join(', ')}`);
 });
+
+test('THE BOUNDARY: every type declared here is read by something', () => {
+  // This file declared five exported types and the tests below exercised four of them by *behaviour*.
+  // The fifth, `GatewayRuntime`, was asserted by nothing at all — it was a bundle of `deployment`,
+  // `auth` and `secrets`, which are supplied to `GatewayService` as three separate arguments, so there
+  // was no constructor that took it and no caller that passed it. It survived for two releases.
+  //
+  // The property worth keeping is not "this particular name is gone" — it is that an exported type in
+  // the boundary file must be named by another *source* file. A name that appears only in its own
+  // declaration, or only in prose about it, is a comment with a semicolon, and that is the exact
+  // failure Task 10 exists to rule out.
+  //
+  // Tests are excluded deliberately: a test that imported an unused type would satisfy a weaker version
+  // of this check and make the guard pass on a dead export.
+  //
+  // Scoped to `runtime.ts` on purpose, and that scope is a correction. My first version scanned every
+  // source file in `src/` and failed on twelve types — `LocalApiKeyStoreOptions`, `FirstPartyContract`,
+  // `CredentialLifecycleDeps` and so on — each of which is used inside its own file and none of which is
+  // exported from the package barrel. A constructor-options type that appears in one constructor is
+  // *working*, not dead; flagging it meant the guard would be disabled on its first honest run rather
+  // than ever catching the thing it was written for.
+  //
+  // The distinction that survives: this checks the file that *defines the boundary*, where a type is a
+  // claim about how a cloud deployment would be assembled, and a claim nothing reads is a promise to
+  // nobody. `GatewayRuntime` was exactly that — a whole assembly described in one place and assemblable
+  // in none.
+  //
+  // A type may also be read as *data* rather than by name, and `TenantContext` is. `server.ts` does not
+  // say `TenantContext`; it writes `tenant: service.deployment().tenant` while building an
+  // `AuthContext`, so the tenant reaches a real request path while the type's name appears in no other
+  // file. Demanding a by-name reference would have flagged a working boundary as dead, so a type counts
+  // as used when another source file either names it or carries its value. Both are checked below, and
+  // `TenantContext` is named in the allowed list precisely so that this exemption stays deliberate
+  // rather than becoming a loophole for the next type.
+  const srcDir = new URL('../src/', import.meta.url);
+  const boundaryFile = 'runtime.ts';
+  const sources = readdirSync(srcDir).filter((f) => f.endsWith('.ts') && f !== boundaryFile);
+  const strip = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const boundaryCode = strip(readFileSync(new URL(boundaryFile, srcDir), 'utf8'));
+  const declared = [...boundaryCode.matchAll(/export (?:type|interface) (\w+)/g)].map((m) => m[1]);
+
+  // Read by value rather than by name, with the reading path spelled out so the exemption is auditable.
+  const readByValue = {
+    // `server.ts` assigns `deployment().tenant` into the AuthContext it hands to each request.
+    TenantContext: 'server.ts',
+  };
+
+  const unreferenced = declared.filter((name) => !(name in readByValue) && !sources.some((other) => {
+    const code = strip(readFileSync(new URL(other, srcDir), 'utf8'));
+    return new RegExp(`\\b${name}\\b`).test(code);
+  }));
+  assert.deepEqual(unreferenced, [], `a declared-and-unused type came back: ${unreferenced.join(', ')}`);
+
+  // And the general fact, asserted once so the scope above cannot quietly become "no scope at all".
+  assert.ok(declared.includes('DeploymentConfig') && declared.includes('AuthContext') && declared.includes('ConnectionSecretStore'),
+    'the three boundary types Task 10 asks for are still declared here');
+
+  // The exemption is not a loophole: every entry must still be reachable, and each one names its reader.
+  for (const [name, reader] of Object.entries(readByValue)) {
+    assert.ok(declared.includes(name), `${name} is exempted but is no longer declared here`);
+    assert.ok(sources.includes(reader), `${name} is exempted and names a file that no longer exists: ${reader}`);
+    assert.ok(
+      new RegExp(`\\b${name}\\b|\\.tenant\\b`).test(strip(readFileSync(new URL(reader, srcDir), 'utf8'))),
+      `${name} is exempted but ${reader} no longer reads it`,
+    );
+  }
+});

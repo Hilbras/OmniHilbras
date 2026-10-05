@@ -4090,9 +4090,9 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Depends on: Task 9l.
   - Scope: Small.
 
-- [ ] Task 10: Define cloud integration boundaries.
+- [x] Task 10: Define cloud integration boundaries.
   - Acceptance: auth context, tenant context, remote `SecretStore`, and deployment configuration are represented by interfaces without implementing cloud infrastructure.
-  - Verify: typecheck and architecture review.
-  - Files: SDK/gateway interfaces and documentation.
+  - Verify: typecheck and architecture review. Closed by audit rather than authorship — `DeploymentConfig`, `TenantContext`, `AuthContext` and `ConnectionSecretStore` all already existed in `apps/gateway/src/runtime.ts` from Phase 5 and are read on real request paths (`server.ts:82` assigns the tenant into every `AuthContext`). The audit found the fifth type there, `GatewayRuntime`, declared and never read by anything: `GatewayService` takes deployment and secrets as separate constructor arguments, so no constructor accepted the bundle. Removed. `apps/gateway/test/runtime.test.js` now requires every exported type in the boundary file to be read by another source file, and four mutations are caught — including the one where the exempted tenant reader stops reading it.
+  - Files: `apps/gateway/src/runtime.ts`, `apps/gateway/test/runtime.test.js`.
   - Depends on: Task 8.
   - Scope: Small.

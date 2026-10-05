@@ -160,16 +160,18 @@ function defaultLocalDataDir(): string {
   return join(homedir(), '.omnihilbras');
 }
 
-/**
- * The bundle one gateway instance is built with.
- *
- * Optional throughout, with local defaults, because the overwhelming majority of callers are
- * embedded or single-user and must not be asked to think about any of it. That is what keeps a cloud
- * boundary from becoming a tax on the local case it is supposed to be optional for.
- */
-export type GatewayRuntime = {
-  readonly deployment: DeploymentConfig;
-  /** How the gateway answers *"is this a local operator?"* when nothing has said. */
-  readonly auth?: AuthContext;
-  readonly secrets: ConnectionSecretStore;
-};
+// A `GatewayRuntime` type — deployment, auth and secrets bundled together, one gateway instance built
+// from it — was here from Phase 5 and was **never referenced by anything**, including this file's own
+// neighbours. The service takes its deployment and its secrets as two separate constructor arguments,
+// so the bundle was a *third* description of the same assembly with no constructor to hand it to, and no
+// caller to pass it to.
+//
+// It is removed rather than wired up, and the reason is the difference between the two. Wiring it would
+// have changed the constructor signature that every one of ~30 gateway tests constructs, for a bundle
+// whose fields are already supplied separately. Removing it costs one export. Removing it is also what
+// makes the boundary honest: the interfaces Task 10 asked for are `DeploymentConfig`, `AuthContext` and
+// `ConnectionSecretStore`, all three of which are read on real request paths, and a fourth type that
+// claims to be the way you assemble them and is not is worse than no fourth type at all.
+//
+// `apps/gateway/test/runtime.test.js` asserts the absence: every exported type in this file must be
+// referenced by at least one other source file. That guard is why this cannot come back unnoticed.
