@@ -15,6 +15,7 @@ import { ChatGptWebAdapter } from '../dist/adapters/chatgpt-web.js';
 import { ClineAdapter } from '../dist/adapters/cline.js';
 import { KiroAdapter } from '../dist/adapters/kiro.js';
 import { KimiCodeAdapter } from '../dist/adapters/kimi-code.js';
+import { ClaudeCodeAdapter } from '../dist/adapters/claude-code.js';
 import { OpencodeConsoleAdapter } from '../dist/adapters/opencode-console.js';
 import { ZenAdapter } from '../dist/adapters/zen.js';
 import { ProviderRegistry } from '../dist/registry.js';
@@ -79,6 +80,16 @@ const providers = [
     make: () => {
       const { stub, transport: t } = transport('openai');
       return { adapter: new KimiCodeAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    // Claude Code's `/v1/messages` endpoints speak Anthropic's wire format — the same blocks, the same
+    // stop reasons — so the contract applies unchanged. What makes it a separate provider is the
+    // *credential*, not the protocol: an OAuth grant for a Claude subscription rather than an API key.
+    name: 'claude-code',
+    make: () => {
+      const { stub, transport: t } = transport('anthropic');
+      return { adapter: new ClaudeCodeAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
     },
   },
   {

@@ -3,9 +3,11 @@ import { createPortal } from 'react-dom';
 import { Check, CircleAlert, ExternalLink, LoaderCircle, ShieldCheck } from 'lucide-react';
 import {
   connectGatewayOauthProvider,
+  getClaudeCodeSignInStatus,
   getClineSignInStatus,
   getDeviceSignInStatus,
   getKiroSignInStatus,
+  startClaudeCodeSignIn,
   startGatewayDeviceSignIn,
   startGatewayOauthSignIn,
   startKiroSignIn,
@@ -40,6 +42,16 @@ type Phase = 'starting' | 'waiting' | 'connected' | 'failed';
  * no authUrl to navigate to and nothing comes back on a callback.
  */
 const deviceFlowProviders = new Set(['opencode-console', 'kiro']);
+
+/**
+ * Providers that sign in with PKCE and no pasted code, because the exchange needs the verifier that
+ * session holds.
+ *
+ * Claude Code earns its place here by having no usable paste fallback: the exchange is
+ * `code + PKCE verifier`, and the verifier lives only on the gateway's session, so a code pasted into
+ * a fresh dialog could never be spent. Offering the field would promise something that cannot work.
+ */
+const pkceOnlyProviders = new Set(['claude-code']);
 
 /** How often to ask the gateway whether the browser sign-in finished. */
 const pollIntervalMs = 1000;
@@ -184,6 +196,24 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
           ? 'Approve the request in your browser using the code below. This tab will finish the connection.'
           : 'Your browser blocked the sign-in tab. Open the link below to approve.');
         watch(signIn.sessionId, getKiroSignInStatus, 'The sign-in timed out. Start again from OmniHilbras.');
+      } catch (startError) {
+        settledRef.current = true;
+        setPhase('failed');
+        setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
+      }
+      return;
+    }
+
+    if (providerId === 'claude-code') {
+      try {
+        const signIn = await startClaudeCodeSignIn();
+        if (settledRef.current) return;
+        const sentToOpenTab = navigateTo(signIn.verificationUrl);
+        setPhase('waiting');
+        setMessage(sentToOpenTab
+          ? 'Approve the request in your browser. This tab will finish the connection.'
+          : 'Your browser blocked the sign-in tab. Open the link below to continue.');
+        watch(signIn.sessionId, getClaudeCodeSignInStatus, 'The sign-in timed out. Start again from OmniHilbras.');
       } catch (startError) {
         settledRef.current = true;
         setPhase('failed');
@@ -337,10 +367,23 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
             </div>
           )}
 
-          {(phase === 'starting' || phase === 'waiting') && !showPaste && !deviceFlowProviders.has(providerId) && (
+          {(phase === 'starting' || phase === 'waiting') && !showPaste && !deviceFlowProviders.has(providerId) && !pkceOnlyProviders.has(providerId) && (
             <button type="button" onClick={() => setShowPaste(true)} className="btn-ghost mt-4 !h-8 !px-2.5 !text-[11px]">
               Open the sign-in page manually
             </button>
+          )}
+
+          {/**
+           * A PKCE sign-in cannot be finished from a pasted code — the exchange needs the verifier on
+           * the gateway's session, and a code that arrives without it is spent refusable. Saying so is
+           * kinder than offering a field that would always fail.
+           */}
+          {pkceOnlyProviders.has(providerId) && phase !== 'connected' && (
+            <p className="muted mt-4 text-[11px] leading-relaxed">
+              This sign-in returns to the gateway's own callback, and the code is only valid together with the
+              key the gateway generated for it — so there is nothing to paste. If the browser did not come
+              back here, close this dialog and start again.
+            </p>
           )}
 
           {showPaste && phase !== 'connected' && (

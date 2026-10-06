@@ -1,9 +1,10 @@
-import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import type { GatewayConfig } from './config.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { KimiCodeSessionStore, kimiCodeProviderId, type KimiCodeSessionStatus } from './kimiCode.js';
+import { ClaudeCodeSessionStore, beginClaudeCodeSignIn, completeClaudeCodeSignIn, type ClaudeCodeSessionStatus } from './claudeCode.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialSignIn, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
@@ -119,6 +120,9 @@ export class GatewayService {
   private readonly kimiCodeSessions = new KimiCodeSessionStore();
   /** Built on demand, so signing in is what constructs it. */
   private kimiCode?: KimiCodeAdapter;
+  private readonly claudeCodeSessions = new ClaudeCodeSessionStore();
+  /** Built on demand, so signing in is what constructs it. */
+  private claudeCode?: ClaudeCodeAdapter;
   private readonly kiroSessions = new KiroSessionStore();
   private readonly kiroSocial = new KiroSocialStore();
   private chatGptWeb?: ProviderAdapter;
@@ -278,6 +282,7 @@ export class GatewayService {
       .onDemand('opencode', () => this.zenAdapter())
       .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId))
       .onDemand(kimiCodeProviderId, ({ providerId, connection }) => this.kimiCodeAdapter(connection?.id ?? providerId))
+      .onDemand(claudeCodeProviderId, ({ providerId, connection }) => this.claudeCodeAdapter(connection?.id ?? providerId))
       .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId))
       .onDemand(chatGptWebProviderId, () => this.chatGptWebAdapter())
       .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter());
@@ -548,6 +553,51 @@ export class GatewayService {
         modelPolicy: 'all',
       }),
       save: (input, credential, pollSignal) => this.saveConnection(input, credential, pollSignal),
+    });
+  }
+
+  /**
+   * Starts a Claude Code sign-in. An authorization-code flow with PKCE, so the browser opens on
+   * Claude's page and returns to a callback this gateway serves; nothing is typed by the user.
+   *
+   * The public base URL is supplied by the route rather than read from a config field, because that
+   * is where the gateway's own reachable origin is known — the same value `defaultClineRedirect`
+   * uses. The callback path derived from it must match the one the route and `http.ts` exempt.
+   */
+  startClaudeCodeSignIn(publicBaseUrl: string) {
+    return beginClaudeCodeSignIn({ store: this.claudeCodeSessions, publicBaseUrl });
+  }
+
+  /** Whether a started Claude Code sign-in has finished, and how it went. */
+  claudeCodeSignInStatus(sessionId: string) {
+    const session = this.claudeCodeSessions.get(sessionId);
+    return session ? this.claudeCodeSessions.publicStatus(session) : undefined;
+  }
+
+  /**
+   * Finishes the sign-in a callback delivered: the code is exchanged with the stored PKCE verifier,
+   * the credential is proved against Claude, the catalog is imported, and only then is anything
+   * saved. Completion lives in `claudeCode.ts`, which is close to the store that holds the verifier;
+   * what stays here is the connection the gateway records for it.
+   */
+  completeClaudeCodeCallback(input: { sessionId?: string; raw: string }, signal?: AbortSignal): Promise<ClaudeCodeSessionStatus | undefined> {
+    if (!input.sessionId) return Promise.resolve(undefined);
+    return completeClaudeCodeSignIn({
+      store: this.claudeCodeSessions,
+      sessionId: input.sessionId,
+      raw: input.raw,
+      transport: this.transport,
+      ...(signal ? { signal } : {}),
+      saveConnection: async ({ credential }) => this.saveConnection({
+        id: claudeCodeProviderId,
+        providerId: claudeCodeProviderId,
+        name: 'Claude Code',
+        // The endpoint is fixed by the adapter; recorded so an operator can see which host it reaches.
+        endpoint: CLAUDE_CODE.server,
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      }, credential, signal),
     });
   }
 
@@ -840,6 +890,26 @@ export class GatewayService {
       });
     }
     return this.kimiCode;
+  }
+
+  /**
+   * Claude Code — the Anthropic subscription reached by OAuth, not the metered `anthropic` API key.
+   *
+   * A separate adapter from `anthropic` because they are separate accounts with separate billing, the
+   * same reasoning as `kimi` versus `kimi-code`. Its access tokens are short-lived, so a renewal must
+   * outlive the request that triggered it — hence the write-back to the vault below.
+   */
+  claudeCodeAdapter(connectionId: string): ClaudeCodeAdapter {
+    if (!this.claudeCode) {
+      this.claudeCode = new ClaudeCodeAdapter({
+        transport: this.transport,
+        onTokensRefreshed: async (credential) => {
+          if (!this.connectionStore) return;
+          await this.connectionStore.set(connectionId, credential).catch(() => undefined);
+        },
+      });
+    }
+    return this.claudeCode;
   }
 
   kiroAdapter(connectionId: string): ProviderAdapter {

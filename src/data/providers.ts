@@ -22,6 +22,9 @@ export const providerLogoMap = {
   kimi: '/providers/kimi.svg',
   // The coding subscription is a separate product with its own mark, not the platform's.
   'kimi-code': '/providers/kimi-coding.png',
+  // Claude Code is the Anthropic *subscription*, reached by OAuth — a separate account from the
+  // metered `anthropic` API key. Its own card and its own mark, for the same reason `kimi-code` has.
+  'claude-code': '/providers/claude.svg',
   moonshot: '/providers/moonshot.svg',
   groq: '/providers/groq.svg',
   xai: '/providers/xai.svg',
@@ -406,6 +409,38 @@ export const providerCatalog: ProviderRecord[] = [
     logo: providerLogoMap['kimi-code'],
     endpoint: 'https://api.kimi.com',
     modelList: [],
+  },
+  {
+    id: 'claude-code',
+    name: 'Claude Code',
+    description: 'Your Claude Code subscription, signed in with the account you already have, rather than metered per token through an API key.',
+    category: 'Model provider',
+    group: 'oauth',
+    // Placeholders, because this catalog is the state a card shows when the gateway has no connection
+    // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists.
+    status: 'available',
+    auth: 'OAuth',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    // Anthropic's own terracotta, which is the accent the Claude app uses.
+    color: '#d97757',
+    initial: 'CC',
+    logo: providerLogoMap['claude-code'],
+    endpoint: 'https://api.anthropic.com',
+    modelList: [],
+    /**
+     * Real, and the reason this is a separate card from `anthropic`.
+     *
+     * An `anthropic` card takes an API key metered per token. This card signs in with a Claude
+     * subscription through OAuth, which Anthropic's consumer terms do not permit for third-party API
+     * access. The user is the one who decides whether to make that trade, so both facts are on the card.
+     */
+    riskNotice:
+      'Anthropic’s consumer terms do not permit using a Claude subscription for third-party API access. The credential here is an OAuth grant for your Claude account, not an API key. If you have an Anthropic API key, prefer the Anthropic card.',
+    riskSeverity: 'standard',
   },
   {
     id: 'deepseek',

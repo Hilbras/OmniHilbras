@@ -11,16 +11,16 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
  * > Keep adapters isolated, use official API documentation, and **pin response fixtures per
  * > adapter.**
  *
- * Measured, there are **four** pinned fixtures for **twelve** adapters. `kiro-stream.bin` is a real
+ * Measured, there are **four** pinned fixtures for **fourteen** adapters. `kiro-stream.bin` is a real
  * captured binary eventstream, with tests asserting both the answer it decoded to and the frame names
  * the service really sends. Since 1.48.0 there are three more — `openrouter`, `cline` and
  * `opencode-console` — captured from the providers themselves, all three of them **model listings**, so
  * the total cost was nothing.
  *
- * The remaining eight are accounted for by a stated reason, and the count is asserted so the two cannot
- * drift apart. Six of those eight need a credential this machine does not have: `openai`,
- * `openai-compatible`, `anthropic`, `gemini`, `zen` and `zen-free-tier`. `chatgpt-web` and
- * `deepseek-web` are browser DOM sessions, where a byte capture pins nothing useful.
+ * The remaining ten are accounted for by a stated reason, and the count is asserted so the two cannot
+ * drift apart. Eight of those ten need a credential this machine does not have: `openai`,
+ * `openai-compatible`, `anthropic`, `gemini`, `zen`, `zen-free-tier`, `kimi-code` and `claude-code`.
+ * `chatgpt-web` and `deepseek-web` are browser DOM sessions, where a byte capture pins nothing useful.
  *
  * ## Why one of eleven is a problem and not a detail
  *
@@ -83,6 +83,11 @@ const NO_CAPTURE_YET = {
   // Saying "no capture yet, needs a credential" is the claim the guard asks for; the alternative —
   // manufacturing one from a scripted transport — is the artefact that hid the DeepSeek bug.
   'kimi-code': 'its models listing needs a Kimi Code subscription token this machine does not have; the listing itself is free, so this is a credential gap rather than a cost one',
+  // Claude Code is the same shape as Kimi Code and is excused the same way. `/v1/models` is a free,
+  // authenticated read, so the capture costs nothing — it is absent only because this machine holds no
+  // Claude subscription grant to read it with, and `claude-code.test.js` asserts the decode against a
+  // scripted transport instead of claiming a capture that was never taken.
+  'claude-code': 'its `/v1/models` listing needs a Claude subscription OAuth grant this machine does not have; the listing itself is free, so this is a credential gap rather than a cost one',
 };
 
 test('the fixtures directory holds only captures, named for the adapter they came from', () => {

@@ -17,14 +17,14 @@ import assert from 'node:assert/strict';
 // that goes stale while the plan reads as finished.
 //
 // Numbers that ARE recomputed by a running test are allowed here — `fixture-coverage.test.js` prints
-// "pinned real captures: 4 of 12 adapters", so the plan may quote it. This guard checks the *quoted*
+// "pinned real captures: 4 of 14 adapters", so the plan may quote it. This guard checks the *quoted*
 // number against what the guard prints, which is what stops the two drifting apart.
 
 const ROOT = new URL('..', import.meta.url);
 const ROOT_URL = fileURLToPath(ROOT);
 const read = (file) => readFileSync(new URL(file, ROOT), 'utf8');
 
-/** Adapters the capture guard considers, which is the 12 behind the 14 files. */
+/** Adapters the capture guard considers, which is the 14 behind the 16 files. */
 function consideredAdapters() {
   const dir = new URL('packages/omnihilbras-sdk/src/adapters/', ROOT);
   return readdirSync(dir)
@@ -69,7 +69,7 @@ test('the adapter count in the SPEC is the real file count', () => {
 });
 
 test('the SPEC reconciles its file count with the capture guard\'s count', () => {
-  // The SPEC says 14 files, the capture guard says 12 adapters. Both are right — three files are not
+  // The SPEC says 16 files, the capture guard says 14 adapters. Both are right — three files are not
   // protocol adapters — and both are quoted in plan.md as live numbers. Left unreconciled they read as a
   // contradiction, and the fix someone applies under time pressure is to "correct" the wrong one.
   const files = readdirSync(new URL('packages/omnihilbras-sdk/src/adapters/', ROOT))
@@ -133,7 +133,7 @@ test('no document states a test count as a bare number', () => {
 });
 
 test('no document claims an adapter count without naming what it counted', () => {
-  // "12 adapters" and "14 files" are both currently correct and both were wrong at some point in the
+  // "14 adapters" and "16 files" are both currently correct and both were wrong at some point in the
   // same sentence. The bare number is the problem; the fix is that a reader can tell which set is meant.
   const offenders = [];
   for (const [name, text] of [['docs/SPEC-SDK.md', spec], ['tasks/plan.md', plan]]) {

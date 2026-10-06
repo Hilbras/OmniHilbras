@@ -727,6 +727,29 @@ export function getClineSignInStatus(sessionId: string, signal?: AbortSignal) {
 }
 
 /**
+ * Claude Code — an authorization-code flow with PKCE, so the browser opens on Claude's page.
+ *
+ * `verificationUrl` is the URL to open, the same field the device flows use. There is deliberately no
+ * `authUrl`/`state` pair here: the session id travels in the redirect path, so the callback can be tied
+ * to its PKCE verifier without the provider echoing anything back.
+ */
+export function startClaudeCodeSignIn(signal?: AbortSignal) {
+  return requestJson<{ sessionId: string; verificationUrl: string; expiresAt: string }>('/v1/oauth/claude-code/start', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+    ...(signal ? { signal } : {}),
+  });
+}
+
+export function getClaudeCodeSignInStatus(sessionId: string, signal?: AbortSignal) {
+  return requestJson<GatewayOauthSignInStatus & { verificationUrl?: string }>(
+    `/v1/oauth/claude-code/session/${encodeURIComponent(sessionId)}`,
+    { signal },
+  );
+}
+
+/**
  * A device-flow sign-in. The provider hands back a code the user types into its own
  * page, so there is no authUrl to navigate to and nothing is echoed back on a callback.
  */

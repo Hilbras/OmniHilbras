@@ -236,6 +236,20 @@ The first local gateway exposes:
 - `GET /v1/oauth/kimi-code/session/:id` — whether the Kimi Code sign-in is pending, connected, failed or
   expired. The device code is never in this response. A well-formed id that does not exist is `404`; an
   id that is not a plausible session id is `400`, refused before any lookup.
+- `POST /v1/oauth/claude-code/start` — begin a Claude Code sign-in: the Anthropic **subscription**, reached
+  by OAuth, not the metered `anthropic` API key. Returns the URL to open and the session id to poll. The
+  flow is authorization-code with PKCE — the verifier is minted here and **never leaves the session**, and
+  the session id rides in the redirect **path** so a callback can be tied to its verifier even if Claude
+  does not echo `state`. `claude.ai/oauth/authorize` answers a server-side fetch with a Cloudflare
+  interstitial rather than a code, so this flow is a browser redirect rather than an API call.
+- `GET /v1/oauth/claude-code/callback/:sessionId` — where Claude redirects the browser; completes the
+  exchange and reports the outcome on a small HTML page. The raw query is handed over rather than the
+  parsed `code`, because Claude repeats the code after a `#` and both halves are needed. Exempt from the
+  cross-site guard alongside Cline's callback, because a top-level navigation carries no `Origin`. The
+  session is claimed **before** the exchange, since an authorization code is single-use.
+- `GET /v1/oauth/claude-code/session/:id` — whether a started Claude Code sign-in is pending, connected,
+  failed, or expired. A well-formed id that does not exist is `404`; an id that is not a plausible session
+  id is `400`, refused before any lookup. The PKCE verifier is never in this response.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
 - `POST /v1/embeddings` — normalized embeddings, one vector per input. `input` is a non-empty
   string or a non-empty array of them; `encoding_format` must be `float` (base64 is refused rather
@@ -2464,7 +2478,7 @@ measurement, and `apps/gateway/test/spec-success-criteria.mjs` fails if any stop
       `build` script; `packages/omnihilbras-sdk/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **15 files** in `packages/omnihilbras-sdk/src/adapters/` — three of which (`deepseek-pow`, `chatgpt-first-party`, `qwen-web`) are not protocol adapters, which is why the capture guard counts 13 — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **16 files** in `packages/omnihilbras-sdk/src/adapters/` — three of which (`deepseek-pow`, `chatgpt-first-party`, `qwen-web`) are not protocol adapters, which is why the capture guard counts 14 — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **7 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

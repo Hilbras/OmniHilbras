@@ -240,9 +240,11 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 13 until 1.43.0, then 22: Kimi, DeepSeek, Qwen, Groq, Grok, NVIDIA, OpenAI, Anthropic and Gemini.
   // 23 from 1.71.0, which added `kimi-code` — the Kimi *subscription*, which is a separate account
   // with separate billing from the `kimi` platform card rather than a second auth mode on it.
+  // 24 from 1.72.0, which added `claude-code` — the same shape again: the Claude *subscription*,
+  // reached by OAuth, is a separate account from the metered `anthropic` API key.
   // Every one is OpenAI-compatible or already adapted, so each is a catalog card and no adapter work.
   // Mistral is **not** in that list — the catalog already had it, and the ten requested included it.
-  assert.equal(all.length, 23, `the catalog now has ${all.length} cards`);
-  assert.equal(oauthCapableProviders().size, 4, 'the gateway serves an OAuth start route for four providers');
+  assert.equal(all.length, 24, `the catalog now has ${all.length} cards`);
+  assert.equal(oauthCapableProviders().size, 5, 'the gateway serves an OAuth start route for five providers');
   console.log(`    cards: ${all.length}   claiming OAuth: ${all.filter((c) => c.auth === 'OAuth').length}   gateway OAuth routes: ${oauthCapableProviders().size}   claiming a measurement: 0`);
 });

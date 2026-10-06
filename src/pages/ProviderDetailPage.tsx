@@ -224,7 +224,7 @@ const modelSortOptions: ReadonlyArray<{ value: ModelFilterState['sort']; label: 
 const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, requestsPerMinute: 0, hedgeAfterMs: 0 };
 
 /** OAuth providers the gateway can actually complete a sign-in for today. */
-const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro']);
+const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro', 'claude-code']);
 
 /** Providers whose flow is a pasted credential rather than a browser sign-in. */
 const webCookieProviders = new Set(webSessionProviderIds());

@@ -155,7 +155,7 @@ Recorded so a later reader does not "helpfully" add them.
 
 Blocked on credentials, not on engineering, and true before this phase:
 
-- Pinned real provider captures: **4 of 12 adapters**. Six of the eight remaining need a credential this
+- Pinned real provider captures: **4 of 14 adapters**. Eight of the ten remaining need a credential this
   machine does not have.
 - Rotate: the Qwen `auth.qwen.ai` credential, `/home/gin/session.json`, and the live npm token. All three
   need rotating rather than deleting — a key that reached a commit is compromised.

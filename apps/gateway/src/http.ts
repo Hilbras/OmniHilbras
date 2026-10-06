@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ProviderError, publicProviderMessage, type ModelImportPolicy } from '@hilbras/omnihilbras';
-import { clineCallbackPath } from './oauth.js';
+import { claudeCodeCallbackPath, clineCallbackPath } from './oauth.js';
 import type { GatewayServerOptions } from './server.js';
 
 /**
@@ -70,7 +70,11 @@ export function isCrossSiteRequest(request: IncomingMessage) {
 export function isOauthCallbackNavigation(request: IncomingMessage) {
   if (request.method !== 'GET') return false;
   const path = (request.url ?? '').split('?', 1)[0] ?? '';
-  return path === clineCallbackPath || path.startsWith(`${clineCallbackPath}/`);
+  // Both redirect providers land here as a top-level navigation from the provider, so both carry
+  // `sec-fetch-site: cross-site` and no `Origin`. The exemption is by path, and each path is the
+  // gateway's own constant — never a value from the request.
+  return path === clineCallbackPath || path.startsWith(`${clineCallbackPath}/`)
+    || path === claudeCodeCallbackPath || path.startsWith(`${claudeCodeCallbackPath}/`);
 }
 
 

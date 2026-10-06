@@ -6,7 +6,7 @@
  * that already exist.
  */
 
-import { clineCallbackPath, sessionIdFromCallbackPath } from '../oauth.js';
+import { claudeCodeCallbackPath, claudeCodeSessionIdFromCallbackPath, clineCallbackPath, sessionIdFromCallbackPath } from '../oauth.js';
 import type { RouteContext } from './route-context.js';
 import {
   assertOnlyFields,
@@ -131,6 +131,57 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
+    /**
+     * Claude Code — the Anthropic subscription, reached by an authorization-code flow with PKCE.
+     *
+     * The browser is the only path here: probing `claude.ai/oauth/authorize` server-side returns a
+     * Cloudflare interstitial rather than a code, so the user's own browser has to make the trip and
+     * the callback comes back to us. The session id rides in the redirect path — see `claudeCode.ts`
+     * for why — and `start` hands back both the URL to open and the id to poll.
+     */
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/claude-code/start') {
+      sendJson(response, 201, service.startClaudeCodeSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:8787'), origin);
+      return true;
+    }
+
+    // Where Claude redirects the browser. Exempt from the cross-site guard alongside Cline's callback:
+    // a top-level navigation from the provider carries `sec-fetch-site: cross-site` and no Origin.
+    if (request.method === 'GET' && (url.pathname === claudeCodeCallbackPath || url.pathname.startsWith(`${claudeCodeCallbackPath}/`))) {
+      const sessionId = claudeCodeSessionIdFromCallbackPath(url.pathname);
+      /**
+       * Claude repeats the code after a `#`, and reassembling it is what this line is for.
+       *
+       * The `#` half is a URL **fragment**, which a browser puts in `url.hash` rather than in the
+       * query — and a client that pastes the whole callback may instead deliver it percent-encoded
+       * **inside** `code`, which `searchParams` decodes back to `#`. Both forms are rebuilt here so
+       * `splitCallbackFragment` receives a `code#state` pair either way. Passing `url.search` whole
+       * was the first attempt and it handed the exchange `code=granted` — the parameter *name*
+       * became part of the code, which Claude refuses with `invalid_grant` for a code that was right.
+       */
+      const raw = `${url.searchParams.get('code') ?? ''}${url.hash}`;
+      const status = sessionId ? await service.completeClaudeCodeCallback({ sessionId, raw }, signal) : undefined;
+      const ok = status?.status === 'connected';
+      const message = ok
+        ? `Connected to ${(status?.connection as { name?: string } | undefined)?.name ?? 'Claude Code'}.`
+        : status?.error ?? 'This callback did not identify a Claude Code sign-in. Start the sign-in again from OmniHilbras.';
+      sendHtml(response, 200, claudeCodeCallbackPage(ok, message), origin);
+      return true;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/claude-code/session/')) {
+      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/claude-code/session/'.length)).trim();
+      // Shape-checked before it reaches the store, which is what stops a crafted path from being used
+      // to probe for sessions. The store checks it too; this is the outer of the two.
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
+      const status = service.claudeCodeSignInStatus(sessionId);
+      if (!status) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
+        return true;
+      }
+      sendJson(response, 200, status, origin);
+      return true;
+    }
+
     // Kiro signs in through AWS's device flow: a code the user approves in their own
     // browser, and the gateway polls until AWS says it was approved.
     if (request.method === 'POST' && url.pathname === '/v1/oauth/kiro/start') {
@@ -241,6 +292,46 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
 
 export function defaultClineRedirect(publicBaseUrl: string | undefined) {
   return `${publicBaseUrl ?? 'http://127.0.0.1:8787'}/v1/oauth/cline/callback`;
+}
+
+
+/**
+ * The tab Claude Code's callback lands on.
+ *
+ * Same shape as `clineCallbackPage` on purpose: the two are the only pages a provider's own redirect
+ * renders, and a reader comparing them should find one design and two wordings rather than two designs.
+ * The message is escaped, and a charset check is the second line of defence against a provider's own
+ * words becoming markup.
+ */
+export function claudeCodeCallbackPage(ok: boolean, message: string) {
+  const safeMessage = /^[\S ]{1,300}$/.test(message) && !/[<>]/.test(message)
+    ? message
+    : 'The sign-in could not be completed.';
+  return `<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>${ok ? 'Claude Code connected' : 'Claude Code sign-in failed'}</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0b0d10; color: #e6e8eb;
+         font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { width: min(520px, calc(100% - 2rem)); text-align: center; }
+  .mark { width: 44px; height: 44px; margin: 0 auto 1rem; border-radius: 50%; display: grid; place-items: center;
+          font-size: 22px; border: 1px solid #2a2f36; }
+  .ok .mark { background: #10261b; border-color: #1f4d33; color: #7cc7a1; }
+  .bad .mark { background: #2a1416; border-color: #4d2024; color: #f08a8a; }
+  h1 { font-size: 1.2rem; margin: 0 0 .5rem; }
+  p { margin: 0; color: #aeb4bb; }
+  .note { margin-top: 1.5rem; color: #8b9299; font-size: 12px; }
+</style>
+<main class="${ok ? 'ok' : 'bad'}">
+  <div class="mark" aria-hidden="true">${ok ? '&#10003;' : '!'}</div>
+  <h1>${ok ? 'Claude Code connected' : 'Claude Code sign-in failed'}</h1>
+  <p>${escapeHtml(safeMessage)}</p>
+  <p class="note">${ok ? 'You can close this tab and go back to OmniHilbras.' : 'Go back to OmniHilbras and start the sign-in again.'}</p>
+</main>
+</html>`;
 }
 
 

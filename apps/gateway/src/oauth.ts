@@ -41,6 +41,30 @@ export function sessionIdFromCallbackPath(pathname: string): string | undefined 
   return /^[A-Za-z0-9_-]{16,128}$/.test(id) ? id : undefined;
 }
 
+/**
+ * Where Claude Code sends the browser after the user approves.
+ *
+ * **The gateway owns this path, not the SDK adapter.** A path is a routing decision, and
+ * `packages/omnihilbras-sdk/src/adapters/claude-code.ts` carries a same-valued copy only so its own
+ * docs and `exchangeClaudeCodeCode` can describe the flow; the route table and the cross-site
+ * exemption both read the constant declared here. The two must agree, or a redirect lands on a path
+ * the gateway never serves — which is exactly the mismatch this file also had to fix: the authorize
+ * URL was built without a session id while the callback parser expected one.
+ *
+ * The session id travels in the path for the same reason Cline's does: it is the one part of a
+ * redirect a provider must honour verbatim, and it ties a callback to the sign-in that began it
+ * without trusting a `state` the provider might not echo back. Unlike Cline, Claude Code's callback
+ * also carries `code` and `state` as ordinary query parameters.
+ */
+export const claudeCodeCallbackPath = '/v1/oauth/claude-code/callback';
+
+/** Pulls the Claude Code sign-in id out of a callback path, if it carries one. */
+export function claudeCodeSessionIdFromCallbackPath(pathname: string): string | undefined {
+  if (!pathname.startsWith(`${claudeCodeCallbackPath}/`)) return undefined;
+  const id = pathname.slice(claudeCodeCallbackPath.length + 1).split('/')[0] ?? '';
+  return /^[A-Za-z0-9_-]{16,128}$/.test(id) ? id : undefined;
+}
+
 /** How long a started sign-in stays usable before it is discarded. */
 export const clineSessionTtlMs = 5 * 60_000;
 

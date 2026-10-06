@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.71.1** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.72.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -180,6 +180,29 @@ request unauthenticated to see what Zen actually said.
 One trap: Zen's `mimo-v2.6-flash-free` and OpenRouter's `xiaomi/mimo-v2.6-flash` are
 different models from different vendors, and the ids are close enough to mix up. The
 OpenRouter one answers on a paid route; the Zen one does not.
+
+## Claude Code, and the subscription it signs in with
+
+**Claude Code** is a separate card from **Anthropic**, and the difference is the credential, not the
+endpoint. Both reach `api.anthropic.com`; the Anthropic card takes an API key metered per token, while
+the Claude Code card signs in with an OAuth grant for a Claude **subscription**.
+
+Open the Claude Code provider page and choose **Add connection**. The gateway mints a PKCE pair, opens
+`claude.ai/oauth/authorize` in a new tab, and waits while you approve the request. Claude redirects your
+browser back to the gateway's own callback, which exchanges the code and saves the connection — there is
+nothing to paste, and the code is never shown back to the browser.
+
+The sign-in is authorization-code with PKCE, so the verifier is minted by the gateway and **never leaves
+the session**; it is not in the URL you open, and it is not in the status the page polls. The session id
+rides in the redirect path, which is what ties a callback to its verifier even though Claude repeats the
+code after a `#` rather than echoing a clean `state`. `claude.ai/oauth/authorize` answers a server-side
+fetch with a Cloudflare challenge rather than a code, which is the whole reason this flow needs a
+browser rather than an API call.
+
+**Read the card's notice before you connect.** Anthropic's consumer terms do not permit using a Claude
+subscription for third-party API access, so the dialog asks you to acknowledge that before it starts
+anything. If you have an Anthropic API key, the **Anthropic** card is the metered path that Anthropic's
+terms cover.
 
 ## Web Cookie providers, and the warning that comes with them
 
@@ -386,10 +409,16 @@ pnpm test
 pnpm verify        # the release gate: version, typecheck, test, build
 pnpm version:check # one version, stated once — fails if the copies disagree
 pnpm version:fix   # rewrite the derived copies from package.json
+./scripts/dev.sh   # the gateway and the dashboard together, in one terminal
 ```
 
 `pnpm verify` is what CI runs on every push and pull request. `version:check` exists because the
 README advertised `0.2.0` while the project was at `1.12.2` — a hundred minor versions, unnoticed.
+
+`scripts/dev.sh` starts the gateway, waits until its port answers, then starts the dashboard, and stops
+both when either exits. The wait is the point: starting the dashboard first means the opening page load
+reaches a gateway that is not listening yet, and every card reads "not connected" with nothing saying
+why. `OMNIHILBRAS_HOST`, `OMNIHILBRAS_PORT` and `DASHBOARD_PORT` override the two defaults.
 
 ## Architecture
 
