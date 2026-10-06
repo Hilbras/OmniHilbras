@@ -75,6 +75,14 @@ const NO_CAPTURE_YET = {
   // tool name moving between models within a week. A byte capture would freeze one day of it and
   // then be wrong, which is the reason the two moving parts are configuration and not constants.
   'zen-free-tier': 'the gate is a request contract measured on a date and it drifts; pinning a capture would pin the drift',
+  // Kimi Code is **not** excused for cost. Its `/coding/v1/models` listing is free and needs no paid
+  // call, and it is exactly the capture the guard exists to encourage — the reason it is absent is
+  // that the endpoint answers only to a credential this machine does not have. A subscription token
+  // is per-account, so the capture has to wait for a signed-in one rather than be skipped as expensive.
+  //
+  // Saying "no capture yet, needs a credential" is the claim the guard asks for; the alternative —
+  // manufacturing one from a scripted transport — is the artefact that hid the DeepSeek bug.
+  'kimi-code': 'its models listing needs a Kimi Code subscription token this machine does not have; the listing itself is free, so this is a credential gap rather than a cost one',
 };
 
 test('the fixtures directory holds only captures, named for the adapter they came from', () => {

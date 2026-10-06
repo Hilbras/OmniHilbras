@@ -124,14 +124,37 @@ test('a new provider id is one edit away from a web-session id, and stays distin
   const added = ['kimi', 'deepseek', 'qwen', 'groq', 'grok', 'nvidia', 'openai', 'anthropic', 'gemini'];
   const confused = added.filter((id) => webSessionIds.has(id));
   assert.deepEqual(confused, [], `these API-key cards are listed as web-session providers: ${confused.join(', ')}`);
-  // And the near-misses must all be web-session, which is what makes them a real hazard.
+  /**
+   * A near-miss must be *distinguishable from the API-key card it resembles*, and the original rule
+   * said "must be a web session" — which was right for the three pairs it was written against and wrong
+   * for the fourth.
+   *
+   * `kimi-code` is `kimi` plus a suffix, and it is neither an API-key card nor a browser session: it is
+   * an **OAuth card** with a real device-code flow. The assertion failed on a correct card, which is the
+   * usual cost of encoding the three pairs someone happened to have rather than the property.
+   *
+   * So the property is now what it was protecting: the derived card must not resolve to the *base*
+   * card's credential path. A web session does not, and an OAuth flow with its own start route does
+   * not. A card that is neither would let a user who meant the API key sign in instead — which is the
+   * exact confusion the test was written for.
+   */
+  const oauthIds = new Set(providerCatalog.filter((card) => card.auth === 'OAuth').map((card) => card.id));
+  const oauthRoutes = new Set(
+    [...readFileSync(join(ROOT, 'apps/gateway/src/routes/oauth.ts'), 'utf8')
+      .matchAll(/url\.pathname === '\/v1\/oauth\/([\w-]+)\/start'/g)].map((m) => m[1]),
+  );
   const nearMiss = pairs.filter(([, derived]) => derived !== 'opencode-console').map(([, derived]) => derived);
   for (const id of nearMiss) {
-    assert.ok(webSessionIds.has(id), `${id} is one character from an API-key card and must be a web session`);
+    const distinguishable = webSessionIds.has(id) || (oauthIds.has(id) && oauthRoutes.has(id));
+    assert.ok(
+      distinguishable,
+      `${id} is one character from an API-key card and must resolve to a different credential path — ` +
+        'either a web session, or an OAuth card whose gateway really serves a start route for it',
+    );
   }
   assert.deepEqual(
     pairs.map(([, derived]) => derived).sort(),
-    ['deepseek-web', 'opencode-console', 'qwen-web'],
+    ['deepseek-web', 'kimi-code', 'opencode-console', 'qwen-web'],
     'the near-miss ids are exactly the ones expected, so this stays a measurement and not a tautology',
   );
 });

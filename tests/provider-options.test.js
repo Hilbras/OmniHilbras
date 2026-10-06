@@ -153,7 +153,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // `withoutCard` for the catalog. I first wrote 19 by adding the nine to the old ten without noticing
   // three had moved, which is the arithmetic of a list described in two places — the reason the next
   // test exists.
-  assert.equal(providerCatalog.length, 22, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerCatalog.length, 23, `the catalog now has ${providerCatalog.length} cards`);
   assert.equal(providerOptions.length, 16, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

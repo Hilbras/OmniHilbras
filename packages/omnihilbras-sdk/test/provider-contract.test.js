@@ -14,6 +14,7 @@ import { DeepSeekWebAdapter } from '../dist/adapters/deepseek-web.js';
 import { ChatGptWebAdapter } from '../dist/adapters/chatgpt-web.js';
 import { ClineAdapter } from '../dist/adapters/cline.js';
 import { KiroAdapter } from '../dist/adapters/kiro.js';
+import { KimiCodeAdapter } from '../dist/adapters/kimi-code.js';
 import { OpencodeConsoleAdapter } from '../dist/adapters/opencode-console.js';
 import { ZenAdapter } from '../dist/adapters/zen.js';
 import { ProviderRegistry } from '../dist/registry.js';
@@ -67,6 +68,17 @@ const providers = [
     make: () => {
       const { stub, transport: t } = transport('anthropic');
       return { adapter: new AnthropicAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    // Kimi Code's `/coding/v1` endpoints speak the OpenAI shape — chat, stream and models — so the
+    // contract applies unchanged rather than being excused. Its account host (device code, token,
+    // refresh) is form-encoded and is *not* the OpenAI wire format, so those calls are covered by
+    // `kimi-code.test.js` against a scripted transport instead.
+    name: 'kimi-code',
+    make: () => {
+      const { stub, transport: t } = transport('openai');
+      return { adapter: new KimiCodeAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
     },
   },
   {

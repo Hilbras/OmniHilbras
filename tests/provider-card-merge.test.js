@@ -219,10 +219,12 @@ test('a card whose connection disappears goes back to being the catalog card', (
 });
 
 test('THE COUNT, asserted so it cannot drift quietly', () => {
-  // 13 until 1.43.0, then 22. The nine added cards are all OpenAI-compatible or already adapted, so
+  // 13 until 1.43.0, then 22 (nine added: OpenAI-compatible or already adapted). 23 from 1.71.0,
+// which added `kimi-code` — the Kimi *subscription*, a separate account from the `kimi`
+// platform card rather than a second auth mode on it.
   // each is catalog metadata and no merge behaviour — which is why this suite needed no new cases: the
   // property it asserts is about every card, and it holds for a new one without being extended.
-  assert.equal(providerCatalog.length, 22, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerCatalog.length, 23, `the catalog now has ${providerCatalog.length} cards`);
   const connected = mergeGatewayConnections(providerCatalog, [connection()], health());
   assert.equal(connected.length, providerCatalog.length, 'a merge must not add or drop a card');
   console.log(`    cards: ${providerCatalog.length}   fields that may change on a merge: 5   that may not: 2`);

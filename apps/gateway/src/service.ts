@@ -1,8 +1,9 @@
-import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import type { GatewayConfig } from './config.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
+import { KimiCodeSessionStore, kimiCodeProviderId, type KimiCodeSessionStatus } from './kimiCode.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialSignIn, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
@@ -115,6 +116,9 @@ export class GatewayService {
   private zen?: ProviderAdapter;
   private opencodeConsole?: ProviderAdapter;
   private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
+  private readonly kimiCodeSessions = new KimiCodeSessionStore();
+  /** Built on demand, so signing in is what constructs it. */
+  private kimiCode?: KimiCodeAdapter;
   private readonly kiroSessions = new KiroSessionStore();
   private readonly kiroSocial = new KiroSocialStore();
   private chatGptWeb?: ProviderAdapter;
@@ -273,6 +277,7 @@ export class GatewayService {
       .onDemand('cline', () => this.clineAdapter(), { validateOnSave: true })
       .onDemand('opencode', () => this.zenAdapter())
       .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId))
+      .onDemand(kimiCodeProviderId, ({ providerId, connection }) => this.kimiCodeAdapter(connection?.id ?? providerId))
       .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId))
       .onDemand(chatGptWebProviderId, () => this.chatGptWebAdapter())
       .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter());
@@ -484,6 +489,68 @@ export class GatewayService {
    * code the user types into its own page, so the dashboard shows the code and waits
    * rather than following a redirect.
    */
+  /**
+   * Starts a Kimi Code sign-in. A device flow, so the user approves a code in their own browser and
+   * the dashboard polls — nothing is redirected back to us.
+   */
+  async startKimiCodeSignIn() {
+    // **The registered adapter, not a fresh one.** A `new KimiCodeAdapter` here would build its own
+    // `FetchHttpTransport` and reach the real Kimi even when the gateway was constructed with a
+    // scripted transport — so a test of this flow made a live network call, and a caller who supplied
+    // their own transport silently had it ignored for the sign-in. The adapter is memoised per
+    // connection, which is exactly the lifetime this needs.
+    const started = await this.kimiCodeAdapter(kimiCodeProviderId).beginSignIn();
+    const session = this.kimiCodeSessions.create(started);
+    return {
+      sessionId: session.id,
+      userCode: session.userCode,
+      verificationUrl: session.verificationUrl,
+      expiresAt: new Date(session.expiresAt).toISOString(),
+    };
+  }
+
+  /**
+   * Reports whether the Kimi Code sign-in finished, spending the device code on the first poll that
+   * finds it approved.
+   *
+   * Routed through `completeSignIn`, which claims the session *before* the exchange. A device code is
+   * single-use, so two concurrent polls would otherwise spend it twice, the second be told the code is
+   * invalid, and a success that already happened be overwritten with a failure.
+   */
+  kimiCodeSignInStatus(sessionId: string, signal?: AbortSignal): Promise<KimiCodeSessionStatus | undefined> {
+    return completeSignIn({
+      sessions: this.kimiCodeSessions,
+      sessionId,
+      signal,
+      fallback: 'The Kimi Code sign-in could not be completed.',
+      poll: async () => {
+        const session = this.kimiCodeSessions.get(sessionId);
+        if (!session) return { status: 'denied', error: 'This sign-in no longer exists.' };
+        const outcome = await this.kimiCodeAdapter(sessionId).pollSignIn(session.deviceCode, signal, session.deviceId);
+        if (outcome.status === 'pending') return { status: 'pending' };
+        if (outcome.status === 'denied') return { status: 'denied', error: outcome.error };
+        return { status: 'connected', credential: outcome.credential };
+      },
+      takeDiscoveryNote: () => {
+        const note = this.lastDiscoveryNote;
+        this.lastDiscoveryNote = undefined;
+        return note;
+      },
+      connection: () => ({
+        id: kimiCodeProviderId,
+        providerId: kimiCodeProviderId,
+        name: 'Kimi Code',
+        // The endpoint is fixed by the adapter, so it is recorded for display rather than read back —
+        // an operator needs to see which host this connection talks to.
+        endpoint: KIMI_CODE.server,
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      }),
+      save: (input, credential, pollSignal) => this.saveConnection(input, credential, pollSignal),
+    });
+  }
+
   async startOpencodeConsoleSignIn() {
     const started = await beginOpencodeConsoleSignIn();
     const session = this.opencodeConsoleSessions.create(started);
@@ -751,6 +818,28 @@ export class GatewayService {
       chatGptWebCredential(state),
       signal,
     );
+  }
+
+  /**
+   * Kimi Code, the `api.kimi.com/coding` subscription.
+   *
+   * A separate adapter from the `kimi` platform card because they are separate accounts with
+   * separate billing: a subscription token and a platform key both work here, but they are not the
+   * same thing and a connection saved under one is never consulted for the other.
+   */
+  kimiCodeAdapter(connectionId: string): KimiCodeAdapter {
+    if (!this.kimiCode) {
+      this.kimiCode = new KimiCodeAdapter({
+        transport: this.transport,
+        // A renewal must outlive the request that triggered it, or the next request presents a
+        // token Kimi has already replaced.
+        onTokensRefreshed: async (credential) => {
+          if (!this.connectionStore) return;
+          await this.connectionStore.set(connectionId, credential).catch(() => undefined);
+        },
+      });
+    }
+    return this.kimiCode;
   }
 
   kiroAdapter(connectionId: string): ProviderAdapter {

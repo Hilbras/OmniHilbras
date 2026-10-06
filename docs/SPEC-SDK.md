@@ -226,6 +226,16 @@ The first local gateway exposes:
 - `POST /v1/oauth/opencode-console/start` — begin an OpenCode Console device-flow sign-in.
 - `GET /v1/oauth/opencode-console/session/:id` — whether a device flow is awaiting approval, connected, or failed.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
+- `POST /v1/oauth/kimi-code/start` — begin a Kimi Code sign-in. Kimi's device flow, so the response
+  carries a `userCode` and a `verificationUrl` for the user to approve in their own browser; there is no
+  redirect back. Both halves of the flow are **form-encoded**, which is measured: Kimi answers a JSON
+  body with `400 client_id is required` even when the parameter is present, and returns a device code
+  only from `application/x-www-form-urlencoded`. The session id is shape-checked before it reaches the
+  store, and the device id minted at the start is carried on the session so the poll presents the same
+  one — Kimi ties the two halves of a grant together by it.
+- `GET /v1/oauth/kimi-code/session/:id` — whether the Kimi Code sign-in is pending, connected, failed or
+  expired. The device code is never in this response. A well-formed id that does not exist is `404`; an
+  id that is not a plausible session id is `400`, refused before any lookup.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
 - `POST /v1/embeddings` — normalized embeddings, one vector per input. `input` is a non-empty
   string or a non-empty array of them; `encoding_format` must be `float` (base64 is refused rather
@@ -2454,7 +2464,7 @@ measurement, and `apps/gateway/test/spec-success-criteria.mjs` fails if any stop
       `build` script; `packages/omnihilbras-sdk/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **14 files** in `packages/omnihilbras-sdk/src/adapters/` — three of which (`deepseek-pow`, `chatgpt-first-party`, `qwen-web`) are not protocol adapters, which is why the capture guard counts 12 — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **15 files** in `packages/omnihilbras-sdk/src/adapters/` — three of which (`deepseek-pow`, `chatgpt-first-party`, `qwen-web`) are not protocol adapters, which is why the capture guard counts 13 — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **7 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

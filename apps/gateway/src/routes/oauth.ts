@@ -106,6 +106,31 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
+    /**
+     * Kimi Code, the `api.kimi.com/coding` subscription.
+     *
+     * A device flow, so there is no callback: the dashboard starts it, shows the code, and polls the
+     * session route until Kimi reports the code approved.
+     */
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/kimi-code/start') {
+      sendJson(response, 201, await service.startKimiCodeSignIn(), origin);
+      return true;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/kimi-code/session/')) {
+      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/kimi-code/session/'.length)).trim();
+      // Shape-checked before it reaches the store, which is what stops a crafted path from being used
+      // to probe for sessions. The store checks it too; this is the outer of the two.
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
+      const status = await service.kimiCodeSignInStatus(sessionId, signal);
+      if (!status) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
+        return true;
+      }
+      sendJson(response, 200, status, origin);
+      return true;
+    }
+
     // Kiro signs in through AWS's device flow: a code the user approves in their own
     // browser, and the gateway polls until AWS says it was approved.
     if (request.method === 'POST' && url.pathname === '/v1/oauth/kiro/start') {

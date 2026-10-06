@@ -20,6 +20,8 @@ export const providerLogoMap = {
   // assets went missing from 18 releases once because a blanket staging rule excluded that directory.
   // No `initial` is doing the work of a logo here; these are the vendors' own marks.
   kimi: '/providers/kimi.svg',
+  // The coding subscription is a separate product with its own mark, not the platform's.
+  'kimi-code': '/providers/kimi-coding.png',
   moonshot: '/providers/moonshot.svg',
   groq: '/providers/groq.svg',
   xai: '/providers/xai.svg',
@@ -382,6 +384,27 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'K',
     logo: providerLogoMap.kimi,
     endpoint: 'https://api.moonshot.ai/v1',
+    modelList: [],
+  },
+  {
+    id: 'kimi-code',
+    name: 'Kimi Code',
+    description: 'Your Kimi Code subscription, signed in with the account you already have, rather than bought per token.',
+    category: 'Model provider',
+    group: 'oauth',
+    // Placeholders, because this catalog is the state a card shows when the gateway has no connection
+    // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists.
+    status: 'available',
+    auth: 'OAuth',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#1E3A8A',
+    initial: 'KC',
+    logo: providerLogoMap['kimi-code'],
+    endpoint: 'https://api.kimi.com',
     modelList: [],
   },
   {
