@@ -1,4 +1,4 @@
-import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse } from '@hilbras/omnihilbras';
+import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse } from '@hilbras/omnihilbras';
 import { noCandidateMessage, type RouteCandidate, type RouteDecision } from './routing.js';
 import { RetryPolicy } from './retry-policy.js';
 import { HedgePolicy } from './hedge-policy.js';
@@ -54,6 +54,18 @@ export type GatewayChatOutcome = {
   attempts: GatewayFailoverAttempt[];
 };
 
+/**
+ * The embeddings outcome, shaped exactly like {@link GatewayChatOutcome}.
+ *
+ * `attempts` is here for the same reason it is on the chat outcome: a client that sees four attempts
+ * knows four calls were paid for. An embeddings request that fails over four times is four billable
+ * embeddings calls, and the operator is the one who needs to know.
+ */
+export type GatewayEmbedOutcome = {
+  response: EmbeddingResponse;
+  attempts: GatewayFailoverAttempt[];
+};
+
 export type GatewayStreamOutcome = {
   chunks: AsyncIterable<ChatChunk>;
   attempts: GatewayFailoverAttempt[];
@@ -76,6 +88,18 @@ export type RequestExecutorDeps = {
   chat: (providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope) => Promise<ChatResponse>;
   /** Opens a stream with one provider. Only the first chunk is a failover decision point. */
   streamChat: (providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope) => AsyncIterable<ChatChunk>;
+  /**
+   * Embeds with one provider.
+   *
+   * A ninth injected operation rather than a second executor, and that is the whole decision.
+   * `chat`/`stream` and `embed` share every rule this file owns — retry count, rate-limit accounting,
+   * terminal codes, the attempt ledger, and the three fixes that each took a release of its own:
+   * a limiter refusal is not a provider failure (1.56.0), a cancellation is neither success nor
+   * failure (1.52.0), and an abandoned hedge may not settle twice (1.53.0). A separate embeddings loop
+   * would have had to re-derive all six, and would have been correct until someone changed one of them
+   * here only.
+   */
+  embed: (providerId: string, request: EmbeddingRequest, signal?: AbortSignal, scope?: RequestScope) => Promise<EmbeddingResponse>;
   /** Applies a per-attempt deadline and never leaks its timer. */
   withDeadline: <T>(signal: AbortSignal | undefined, timeoutMs: number, providerId: string, run: (signal: AbortSignal | undefined) => Promise<T>) => Promise<T>;
   /** Refuses an attempt that would exceed the connection's per-minute limit. */
@@ -111,9 +135,79 @@ export class RequestExecutor {
       // The race found no winner; continue down the normal chain.
     }
     const racedProviders = new Set(race?.attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.providerId));
-    let lastError: unknown = race?.lastError;
+    return this.runSequential({
+      candidates: decision.candidates,
+      attempts,
+      racedProviders,
+      lastError: race?.lastError,
+      signal,
+      scope,
+      dispatch: (candidate, deadline) => this.deps.chat(candidate.providerId, request, deadline, scope),
+    });
+  }
 
-    for (const candidate of decision.candidates) {
+  /**
+   * Embeds, walking the same route chain and obeying the same rules as {@link chat}.
+   *
+   * **Deliberately not a second loop.** The three fixes below each cost a release to find, and every
+   * one of them is a property of *dispatching an attempt* rather than of chat specifically — so a
+   * copied loop would have been correct on day one and quietly wrong the first time any of them was
+   * changed here only:
+   *
+   * - a limiter refusal is not a provider failure (1.56.0) — nothing was sent, so nothing was learned;
+   * - a cancellation is neither success nor failure (1.52.0) — a client that closes its request did
+   *   not make the provider slow;
+   * - `terminalRouteCodes` decides what is worth retrying, and it already lists `NOT_SUPPORTED` and
+   *   `INVALID_REQUEST` — which is precisely what a provider with no embeddings endpoint returns.
+   *
+   * The one thing that is genuinely chat-only is **hedging**, and it is not merely omitted: a hedge
+   * fires a second request after a delay to reach the fastest provider, and an embeddings request
+   * that has already been computed by two providers has doubled the bill for a latency win nobody
+   * asked for. So `tryHedgedRace` is not called here, and the loop below is the whole of the policy.
+   * That is a decision recorded in code, not an oversight for a reader to infer.
+   */
+  async embed(request: EmbeddingRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayEmbedOutcome> {
+    const decision = await this.deps.planRoute(request.model, explicitProviderId);
+    if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
+    return this.runSequential({
+      candidates: decision.candidates,
+      attempts: [],
+      racedProviders: new Set(),
+      lastError: undefined,
+      signal,
+      scope,
+      dispatch: (candidate, deadline) => this.deps.embed(candidate.providerId, request, deadline, scope),
+    });
+  }
+
+  /**
+   * The route chain, walked one candidate at a time, with every rule this file owns applied once.
+   *
+   * Extracted from `chat` rather than written twice. The duplication would have been ~85 lines
+   * carrying six behaviours that all had to stay in step — retry counting, the limiter-before-dispatch
+   * ordering, per-attempt accounting, the ledger shape, `attachAttempts`, and the two health verdicts
+   * that `abandoned`/`aborted` distinguish. Six rules that must not drift is six chances to drift, and
+   * the drift is invisible until a provider is ejected for something nobody did.
+   *
+   * Generic over the response type so embeddings and chat share it rather than the file holding a
+   * near-identical copy that only the type parameter separates.
+   */
+  private async runSequential<T>(input: {
+    candidates: readonly RouteCandidate[];
+    attempts: GatewayFailoverAttempt[];
+    /** Candidates a hedge already tried and failed; walked past rather than paid for twice. */
+    racedProviders: ReadonlySet<string>;
+    lastError: unknown;
+    signal?: AbortSignal;
+    scope?: RequestScope;
+    dispatch: (candidate: RouteCandidate, deadline: AbortSignal | undefined) => Promise<T>;
+  }): Promise<{ response: T; attempts: GatewayFailoverAttempt[] }> {
+    // `scope` is deliberately not destructured: the dispatch closure already captures it, and
+    // reading an unused binding here is what `noUnusedLocals` caught when this loop was extracted.
+    const { candidates, attempts, racedProviders, signal } = input;
+    let lastError: unknown = input.lastError;
+
+    for (const candidate of candidates) {
       if (racedProviders.has(candidate.providerId)) continue;
       for (let attempt = 1; attempt <= candidate.resilience.maxRetries + 1; attempt += 1) {
         if (signal?.aborted) throw new ProviderError('CANCELLED', 'The request was cancelled.', { cause: signal.reason });
@@ -163,7 +257,7 @@ export class RequestExecutor {
           // failed still cost the provider a call. A request the limit *refused* is not counted,
           // because nothing was sent.
           this.deps.recordRateLimitUse(candidate.connectionId);
-          const response = await this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.deps.chat(candidate.providerId, request, deadline, scope));
+          const response = await this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => input.dispatch(candidate, deadline));
           const latencyMs = Date.now() - startedAt;
           this.deps.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString());
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: true, latencyMs });

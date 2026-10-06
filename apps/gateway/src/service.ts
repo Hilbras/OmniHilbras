@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, ChatGptWebAdapter, FetchHttpTransport, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import type { GatewayConfig } from './config.js';
@@ -18,7 +18,7 @@ import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
 import { startRequestScope, type RequestScope } from './request-context.js';
 import { notSupported } from './capability.js';
-import { RequestExecutor, type GatewayChatOutcome, type GatewayStreamOutcome } from './request-executor.js';
+import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
 import type { UsageStore } from './usage-store.js';
@@ -56,7 +56,7 @@ const defaultProviderId = 'openai';
  * Re-exported rather than moved: the types now live with the loop that produces them, but every
  * existing importer of `service.js` keeps working without learning a second path for the same type.
  */
-export type { GatewayFailoverAttempt, GatewayChatOutcome, GatewayStreamOutcome } from './request-executor.js';
+export type { GatewayFailoverAttempt, GatewayChatOutcome, GatewayStreamOutcome, GatewayEmbedOutcome } from './request-executor.js';
 
 /**
  * The credential surface the service needs, keyed by connection id.
@@ -262,6 +262,7 @@ export class GatewayService {
       planRoute: (model, explicitProviderId) => this.planRoute(model, explicitProviderId),
       chat: (providerId, request, signal, scope) => this.chat(providerId, request, signal, scope),
       streamChat: (providerId, request, signal, scope) => this.streamChat(providerId, request, signal, scope),
+      embed: (providerId, request, signal, scope) => this.embed(providerId, request, signal, scope),
       withDeadline: (signal, timeoutMs, providerId, run) => this.withDeadline(signal, timeoutMs, providerId, run),
       enforceRateLimit: (candidate) => this.enforceRateLimit(candidate),
       recordSuccess: (providerId, latencyMs, at) => this.healthManager.recordSuccess(providerId, latencyMs, at),
@@ -963,6 +964,25 @@ export class GatewayService {
   }
 
   /**
+   * Embeds with one provider.
+   *
+   * The gate is two-part on purpose and both parts are load-bearing. `notSupported(adapter,
+   * 'embeddings')` is what a user needs to hear when their provider has no embeddings endpoint, and it
+   * is a `NOT_SUPPORTED` code, which `terminalRouteCodes` already treats as never worth retrying — so
+   * the request is not also spent walking to the next connection that cannot serve it either.
+   *
+   * Requiring `capabilities.embeddings === true` *and* `typeof adapter.embed === 'function'` is
+   * redundant for today's adapters and correct for future ones: an adapter can carry the capability
+   * flag without having implemented the call (a registry entry that advertises before it builds), and
+   * calling `undefined` would be a `TypeError` reaching the client as a 500 instead of a 404.
+   */
+  async embed(providerId: string, request: EmbeddingRequest, signal?: AbortSignal, scope?: RequestScope): Promise<EmbeddingResponse> {
+    const adapter = await this.resolveAdapter(providerId);
+    if (adapter.capabilities.embeddings !== true || typeof adapter.embed !== 'function') throw notSupported(adapter, 'embeddings');
+    return adapter.embed(request, await this.credentials.contextForProvider(providerId, signal, scope));
+  }
+
+  /**
    * Serves one request across a failover chain: each candidate gets its own
    * retry budget, and a retryable failure moves on to the next connection.
    */
@@ -997,6 +1017,16 @@ export class GatewayService {
    */
   deployment(): DeploymentConfig {
     return this.deploymentConfig;
+  }
+
+  /**
+   * Embeds across a failover chain, beside {@link chatWithFailover}.
+   *
+   * Same chain, same retry budget, same ledger, **no hedge** — see `RequestExecutor.embed` for why a
+   * second concurrent embeddings call is a cost rather than a latency win.
+   */
+  async embedWithFailover(request: EmbeddingRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayEmbedOutcome> {
+    return this.requests.embed(request, explicitProviderId, signal, scope);
   }
 
   /** Streaming cannot retry after bytes are sent, so failover only covers the first chunk. */

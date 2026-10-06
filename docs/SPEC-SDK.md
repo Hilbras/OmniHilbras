@@ -227,6 +227,15 @@ The first local gateway exposes:
 - `GET /v1/oauth/opencode-console/session/:id` — whether a device flow is awaiting approval, connected, or failed.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
+- `POST /v1/embeddings` — normalized embeddings, one vector per input. `input` is a non-empty
+  string or a non-empty array of them; `encoding_format` must be `float` (base64 is refused rather
+  than silently returned as floats). `dimensions` is echoed per vector **only when the adapter
+  measured it** — it is derived from the vector's own length, so it cannot disagree with the vector,
+  and it is omitted when the provider reports nothing. A provider with no embeddings endpoint returns
+  `404 NOT_SUPPORTED` naming that provider rather than an empty vector list. Served only by adapters
+  that declare `capabilities.embeddings` — `OpenAIAdapter` does, the general `openai-compatible`
+  adapter does not, because an OpenAI-shaped base URL is not evidence that the server implemented an
+  embeddings endpoint.
 - `POST /v1/chat/completions` with `stream: true` — normalized SSE chunks.
 - The dashboard provider test uses live adapter health; each model test uses a bounded real chat completion through the same route.
 - A model test must fail when the model returns no visible output. A well-formed
@@ -354,8 +363,8 @@ allowlisted browser origin. The contract:
   and shell history.
 - Hashes are compared in constant time across every stored key, and paused or
   deleted keys fail immediately.
-- Enforcement defaults to on and guards `GET /v1/models` and
-  `POST /v1/chat/completions`. Requests carrying an allowlisted dashboard
+- Enforcement defaults to on and guards `GET /v1/models`,
+  `POST /v1/chat/completions` and `POST /v1/embeddings`. Requests carrying an allowlisted dashboard
   `Origin` are exempt: they are already protected by the origin allowlist and
   the cross-site request check, and the dashboard must keep working without
   holding a key. Anything else — CLI tools, IDE extensions, scripts — must

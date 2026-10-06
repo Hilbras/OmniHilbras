@@ -6,7 +6,7 @@
  * the wrong thing.
  */
 
-import { ProviderError, isLoopbackHostname, type ProviderId, isPrivateHostname, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type MessageContent, type Model, type ToolDefinition } from '@hilbras/omnihilbras';
+import { ProviderError, isLoopbackHostname, type ProviderId, isPrivateHostname, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type MessageContent, type Model, type ToolDefinition } from '@hilbras/omnihilbras';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
 import { attachRequestId, type RequestScope } from '../request-context.js';
@@ -49,7 +49,128 @@ export async function handleInferenceRoute(ctx: RouteContext): Promise<boolean> 
       return true;
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/embeddings') {
+      await handleEmbeddings(request, response, service, options, origin, signal);
+      return true;
+    }
+
   return false;
+}
+
+/**
+ * `POST /v1/embeddings`, in OpenAI's shape.
+ *
+ * Deliberately a sibling of `handleChat` and not a call into it: the two share the auth gate, the
+ * request scope, the attempt ledger and the usage vocabulary, and nothing else. Embeddings has no
+ * stream, no tools, no temperature and no continuation, and modelling it as "chat with fewer fields"
+ * would put four branches in the chat path that can never be true for an embeddings request.
+ */
+export async function handleEmbeddings(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
+  const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
+  const embeddingRequest = parseEmbeddingRequest(body);
+  const explicitProviderId = getExplicitProviderId(request, body);
+  const scope = service.startScope(embeddingRequest.model, explicitProviderId);
+
+  const startedAt = Date.now();
+  let responseBody: { response: EmbeddingResponse; attempts: GatewayFailoverAttempt[] };
+  try {
+    responseBody = await service.embedWithFailover(embeddingRequest, explicitProviderId, signal, scope);
+  } catch (error) {
+    // The same ledger read as chat's failure path, and for the same reason: `attachAttempts` rebuilds
+    // the error, so `details.attempts` is the only place the list survives.
+    const details = error instanceof ProviderError ? error.details : undefined;
+    const ledger: GatewayFailoverAttempt[] =
+      typeof details === 'object' && details !== null && Array.isArray((details as { attempts?: unknown }).attempts)
+        ? ((details as { attempts: GatewayFailoverAttempt[] }).attempts)
+        : [];
+    const cancelled = signal.aborted || (error instanceof ProviderError && error.code === 'CANCELLED');
+    recordUsage(service, {
+      model: embeddingRequest.model,
+      providerId: ledger[ledger.length - 1]?.providerId,
+      connectionId: ledger[ledger.length - 1]?.connectionId,
+      outcome: cancelled ? 'cancelled' : 'failure',
+      attempts: ledger.length,
+      latencyMs: Date.now() - startedAt,
+      ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+    });
+    throw attachRequestId(error, scope);
+  }
+
+  const serving = responseBody.attempts.find((attempt) => attempt.ok);
+  recordUsage(service, {
+    model: responseBody.response.model,
+    providerId: responseBody.response.providerId,
+    connectionId: serving?.connectionId,
+    outcome: 'success',
+    attempts: responseBody.attempts.length,
+    latencyMs: Date.now() - startedAt,
+    usage: responseBody.response.usage,
+  });
+
+  sendJson(response, 200, {
+    object: 'list',
+    data: responseBody.response.data.map((vector) => ({
+      object: 'embedding',
+      index: vector.index,
+      embedding: [...vector.embedding],
+      // **Only when the adapter measured it.** OpenAI omits this field entirely, and a client that
+      // reads it needs to be able to tell "the provider did not say" from "it is zero". The value comes
+      // from the vector's own length, so it cannot disagree with the vector.
+      ...(vector.dimensions === undefined ? {} : { dimensions: vector.dimensions }),
+    })),
+    model: responseBody.response.model,
+    provider: responseBody.response.providerId,
+    usage: responseBody.response.usage
+      ? {
+          prompt_tokens: responseBody.response.usage.inputTokens,
+          total_tokens: responseBody.response.usage.totalTokens,
+        }
+      : undefined,
+    gateway: { requestId: scope.id, ...(responseBody.attempts.length > 1 ? { attempts: responseBody.attempts.map(toPublicAttempt) } : {}) },
+  }, origin);
+}
+
+/**
+ * Parses an OpenAI `/v1/embeddings` body.
+ *
+ * `input` is required and must be a non-empty string or a non-empty array of them, mirroring the
+ * adapter's own check. Two reasons to be strict at the edge rather than to forward and let the
+ * provider answer: a request naming no input would otherwise be routed, rate-limited and paid for
+ * before anything refused it, and `[]` is not "no input", it is a request for zero vectors — which a
+ * caller receiving `data: []` cannot distinguish from a provider that silently did nothing.
+ */
+export function parseEmbeddingRequest(body: unknown): EmbeddingRequest {
+  if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+  if (typeof body.model !== 'string' || !body.model.trim()) throw invalidRequest('model is required.');
+
+  // Narrowed here rather than re-checked in the helper: `body.model` is `unknown` until the guard
+  // above runs, and a type predicate does not survive being passed to another function.
+  const model = body.model.trim();
+  const input = body.input;
+  if (typeof input === 'string' && input.length > 0) {
+    return finishEmbeddingRequest(body, model, input);
+  }
+  if (Array.isArray(input) && input.length > 0 && input.every((value) => typeof value === 'string' && value.length > 0)) {
+    return finishEmbeddingRequest(body, model, input as readonly string[]);
+  }
+  throw invalidRequest('input must be a non-empty string or a non-empty array of non-empty strings.');
+}
+
+function finishEmbeddingRequest(body: Record<string, unknown>, model: string, input: string | readonly string[]): EmbeddingRequest {
+  const dimensions = body.dimensions === undefined ? undefined : parseOptionalNumber(body.dimensions, 'dimensions', 1, 1_000_000);
+  if (body.encoding_format !== undefined && body.encoding_format !== 'float') {
+    // Base64 embeddings are a different wire format, and decoding them here would mean this gateway
+    // holds a vector it cannot use. Refusing is honest; silently returning floats under a `base64`
+    // request is a lie the client cannot detect.
+    throw invalidRequest('encoding_format must be float; base64 embeddings are not supported.');
+  }
+  if (body.user !== undefined && typeof body.user !== 'string') throw invalidRequest('user must be a string.');
+  return {
+    model,
+    input,
+    ...(dimensions === undefined ? {} : { dimensions }),
+    ...(body.user === undefined ? {} : { user: body.user as string }),
+  };
 }
 
 export async function handleChat(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
@@ -543,8 +664,25 @@ export async function writeStreamData(response: ServerResponse, data: string, si
 }
 
 
+/**
+ * The LLM surface: everything that can cost money or return model output, and therefore everything
+ * that needs a key unless the caller is the allowlisted dashboard.
+ *
+ * **This function is the authentication boundary for the public surface, and a path missing from it is
+ * an unauthenticated endpoint.** `handleInferenceRoute` asks it before dispatching, so a route added
+ * to the dispatcher but not here is reachable with no credential at all — which is exactly the shape of
+ * bug that a route test written against the handler would miss, because the handler is not where the
+ * decision is made.
+ *
+ * So the route list and this list are the same fact stated twice, and the guard in
+ * `apps/gateway/test/embeddings-route.test.js` asserts they agree in both directions. `/v1/embeddings`
+ * was added here in the same commit that added the route below; that is the whole point of stating it
+ * as one rule rather than two places to remember.
+ */
 export function isPublicLlmRoute(method: string | undefined, pathname: string) {
-  return (method === 'GET' && pathname === '/v1/models') || (method === 'POST' && pathname === '/v1/chat/completions');
+  return (method === 'GET' && pathname === '/v1/models')
+    || (method === 'POST' && pathname === '/v1/chat/completions')
+    || (method === 'POST' && pathname === '/v1/embeddings');
 }
 
 /** Accepts the same headers OpenAI, Anthropic, and Gemini clients already send. */

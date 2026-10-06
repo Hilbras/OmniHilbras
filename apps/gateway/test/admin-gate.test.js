@@ -126,7 +126,12 @@ test('the prefix list and the router agree, so a new management route cannot be 
   const declared = new Set([...server.matchAll(/'(\/v1\/[a-z-]+)'/g)].map((m) => m[1]));
   // The inference surface, which `handleInferenceRoute` gates itself. Matched by prefix because the
   // scan sees `/v1/chat` (the shape in the source) rather than the full `/v1/chat/completions`.
-  const excluded = new Set(['/v1/models', '/v1/chat']);
+  // `/v1/embeddings` joins these for the same reason `/v1/models` and `/v1/chat` are here: it is part
+  // of the inference surface, which `handleInferenceRoute` gates through `isPublicLlmRoute` rather
+  // than through the prefix list. Putting it in `MANAGEMENT_PREFIXES` instead would be a *second*
+  // gate on the same route — the 1.46.0 shape, where a route protected in one place and exempt in
+  // another is a route whose protection depends on which check runs first.
+  const excluded = new Set(['/v1/models', '/v1/chat', '/v1/embeddings']);
   for (const prefix of served) {
     if (excluded.has(prefix)) continue;
     assert.ok(

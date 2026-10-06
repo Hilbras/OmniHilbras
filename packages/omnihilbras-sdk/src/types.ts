@@ -98,6 +98,53 @@ export type ChatResponse = {
   contextUsagePercent?: number;
 };
 
+/**
+ * One input, and the vector the provider returned for it.
+ *
+ * **`dimensions` is the provider's own answer, or absent — never a default.**
+ *
+ * This is the rule the whole embeddings surface turns on. A missing `dimensions` field used to be the
+ * tempting place to write `1536`, because every OpenAI-shaped model returns 1536 and a client that
+ * hardcodes it looks right until it talks to a provider that returns 3072. A caller cannot recover from
+ * a wrong number after the fact: the vector is already built, and a caller who trusted `1536` has no
+ * way to notice. So `undefined` means *the provider did not say*, and it is carried to the response
+ * rather than resolved to a guess.
+ */
+export type EmbeddingVector = {
+  index: number;
+  embedding: readonly number[];
+  /** What the provider reported, when it reported one. Absent means unknown, not zero. */
+  dimensions?: number;
+};
+
+/**
+ * A request for embeddings. The shape OpenAI's `/v1/embeddings` already uses.
+ *
+ * `input` is deliberately `string | readonly string[]` rather than token arrays: this SDK has never
+ * tokenised, and an adapter that needs to will tokenise provider-side. Accepting an integer-token form
+ * would imply a tokenizer this package does not have and silently produce different vectors than the
+ * caller expects.
+ */
+export type EmbeddingRequest = {
+  /** The model to embed with, named exactly as the provider names it. */
+  readonly model: string;
+  readonly input: string | readonly string[];
+  /** Passed through as `dimensions` where the provider accepts one. */
+  readonly dimensions?: number;
+  /** The OpenAI `encoding_format`. Only `float` is supported; see the adapter. */
+  readonly encodingFormat?: 'float';
+  readonly user?: string;
+};
+
+export type EmbeddingResponse = {
+  id: string;
+  providerId: ProviderId;
+  model: string;
+  createdAt: string;
+  data: readonly EmbeddingVector[];
+  usage?: TokenUsage;
+};
+
 export type ChatChunk = {
   id: string;
   providerId: ProviderId;
@@ -251,6 +298,20 @@ export type ProviderAdapter = {
   listModels?: (context?: ProviderRequestContext) => Promise<readonly Model[]>;
   chat?: (request: ChatRequest, context?: ProviderRequestContext) => Promise<ChatResponse>;
   streamChat?: (request: ChatRequest, context?: ProviderRequestContext) => AsyncIterable<ChatChunk>;
+  /**
+   * Embeds text, when this adapter's provider can.
+   *
+   * **Optional, and optional is the point.** A published interface gains a member by adding it as
+   * optional; adding it as required would break every adapter that cannot serve it, every consumer that
+   * implements the interface, and would make "this provider has no embeddings endpoint" a *compile*
+   * error rather than a truthful runtime one.
+   *
+   * An adapter without `embed` is not broken and must not be reported as unavailable. `notSupported()`
+   * in `apps/gateway/src/capability.ts` produces `NOT_SUPPORTED` naming the adapter, which is the
+   * message a user needs — the two situations look identical from outside and mean opposite things to
+   * act on.
+   */
+  embed?: (request: EmbeddingRequest, context?: ProviderRequestContext) => Promise<EmbeddingResponse>;
   /** Performs a provider-specific, side-effect-free credential check. */
   validateCredential?: (credential: ProviderCredential | undefined, context?: ProviderRequestContext) => Promise<CredentialValidation | void>;
   /** Discovers models for a connection import policy. */

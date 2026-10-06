@@ -4096,3 +4096,9 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Files: `apps/gateway/src/runtime.ts`, `apps/gateway/test/runtime.test.js`.
   - Depends on: Task 8.
   - Scope: Small.
+- [x] Task 11: `/v1/embeddings`, the first capability 9router has and this gateway did not.
+  - Acceptance: `POST /v1/embeddings` returns OpenAI's shape; a provider with no embeddings endpoint returns `NOT_SUPPORTED` naming it rather than an empty vector list; an unauthenticated request is refused; `dimensions` is measured from the vector and omitted when the provider reports nothing; usage records one entry per request with `success` / `failure` / `cancelled` distinct; every new guard mutation-proven.
+  - Verify: 19 gateway tests + 15 SDK tests. Five product mutations caught — `/v1/embeddings` dropped from `isPublicLlmRoute` (7 tests red), the implementation check dropped, `NOT_SUPPORTED` replaced by an empty vector list, a failure recorded as success, and unmeasured dimensions zero-filled — plus a guarded-but-unserved path (9 red) proving the reverse direction of the route-set guard. Full `pnpm verify` green.
+  - Files: `packages/omnihilbras-sdk/src/types.ts`, `src/adapters/openai-compatible.ts`, `src/adapters/openai.ts`, `test/embeddings.test.js`, `apps/gateway/src/request-executor.ts`, `src/service.ts`, `src/routes/inference.ts`, `test/embeddings-route.test.js`, `docs/SPEC-SDK.md`, `docs/architecture/embeddings-plan.md`.
+  - Depends on: Task 10.
+  - Scope: Medium.

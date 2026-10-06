@@ -2,7 +2,7 @@ import { ProviderError } from '../errors.js';
 import { parseSseJson, parseSseStream } from '../streaming.js';
 import { FetchHttpTransport, type HttpTransport } from '../transport.js';
 import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../url.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '../types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '../types.js';
 
 export type OpenAICompatibleAuth = {
   header?: string;
@@ -17,6 +17,15 @@ export type OpenAICompatibleAdapterConfig = {
   auth?: OpenAICompatibleAuth;
   modelsPath?: string;
   chatPath?: string;
+  /**
+   * Where the embeddings endpoint lives, relative to `baseUrl`.
+   *
+   * Beside `modelsPath`/`chatPath` and defaulted the same way, rather than derived from `chatPath`. A
+   * provider that serves `/v1/chat/completions` and `/v1/embeddings` has no rule connecting the two —
+   * deriving one would be a guess about a third party's URL layout, and the failure mode of a wrong
+   * guess is a 404 that reads as "this provider has no embeddings" when it does.
+   */
+  embeddingsPath?: string;
   headers?: Record<string, string>;
   maxTokensField?: 'max_tokens' | 'max_completion_tokens';
   capabilities?: ProviderCapabilities;
@@ -78,6 +87,22 @@ type OpenAIStreamChunk = OpenAIResponse & {
   }>;
 };
 
+/**
+ * OpenAI's `/v1/embeddings` response.
+ *
+ * `dimensions` is deliberately **not** a field here. OpenAI does not send one — the dimension count is
+ * `data[i].embedding.length`, which is the only measured answer — so a field for it would be a number
+ * this SDK invented. `EmbeddingVector.dimensions` is filled from the array's own length, which is a
+ * measurement and therefore cannot disagree with the vector.
+ */
+type OpenAIEmbeddingResponse = {
+  id?: string;
+  model?: string;
+  created?: number;
+  data?: Array<{ object?: string; index?: number; embedding?: number[] }>;
+  usage?: { prompt_tokens?: number; total_tokens?: number };
+};
+
 type OpenAIModelList = {
   data?: Array<{ id?: string; owned_by?: string }>;
 };
@@ -90,6 +115,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   private readonly auth: Required<Pick<OpenAICompatibleAuth, 'required'>> & OpenAICompatibleAuth;
   private readonly modelsPath: string;
   private readonly chatPath: string;
+  private readonly embeddingsPath: string;
   private readonly unwrap?: OpenAICompatibleAdapterConfig['unwrapResponse'];
   private readonly headers: Record<string, string>;
   private readonly maxTokensField: 'max_tokens' | 'max_completion_tokens';
@@ -110,6 +136,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     };
     this.modelsPath = config.modelsPath ?? '/models';
     this.chatPath = config.chatPath ?? '/chat/completions';
+    this.embeddingsPath = config.embeddingsPath ?? '/embeddings';
     this.unwrap = config.unwrapResponse;
     this.headers = sanitizeProviderHeaders(config.headers, config.id);
     this.maxTokensField = config.maxTokensField ?? 'max_tokens';
@@ -117,6 +144,21 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       chat: true,
       streaming: true,
       models: true,
+      /**
+       * **Not defaulted to true, and that is a deliberate gap rather than an omission.**
+       *
+       * An OpenAI-shaped base URL is not evidence that `/embeddings` exists on it: plenty of
+       * compatible servers implement chat and nothing else. Defaulting this on would make `embed()`
+       * appear to work against a provider that has no such endpoint, and the failure would be a 404
+       * from a third party rather than a truthful `NOT_SUPPORTED` naming our own adapter.
+       *
+       * So a deployment opts in by setting `capabilities: { embeddings: true }` — a statement that
+       * someone verified the endpoint exists. `createGatewayService` does that for the built-in
+       * providers whose embeddings endpoints are documented, and not for the open-ended
+       * `openai-compatible` one, which is why the first release of this ships embeddings for named
+       * providers rather than for every custom endpoint.
+       */
+      embeddings: false,
       ...config.capabilities,
     };
     this.transport = options.transport ?? new FetchHttpTransport({ timeoutMs: options.timeoutMs });
@@ -146,6 +188,75 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       ...(context.signal ? { signal: context.signal } : {}),
     });
     return this.toChatResponse(this.unwrap ? this.unwrap(response.data) : response.data, request.model);
+  }
+
+  /**
+   * `/embeddings`, in the shape OpenAI's own endpoint uses.
+   *
+   * Present only because `embeddingsPath` was configured or because the caller declared the
+   * capability — see the constructor. An adapter that advertises `embeddings: false` throws
+   * `NOT_SUPPORTED` rather than making a request that is guaranteed to fail, so a caller learns the
+   * provider cannot serve this without spending a round trip finding out.
+   */
+  async embed(request: EmbeddingRequest, context: ProviderRequestContext = {}): Promise<EmbeddingResponse> {
+    if (!this.capabilities.embeddings) {
+      throw new ProviderError('NOT_SUPPORTED', `${this.name} does not support embeddings.`, {
+        providerId: this.id,
+        publicMessage: `${this.name} does not support embeddings.`,
+      });
+    }
+    const inputs = typeof request.input === 'string' ? [request.input] : [...request.input];
+    if (inputs.length === 0 || inputs.some((value) => !value)) {
+      throw new ProviderError('INVALID_REQUEST', 'Embedding input must be a non-empty string or a non-empty array of non-empty strings.', { providerId: this.id });
+    }
+    const body: Record<string, unknown> = { model: request.model, input: inputs };
+    if (request.dimensions !== undefined) body.dimensions = request.dimensions;
+    if (request.encodingFormat !== undefined) body.encoding_format = request.encodingFormat;
+    if (request.user !== undefined) body.user = request.user;
+
+    const response = await this.transport.request<OpenAIEmbeddingResponse>({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url(this.embeddingsPath),
+      headers: this.requestHeaders(context.credential, 'application/json'),
+      body: JSON.stringify(body),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    const payload = response.data;
+    const rows = payload?.data;
+    if (!Array.isArray(rows)) throw invalidResponse(this.id, 'Provider embeddings response is missing data.');
+
+    const vectors = rows.map((row, position) => {
+      const embedding = row?.embedding;
+      if (!Array.isArray(embedding) || embedding.length === 0) {
+        throw invalidResponse(this.id, `Provider embedding at index ${position} is missing its vector.`);
+      }
+      if (embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+        throw invalidResponse(this.id, `Provider embedding at index ${position} contains a non-numeric value.`);
+      }
+      return {
+        index: typeof row?.index === 'number' ? row.index : position,
+        embedding,
+        // **Measured from the vector itself**, never assumed. See `EmbeddingVector.dimensions`.
+        dimensions: embedding.length,
+      };
+    });
+
+    // The provider returns one row per input. A short list means the caller asked for N vectors and got
+    // fewer, which is a wrong answer, not a partial success — and silently returning it would hand back
+    // an array whose positions no longer line up with the inputs the caller sent.
+    if (vectors.length !== inputs.length) {
+      throw invalidResponse(this.id, `Provider returned ${vectors.length} embedding(s) for ${inputs.length} input(s).`);
+    }
+
+    return {
+      id: payload.id ?? `embed-${request.model}`,
+      providerId: this.id,
+      model: payload.model ?? request.model,
+      createdAt: new Date((typeof payload.created === 'number' ? payload.created : Date.now() / 1000) * 1000).toISOString(),
+      data: vectors,
+      ...(payload.usage ? { usage: normalizeUsage(payload.usage) } : {}),
+    };
   }
 
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
