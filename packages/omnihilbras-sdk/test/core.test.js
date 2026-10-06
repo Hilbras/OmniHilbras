@@ -165,3 +165,81 @@ test('ProviderRegistry resolves capabilities without provider-specific logic', (
   assert.throws(() => registry.register(adapter), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
   assert.throws(() => registry.require('missing'), (error) => error instanceof ProviderError && error.code === 'NOT_FOUND');
 });
+
+
+/**
+ * `tolerateRefusalBody` — an OAuth token exchange whose refusal *is* the answer.
+ *
+ * Kimi's poll answers `400 {"error":"authorization_pending"}` while the user has not approved yet. The
+ * transport throws on any non-2xx before a caller can read that, so the sign-in reported a failure for a
+ * request that was merely waiting.
+ *
+ * Both directions are asserted, and the second matters more than the first: the flag is a sharp tool, and
+ * its value is that the default path is unchanged. A guard that only proved the flag *works* would leave
+ * the property that matters unproven — that it is hard to use by accident.
+ */
+test('a 4xx throws by default, with the provider\'s wording attached', async () => {
+  const transport = new FetchHttpTransport({
+    fetch: async () => new Response(JSON.stringify({ error: { message: 'Invalid Authentication' } }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
+    }),
+  });
+  await assert.rejects(
+    () => transport.request({ method: 'GET', providerId: 'acme', url: 'https://api.acme.test/v1/models' }),
+    (error) => error.code === 'AUTHENTICATION_FAILED',
+    'a refusal must still be a failure when nobody opted out',
+  );
+});
+
+test('tolerateRefusalBody returns the 4xx body instead of throwing, for a token exchange', async () => {
+  const transport = new FetchHttpTransport({
+    fetch: async () => new Response(JSON.stringify({ error: 'authorization_pending', error_description: 'Authorization is pending' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    }),
+  });
+  const response = await transport.request({
+    method: 'POST',
+    providerId: 'acme',
+    url: 'https://auth.acme.test/oauth/token',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=device_code',
+    tolerateRefusalBody: true,
+  });
+  assert.equal(response.status, 400);
+  assert.equal(response.data.error, 'authorization_pending');
+  assert.equal(response.data.error_description, 'Authorization is pending', 'the body must survive intact, not be re-read');
+});
+
+test('a non-JSON refusal body is still returned rather than throwing', async () => {
+  // An HTML error page from a proxy in front of the token endpoint. What matters is that the caller sees
+  // the **status** rather than a transport error claiming the provider is unreachable — which is what
+  // happens if the body parse throws here. The body itself comes back as text, since `parseResponse` is
+  // content-type driven and a `text/html` body is not a parse failure.
+  const transport = new FetchHttpTransport({
+    fetch: async () => new Response('<html>gateway timeout</html>', {
+      status: 504,
+      headers: { 'content-type': 'text/html' },
+    }),
+  });
+  const response = await transport.request({
+    method: 'POST',
+    providerId: 'acme',
+    url: 'https://auth.acme.test/oauth/token',
+    tolerateRefusalBody: true,
+  });
+  assert.equal(response.status, 504, 'the status is the part the caller branches on');
+  assert.equal(response.data, '<html>gateway timeout</html>');
+  // And the same body without the flag still throws, which is the property that keeps the flag sharp.
+  const strict = new FetchHttpTransport({
+    fetch: async () => new Response('<html>gateway timeout</html>', {
+      status: 504,
+      headers: { 'content-type': 'text/html' },
+    }),
+  });
+  await assert.rejects(
+    () => strict.request({ method: 'GET', providerId: 'acme', url: 'https://api.acme.test/v1/models' }),
+    (error) => error.code === 'PROVIDER_TIMEOUT' || error.code === 'PROVIDER_UNAVAILABLE',
+  );
+});

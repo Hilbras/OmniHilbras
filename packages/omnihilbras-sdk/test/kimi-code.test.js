@@ -169,11 +169,56 @@ test('authorization_pending and slow_down are both pending, neither is a denial'
   // `slow_down` is the provider asking for a slower poll, not refusing the grant. Treating it as a
   // denial would fail a sign-in the user completed correctly.
   for (const code of ['authorization_pending', 'slow_down']) {
-    const transport = createTransport({ request: () => ({ status: 400, headers: new Headers(), data: { error: code } }) });
+    const transport = createTransport({ request: () => ({ status: 400, data: { error: code } }) });
     const adapter = new KimiCodeAdapter({ transport });
     const outcome = await adapter.pollSignIn('dev-1', undefined, 'dev-id');
     assert.deepEqual(outcome, { status: 'pending' }, `${code} must read as pending`);
   }
+});
+
+test('a pending poll arriving as HTTP 400 is pending, not a failure', async () => {
+  // **Measured against the live host**, and the defect it caught was real: Kimi's token endpoint
+  // answers a poll that is still waiting with `400 {"error":"authorization_pending"}`. The shared
+  // transport turns any non-2xx into a thrown ProviderError *before* the body is read, so the flow
+  // reported a failed sign-in for one the user had simply not approved yet — and the dashboard would
+  // have shown an error for the whole wait.
+  const transport = createTransport({ request: () => ({ status: 400, data: { error: 'authorization_pending', error_description: 'Authorization is pending' } }) });
+  const adapter = new KimiCodeAdapter({ transport });
+
+  const outcome = await adapter.pollSignIn('dev-1', undefined, 'dev-id');
+  assert.deepEqual(outcome, { status: 'pending' });
+  assert.equal(transport.calls.length, 1, 'and it read the body rather than throwing on the status');
+});
+
+test('a 5xx is not pending, however the body reads', async () => {
+  // The other direction: reading the body must not turn every refusal into "keep waiting". A server
+  // that is down must say so, or the dashboard polls a broken provider until the session expires.
+  const transport = createTransport({ request: () => ({ status: 503, data: { error: 'authorization_pending' } }) });
+  const adapter = new KimiCodeAdapter({ transport });
+  const outcome = await adapter.pollSignIn('dev-1', undefined, 'dev-id');
+  assert.equal(outcome.status, 'denied', 'a body cannot override a status that says the provider is down');
+  assert.match(outcome.error, /503/);
+});
+
+test('a 4xx with no error field is a denial, not a silent pending', async () => {
+  const transport = createTransport({ request: () => ({ status: 400, data: {} }) });
+  const adapter = new KimiCodeAdapter({ transport });
+  const outcome = await adapter.pollSignIn('dev-1', undefined, 'dev-id');
+  assert.equal(outcome.status, 'denied');
+  assert.match(outcome.error, /Start the sign-in again/);
+});
+
+test('a refused refresh reports Kimi\'s wording, not a generic refusal', async () => {
+  // Same class on the renewal path: a dead refresh token is a 4xx whose `error_description` is the only
+  // place Kimi says why, and the user is the one who can act on it.
+  const transport = createTransport({ request: () => ({ status: 400, data: { error: 'invalid_grant', error_description: 'The refresh token has been revoked' } }) });
+  const adapter = new KimiCodeAdapter({ transport });
+  await assert.rejects(
+    () => adapter.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, {
+      credential: { type: 'oauth', value: 'stale', refreshToken: 'dead', expiresAt: '2020-01-01T00:00:00.000Z' },
+    }),
+    (error) => error.code === 'AUTHENTICATION_FAILED' && /revoked/.test(error.message),
+  );
 });
 
 test('a refused grant reports the provider wording, redacted', async () => {

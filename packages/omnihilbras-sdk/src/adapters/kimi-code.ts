@@ -222,15 +222,37 @@ export class KimiCodeAdapter implements ProviderAdapter {
     | { status: 'denied'; error: string }
     | { status: 'connected'; credential: ProviderCredential; account: string }
   > {
-    // Same form encoding, for the same measured reason.
-    const { data } = await this.postForm<TokenResponse>(KIMI_CODE.deviceTokenPath, {
+    // Same form encoding, for the same measured reason — **and the status is the reason this had to be
+    // written differently.**
+    //
+    // `postForm` runs the request through the shared transport, which turns any non-2xx into a thrown
+    // `ProviderError` — the correct behaviour for an inference call. But Kimi's *token* endpoint answers
+    // a pending poll with **HTTP 400** and `{"error":"authorization_pending"}` in the body, so the throw
+    // happened before the body could be read and the flow reported a failure for a sign-in that was
+    // simply waiting. Measured against the live host:
+    //
+    // ```
+    // POST /api/oauth/token  grant_type=device_code  ->  400 {"error":"authorization_pending"}  (still waiting)
+    // ```
+    //
+    // So the poll goes out raw and reads the status itself. The inference paths keep using `postForm`,
+    // where the transport's classification is exactly right.
+    const { data, status } = await this.postFormAllowingRefusal<TokenResponse>(KIMI_CODE.deviceTokenPath, {
       grant_type: KIMI_CODE.grantType,
       device_code: deviceCode,
       client_id: KIMI_CODE.clientId,
     }, this.kimiHeaders(deviceId), signal);
 
     const error = typeof data.error === 'string' ? data.error : '';
-    if (error === 'authorization_pending' || error === 'slow_down') return { status: 'pending' };
+    // Read from the body whatever the status. The status is asserted as well, because a body carrying
+    // `authorization_pending` on a 200 would be a different provider's convention and should not be
+    // trusted silently — but the status alone is not enough either, since this endpoint answers 400.
+    if (error === 'authorization_pending' || error === 'slow_down') {
+      if (status !== 400 && status !== 200) {
+        return { status: 'denied', error: `Kimi answered ${status} for a poll that should still be waiting.` };
+      }
+      return { status: 'pending' };
+    }
     if (error) {
       const description = typeof data.error_description === 'string' ? data.error_description : '';
       return {
@@ -418,18 +440,19 @@ export class KimiCodeAdapter implements ProviderAdapter {
     const memo = this.renewed.get(replaced);
     if (memo) return memo;
 
-    const { data } = await this.transport.request<TokenResponse>({
-      method: 'POST',
-      providerId: this.id,
-      url: `${KIMI_CODE.authOrigin}${KIMI_CODE.deviceTokenPath}`,
-      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
+    // Read the body whatever the status, for the same measured reason as the poll: a dead refresh token
+    // comes back as a 4xx whose `error_description` is the only place Kimi says *why*, and throwing on the
+    // status would replace that with the transport's own generic refusal.
+    const { data } = await this.postFormAllowingRefusal<TokenResponse>(
+      KIMI_CODE.deviceTokenPath,
+      {
         grant_type: KIMI_CODE.refreshGrantType,
         refresh_token: refresh,
         client_id: KIMI_CODE.clientId,
-      }).toString(),
-      ...(context.signal ? { signal: context.signal } : {}),
-    });
+      },
+      { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+      context.signal,
+    );
     const access = typeof data.access_token === 'string' ? data.access_token : '';
     if (!access) {
       const description = typeof data.error_description === 'string' ? data.error_description : '';
@@ -523,6 +546,29 @@ export class KimiCodeAdapter implements ProviderAdapter {
    * rather than splitting the body — which on a token endpoint means a client id that arrives
    * truncated, with no error to point at.
    */
+  /**
+   * Posts a form body and returns the parsed body **whatever the status**.
+   *
+   * Only for an endpoint whose 4xx carries a meaningful body — an OAuth token exchange, where `400
+   * authorization_pending` is an expected answer rather than a failure. Everywhere else the shared
+   * transport's classification is right and this must not be used: a 401 here would be read as data
+   * instead of an authentication failure.
+   */
+  private async postFormAllowingRefusal<T>(path: string, fields: Record<string, string>, headers: Record<string, string>, signal?: AbortSignal): Promise<{ data: T; status: number }> {
+    const response = await this.transport.request<{ data?: T } & T>({
+      method: 'POST',
+      providerId: this.id,
+      url: `${KIMI_CODE.authOrigin}${path}`,
+      headers: { accept: 'application/json', ...headers },
+      body: new URLSearchParams(fields).toString(),
+      // The flag that reaches the transport: without it the 400 is thrown before this method runs, which
+      // was the whole defect — the first fix lived here and could not work, because the throw is upstream.
+      tolerateRefusalBody: true,
+      ...(signal ? { signal } : {}),
+    });
+    return { data: (response.data ?? {}) as T, status: response.status };
+  }
+
   private async postForm<T>(path: string, fields: Record<string, string>, headers: Record<string, string>, signal?: AbortSignal): Promise<{ data: T }> {
     const response = await this.transport.request<{ data?: T } & T>({
       method: 'POST',

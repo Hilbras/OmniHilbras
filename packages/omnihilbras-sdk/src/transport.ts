@@ -18,6 +18,19 @@ export type HttpRequest = {
    * answered with nothing. Providers that answer in a binary framing ask for this.
    */
   responseAs?: 'bytes';
+  /**
+   * Return a 4xx as a result instead of throwing.
+   *
+   * **For OAuth token endpoints only**, where a refusal carries meaning in its body: Kimi's poll answers
+   * `400 {"error":"authorization_pending"}` while the user has simply not approved yet, so throwing turns
+   * "still waiting" into a failed sign-in. Measured against the live host.
+   *
+   * Everything else must leave this off. The throw is the transport's most useful property — it is what
+   * stops a 401 being read as data — and a flag that says "read the error body anyway" is a sharp tool
+   * whose whole value is being hard to reach by accident. Its two callers are the Kimi device poll and the
+   * Kimi token renewal, and both are documented at their use site.
+   */
+  tolerateRefusalBody?: boolean;
 };
 
 export type HttpResponse<T> = {
@@ -99,6 +112,12 @@ export class FetchHttpTransport implements HttpTransport {
          * cancelled unread, so every refusal arrived as "the provider rejected the
          * request" with no reason attached. It is read here, bounded, and handed to the
          * classifier.
+         *
+         * With `tolerateRefusalBody` the read *becomes* the result and the request returns, because an
+         * OAuth token endpoint's refusal is data. Reading it here and then reading the body again below
+         * was the first attempt and it fails in a way that hides itself: the second read sees a consumed
+         * stream, throws, and `normalizeTransportError` reports `PROVIDER_UNAVAILABLE` — which reads as
+         * "Kimi is down" rather than "Kimi said no".
          */
         let body: unknown;
         try {
@@ -106,7 +125,9 @@ export class FetchHttpTransport implements HttpTransport {
         } catch {
           body = undefined;
         }
-        throw providerErrorFromResponse(response, body, request.providerId);
+        // Opted out only by an OAuth token exchange, where the body *is* the answer.
+        if (!request.tolerateRefusalBody) throw providerErrorFromResponse(response, body, request.providerId);
+        return { status: response.status, headers: response.headers, data: body as T };
       }
       const data =
         request.responseAs === 'bytes'
