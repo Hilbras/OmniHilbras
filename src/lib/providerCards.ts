@@ -39,7 +39,11 @@ export function mergeGatewayConnections(providers: ProviderRecord[], connections
   const connectionByProvider = new Map(connections.map((connection) => [connection.providerId, connection]));
   const healthByProvider = new Map(health?.providers.map((provider) => [provider.providerId, provider]));
   return providers.map((provider) => {
-    const connection = connectionByProvider.get(provider.catalogId ?? provider.id);
+    // `connectionProviderId` first: a card that shares another card's account (`clinepass` reads
+    // `cline`'s one connection) names its owner there. Otherwise a card's own id, or the catalog id it
+    // was written under. Getting this wrong is silent — the card simply keeps its placeholders and reads
+    // as unconnected — so the field is what makes sharing a deliberate statement rather than a guess.
+    const connection = connectionByProvider.get(provider.connectionProviderId ?? provider.catalogId ?? provider.id);
     // No connection: the card keeps the catalog's placeholders, untouched. Not "reset to defaults" —
     // untouched, so there is no path by which a value from a previous merge survives a disconnect.
     if (!connection) return provider;

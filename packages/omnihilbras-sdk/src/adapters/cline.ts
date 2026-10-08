@@ -54,12 +54,22 @@ export type ClineAdapterOptions = {
   /** Renew when the access token is within this window of expiry. */
   refreshSkewMs?: number;
   userAgent?: string;
+  /**
+   * The provider id and display name this adapter reports.
+   *
+   * Defaulted, because Cline owns the wire format and ClinePass is the same API on the same host — see
+   * `clinepass.ts`, which subclasses this adapter to change only the id, the name, and the model filter.
+   * The id is what a failure is attributed to, and the two ids are separate cards in the dashboard even
+   * though they share one stored credential, so it has to travel rather than be hardcoded here.
+   */
+  id?: string;
+  name?: string;
 };
 
 const defaultRefreshSkewMs = 60_000;
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '1.76.0';
+const omnihilbrasVersion = '1.77.0';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {
@@ -303,24 +313,24 @@ export function unwrapClineEnvelope(
 }
 
 /** A short, safe explanation of why a Cline call failed. */
-export function clineFailureReason(error: unknown): string {
+export function clineFailureReason(error: unknown, label = 'Cline'): string {
   if (error instanceof ProviderError) {
     const details = error.details as { providerMessage?: string } | undefined;
     const reason = typeof details?.providerMessage === 'string' ? details.providerMessage : undefined;
     if (error.code === 'AUTHENTICATION_FAILED') {
-      return reason ? `Cline rejected the token: ${reason}` : 'Cline rejected the token. Sign in again.';
+      return reason ? `${label} rejected the token: ${reason}` : `${label} rejected the token. Sign in again.`;
     }
     if (error.code === 'CANCELLED') return 'The health check was cancelled.';
-    if (error.code === 'PROVIDER_TIMEOUT') return 'Cline did not answer in time.';
-    if (error.code === 'PROVIDER_UNAVAILABLE') return 'Cline could not be reached.';
+    if (error.code === 'PROVIDER_TIMEOUT') return `${label} did not answer in time.`;
+    if (error.code === 'PROVIDER_UNAVAILABLE') return `${label} could not be reached.`;
     return reason ? `${error.code}: ${reason}` : `${error.code}.`;
   }
-  return 'The Cline health check failed.';
+  return `The ${label} health check failed.`;
 }
 
 export class ClineAdapter implements ProviderAdapter {
-  readonly id = 'cline';
-  readonly name = 'Cline';
+  readonly id: string;
+  readonly name: string;
   readonly capabilities = { chat: true, streaming: true, models: true } as const;
 
   /**
@@ -342,22 +352,26 @@ export class ClineAdapter implements ProviderAdapter {
     if (!Number.isFinite(parsed)) return undefined;
     return parsed <= now;
   }
-  private readonly transport: HttpTransport;
-  private readonly delegate: OpenAICompatibleAdapter;
-  private readonly onTokensRefreshed?: ClineAdapterOptions['onTokensRefreshed'];
-  private readonly refreshSkewMs: number;
-  private readonly userAgent: string;
-  private refreshInFlight?: Promise<Exclude<ProviderCredential, { type: 'none' }>>;
+  protected readonly transport: HttpTransport;
+  protected readonly delegate: OpenAICompatibleAdapter;
+  protected readonly onTokensRefreshed?: ClineAdapterOptions['onTokensRefreshed'];
+  protected readonly refreshSkewMs: number;
+  protected readonly userAgent: string;
+  protected refreshInFlight?: Promise<Exclude<ProviderCredential, { type: 'none' }>>;
 
   constructor(options: ClineAdapterOptions = {}) {
+    this.id = options.id ?? 'cline';
+    this.name = options.name ?? 'Cline';
     this.transport = options.transport ?? new FetchHttpTransport();
     this.delegate = new OpenAICompatibleAdapter(
       {
-        id: 'cline',
-        name: 'Cline',
+        id: this.id,
+        name: this.name,
         baseUrl: CLINE_OAUTH.apiBasePath,
         auth: { header: 'Authorization', prefix: 'Bearer' },
-        unwrapResponse: unwrapClineEnvelope,
+        // The envelope names whichever provider is asking, so a ClinePass refusal reports itself as
+        // ClinePass. Hardcoding `cline` here would send the operator to fix the wrong card.
+        unwrapResponse: (body) => unwrapClineEnvelope(body, { providerId: this.id, label: this.name }),
       },
       { transport: this.transport },
     );
@@ -409,16 +423,16 @@ export class ClineAdapter implements ProviderAdapter {
         status: 'unavailable', verified: 'credential',
         checkedAt: new Date().toISOString(),
         latencyMs: Date.now() - startedAt,
-        message: clineFailureReason(error),
+        message: clineFailureReason(error, this.name),
       };
     }
   }
 
-  private context(credential: ProviderCredential): ProviderRequestContext {
+  protected context(credential: ProviderCredential): ProviderRequestContext {
     return { credential: { type: 'api-key', value: toClineAccessToken(credential.type === 'none' ? '' : credential.value) } };
   }
 
-  private needsRefresh(credential: ProviderCredential): credential is Extract<ProviderCredential, { type: 'oauth' }> {
+  protected needsRefresh(credential: ProviderCredential): credential is Extract<ProviderCredential, { type: 'oauth' }> {
     if (credential.type !== 'oauth' || !credential.refreshToken || !credential.expiresAt) return false;
     // Normalised rather than handed to `new Date` directly: an epoch-seconds
     // value read as milliseconds lands in 1970, and a perfectly valid token
@@ -427,7 +441,7 @@ export class ClineAdapter implements ProviderAdapter {
     return Number.isFinite(expiresAt) && expiresAt - this.refreshSkewMs <= Date.now();
   }
 
-  private async currentCredential(credential: ProviderCredential | undefined, signal?: AbortSignal): Promise<Exclude<ProviderCredential, { type: 'none' }>> {
+  protected async currentCredential(credential: ProviderCredential | undefined, signal?: AbortSignal): Promise<Exclude<ProviderCredential, { type: 'none' }>> {
     if (credential?.type === 'none' || !credential?.value) {
       throw new ProviderError('AUTHENTICATION_FAILED', 'A Cline access token is required.', { providerId: this.id, publicMessage: 'A Cline access token is required.' });
     }
@@ -437,7 +451,7 @@ export class ClineAdapter implements ProviderAdapter {
     return this.refreshInFlight;
   }
 
-  private async refresh(credential: Extract<ProviderCredential, { type: 'oauth' }>, signal?: AbortSignal) {
+  protected async refresh(credential: Extract<ProviderCredential, { type: 'oauth' }>, signal?: AbortSignal) {
     try {
       const response = await this.transport.request<ClineTokenPayload>({
         method: 'POST',

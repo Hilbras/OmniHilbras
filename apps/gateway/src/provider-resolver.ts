@@ -1,4 +1,5 @@
 import { OpenAICompatibleAdapter, type ProviderAdapter, type ProviderRegistry } from '@hilbras/omnihilbras';
+import { providerAlias } from './provider-alias.js';
 
 /**
  * Resolving a provider id to something that can serve traffic.
@@ -149,7 +150,12 @@ export class ProviderResolver {
   async active(connections: ReadonlyArray<{ id: string; providerId: string; hasCredential: boolean }>): Promise<ProviderAdapter[]> {
     const adapters: ProviderAdapter[] = [];
     for (const [providerId, factory] of this.onDemandFactories) {
-      const connection = connections.find((item) => item.providerId === providerId && item.hasCredential);
+      // A provider that shares another's credential is polled when **that** connection has one — the
+      // ClinePass card is served by the Cline connection. The connection *id* is still the owner's, but
+      // the factory is built for the provider that registered it, so the adapter and its failure text
+      // name the right card. This is the one place the alias touches the resolver.
+      const canonical = providerAlias(providerId) ?? providerId;
+      const connection = connections.find((item) => item.providerId === canonical && item.hasCredential);
       if (!connection) continue;
       adapters.push(factory({ providerId, connection: { id: connection.id } }));
     }

@@ -2227,12 +2227,10 @@ revoked token, an unreachable endpoint, and a cancelled probe all look identical
 otherwise. `clineFailureReason` maps the error to a short, safe explanation.
 
 **Token prefixing.** Cline accepts WorkOS JWTs only with an explicit `workos:`
-prefix, and rejects ClinePass keys that carry one. The adapter applies the prefix
-only to JWT-shaped tokens and sends everything else verbatim. Note what that
-last clause rests on: the vendor's own source names ClinePass keys by their
-`CLINE_API_KEY` variable and never states their text format, so "non-JWT keys are
-passed through untouched" is the property this relies on, not a claim about what
-those keys look like.
+prefix. The adapter applies the prefix only to JWT-shaped tokens and sends
+everything else verbatim. ClinePass carries the same WorkOS token — it is the same
+account — so it needs no separate rule here; the current keys are a property of
+Cline's JWT, not of a ClinePass-specific format.
 
 **Client identification.** Every Cline request carries the header set Cline's own
 clients send: `HTTP-Referer: https://cline.bot` (the public site, not the app
@@ -2279,34 +2277,49 @@ which is the only one that actually checks.
 
 ### ClinePass
 
-ClinePass is Cline's paid model tier, and it is **not** a second kind of Cline
-sign-in. Cline's own client registers `cline` and `cline-pass` against the same
-host and the same AI SDK provider, its auth registry points `cline-pass` at the
-`cline` handler while reusing the identical stored credential, and nothing in its
-SDK reads a cookie — `app.cline.bot` is only ever opened in a real browser. So it
-is registered here as an **API-key** provider rather than as a fourth OAuth one: a
-sign-in button would be a second way to hold a token ClinePass does not need.
+ClinePass is Cline's paid model tier, and it is **the same account as Cline**, not a
+second credential. Cline's own client registers `cline` and `cline-pass` against the
+same host and the same AI SDK provider, and its auth registry registers `cline-pass`
+as an **alias** of the `cline` handler (`storageProviderId: "cline"`), reusing the
+identical stored credential; `isOAuthProvider("cline-pass")` is true, and Cline's own
+CLI opens a **sign-in** for it. So it is registered here as an **OAuth** provider whose
+sign-in is Cline's: the ClinePass card is signed into by signing into Cline, and
+nothing in Cline's SDK reads a cookie — `app.cline.bot` is only ever opened in a real
+browser.
+
+`ClinePassAdapter` therefore **subclasses `ClineAdapter`** and changes only two things:
+the id and name it reports (so a failure names the ClinePass card), and the model
+filter below. Everything else — the host, the client headers, and crucially the OAuth
+**token renewal** — is Cline's, because the shared connection carries Cline's token
+with its own expiry and a ClinePass request has to renew it like a Cline one.
 
 What distinguishes the two is not on the wire. Same host, same `Authorization:
 Bearer`, same client headers; the only difference is the `cline-pass/` model
 prefix and whether the account is entitled to it.
 
-Two consequences, both load-bearing:
+Three consequences, all load-bearing:
 
-- **The catalog is filtered.** `GET /api/v1/models` answers a ClinePass key with
+- **One connection, two cards.** The gateway's `provider-alias.ts` maps `clinepass`
+  to `cline`, so a request made for ClinePass reads the `cline` connection's stored
+  credential. This is the one deliberate cross-provider credential lookup in the
+  gateway; the provider id on the request path stays `clinepass` so the adapter and
+  its errors name the right card. On the dashboard the card carries
+  `connectionProviderId: 'cline'`, which is what makes the one connection light up
+  both cards.
+- **The catalog is filtered.** `GET /api/v1/models` answers a ClinePass request with
   the *whole* Cline catalog, so `listModels` keeps only ids beginning
   `cline-pass/`. Unfiltered, the connection offers models it is not entitled to
   and fails on first use with a message about subscriptions.
 - **Entitlement cannot be pre-checked.** It is decided server-side per request,
   from the subscription, and stated in the response body (*"no access to clinepass
   subscription models yet"*). There is no endpoint that answers "is this
-  subscription current", so `validateCredential` proves the key is live against
-  `/users/me` and **nothing more** — a green health check is not an entitlement
-  check, and `clinePassFailureReason` says so rather than telling a user to sign
-  in again to a provider that has no sign-in here.
+  subscription current", so a health check proves the Cline token is live and
+  **nothing more** — a green card is not an entitlement check. The model filter is
+  what keeps the *model list* honest; the health status does not.
 
-`isCredentialExpired()` returns `undefined` — "cannot say", never `false` — because
-an API key carries no expiry to read.
+A failed renewal reads as *"sign in again"*, which is now the correct instruction:
+ClinePass shares Cline's sign-in, so there is a sign-in to repeat even though there
+is no ClinePass sign-in of its own.
 
 ## Model Routing and the Client Catalog
 

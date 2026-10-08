@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.76.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.77.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -395,27 +395,18 @@ read. If a sign-in is refused, the callback page reports what Cline said.
 
 ## ClinePass
 
-ClinePass is a different thing from the Cline sign-in above, and it lives in the
-**API key** group. It is Cline's subscription tier, not a second account: Cline's
-own auth registry registers `cline-pass` as an alias of `cline` and reuses the one
-stored credential, so signing in again would be signing in twice for the same
-token. You reach it by creating a key under **Settings > API Keys** on
-`app.cline.bot` and pasting it, and the gateway sends it as a bearer token on the
-same host, over the same client headers, to the same `/api/v1` base URL.
+ClinePass is Cline's paid model tier, and it is **the same account as Cline** — not a
+second credential. Cline's own auth registry registers `cline-pass` as an alias of its
+`cline` handler, reusing the identical stored credential, and its CLI opens a sign-in
+for it. So ClinePass lives in the **OAuth** group and is signed into by **signing into
+Cline**: it shares the one saved connection, and its models are the `cline-pass/` slice
+of Cline's catalog.
 
-What actually differs is the model prefix: ClinePass answers with models under
-`cline-pass/`, and the adapter filters the catalog to those. A ClinePass key is
-answered with the whole Cline catalog, which is why that filter exists rather than
-being cosmetic.
-
-The one thing a ClinePass connection cannot tell you up front is whether your
-subscription covers a given model — Cline decides that server-side, at request
-time, and the only evidence is an error body on a call nobody has made yet. So a
-green health check proves the key is live and nothing more. Do not read a passing
-check as "this key can run every model the card lists"; if a request comes back
-refused, the adapter reports what Cline said instead of collapsing it into a
-generic authentication failure, and it will not tell you to sign in again, because
-there is no sign-in here.
+What differs is the model prefix and whether your account's subscription covers a given
+model — and that is decided server-side, at request time, with no endpoint that answers
+"is this subscription current". So a green check here proves your Cline sign-in is live
+and **nothing about entitlement**: do not read it as "this connection can run every
+model the card lists". If a request is refused, the card reports what Cline said.
 
 ## Releases
 

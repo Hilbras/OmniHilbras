@@ -239,11 +239,19 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'clinepass',
     name: 'ClinePass',
-    description: 'Cline’s paid model tier, keyed rather than signed into. Create a key in Settings → API Keys at app.cline.bot; its models need an active ClinePass subscription.',
+    description: 'Cline’s paid model tier — the same account as Cline, reached through the same sign-in. Its models need an active ClinePass subscription.',
     category: 'Coding agent',
-    group: 'api-key',
+    group: 'oauth',
     status: 'available',
-    auth: 'API key',
+    auth: 'OAuth',
+    /**
+     * The **shared connection**. Cline's own auth registry registers `cline-pass` as an alias of the
+     * `cline` handler reusing the identical stored credential, so both cards are served by the one
+     * connection saved under `cline`. `providerCards.ts` merges on this, so naming the owner here is what
+     * lights this card up from that connection — see also the gateway's `provider-alias.ts`. The adapter
+     * id still travels as `clinepass`, so a failure names this card.
+     */
+    connectionProviderId: 'cline',
     models: '—',
     latency: '—',
     requests: '0',

@@ -84,6 +84,26 @@ test('an unconnected provider is still asked, with the provider id standing in',
   assert.deepEqual(vault.reads, [['p', 'p']], 'and the read happens once, under the id that is available');
 });
 
+test('a provider that shares another’s credential reads the owner’s connection', async () => {
+  // `clinepass` reads `cline`'s one connection — Cline's own auth registry registers `cline-pass` as an
+  // alias of the `cline` handler. The lookup follows the alias; the **provider id stays this one**, so the
+  // adapter is ClinePass's and a failure names the right card.
+  const vault = secrets({ 'cline-conn': credential });
+  const manager = new CredentialManager(vault, connections([record({ id: 'cline-conn', providerId: 'cline' })]));
+  const context = await manager.contextForProvider('clinepass');
+  assert.deepEqual(context.credential, credential, 'the shared credential is used');
+  assert.deepEqual(vault.reads, [['cline-conn', 'clinepass']], 'read under the owner’s connection, labelled with this provider');
+});
+
+test('the alias does not let an unrelated provider borrow a credential', async () => {
+  // Only the providers listed in `provider-alias.ts` share. A provider that merely resembles another —
+  // the `kimi` key versus the `kimi-code` token — resolves its own connection and nothing else.
+  const vault = secrets({ 'cline-conn': credential });
+  const manager = new CredentialManager(vault, connections([record({ id: 'cline-conn', providerId: 'cline' })]));
+  const context = await manager.contextForProvider('some-other-provider');
+  assert.equal(context.credential, undefined, 'no cross-provider read for a provider with no alias');
+});
+
 test("the connection's own model policy travels with the credential", async () => {
   // The difference between a `free` import and an `all` import has to be the same whether a catalog
   // is read during a connect, during a manual refresh, or by a health poll. A dashboard that shows

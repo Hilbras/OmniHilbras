@@ -223,8 +223,14 @@ const modelSortOptions: ReadonlyArray<{ value: ModelFilterState['sort']; label: 
 /** The documented defaults, used when a record arrives without a resilience block. */
 const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, requestsPerMinute: 0, hedgeAfterMs: 0 };
 
-/** OAuth providers the gateway can actually complete a sign-in for today. */
-const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro', 'claude-code']);
+/**
+ * OAuth providers the gateway can actually complete a sign-in for today.
+ *
+ * `clinepass` is here because it shares Cline's sign-in — the same account, the same stored
+ * connection — rather than having a flow of its own. Signing in from its page runs the Cline flow and
+ * saves the one connection both cards then read.
+ */
+const oauthProvidersWithFlow = new Set(['cline', 'clinepass', 'opencode-console', 'kiro', 'claude-code']);
 
 /** Providers whose flow is a pasted credential rather than a browser sign-in. */
 const webCookieProviders = new Set(webSessionProviderIds());
@@ -331,7 +337,11 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     void listGatewayConnections(AbortSignal.timeout(CONNECTION_LOAD_TIMEOUT_MS))
       .then((connections) => {
         if (!active) return;
-        const savedConnection = connections.find((item) => item.providerId === provider.id && item.hasCredential);
+        // A card that shares another's connection names its owner via `connectionProviderId`
+        // (`clinepass` → `cline`), so the lookup follows that. Without it this page would say "No
+        // connection yet" about an account that is already signed in on the sibling card.
+        const owner = provider.connectionProviderId ?? provider.catalogId ?? provider.id;
+        const savedConnection = connections.find((item) => item.providerId === owner && item.hasCredential);
         setConnection(savedConnection);
         setConnectionAdded(Boolean(savedConnection));
         setConnectionState('ready');

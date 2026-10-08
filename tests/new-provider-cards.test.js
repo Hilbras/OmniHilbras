@@ -139,17 +139,18 @@ test('a new provider id is one edit away from a web-session id, and stays distin
    *
    * 1. a web session — `webSessionProviders.ts` is what makes a provider sign in rather than take a key;
    * 2. an OAuth flow the gateway really serves a start route for;
-   * 3. **the base is signed into and the derived card is keyed.** Added for `cline`/`clinepass`, where
-   *    ClinePass is a keyed tier of the same account rather than a different way into it — Cline's own
-   *    auth registry registers `cline-pass` as an alias of the `cline` handler reusing the identical
-   *    stored credential. An earlier version excluded `opencode-console` from this loop to keep the
-   *    narrow rule green; it satisfies (2) outright, so the exclusion went with the rest.
+   * 3. **the derived card reads the base's connection.** Added for `cline`/`clinepass`, where ClinePass is
+   *    the *same account* as Cline rather than a different way into it — Cline's own auth registry
+   *    registers `cline-pass` as an alias of the `cline` handler reusing the identical stored credential,
+   *    so our `clinepass` card carries `connectionProviderId: 'cline'` and is signed into by signing into
+   *    Cline. This is what the near-miss is protecting here: a `clinepass` card that did *not* share the
+   *    connection would either need a sign-in of its own (a second token for one account) or read as
+   *    unconnected. An earlier version excluded `opencode-console` from this loop to keep the narrow rule
+   *    green; it satisfies (2) outright, so the exclusion went with the rest.
    *
-   * What all three have in common is that the derived card cannot be collected by the form that
-   * collects the base's credential. For (1) and (2) that is a different flow entirely; for (3) it is
-   * `providerOptions.ts`'s group filter, which offers only `api-key`, `local` and `custom` — so a
-   * `cline` card is not in the key dialog, and a `clinepass` card is not in the sign-in dialog. Two
-   * cards sharing a vendor, a host and an account are still two different things to paste or click.
+   * What all three have in common is that the derived card cannot be collected by the form that collects
+   * the base's credential, and cannot silently borrow the base's *name* — (3) makes the sharing explicit
+   * in one field rather than leaving two similar ids to be told apart by a prefix.
    */
   const oauthIds = new Set(providerCatalog.filter((card) => card.auth === 'OAuth').map((card) => card.id));
   const oauthRoutes = new Set(
@@ -160,12 +161,12 @@ test('a new provider id is one edit away from a web-session id, and stays distin
   for (const [base, derived] of pairs) {
     const isWebSession = webSessionIds.has(derived);
     const isOAuth = oauthIds.has(derived) && oauthRoutes.has(derived);
-    const keyedAgainstASignIn = cardById.get(base)?.group === 'oauth' && cardById.get(derived)?.group === 'api-key';
+    const sharesConnection = cardById.get(derived)?.connectionProviderId === base;
     assert.ok(
-      isWebSession || isOAuth || keyedAgainstASignIn,
+      isWebSession || isOAuth || sharesConnection,
       `${derived} is one character from ${base} and must resolve to a different credential path — ` +
         'either a web session, an OAuth card whose gateway really serves a start route for it, ' +
-        'or a key where the card it resembles is signed into',
+        "or a card that names the base's connection explicitly",
     );
   }
   assert.deepEqual(

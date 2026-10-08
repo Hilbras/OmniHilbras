@@ -1,5 +1,6 @@
 import type { ProviderRequestContext, ProviderCredential, ModelImportPolicy } from '@hilbras/omnihilbras';
 import type { ConnectionManager } from './connection-manager.js';
+import { providerAlias } from './provider-alias.js';
 import { withRequestScope, type RequestScope } from './request-context.js';
 
 /**
@@ -72,7 +73,11 @@ export class CredentialManager {
    * unconnected provider look broken rather than unconnected.
    */
   async contextForProvider(providerId: string, signal?: AbortSignal, scope?: RequestScope): Promise<ProviderRequestContext> {
-    const owner = await this.connections.firstWithCredentialFor(providerId);
+    // A provider that shares another's credential reads the owner's connection. The **provider id stays
+    // this one** — it is passed to `context()` unchanged — so the adapter, and any failure it reports,
+    // is still attributed to the card the user asked for. Only the *lookup* follows the alias.
+    const canonical = providerAlias(providerId) ?? providerId;
+    const owner = await this.connections.firstWithCredentialFor(canonical);
     const context = await this.context(owner?.id ?? providerId, providerId, signal);
     // Optional, because an embedded caller that does not track request identity still works — the
     // context is the SDK's type and the adapter boundary is published, so this only ever *adds* a

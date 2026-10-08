@@ -29,6 +29,17 @@ export const providerGroupLabels: Record<ProviderGroup, string> = {
 export type ProviderRecord = {
   id: string;
   catalogId?: string;
+  /**
+   * The provider whose **saved connection** this card reads, when it is not its own.
+   *
+   * A card that shares another card's account names it here. `clinepass` sets it to `cline`: Cline's own
+   * auth registry registers `cline-pass` as an alias of the `cline` handler reusing the identical stored
+   * credential, so both cards are served by the one connection saved under `cline`. This is deliberately
+   * **not** `catalogId` — that names the catalog entry, and `ProvidersPage` routes `detailTo` from it, so
+   * putting `cline` there would send the ClinePass card's link to the Cline page. It is the merge
+   * (`providerCards.ts`) and the detail page that read this, and only for the connection lookup.
+   */
+  connectionProviderId?: string;
   name: string;
   description: string;
   category: string;

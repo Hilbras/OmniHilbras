@@ -281,7 +281,9 @@ export class GatewayService {
     });
     this.providers = new ProviderResolver(registry)
       .onDemand('cline', () => this.clineAdapter(), { validateOnSave: true })
-      .onDemand('clinepass', () => this.clinepassAdapter(), { validateOnSave: true })
+      // No `validateOnSave`: ClinePass stores no credential of its own — it reads Cline's connection
+      // through the alias in `credential-manager.ts` — so there is nothing to prove at save time.
+      .onDemand('clinepass', () => this.clinepassAdapter())
       .onDemand('opencode', () => this.zenAdapter())
       .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId))
       .onDemand(kimiCodeProviderId, ({ providerId, connection }) => this.kimiCodeAdapter(connection?.id ?? providerId))
@@ -1138,12 +1140,19 @@ export class GatewayService {
   }
 
   /**
-   * ClinePass holds an API key, not a session, so there is no renewal to wire back: a key has no
-   * refresh token and no expiry, and inventing an expiry from its creation time would be a guess
-   * that eventually ejects a working connection.
+   * ClinePass is the same account as Cline, reached through the same sign-in, so it carries **Cline's**
+   * OAuth token rather than a key of its own. The renewal is wired back to the `cline` vault entry — the
+   * one connection the two cards share — because the token it renews is that connection's.
    */
   clinepassAdapter(): ProviderAdapter {
-    this.clinepass ??= new ClinePassAdapter({ transport: this.transport });
+    if (!this.clinepass) {
+      this.clinepass = new ClinePassAdapter({
+        transport: this.transport,
+        onTokensRefreshed: async (tokens) => {
+          await this.connectionStore?.set('cline', toClineCredential(tokens));
+        },
+      });
+    }
     return this.clinepass;
   }
 

@@ -143,15 +143,34 @@ test('no catalog card claims a measurement, because the catalog is the no-connec
 test('a card may claim OAuth only where the gateway has an OAuth flow to sign in with', () => {
   // The enforceable form of the clause AGENTS.md used to state aspirationally — and with a
   // parenthetical that had gone stale, since three providers have grown real flows since it was written.
-  const claimOauth = cards().filter((card) => card.auth === 'OAuth').map((card) => card.id);
+  const allCards = cards();
   const capable = oauthCapableProviders();
-  const unsupported = claimOauth.filter((id) => !capable.has(id));
+  const cardById = new Map(allCards.map((card) => [card.id, card]));
+  /**
+   * A card is signed into if the gateway serves a start route for it **or** for the card whose
+   * connection it shares. `clinepass` is the second case: it has no route of its own because its sign-in
+   * *is* Cline's — Cline's auth registry registers `cline-pass` as an alias of the `cline` handler — so
+   * `connectionProviderId: 'cline'` points at the route that serves it. Reading only the card's own id
+   * would call a correctly-signed-in card "unsupported".
+   */
+  const servedBy = (card) => capable.has(card.id) || (card.connectionProviderId ? capable.has(card.connectionProviderId) : false);
+  const claimOauth = allCards.filter((card) => card.auth === 'OAuth');
+  const unsupported = claimOauth.filter((card) => !servedBy(card)).map((card) => card.id);
   assert.deepEqual(
     unsupported,
     [],
     `these cards claim an OAuth sign-in and the gateway has no start route for them: ${unsupported.join(', ')}. ` +
       'A card whose auth mode has no flow behind it must either gain the route or stop claiming the mode.',
   );
+  // The shared route must point at a real OAuth card, not an arbitrary id — otherwise the escape hatch
+  // above would accept any string.
+  for (const card of claimOauth) {
+    if (!card.connectionProviderId) continue;
+    assert.ok(
+      cardById.get(card.connectionProviderId)?.auth === 'OAuth',
+      `${card.id} shares ${card.connectionProviderId}'s connection, but that card is not an OAuth card`,
+    );
+  }
   // The other direction is deliberately not asserted: a provider can have an OAuth route and no OAuth
   // card, because an API key may also be accepted (Kiro does). That is a product choice, not a defect.
   assert.ok(claimOauth.length > 0, 'there are OAuth cards, so the check above is not vacuous');
@@ -244,12 +263,16 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // reached by OAuth, is a separate account from the metered `anthropic` API key.
   // 25 from 1.73.0, which added `tokenharbor-web` — the web-session twin of the `tokenharbor` API-key
   // card, the same split as Anthropic versus Claude Code: one vendor, two credentials.
-  // 26 from 1.76.0, which added `clinepass` — the keyed twin of the `cline` OAuth card, but the *opposite*
-  // direction of every pair above: same vendor, same host, same account, and Cline's own auth registry
-  // registers `cline-pass` as an alias of the `cline` handler. It is one card, not two credentials.
+  // 26 from 1.76.0, which added `clinepass` — the *same* account as the `cline` OAuth card, not a second
+  // credential: same vendor, same host, and Cline's own auth registry registers `cline-pass` as an alias
+  // of the `cline` handler reusing the identical stored credential. So it is a second *card* over one
+  // connection (`connectionProviderId: 'cline'`), the opposite of every pair above.
   // Every one is OpenAI-compatible or already adapted, so each is a catalog card and no adapter work.
   // Mistral is **not** in that list — the catalog already had it, and the ten requested included it.
   assert.equal(all.length, 26, `the catalog now has ${all.length} cards`);
+  // Six cards claim OAuth, but the gateway serves **five** start routes: `clinepass` shares `cline`'s,
+  // which is why the count of routes and the count of claims no longer coincide.
   assert.equal(oauthCapableProviders().size, 5, 'the gateway serves an OAuth start route for five providers');
+  assert.equal(all.filter((card) => card.auth === 'OAuth').length, 6, 'six cards claim OAuth, one of them over a shared route');
   console.log(`    cards: ${all.length}   claiming OAuth: ${all.filter((c) => c.auth === 'OAuth').length}   gateway OAuth routes: ${oauthCapableProviders().size}   claiming a measurement: 0`);
 });

@@ -148,14 +148,20 @@ that is not on `main`.
   to that vendor. The only hand-written entries are the three providers the dialog can connect that have
   no card (`openai`, `anthropic`, `google`), and adding a card for one of them means deleting its entry.
   `customOption()` finds the neutral fallback **by id**, never by position.
-  **A derived card's id must not be a prefix of a base card's.** `clinepass` is a distinct provider from
-  `cline` and nothing about the two surfaces is shared but a hostname, but `'clinepass'.startsWith('cline')`
-  is `true` — so a test that treats "a card whose id extends a base card's" as a duplicate rejects a real
-  provider, and a test that treated them as the same provider would have hidden it. The duplicate check is
-  three clauses: a web session, or OAuth with a real start route, or a base card in group `oauth` with a
-  derived card in group `api-key` (`providerOptions.ts`'s `eligibleGroups` is what makes the third one safe).
-  A provider that shares a vendor with another provider is a normal thing to add; check the near-miss
+  **A derived card's id must not be a prefix of a base card's.** `clinepass` is a distinct card from
+  `cline`, but `'clinepass'.startsWith('cline')` is `true` — so a test that treats "a card whose id
+  extends a base card's" as a duplicate rejects a real card, and one that treated them as the same
+  provider would hide it. `tests/new-provider-cards.test.js` now asserts the real property instead: a
+  card that resembles another must be a web session, an OAuth card the gateway serves a start route for,
+  **or a card that names the base's stored connection** via `connectionProviderId`. That last clause is
+  `clinepass`, which shares `cline`'s connection — the same account, signed in once. Check the near-miss
   explicitly rather than trusting a prefix comparison either way.
+  **Two cards may share one connection.** `connectionProviderId` names the provider whose saved
+  connection a card reads, so `clinepass` sets it to `cline`. It is deliberately **not** `catalogId`:
+  `ProvidersPage` routes `detailTo` from `catalogId`, so pointing that at `cline` would send the
+  ClinePass card's link to the Cline page. The gateway mirrors the sharing with the alias in
+  `provider-alias.ts`, which is the one deliberate cross-provider credential lookup — a provider id on
+  the request path stays its own, so failures name the right card.
   **A card may only show what was measured.** `lib/providerCards.ts` folds gateway state into the
   catalog, and it sets only what a connection or a health poll actually reports — `endpoint`, `latency`,
   `status`, `health`, `models`, `modelList`. `lastUsed` and `requests` are deliberately left as

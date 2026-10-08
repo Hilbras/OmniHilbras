@@ -4694,3 +4694,75 @@ false before this change and now says two.
 ```
 repo tests 159 (was 159), sdk 549 (was 535), gateway 555 (was 555)   — pnpm verify exit 0 at 1.76.0
 ```
+
+---
+
+## Correction, 1.77.0 — ClinePass is OAuth, and shares Cline's one connection
+
+### What was wrong in 1.76.0
+
+1.76.0 put ClinePass in the **API key** group. The user pushed back: ClinePass is OAuth and uses the
+account system. They were right, and the vendor source says so plainly:
+
+- `sdk/packages/core/src/auth/provider-auth-registry.ts` — `createClineAuthHandler({ providerId:
+  "cline-pass", storageProviderId: "cline" })`. It is a real auth handler, so `isOAuthProvider("cline-pass")`
+  is **true**, and it reuses the identical stored credential.
+- `apps/cli/src/tui/views/onboarding/model.ts` — `resolveProviderSetupRoute()` returns `"oauth"` for
+  anything that predicate accepts: *"Keyed off how the provider authenticates, so every caller routes the
+  same way."* Cline's own CLI opens a **sign-in** for ClinePass.
+- `apps/vscode/src/core/controller/models/handleClinePassProviderSelection.ts` — selecting ClinePass calls
+  `accountService.switchAccount(undefined)`, the same signed-in account.
+
+The 1.76.0 reasoning generalised "no cookie appears anywhere in the SDK" (true) into "keyed, not signed
+into" (false), and leaned on `docs/getting-started/clinepass.mdx`, which documents only the **outside-Cline**
+escape hatch (a key you create at app.cline.bot for a non-Cline client). Both are true statements that do
+not answer the question that was asked.
+
+### The shape now
+
+Group `oauth`, `auth: 'OAuth'`, and — the user's decision — **one shared connection**. ClinePass is the same
+account as Cline, so it reads the credential the existing `cline` connection stores. This is what the vendor
+does with `storageProviderId: "cline"`, and it is why there is no second sign-in: a second one would mint a
+second token for one account, and WorkOS rotates refresh tokens, so the two would invalidate each other.
+
+- **SDK.** `ClinePassAdapter` now **extends `ClineAdapter`** and changes only its id/name and its model
+  filter. Everything else is Cline's — including the OAuth token renewal the shared connection needs, which
+  a thin standalone adapter could not have done. `ClineAdapter` grew optional `id`/`name` options and a
+  `label` parameter on `clineFailureReason` for this; its own behaviour is unchanged when they are omitted.
+- **Gateway.** New `provider-alias.ts` maps `clinepass → cline`. This is the gateway's **one** deliberate
+  cross-provider credential lookup: `CredentialManager.contextForProvider` resolves the owner connection
+  through the alias, and `ProviderResolver.active()` polls a shared-credential provider when the *owner's*
+  connection has a credential. The provider id on the request path stays `clinepass`, so a failure names the
+  right card. The adapter release of `validateOnSave` for `clinepass` was removed — there is no credential of
+  its own to prove at save time — and token renewal is wired back to the `cline` vault entry.
+- **Dashboard.** The card carries `connectionProviderId: 'cline'`. It is deliberately **not** `catalogId`:
+  `ProvidersPage` routes `detailTo` from `catalogId`, so pointing that at `cline` would send the ClinePass
+  card's link to the Cline page. `providerCards.ts` and `ProviderDetailPage.loadConnection` follow
+  `connectionProviderId`; `oauthProvidersWithFlow` gained `clinepass`.
+
+### What a health check proves
+
+The Cline token is live, and **nothing about entitlement**. Cline decides entitlement server-side, per
+request, and states it in the response body. The `cline-pass/` model filter is what keeps the model list
+honest; the health status does not. A failed renewal reads as *"sign in again"*, which is now correct
+advice — ClinePass shares Cline's sign-in.
+
+### Verify
+
+- repo tests 159, sdk 550 (was 549), gateway 557 (was 555) — `pnpm verify` exit 0 at 1.77.0.
+- New gateway tests: a provider that shares another's credential reads the owner's connection (and the
+  provider id stays its own), and an unrelated provider cannot borrow a credential.
+- New/reworked SDK tests: ClinePass renews an expired shared token; a failure is attributed to `clinepass`;
+  the `cline-pass/` filter is asserted.
+
+### Still unverified
+
+- **No ClinePass request has ever been made.** No sign-in, no `/users/me`, no `/v1/models`, no completion.
+  The sharing is proven by unit tests and the vendor source only.
+- **Whether a shared token reaches the ClinePass tier** depends on the account subscription, which only the
+  server knows at request time.
+- The user also pasted Cline's `__client` session cookie and said they want to use **session cookies, not an
+  API key**. Cline's client never authenticates with a cookie, so no cookie path was built; that intent is
+  unanswered by this change and would be a separate, researched piece of work.
+- `docs/architecture/9router-provider-catalog.md` lists 10 ClinePass models; Cline's current list is 14–16.
+  Left alone — it is a captured measurement.
