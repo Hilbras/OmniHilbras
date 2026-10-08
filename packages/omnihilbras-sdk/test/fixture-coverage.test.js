@@ -11,18 +11,21 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
  * > Keep adapters isolated, use official API documentation, and **pin response fixtures per
  * > adapter.**
  *
- * Measured, there are **four** pinned fixtures for **fourteen** adapters. `kiro-stream.bin` is a real
+ * Measured, there are **four** pinned fixtures for **sixteen** adapters. `kiro-stream.bin` is a real
  * captured binary eventstream, with tests asserting both the answer it decoded to and the frame names
  * the service really sends. Since 1.48.0 there are three more — `openrouter`, `cline` and
  * `opencode-console` — captured from the providers themselves, all three of them **model listings**, so
  * the total cost was nothing.
  *
- * The remaining ten are accounted for by a stated reason, and the count is asserted so the two cannot
- * drift apart. Eight of those ten need a credential this machine does not have: `openai`,
+ * The remaining twelve are accounted for by a stated reason, and the count is asserted so the two
+ * cannot drift apart. Eight of those twelve need a credential this machine does not have: `openai`,
  * `openai-compatible`, `anthropic`, `gemini`, `zen`, `zen-free-tier`, `kimi-code` and `claude-code`.
- * `chatgpt-web` and `deepseek-web` are browser DOM sessions, where a byte capture pins nothing useful.
+ * `chatgpt-web` and `deepseek-web` are browser DOM sessions, where a byte capture pins nothing useful,
+ * and `tokenharbor-web` has no endpoint to capture at all. The twelfth is `clinepass`, whose capture
+ * would be a *duplicate* rather than a gap: it shares Cline's host and wire format, so the bytes it
+ * would pin are the bytes `cline-models.json` already pins.
  *
- * ## Why one of eleven is a problem and not a detail
+ * ## Why one of sixteen is a problem and not a detail
  *
  * The provider contract suite does not cover this, and the two are not substitutes. The contract
  * suite proves an adapter satisfies an *invariant* — text survives the round trip, a refusal is a
@@ -94,6 +97,15 @@ const NO_CAPTURE_YET = {
   // which its terms do not permit proxying in the first place. The frames are transcribed from
   // the client bundle in `scripted-tokenharbor-fetch.js` rather than invented.
   'tokenharbor-web': 'the only captureable bytes are a live direct-chat/stream body, which needs a signed-in Token Harbor session this machine has no credential for; the frames come from that service\'s own client bundle',
+  // ClinePass is the one adapter whose capture would be a **duplicate** rather than a gap: Cline's
+  // own client registers `cline` and `cline-pass` against the same host, the same `/v1/models` and
+  // the same wire format, and a ClinePass key is answered with the *whole* Cline catalog — which is
+  // why the adapter filters it down to the `cline-pass/` slice. So the bytes a ClinePass capture
+  // would pin are byte-for-byte the ones `cline.json` already pins, and the thing that actually
+  // distinguishes the two adapters is not on the wire at all: it is which subscription the account
+  // holds, which the vendor decides per request and never sends. A capture taken with an
+  // unsubscribed key would pin the free tier and call it ClinePass.
+  clinepass: 'the same host and the same wire format as `cline`, so a capture would pin `cline.json` a second time; what distinguishes the two is a server-side subscription no response body reveals',
 };
 
 test('the fixtures directory holds only captures, named for the adapter they came from', () => {

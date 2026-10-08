@@ -157,7 +157,10 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // OAuth card and `eligibleGroups` is `api-key`, `local` and `custom` only.
   // Cards 24 -> 25 in 1.73.0 (`tokenharbor-web`); no option either, for the same reason one level
   // over — its group is `web-cookie`, which the keyed dialog does not offer.
-  assert.equal(providerCatalog.length, 25, `the catalog now has ${providerCatalog.length} cards`);
-  assert.equal(providerOptions.length, 16, `the dialog now offers ${providerOptions.length} options`);
+  // Cards 25 -> 26 in 1.76.0 (`clinepass`), and options 16 -> 17 — the first card added here whose
+  // *base* is also a card. `cline` is OAuth and so is absent from this dialog; `clinepass` is keyed
+  // and so is present, which is the whole reason the near-miss test needed a third rule.
+  assert.equal(providerCatalog.length, 26, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerOptions.length, 17, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

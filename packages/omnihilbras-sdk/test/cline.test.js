@@ -6,8 +6,10 @@ test('WorkOS JWTs are prefixed and other tokens are left alone', () => {
   assert.equal(toClineAccessToken('eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig'), 'workos:eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig');
   // Already prefixed tokens are not prefixed twice.
   assert.equal(toClineAccessToken('workos:eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig'), 'workos:eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig');
-  // A ClinePass key is not a JWT and must be sent verbatim.
-  assert.equal(toClineAccessToken('clp_live_abc123'), 'clp_live_abc123');
+  // A key that is not a JWT must be sent verbatim. ClinePass uses this shape; what its keys are
+  // actually prefixed with is not documented anywhere in Cline's source, so this asserts the property
+  // (no rewrite) rather than a format that could change under us.
+  assert.equal(toClineAccessToken('a-key-that-is-not-a-jwt'), 'a-key-that-is-not-a-jwt');
   assert.equal(toClineAccessToken('   '), '');
 });
 

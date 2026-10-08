@@ -134,27 +134,43 @@ test('a new provider id is one edit away from a web-session id, and stays distin
    * usual cost of encoding the three pairs someone happened to have rather than the property.
    *
    * So the property is now what it was protecting: the derived card must not resolve to the *base*
-   * card's credential path. A web session does not, and an OAuth flow with its own start route does
-   * not. A card that is neither would let a user who meant the API key sign in instead — which is the
-   * exact confusion the test was written for.
+   * card's credential path. Three kinds satisfy it, and each is checked against the real thing rather
+   * than against a list of ids:
+   *
+   * 1. a web session — `webSessionProviders.ts` is what makes a provider sign in rather than take a key;
+   * 2. an OAuth flow the gateway really serves a start route for;
+   * 3. **the base is signed into and the derived card is keyed.** Added for `cline`/`clinepass`, where
+   *    ClinePass is a keyed tier of the same account rather than a different way into it — Cline's own
+   *    auth registry registers `cline-pass` as an alias of the `cline` handler reusing the identical
+   *    stored credential. An earlier version excluded `opencode-console` from this loop to keep the
+   *    narrow rule green; it satisfies (2) outright, so the exclusion went with the rest.
+   *
+   * What all three have in common is that the derived card cannot be collected by the form that
+   * collects the base's credential. For (1) and (2) that is a different flow entirely; for (3) it is
+   * `providerOptions.ts`'s group filter, which offers only `api-key`, `local` and `custom` — so a
+   * `cline` card is not in the key dialog, and a `clinepass` card is not in the sign-in dialog. Two
+   * cards sharing a vendor, a host and an account are still two different things to paste or click.
    */
   const oauthIds = new Set(providerCatalog.filter((card) => card.auth === 'OAuth').map((card) => card.id));
   const oauthRoutes = new Set(
     [...readFileSync(join(ROOT, 'apps/gateway/src/routes/oauth.ts'), 'utf8')
       .matchAll(/url\.pathname === '\/v1\/oauth\/([\w-]+)\/start'/g)].map((m) => m[1]),
   );
-  const nearMiss = pairs.filter(([, derived]) => derived !== 'opencode-console').map(([, derived]) => derived);
-  for (const id of nearMiss) {
-    const distinguishable = webSessionIds.has(id) || (oauthIds.has(id) && oauthRoutes.has(id));
+  const cardById = new Map(providerCatalog.map((card) => [card.id, card]));
+  for (const [base, derived] of pairs) {
+    const isWebSession = webSessionIds.has(derived);
+    const isOAuth = oauthIds.has(derived) && oauthRoutes.has(derived);
+    const keyedAgainstASignIn = cardById.get(base)?.group === 'oauth' && cardById.get(derived)?.group === 'api-key';
     assert.ok(
-      distinguishable,
-      `${id} is one character from an API-key card and must resolve to a different credential path — ` +
-        'either a web session, or an OAuth card whose gateway really serves a start route for it',
+      isWebSession || isOAuth || keyedAgainstASignIn,
+      `${derived} is one character from ${base} and must resolve to a different credential path — ` +
+        'either a web session, an OAuth card whose gateway really serves a start route for it, ' +
+        'or a key where the card it resembles is signed into',
     );
   }
   assert.deepEqual(
     pairs.map(([, derived]) => derived).sort(),
-    ['deepseek-web', 'kimi-code', 'opencode-console', 'qwen-web', 'tokenharbor-web'],
+    ['clinepass', 'deepseek-web', 'kimi-code', 'opencode-console', 'qwen-web', 'tokenharbor-web'],
     'the near-miss ids are exactly the ones expected, so this stays a measurement and not a tautology',
   );
 });

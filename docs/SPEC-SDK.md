@@ -2227,8 +2227,12 @@ revoked token, an unreachable endpoint, and a cancelled probe all look identical
 otherwise. `clineFailureReason` maps the error to a short, safe explanation.
 
 **Token prefixing.** Cline accepts WorkOS JWTs only with an explicit `workos:`
-prefix, and rejects non-JWT ClinePass keys (`clp_…`) that carry one. The adapter
-applies the prefix only to JWT-shaped tokens and sends everything else verbatim.
+prefix, and rejects ClinePass keys that carry one. The adapter applies the prefix
+only to JWT-shaped tokens and sends everything else verbatim. Note what that
+last clause rests on: the vendor's own source names ClinePass keys by their
+`CLINE_API_KEY` variable and never states their text format, so "non-JWT keys are
+passed through untouched" is the property this relies on, not a claim about what
+those keys look like.
 
 **Client identification.** Every Cline request carries the header set Cline's own
 clients send: `HTTP-Referer: https://cline.bot` (the public site, not the app
@@ -2272,6 +2276,37 @@ Two of these endpoints are deliberately used for different jobs:
 The catalog is public, so it cannot tell a good token from a bad one and is never
 used as the credential check. A sign-in is proved against the account endpoint,
 which is the only one that actually checks.
+
+### ClinePass
+
+ClinePass is Cline's paid model tier, and it is **not** a second kind of Cline
+sign-in. Cline's own client registers `cline` and `cline-pass` against the same
+host and the same AI SDK provider, its auth registry points `cline-pass` at the
+`cline` handler while reusing the identical stored credential, and nothing in its
+SDK reads a cookie — `app.cline.bot` is only ever opened in a real browser. So it
+is registered here as an **API-key** provider rather than as a fourth OAuth one: a
+sign-in button would be a second way to hold a token ClinePass does not need.
+
+What distinguishes the two is not on the wire. Same host, same `Authorization:
+Bearer`, same client headers; the only difference is the `cline-pass/` model
+prefix and whether the account is entitled to it.
+
+Two consequences, both load-bearing:
+
+- **The catalog is filtered.** `GET /api/v1/models` answers a ClinePass key with
+  the *whole* Cline catalog, so `listModels` keeps only ids beginning
+  `cline-pass/`. Unfiltered, the connection offers models it is not entitled to
+  and fails on first use with a message about subscriptions.
+- **Entitlement cannot be pre-checked.** It is decided server-side per request,
+  from the subscription, and stated in the response body (*"no access to clinepass
+  subscription models yet"*). There is no endpoint that answers "is this
+  subscription current", so `validateCredential` proves the key is live against
+  `/users/me` and **nothing more** — a green health check is not an entitlement
+  check, and `clinePassFailureReason` says so rather than telling a user to sign
+  in again to a provider that has no sign-in here.
+
+`isCredentialExpired()` returns `undefined` — "cannot say", never `false` — because
+an API key carries no expiry to read.
 
 ## Model Routing and the Client Catalog
 
@@ -2537,9 +2572,9 @@ measurement, and `apps/gateway/test/spec-success-criteria.mjs` fails if any stop
       `build` script; `packages/omnihilbras-sdk/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **17 files** in `packages/omnihilbras-sdk/src/adapters/` — three of which (`deepseek-pow`, `chatgpt-first-party`, `qwen-web`) are not protocol adapters, which is why the capture guard counts 15 — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **18 files** in `packages/omnihilbras-sdk/src/adapters/` — two of which (`deepseek-pow`, `qwen-web`) are not protocol adapters, which is why the capture guard counts 16 — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
-      modifying the gateway core. — **7 registrations in `service.ts`, 0 provider-id conditionals in
+      modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and
       1.45.0, which showed the gateway serves all nine with no adapter at all.
 - [x] Native streaming works through one normalized `AsyncIterable<ChatChunk>` contract. — `ChatChunk` is in

@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.75.2** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.76.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -392,6 +392,30 @@ Cline serves its API under `https://api.cline.bot/api/v1`, and its model catalog
 is public while `/api/v1/users/me` is the endpoint that actually checks a token —
 so a sign-in is proved against the account endpoint and the catalog is only ever
 read. If a sign-in is refused, the callback page reports what Cline said.
+
+## ClinePass
+
+ClinePass is a different thing from the Cline sign-in above, and it lives in the
+**API key** group. It is Cline's subscription tier, not a second account: Cline's
+own auth registry registers `cline-pass` as an alias of `cline` and reuses the one
+stored credential, so signing in again would be signing in twice for the same
+token. You reach it by creating a key under **Settings > API Keys** on
+`app.cline.bot` and pasting it, and the gateway sends it as a bearer token on the
+same host, over the same client headers, to the same `/api/v1` base URL.
+
+What actually differs is the model prefix: ClinePass answers with models under
+`cline-pass/`, and the adapter filters the catalog to those. A ClinePass key is
+answered with the whole Cline catalog, which is why that filter exists rather than
+being cosmetic.
+
+The one thing a ClinePass connection cannot tell you up front is whether your
+subscription covers a given model — Cline decides that server-side, at request
+time, and the only evidence is an error body on a call nobody has made yet. So a
+green health check proves the key is live and nothing more. Do not read a passing
+check as "this key can run every model the card lists"; if a request comes back
+refused, the adapter reports what Cline said instead of collapsing it into a
+generic authentication failure, and it will not tell you to sign in again, because
+there is no sign-in here.
 
 ## Releases
 

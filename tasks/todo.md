@@ -4587,3 +4587,110 @@ re-investigate from zero.
 ```
 repo tests 159 (was 159), sdk 535 (was 535), gateway 555 (was 550)   — pnpm verify exit 0 at 1.75.2
 ```
+
+---
+
+## ClinePass — the same account, reached with a key instead of a sign-in
+
+### What was asked
+
+Add a ClinePass card to the dashboard. The request did not say which group, and the earlier turns in this
+session had been about **Token Harbor** explicitly depending on a *session cookie* rather than an API key, so
+the obvious first guess was the web-cookie group. That guess is wrong, and it is wrong for a reason that is
+worth writing down: **ClinePass has no web session and no OAuth flow at all.**
+
+### How the auth model was settled
+
+Read from Cline's own source in `/home/gin/work/projects.old/cline-main`, not from the marketing page:
+
+- `sdk/packages/llms/src/providers/builtins.ts:743-759` — the `clinePass` spec is
+  `id: 'cline-pass'`, `family: 'cline'`, `apiKeyEnv: ['CLINE_API_KEY']`.
+- `providers.generated.ts:495-507` — same base URL as `cline`: `https://api.cline.bot/api/v1`.
+- `vendors/cline.ts:191-194` — *"Both Cline gateway providers (`cline` and `cline-pass`) share this AI SDK
+  provider and the same Cline API."*
+- `http.ts:13-35` — `resolveApiKey` has exactly three sources: an explicit key, a resolver, and the
+  environment. There is no cookie branch anywhere. Zero occurrences of `cookie` across
+  `sdk/packages/llms/src`, checked against a control term that returns 848 hits in 155 files so the grep
+  itself was known to work.
+- `sdk/packages/core/src/auth/provider-auth-registry.ts:245-248` —
+  `createClineAuthHandler({ providerId: 'cline-pass', storageProviderId: 'cline' })`. `cline-pass` is an
+  **alias** that reuses the one stored credential. An OAuth card would mean signing in twice for one token.
+- `docs/getting-started/clinepass.mdx:66-87` ("Using ClinePass outside of Cline") — create a key under
+  **Settings > API Keys** on `app.cline.bot`, send it as `Authorization: Bearer $CLINE_API_KEY`.
+
+So it landed in the **API key** group. The user's deferral to that judgement was explicit and this section is
+the record of what it was based on.
+
+### What actually differs, and what cannot be known up front
+
+Nothing in the headers or the URL distinguishes a ClinePass request. What differs is the `cline-pass/` model
+prefix plus an account entitlement. Two consequences drove the adapter's shape:
+
+1. A ClinePass key is answered with the **whole** Cline catalog, so `listModels` filters to
+   `CLINE_PASS_MODEL_PREFIX`. Without the filter the card would list Cline models that the key cannot run.
+2. Entitlement is decided **server-side, at request time**, string-matched on the response
+   (`errors.ts:3-6`: *"the user is not subscribed to required model plan"*, *"no access to clinepass
+   subscription models yet. subscribe to clinepass"*). There is no client-side pre-check, so
+   `validateCredential` hits `/users/me` and **proves the key is live and nothing more**. A green health
+   check is not a statement about the subscription, and the docstring on the method says so.
+
+`clinePassFailureReason` is separate from `clineFailureReason` for one reason: the generic Cline failure text
+tells the user to *sign in again*, which is wrong advice for a provider where there is no sign-in to do. The
+adapter surfaces the response body instead of collapsing it into a generic authentication failure.
+
+### The near-miss that the guards caught
+
+`'clinepass'.startsWith('cline')` is **true**. `tests/new-provider-cards.test.js` derives cards for
+cookie/OAuth providers from a base card, and the first version of the derived-card check would have treated
+`clinepass` as a duplicate of `cline`. The assertion is now three clauses — a web session, or OAuth with a
+real start route, or a base card in group `oauth` with a derived card in group `api-key` (defended by
+`providerOptions.ts`'s `eligibleGroups = new Set(['api-key','local','custom'])`). The dead
+`derived !== 'opencode-console'` exclusion was removed at the same time.
+
+### Three guards that failed and why
+
+1. **`scriptedTransport` could not serve a filterable catalog.** It hardcoded one model id, so `clinepass`'s
+   `cline-pass/` filter returned `[]` and the attribution assertion would have failed for a reason that had
+   nothing to do with attribution. It now takes `{ wireFormat, catalog = ['contract-model'] }`, with a
+   docstring saying why a filtering adapter needs a payload it can filter. The dead second
+   `if (wireFormat === 'console')` branch in `modelsPayload` was removed in the same pass — it was
+   unreachable after the first, not newly orphaned.
+2. **No provider-contract entry.** `clinepass` is in `provider-contract.test.js` with a catalog of
+   `['cline-pass/contract-model', 'contract-model']`, so the fixture must serve **both** tiers or
+   `listModels` correctly returns nothing.
+3. **`fixture-coverage.test.js` wanted a capture.** The entry states a reason rather than suppressing it:
+   a ClinePass capture would be a **duplicate**, not a gap — same host, same `/v1/models`, same wire format,
+   byte-for-byte what `cline-models.json` already pins. What distinguishes the two is a server-side
+   subscription that no response body reveals, and a capture taken with an unsubscribed key would pin the
+   free tier and call it ClinePass.
+
+Counts recomputed, not guessed: `ls src/adapters/*.ts` is **18** files; the guard's exclusion list mentions
+`chatgpt-first-party.ts`, **which does not exist**, so only 2 exclusions match → 16 considered adapters, 4
+fixtures pinned, 12 stated reasons. 16 − 12 = 4. The SPEC sentence claiming "three of which" was already
+false before this change and now says two.
+
+### Verify
+
+- `node --test tests/*.test.js` — 159 tests, 159 pass.
+- `pnpm test:sdk` — 549 tests, 549 pass (first run was 3 failures: `fixture-coverage` ×2 and
+  `provider-contract` ×1).
+- `pnpm test:gateway` — 555 tests, 555 pass.
+- `pnpm verify` exit **0** at 1.76.0.
+
+### Still unverified
+
+- **No ClinePass request has been made.** No sign-in, no `/users/me`, no `/v1/models`, no chat completion. The
+  card, the adapter, the gateway registration and every test around them are unproven against the live API.
+  Only the auth model is proven, and only from vendor source.
+- **`clp_` is not a confirmed key format.** It appears nowhere in the vendor repository. An earlier comment in
+  this change claimed ClinePass keys are `clp_…`; that claim was not supported and was removed. What the
+  adapter actually relies on is a property, not a format: `toClineAccessToken` passes a non-JWT through
+  verbatim, so an unknown prefix is not rewritten and cannot break. The SPEC and the `cline` test now assert
+  that property instead of a format.
+- **`docs/architecture/9router-provider-catalog.md:1345` lists 10 ClinePass models** and Cline's current list
+  is 14–16. Left alone: it is a captured measurement of a moment, and editing it to match a list that has not
+  been fetched here would be inventing the measurement.
+
+```
+repo tests 159 (was 159), sdk 549 (was 535), gateway 555 (was 555)   — pnpm verify exit 0 at 1.76.0
+```

@@ -11,8 +11,10 @@ import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model,
  * the generic adapter:
  *
  * - Cline issues WorkOS JWTs, which the API only accepts with a `workos:`
- *   prefix. Tokens that are not JWTs (ClinePass `clp_…` keys) must be sent
- *   verbatim or the API rejects them with 401.
+ *   prefix. A key that is not a JWT must be sent verbatim or the API rejects it
+ *   with 401. What that non-JWT key looks like is **not** modelled anywhere in
+ *   Cline's own source — the vendor never names a prefix for it — so this
+ *   function guesses nothing and only rewrites the shape it can actually see.
  * - The API requires a set of client headers on every request.
  */
 
@@ -57,7 +59,7 @@ export type ClineAdapterOptions = {
 const defaultRefreshSkewMs = 60_000;
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '1.75.2';
+const omnihilbrasVersion = '1.76.0';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {
@@ -271,17 +273,27 @@ const toIsoString = clineExpiryToIso;
 /**
  * Unwraps Cline's non-streaming chat envelope, or raises the error it carries.
  * Returns the OpenAI-shaped body the generic adapter expects.
+ *
+ * `label` and `providerId` exist because the same envelope is read on behalf of more than one of our
+ * provider ids — Cline and ClinePass share the host and the shape. Hardcoding `'cline'` made a
+ * ClinePass failure report itself as a Cline one, which is the id the operator has to act on.
  */
-export function unwrapClineEnvelope(body: unknown): OpenAIResponse {
+export function unwrapClineEnvelope(
+  body: unknown,
+  options: { providerId?: string; label?: string } = {},
+): OpenAIResponse {
+  const label = options.label ?? 'Cline';
+  const providerId = options.providerId ?? 'cline';
   if (!body || typeof body !== 'object' || Array.isArray(body)) return body as OpenAIResponse;
   const envelope = body as { success?: unknown; data?: unknown; message?: unknown; error?: unknown };
   if (envelope.success === false) {
     const reason = [envelope.message, envelope.error]
       .map((value) => (typeof value === 'string' ? value : (value as { message?: string } | undefined)?.message))
       .find((value) => typeof value === 'string' && value.trim());
-    throw new ProviderError('PROVIDER_REQUEST_FAILED', reason ? `Cline rejected the request: ${reason}` : 'Cline rejected the request.', {
-      providerId: 'cline',
-      publicMessage: reason ? `Cline rejected the request: ${reason}` : 'Cline rejected the request.',
+    const message = reason ? `${label} rejected the request: ${reason}` : `${label} rejected the request.`;
+    throw new ProviderError('PROVIDER_REQUEST_FAILED', message, {
+      providerId,
+      publicMessage: message,
     });
   }
   if (envelope.success === true && envelope.data && typeof envelope.data === 'object' && !Array.isArray(envelope.data)) {

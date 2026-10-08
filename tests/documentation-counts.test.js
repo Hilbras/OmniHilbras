@@ -24,7 +24,7 @@ const ROOT = new URL('..', import.meta.url);
 const ROOT_URL = fileURLToPath(ROOT);
 const read = (file) => readFileSync(new URL(file, ROOT), 'utf8');
 
-/** Adapters the capture guard considers, which is the 14 behind the 16 files. */
+/** Adapters the capture guard considers, which is the 16 behind the 18 files. */
 function consideredAdapters() {
   const dir = new URL('packages/omnihilbras-sdk/src/adapters/', ROOT);
   return readdirSync(dir)

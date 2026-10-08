@@ -39,9 +39,9 @@ const src = (...parts) => readFileSync(join(ROOT, ...parts), 'utf8');
 /** criterion → the suite that actually exercises it. */
 const PROOFS = {
   'SDK builds independently of the React app': 'packages/omnihilbras-sdk builds on its own tsconfig, with no react dependency',
-  'stable normalized types and a provider registry': 'ProviderRegistry + the 12-adapter contract suite',
-  'a new protocol without modifying the gateway core': '7 registrations in service.ts, 0 provider-id conditionals in routing.ts or service.ts',
-  'one normalized AsyncIterable<ChatChunk> streaming contract': '11 stream references in provider-contract.js, run for all 12 adapters',
+  'stable normalized types and a provider registry': 'ProviderRegistry + the 15-adapter contract suite',
+  'a new protocol without modifying the gateway core': '10 registrations in service.ts, 0 provider-id conditionals in routing.ts or service.ts',
+  'one normalized AsyncIterable<ChatChunk> streaming contract': '13 stream references in provider-contract.js, run for all 15 adapters',
   'provider errors have stable codes and never expose secrets': 'the transport redaction tests + no error message built from a credential',
   'loopback, with health, models, chat and SSE': 'live: /health 200, /v1/models 200, contract suite covers SSE',
   'tests run without real provider credentials': '0 test files read a real provider env var',

@@ -45,7 +45,15 @@ function refusal(status, body, providerId) {
   });
 }
 
-export function scriptedTransport({ wireFormat = 'openai' } = {}) {
+/**
+ * The catalog the fixture serves, as provider-named ids.
+ *
+ * A provider whose `listModels` **filters** its host's catalog — ClinePass is the `cline-pass/` slice
+ * of a listing that also contains the free tier — needs a payload it can actually filter. Served the
+ * single default id, such an adapter returns an empty list and the contract's attribution assertion
+ * fails for a reason that has nothing to do with attribution.
+ */
+export function scriptedTransport({ wireFormat = 'openai', catalog = ['contract-model'] } = {}) {
   const state = { mode: 'ok', parts: [], status: 200, body: undefined };
   const seen = [];
   const errors = [];
@@ -92,7 +100,7 @@ export function scriptedTransport({ wireFormat = 'openai' } = {}) {
       if (request.responseAs === 'bytes') {
         return { status: state.status, headers: new Headers(), data: binaryFrames(state.parts) };
       }
-      const data = isModelsRequest(request) || isConsoleConfigRequest(request) ? modelsPayload(wireFormat) : completionPayload(wireFormat, state.parts);
+      const data = isModelsRequest(request) || isConsoleConfigRequest(request) ? modelsPayload(wireFormat, catalog) : completionPayload(wireFormat, state.parts);
       return { status: state.status, headers: new Headers({ 'content-type': 'application/json' }), data };
     },
     async *stream(request) {
@@ -136,7 +144,7 @@ function providerIdFor() {
   return 'contract';
 }
 
-function modelsPayload(wireFormat) {
+function modelsPayload(wireFormat, catalog = ['contract-model']) {
   if (wireFormat === 'console') {
     /**
      * OpenCode Console does not publish a model list — it publishes a *routing table*, mapping
@@ -144,26 +152,15 @@ function modelsPayload(wireFormat) {
      * model by name, so an OpenAI-shaped catalog answers a question nobody asked and the
      * refusal looks like a bug in the adapter rather than in the fixture.
      */
-    return {
-      config: {
-        provider: {
-          opencode: {
-            api: 'https://lane.invalid/v1',
-            models: { 'contract-model': { provider: { api: 'https://lane.invalid/v1' } } },
-          },
-        },
-      },
-    };
-  }
-  if (wireFormat === 'console') {
-    return { config: { provider: { opencode: { api: 'https://lane.invalid/v1', models: { 'contract-model': { provider: { api: 'https://lane.invalid/v1' } } } } } } };
+    const lanes = Object.fromEntries(catalog.map((id) => [id, { provider: { api: 'https://lane.invalid/v1' } }]));
+    return { config: { provider: { opencode: { api: 'https://lane.invalid/v1', models: lanes } } } };
   }
   if (wireFormat === 'gemini') {
     // Gemini requires the method it claims, and the adapter filters on it — so a fixture that
     // omits it returns an empty catalog and the attribution assertion fails for the wrong reason.
-    return { models: [{ name: 'models/contract-model', supportedGenerationMethods: ['generateContent', 'streamGenerateContent'], inputTokenLimit: 1024 }] };
+    return { models: catalog.map((id) => ({ name: id.startsWith('models/') ? id : `models/${id}`, supportedGenerationMethods: ['generateContent', 'streamGenerateContent'], inputTokenLimit: 1024 })) };
   }
-  return { object: 'list', data: [{ id: 'contract-model', object: 'model', owned_by: 'contract' }] };
+  return { object: 'list', data: catalog.map((id) => ({ id, object: 'model', owned_by: 'contract' })) };
 }
 
 /**

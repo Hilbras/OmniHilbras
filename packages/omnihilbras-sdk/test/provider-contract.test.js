@@ -15,6 +15,7 @@ import { DeepSeekWebAdapter } from '../dist/adapters/deepseek-web.js';
 import { TokenHarborWebAdapter } from '../dist/adapters/tokenharbor-web.js';
 import { ChatGptWebAdapter } from '../dist/adapters/chatgpt-web.js';
 import { ClineAdapter } from '../dist/adapters/cline.js';
+import { ClinePassAdapter } from '../dist/adapters/clinepass.js';
 import { KiroAdapter } from '../dist/adapters/kiro.js';
 import { KimiCodeAdapter } from '../dist/adapters/kimi-code.js';
 import { ClaudeCodeAdapter } from '../dist/adapters/claude-code.js';
@@ -37,8 +38,8 @@ import { ProviderError } from '../dist/errors.js';
  * assertion failed with "the provider stream ended before completion" for five providers. That
  * reads exactly like five provider bugs and was entirely the wrapper's doing.
  */
-const transport = (wireFormat) => {
-  const stub = scriptedTransport({ wireFormat });
+const transport = (wireFormat, catalog) => {
+  const stub = scriptedTransport({ wireFormat, catalog });
   return { stub, transport: stub };
 };
 
@@ -99,6 +100,18 @@ const providers = [
     make: () => {
       const { stub, transport: t } = transport('openai');
       return { adapter: new ClineAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    // ClinePass speaks the same OpenAI frames on the same host as Cline, so the contract applies
+    // unchanged rather than being excused. What is its own is the *credential* — a key rather than
+    // an OAuth grant — and the catalog filter, which is why the fixture serves a listing with both
+    // tiers in it: served only the free tier's id, `listModels` would correctly return nothing and
+    // the attribution assertion would fail for a reason that has nothing to do with attribution.
+    name: 'clinepass',
+    make: () => {
+      const { stub, transport: t } = transport('openai', ['cline-pass/contract-model', 'contract-model']);
+      return { adapter: new ClinePassAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
     },
   },
   {

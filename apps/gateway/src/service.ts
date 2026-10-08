@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, ClinePassAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import type { GatewayConfig } from './config.js';
@@ -114,6 +114,7 @@ export class GatewayService {
   private readonly gatewayConfig: GatewayConfig | undefined;
   private readonly transport: HttpTransport;
   private cline?: ProviderAdapter;
+  private clinepass?: ProviderAdapter;
   private zen?: ProviderAdapter;
   private opencodeConsole?: ProviderAdapter;
   private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
@@ -280,6 +281,7 @@ export class GatewayService {
     });
     this.providers = new ProviderResolver(registry)
       .onDemand('cline', () => this.clineAdapter(), { validateOnSave: true })
+      .onDemand('clinepass', () => this.clinepassAdapter(), { validateOnSave: true })
       .onDemand('opencode', () => this.zenAdapter())
       .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId))
       .onDemand(kimiCodeProviderId, ({ providerId, connection }) => this.kimiCodeAdapter(connection?.id ?? providerId))
@@ -1133,6 +1135,16 @@ export class GatewayService {
       });
     }
     return this.cline;
+  }
+
+  /**
+   * ClinePass holds an API key, not a session, so there is no renewal to wire back: a key has no
+   * refresh token and no expiry, and inventing an expiry from its creation time would be a guess
+   * that eventually ejects a working connection.
+   */
+  clinepassAdapter(): ProviderAdapter {
+    this.clinepass ??= new ClinePassAdapter({ transport: this.transport });
+    return this.clinepass;
   }
 
   async listConnections() {
