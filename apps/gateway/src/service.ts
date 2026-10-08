@@ -671,12 +671,12 @@ export class GatewayService {
 
   /**
    * Starts a Cline sign-in and returns the URL to send the browser to. The
-   * session id is how the dashboard learns the outcome; the `state` is what the
-   * callback must echo back.
+   * session id is how the dashboard learns the outcome; the `state` is what
+   * ties the callback to this sign-in when Cline hands one back at all.
    */
   startClineSignIn(redirectUri: string) {
-    // The session id goes in the redirect path, because the provider does not
-    // echo `state` back and the path is the one part it must honour verbatim.
+    // The session id goes in the redirect path, because the path is the one
+    // part of the callback Cline has to honour verbatim.
     // The same redirect is what gets sent to the token endpoint later.
     const { sessionId, state, redirectUri: callback } = this.clineSessions.start((id) => redirectUri.replace(/\/v1\/oauth\/cline\/callback\/?$/, clineCallbackPathFor(id)));
     return { ...this.beginClineAuthorization(callback, state), sessionId, state };
@@ -696,7 +696,16 @@ export class GatewayService {
     }
     const session = this.clineSessions.claim(input.sessionId, input.state);
     if (!session) {
-      return { ok: false, message: 'This sign-in has already been used or has expired. Start again from OmniHilbras.' };
+      /**
+       * The session is resolved even when it could not be claimed. Leaving it `pending`
+       * on a rejected callback made the dashboard poll a session that was never going to
+       * change, so a sign-in that Cline had already refused waited out the dialog's full
+       * five minutes and then reported a timeout — which named neither the refusal nor the
+       * reason for it.
+       */
+      const message = 'This sign-in has already been used or has expired. Start again from OmniHilbras.';
+      this.clineSessions.failPending(input.sessionId, message);
+      return { ok: false, message };
     }
     if (input.providerError) {
       // The provider's error code comes back through the query string, so it is
@@ -1082,7 +1091,19 @@ export class GatewayService {
         modelPolicy: 'all',
       }),
       save: (input, credential, withSignal) => this.saveConnection(input, credential, withSignal),
-      takeDiscoveryNote: () => this.lastDiscoveryNote,
+      /**
+       * Taken, not read, for the reason the OpenCode Console branch above spells out.
+       * This one only read it, so a Kiro discovery failure was never cleared. It stayed on
+       * the service, and the next Kiro sign-in — or a later poll of the session it had been
+       * left on — attached a note describing a failure that had nothing to do with it, so a
+       * user with a working Kiro connection was shown an error about a request they never
+       * made.
+       */
+      takeDiscoveryNote: () => {
+        const note = this.lastDiscoveryNote;
+        this.lastDiscoveryNote = undefined;
+        return note;
+      },
     });
   }
 

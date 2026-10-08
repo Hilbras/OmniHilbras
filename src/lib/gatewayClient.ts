@@ -765,8 +765,18 @@ export type GatewayDeviceSignInStatus = GatewayOauthSignInStatus & {
   verificationUrl?: string;
 };
 
-export function startGatewayDeviceSignIn(signal?: AbortSignal) {
-  return requestJson<GatewayDeviceSignIn>('/v1/oauth/opencode-console/start', {
+/**
+ * Starts a device-code sign-in for whichever provider is asking.
+ *
+ * Both OpenCode Console and Kiro are device flows with the same shape, so the dialog
+ * keeps them in one set. These took no provider and sent every request to
+ * `opencode-console`, which made the set a claim the code did not honour: a second
+ * device provider added to it would silently sign into the first one's endpoint. The
+ * Kiro branch in the dialog runs first today, so nothing was routed wrongly yet — this
+ * is the state that made it impossible for that to stay true.
+ */
+export function startGatewayDeviceSignIn(providerId: string, signal?: AbortSignal) {
+  return requestJson<GatewayDeviceSignIn>(`/v1/oauth/${encodeURIComponent(providerId)}/start`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({}),
@@ -774,8 +784,11 @@ export function startGatewayDeviceSignIn(signal?: AbortSignal) {
   });
 }
 
-export function getDeviceSignInStatus(sessionId: string, signal?: AbortSignal) {
-  return requestJson<GatewayDeviceSignInStatus>(`/v1/oauth/opencode-console/session/${encodeURIComponent(sessionId)}`, { signal });
+export function getDeviceSignInStatus(providerId: string, sessionId: string, signal?: AbortSignal) {
+  return requestJson<GatewayDeviceSignInStatus>(
+    `/v1/oauth/${encodeURIComponent(providerId)}/session/${encodeURIComponent(sessionId)}`,
+    { signal },
+  );
 }
 
 /** Kiro signs in through AWS's device flow, so there is a code and no auth URL. */

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CLINE_OAUTH, ClineAdapter, clineExpiryToIso, clineHeaders, decodeClineCode, providerErrorDetail, toClineAccessToken, unwrapClineEnvelope } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, ClineAdapter, buildClineAuthorizeUrl, clineExpiryToIso, clineHeaders, clineStateCallbackUrl, clineStateMatchesCallback, decodeClineCode, providerErrorDetail, toClineAccessToken, unwrapClineEnvelope } from '@hilbras/omnihilbras';
 
 test('WorkOS JWTs are prefixed and other tokens are left alone', () => {
   assert.equal(toClineAccessToken('eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig'), 'workos:eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig');
@@ -366,4 +366,77 @@ test('more provider error shapes are read', () => {
   assert.equal(providerErrorDetail({ msg: 'rate limited' }), 'rate limited');
   assert.equal(providerErrorDetail({ detail: 'upstream busy' }), 'upstream busy');
   assert.equal(providerErrorDetail({}), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// The `state` Cline hands back
+// ---------------------------------------------------------------------------
+
+/**
+ * A real `state` value, captured from `api.cline.bot` on 2026-10-08.
+ *
+ * Requested with `state=OURSTATEOURSTATE…` and a loopback `callback_url`; the
+ * `state` on the redirect WorkOS received decodes to a JSON object naming that
+ * same `callback_url`, followed by 48 bytes of binary signature, with nothing of
+ * the value that was sent. Base64url, and the padding is `%3D`-escaped in the
+ * query string it travels in — which is why it is stored decoded here.
+ *
+ * This is **not** in `test/fixtures/`: that directory counts pinned captures
+ * against adapters, and `fixture-coverage.test.js` asserts the two agree. A
+ * state blob is not a model listing, and filing it there would inflate a count
+ * that means something specific.
+ */
+const CAPTURED_SESSION_ID = `${'a'.repeat(43)}0123456789abcdefghij`;
+const CAPTURED_CALLBACK = `http://127.0.0.1:8788/v1/oauth/cline/callback/${CAPTURED_SESSION_ID}`;
+const CAPTURED_STATE = 'eyJjbGllbnRfdHlwZSI6ImV4dGVuc2lvbiIsImNhbGxiYWNrX3VybCI6Imh0dHA6Ly8xMjcuMC4wLjE6ODc4OC92MS9vYXV0aC9jbGluZS9jYWxsYmFjay9hYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhMDEyMzQ1Njc4OWFiY2RlZmdoaWoifQAAjJMSSyRNjZyBwz7_66Mo8zLUrpd4kvlFN9oiuNmu';
+
+test("the callback_url is read out of the state Cline actually returns", () => {
+  assert.equal(clineStateCallbackUrl(CAPTURED_STATE), CAPTURED_CALLBACK);
+  // The signature bytes after the object are not part of it, and a JSON parse
+  // over the whole decoded buffer would throw on them.
+  assert.equal(clineStateCallbackUrl(CAPTURED_STATE)?.includes('signature'), false);
+});
+
+test('a state blob that is not Cline\'s shape yields nothing rather than throwing', () => {
+  // Every one of these reaches the decoder on a real callback, because it reaches
+  // whatever the provider chose to put in `state`.
+  for (const value of ['', 'never-issued', 'deadbeef', 'not base64 at all !!!', 'e30=', Buffer.from('{}').toString('base64')]) {
+    assert.equal(clineStateCallbackUrl(value), undefined, `${JSON.stringify(value)} is not Cline's shape`);
+  }
+  // A well-formed object that simply carries no `callback_url` says nothing about
+  // which callback it belongs to, so it vouches for nothing.
+  const noCallback = Buffer.from('{"client_type":"extension"}').toString('base64url');
+  assert.equal(clineStateCallbackUrl(noCallback), undefined);
+  // And `callback_url` of the wrong type is no better than its absence.
+  const wrongType = Buffer.from('{"callback_url":42}').toString('base64url');
+  assert.equal(clineStateCallbackUrl(wrongType), undefined);
+});
+
+test('a callback is accepted when its state is ours, absent, or Cline\'s own naming this callback', () => {
+  const ours = 'a'.repeat(64);
+  assert.equal(clineStateMatchesCallback(ours, ours, CAPTURED_CALLBACK), true, 'our own state, echoed verbatim');
+  assert.equal(clineStateMatchesCallback(undefined, ours, CAPTURED_CALLBACK), true, 'nothing came back to cross-check');
+  assert.equal(clineStateMatchesCallback(CAPTURED_STATE, ours, CAPTURED_CALLBACK), true, "the value Cline replaced it with");
+});
+
+test('a callback is refused when its state belongs to a different sign-in', () => {
+  const ours = 'a'.repeat(64);
+  // Cline's blob, but naming somebody else's callback: it could have been minted
+  // for another session on this machine and replayed here.
+  assert.equal(clineStateMatchesCallback(CAPTURED_STATE, ours, 'http://127.0.0.1:8788/v1/oauth/cline/callback/someone-else'), false);
+  // Another sign-in's state entirely — the classic crossed-state case.
+  assert.equal(clineStateMatchesCallback('b'.repeat(64), ours, CAPTURED_CALLBACK), false);
+  // A session with no stored state still gets its own blob accepted, and nothing else.
+  assert.equal(clineStateMatchesCallback(CAPTURED_STATE, undefined, CAPTURED_CALLBACK), true);
+  assert.equal(clineStateMatchesCallback('b'.repeat(64), undefined, CAPTURED_CALLBACK), false);
+});
+
+test('the authorize URL still sends the state, because providers that echo it are the majority', () => {
+  // Dropping it would quietly weaken every provider whose callback *does* carry
+  // it, to accommodate the one whose does not.
+  const ours = 'a'.repeat(64);
+  const url = new URL(buildClineAuthorizeUrl(CAPTURED_CALLBACK, ours));
+  assert.equal(url.searchParams.get('state'), ours);
+  assert.equal(url.searchParams.get('callback_url'), CAPTURED_CALLBACK);
+  assert.equal(url.searchParams.get('redirect_uri'), CAPTURED_CALLBACK);
 });

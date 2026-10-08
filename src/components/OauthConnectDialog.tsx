@@ -224,7 +224,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
 
     if (deviceFlowProviders.has(providerId)) {
       try {
-        const signIn = await startGatewayDeviceSignIn();
+        const signIn = await startGatewayDeviceSignIn(providerId);
         if (settledRef.current) return;
         // The code has to be read by a person, so it is shown here as well as sent
         // to the browser tab.
@@ -234,7 +234,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
         setMessage(sentToOpenTab
           ? 'Approve the request in your browser using the code below. This tab will finish the connection.'
           : 'Your browser blocked the sign-in tab. Open the link below to approve.');
-        watch(signIn.sessionId, getDeviceSignInStatus, 'The sign-in timed out. Start again from OmniHilbras.');
+        watch(signIn.sessionId, (id) => getDeviceSignInStatus(providerId, id), 'The sign-in timed out. Start again from OmniHilbras.');
       } catch (startError) {
         settledRef.current = true;
         setPhase('failed');

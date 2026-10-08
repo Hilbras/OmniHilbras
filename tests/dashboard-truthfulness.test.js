@@ -118,15 +118,18 @@ test('every provider the client names in a path is a real card, on a route the g
   //
   // I asserted "no provider may appear in a client path", expecting the OAuth surface to be as uniform
   // as the credential check turned out to be. It is not, and the difference matters:
-  // `startGatewayOauthSignIn(providerId)` is generic, but `startGatewayDeviceSignIn` posts to
-  // `/v1/oauth/opencode-console/start` and gets back a `userCode` and a `verificationUrl`, and
-  // `getClineSignInStatus` hits a `/session/` route Cline alone has. **Different endpoints with
-  // different payloads are not two spellings of one decision** — that is what made the credential check
-  // wrong, where the request and the response were identical and only the path differed.
+  // `startGatewayOauthSignIn(providerId)` and `startGatewayDeviceSignIn(providerId)` are both generic,
+  // but `getClineSignInStatus` hits a `/session/` route Cline alone has, and the device flows answer with
+  // a `userCode` and a `verificationUrl` rather than an auth URL. **Different endpoints with different
+  // payloads are not two spellings of one decision** — that is what made the credential check wrong, where
+  // the request and the response were identical and only the path differed.
   //
   // So this asserts the two things that are true regardless: the provider named is a card that exists,
   // and the path is one the gateway actually serves. A hardcoded path for a card that was removed, or
   // for a route that was renamed, fails here instead of 404ing in a browser.
+  //
+  // Only literal paths are matched, which is why a provider id interpolated into a path is invisible here
+  // and needs its own check — that is what the device-flow test below is for.
   const client = stripComments(readFileSync(join(DASHBOARD, 'lib', 'gatewayClient.ts'), 'utf8'));
   const cards = new Set(
     [...stripComments(readFileSync(join(DASHBOARD, 'data', 'providers.ts'), 'utf8')).matchAll(/^\s{4}id: '([\w-]+)'/gm)].map((match) => match[1]),
@@ -149,6 +152,42 @@ test('every provider the client names in a path is a real card, on a route the g
     if (!covered) problems.push(`${path} is called by the client but the gateway does not serve it`);
   }
   assert.deepEqual(problems, [], 'a client path for a card that does not exist, or for a route the gateway dropped, is a 404 waiting to happen');
+});
+
+test('a device-code sign-in goes to the provider that asked for it', () => {
+  // The test above cannot see this one, and the reason is worth stating: it matches **literal** paths,
+  // so a provider id interpolated into a path is invisible to it. `startGatewayDeviceSignIn` and
+  // `getDeviceSignInStatus` took no provider and sent every request to `/v1/oauth/opencode-console/…`,
+  // which is the bug this covers.
+  //
+  // Nothing was routed wrongly while it stood: `deviceFlowProviders` in the dialog is a set of two
+  // (Kiro, OpenCode Console), and the Kiro branch runs first, so the only provider that reached the
+  // hardcoded path was the one it named. That is the state in which the defect is invisible in
+  // production and unavoidable in review — the next device provider added to that set would have
+  // signed into OpenCode Console's endpoint while showing the user's own name, and the check that
+  // guards provider paths would have passed.
+  const client = stripComments(readFileSync(join(DASHBOARD, 'lib', 'gatewayClient.ts'), 'utf8'));
+
+  for (const [name, arity] of [['startGatewayDeviceSignIn', 'providerId: string'], ['getDeviceSignInStatus', 'providerId: string']]) {
+    const start = client.indexOf(`export function ${name}(`);
+    assert.notEqual(start, -1, `${name} should still exist`);
+    const body = client.slice(start, client.indexOf('\n}', start));
+    assert.ok(body.includes(arity), `${name} must take the provider it is signing in, or it can only ever sign in one`);
+    assert.ok(
+      body.includes('${encodeURIComponent(providerId)}'),
+      `${name} must put the provider in the path it calls; a literal there is the bug this test is for`,
+    );
+    assert.equal(
+      body.includes('opencode-console'),
+      false,
+      `${name} names opencode-console literally, so every device provider in the set is sent to it`,
+    );
+  }
+
+  // And the dialog actually passes it, which is the half a signature check cannot see.
+  const dialog = stripComments(readFileSync(join(DASHBOARD, 'components', 'OauthConnectDialog.tsx'), 'utf8'));
+  assert.ok(dialog.includes('startGatewayDeviceSignIn(providerId)'), 'the dialog must pass the provider it was opened for');
+  assert.ok(dialog.includes('getDeviceSignInStatus(providerId, id)'), 'and poll the same provider, not a fixed one');
 });
 
 test('the check goes through the gateway for every provider, not one', () => {

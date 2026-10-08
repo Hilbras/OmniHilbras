@@ -48,8 +48,10 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     // provider carries `sec-fetch-site: cross-site` and no Origin.
     if (request.method === 'GET' && (url.pathname === clineCallbackPath || url.pathname.startsWith(`${clineCallbackPath}/`))) {
       const code = url.searchParams.get('code') ?? '';
-      // The session id rides in the path. `state` is only present when the
-      // provider echoes it, which Cline's AuthKit handoff does not.
+      // The session id rides in the path. `state`, when it arrives, is
+      // whatever the provider sent back — Cline replaces ours with a signed
+      // blob naming the callback URL — so `clineStateMatchesCallback` is what
+      // decides whether it may claim this session.
       const sessionId = sessionIdFromCallbackPath(url.pathname);
       const state = url.searchParams.get('state') ?? undefined;
       const providerError = url.searchParams.get('error');

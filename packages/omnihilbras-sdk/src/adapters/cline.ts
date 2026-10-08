@@ -57,7 +57,7 @@ export type ClineAdapterOptions = {
 const defaultRefreshSkewMs = 60_000;
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '1.75.0';
+const omnihilbrasVersion = '1.75.1';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {
@@ -112,8 +112,11 @@ export function clineHeaders(
 }
 
 /**
- * Builds the Cline sign-in URL. `state` is echoed back on the callback, so the
- * gateway can tell its own sign-in apart from a replayed or forged one.
+ * Builds the Cline sign-in URL.
+ *
+ * `state` is sent, and it is the strongest cross-check *if it comes back*. Cline replaces it with a
+ * blob of its own — see `clineStateMatchesCallback` — so the loopback session id in the path is what
+ * actually correlates the callback, and `state` narrows it when Cline hands one back.
  */
 export function buildClineAuthorizeUrl(redirectUri: string, state?: string, authorizeUrl: string = CLINE_OAUTH.authorizeUrl) {
   const url = new URL(authorizeUrl);
@@ -122,6 +125,66 @@ export function buildClineAuthorizeUrl(redirectUri: string, state?: string, auth
   url.searchParams.set('redirect_uri', redirectUri);
   if (state) url.searchParams.set('state', state);
   return url.toString();
+}
+
+/** The fields Cline signs into the blob it puts on its own authorize redirect. */
+type ClineStateBlob = { client_type?: string; callback_url?: string };
+
+/**
+ * Decodes the `callback_url` Cline recorded in the blob it signs at authorize time.
+ *
+ * Cline's blob is base64url of a flat JSON object followed by binary signature bytes,
+ * so only the leading object is readable and only the `callback_url` in it is of use.
+ * Returns nothing for anything that is not that shape — an unrecognised blob is not a
+ * failure here, it is simply a value this cannot vouch for.
+ */
+export function clineStateCallbackUrl(state: string): string | undefined {
+  let text: string;
+  try {
+    const padded = state.padEnd(state.length + ((4 - (state.length % 4)) % 4), '=');
+    text = Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+  } catch {
+    return undefined;
+  }
+  // The JSON is flat and holds no nested braces, so the first `}` closes it and the
+  // signature bytes after it are not part of the object.
+  const end = text.indexOf('}');
+  if (end < 0) return undefined;
+  let blob: ClineStateBlob;
+  try {
+    blob = JSON.parse(text.slice(0, end + 1)) as ClineStateBlob;
+  } catch {
+    return undefined;
+  }
+  return typeof blob.callback_url === 'string' ? blob.callback_url : undefined;
+}
+
+/**
+ * Whether a callback's `state` can be trusted to belong to this sign-in.
+ *
+ * Cline replaces the caller's `state` rather than echoing it. Verified against
+ * `api.cline.bot`: the blob on its authorize redirect decodes to
+ * `{"client_type":"extension","callback_url":"<our loopback callback>"}` plus a
+ * signature, with nothing of the value we sent. A check that demanded our exact
+ * `state` therefore rejected every callback Cline actually produced, and the sign-in
+ * could never complete.
+ *
+ * So three shapes are accepted, and they are not equally strong:
+ *
+ * - **our own `state`**, echoed verbatim — the full guarantee it was sent for;
+ * - **Cline's blob naming this exact `callback_url`** — not our value, but it could
+ *   only have been minted by Cline's authorize endpoint for *this* sign-in, so it
+ *   still ties the callback to the session;
+ * - **nothing at all** — a provider that echoes nothing cannot be cross-checked. The
+ *   correlation rests entirely on the unguessable session id in the loopback path,
+ *   which is the same guarantee the flow already relied on before `state` existed.
+ *
+ * Anything else is refused.
+ */
+export function clineStateMatchesCallback(state: string | undefined, ours: string | undefined, redirectUri: string): boolean {
+  if (state === undefined) return true;
+  if (ours !== undefined && state === ours) return true;
+  return clineStateCallbackUrl(state) === redirectUri;
 }
 
 type ClineTokenPayload = {

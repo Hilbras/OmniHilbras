@@ -4368,3 +4368,115 @@ the test, and restoring `key={location.pathname}` fails two.
 ```
 repo tests 158 (was 154), sdk 530, gateway 545   — pnpm verify exit 0 at 1.74.0
 ```
+## Task 93: three OAuth providers, and one of them could never have finished signing in
+
+Reported together as "fix these three in the OAuth group: opencode console, kiro, cline", with three
+symptoms between them — sign-in never completes, it fails with an error, and it connects but then
+requests fail. **Only the first of those is reproduced.** What follows says which is which, because
+the other two are diagnosed from source rather than watched failing, and reporting them as fixed
+would be the same error as the ones being fixed here.
+
+### Cline: reproduced, live, and it could never have completed
+
+Three separate defects, in the order they bite:
+
+**1. The state cross-check demanded an echo Cline never sends.** `ClineSessionStore.claim` compared
+the callback's `state` to ours by exact equality. Checked against `api.cline.bot` on 2026-10-08:
+
+- We send `state=<ours>` to `/api/v1/auth/authorize`.
+- Cline **discards it** and redirects to WorkOS AuthKit carrying its own signed blob as `state`.
+- That blob decodes to `{"client_type":"extension","callback_url":"<our loopback callback>"}` plus
+  binary signature bytes, with **nothing of the value we sent**.
+- So every callback Cline actually produced was rejected, always.
+
+The blob is base64url with `=` padding, percent-escaped as `%3D` in the query string. `searchParams.get`
+decodes that correctly — checked, because a first regex suggested the alphabet was the problem and it
+was not; the padding was.
+
+`clineStateMatchesCallback(state, ours, redirectUri)` accepts three shapes, and they are **not
+equally strong**, which the doc comment says out loud:
+
+- our own `state`, echoed verbatim — the guarantee it was sent for;
+- Cline's blob naming **this exact `callback_url`** — not our value, but it could only have been
+  minted by Cline's authorize endpoint for this sign-in;
+- nothing at all — a provider that echoes nothing cannot be cross-checked, and correlation rests on
+  the unguessable session id in the loopback path, the same guarantee the flow relied on before
+  `state` existed.
+
+Anything else is refused.
+
+**2. An unclaimable callback left the session `pending` forever.** `completeClineSignIn` returned
+"already been used or has expired" **without resolving the session**, so the dashboard polled a
+session that would never change state and spun to its five-minute timeout naming neither the refusal
+nor a reason. `failPending(sessionId, error)` now resolves only a session still `pending`, so a
+replayed callback cannot overwrite an already-`connected` result.
+
+**3. Kiro's stale discovery note.** `kiroSignInStatus` had `takeDiscoveryNote: () => this.lastDiscoveryNote`
+— a bare read where the OpenCode Console branch takes. One failed client discovery was therefore
+replayed onto every later, healthy Kiro sign-in, so a working connection could report an error about a
+request that was never made.
+
+### OpenCode Console: a client-side hardcode
+
+`startGatewayDeviceSignIn` and `getDeviceSignInStatus` in `src/lib/gatewayClient.ts` interpolated
+`/v1/oauth/opencode-console/start` regardless of the `providerId` they were handed. Both now
+interpolate the id they are given. This is the one change that is **not** Cline's, and it is a
+one-line-per-function fix; naming it separately because it is the kind of defect that reads as a
+provider bug and is not one.
+
+### Measured on a rebuilt probe gateway (:8788, `requireApiKey: false`)
+
+The first probe run reported `failPending is not a function`. That was a stale `dist/` — building
+`@hilbras/omnihilbras-sdk` does not build `apps/gateway`, which is a separate package and needs
+`cd apps/gateway && pnpm build`. After rebuilding:
+
+| callback | before | after |
+| --- | --- | --- |
+| foreign `state` | hung `pending` until timeout | `failed`, "already been used or has expired" |
+| Cline's own blob naming that session | rejected at the state check | reaches the token exchange — Cline's real answer to a fake code: `invalid or expired authorization code` |
+| replay of that same callback | — | keeps its original error, not overwritten |
+
+The second row is the one that matters: reaching Cline's token endpoint was **previously impossible**,
+so that response is proof the state check now passes rather than a success.
+
+`POST /v1/oauth/kiro/start` and `POST /v1/oauth/opencode-console/start` both return live codes
+(`ZVJT-GRTZ` → `https://view.awsapps.com/start/#/device`, `JDMV-RDMS` →
+`https://opencode.ai/console/device?user_code=…&client_id=opencode-cli`). **Their start and poll paths
+were already healthy** — an earlier AWS `400 invalid_request` came from a made-up `clientId=kiro-desktop`,
+not from the real flow, which calls `registerKiroClient()` for a dynamic client id and secret first.
+
+### Not established
+
+- **Whether Cline honours the loopback `callback_url` hand-back in a browser.** The local half is
+  proven; whether Cline's server redirects a real login to `127.0.0.1:8788/v1/oauth/cline/callback/<id>`
+  needs one real login to observe. **This is not claimed to work.**
+- **Kiro's and OpenCode Console's failure modes are undiagnosed.** Both were reported failing and
+  neither was reproduced. Whatever the user saw is at approval time or inference time, and it needs a
+  real credential to reach.
+- **"Connects, but then requests fail" is not explained for any of the three.** No live inference turn
+  was recorded, because no live credential was available.
+
+### Guards, plant-proven
+
+Every guard was broken on purpose, watched fail, and restored:
+
+- `packages/omnihilbras-sdk/test/cline.test.js` (5 new, 31 total) — against a **real blob captured
+  live from `api.cline.bot`**, not a hand-written fixture.
+- `apps/gateway/test/cline-sessions.test.js` (4 new, 14 total) — same constants, callback on **port
+  8788** to match the captured blob. The first draft used 8787 and failed, which is the correct
+  outcome for a mismatched callback.
+- `apps/gateway/test/sign-in-coordinator.test.js` — **source-scanning, not behavioural.** The
+  coordinator receives `takeDiscoveryNote` as a callback and cannot see whether it clears, so no
+  behavioural test can catch this one; it asserts every sign-in body clears `this.lastDiscoveryNote`.
+- `tests/dashboard-truthfulness.test.js` — a device-code sign-in goes to the provider that asked for
+  it. Plant-proven by hardcoding the path back: 1 failure each, for all four guards.
+
+### Comments that had to change with the code
+
+Five places asserted Cline "never echoes `state`", which was the bug restated as a fact. `oauth.ts`,
+`routes/oauth.ts`, `service.ts` and two test comments now say what actually happens: the state is
+replaced by a signed blob, and the blob is cross-checked against the callback URL. Leaving them would
+have taught the next reader that the bug was intended behaviour.
+```
+repo tests 159 (was 158), sdk 535 (was 530), gateway 550 (was 549)   — pnpm verify exit 0 at 1.75.1
+```

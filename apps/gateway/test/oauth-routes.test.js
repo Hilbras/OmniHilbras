@@ -58,8 +58,8 @@ test('starting a sign-in hands back a session and a state carried in the URL', a
   const started = await startSignIn(baseUrl);
   assert.match(started.sessionId, /^[A-Za-z0-9_-]{20,}$/);
   assert.ok(started.state.length >= 32);
-  // The session id rides in the redirect path, because Cline's AuthKit handoff
-  // never echoes `state` back.
+  // The session id rides in the redirect path, so the callback stays
+  // traceable whatever the AuthKit handoff does with `state`.
   assert.equal(started.redirectUri, `http://127.0.0.1:8787/v1/oauth/cline/callback/${started.sessionId}`);
   const url = new URL(started.authUrl);
   assert.equal(url.searchParams.get('state'), started.state, 'a state is still offered');
@@ -126,8 +126,9 @@ test('the flow completes even when the provider never echoes the state back', as
   const started = await startSignIn(baseUrl);
   assert.ok(started.state, 'a state is still sent to the provider');
 
-  // Cline hands off to WorkOS AuthKit, which drops `state`. The redirect path
-  // is the only thing that still identifies the sign-in.
+  // Cline hands off to WorkOS AuthKit and comes back with no `state` in the
+  // query at all. The redirect path is the only thing that still identifies
+  // the sign-in.
   const page = await fetch(`${baseUrl}/v1/oauth/cline/callback/${started.sessionId}?code=granted`, {
     headers: { 'sec-fetch-site': 'cross-site' },
   });

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { completeSignIn, describeSignInFailure } from '../dist/sign-in-coordinator.js';
 import { SignInSessionStore } from '../dist/sign-in-sessions.js';
 import { ProviderError } from '@hilbras/omnihilbras';
@@ -179,3 +180,37 @@ function coordinatorArgs(store, sessionId) {
     takeDiscoveryNote: () => undefined,
   };
 }
+
+test('every sign-in in the service takes its discovery note rather than reading it', async () => {
+  /**
+   * This cannot be settled behaviourally, and that is the whole reason it is a source check.
+   *
+   * `completeSignIn` calls `takeDiscoveryNote()` after a successful save and shows whatever it gets
+   * beside the connection. Whether that value is *cleared* is entirely the caller's business — the
+   * coordinator is handed a function and cannot see inside it. So a test that drives the coordinator
+   * passes just as happily against an implementation that never clears anything, which is the defect.
+   *
+   * What it looked like: `lastDiscoveryNote` is set by `noteDiscoveryFailure` on any failed model
+   * discovery, and three providers wire `takeDiscoveryNote`. Two cleared it. **Kiro only read it.**
+   * So a discovery failure during one Kiro sign-in left the note on the service, and the next Kiro
+   * sign-in — or any later poll of the session it had been left on — attached a message describing a
+   * failure that had nothing to do with it. A user with a working Kiro connection was shown an error
+   * about a request they never made, which is the same false-reporting shape this file's other guards
+   * exist for.
+   */
+  const source = readFileSync(new URL('../src/service.ts', import.meta.url), 'utf8');
+  const sites = [...source.matchAll(/takeDiscoveryNote:\s*\(\)\s*=>\s*\{?([\s\S]{0,220}?)\n\s*\},/g)];
+
+  assert.ok(sites.length >= 3, `the OAuth providers each wire one, and there were only ${sites.length} — a provider was added without one`);
+
+  const bare = sites
+    .map((match, index) => ({ index, body: match[1] }))
+    .filter(({ body }) => !/this\.lastDiscoveryNote\s*=\s*undefined/.test(body));
+
+  assert.deepEqual(
+    bare.map(({ index }) => index),
+    [],
+    'a takeDiscoveryNote that returns the note without clearing it replays one failure onto every ' +
+      'later, healthy sign-in. Every site must clear it: `const note = this.lastDiscoveryNote; this.lastDiscoveryNote = undefined; return note;`',
+  );
+});

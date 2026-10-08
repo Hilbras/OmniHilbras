@@ -6,6 +6,7 @@ import {
   buildClineAuthorizeUrl,
   clineExpiryToIso,
   clineHeaders,
+  clineStateMatchesCallback,
   decodeClineCode,
   type ClineTokens,
   type HttpTransport,
@@ -23,12 +24,14 @@ export const clineCallbackPath = '/v1/oauth/cline/callback';
 
 /**
  * Cline hands the sign-in to WorkOS AuthKit, which starts a session of its own
- * and does not echo a caller-supplied `state` back. So the session cannot be
- * correlated by `state` alone: the session id travels in the *path* of the
- * redirect, which the provider must honour verbatim in order to redirect at all.
+ * and substitutes its own signed state for the one we send. So the session
+ * cannot be correlated by state equality alone: the session id travels in the
+ * *path* of the redirect, which the provider must honour verbatim in order to
+ * redirect at all.
  *
- * `state` is still sent, and is still checked whenever it does come back, so a
- * provider that echoes it gets the stronger guarantee for free.
+ * `state` is still sent, and a callback that carries one still has to prove it
+ * belongs to this session — either by echoing ours, or by naming this exact
+ * callback URL in the blob Cline hands back. See `clineStateMatchesCallback`.
  */
 export function clineCallbackPathFor(sessionId: string) {
   return `${clineCallbackPath}/${sessionId}`;
@@ -181,9 +184,15 @@ export class ClineSessionStore {
     // makes `claimOnce` leave the claim unspent.
     const claimed = claimOnce(() => {
       const session = this.sessions.get(sessionId);
-      // A provider that echoes `state` must echo the right one.
       if (!session) return undefined;
-      if (state !== undefined && session.state !== undefined && session.state !== state) return undefined;
+      /**
+       * A `state` that comes back must belong to this sign-in — but Cline answers with
+       * a blob of its own rather than the value we sent, so demanding an exact match
+       * refused every callback Cline really produces. `clineStateMatchesCallback` also
+       * accepts Cline's blob when it names this callback, which is the only cross-check
+       * that survives the provider having replaced the value.
+       */
+      if (!clineStateMatchesCallback(state, session.state, session.redirectUri)) return undefined;
       return session;
     });
     if (!claimed) return undefined;
@@ -199,6 +208,19 @@ export class ClineSessionStore {
     session.result = result;
     // A finished sign-in is kept only long enough for the dashboard to read it.
     session.expiresAt = Math.min(session.expiresAt, this.now() + 60_000);
+  }
+
+  /**
+   * Fails a session that is still waiting, and leaves a finished one as it is.
+   *
+   * Used for a callback that could not be claimed. Such a callback has no session to
+   * claim — it may be a replay of one that already succeeded — so it must not overwrite a
+   * result the dashboard may already be showing. Only a still-`pending` session changes.
+   */
+  failPending(sessionId: string, error: string) {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.result.status !== 'pending') return;
+    this.resolve(sessionId, { status: 'failed', error });
   }
 
   private prune() {
