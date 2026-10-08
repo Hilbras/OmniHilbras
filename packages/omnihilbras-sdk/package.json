@@ -1,6 +1,6 @@
 {
   "name": "@hilbras/omnihilbras",
-  "version": "1.77.0",
+  "version": "1.77.1",
   "description": "Typed provider SDK for the OmniHilbras gateway: normalized chat, streaming, model listing, and capability contracts for OpenAI, Anthropic, Gemini, and OpenAI-compatible providers.",
   "license": "MIT",
   "author": "Hilbras",

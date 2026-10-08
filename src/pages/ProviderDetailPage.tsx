@@ -226,11 +226,13 @@ const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, req
 /**
  * OAuth providers the gateway can actually complete a sign-in for today.
  *
- * `clinepass` is here because it shares Cline's sign-in — the same account, the same stored
- * connection — rather than having a flow of its own. Signing in from its page runs the Cline flow and
- * saves the one connection both cards then read.
+ * **A card that shares another's connection is not listed.** `clinepass` reads Cline's connection
+ * through `connectionProviderId`, and there is no `clinepass` sign-in route — its sign-in *is* Cline's.
+ * Listing it here would have enabled a flow that calls `/v1/oauth/clinepass/start`, which the gateway
+ * does not serve: the request 404s, the tab opened for it is never navigated, and the button looks dead
+ * with a blank page. The dialog is sent to the connection owner instead (see `signInProviderId`).
  */
-const oauthProvidersWithFlow = new Set(['cline', 'clinepass', 'opencode-console', 'kiro', 'claude-code']);
+const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro', 'claude-code']);
 
 /** Providers whose flow is a pasted credential rather than a browser sign-in. */
 const webCookieProviders = new Set(webSessionProviderIds());
@@ -533,11 +535,22 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   const testing = testingModels.length > 0;
   const isOauth = provider.auth === 'OAuth';
   /**
-   * OAuth providers the gateway can actually sign in to. A card may list an auth mode
-   * the gateway cannot yet serve, so the action is disabled and says so rather than
-   * opening a flow that would fail or, worse, borrow another provider's.
+   * The provider whose sign-in this card uses.
+   *
+   * Usually the card's own id. For a card that shares another's connection — `clinepass` reads Cline's —
+   * there is no sign-in route of its own: the account is the same, so the flow is Cline's, and the one
+   * connection it saves is what both cards then read. Sending the dialog to the owner's id is what makes
+   * "Add connection" work on the sibling card instead of calling a route that does not exist.
    */
-  const oauthFlowAvailable = !isOauth || oauthProvidersWithFlow.has(provider.id);
+  const signInProviderId = provider.connectionProviderId ?? provider.id;
+  /**
+   * Whether a sign-in can be *started* for this card.
+   *
+   * Two ways to be available: the gateway serves a start route for this card's own id, or the card
+   * shares a connection with a card that does. A card that is neither is disabled and says so, rather
+   * than opening a flow that would fail or, worse, borrow another provider's.
+   */
+  const oauthFlowAvailable = !isOauth || oauthProvidersWithFlow.has(provider.id) || oauthProvidersWithFlow.has(signInProviderId);
 
   // Browsers only allow window.open inside the click that granted the gesture,
   // so the tab is opened blank here and the dialog navigates it once the
@@ -556,7 +569,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       // Kiro opens its own tab from the click that picks a method, which is closer to the
       // gesture a popup needs. Opening one here instead left a blank tab sitting on
       // about:blank through the whole method chooser, doing nothing.
-      setSignInWindow(provider.id === 'kiro' ? null : window.open('about:blank', '_blank'));
+      setSignInWindow(signInProviderId === 'kiro' ? null : window.open('about:blank', '_blank'));
     } else {
       setSignInWindow(null);
     }
@@ -1033,7 +1046,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
           onConnected={handleOauthConnected}
         />
       )}
-      {isOauth && oauthFlowAvailable && addOpen && provider.id === 'kiro' && (
+      {isOauth && oauthFlowAvailable && addOpen && signInProviderId === 'kiro' && (
         <KiroConnectDialog
           providerName={provider.name}
           signInWindow={signInWindow}
@@ -1042,9 +1055,12 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
           onConnected={handleOauthConnected}
         />
       )}
-      {isOauth && oauthFlowAvailable && addOpen && provider.id !== 'kiro' && (
+      {isOauth && oauthFlowAvailable && addOpen && signInProviderId !== 'kiro' && (
         <OauthConnectDialog
-          providerId={provider.id}
+          // The connection owner's id, not this card's: `clinepass` signs in through Cline's route, and
+          // the one saved connection is what both cards read. Passing this card's id here is what sent the
+          // flow to a route the gateway does not serve, leaving the opened tab blank.
+          providerId={signInProviderId}
           providerName={provider.name}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           signInWindow={signInWindow}

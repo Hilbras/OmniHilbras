@@ -176,6 +176,41 @@ test('a card may claim OAuth only where the gateway has an OAuth flow to sign in
   assert.ok(claimOauth.length > 0, 'there are OAuth cards, so the check above is not vacuous');
 });
 
+test('the dashboard offers a sign-in only for a card whose route the gateway actually serves', () => {
+  /**
+   * The regression this exists for: `clinepass` is an OAuth card that shares `cline`'s connection, so it
+   * has no start route of its own. When the page naively added every OAuth card to `oauthProvidersWithFlow`
+   * and told the dialog to sign in as the card's own id, "Add connection" called
+   * `/v1/oauth/clinepass/start`, which the gateway does not serve. The tab opened for the click sat blank
+   * and nothing happened — a dead button with no error, which is exactly the failure the blank-tab shape
+   * hides.
+   *
+   * So the dashboard's OAuth set is checked against the gateway's real routes: each entry either has its
+   * own start route, or names a `connectionProviderId` that does.
+   */
+  const gateway = stripComments(readFileSync(join(GATEWAY, 'routes', 'oauth.ts'), 'utf8'));
+  const routes = new Set([...gateway.matchAll(/url\.pathname === '\/v1\/oauth\/([\w-]+)\/start'/g)].map((match) => match[1]));
+  const page = stripComments(readFileSync(join(ROOT, 'src', 'pages', 'ProviderDetailPage.tsx'), 'utf8'));
+  const listed = [...page.matchAll(/oauthProvidersWithFlow\s*=\s*new Set\(\[([^\]]*)\]\)/g)]
+    .flatMap((match) => [...match[1].matchAll(/'([\w-]+)'/g)].map((id) => id[1]));
+  assert.ok(listed.length > 0, 'the OAuth set must be readable, or this proves nothing');
+  const cardById = new Map(cards().map((card) => [card.id, card]));
+  const broken = listed.filter((id) => !routes.has(id) && !(cardById.get(id)?.connectionProviderId && routes.has(cardById.get(id).connectionProviderId)));
+  assert.deepEqual(
+    broken,
+    [],
+    `these cards enable a sign-in but neither they nor the connection they share has a start route: ${broken.join(', ')}. ` +
+      'A card that shares another card\'s sign-in must name it as `connectionProviderId`, and the dialog must sign in as that owner.',
+  );
+  // And the dialog must actually be handed the owner's id, not the card's — the set being right is not
+  // enough if the flow still calls the sibling's route.
+  assert.match(
+    page,
+    /providerId=\{signInProviderId\}/,
+    'the OAuth dialog must be given the connection owner\'s id, or a shared card calls a route that does not exist',
+  );
+});
+
 test('every card has a mark or a letter to fall back on, and no card is listed twice', () => {
   const seen = new Map();
   const problems = [];

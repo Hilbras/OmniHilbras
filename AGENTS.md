@@ -162,6 +162,14 @@ that is not on `main`.
   ClinePass card's link to the Cline page. The gateway mirrors the sharing with the alias in
   `provider-alias.ts`, which is the one deliberate cross-provider credential lookup — a provider id on
   the request path stays its own, so failures name the right card.
+  **A shared card must sign in as the connection owner, not as itself.** There is no
+  `/v1/oauth/clinepass/start`; a shared card signs in through Cline's route, so `ProviderDetailPage`
+  passes `signInProviderId` (the owner) to the dialog and does not list the card in
+  `oauthProvidersWithFlow` on its own id alone. Getting this wrong is silent in the worst way: the click
+  opens a tab that is never navigated, and the button just looks dead — no error, because the failure is
+  a 404 on a request whose response was never awaited into the UI.
+  `tests/provider-cards.test.js` now checks the dashboard's OAuth set against the gateway's real routes
+  and fails if the dialog is not handed the owner's id.
   **A card may only show what was measured.** `lib/providerCards.ts` folds gateway state into the
   catalog, and it sets only what a connection or a health poll actually reports — `endpoint`, `latency`,
   `status`, `health`, `models`, `modelList`. `lastUsed` and `requests` are deliberately left as

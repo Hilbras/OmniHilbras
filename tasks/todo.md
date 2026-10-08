@@ -4766,3 +4766,46 @@ advice — ClinePass shares Cline's sign-in.
   unanswered by this change and would be a separate, researched piece of work.
 - `docs/architecture/9router-provider-catalog.md` lists 10 ClinePass models; Cline's current list is 14–16.
   Left alone — it is a captured measurement.
+
+---
+
+## Fix, 1.77.1 — the ClinePass "Add connection" button opened a blank tab
+
+### What the user saw
+
+Clicking **Add connection** on the ClinePass card opened a tab that stayed on `about:blank` and did
+nothing. Reproduced against the running gateway: with the dashboard's `Origin`, `POST
+/v1/oauth/cline/start` answers `201` and returns the auth URL, but `POST /v1/oauth/clinepass/start`
+answers **`404 Route not found`**.
+
+### The cause, which was mine from 1.77.0
+
+1.77.0 put `clinepass` in `oauthProvidersWithFlow` and passed `providerId={provider.id}` to the dialog.
+There is **no `clinepass` OAuth route**, and there should not be — ClinePass has no sign-in of its own,
+its sign-in is Cline's. The dialog's `start` request 404'd; the tab the click had opened was never
+navigated; the dialog's own error was never seen because the blank tab is all the user looks at.
+
+Two earlier decisions kept this from being caught: the same-value assumption that made `clinepass` read
+`cline`'s connection (correct) was not carried through to the *route* (wrong), and the failure mode — a
+dead button — is one no unit test was watching.
+
+### The fix
+
+- `oauthProvidersWithFlow` is back to the four ids that have routes. A card is now *available* if it has
+  its own route **or** names a `connectionProviderId` that does.
+- `ProviderDetailPage` computes `signInProviderId = connectionProviderId ?? id` and passes **that** to the
+  dialog, so a shared card runs the owner's sign-in. The one connection it saves is what both cards read.
+- `tests/provider-cards.test.js` gained a guard: the dashboard's OAuth set is checked against the
+  gateway's real start routes, and the dialog must be handed `signInProviderId`. **Plant-proven** —
+  reverting the dialog to `provider.id` fails the new test; restoring it passes.
+
+### Verify
+
+- repo tests 160 (was 159), sdk 550, gateway 557 — `pnpm verify` exit 0 at 1.77.1.
+- Live on `:8787`: `POST /v1/oauth/cline/start` with the dashboard Origin returns the auth URL; there is
+  no `clinepass` route and the card no longer calls one.
+
+### Still unverified
+
+- The sign-in itself was not completed in a browser. The button now calls the right route; whether Cline
+  returns the redirect end to end is the same open question recorded at 1.75.2 and is not answered here.
