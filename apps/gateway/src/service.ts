@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import type { GatewayConfig } from './config.js';
@@ -128,6 +128,7 @@ export class GatewayService {
   private chatGptWeb?: ProviderAdapter;
   /** DeepSeek Web, built once so its access-token cache is shared across requests. */
   private deepSeek?: DeepSeekWebAdapter;
+  private tokenHarborWeb?: TokenHarborWebAdapter;
   private kiro?: ProviderAdapter;
   /** Why the last model discovery failed, when it was tolerated rather than fatal. */
   private lastDiscoveryNote?: string;
@@ -285,7 +286,8 @@ export class GatewayService {
       .onDemand(claudeCodeProviderId, ({ providerId, connection }) => this.claudeCodeAdapter(connection?.id ?? providerId))
       .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId))
       .onDemand(chatGptWebProviderId, () => this.chatGptWebAdapter())
-      .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter());
+      .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter())
+      .onDemand(tokenHarborWebProviderId, () => this.tokenHarborWebAdapter());
     this.credentialLifecycle = new CredentialLifecycle({
       adapterFor: (providerId) => { try { return this.registry.get(providerId); } catch { return undefined; } },
       now,
@@ -829,6 +831,57 @@ export class GatewayService {
         priority: 1,
         proxyPool: 'none',
         modelPolicy: 'all',
+      },
+      credential,
+      signal,
+    );
+  }
+
+  /**
+   * Token Harbor Web, built once. Typed as the concrete class for the same reason as DeepSeek's:
+   * both the check and the connect path depend on `validateCredential` being present, and the
+   * concrete type makes that a compile error rather than a runtime one.
+   */
+  tokenHarborWebAdapter(): TokenHarborWebAdapter {
+    this.tokenHarborWeb ??= new TokenHarborWebAdapter();
+    return this.tokenHarborWeb;
+  }
+
+  /**
+   * Checks a pasted Token Harbor session cookie and stores nothing.
+   *
+   * The check is a real read of `/api/me/profile`, which answers 401 to a session Token Harbor
+   * does not recognise. That is a credential check and not a completion, and it is reported as
+   * one: whether a model can answer is only known by sending a turn, which the connect path does
+   * not do either.
+   */
+  async checkTokenHarborWeb(cookie: string, signal?: AbortSignal) {
+    const credential = tokenHarborWebCredential(cookie);
+    await this.tokenHarborWebAdapter().validateCredential(credential, { signal });
+    return { verified: true };
+  }
+
+  /**
+   * Stores a Token Harbor Web session cookie, after confirming Token Harbor accepts it.
+   *
+   * Verified **before** the save, so a refused cookie never becomes a connection — the same order
+   * as DeepSeek Web, and the opposite of what produced a saved-but-dead connection in the past.
+   *
+   * `modelPolicy` follows the dialog's free-only checkbox. The adapter's catalog is a dated
+   * snapshot that needs no request, and the two `:free` ids are the ones that do not bill.
+   */
+  async connectTokenHarborWeb(cookie: string, signal?: AbortSignal, freeOnly = false) {
+    const credential = tokenHarborWebCredential(cookie);
+    await this.tokenHarborWebAdapter().validateCredential(credential, { signal });
+    return this.saveConnection(
+      {
+        id: tokenHarborWebProviderId,
+        providerId: tokenHarborWebProviderId,
+        name: 'Token Harbor Web',
+        endpoint: 'https://tokenharbor.ai',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: freeOnly ? 'free' : 'all',
       },
       credential,
       signal,

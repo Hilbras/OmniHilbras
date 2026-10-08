@@ -214,6 +214,25 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/tokenharbor/check') {
+      // A credential check, not a completion: it reads `/api/me/profile` and stores nothing. The
+      // card's notice says what the trade is — this proxies a service whose terms forbid it — and
+      // the check is what makes the button worth pressing before saving a whole-account session.
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      sendJson(response, 200, await service.checkTokenHarborWeb(readRequiredString(body, 'cookieHeader'), signal), origin);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/tokenharbor/connect') {
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      // Anything other than a literal `true` is not the free-only import; a truthy string from a
+      // hand-written request would otherwise narrow a connection nobody asked to narrow.
+      const freeOnly = body.freeOnly === true;
+      const connection = await service.connectTokenHarborWeb(readRequiredString(body, 'cookieHeader'), signal, freeOnly);
+      sendJson(response, 201, { connection }, origin);
+      return true;
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/web-cookie/qwen/check') {
       // A probe, not a connect, and it stores nothing. The open question is whether Alibaba's
       // bot-protection gate applies to an authenticated request, and that cannot be answered

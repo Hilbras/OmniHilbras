@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
 import { scriptedFetch } from './harness/scripted-fetch.js';
+import { scriptedTokenHarborFetch } from './harness/scripted-tokenharbor-fetch.js';
 import { scriptedDriver, chatGptWebFixtureCredential, CHATGPT_WEB_CONTRACT_MODEL } from './harness/scripted-driver.js';
 import test from 'node:test';
 import { runProviderContract, CONTRACT_TEXT } from './provider-contract.js';
@@ -11,6 +12,7 @@ import { OpenAICompatibleAdapter } from '../dist/adapters/openai-compatible.js';
 import { AnthropicAdapter } from '../dist/adapters/anthropic.js';
 import { GeminiAdapter } from '../dist/adapters/gemini.js';
 import { DeepSeekWebAdapter } from '../dist/adapters/deepseek-web.js';
+import { TokenHarborWebAdapter } from '../dist/adapters/tokenharbor-web.js';
 import { ChatGptWebAdapter } from '../dist/adapters/chatgpt-web.js';
 import { ClineAdapter } from '../dist/adapters/cline.js';
 import { KiroAdapter } from '../dist/adapters/kiro.js';
@@ -139,6 +141,28 @@ const providers = [
         },
         // A fixed catalog, like Kiro's: the contract cannot ask for it and be believed.
         model: 'deepseek-v4-pro',
+      };
+    },
+  },
+  {
+    // A `fetch` double, like DeepSeek Web's. Its turn is two requests and a named-event SSE
+    // decode, so a parsed-JSON transport could not exercise it.
+    name: 'tokenharbor-web',
+    make: () => {
+      const fetchImpl = scriptedTokenHarborFetch();
+      return {
+        adapter: new TokenHarborWebAdapter({ fetch: fetchImpl }),
+        // An api-key, because that is what a Token Harbor Web connection holds: the reassembled
+        // Supabase cookie, wrapped by tokenHarborWebCredential.
+        credential: { type: 'api-key', value: 'sb-auth-auth-token=base64-eyJhY2Nlc3NfdG9rZW4iOiJhLmIuYyJ9' },
+        script: (parts, options) => {
+          fetchImpl.set(parts);
+          if (options?.refuseWith !== undefined) fetchImpl.setStatus(options.refuseWith);
+          return async () => { fetchImpl.setStatus(200); };
+        },
+        // A fixed, dated catalog: Token Harbor publishes no models endpoint, so the contract
+        // cannot ask for it and be believed.
+        model: 'gpt-6-luna',
       };
     },
   },

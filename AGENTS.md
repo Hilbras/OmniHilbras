@@ -23,8 +23,9 @@ version.
 
 ## Definition of done for a change
 
-1. `pnpm verify` passes. That is `version:check`, then `typecheck`, then `test`,
-   then `build`, in that order — the order that fails fastest. CI runs the same
+1. `pnpm verify` passes. That is `version:check`, then `typecheck`, then `test`, then `build`,
+   then `analyze:check` (the dashboard's bundle budget) — in that order, the order that fails
+   fastest. CI runs the same
    command, so a change that passes locally passes in CI by construction.
    **That sentence was false until 1.33.2.** CI had failed all 25 runs it had
    ever executed, including the commit that introduced it, while every local
@@ -162,6 +163,22 @@ that is not on `main`.
   of which the dashboard renders directly, and a missing logo is a browser 404 that no build reports.
   `tests/dashboard-assets.test.js` asserts every rendered mark is committed; if it has to be
   disabled to make a commit pass, the exclusion is the bug.
+- A surface that content scrolls under is **opaque**. A `backdrop-filter` behind a `position: sticky`
+  element re-samples and re-blurs that content every frame. The dashboard header and sidebar were
+  `bg-bg/80 backdrop-blur-xl`, and `.nav-blur` in `src/index.css` was a filter over a 74%-opaque
+  background; measured on `/dashboard/usage` by swapping the committed file for the one in `HEAD`
+  and back, two interleaved rounds of 5 reps: **37 and 39 fps before, 61 and 62 after**. On `/`,
+  **52 and 49 before, 64 and 63 after**. **Opacity is half of it** — a filter is only paid for when
+  something shows through, so dropping the utility while leaving `bg-bg/80` in place would have kept
+  the cost while looking like a fix. `tests/ui-performance.test.js` walks every `.ts`/`.tsx` under
+  `src/`, including classes defined in `src/index.css`, so the literal-CSS blur is caught too.
+  `fixed inset-0` modal overlays are deliberately allowed: nothing scrolls behind them.
+- **The page wrapper is not keyed on the path.** `key={location.pathname}` forced React to unmount
+  and rebuild the whole page on every route change, replaying a 420 ms entrance animation and
+  re-running every page effect. Measured by marking the wrapper's DOM node before a click:
+  **it survived 8 of 8 navigations without the key, and 0 of 8 with it.** Route-level caching is
+  *not* the answer to a slow navigation — keeping pages mounted is most of what makes a dashboard
+  feel heavy.
 
 ## Commands
 
@@ -172,4 +189,6 @@ pnpm dev:gateway    # local gateway on 127.0.0.1:8787
 pnpm typecheck
 pnpm test           # SDK then gateway
 pnpm build
+pnpm analyze        # per-page bundle cost, attributed per package
+pnpm verify         # the release gate: version, typecheck, test, build, bundle budget
 ```

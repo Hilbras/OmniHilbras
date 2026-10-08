@@ -61,7 +61,19 @@ function DashboardRoutes() {
 
   return (
     <DashboardShell activePage={activePage} pageTitle={pageTitle} pageDescription={pageDescription}>
-      <div key={location.pathname} className="page-enter">
+      {/*
+        * **No `key={location.pathname}` here.** It was on this div, and it forced React to unmount
+        * and remount the entire page subtree on every navigation — throwing away the DOM, replaying
+        * the 420 ms `.page-enter` animation from opacity 0, and re-running every page effect. The
+        * animation made the remount look intentional; measured, it was a full teardown on each
+        * route change.
+        *
+        * `Routes` already swaps the matched element when the path changes, which is the render that
+        * was wanted. The `.page-enter` class is kept on the wrapper for the *first* mount of the
+        * dashboard, which is the one place an entrance animation reads as a transition rather than
+        * as lag.
+        */}
+      <div className="page-enter">
         <Routes>
           <Route path="/" element={<Navigate to="/providers" replace />} />
           <Route path="/providers" element={<ProvidersContent />} />

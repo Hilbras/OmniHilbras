@@ -21,4 +21,5 @@ export * from './adapters/chatgpt-web.js';
 export * from './adapters/deepseek-pow.js';
 export * from './adapters/deepseek-web.js';
 export * from './adapters/qwen-web.js';
+export * from './adapters/tokenharbor-web.js';
 export * from './url.js';

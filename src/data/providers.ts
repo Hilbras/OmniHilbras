@@ -367,6 +367,47 @@ export const providerCatalog: ProviderRecord[] = [
     modelList: [],
   },
   {
+    /**
+     * The **web** side of Token Harbor, as a separate card from the API-key one above — the same
+     * split as Anthropic versus Claude Code, where the difference is the credential and not the
+     * vendor.
+     *
+     * It drives the chat application at tokenharbor.ai with the Supabase session cookie a
+     * signed-in browser already holds, instead of an API key. Token Harbor publishes a real API
+     * (the card above), and their terms **prohibit** proxying the web chat — which is exactly what
+     * this is — so it carries the strongest notice the catalog has and the trade is the user's.
+     */
+    id: 'tokenharbor-web',
+    name: 'Token Harbor Web',
+    description:
+      'Drives tokenharbor.ai/chat with the session cookie you are signed in with. A web session, not your API key.',
+    category: 'Web session',
+    group: 'web-cookie',
+    status: 'available',
+    auth: 'Session cookie',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#3859ff',
+    initial: 'T',
+    logo: providerLogoMap.tokenharbor,
+    endpoint: 'https://tokenharbor.ai',
+    /**
+     * An empty list on purpose, and not the same decision as the dated `qwen-web` snapshot.
+     *
+     * The models are real and known — 21 of them, including two `:free` ids that do not bill — but
+     * they live in a constant in the adapter rather than on the card, because this catalog is the
+     * no-connection fallback and must claim no measurement. The connect dialog is where the live
+     * list is shown.
+     */
+    modelList: [],
+    riskNotice:
+      'Token Harbor is itself a gateway, and its terms prohibit constructing a proxy over it — which is what this is. Their documented, supported path is the API-key card beside this one, and a key is free on the ":free" models. This card drives the web chat with a live session cookie for a whole-account sign-in instead. Only continue if you have weighed that against the supported path.',
+    riskSeverity: 'high',
+  },
+  {
     id: 'kimi',
     name: 'Kimi',
     description: 'Moonshot AI long-context and agentic models, reached through their OpenAI-compatible endpoint.',

@@ -88,6 +88,12 @@ const NO_CAPTURE_YET = {
   // Claude subscription grant to read it with, and `claude-code.test.js` asserts the decode against a
   // scripted transport instead of claiming a capture that was never taken.
   'claude-code': 'its `/v1/models` listing needs a Claude subscription OAuth grant this machine does not have; the listing itself is free, so this is a credential gap rather than a cost one',
+  // Token Harbor Web is a named-event SSE body over a Supabase session cookie. The catalog is
+  // read from the `/models` page, not an endpoint, so the only captureable bytes are a live
+  // `direct-chat/stream` body — which needs a signed-in session this machine does not have, and
+  // which its terms do not permit proxying in the first place. The frames are transcribed from
+  // the client bundle in `scripted-tokenharbor-fetch.js` rather than invented.
+  'tokenharbor-web': 'the only captureable bytes are a live direct-chat/stream body, which needs a signed-in Token Harbor session this machine has no credential for; the frames come from that service\'s own client bundle',
 };
 
 test('the fixtures directory holds only captures, named for the adapter they came from', () => {

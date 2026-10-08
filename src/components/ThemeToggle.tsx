@@ -1,10 +1,42 @@
-import { useEffect, useRef, useState } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 
-type Theme = 'light' | 'dark';
+/**
+ * The theme toggle, and the one place the dashboard touches an animation library.
+ *
+ * ## Why `motion` is loaded lazily
+ *
+ * This component is the **only** user of `motion/react` on the dashboard, for a single icon flip.
+ * Because `DashboardShell` imports it, a static import put the whole library in the shared chunk
+ * `dashboard.html` loads — **284 KB rendered**, about 90 KB gzipped, on every dashboard page load
+ * for an animation nobody sees unless they press the button. `scripts/analyze-bundle.mjs` measures
+ * it and `--check` fails if it comes back; `tests/bundle-budget.test.js` asserts the source side.
+ *
+ * So the animated icon lives in `ThemeAnimatedIcon.tsx` and is pulled in on **intent** — a pointer
+ * or a keyboard focus on the toggle, which is the moment before it can be pressed. The toggle is
+ * usable throughout: before the chunk arrives, and forever under reduced motion, it renders the
+ * plain icon, which is what it looked like before the animation existed. Someone who never touches
+ * the theme toggle never downloads the library at all.
+ *
+ * `prefers-reduced-motion` is honoured *before* the import, so a user who asked for less motion
+ * never downloads the library either.
+ */
 
-function getTheme(): Theme {
-  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+type AnimatedIcon = ComponentType<{ theme: 'light' | 'dark'; children: ReactNode }>;
+
+let cached: AnimatedIcon | null = null;
+let inflight: Promise<AnimatedIcon> | null = null;
+
+/** Imports the animated icon once, however many callers ask. */
+function loadAnimatedIcon(): Promise<AnimatedIcon> {
+  if (cached) return Promise.resolve(cached);
+  inflight ??= import('./ThemeAnimatedIcon').then((mod) => (cached = mod.ThemeAnimatedIcon));
+  return inflight;
+}
+
+/** `requestIdleCallback` where it exists, a timeout otherwise (Safari shipped it late). */
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 function MoonSparkle({ size = 16 }: { size?: number }) {
@@ -28,9 +60,17 @@ function SunSparkle({ size = 16 }: { size?: number }) {
   );
 }
 
+type Theme = 'light' | 'dark';
+
+function getTheme(): Theme {
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+}
+
 export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>(getTheme);
-  const reduceMotion = useReducedMotion();
+  // `null` until the animation library has arrived. Nothing depends on it, so the toggle is
+  // interactive from the first render either way.
+  const [Animated, setAnimated] = useState<AnimatedIcon | null>(cached);
   const animationTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -42,19 +82,28 @@ export function ThemeToggle() {
     }
   }, [theme]);
 
+  /** Fetches the animated icon, unless it is not wanted or already here. */
+  const warm = useCallback(() => {
+    if (prefersReducedMotion()) return;
+    void loadAnimatedIcon().then((component) => setAnimated(() => component));
+  }, []);
+
   useEffect(() => () => window.clearTimeout(animationTimer.current), []);
 
   const nextTheme = theme === 'dark' ? 'light' : 'dark';
   const icon = theme === 'light' ? <MoonSparkle /> : <SunSparkle />;
 
+  const animateThemeClass = useCallback(() => {
+    if (prefersReducedMotion()) return;
+    document.documentElement.classList.add('theme-anim');
+    window.clearTimeout(animationTimer.current);
+    animationTimer.current = window.setTimeout(() => {
+      document.documentElement.classList.remove('theme-anim');
+    }, 450);
+  }, []);
+
   function toggleTheme() {
-    if (!reduceMotion) {
-      document.documentElement.classList.add('theme-anim');
-      window.clearTimeout(animationTimer.current);
-      animationTimer.current = window.setTimeout(() => {
-        document.documentElement.classList.remove('theme-anim');
-      }, 450);
-    }
+    animateThemeClass();
     setTheme(nextTheme);
   }
 
@@ -62,25 +111,15 @@ export function ThemeToggle() {
     <button
       type="button"
       onClick={toggleTheme}
+      // Intent is a better signal than the idle timer: a pointer or a keyboard focus on the toggle
+      // means the animation is about to be wanted, so start the fetch then rather than later.
+      onPointerEnter={warm}
+      onFocus={warm}
       aria-label={`Switch to ${nextTheme} theme`}
       title={`Switch to ${nextTheme} theme`}
       className="theme-toggle relative grid h-9 w-9 place-items-center rounded-full"
     >
-      {reduceMotion ? (
-        icon
-      ) : (
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.span
-            key={theme}
-            className="grid place-items-center"
-            initial={{ opacity: 0, scale: 0.4, rotate: -120 }}
-            animate={{ opacity: 1, scale: 1, rotate: 0, transition: { duration: 0.3, ease: [0.34, 1.56, 0.64, 1] } }}
-            exit={{ opacity: 0, scale: 0.4, rotate: 120, transition: { duration: 0.15, ease: 'easeIn' } }}
-          >
-            {icon}
-          </motion.span>
-        </AnimatePresence>
-      )}
+      {Animated ? <Animated theme={theme}>{icon}</Animated> : icon}
     </button>
   );
 }

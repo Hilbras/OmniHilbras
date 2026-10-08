@@ -114,10 +114,35 @@
 }
 
 @layer components {
+  /*
+   * Opaque, not frosted — the same performance decision as the dashboard header.
+   *
+   * This was `backdrop-filter: blur(16px) saturate(1.4)` on the sticky navbar, over a 74%-opaque
+   * background — which makes the browser re-sample and re-blur everything scrolling under it on
+   * every frame. Measured on `/` by swapping this file for the one in `HEAD`, scrolling, and swapping
+   * back — two interleaved rounds, median of 5 reps: **52 and 49 fps before, 64 and 63 after.**
+   *
+   * The background is now opaque, not merely blur-free: a backdrop filter is only paid for when
+   * something shows through, so dropping the filter while leaving the translucency would have left
+   * the cost in place.
+   *
+   * The frosted look was not worth a scroll that stutters, and the guard for it lived only in my
+   * head until `tests/ui-performance.test.js` learned to follow a class name to its definition —
+   * it had been checking for `backdrop-blur` utilities and could not see this literal CSS one.
+   */
   .nav-blur {
-    background: color-mix(in srgb, var(--bg) 74%, transparent);
-    backdrop-filter: blur(16px) saturate(1.4);
-    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    background: color-mix(in srgb, var(--bg) 96%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  }
+
+  .glass {
+    /* Unused today — nothing in `src/` applies this class. Left in place because deleting a token
+       is a separate decision; if it is ever used on a sticky or always-visible fixed surface, the
+       blur is the same per-frame cost, and `tests/ui-performance.test.js` now follows a class name
+       to this definition to say so. */
+    background: color-mix(in srgb, var(--surface) 74%, transparent);
+    backdrop-filter: blur(14px) saturate(1.35);
+    -webkit-backdrop-filter: blur(14px) saturate(1.35);
   }
 
   .btn-gold {

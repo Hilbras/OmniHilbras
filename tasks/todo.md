@@ -4102,3 +4102,269 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Files: `packages/omnihilbras-sdk/src/types.ts`, `src/adapters/openai-compatible.ts`, `src/adapters/openai.ts`, `test/embeddings.test.js`, `apps/gateway/src/request-executor.ts`, `src/service.ts`, `src/routes/inference.ts`, `test/embeddings-route.test.js`, `docs/SPEC-SDK.md`, `docs/architecture/embeddings-plan.md`.
   - Depends on: Task 10.
   - Scope: Medium.
+
+---
+
+## Task 90: Token Harbor Web, a session cookie over a gateway whose terms forbid it
+
+Asked to add a Web Cookie provider for `https://tokenharbor.ai/chat`. Probed it before writing
+anything, and the probe changed the shape of the work twice.
+
+**Token Harbor is itself a gateway** — "One API for the world's leading AI models", "one key, one
+balance" — and the web-cookie route is a *proxy over a gateway*, which its terms forbid:
+
+> **Proxy Reselling:** Utilize the Service to construct a direct, white-labeled proxy alternative
+> to Token Harbor without adding substantive unique value...
+
+> ...compromise the security, stability, or **architectural guardrails of the Token Harbor gateway**.
+
+Their documented path is `https://tokenharbor.ai/v1` with a Bearer key (OpenAI-compatible, and
+free on the `:free` models), and a card for it **already exists** in the catalog. This was the
+second time a decision "already made" was not: the same as Anthropic-versus-Claude-Code, the
+vendor was present but the credential was not the one asked for.
+
+The ToS finding and the credential gap were both put to the operator before any code was written;
+the session-cookie route was chosen with the trade stated, so it ships with `riskSeverity: 'high'`.
+
+### What was measured rather than assumed
+
+- Auth is Supabase: `auth.tokenharbor.ai/auth/v1/health` answers Supabase's own
+  `No API key found in request`. The cookie is therefore `sb-<ref>-auth-token`, i.e.
+  **`sb-auth-auth-token`**, written with `document.cookie` (not `HttpOnly`), chunked `.0`/`.1`.
+- The turn is **not** OpenAI-shaped. From the client bundle:
+  `POST /api/direct-chat/sessions { model, temporary }` then
+  `POST /api/direct-chat/stream { sessionId, content, model, webSearch, tz }` → named-event SSE
+  (`chunk`, `thinking`, `tool_use`, `citation`, `image`, `file`, `miniapp`, `done`, `error`).
+- The catalog is on the `/models` page and has no JSON endpoint: **21 models**, two of them free.
+- No reusable "sign in and read the cookies" helper exists in the gateway — the window flow was
+  removed in 1.44.0 — so the house pattern is **paste the credential**, which is what this does.
+
+### What was built
+
+`packages/omnihilbras-sdk/src/adapters/tokenharbor-web.ts`, plus a gateway `.onDemand`
+registration, `checkTokenHarborWeb` / `connectTokenHarborWeb`, two `/v1/web-cookie/tokenharbor/*`
+routes, a second catalog card and a `webSessionProviders` descriptor. The adapter consumes
+`chunk` and `thinking` separately (a thinking model must not answer with its reasoning), requires
+`done` to call an answer complete (a stream that closes early is reported, not handed back as a
+half answer labelled `stop`), and ignores attachment events rather than guessing them into text.
+
+### What is asserted, and what is not
+
+The turn needs a signed-in session this repository has no credential for, and `AGENTS.md` forbids
+presenting an unverified check as a working one. So:
+
+- **Asserted offline:** the cookie parser (chunk reunion *in numeric order*, sibling cookies kept,
+  the signed-out empty value named), the decoder (reasoning split, `done` required, `error` codes),
+  the request bodies via a scripted `fetch`, health being a `credential` check, and the routes.
+- **Not asserted:** a live turn. The end-to-end path that *is* reachable without a session was
+  exercised against a running gateway — a real cookie-shaped paste reaches `tokenharbor.ai` and its
+  `401` is mapped to `AUTHENTICATION_FAILED` — and the card, the dialog and its guide were verified
+  in a browser (4 cards in the group, zero broken images, no page errors).
+- The adapter is **not** in the DeepSeek/OpenAI contract table, because its SSE body is consumed
+  whole rather than streamed; `capabilities.streaming` is false and no `streamChat` is claimed.
+
+```
+tests    repo 150   sdk 528   gateway 545   (all green, pnpm verify green)
+```
+
+### The first live check: a 401 that was really a truncated paste
+
+The operator pasted a session and got `401 ... Sign in at tokenharbor.ai again`. Measured before
+changing anything:
+
+- The cookie name is right — the bundle derives `` `sb-${hostname.split(".")[0]}-auth-token` ``,
+  which is `sb-auth-auth-token` for `auth.tokenharbor.ai`, and the ref (`isbnzmwjmtiuipesgmmg`)
+  is read from the anon key the bundle also ships. So the name was never the question.
+- The header set is not the cause: `tokenharbor.ai/api/me/profile` answers `401 {"ok":false}`
+  identically with no headers, with browser-shaped headers, and with a bogus cookie — and the
+  public endpoint is reached from here, so it is not a network block.
+- Node's `fetch` **does** transmit a `Cookie` header (proved against a local listener), so the
+  value really was sent.
+
+The value the operator pasted was **truncated** — it ends mid-base64, inside the `identities`
+JSON. That is the real defect: a cut-short cookie was forwarded, Token Harbor answered 401, and
+the user was told to sign in again for a paste that never finished. It is DeepSeek's
+`{"value":null}`-read-as-a-token, one provider over.
+
+**Fixed by decoding the session locally before it is sent.** `sessionValueProblem` strips
+Supabase's `base64url` encoding (confirmed from their own decoder: `cookieEncoding` defaults to
+`base64url`, and the `base64-` prefix is what `cookieEncoding` writes) and reports which of the
+two failures it is — undecodable base64, or decodes-but-not-JSON — so the sentence says "the
+paste was cut short", not "sign in again". A complete-but-expired session is told apart too:
+`sessionExpiresAt` reads `expires_at` and the 401 names the expiry rather than sending the user
+round a re-auth loop. Both decode with `atob`/`TextDecoder`, so the module stays free of Node
+builtins the dashboard would choke on.
+
+Measured against the restarted gateway:
+
+```
+truncated  -> 400  "That session cookie was cut short: it decodes to something that is not complete JSON..."
+expired    -> 401  "...The pasted session expired at 2001-09-09T01:46:40.000Z..."
+```
+
+**A live session was pasted into the chat to diagnose this.** It carries an `access_token`, a
+`refresh_token` and the account email, so it is compromised the moment it leaves the browser: it
+was **not** written to any file or commit, it was used only to localise the problem, and it has
+to be rotated (sign out, or sign in again) regardless. The lesson is the one the ChatGPT card
+already states — the credential is a whole-account session, and it never belongs anywhere but the
+loopback gateway.
+
+---
+
+## Task 91: the dashboard was heavy, and the fix was measured rather than felt
+
+Reported as "the frontend UI is very slow and heavy, it takes a lot of memory". Measured first,
+because "heavy" has several candidates and no number.
+
+```
+                        heap (load -> 13s)   nodes   GSAP loops   gateway calls
+DEV  dashboard          35.6 -> 35.6 MB       518       0             12
+DEV  marketing /        28.0 -> 28.0 MB       487       1              0
+PROD dashboard           9.5 MB               ~500      0             10
+PROD marketing /         9.5 MB                486      1              0
+```
+
+**Heap is flat on both pages — there is no leak.** What the report was feeling was startup cost,
+and the largest part of it was **dev mode**: `pnpm dev` serves 67 separate JavaScript modules
+(35.6 MB heap) where the production build serves two bundles (9.5 MB).
+
+### The finding that mattered: 284 KB of `motion` on every dashboard load
+
+The bundle analyzer (`scripts/analyze-bundle.mjs`, added here) attributes rendered bytes per module
+to the package that shipped them, per page. It reported:
+
+```
+dashboard.html   1305 KB rendered over 2 chunk(s)   motion: 284 KB
+index.html        930 KB rendered over 2 chunk(s)   motion: 285 KB
+```
+
+`motion` is used on the dashboard in exactly one place — an icon flip in the theme toggle — but
+`DashboardShell` imports `ThemeToggle`, so `motion/react` was in the shared chunk that
+`dashboard.html` loads. Every dashboard page load paid roughly 90 KB gzipped for an animation
+nobody sees unless they press a button.
+
+**Before this, that number was a grep.** I had counted `MotionValue` occurrences in the built
+chunk and called it a measurement; it says a string is present, not what it costs. Rollup reports
+`renderedLength` per module, so the honest figure was always available from the real build with no
+new dependency. The heuristic and the real number happened to agree (≈110 KB raw), which is luck,
+not method — and it is why the analyzer now exists instead of a note in a conversation.
+
+### Fixed
+
+- **`motion` is off the dashboard's critical path.** The animated half moved to
+  `ThemeAnimatedIcon.tsx`, and `ThemeToggle` reaches it with `import()` on **intent** — a pointer
+  or a keyboard focus on the toggle. Measured in a browser: **no motion request on load, and
+  `ThemeAnimatedIcon.tsx` requested the moment the toggle is hovered.** Someone who never touches
+  the theme toggle never downloads the library. `prefers-reduced-motion` is checked *before* the
+  import, so that user never downloads it either.
+- **The particle canvas stops instead of idling.** It was an O(n²) loop over up to 72 particles
+  running forever, including in a background tab and while scrolled past. Now: the loop is
+  **cancelled** (not merely skipped) when the document is hidden or the canvas leaves the viewport,
+  and restarted on the way back; a 60 fps cap stops it spending the whole frame on a 120 Hz panel.
+  Measured with rAF call counting: **53/s visible, 0 off-screen, 42/s on return, 0 hidden.** The
+  "control" that validated the method: the canvas bitmap is provably static off-screen and provably
+  changing back in view.
+
+### Result
+
+```
+dashboard.html    1305 KB rendered, motion 284 KB   ->   1021 KB rendered, motion 0 KB
+dashboard gzip total (entry + css + shared)  182 KB  ->  144 KB
+```
+
+### Guards, both plant-proven
+
+- `tests/bundle-budget.test.js` (4 tests) asserts the **source** side in two seconds, before
+  anything builds: `ThemeToggle` must not statically import `motion`, must reach
+  `ThemeAnimatedIcon` by `import()`, that module must not be statically imported elsewhere, motion
+  must be imported from exactly the three expected files, and the particle loop must keep its
+  hidden/off-screen/frame-budget guards. Planting a static `motion/react` import back, and
+  deleting the `document.hidden` guard, each fail exactly one test.
+- `pnpm analyze:check` runs last in `pnpm verify` and fails if the dashboard's motion cost leaves
+  its budget. It is the build-side half — a source check cannot see what a bundler decided.
+
+```
+tests    repo 154   sdk 530   gateway 545
+```
+
+---
+
+## Task 92: scrolling and page switching were slow, and the cause was two attributes
+
+Reported as "when I scroll or change between the pages it is very slow and takes too long, I want
+it to be very light." Two independent causes, neither visible in a diff.
+
+### Cause 1: a translucent backdrop blur on sticky surfaces
+
+The dashboard header was `sticky top-0 ... bg-bg/80 backdrop-blur-xl`, spanning the full content
+width, and the sidebar carried the same filter beside it. A backdrop filter behind a `position:
+sticky` element re-samples and re-blurs the content scrolling under it **every frame**. The marketing
+navbar had the same shape in a place the first guard could not see: `.nav-blur` in `src/index.css`
+was `blur(16px) saturate(1.4)` over a 74%-opaque background.
+
+Both are now opaque: the header and sidebar lost the filter and went solid, and `.nav-blur` keeps
+only a background and a border. The mobile overlay's `backdrop-blur-[2px]` is deliberately **kept** —
+it is mounted only while the drawer is open, nothing scrolls behind it, and the blur is painted once.
+`.glass` is unused and was left alone, with the risk written next to it.
+
+### Cause 2: the page was torn down and rebuilt on every navigation
+
+`key={location.pathname}` on the page wrapper in `dashboardApp.tsx` made React unmount and rebuild
+the entire page subtree on each route change, replaying a 420 ms `.page-enter` animation from
+`opacity: 0` and re-running every page effect — which is a round trip to the gateway per tab switch.
+`<Routes>` already swaps the matched element; the key only added a teardown.
+
+Measured by marking the page wrapper's DOM node with an expando before a sidebar click, then
+checking whether the mark survives: **the wrapper survived 8 of 8 navigations with the key removed,
+and 0 of 8 with it present.** The mark has to be set before the click — a probe installed after the
+click lands on the replacement node and reports the opposite of what happened, which is what the
+first version of this measurement did.
+
+Route-level caching was considered and **rejected**: keeping mounted pages alive is what makes a
+dashboard feel heavy, and this complaint was partly about memory.
+
+### Measurement, and a correction to how it was taken
+
+The first numbers here came from injecting the old CSS at runtime in a headless browser, and they
+were wrong — an injected `backdrop-filter` produced a *smaller* penalty than the same filter present
+in the markup from first paint, because the compositing decision has already been made. The
+numbers below swap the committed file for the one in `HEAD`, scroll, swap back, and repeat: two
+interleaved rounds, median of 5 reps, scrolling driven from inside `requestAnimationFrame` so the
+scroll and the paint it triggers land in the same frame.
+
+```
+/dashboard/usage   37, 39 fps before   ->   61, 62 fps after
+/                 52, 49 fps before   ->   64, 63 fps after
+```
+
+The variance is itself part of the result: the "before" runs ranged 30–53 fps while the "after" runs
+were flat at 61–65. A frame that occasionally takes three times as long is a visible stutter even
+when the median looks acceptable.
+
+### Fixed
+
+- **Sticky and always-visible fixed surfaces are opaque.** Header and sidebar in `DashboardShell.tsx`,
+  `.nav-blur` in `src/index.css`. The header comment records why, and that **opacity is half the
+  cost** — a filter is only paid for when something shows through, so dropping the utility while
+  leaving the translucency would have kept the cost and looked like a fix.
+- **No forced remount per navigation.** `key={location.pathname}` is gone; `<Routes>` remains.
+
+### Guards, plant-proven
+
+`tests/ui-performance.test.js` (4 tests) walks every `.ts`/`.tsx` under `src/`:
+
+- no `backdrop-blur` on a `sticky` element or a `fixed inset-y-0` one, **and** no class used on such
+  an element that `src/index.css` defines with `backdrop-filter`. The second half exists because the
+  first version of this test could not see `.nav-blur` at all — it only read Tailwind utility names.
+  Plant-proven: putting `backdrop-filter` back into `.nav-blur` fails it, naming
+  `src/components/Navbar.tsx: class "nav-blur" …`.
+- the page wrapper is not keyed, and still routes through `<Routes>`.
+- `.page-enter` still exists for first paint, and is not replayed per route.
+- nothing calls `startViewTransition`, which would animate the entire viewport per navigation.
+
+Plant-proven for the blur branch as well: restoring `backdrop-blur-xl` on the sticky header fails
+the test, and restoring `key={location.pathname}` fails two.
+
+```
+repo tests 158 (was 154), sdk 530, gateway 545   — pnpm verify exit 0 at 1.74.0
+```

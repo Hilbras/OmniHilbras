@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "1.72.0",
+  "version": "1.75.0",
   "packageManager": "pnpm@12.5.1",
   "type": "module",
   "scripts": {
@@ -21,7 +21,9 @@
     "test:gateway": "pnpm --filter @omnihilbras/gateway test",
     "version:check": "node scripts/check-version.mjs",
     "version:fix": "node scripts/check-version.mjs --fix",
-    "verify": "pnpm version:check && pnpm test:brand && pnpm typecheck && pnpm test && pnpm build",
+    "analyze": "node scripts/analyze-bundle.mjs",
+    "analyze:check": "node scripts/analyze-bundle.mjs --check",
+    "verify": "pnpm version:check && pnpm test:brand && pnpm typecheck && pnpm test && pnpm build && pnpm analyze:check",
     "test:brand": "BRAND_STRICT=1 node --test tests/brand-assets.test.js",
     "brand": "node scripts/generate-brand.mjs"
   },

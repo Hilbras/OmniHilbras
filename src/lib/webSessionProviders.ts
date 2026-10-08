@@ -119,6 +119,41 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     },
     planNote: 'DeepSeek Web serves the same 14 models to every account, so there is no plan to read and nothing is narrowed.',
   },
+  'tokenharbor-web': {
+    id: 'tokenharbor-web',
+    name: 'Token Harbor Web',
+    website: 'https://tokenharbor.ai/chat',
+    credentialName: 'sb-auth-auth-token',
+    /**
+     * The cookie is a Supabase session, so unlike ChatGPT Web's `HttpOnly` token it can be read
+     * from the Application panel as well as the Network tab — a distinction that decides whether a
+     * console one-liner is possible (it is not needed here, and is not offered).
+     */
+    extractionSteps: [
+      {
+        label: 'Copy the Cookie header',
+        body: 'With tokenharbor.ai open and signed in: F12 → Network → reload → click any request to tokenharbor.ai → Headers → Request Headers → Cookie. Copy that entire line and paste it here. It carries the Cloudflare clearance alongside the session, and both are wanted.',
+      },
+      {
+        label: 'Or the Application panel',
+        body: `F12 → Application → Storage → Cookies → https://tokenharbor.ai, and copy the value of \`${'sb-auth-auth-token'}\`. If it is split into numbered rows (\`.0\`, \`.1\`), copy them all — they are rejoined in order for you.`,
+      },
+      {
+        label: 'What happens next',
+        body: 'Check asks tokenharbor.ai whether the session is accepted, by reading your profile. Nothing is stored unless you press Save, and the check is a credential check — whether a model can answer is only known by sending a turn.',
+      },
+    ],
+    paste: {
+      path: '/v1/web-cookie/tokenharbor/connect',
+      field: 'cookieHeader',
+      placeholder: 'sb-auth-auth-token=base64-...; cf_clearance=...',
+      supportsFreeOnly: true,
+      sectionLabel: 'Or paste a session cookie instead',
+      fieldLabel: 'Cookie header or session cookie',
+    },
+    check: { path: '/v1/web-cookie/tokenharbor/check', field: 'cookieHeader' },
+    planNote: 'Token Harbor serves its catalog to every account; the ":free" models are the ones that never bill.',
+  },
 };
 
 export function webSessionDescriptor(providerId: string): WebSessionDescriptor | undefined {

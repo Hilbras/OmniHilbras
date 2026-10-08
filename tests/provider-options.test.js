@@ -76,8 +76,8 @@ test('the neutral option is the local custom endpoint, not a hosted vendor', () 
 test('a web-session provider is recognised, so the keyed dialog is never opened for one', () => {
   // A card for a provider that is *signed into* has no key to collect, and opening the keyed dialog
   // for one produces a form that asks for a credential the provider does not use.
-  const webSession = providerCatalog.filter((card) => ['chatgpt-web', 'qwen-web', 'deepseek-web'].includes(card.id));
-  assert.equal(webSession.length, 3, 'the fixture moved: update the ids here');
+  const webSession = providerCatalog.filter((card) => ['chatgpt-web', 'qwen-web', 'deepseek-web', 'tokenharbor-web'].includes(card.id));
+  assert.equal(webSession.length, 4, 'the fixture moved: update the ids here');
   for (const card of webSession) assert.equal(isWebSessionProvider(card.id), true, `${card.id} is a web-session provider`);
   for (const card of providerCatalog.filter((c) => !webSession.includes(c))) {
     assert.equal(isWebSessionProvider(card.id), false, `${card.id} should not be treated as a web-session provider`);
@@ -155,7 +155,9 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // test exists.
   // Cards 23 -> 24 in 1.72.0 (`claude-code`); the dialog offers no option for it, because it is an
   // OAuth card and `eligibleGroups` is `api-key`, `local` and `custom` only.
-  assert.equal(providerCatalog.length, 24, `the catalog now has ${providerCatalog.length} cards`);
+  // Cards 24 -> 25 in 1.73.0 (`tokenharbor-web`); no option either, for the same reason one level
+  // over — its group is `web-cookie`, which the keyed dialog does not offer.
+  assert.equal(providerCatalog.length, 25, `the catalog now has ${providerCatalog.length} cards`);
   assert.equal(providerOptions.length, 16, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

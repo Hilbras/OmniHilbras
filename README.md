@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.72.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.75.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -266,6 +266,16 @@ Qwen3.7-Plus, Qwen3.8-Max and Qwen3.8-Omni-Flash, and the chat endpoint is a pla
 unobfuscated `POST /api/v2/chat/completions`. The turn is refused by Alibaba's TMD anti-bot,
 which returns a captcha that has to be rendered in a browser. Not built on a maybe.
 
+**Token Harbor Web is the one to think twice about.** Token Harbor is itself a gateway, and its
+terms **prohibit** constructing a proxy over it — which is what a web-cookie card is. Their
+documented path is the **TokenHarbor** API-key card (`https://tokenharbor.ai/v1`, OpenAI-compatible,
+free on the `:free` models), and that card is the one to prefer. The web card exists because the
+session route was asked for with the trade stated: it drives `tokenharbor.ai/chat` with a Supabase
+session cookie (`sb-auth-auth-token`), whose turn is `POST /api/direct-chat/sessions` and then
+`POST /api/direct-chat/stream` — a named-event SSE body (`chunk`, `thinking`, `done`) rather than
+OpenAI's. The card carries `riskSeverity: 'high'` and says so before you paste anything. **No live
+turn has been recorded here**, because a real one needs a signed-in session.
+
 **Signing in is one button.** It opens chatgpt.com in a window on the machine running
 OmniHilbras, you sign in with your own password and second factor, and the session is read
 straight out of that browser — including the Cloudflare clearance a copied cookie tends to
@@ -406,7 +416,9 @@ pnpm dev:gateway
 pnpm build
 pnpm typecheck
 pnpm test
-pnpm verify        # the release gate: version, typecheck, test, build
+pnpm verify        # the release gate: version, typecheck, test, build, bundle budget
+pnpm analyze       # what each page downloads, attributed to the package that shipped it
+pnpm analyze:check # the same, failing if the dashboard pulls the animation library again
 pnpm version:check # one version, stated once — fails if the copies disagree
 pnpm version:fix   # rewrite the derived copies from package.json
 ./scripts/dev.sh   # the gateway and the dashboard together, in one terminal
@@ -414,6 +426,16 @@ pnpm version:fix   # rewrite the derived copies from package.json
 
 `pnpm verify` is what CI runs on every push and pull request. `version:check` exists because the
 README advertised `0.2.0` while the project was at `1.12.2` — a hundred minor versions, unnoticed.
+
+**`pnpm analyze` answers "why is the dashboard heavy" with numbers.** Rollup reports rendered bytes
+per module, so the script attributes what each page loads to the package that shipped it. It exists
+because that question was first answered by grepping a built chunk for a library's symbol names — a
+heuristic dressed as a measurement. Measured, the dashboard was loading **284 KB of `motion`**
+(`motion-dom` + `framer-motion`) for one icon flip in the theme toggle, because `DashboardShell`
+imports it. The animated half now lives in `ThemeAnimatedIcon.tsx` and is fetched on intent — a hover
+or focus on the toggle — so a dashboard page load downloads none of it, and `pnpm analyze:check`
+runs last in `pnpm verify` so it cannot come back quietly. `tests/bundle-budget.test.js` asserts the
+source side of the same rule in two seconds, before anything is built.
 
 `scripts/dev.sh` starts the gateway, waits until its port answers, then starts the dashboard, and stops
 both when either exits. The wait is the point: starting the dashboard first means the opening page load

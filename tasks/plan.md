@@ -250,7 +250,7 @@ written, while the plan continued to read as finished:
 
 | Risk | Claimed mitigation | Measured |
 | --- | --- | --- |
-| Provider APIs change independently (**High**) | pin response fixtures per adapter | **4 of 14 adapters** (16 files in `src/adapters/`, three of which are not protocol adapters) — `kiro-stream.bin` plus `openrouter`, `cline` and `opencode-console` (1.48.0). The other ten have a stated reason, and **eight of those need a credential this machine does not have**. The count is printed by `fixture-coverage.test.js`, so it cannot go stale again without a test failing. |
+| Provider APIs change independently (**High**) | pin response fixtures per adapter | **4 of 15 adapters** (17 files in `src/adapters/`, three of which are not protocol adapters) — `kiro-stream.bin` plus `openrouter`, `cline` and `opencode-console` (1.48.0). The other eleven have a stated reason, and **nine of those need a credential this machine does not have**. The count is printed by `fixture-coverage.test.js`, so it cannot go stale again without a test failing. |
 | Streaming formats differ (**High**) | test event boundaries explicitly | real: frame-level assertions across the adapter tests |
 | Secrets leak through logs/errors (**High**) | redaction helpers and tests that scan errors/log output | real: error-output scanning tests exist |
 | Gateway becomes coupled to one provider | no provider IDs in shared service logic | real: 12 files carry a zero-provider-id invariant test |

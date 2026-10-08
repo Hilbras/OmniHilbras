@@ -226,6 +226,12 @@ The first local gateway exposes:
 - `POST /v1/oauth/opencode-console/start` — begin an OpenCode Console device-flow sign-in.
 - `GET /v1/oauth/opencode-console/session/:id` — whether a device flow is awaiting approval, connected, or failed.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
+- `POST /v1/web-cookie/tokenharbor/check` — verify a pasted Token Harbor session cookie against
+  `tokenharbor.ai` by reading the account profile, and store nothing. A credential check, not a
+  completion: it says whether the session is accepted, not whether a model can answer.
+- `POST /v1/web-cookie/tokenharbor/connect` — store the session cookie as a connection after it is
+  verified. Accepts the whole `Cookie:` header or the `sb-auth-auth-token` value alone, rejoins its
+  numbered chunks, and honours `freeOnly`.
 - `POST /v1/oauth/kimi-code/start` — begin a Kimi Code sign-in. Kimi's device flow, so the response
   carries a `userCode` and a `verificationUrl` for the user to approve in their own browser; there is no
   redirect back. Both halves of the flow are **form-encoded**, which is measured: Kimi answers a JSON
@@ -1501,7 +1507,40 @@ connection is made.
 POST /v1/web-cookie/chatgpt/connect    { storageState }        -> 201
 POST /v1/web-cookie/deepseek/connect   { userToken }           -> 201
 POST /v1/web-cookie/chatgpt/check      { storageState }        -> 200
+POST /v1/web-cookie/tokenharbor/check  { cookieHeader }        -> 200
+POST /v1/web-cookie/tokenharbor/connect { cookieHeader, freeOnly } -> 201
 ```
+
+### Token Harbor Web — a session cookie over a gateway whose terms forbid it
+
+Token Harbor is itself a gateway, and its terms prohibit constructing a proxy over it. This is
+one: `/api/direct-chat/stream` is the web chat's own request path, driven with a Supabase session
+cookie rather than an API key. The supported path is the `tokenharbor` API-key card
+(`https://tokenharbor.ai/v1`, OpenAI-compatible, free on the `:free` models); this card exists
+because the operator asked for the session route with that trade stated, and it carries
+`riskSeverity: 'high'` so a user meets the warning before pasting a credential.
+
+The cookie is Supabase's, on the `auth` host: `sb-<ref>-auth-token`, chunked `.0`/`.1` when large.
+
+**The wire format is not OpenAI's**, which is the whole adapter:
+
+```
+POST /api/direct-chat/sessions  { model, temporary }        -> { session: { id } }
+POST /api/direct-chat/stream    { sessionId, content, model, webSearch, tz }
+   -> SSE named events: chunk { delta } | thinking { delta } | done | error { code, message }
+```
+
+`temporary: true` keeps a gateway request out of the user's sidebar; `chunk` is the answer and
+`thinking` is the reasoning, split by event name so a thinking model is not read as answering
+with its reasoning. `done` is what makes a truncated body detectable — a stream that closes
+without it is reported, not handed back as a half answer labelled complete. Attachment events
+(`image`, `file`, `citation`, `tool_use`) are ignored rather than guessed into the answer.
+
+**No live turn is asserted here.** The turn needs a signed-in session this repository has no
+credential for, so it is verified by using it; what is asserted offline is the cookie parser
+(chunk reunion in numeric order, sibling cookies preserved), the decoder (reasoning split from
+the answer, `done` required, `error` codes), and the route. Health is a `credential` check — it
+reads `/api/me/profile` and says so rather than claiming `inference`.
 
 **The trade-off, stated plainly.** A pasted credential is replayed into the gateway's browser
 on each turn, rather than that browser keeping a fresh session of its own. The Cloudflare
@@ -2478,7 +2517,7 @@ measurement, and `apps/gateway/test/spec-success-criteria.mjs` fails if any stop
       `build` script; `packages/omnihilbras-sdk/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **16 files** in `packages/omnihilbras-sdk/src/adapters/` — three of which (`deepseek-pow`, `chatgpt-first-party`, `qwen-web`) are not protocol adapters, which is why the capture guard counts 14 — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **17 files** in `packages/omnihilbras-sdk/src/adapters/` — three of which (`deepseek-pow`, `chatgpt-first-party`, `qwen-web`) are not protocol adapters, which is why the capture guard counts 15 — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **7 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and
