@@ -181,6 +181,35 @@ export async function startGatewayServer(options: {
  * `/v1/usage` is on the same footing as `/v1/routing` and for the same reason: a usage record names
  * providers, connections, models and latencies, which describes what this machine talks to. It holds no
  * credential and no prompt, so it is not as sensitive as `/v1/keys`.
+ *
+ * ## The one carve-out, and why it is safe (1.75.2)
+ *
+ * `/v1/oauth` is on this list, and the provider's callback lives under it — which meant the Cline
+ * callback answered a browser that could not present a key with the gate's own message and no page at
+ * all:
+ *
+ * ```
+ * 401  GET /v1/oauth/cline/callback/<id>?code=…
+ *      {"error":{"code":"AUTHENTICATION_FAILED","message":"This gateway requires an API key…"}}
+ * ```
+ *
+ * The callback is the one request in the whole product that **cannot** carry an `Authorization` header:
+ * it is a top-level navigation the provider sends the browser to, so the key was never on the table and
+ * enforcement made the feature unreachable rather than secure. It is exempted here with the *same*
+ * predicate that already exempts it from the cross-site guard, so the two exemptions cannot drift apart
+ * and leave a path open to one and not the other.
+ *
+ * What the exemption costs, stated rather than assumed: those two GET paths are reachable by an
+ * unauthenticated local process. They render an HTML status page whose only content is a short message,
+ * and the callback can only act on a session this gateway minted — 256 random bits in the path for Cline,
+ * 122 for Claude Code — and on a code the provider issued. The token never appears in the response and never
+ * leaves the vault; the route that carries the resulting connection, `/v1/oauth/cline/session/*`, is still
+ * gated, as are `/v1/oauth/cline/start` and `/v1/oauth/cline/exchange`. The predicate is GET-only and
+ * path-exact, so a POST to the callback path is refused like any other management route.
+ *
+ * This is parity, not a new opening: with enforcement off — the documented local-mode default — these paths
+ * were already reachable, because `authorize()` returns before it can refuse anything. What changed is that
+ * a gateway *with* keys enforced now answers the navigation the same way a gateway without them does.
  */
 const MANAGEMENT_PREFIXES = ['/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage'] as const;
 
@@ -217,7 +246,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     // The management surface is gated here rather than in each handler, so a route added later cannot
     // forget it. `authorize()` returns immediately when enforcement is off, which is what keeps local
     // mode and every test that builds a gateway without a key store working unchanged.
-    if (isManagementPath(ctx.url.pathname) && !isTrustedDashboard(auth)) {
+    if (isManagementPath(ctx.url.pathname) && !isTrustedDashboard(auth) && !isOauthCallbackNavigation(request)) {
       try {
         await service.authorizePublicRequest(extractApiKey(request));
       } catch (error) {

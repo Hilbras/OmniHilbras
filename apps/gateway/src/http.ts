@@ -55,18 +55,25 @@ export function getRequestOrigin(request: IncomingMessage) {
   return typeof origin === 'string' ? origin : undefined;
 }
 
-/**
- * Cline redirects the browser to a loopback address, so the callback is a page
- * the gateway serves itself. It only shows the code for the user to copy back
- * into the dashboard; it never stores a token on its own.
- */
-
 export function isCrossSiteRequest(request: IncomingMessage) {
   return request.headers['sec-fetch-site'] === 'cross-site';
 }
 
-/** The GET navigations the OAuth provider is allowed to redirect to. */
-
+/**
+ * The GET navigations an OAuth provider is allowed to redirect the browser to.
+ *
+ * Two guards consult this, and they have to agree. The cross-site guard exempts
+ * the callback because a top-level navigation carries `sec-fetch-site: cross-site`
+ * and no `Origin`; the API-key gate exempts it because that same navigation has
+ * no way to carry an `Authorization` header either. Naming the paths once is what
+ * stops one guard learning about the callback and the other not — which is not a
+ * tidy-up: the callback lives under `/v1/oauth`, and it served the API-key gate's
+ * "This gateway requires an API key" error to every user with enforcement on until
+ * both agreed.
+ *
+ * The page it identifies renders an outcome message and no credential, so what the
+ * exemption exposes is a status page, not a session.
+ */
 export function isOauthCallbackNavigation(request: IncomingMessage) {
   if (request.method !== 'GET') return false;
   const path = (request.url ?? '').split('?', 1)[0] ?? '';

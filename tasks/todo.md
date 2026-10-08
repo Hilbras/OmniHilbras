@@ -4480,3 +4480,110 @@ have taught the next reader that the bug was intended behaviour.
 ```
 repo tests 159 (was 158), sdk 535 (was 530), gateway 550 (was 549)   — pnpm verify exit 0 at 1.75.1
 ```
+
+## Task 94: Cline could never finish signing in on a gateway that enforces API keys
+
+**Reported.** The Cline provider answered with
+
+```
+error
+code    "AUTHENTICATION_FAILED"
+message 'This gateway requires an API key. Create one on the API keys page and send it as "Authorization: Bearer <key>".'
+```
+
+**Reproduced** against the local gateway on `:8787`, which has `requireApiKey: true`, with the headers a
+provider redirect actually sends — `sec-fetch-site: cross-site`, `sec-fetch-mode: navigate`, no `Origin`, no
+`Authorization`:
+
+```
+401  GET /v1/oauth/cline/callback/<43-char id>?code=…
+     {"error":{"code":"AUTHENTICATION_FAILED","message":"This gateway requires an API key…"}}
+```
+
+Byte for byte the reported message. So this was never Cline refusing anything.
+
+### Why 1.75.1 could not have seen it
+
+The probe gateway I used to verify that fix ran on `:8788` with `requireApiKey: false`. `authorize()` returns
+immediately when enforcement is off, so the gate could not fire there and the callback answered `200` every
+time. **A local half of a flow can look completely correct while the deployment configuration the user
+actually runs is the thing that is broken.** That is the lesson, and it is the reason this task exists as more
+than a one-line guard change: the verification was done against a configuration that could not reproduce the
+failure.
+
+### The cause
+
+`MANAGEMENT_PREFIXES` in `apps/gateway/src/server.ts` covers `/v1/oauth` — correctly, since that prefix holds
+`/v1/keys`-shaped routes. The provider callback lives under it, and a callback is the **one request in the
+product that cannot present an `Authorization` header**: it is a top-level navigation the provider sends the
+browser to. Enforcement therefore did not secure it, it made it unreachable — and it did so *after* the
+cross-site guard had already been taught to let it through, so the two guards disagreed about the same path.
+
+Both provider callbacks were affected. `GET /v1/oauth/claude-code/callback/:sessionId` had the same defect and
+would have failed the same way.
+
+### The fix
+
+Exempt the callback navigation from the API-key gate with `isOauthCallbackNavigation(request)` — the *same*
+predicate that already exempts it from the cross-site guard, so the two cannot drift apart again. One line in
+`server.ts`.
+
+Refused deliberately: a prefix exemption on `/v1/oauth/`. It would also open `/v1/oauth/cline/exchange`, the
+route that turns a code into a live connection, and `/v1/oauth/cline/session/*`, which carries the connected
+record back. `isOauthCallbackNavigation` is GET-only and path-exact, so neither is reachable through it.
+
+### What the exemption costs, stated
+
+Those two GET paths are reachable by an unauthenticated local process. They render an HTML page whose only
+content is a short outcome message; no token is in it or in the response, and a callback can only act on a
+session this gateway minted — the session id in the path carries 256 random bits for Cline (`randomToken(32)`,
+`oauth.ts`) and 122 for Claude Code (`crypto.randomUUID()` with the dashes stripped, `sign-in-sessions.ts`) —
+with the provider's code as the other half. The token never leaves the vault. This is recorded in
+`server.ts`, `docs/SPEC-SDK.md` and `SECURITY.md`
+rather than left implicit.
+
+### Verify
+
+`apps/gateway/test/admin-gate.test.js` (5 new, 11 total):
+
+- the callback is reachable with enforcement on and no key, for **both** providers, and never renders the
+  gate's message;
+- the siblings that mint and carry credentials — `cline/start`, `cline/exchange`, `cline/session/*`,
+  `claude-code/start`, `claude-code/session/*`, `opencode-console/start`, `opencode-console/session/*` — all
+  still answer `401`;
+- the carve-out is GET-only: a `POST` to the callback path is refused;
+- what the carve-out exposes is a status page, not the session: no gateway key in the body, and the session
+  route still `401`;
+- both guards call the same predicate, so they cannot drift apart.
+
+Both directions were plant-proven rather than assumed:
+
+- **fix removed** → the reachable, status-page and same-predicate tests fail; the sibling and GET-only tests
+  still pass, which is the correct outcome for assertions about what must *not* change;
+- **exemption widened to `/v1/oauth/`** → the sibling test and the status-page test fail, on
+  `/v1/oauth/cline/session/*` answering `200`.
+
+Live on `:8787` with enforcement on, after restarting the gateway: the callback answers `200 text/html` and
+renders *"This sign-in has already been used or has expired. Start again from OmniHilbras."* — an honest
+answer for a session that does not exist, where before it rendered the admin gate's error — while
+`/v1/oauth/cline/session/:id`, `/v1/oauth/cline/exchange` and `/v1/connections` all still answer `401`.
+
+### Still unverified
+
+- **Whether Cline completes the redirect in a real browser.** The callback is reachable and answers an
+  honest page; whether `api.cline.bot` honours the loopback `callback_url` hand-back after a genuine login was
+  never observed end to end, so the sign-in may still stop later than this point.
+- Kiro and OpenCode Console were not touched here — their reported failure modes were never reproduced, and
+  neither uses a redirect callback, so this fix should not change either. It has not been re-tested for them.
+
+One flake to record, because the first run of this verify failed and the second did not: `sdk
+test/stream-bounds.test.js` was reported as `✖ … 'Promise resolution is still pending but the event loop has
+already resolved'` while the full suite was running, with all six of its assertions `✔` and one test cancelled.
+Run on its own three times it passed 7/7 every time, and the full suite passed clean on the retry, so it is
+load flakiness in `node --test` rather than anything this change touched — the only SDK edit here is a version
+constant. Not fixed, because nothing here reproduces it; recorded so the next person who sees it does not
+re-investigate from zero.
+
+```
+repo tests 159 (was 159), sdk 535 (was 535), gateway 555 (was 550)   — pnpm verify exit 0 at 1.75.2
+```

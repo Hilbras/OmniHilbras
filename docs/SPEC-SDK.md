@@ -251,7 +251,8 @@ The first local gateway exposes:
 - `GET /v1/oauth/claude-code/callback/:sessionId` — where Claude redirects the browser; completes the
   exchange and reports the outcome on a small HTML page. The raw query is handed over rather than the
   parsed `code`, because Claude repeats the code after a `#` and both halves are needed. Exempt from the
-  cross-site guard alongside Cline's callback, because a top-level navigation carries no `Origin`. The
+  cross-site guard and from the API-key gate alongside Cline's callback, because a top-level navigation
+  carries no `Origin` and could not carry a key either. The
   session is claimed **before** the exchange, since an authorization code is single-use.
 - `GET /v1/oauth/claude-code/session/:id` — whether a started Claude Code sign-in is pending, connected,
   failed, or expired. A well-formed id that does not exist is `404`; an id that is not a plausible session
@@ -411,6 +412,24 @@ allowlisted browser origin. The contract:
   and `/v1/routing`. `authorize()` returns early when enforcement is off, so
   local mode and every test that builds a gateway without a key store are
   unchanged.
+- **The provider callbacks are the one carve-out from the management gate**
+  (1.75.2). `/v1/oauth` is on that list, and a provider's callback is a
+  top-level navigation the browser is *sent* to, so it is the one request in the
+  product that cannot carry an `Authorization` header. With enforcement on it
+  answered `401 AUTHENTICATION_FAILED` — *"This gateway requires an API key…"* —
+  which made the sign-in unreachable rather than secure. `GET
+  /v1/oauth/cline/callback/:sessionId` and `GET
+  /v1/oauth/claude-code/callback/:sessionId` are now exempt, using the *same*
+  predicate that already exempts them from the cross-site guard so the two
+  exemptions cannot drift apart. What that costs, stated: those two GET paths are
+  reachable by an unauthenticated local process. They render an HTML page whose
+  only content is a short outcome message; no token is in it or in the response,
+  and a callback can only act on a session this gateway minted — the session id
+  carries 256 random bits for Cline and 122 for Claude Code — with the provider's
+  code as the other half. The routes that carry the result, `/v1/oauth/*/session/*`,
+  and the ones that mint credentials, `/*/start` and `/cline/exchange`, stay
+  gated. The predicate is GET-only and path-exact, so a `POST` to a callback path
+  is refused like any other management route.
 - **Known limitation, recorded not papered over.** `kind: 'dashboard'` is derived
   from the `Origin` *header*, which any non-browser client can set, so a local
   process can claim to be the dashboard and skip the gate. Closing that needs a
@@ -2125,9 +2144,10 @@ owns, so the sign-in completes on its own and there is normally nothing to paste
    click that started the flow, because a browser only allows `window.open`
    during a user gesture, and the dialog navigates it once the URL exists.
 3. The user approves in the browser, and Cline redirects to
-   `GET /v1/oauth/cline/callback/:sessionId`, which is the one route exempt from
-   the cross-site guard, because a top-level navigation from the provider sends
-   `sec-fetch-site: cross-site` and no `Origin`.
+   `GET /v1/oauth/cline/callback/:sessionId`, which is exempt from both the
+   cross-site guard and the API-key gate: a top-level navigation from the
+   provider sends `sec-fetch-site: cross-site` and no `Origin`, and it has no way
+   to carry an `Authorization` header at all.
 4. The exchange proves the token with a real `GET /v1/users/me` before anything
    is written, then discovers the model catalog and saves the connection. A
    rejected code is reported as an authentication failure; an unreachable token

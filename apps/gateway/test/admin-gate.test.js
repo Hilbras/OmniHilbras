@@ -143,6 +143,102 @@ test('the prefix list and the router agree, so a new management route cannot be 
   void t;
 });
 
+/**
+ * ## The one carve-out, and its two halves (1.75.2)
+ *
+ * `/v1/oauth` is on the management list and the provider callbacks live under it. The callback is the one
+ * request in the product that *cannot* present an `Authorization` header — it is a top-level navigation
+ * the provider sends the browser to — so the gate did not secure it, it made it unreachable. Measured on a
+ * gateway with enforcement on, no key, cross-site headers:
+ *
+ * ```
+ * 401  GET /v1/oauth/cline/callback/<id>?code=…
+ *      {"error":{"code":"AUTHENTICATION_FAILED","message":"This gateway requires an API key…"}}
+ * ```
+ *
+ * Which is why an earlier probe of this exact flow could not see the defect: that gateway ran with
+ * `requireApiKey: false`, where `authorize()` returns before it can refuse anything.
+ */
+
+/** The request a provider redirect makes: a top-level navigation, cross-site, no Origin, no key. */
+function navigation(base, path) {
+  return fetch(`${base}${path}`, { headers: { 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'navigate' } });
+}
+
+const SESSION_ID = 'a'.repeat(43) + '0123456789abcdefghij';
+
+const CALLBACKS = [
+  ['cline', `/v1/oauth/cline/callback/${SESSION_ID}?code=made-up-code`],
+  ['claude-code', `/v1/oauth/claude-code/callback/${SESSION_ID}?code=granted#state`],
+];
+
+test('the provider callback is reachable with enforcement on, because a browser navigation cannot carry a key', async (t) => {
+  const { base } = await startGateway(t, { enforced: true });
+  for (const [name, path] of CALLBACKS) {
+    const response = await navigation(base, path);
+    assert.equal(response.status, 200, `${name} callback answered ${response.status} for a navigation that has no key`);
+    const page = await response.text();
+    assert.match(response.headers.get('content-type') ?? '', /text\/html/, `${name} must answer with the page, not a JSON error`);
+    assert.match(page, /<!doctype html>/i, `${name} must render its result page`);
+    assert.doesNotMatch(page, /AUTHENTICATION_FAILED|requires an API key/, `${name} must never show the admin gate's message`);
+  }
+});
+
+test('the carve-out is the callback paths only — the siblings that mint and carry credentials stay gated', async (t) => {
+  // The shape of a lazy fix is a prefix exemption: `/v1/oauth/*`, which would open `/exchange` — the route
+  // that turns a code into a live connection — and `/session/*`, which carries the connected record back.
+  const { base } = await startGateway(t, { enforced: true });
+  const siblings = [
+    ['POST', '/v1/oauth/cline/start', { redirectUri: `http://127.0.0.1:0/v1/oauth/cline/callback/${SESSION_ID}` }],
+    ['POST', '/v1/oauth/cline/exchange', { code: 'made-up-code' }],
+    ['GET', `/v1/oauth/cline/session/${SESSION_ID}`, undefined],
+    ['POST', '/v1/oauth/claude-code/start', {}],
+    ['GET', `/v1/oauth/claude-code/session/${SESSION_ID}`, undefined],
+    ['POST', '/v1/oauth/opencode-console/start', {}],
+    ['GET', `/v1/oauth/opencode-console/session/${SESSION_ID}`, undefined],
+  ];
+  for (const [method, path, body] of siblings) {
+    const response = await bare(base, method, path, body);
+    assert.equal(response.status, 401, `${method} ${path} answered ${response.status} — the exemption leaked past the callback paths`);
+  }
+});
+
+test('the carve-out is GET-only, so the callback path itself is not an open management prefix', async (t) => {
+  // `isOauthCallbackNavigation` checks the method. Without that, a POST to the same path would skip the
+  // gate on the strength of its URL alone. Sent without `sec-fetch-site` and with a JSON content type, so
+  // the cross-site and media-type guards — which answer earlier and for unrelated reasons — stay out of it.
+  const { base } = await startGateway(t, { enforced: true });
+  const response = await bare(base, 'POST', `/v1/oauth/cline/callback/${SESSION_ID}`, { code: 'made-up-code' });
+  assert.equal(response.status, 401, `POST to the callback path answered ${response.status} with no key`);
+});
+
+test('what the carve-out exposes is a status page, not the session', async (t) => {
+  // The reason the exemption is tolerable. The callback answers with prose and no credential, and the
+  // route holding the connected record is still gated — so reaching the callback buys an attacker nothing.
+  const { base, apiKeys } = await startGateway(t, { enforced: true });
+  const created = await apiKeys.create('operator');
+  const response = await navigation(base, `/v1/oauth/cline/callback/${SESSION_ID}?code=made-up-code`);
+  const page = await response.text();
+  assert.doesNotMatch(page, new RegExp(created.key), 'the callback must not echo a gateway key');
+  assert.doesNotMatch(page, /ohk_/, 'the callback must not emit anything key-shaped');
+  assert.match(page, /Start (the sign-in|again)|already been used|expired/i, `the page must say the sign-in did not complete, got: ${page.slice(0, 200)}`);
+
+  const session = await bare(base, 'GET', `/v1/oauth/cline/session/${SESSION_ID}`);
+  assert.equal(session.status, 401, 'the session route must stay gated even once the callback is reachable');
+});
+
+test('both guards exempt the callback from the same predicate, so they cannot drift apart', async (t) => {
+  // The cross-site guard and the admin gate are two checks on the same path. If only one of them learned
+  // about the callback, a later edit could re-close the feature or leave it half-open without a test
+  // failing. This reads the source because the property *is* "both call the same predicate".
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../src/server.ts', import.meta.url), 'utf8');
+  const guard = source.match(/if \(isManagementPath\([^)]*\) && [^\n]*/)?.[0] ?? '';
+  assert.match(guard, /!isOauthCallbackNavigation\(request\)/, 'the management gate must exempt the callback navigation');
+  assert.match(source, /!isOauthCallbackNavigation\(request\) && isCrossSiteRequest/, 'the cross-site guard must exempt the same navigation');
+  void t;
+});
+
 test('a file-backed key store enforces the same rule end to end', async (t) => {
   // `InMemoryApiKeyStore` is a test double. The real store is the one on disk, so the gate is checked
   // against it too — the shape of this defect is a double that agrees with a broken implementation.

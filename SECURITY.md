@@ -50,8 +50,18 @@ and does not un-copy it.
 
 - **The allowlisted dashboard Origin is a bootstrap path, not authentication.** An allowlisted origin can read
   the management surface without a key, because the local dashboard has no login. Management routes
-  (`/v1/connections`, `/v1/keys`, `/v1/settings`, `/v1/routing`, `/v1/usage`) require the admin key when
-  enforcement is on, but the allowlist is the intended local path.
+  (`/v1/connections`, `/v1/keys`, `/v1/oauth`, `/v1/settings`, `/v1/web-cookie`, `/v1/routing`, `/v1/usage`)
+  require the admin key when enforcement is on, but the allowlist is the intended local path.
+- **The two OAuth callbacks are exempt from that gate, and here is what that means.** `GET
+  /v1/oauth/cline/callback/:sessionId` and `GET /v1/oauth/claude-code/callback/:sessionId` answer the
+  provider's redirect, which is a top-level navigation the browser is *sent* to — it carries no `Origin` and
+  no way to send an `Authorization` header. So those two GET paths are reachable by an unauthenticated local
+  process. They render an HTML page whose only content is a short outcome message: no token is in the
+  response, and a callback can only act on a session this gateway minted, which requires the session id in
+  the path — 256 random bits for Cline, 122 for Claude Code — *and* a code the provider issued. The routes
+  carrying the result (`/v1/oauth/*/session/*`)
+  and the routes that mint credentials (`/*/start`, `/v1/oauth/cline/exchange`) stay gated, and the
+  exemption is GET-only and path-exact.
 - **Provider tokens are stored, encrypted at rest** with a key derived from a local master key. They are not
   encrypted in a vault that can revoke them: `CredentialLifecycle` decides whether a stored credential is
   still usable, but "revoked at the provider" is discovered by spending one request.

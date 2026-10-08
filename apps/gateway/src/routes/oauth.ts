@@ -43,9 +43,9 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
-    // Where Cline sends the browser after the user approves. This is the only
-    // route exempt from the cross-site guard: a top-level navigation from the
-    // provider carries `sec-fetch-site: cross-site` and no Origin.
+    // Where Cline sends the browser after the user approves. Exempt from the cross-site guard and
+    // from the API-key gate alongside Claude Code's callback, because a top-level navigation from
+    // the provider carries `sec-fetch-site: cross-site`, no Origin, and no way to send a key.
     if (request.method === 'GET' && (url.pathname === clineCallbackPath || url.pathname.startsWith(`${clineCallbackPath}/`))) {
       const code = url.searchParams.get('code') ?? '';
       // The session id rides in the path. `state`, when it arrives, is
@@ -146,8 +146,8 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
-    // Where Claude redirects the browser. Exempt from the cross-site guard alongside Cline's callback:
-    // a top-level navigation from the provider carries `sec-fetch-site: cross-site` and no Origin.
+    // Where Claude redirects the browser. Exempt from the cross-site guard and the API-key gate
+    // alongside Cline's callback: a top-level navigation carries no `Origin` and no key.
     if (request.method === 'GET' && (url.pathname === claudeCodeCallbackPath || url.pathname.startsWith(`${claudeCodeCallbackPath}/`))) {
       const sessionId = claudeCodeSessionIdFromCallbackPath(url.pathname);
       /**
