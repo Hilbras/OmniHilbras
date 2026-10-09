@@ -57,3 +57,13 @@ prevent. They stay open until credentials are supplied.
 
 Without a key, the public listings that do answer are already captured (OpenRouter, Zen, xKiro). Authenticated
 streaming, provider errors and tool calls are not.
+
+## Closed since the matrix was first written
+
+- **DeepSeek Web and TokenHarbor Web status branches** were not covered by their own tests. They map their own
+  status codes instead of using the shared transport. `packages/omnihilbras-sdk/test/web-session-refusals.test.js`
+  now drives those branches: 429 is a retryable rate limit; 401 and 403 are authentication failures, with the
+  re-export or re-paste instruction; an unknown status is unavailable with the status in the message; TokenHarbor's
+  402 names the missing balance and says `:free` models do not bill; 5xx is retryable and other 4xx are not; an
+  expired session is named as expired. The test uses a well-formed `base64-` session, because the parser correctly
+  refuses a truncated one.
