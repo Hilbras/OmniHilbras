@@ -200,3 +200,32 @@ test('THE INVARIANT: the resolver names no provider', () => {
   const offenders = [...code.matchAll(/['"]([a-z0-9]+(?:-[a-z0-9]+)+)['"]/g)].map((match) => match[1]);
   assert.deepEqual(offenders, [], `the resolver must contain no provider id, found: ${offenders.join(', ')}`);
 });
+
+test('a saved generic provider is active, so its health check finds the connection', async () => {
+  // apmix and xKiro have no dedicated adapter. Their saved connection carries an endpoint, and it must be
+  // served by the generic adapter, or the health route reports "no active connection" for a credential
+  // that is saved and that chat already reaches.
+  const resolver = new ProviderResolver(new ProviderRegistry());
+  const active = await resolver.active([
+    { id: 'apmix', providerId: 'apmix', hasCredential: true, endpoint: 'https://api.apmix.ai/v1', name: 'apmix' },
+  ]);
+  assert.equal(active.length, 1);
+  assert.equal(active[0].id, 'apmix');
+});
+
+test('a generic provider with no credential is not polled', async () => {
+  const resolver = new ProviderResolver(new ProviderRegistry());
+  const active = await resolver.active([
+    { id: 'apmix', providerId: 'apmix', hasCredential: false, endpoint: 'https://api.apmix.ai/v1', name: 'apmix' },
+  ]);
+  assert.equal(active.length, 0, 'probing without a credential costs a request that cannot succeed');
+});
+
+test('a provider with a dedicated adapter is not duplicated by the generic path', async () => {
+  const resolver = new ProviderResolver(new ProviderRegistry());
+  resolver.onDemand('kiro', () => ({ id: 'kiro', name: 'Kiro', capabilities: { chat: true, streaming: true, models: true } }));
+  const active = await resolver.active([
+    { id: 'kiro', providerId: 'kiro', hasCredential: true, endpoint: 'https://codewhisperer.us-east-1.amazonaws.com', name: 'Kiro' },
+  ]);
+  assert.equal(active.length, 1, 'the dedicated factory serves it once, not a second generic adapter');
+});

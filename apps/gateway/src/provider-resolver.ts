@@ -147,8 +147,26 @@ export class ProviderResolver {
    * probing it without one costs a request that cannot succeed. That rule is the whole of this
    * method.
    */
-  async active(connections: ReadonlyArray<{ id: string; providerId: string; hasCredential: boolean }>): Promise<ProviderAdapter[]> {
+  async active(connections: ReadonlyArray<{ id: string; providerId: string; hasCredential: boolean; endpoint?: string; name?: string }>): Promise<ProviderAdapter[]> {
     const adapters: ProviderAdapter[] = [];
+    /**
+     * A saved connection for a provider with no dedicated adapter (a generic OpenAI-compatible endpoint, such
+     * as apmix or xKiro) is served by the same generic adapter `resolve` builds for it. Without this it is
+     * never listed as active, so its health check reports "no active connection" even though a credential
+     * is saved and chat reaches it.
+     */
+    for (const connection of connections) {
+      if (!connection.hasCredential || !connection.endpoint) continue;
+      if (this.onDemandFactories.has(connection.providerId) || this.registry.get(connection.providerId)) continue;
+      const cached = this.dynamic.get(connection.providerId);
+      if (cached && cached.endpoint === connection.endpoint) {
+        adapters.push(cached.adapter);
+        continue;
+      }
+      const adapter = new OpenAICompatibleAdapter({ id: connection.providerId, name: connection.name ?? connection.providerId, baseUrl: connection.endpoint });
+      this.dynamic.set(connection.providerId, { endpoint: connection.endpoint, adapter });
+      adapters.push(adapter);
+    }
     for (const [providerId, factory] of this.onDemandFactories) {
       // A provider that shares another's credential is polled when **that** connection has one — the
       // ClinePass card is served by the Cline connection. The connection *id* is still the owner's, but
