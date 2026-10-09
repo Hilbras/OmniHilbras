@@ -7,7 +7,7 @@ import {
   parseTokenHarborCookieHeader,
   sessionExpiresAt,
   tokenHarborWebCredential,
-} from '../dist/adapters/tokenharbor-web.js';
+} from '../dist/providers/tokenharbor-web/index.js';
 import { ProviderError } from '../dist/core/errors.js';
 import { scriptedTokenHarborFetch } from './harness/scripted-tokenharbor-fetch.js';
 

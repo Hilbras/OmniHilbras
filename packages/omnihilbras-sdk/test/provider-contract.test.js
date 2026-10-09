@@ -6,21 +6,21 @@ import { scriptedDriver, chatGptWebFixtureCredential, CHATGPT_WEB_CONTRACT_MODEL
 import test from 'node:test';
 import { runProviderContract, CONTRACT_TEXT } from './provider-contract.js';
 import { framesFor, scriptedTransport } from './harness/scripted-transport.js';
-import { OpenAIAdapter } from '../dist/adapters/openai.js';
-import { OpenRouterAdapter } from '../dist/adapters/openrouter.js';
-import { OpenAICompatibleAdapter } from '../dist/adapters/openai-compatible.js';
-import { AnthropicAdapter } from '../dist/adapters/anthropic.js';
-import { GeminiAdapter } from '../dist/adapters/gemini.js';
-import { DeepSeekWebAdapter } from '../dist/adapters/deepseek-web.js';
-import { TokenHarborWebAdapter } from '../dist/adapters/tokenharbor-web.js';
-import { ChatGptWebAdapter } from '../dist/adapters/chatgpt-web.js';
-import { ClineAdapter } from '../dist/adapters/cline.js';
-import { ClinePassAdapter } from '../dist/adapters/clinepass.js';
-import { KiroAdapter } from '../dist/adapters/kiro.js';
-import { KimiCodeAdapter } from '../dist/adapters/kimi-code.js';
-import { ClaudeCodeAdapter } from '../dist/adapters/claude-code.js';
-import { OpencodeConsoleAdapter } from '../dist/adapters/opencode-console.js';
-import { ZenAdapter } from '../dist/adapters/zen.js';
+import { OpenAIAdapter } from '../dist/providers/openai/index.js';
+import { OpenRouterAdapter } from '../dist/providers/openrouter/index.js';
+import { OpenAICompatibleAdapter } from '../dist/providers/openai-compatible/index.js';
+import { AnthropicAdapter } from '../dist/providers/anthropic/index.js';
+import { GeminiAdapter } from '../dist/providers/gemini/index.js';
+import { DeepSeekWebAdapter } from '../dist/providers/deepseek-web/index.js';
+import { TokenHarborWebAdapter } from '../dist/providers/tokenharbor-web/index.js';
+import { ChatGptWebAdapter } from '../dist/providers/chatgpt-web/index.js';
+import { ClineAdapter } from '../dist/providers/cline/index.js';
+import { ClinePassAdapter } from '../dist/providers/clinepass/index.js';
+import { KiroAdapter } from '../dist/providers/kiro/index.js';
+import { KimiCodeAdapter } from '../dist/providers/kimi-code/index.js';
+import { ClaudeCodeAdapter } from '../dist/providers/claude-code/index.js';
+import { OpencodeConsoleAdapter } from '../dist/providers/opencode-console/index.js';
+import { ZenAdapter } from '../dist/providers/zen/index.js';
 import { ProviderRegistry } from '../dist/core/registry.js';
 import { ProviderError } from '../dist/core/errors.js';
 
@@ -298,9 +298,9 @@ test('the contract knows which adapters it does not cover, and says why', () => 
 test('every adapter in the SDK is either contracted or listed as not', () => {
   // The point of the list above: an adapter cannot be added and forgotten. This reads the
   // adapter directory, so a new one without a contract fails here rather than passing quietly.
-  const files = readdirSync(new URL('../src/adapters/', import.meta.url))
-    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
-    .map((file) => file.replace(/\.ts$/, ''))
+  const files = readdirSync(new URL('../src/providers/', import.meta.url), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
     // Not adapters: `deepseek-pow` is a proof-of-work solver, `chatgpt-first-party` is the
     // first-party client behind the ChatGPT Web driver, `qwen-web` is a probe, and `zen-free-tier`
     // is the free-tier request contract that `zen` uses — a rule about a request, not a provider.

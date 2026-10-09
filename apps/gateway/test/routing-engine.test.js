@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { RoutingEngine } from '../dist/routing-engine.js';
 import { HealthRegistry, SlidingWindowRateLimiter } from '../dist/routing.js';
 import { ProviderError } from '@hilbras/omnihilbras';
+import { providerIds } from './support/providerIds.js';
 
 /**
  * `RoutingEngine`: which routes a request may take, given what is currently true.
@@ -245,9 +246,7 @@ test('THE INVARIANT: the engine names no provider', () => {
   //
   // Reading the adapter directory makes it self-maintaining: a new provider cannot be added without
   // this noticing, and nothing else in the file can trip it.
-  const adapters = readdirSync(new URL('../../../packages/omnihilbras-sdk/src/adapters/', import.meta.url))
-    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
-    .map((file) => file.replace(/\.ts$/, ''));
+  const adapters = providerIds();
   const source = readFileSync(new URL('../src/routing-engine.ts', import.meta.url), 'utf8');
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   const found = adapters.filter((id) => new RegExp("['\"\`]" + id + "['\"\`]").test(code));

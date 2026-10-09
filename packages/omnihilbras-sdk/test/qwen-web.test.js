@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { QWEN_WEB_MODELS, parseQwenCookieHeader, probeQwenWeb, qwenWebProviderId } from '../dist/adapters/qwen-web.js';
+import { QWEN_WEB_MODELS, parseQwenCookieHeader, probeQwenWeb, qwenWebProviderId } from '../dist/providers/qwen-web/index.js';
 import { ProviderError } from '../dist/core/errors.js';
 
 /**

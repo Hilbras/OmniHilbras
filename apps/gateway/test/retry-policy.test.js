@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { RetryPolicy } from '../dist/retry-policy.js';
 import { ProviderError } from '@hilbras/omnihilbras';
+import { providerIds } from './support/providerIds.js';
 
 /**
  * `RetryPolicy`: retry this route, move to the next one, or stop.
@@ -137,9 +138,7 @@ test('the decision depends on the connection’s own budget, not on how much has
 // ── the invariant ──────────────────────────────────────────────────────────
 
 test('THE INVARIANT: the policy names no provider', () => {
-  const files = readdirSync(new URL('../../../packages/omnihilbras-sdk/src/adapters/', import.meta.url))
-    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
-    .map((file) => file.replace(/\.ts$/, ''));
+  const files = providerIds();
   const source = readFileSync(new URL('../src/retry-policy.ts', import.meta.url), 'utf8');
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   const found = files.filter((id) => new RegExp("['\"`]" + id + "['\"`]").test(code));

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { RateLimitPolicy } from '../dist/rate-limit-policy.js';
 import { SlidingWindowRateLimiter } from '../dist/routing.js';
+import { providerIds } from './support/providerIds.js';
 
 /**
  * `RateLimitPolicy`: what a request limit means, and when it is spent.
@@ -136,9 +137,7 @@ test('the observed waits cannot be written through by a caller', () => {
 // ── the invariant ──────────────────────────────────────────────────────────
 
 test('THE INVARIANT: the policy names no provider', () => {
-  const adapters = readdirSync(new URL('../../../packages/omnihilbras-sdk/src/adapters/', import.meta.url))
-    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
-    .map((file) => file.replace(/\.ts$/, ''));
+  const adapters = providerIds();
   const source = readFileSync(new URL('../src/rate-limit-policy.ts', import.meta.url), 'utf8');
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   const found = adapters.filter((id) => new RegExp("['\"`]" + id + "['\"`]").test(code));

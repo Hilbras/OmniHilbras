@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { deepSeekHashV1 } from '../dist/adapters/deepseek-pow.js';
+import { deepSeekHashV1 } from '../dist/providers/deepseek-web/deepseek-pow.js';
 import {
   DEEPSEEK_WEB,
   DeepSeekWebAdapter,
@@ -8,7 +8,7 @@ import {
   decodeDeepSeekAnswer,
   flattenToPrompt,
   parseDeepSeekUserToken,
-} from '../dist/adapters/deepseek-web.js';
+} from '../dist/providers/deepseek-web/index.js';
 
 /**
  * DeepSeek Web, without a network.

@@ -58,8 +58,8 @@ for (const [criterion, proof] of Object.entries(PROOFS)) {
 const facts = {
   sdkBuildsAlone: src('packages/omnihilbras-sdk/package.json').includes('"build"')
     && !src('packages/omnihilbras-sdk/package.json').includes('"react"'),
-  registryExported: src('packages/omnihilbras-sdk/src/registry.ts').includes('export class ProviderRegistry'),
-  chatChunkInContract: src('packages/omnihilbras-sdk/src/types.ts').includes('ChatChunk'),
+  registryExported: src('packages/omnihilbras-sdk/src/core/registry.ts').includes('export class ProviderRegistry'),
+  chatChunkInContract: src('packages/omnihilbras-sdk/src/core/types.ts').includes('ChatChunk'),
   serviceRegistrations: (src('apps/gateway/src/service.ts').match(/\.(?:onDemand|register)\(/g) ?? []).length,
   providerConditionalsInRouting: (src('apps/gateway/src/routing.ts').match(/providerId === '/g) ?? []).length,
   providerConditionalsInService: (src('apps/gateway/src/service.ts').match(/providerId === '(openai|anthropic|gemini|openrouter|kiro|cline)'/g) ?? []).length,
@@ -70,7 +70,7 @@ const facts = {
     .flatMap((dir) => readdirSync(join(ROOT, dir)).map((file) => join(dir, file)))
     .filter((file) => file.endsWith('.js'))
     .filter((file) => /process\.env\.(OPENAI|ANTHROPIC|GEMINI|OPENROUTER)/.test(readFileSync(join(ROOT, file), 'utf8'))).length,
-  cloudSdks: (src('apps/gateway/src/service.ts') + src('packages/omnihilbras-sdk/src/registry.ts')).match(/aws-sdk|@google-cloud|@aws-sdk/g) ?? [],
+  cloudSdks: (src('apps/gateway/src/service.ts') + src('packages/omnihilbras-sdk/src/core/registry.ts')).match(/aws-sdk|@google-cloud|@aws-sdk/g) ?? [],
 };
 
 console.log('\nmeasured:');

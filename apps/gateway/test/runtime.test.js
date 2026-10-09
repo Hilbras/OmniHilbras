@@ -5,6 +5,7 @@ import { localDeployment, isTrustedDashboard } from '../dist/runtime.js';
 import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore, createGatewayServer, loadGatewayConfig, deploymentFrom } from '../dist/index.js';
 import { LocalConnectionStore, InMemoryConnectionStore as MemoryStore } from '../dist/connections.js';
 import { ProviderRegistry, InMemorySecretStore } from '@hilbras/omnihilbras';
+import { providerIds } from './support/providerIds.js';
 
 /**
  * The outer runtime — the last item in `tasks/plan.md`.
@@ -107,9 +108,7 @@ test('every local credential store satisfies the named interface', () => {
 // ── the invariants ─────────────────────────────────────────────────────────
 
 test('THE INVARIANT: the runtime names no provider', () => {
-  const adapters = readdirSync(new URL('../../../packages/omnihilbras-sdk/src/adapters/', import.meta.url))
-    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
-    .map((file) => file.replace(/\.ts$/, ''));
+  const adapters = providerIds();
   const source = readFileSync(new URL('../src/runtime.ts', import.meta.url), 'utf8');
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   const found = adapters.filter((id) => new RegExp("['\"`]" + id + "['\"`]").test(code));

@@ -1,4 +1,4 @@
-import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from './openai-compatible.js';
+import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '../openai-compatible/index.js';
 
 export type OpenAIAdapterOptions = OpenAICompatibleAdapterOptions & {
   baseUrl?: string;

@@ -7,7 +7,7 @@ import {
   deepSeekHashV1Reference,
   findDeepSeekPowNonce,
   sha3_256Fips202Reference,
-} from '../dist/adapters/deepseek-pow.js';
+} from '../dist/providers/deepseek-web/deepseek-pow.js';
 
 /**
  * DeepSeek's proof-of-work.

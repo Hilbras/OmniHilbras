@@ -1,5 +1,5 @@
-import { ProviderError } from '../core/errors.js';
-import type { ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderId, ProviderRequestContext } from '../core/types.js';
+import { ProviderError } from '../../core/errors.js';
+import type { ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderId, ProviderRequestContext } from '../../core/types.js';
 
 /**
  * Token Harbor Web — the chat application at tokenharbor.ai, driven by the Supabase session

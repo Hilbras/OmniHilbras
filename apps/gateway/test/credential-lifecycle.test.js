@@ -6,6 +6,7 @@ import { HealthManager } from '../dist/health.js';
 import { ClineAdapter } from '@hilbras/omnihilbras';
 import { ChatGptWebAdapter } from '@hilbras/omnihilbras';
 import { ProviderError } from '@hilbras/omnihilbras';
+import { providerIds } from './support/providerIds.js';
 
 /**
  * `CredentialLifecycle`: the one question about a credential that needs no request.
@@ -165,9 +166,7 @@ test('a source with no lifecycle answer is asked as it always was', async () => 
 // ── the invariant ──────────────────────────────────────────────────────────
 
 test('THE INVARIANT: the lifecycle names no provider', () => {
-  const adapters = readdirSync(new URL('../../../packages/omnihilbras-sdk/src/adapters/', import.meta.url))
-    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
-    .map((file) => file.replace(/\.ts$/, ''));
+  const adapters = providerIds();
   const source = readFileSync(new URL('../src/credential-lifecycle.ts', import.meta.url), 'utf8');
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   const found = adapters.filter((id) => new RegExp("['\"`]" + id + "['\"`]").test(code));

@@ -41,13 +41,13 @@ import { mergeGatewayConnections } from '../src/lib/providerCards.ts';
  * adapter and the second card both fail the same way the first did.
  */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const ADAPTERS = join(ROOT, 'packages/omnihilbras-sdk/src/adapters');
+const ADAPTERS = join(ROOT, 'packages/omnihilbras-sdk/src/providers');
 
 /** Strips comments, because a doc comment naming `verified` is not a verdict using it. */
 const code = (source) => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 
 test('every adapter that answers a health check declares what it verified', () => {
-  const files = readdirSync(ADAPTERS).filter((file) => file.endsWith('.ts'));
+  const files = readdirSync(ADAPTERS, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => `${e.name}/index.ts`);
   const offenders = [];
   for (const file of files) {
     const source = code(readFileSync(join(ADAPTERS, file), 'utf8'));
@@ -88,7 +88,7 @@ test('no adapter claims it verified inference without completing a request', () 
   // `inference` is reserved for a check that really sent something and read an answer back. None of
   // these do — they read a catalog or a session — so any that claimed it would be asserting a
   // stronger fact than it measured, which is the same overclaim pointed the other way.
-  const files = readdirSync(ADAPTERS).filter((file) => file.endsWith('.ts'));
+  const files = readdirSync(ADAPTERS, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => `${e.name}/index.ts`);
   const overclaiming = files.filter((file) => {
     const source = code(readFileSync(join(ADAPTERS, file), 'utf8'));
     return /healthCheck\s*[:=(]/.test(source) && /verified:\s*'inference'/.test(source);

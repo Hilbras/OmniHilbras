@@ -1,10 +1,10 @@
-import { ProviderError } from '../core/errors.js';
-import { FetchHttpTransport } from '../core/transport.js';
-import type { HttpTransport } from '../core/transport.js';
-import { compactPricing, normalizeContextWindow, normalizeModalities, perMillionPrice } from '../core/pricing.js';
-import { AnthropicAdapter } from './anthropic.js';
-import { OpenAICompatibleAdapter } from './openai-compatible.js';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../core/types.js';
+import { ProviderError } from '../../core/errors.js';
+import { FetchHttpTransport } from '../../core/transport.js';
+import type { HttpTransport } from '../../core/transport.js';
+import { compactPricing, normalizeContextWindow, normalizeModalities, perMillionPrice } from '../../core/pricing.js';
+import { AnthropicAdapter } from '../anthropic/index.js';
+import { OpenAICompatibleAdapter } from '../openai-compatible/index.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../../core/types.js';
 
 /**
  * OpenCode Console is the credential that reaches OpenCode's free Zen models. An API

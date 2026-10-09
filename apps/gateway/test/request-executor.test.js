@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { RequestExecutor } from '../dist/request-executor.js';
 import { ProviderError } from '@hilbras/omnihilbras';
+import { providerIds } from './support/providerIds.js';
 
 /**
  * `RequestExecutor` — the loop, tested without a gateway.
@@ -337,9 +338,7 @@ test('THE INVARIANT: the executor names no provider', () => {
   //
   // Reading the adapter directory makes it self-maintaining: a new provider cannot be added without
   // this noticing, and nothing else in the file can trip it.
-  const adapters = readdirSync(new URL('../../../packages/omnihilbras-sdk/src/adapters/', import.meta.url))
-    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
-    .map((file) => file.replace(/\.ts$/, ''));
+  const adapters = providerIds();
   const source = readFileSync(new URL('../src/request-executor.ts', import.meta.url), 'utf8');
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   const found = adapters.filter((id) => new RegExp("['\"\`]" + id + "['\"\`]").test(code));

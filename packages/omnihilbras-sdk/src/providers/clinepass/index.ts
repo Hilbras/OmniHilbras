@@ -1,5 +1,5 @@
-import { CLINE_OAUTH, ClineAdapter, clineHeaders, type ClineAdapterOptions } from './cline.js';
-import type { Model, ProviderRequestContext } from '../core/types.js';
+import { CLINE_OAUTH, ClineAdapter, clineHeaders, type ClineAdapterOptions } from '../cline/index.js';
+import type { Model, ProviderRequestContext } from '../../core/types.js';
 
 /**
  * ClinePass is Cline's paid model tier, and it is **the same account as Cline** — not a second

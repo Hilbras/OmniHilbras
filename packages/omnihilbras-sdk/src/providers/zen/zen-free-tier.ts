@@ -1,4 +1,4 @@
-import type { ChatRequest } from '../core/types.js';
+import type { ChatRequest } from '../../core/types.js';
 
 /**
  * OpenCode Zen's free-tier request contract.

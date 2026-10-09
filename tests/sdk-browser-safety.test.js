@@ -145,7 +145,7 @@ test('every remaining Buffer use is inside a function, never at module scope', (
   const users = reachable.filter((file) => /\bBuffer\b/.test(code(readFileSync(file, 'utf8'))));
   assert.deepEqual(
     users.map((f) => f.replace(ROOT + '/', '')).sort(),
-    ['packages/omnihilbras-sdk/src/adapters/cline.ts', 'packages/omnihilbras-sdk/src/adapters/deepseek-web.ts', 'packages/omnihilbras-sdk/src/adapters/kiro.ts'],
+    ['packages/omnihilbras-sdk/src/providers/cline/index.ts', 'packages/omnihilbras-sdk/src/providers/deepseek-web/index.ts', 'packages/omnihilbras-sdk/src/providers/kiro/index.ts'],
     'the set of Buffer users changed — re-measure the bundle before accepting this list',
   );
 });
@@ -183,7 +183,7 @@ test('the dashboard really does import the SDK barrel, so the rule above is not 
 test('the module that caused it says why it avoids node:crypto', () => {
   // A rule with no reason attached is a superstition, and this one was learned from a blank page. The
   // comment is what stops the next person from "simplifying" it back to `node:crypto`.
-  const source = readFileSync(join(SDK_SRC, 'adapters/zen-free-tier.ts'), 'utf8');
+  const source = readFileSync(join(SDK_SRC, 'providers/zen/zen-free-tier.ts'), 'utf8');
   assert.match(source, /node:crypto/, 'the reason the import is avoided is written down');
   assert.match(source, /getRandomValues/, 'and the replacement actually used');
 });

@@ -52,9 +52,9 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
 const FIXTURES = new URL('./fixtures/', import.meta.url);
 
-const ADAPTERS = readdirSync(new URL('../src/adapters/', import.meta.url))
-  .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
-  .map((file) => file.replace(/\.ts$/, ''))
+const ADAPTERS = readdirSync(new URL('../src/providers/', import.meta.url), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
   // `deepseek-pow` solves a hash rather than speaking a protocol, `chatgpt-first-party` is the
   // browser driver behind ChatGPT Web, and `qwen-web` is a probe with no completion path.
   .filter((id) => !['deepseek-pow', 'chatgpt-first-party', 'qwen-web'].includes(id));
@@ -77,7 +77,6 @@ const NO_CAPTURE_YET = {
   // date, and it changes: the working implementation in OmniRoute records the accepted placeholder
   // tool name moving between models within a week. A byte capture would freeze one day of it and
   // then be wrong, which is the reason the two moving parts are configuration and not constants.
-  'zen-free-tier': 'the gate is a request contract measured on a date and it drifts; pinning a capture would pin the drift',
   // Kimi Code is **not** excused for cost. Its `/coding/v1/models` listing is free and needs no paid
   // call, and it is exactly the capture the guard exists to encourage — the reason it is absent is
   // that the endpoint answers only to a credential this machine does not have. A subscription token

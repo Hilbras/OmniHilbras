@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ProviderError, ZenAdapter } from '../dist/index.js';
-import { zenSessionId, zenFreeTierHeaders, zenPlaceholderTool, zenContractSatisfied, satisfiesZenUserAgentContract, zenPlaceholderToolName } from '../dist/adapters/zen-free-tier.js';
+import { zenSessionId, zenFreeTierHeaders, zenPlaceholderTool, zenContractSatisfied, satisfiesZenUserAgentContract, zenPlaceholderToolName } from '../dist/providers/zen/zen-free-tier.js';
 
 /**
  * OpenCode Zen's free-tier request contract.

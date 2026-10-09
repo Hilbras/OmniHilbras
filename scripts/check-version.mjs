@@ -57,14 +57,14 @@ if (!readmeMatch) {
 }
 
 /** The version the Cline adapter reports as its client version. */
-const cline = read('packages/omnihilbras-sdk/src/adapters/cline.ts');
+const cline = read('packages/omnihilbras-sdk/src/providers/cline/index.ts');
 const clinePattern = /const omnihilbrasVersion = '(\d+\.\d+\.\d+)';/;
 const clineMatch = clinePattern.exec(cline);
 if (!clineMatch) {
   problems.push('cline.ts has no omnihilbrasVersion constant to check');
 } else if (clineMatch[1] !== version) {
   if (fix) {
-    write('packages/omnihilbras-sdk/src/adapters/cline.ts', cline.replace(clinePattern, `const omnihilbrasVersion = '${version}';`));
+    write('packages/omnihilbras-sdk/src/providers/cline/index.ts', cline.replace(clinePattern, `const omnihilbrasVersion = '${version}';`));
     fixed.push(`cline.ts → ${version}`);
   } else {
     problems.push(`cline.ts sends ${clineMatch[1]} as its client version, expected ${version}`);

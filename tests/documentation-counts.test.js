@@ -26,10 +26,10 @@ const read = (file) => readFileSync(new URL(file, ROOT), 'utf8');
 
 /** Adapters the capture guard considers, which is the 16 behind the 18 files. */
 function consideredAdapters() {
-  const dir = new URL('packages/omnihilbras-sdk/src/adapters/', ROOT);
-  return readdirSync(dir)
-    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
-    .map((file) => file.replace(/\.ts$/, ''))
+  const dir = new URL('packages/omnihilbras-sdk/src/providers/', ROOT);
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name !== 'openai-compatible')
+    .map((entry) => entry.name)
     .filter((id) => !['deepseek-pow', 'chatgpt-first-party', 'qwen-web'].includes(id));
 }
 
@@ -55,9 +55,11 @@ const readme = read('README.md');
 const architecture = read('docs/architecture/README.md');
 
 test('the adapter count in the SPEC is the real file count', () => {
-  const dir = new URL('packages/omnihilbras-sdk/src/adapters/', ROOT);
-  const files = readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts')).length;
-  const claimed = spec.match(/\*\*(\d+) files\*\* in `packages\/omnihilbras-sdk\/src\/adapters\/`/);
+  const dir = new URL('packages/omnihilbras-sdk/src/providers/', ROOT);
+  const files = readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .reduce((count, entry) => count + readdirSync(new URL(`${entry.name}/`, dir)).filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts')).length, 0);
+  const claimed = spec.match(/\*\*(\d+) files\*\* in `packages\/omnihilbras-sdk\/src\/providers\/`/);
 
   assert.ok(claimed, 'the SPEC must state the adapter file count, and name the directory it counted');
   assert.equal(
@@ -72,8 +74,10 @@ test('the SPEC reconciles its file count with the capture guard\'s count', () =>
   // The SPEC says 16 files, the capture guard says 14 adapters. Both are right — three files are not
   // protocol adapters — and both are quoted in plan.md as live numbers. Left unreconciled they read as a
   // contradiction, and the fix someone applies under time pressure is to "correct" the wrong one.
-  const files = readdirSync(new URL('packages/omnihilbras-sdk/src/adapters/', ROOT))
-    .filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts')).length;
+  const providersDir = new URL('packages/omnihilbras-sdk/src/providers/', ROOT);
+  const files = readdirSync(providersDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .reduce((count, entry) => count + readdirSync(new URL(`${entry.name}/`, providersDir)).filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts')).length, 0);
   const considered = consideredAdapters().length;
   const excluded = files - considered;
 

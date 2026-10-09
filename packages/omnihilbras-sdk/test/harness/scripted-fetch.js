@@ -1,4 +1,4 @@
-import { deepSeekHashV1 } from '../../dist/adapters/deepseek-pow.js';
+import { deepSeekHashV1 } from '../../dist/providers/deepseek-web/deepseek-pow.js';
 
 /**
  * A `fetch` double for adapters that inject one instead of a transport.

@@ -1,9 +1,9 @@
-import { ProviderError } from '../core/errors.js';
-import { compactPricing, normalizeContextWindow, normalizeModalities, perTokenPrice } from '../core/pricing.js';
-import { FetchHttpTransport, type HttpResponse, type HttpTransport } from '../core/transport.js';
-import { assertSafeProviderHeaderValue, assertSafeProviderRequestUrl, normalizeProviderBaseUrl, resolveProviderUrl } from '../core/url.js';
-import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterConfig } from './openai-compatible.js';
-import type { CredentialValidation, Model, ModelImportOptions, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../core/types.js';
+import { ProviderError } from '../../core/errors.js';
+import { compactPricing, normalizeContextWindow, normalizeModalities, perTokenPrice } from '../../core/pricing.js';
+import { FetchHttpTransport, type HttpResponse, type HttpTransport } from '../../core/transport.js';
+import { assertSafeProviderHeaderValue, assertSafeProviderRequestUrl, normalizeProviderBaseUrl, resolveProviderUrl } from '../../core/url.js';
+import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterConfig } from '../openai-compatible/index.js';
+import type { CredentialValidation, Model, ModelImportOptions, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../../core/types.js';
 
 export type OpenRouterAdapterConfig = Omit<OpenAICompatibleAdapterConfig, 'id' | 'name' | 'auth' | 'baseUrl'> & {
   baseUrl?: string;

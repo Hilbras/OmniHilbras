@@ -1,6 +1,6 @@
-import { ProviderError } from '../core/errors.js';
-import type { Model } from '../core/types.js';
-import type { HttpTransport } from '../core/transport.js';
+import { ProviderError } from '../../core/errors.js';
+import type { Model } from '../../core/types.js';
+import type { HttpTransport } from '../../core/transport.js';
 
 /**
  * Qwen Web, through the credential a signed-in chat.qwen.ai session holds.

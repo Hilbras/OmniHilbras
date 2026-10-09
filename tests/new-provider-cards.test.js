@@ -64,10 +64,10 @@ function registeredProviderIds() {
   // Scanning only `service.ts` — my first two attempts — resolves two ids and marks the other four
   // unresolved, which is a check that looks for collisions while being unable to see most of the
   // registered providers.
-  const adapterDir = join(ROOT, 'packages/omnihilbras-sdk/src/adapters');
-  const modules = readdirSync(adapterDir)
-    .filter((file) => file.endsWith('.ts'))
-    .map((file) => readFileSync(join(adapterDir, file), 'utf8'));
+  const providerDir = join(ROOT, 'packages/omnihilbras-sdk/src/providers');
+  const modules = readdirSync(providerDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .flatMap((e) => readdirSync(join(providerDir, e.name)).filter((f) => f.endsWith('.ts')).map((f) => readFileSync(join(providerDir, e.name, f), 'utf8')));
   const service = readFileSync(join(ROOT, 'apps/gateway/src/service.ts'), 'utf8');
   const searchable = [...modules, service];
 

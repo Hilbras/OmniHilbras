@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { HedgePolicy } from '../dist/hedge-policy.js';
+import { providerIds } from './support/providerIds.js';
 
 /**
  * `HedgePolicy`: whether a second request is worth sending, and which route.
@@ -138,9 +139,7 @@ test('at most one hedge per route, and never more routes than were configured', 
 });
 
 test('THE INVARIANT: the policy names no provider', () => {
-  const adapters = readdirSync(new URL('../../../packages/omnihilbras-sdk/src/adapters/', import.meta.url))
-    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
-    .map((file) => file.replace(/\.ts$/, ''));
+  const adapters = providerIds();
   const source = readFileSync(new URL('../src/hedge-policy.ts', import.meta.url), 'utf8');
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   const found = adapters.filter((id) => new RegExp("['\"`]" + id + "['\"`]").test(code));

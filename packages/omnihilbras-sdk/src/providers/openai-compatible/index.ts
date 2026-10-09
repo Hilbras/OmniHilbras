@@ -1,8 +1,8 @@
-import { ProviderError } from '../core/errors.js';
-import { parseSseJson, parseSseStream } from '../core/streaming.js';
-import { FetchHttpTransport, type HttpTransport } from '../core/transport.js';
-import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../core/url.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '../core/types.js';
+import { ProviderError } from '../../core/errors.js';
+import { parseSseJson, parseSseStream } from '../../core/streaming.js';
+import { FetchHttpTransport, type HttpTransport } from '../../core/transport.js';
+import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../../core/url.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '../../core/types.js';
 
 export type OpenAICompatibleAuth = {
   header?: string;

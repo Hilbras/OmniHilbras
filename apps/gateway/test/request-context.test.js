@@ -111,7 +111,7 @@ test('an envelope with no request id is shaped exactly as before', () => {
 test('THE FINDING: nothing in the gateway set a requestId before this', () => {
   // Read the source rather than trusting that the field is now used, because the whole point is
   // that it was declared and unused for as long as it existed.
-  const declared = /requestId\?: string/.test(readFileSync(new URL('../../../packages/omnihilbras-sdk/src/types.ts', import.meta.url), 'utf8'));
+  const declared = /requestId\?: string/.test(readFileSync(new URL('../../../packages/omnihilbras-sdk/src/core/types.ts', import.meta.url), 'utf8'));
   assert.equal(declared, true, 'the SDK still declares it, so adapters can read it');
 });
 

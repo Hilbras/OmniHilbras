@@ -72,13 +72,14 @@ test('the plan\'s adapter counts agree with the fixture guard that measures them
 
   // The real number, counted here rather than parsed from the guard's source: every adapter module, and
   // every fixture in the directory. That is what the document must agree with.
-  const adapterDir = join(ROOT, 'packages/omnihilbras-sdk/src/adapters');
+  const adapterDir = join(ROOT, 'packages/omnihilbras-sdk/src/providers');
   const fixtureDir = join(ROOT, 'packages/omnihilbras-sdk/test/fixtures');
   // The guard excludes three adapter ids that carry no completion path of their own.
   const EXCLUDED = ['deepseek-pow', 'chatgpt-first-party', 'qwen-web'];
-  const adapters = readdirSync(adapterDir)
-    .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
-    .map((file) => file.replace(/\.ts$/, ''))
+  // `openai-compatible` is the shared base that providers extend, not a provider, so it is not counted.
+  const adapters = readdirSync(adapterDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && e.name !== 'openai-compatible')
+    .map((e) => e.name)
     .filter((id) => !EXCLUDED.includes(id));
   const captures = readdirSync(fixtureDir);
   const measured = `${captures.length} of ${adapters.length} adapters`;

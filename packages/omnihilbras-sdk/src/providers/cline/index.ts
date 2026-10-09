@@ -1,9 +1,9 @@
-import { ProviderError } from '../core/errors.js';
-import { providerErrorDetail } from '../core/transport.js';
-import { FetchHttpTransport } from '../core/transport.js';
-import { OpenAICompatibleAdapter, type OpenAIResponse } from './openai-compatible.js';
-import type { HttpTransport } from '../core/transport.js';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../core/types.js';
+import { ProviderError } from '../../core/errors.js';
+import { providerErrorDetail } from '../../core/transport.js';
+import { FetchHttpTransport } from '../../core/transport.js';
+import { OpenAICompatibleAdapter, type OpenAIResponse } from '../openai-compatible/index.js';
+import type { HttpTransport } from '../../core/transport.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../../core/types.js';
 
 /**
  * Cline serves an OpenAI-compatible API behind an OAuth authorization-code

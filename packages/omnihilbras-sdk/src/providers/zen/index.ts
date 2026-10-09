@@ -1,10 +1,10 @@
-import { ProviderError } from '../core/errors.js';
-import { FetchHttpTransport } from '../core/transport.js';
-import type { HttpTransport } from '../core/transport.js';
-import { OpenAICompatibleAdapter } from './openai-compatible.js';
-import { parseSseJson, parseSseStream } from '../core/streaming.js';
+import { ProviderError } from '../../core/errors.js';
+import { FetchHttpTransport } from '../../core/transport.js';
+import type { HttpTransport } from '../../core/transport.js';
+import { OpenAICompatibleAdapter } from '../openai-compatible/index.js';
+import { parseSseJson, parseSseStream } from '../../core/streaming.js';
 import { isZenFreeTierRefusal, zenFreeTierHeaders, zenPlaceholderTool, zenSessionId, zenContractSatisfied, zenConversationSeed } from './zen-free-tier.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../core/types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../../core/types.js';
 
 /**
  * OpenCode Zen serves one catalog through three different wire formats. Which
