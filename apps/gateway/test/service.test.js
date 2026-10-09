@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@hilbras/omnihilbras';
 import { createGatewayService, createProviderRegistry, EnvironmentSecretStore, GatewayService, InMemoryConnectionStore, loadGatewayConfig, startGatewayServer } from '../dist/index.js';
@@ -51,7 +54,9 @@ test('gateway config rejects non-loopback hosts and wildcard CORS', () => {
 
 test('startGatewayServer canonicalizes and binds a loopback address', async (t) => {
   const config = loadGatewayConfig({ OMNIHILBRAS_HOST: 'localhost' });
-  const instance = await startGatewayServer({ config: { ...config, port: 0 } });
+  const stateHome = mkdtempSync(join(tmpdir(), 'omnihilbras-service-state-'));
+  t.after(() => rmSync(stateHome, { recursive: true, force: true }));
+  const instance = await startGatewayServer({ config: { ...config, port: 0 }, env: { XDG_CONFIG_HOME: stateHome } });
   t.after(() => instance.server.close());
   const address = instance.server.address();
   assert.equal(instance.config.host, '127.0.0.1');
