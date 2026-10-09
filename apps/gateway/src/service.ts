@@ -12,6 +12,7 @@ import { SlidingWindowRateLimiter, type RouteCandidate } from './routing.js';
 import { HealthManager } from './health.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
+import { assertPublicDestination } from './destination-check.js';
 import { CredentialManager } from './credential-manager.js';
 import { CredentialLifecycle } from './credential-lifecycle.js';
 import { localDeployment, type ConnectionSecretStore, type DeploymentConfig } from './runtime.js';
@@ -253,7 +254,7 @@ export class GatewayService {
     // Kept, not just read: the ChatGPT Web driver is built lazily on first use, long after
     // the constructor has returned, so the override has to outlive this call.
     this.options = options;
-    this.transport = options.transport ?? new FetchHttpTransport();
+    this.transport = options.transport ?? new FetchHttpTransport({ checkDestination: assertPublicDestination });
     const now = options.now ?? (() => Date.now());
     this.rateLimiter = new SlidingWindowRateLimiter(now);
     this.apiKeys = new ApiKeyManager(this.apiKeyStore);

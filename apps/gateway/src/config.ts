@@ -12,6 +12,7 @@ import {
   type SecretStore,
 } from '@hilbras/omnihilbras';
 import { LocalApiKeyStore, type ApiKeyStore } from './api-keys.js';
+import { assertPublicDestination } from './destination-check.js';
 import { LocalUsageStore } from './usage-store.js';
 import { defaultConnectionDirectory, LocalConnectionStore, parseMasterKey, type ConnectionStore } from './connections.js';
 import { GatewayService } from './service.js';
@@ -114,7 +115,7 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
   };
 }
 
-export function createProviderRegistry(config: GatewayConfig, transport = new FetchHttpTransport({ timeoutMs: config.timeoutMs })) {
+export function createProviderRegistry(config: GatewayConfig, transport = new FetchHttpTransport({ timeoutMs: config.timeoutMs, checkDestination: assertPublicDestination })) {
   const registry = new ProviderRegistry();
   registry.register(new OpenAIAdapter({
     baseUrl: config.openai.baseUrl,

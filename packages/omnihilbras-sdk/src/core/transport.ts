@@ -1,5 +1,5 @@
 import { isProviderError, ProviderError } from './errors.js';
-import { assertSafeProviderRequestUrl } from './url.js';
+import { assertSafeProviderRequestUrl, isLoopbackHostname } from './url.js';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -58,6 +58,14 @@ export type FetchHttpTransportOptions = {
   maxResponseBytes?: number;
   maxStreamBytes?: number;
   maxStreamDurationMs?: number;
+  /**
+   * Asked before a remote request is sent, with the hostname from the URL. Throw to refuse it.
+   *
+   * The SDK cannot resolve names itself: it is bundled into the browser dashboard, where `node:dns`
+   * does not exist. A host that runs in Node supplies the check, and the gateway does. Absent, the
+   * request is sent as before, so existing callers are unchanged.
+   */
+  checkDestination?: (hostname: string) => Promise<void>;
 };
 
 type RequestLifecycle = {
@@ -79,6 +87,7 @@ export class FetchHttpTransport implements HttpTransport {
   private readonly maxResponseBytes: number;
   private readonly maxStreamBytes: number;
   private readonly maxStreamDurationMs: number;
+  private readonly checkDestination: ((hostname: string) => Promise<void>) | undefined;
 
   constructor(options: FetchHttpTransportOptions = {}) {
     const fetchImpl = options.fetch ?? globalThis.fetch;
@@ -92,10 +101,12 @@ export class FetchHttpTransport implements HttpTransport {
     this.maxResponseBytes = options.maxResponseBytes ?? defaultMaxResponseBytes;
     this.maxStreamBytes = options.maxStreamBytes ?? defaultMaxStreamBytes;
     this.maxStreamDurationMs = options.maxStreamDurationMs ?? defaultMaxStreamDurationMs;
+    this.checkDestination = options.checkDestination;
   }
 
   async request<T>(request: HttpRequest): Promise<HttpResponse<T>> {
     assertSafeProviderRequestUrl(request.url, request.providerId ?? 'provider');
+    await this.assertDestination(request);
     const lifecycle = createRequestLifecycle(request.signal, this.timeoutMs);
 
     try {
@@ -142,8 +153,29 @@ export class FetchHttpTransport implements HttpTransport {
     }
   }
 
+  /**
+   * Refuses a remote destination the host's check rejects, with the same error shape as the URL check.
+   *
+   * Loopback hosts are not checked here. They are the deliberate local-inference exemption, and a
+   * check that refused them would break the default compatible base (`localhost`).
+   */
+  private async assertDestination(request: HttpRequest) {
+    if (!this.checkDestination) return;
+    const hostname = new URL(request.url).hostname.replace(/^\[|\]$/g, '');
+    if (isLoopbackHostname(hostname)) return;
+    try {
+      await this.checkDestination(hostname);
+    } catch (error) {
+      throw new ProviderError('CONFIGURATION_ERROR', `Provider destination refused for ${request.providerId ?? 'provider'}.`, {
+        providerId: request.providerId,
+        cause: error,
+      });
+    }
+  }
+
   async *stream(request: HttpRequest): AsyncIterable<string> {
     assertSafeProviderRequestUrl(request.url, request.providerId ?? 'provider');
+    await this.assertDestination(request);
     const lifecycle = createRequestLifecycle(request.signal, this.streamIdleTimeoutMs, this.maxStreamDurationMs);
 
     try {

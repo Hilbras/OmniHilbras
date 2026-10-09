@@ -91,3 +91,17 @@ https://169.254.169.254/    refused
 The transport calls the global `fetch`, which cannot be given a per-request DNS hook. The correct fix resolves the name, rejects private results, and connects to the checked address. It changes every outbound request, so it needs its own design and tests. Local HTTP endpoints (`localhost`, the default compatible base) are a deliberate exemption and must stay usable.
 
 Status: **verified, not fixed.**
+
+### F5 — status after the fix
+
+Fixed in part. A remote provider hostname that resolves to a private or loopback address is refused before the
+request is sent. The check is supplied by the gateway (`apps/gateway/src/destination-check.ts`) through the
+transport's `checkDestination` hook; the SDK itself stays free of `node:dns`, because it is bundled into the
+browser dashboard. Loopback hosts remain exempt, so local inference endpoints keep working.
+
+**Still open:** the check resolves the name, then the connection resolves it again. A DNS server that answers
+with a public address to the check and a private one to the connection still gets through. Closing that needs
+the check to run on the connection's own lookup, which Node's global `fetch` does not expose. Doing it properly
+would need `undici` (a runtime dependency the SDK does not have) or a Node-level lookup hook.
+
+Tests: `packages/omnihilbras-sdk/test/destination-check.test.js` (5), `apps/gateway/test/destination-check.test.js` (3).
