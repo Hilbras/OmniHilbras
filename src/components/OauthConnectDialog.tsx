@@ -91,6 +91,17 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
     setPortalNode(document.body);
   }, []);
 
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    // Returns focus to whatever opened the dialog. Without it, closing a sign-in drops a keyboard user at
+    // the top of the page instead of the button they used.
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      previousFocusRef.current?.focus({ preventScroll: true });
+      previousFocusRef.current = null;
+    };
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();

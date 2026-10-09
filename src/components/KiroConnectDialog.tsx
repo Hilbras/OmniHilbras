@@ -77,6 +77,16 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
     signInWindowRef.current = signInWindow ?? null;
   }, [signInWindow]);
 
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    // Returns focus to the control that opened the dialog, so closing it does not drop a keyboard user at the top of the page.
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      previousFocusRef.current?.focus({ preventScroll: true });
+      previousFocusRef.current = null;
+    };
+  }, []);
+
   useEffect(() => {
     setPortalNode(document.body);
   }, []);

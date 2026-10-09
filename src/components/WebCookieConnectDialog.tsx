@@ -98,6 +98,16 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
     setPortalNode(document.body);
   }, []);
 
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    // Returns focus to the control that opened the dialog, so closing it does not drop a keyboard user at the top of the page.
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      previousFocusRef.current?.focus({ preventScroll: true });
+      previousFocusRef.current = null;
+    };
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
