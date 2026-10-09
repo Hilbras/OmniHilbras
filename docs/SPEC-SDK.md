@@ -32,7 +32,8 @@ sdk-core → provider-openai-compatible → provider-openai → provider-anthrop
 
 ## Technical Assumptions
 
-- Runtime: Node.js 24+ and TypeScript.
+- Runtime: TypeScript. The published SDK (`@hilbras/omnihilbras`) requires Node.js 20 or newer, and was tested on
+  20, 22, 24 and 26. The gateway and the monorepo tooling require Node.js 24+, matching CI and `.nvmrc`.
 - Package manager: pnpm workspaces.
 - SDK code is runtime-agnostic and uses standard `fetch` and Web Streams.
 - The first gateway binds to `127.0.0.1:8787` and has no authentication in local mode.
