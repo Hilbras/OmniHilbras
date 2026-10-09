@@ -31,6 +31,9 @@ export const usagePath = '/v1/usage';
 /** Outcomes, as an allowlist rather than a cast: an unknown value is a caller bug, not a passthrough. */
 const outcomes: readonly UsageOutcome[] = ['success', 'failure', 'cancelled'];
 
+/** Rows returned when the caller does not ask for a count. The totals still cover every retained record. */
+const recentRequestsDefault = 10;
+
 export async function handleUsageRoute(context: RouteContext): Promise<boolean> {
   const { request, response, url, service, origin } = context;
   // A positive comparison on purpose: `!==` would be the same route and an *invisible* one. The route guard
@@ -76,6 +79,14 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
     return true;
   }
 
+  const offsetParam = url.searchParams.get('offset');
+  if (offsetParam !== null && !/^\d+$/.test(offsetParam)) {
+    sendJson(response, 400, {
+      error: { code: 'INVALID_REQUEST', message: 'offset must be a non-negative integer.' },
+    }, origin);
+    return true;
+  }
+
   try {
     const summary = await store.summary({
       ...(url.searchParams.get('provider') ? { providerId: url.searchParams.get('provider')! } : {}),
@@ -84,22 +95,22 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
       ...(url.searchParams.get('since') ? { since: url.searchParams.get('since')! } : {}),
       ...(url.searchParams.get('until') ? { until: url.searchParams.get('until')! } : {}),
       ...(outcomeParam ? { outcome: outcomeParam as UsageOutcome } : {}),
-      ...(limitParam !== null ? { limit: Number(limitParam) } : {}),
     });
+    // Totals and cost cover every retained record that matches; only the listed rows are capped. A cap
+    // applied to the store query would shrink the totals with it, so the page would report fewer requests
+    // than the gateway recorded.
+    const offset = offsetParam !== null ? Number(offsetParam) : 0;
+    const pageSize = limitParam !== null ? Number(limitParam) : recentRequestsDefault;
+    const listed = summary.records.slice(offset, offset + pageSize);
     // Priced at read time from the connection's catalog, never stored and never defaulted. See
     // `usage-pricing.ts`: a model whose provider publishes no price contributes tokens to the totals and
     // nothing to the cost, and the response says how much of the page that covers.
-    const priced = priceUsage(
-      await Promise.all(
-        summary.records.map(async (record) => ({
-          ...record,
-          pricing: await service.modelPrice(record.connectionId, record.model),
-        })),
-      ),
-    );
+    const prices = await service.modelPrices(summary.records);
+    const priced = priceUsage(summary.records.map((record, index) => ({ ...record, pricing: prices[index] })));
     sendJson(response, 200, {
       recording: true,
-      ...summary,
+      totals: summary.totals,
+      records: listed,
       cost: {
         ...priced,
         // `null` rather than a string nobody should show: a caveat printed every time is a caveat read

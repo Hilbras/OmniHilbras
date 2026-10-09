@@ -237,6 +237,25 @@ test('an unknown outcome or a malformed limit is a 400, not a filter that matche
   assert.equal((await gw.getUsage('?limit=5')).status, 200);
 });
 
+test('paging moves through the list while the totals still cover every record', async (t) => {
+  const gw = await gateway();
+  t.after(gw.close);
+  for (let i = 0; i < 5; i += 1) await gw.post();
+
+  assert.equal((await gw.getUsage('?offset=abc')).status, 400);
+
+  const first = await (await gw.getUsage('?limit=2&offset=0')).json();
+  const second = await (await gw.getUsage('?limit=2&offset=2')).json();
+  const last = await (await gw.getUsage('?limit=2&offset=4')).json();
+  assert.equal(first.records.length, 2);
+  assert.equal(second.records.length, 2);
+  assert.equal(last.records.length, 1);
+  const ids = [...first.records, ...second.records, ...last.records].map((record) => record.id);
+  assert.equal(new Set(ids).size, 5, 'each page returns different records');
+  assert.equal(first.totals.requests, 5);
+  assert.equal(last.totals.requests, 5, 'paging must not shrink the totals');
+});
+
 test('usage is read-only', async (t) => {
   const gw = await gateway();
   t.after(gw.close);

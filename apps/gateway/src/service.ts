@@ -26,6 +26,19 @@ import { ApiKeyManager } from './api-key-manager.js';
 import type { UsageStore } from './usage-store.js';
 import { modelMetaPriceOrder } from './connections.js';
 
+function pricingFromConnection(connection: ConnectionRecord | undefined, model: string): ModelPricing | undefined {
+  const prices = connection?.modelMeta?.[model]?.p;
+  if (!Array.isArray(prices) || prices.length === 0) return undefined;
+  const pricing: ModelPricing = {};
+  modelMetaPriceOrder.forEach((key, index) => {
+    const value = prices[index];
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000) {
+      pricing[key] = value;
+    }
+  });
+  return Object.keys(pricing).length > 0 ? pricing : undefined;
+}
+
 export type GatewayProviderHealth = ProviderHealth & {
   providerId: string;
 };
@@ -1417,24 +1430,18 @@ export class GatewayService {
    * @param connectionId Which saved connection served the request.
    * @param model The model id as it was requested.
    */
+  async modelPrices(
+    requests: ReadonlyArray<{ connectionId?: string; model: string }>,
+  ): Promise<Array<ModelPricing | undefined>> {
+    const connections = await this.connections.list();
+    const byId = new Map(connections.map((connection) => [connection.id, connection]));
+    return requests.map((request) => pricingFromConnection(byId.get(request.connectionId ?? ''), request.model));
+  }
+
   async modelPrice(connectionId: string | undefined, model: string): Promise<ModelPricing | undefined> {
     if (!connectionId) return undefined;
-    // `ConnectionManager` exposes `list()`, not `get()` — I wrote `get` from the shape of `ConnectionStore`
-    // and the compiler caught it. `list()` is a full array read, which is fine here: `/v1/usage` prices its
-    // own records once, and a second pass over a connection list per record would be the slower shape.
     const record = (await this.connections.list()).find((connection) => connection.id === connectionId);
-    const prices = record?.modelMeta?.[model]?.p;
-    if (!Array.isArray(prices) || prices.length === 0) return undefined;
-    const pricing: ModelPricing = {};
-    modelMetaPriceOrder.forEach((key, index) => {
-      const value = prices[index];
-      // Validated rather than trusted: this array is read back from a file a user can edit, and a NaN or a
-      // negative rate would produce a negative total rather than an obviously wrong one.
-      if (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000) {
-        pricing[key] = value;
-      }
-    });
-    return Object.keys(pricing).length > 0 ? pricing : undefined;
+    return pricingFromConnection(record, model);
   }
 
   private requireAdapter(providerId: string): ProviderAdapter {

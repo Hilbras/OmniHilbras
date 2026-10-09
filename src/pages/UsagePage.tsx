@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import {
   BarChart3,
   CircleAlert,
@@ -13,6 +13,10 @@ import {
 } from 'lucide-react';
 import { DashboardShell } from '../components/DashboardShell';
 import { getGatewayUsage, type GatewayUsage, type GatewayUsageRecord } from '../lib/gatewayClient';
+
+const REQUESTS_PER_PAGE = 10;
+
+const UsageTopology = lazy(() => import('../components/UsageTopology').then((module) => ({ default: module.UsageTopology })));
 
 /**
  * Usage, measured.
@@ -131,18 +135,25 @@ export function UsageContent() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<OutcomeFilter>('all');
+  const [page, setPage] = useState(0);
 
   const load = useCallback(() => {
     setLoading(true);
-    getGatewayUsage(filter === 'all' ? undefined : { outcome: filter })
+    const offset = page * REQUESTS_PER_PAGE;
+    getGatewayUsage(filter === 'all' ? { limit: REQUESTS_PER_PAGE, offset } : { outcome: filter, limit: REQUESTS_PER_PAGE, offset })
       .then((next) => { setUsage(next); setError(null); })
       // Said plainly, because "the gateway is not running" and "nothing has been recorded" are different
       // states and only one of them is the operator's fault.
       .catch(() => setError('The gateway did not answer. Start it with `pnpm dev:gateway` and refresh.'))
       .finally(() => setLoading(false));
-  }, [filter]);
+  }, [filter, page]);
 
   useEffect(() => { load(); }, [load]);
+
+  const chooseFilter = (next: OutcomeFilter) => {
+    setPage(0);
+    setFilter(next);
+  };
 
   const totals = usage?.totals;
   const cost = usage?.cost;
@@ -264,18 +275,29 @@ export function UsageContent() {
             </div>
           </section>
 
+          <section className="card mt-4 overflow-hidden p-4" aria-label="Provider connections">
+            <div className="mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-semibold">Connections</h3>
+              <span className="muted text-[11px]">providers that served the latest requests are highlighted</span>
+            </div>
+            <Suspense fallback={<p className="muted py-10 text-center text-xs">Loading diagram…</p>}>
+              <UsageTopology records={records} />
+            </Suspense>
+          </section>
+
           <section className="card mt-4 overflow-hidden" aria-label="Recorded requests">
             <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <Timer className="h-4 w-4 text-muted" aria-hidden="true" />
                 <h3 className="text-sm font-semibold">Most recent requests</h3>
+                <span className="muted text-[11px]">latest 10</span>
               </div>
               <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by outcome">
                 {(['all', 'success', 'failure', 'cancelled'] as OutcomeFilter[]).map((option) => (
                   <button
                     key={option}
                     type="button"
-                    onClick={() => setFilter(option)}
+                    onClick={() => chooseFilter(option)}
                     aria-pressed={filter === option}
                     className={`btn-ghost !px-3 !py-2 !text-xs${filter === option ? ' !border-line' : ''}`}
                   >
@@ -308,6 +330,31 @@ export function UsageContent() {
                     {records.map((record) => <RecordRow key={record.id} record={record} />)}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {totals && totals.requests > 0 && (
+              <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-3 text-xs">
+                <span className="muted font-mono">
+                  {page * REQUESTS_PER_PAGE + 1}–{Math.min((page + 1) * REQUESTS_PER_PAGE, totals.requests)} of {totals.requests}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage((current) => Math.max(0, current - 1))}
+                    disabled={page === 0}
+                    className="btn-ghost !px-3 !py-2 !text-xs disabled:opacity-40"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((current) => current + 1)}
+                    disabled={(page + 1) * REQUESTS_PER_PAGE >= totals.requests}
+                    className="btn-ghost !px-3 !py-2 !text-xs disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
             )}
           </section>

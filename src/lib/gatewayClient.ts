@@ -639,10 +639,11 @@ export type GatewayUsage = {
   cost?: GatewayUsageCost;
 };
 
-export function getGatewayUsage(query?: { outcome?: 'success' | 'failure' | 'cancelled'; limit?: number }, signal?: AbortSignal) {
+export function getGatewayUsage(query?: { outcome?: 'success' | 'failure' | 'cancelled'; limit?: number; offset?: number }, signal?: AbortSignal) {
   const params = new URLSearchParams();
   if (query?.outcome) params.set('outcome', query.outcome);
   if (query?.limit !== undefined) params.set('limit', String(query.limit));
+  if (query?.offset !== undefined) params.set('offset', String(query.offset));
   const suffix = params.toString();
   return requestJson<GatewayUsage>(`/v1/usage${suffix ? `?${suffix}` : ''}`, { signal });
 }
