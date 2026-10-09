@@ -112,13 +112,41 @@ test('an approval yields a credential carrying the org the client would pick', a
     return new Response('{}', { status: 404 });
   });
   const outcome = await pollOpencodeConsoleSignIn('dev_1');
-  assert.equal(outcome.status, 'connected');
+  assert.equal(outcome.status, 'choose', 'two workspaces are a choice, not a silent pick of the first');
+  assert.deepEqual(outcome.workspaces.map((workspace) => workspace.id), ['org_aaa', 'org_zzz'], 'offered in the order shown');
   assert.equal(outcome.credential.type, 'oauth');
-  assert.equal(outcome.credential.orgId, 'org_aaa');
-  assert.equal(outcome.credential.orgName, 'Personal');
+  assert.equal(outcome.credential.orgId, 'org_aaa', 'the default the client would pick is still carried');
   assert.equal(outcome.credential.email, 'dev@example.com');
   assert.equal(outcome.credential.refreshToken, 'ref');
   assert.ok(Date.parse(outcome.credential.expiresAt) > Date.now(), 'expiry is in the future');
+});
+
+test('the chosen workspace replaces the default and keeps the rest of the credential', async () => {
+  const { withConsoleWorkspace } = await import('../dist/opencodeConsole.js');
+  const credential = { type: 'oauth', value: 'acc', refreshToken: 'ref', orgId: 'org_aaa', orgName: 'Personal' };
+  const picked = withConsoleWorkspace(credential, { id: 'org_zzz', name: 'Zulu' });
+  assert.equal(picked.orgId, 'org_zzz');
+  assert.equal(picked.orgName, 'Zulu');
+  assert.equal(picked.value, 'acc');
+  assert.equal(picked.refreshToken, 'ref');
+  assert.equal(credential.orgId, 'org_aaa', 'the input is not mutated');
+});
+
+test('a parked sign-in is handed out once, so a second pick cannot save it again', async () => {
+  const store = new OpencodeConsoleSessionStore();
+  const session = store.create({ deviceCode: 'dev_2', userCode: 'U', verificationUrl: 'https://opencode.ai/x' });
+  store.parkForChoice(session.id, { credential: { type: 'oauth', value: 'acc' }, account: 'a@b.c' }, [{ id: 'org_1', name: 'One' }]);
+  assert.deepEqual(store.publicStatus(store.get(session.id)).workspaces, [{ id: 'org_1', name: 'One' }]);
+  assert.ok(store.takeChoice(session.id), 'the first take gets the credential');
+  assert.equal(store.takeChoice(session.id), undefined, 'the second take gets nothing');
+});
+
+test('the browser status never carries the parked token', () => {
+  const store = new OpencodeConsoleSessionStore();
+  const session = store.create({ deviceCode: 'dev_3', userCode: 'U', verificationUrl: 'https://opencode.ai/x' });
+  store.parkForChoice(session.id, { credential: { type: 'oauth', value: 'secret-token' }, account: 'a@b.c' }, [{ id: 'org_1', name: 'One' }]);
+  const json = JSON.stringify(store.publicStatus(store.get(session.id)));
+  assert.ok(!json.includes('secret-token'), 'the public status must not contain the access token');
 });
 
 test('a token with no account lookup still connects, minus the org', async () => {

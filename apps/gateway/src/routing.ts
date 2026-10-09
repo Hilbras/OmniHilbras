@@ -183,6 +183,29 @@ export function isRetryableFailure(error: unknown) {
   return error.retryable || error.code === 'PROVIDER_TIMEOUT' || error.code === 'PROVIDER_UNAVAILABLE' || error.code === 'RATE_LIMITED' || error.code === 'PROVIDER_REQUEST_FAILED';
 }
 
+/**
+ * Splits a `provider/model` request into its provider and model, but only when the prefix is a
+ * provider this gateway actually has a connection for.
+ *
+ * Splitting at the first slash alone would misread real model ids: most ids in the catalog already
+ * contain one (`qwen/qwen3.8-27b:free`), and `qwen` is not a provider prefix there. So the prefix must
+ * name a connected provider, and anything else is returned unchanged as a bare model id.
+ */
+export function splitProviderPrefix(
+  model: string,
+  connections: readonly Pick<ConnectionRecord, 'providerId'>[],
+): { model: string; providerId?: string } {
+  const trimmed = model.trim();
+  const slash = trimmed.indexOf('/');
+  if (slash <= 0) return { model: trimmed };
+  const prefix = trimmed.slice(0, slash);
+  const rest = trimmed.slice(slash + 1);
+  if (!rest) return { model: trimmed };
+  return connections.some((connection) => connection.providerId === prefix)
+    ? { model: rest, providerId: prefix }
+    : { model: trimmed };
+}
+
 /** Resolves a failover chain, ordered by priority then name for determinism. */
 export function resolveRoute(input: {
   connections: ConnectionRecord[];

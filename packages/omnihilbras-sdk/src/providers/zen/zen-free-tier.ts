@@ -64,15 +64,14 @@ import type { ChatRequest } from '../../core/types.js';
 export const MINIMUM_ZEN_USER_AGENT_MINOR = 17;
 
 /**
- * The placeholder tool the official client declares to satisfy the gate.
+ * The tools the free-tier gate accepts, in lowercase.
  *
- * **A moving target.** OmniRoute records that one made-up name was accepted on `big-pickle` and refused
- * on two other free models that had accepted it the day before, which is an observation about someone
- * else's service rather than a fact this project controls. It is therefore a default that
- * `OMNIHILBRAS_ZEN_PLACEHOLDER_TOOL` can replace without a release, and the refusal path names it so a
- * wrong guess is diagnosable rather than mysterious.
+ * Measured against the live endpoint for `mimo-v2.6-flash-free`: a single `_noop` placeholder answers
+ * 403 FreeTierError, and the file-search quartet below answers 200 with a streamed answer. The same
+ * quartet is what OmniRoute's `opencodeFingerprint` sends, so this is the contract both projects share.
+ * Caller tools that match a name in the quartet in another case are renamed to it, never duplicated.
  */
-export const DEFAULT_ZEN_PLACEHOLDER_TOOL = '_noop';
+export const ZEN_FINGERPRINT_TOOL_NAMES = ['bash', 'glob', 'grep', 'read'] as const;
 
 const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
@@ -143,10 +142,6 @@ export function zenUserAgent(): string {
   return process.env.OMNIHILBRAS_ZEN_USER_AGENT?.trim() || 'opencode/1.18.31';
 }
 
-/** The placeholder tool name, overridable because the accepted names move over time. */
-export function zenPlaceholderToolName(): string {
-  return process.env.OMNIHILBRAS_ZEN_PLACEHOLDER_TOOL?.trim() || DEFAULT_ZEN_PLACEHOLDER_TOOL;
-}
 
 /**
  * The headers half of the contract, for a free-tier request.
@@ -165,16 +160,21 @@ export function zenFreeTierHeaders(sessionId: string): Record<string, string> {
   };
 }
 
-/** A tool that satisfies the gate and is never called, so it cannot change an answer. */
-export function zenPlaceholderTool() {
-  return {
+/**
+ * The quartet, declared in the chat-completions shape, for a request that has no tools of its own.
+ *
+ * They are declared only to satisfy the gate, and their description says so, so a model is not
+ * encouraged to call them.
+ */
+export function zenFingerprintTools() {
+  return ZEN_FINGERPRINT_TOOL_NAMES.map((name) => ({
     type: 'function' as const,
     function: {
-      name: zenPlaceholderToolName(),
-      description: 'Declared to satisfy the provider free-tier request contract. Never called.',
+      name,
+      description: 'Declared to satisfy the provider free-tier request contract. Do not call.',
       parameters: { type: 'object' as const, properties: {}, additionalProperties: false },
     },
-  };
+  }));
 }
 
 /**

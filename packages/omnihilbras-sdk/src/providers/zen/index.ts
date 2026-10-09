@@ -3,7 +3,7 @@ import { FetchHttpTransport } from '../../core/transport.js';
 import type { HttpTransport } from '../../core/transport.js';
 import { OpenAICompatibleAdapter } from '../openai-compatible/index.js';
 import { parseSseJson, parseSseStream } from '../../core/streaming.js';
-import { isZenFreeTierRefusal, zenFreeTierHeaders, zenPlaceholderTool, zenSessionId, zenContractSatisfied, zenConversationSeed } from './zen-free-tier.js';
+import { ZEN_FINGERPRINT_TOOL_NAMES, isZenFreeTierRefusal, zenFingerprintTools, zenFreeTierHeaders, zenSessionId, zenContractSatisfied, zenConversationSeed } from './zen-free-tier.js';
 import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../../core/types.js';
 
 /**
@@ -53,6 +53,25 @@ function toGatedTool(tool: ToolDefinition) {
     type: 'function' as const,
     function: { name: tool.name, ...(tool.description ? { description: tool.description } : {}), parameters: tool.parameters },
   };
+}
+
+export function gatedTools(tools: readonly ToolDefinition[] | undefined) {
+  const quartet = new Set<string>(ZEN_FINGERPRINT_TOOL_NAMES);
+  const seen = new Set<string>();
+  const out: ReturnType<typeof toGatedTool>[] = [];
+  for (const tool of tools ?? []) {
+    const lower = tool.name.trim().toLowerCase();
+    const name = quartet.has(lower) ? lower : tool.name;
+    if (quartet.has(lower)) {
+      if (seen.has(lower)) continue;
+      seen.add(lower);
+    }
+    out.push(toGatedTool({ ...tool, name }));
+  }
+  for (const name of ZEN_FINGERPRINT_TOOL_NAMES) {
+    if (!seen.has(name)) out.push(...zenFingerprintTools().filter((tool) => tool.function.name === name));
+  }
+  return out;
 }
 
 function toGatedFinishReason(reason: string): FinishReason {
@@ -471,9 +490,10 @@ export class ZenAdapter implements ProviderAdapter {
       model: id,
       messages: request.messages.map(toGatedMessage),
       stream: true,
-      // The caller's tools when there are any; the placeholder otherwise, because an empty array is a
-      // refusal. A tool the model could actually call is never removed to make room for the placeholder.
-      tools: request.tools && request.tools.length > 0 ? request.tools.map(toGatedTool) : [zenPlaceholderTool()],
+      // The caller's tools, with any quartet member they lack appended. A tool the model could actually call
+      // is never removed to make room for the quartet, and a caller's own `Bash` is renamed to `bash`
+      // rather than declared twice.
+      tools: gatedTools(request.tools),
       ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
       ...(request.topP === undefined ? {} : { top_p: request.topP }),

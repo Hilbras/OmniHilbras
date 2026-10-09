@@ -161,7 +161,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 1.77.0 moved `clinepass` to the OAuth group — it is the same account as Cline, reached by the same
   // sign-in — so the dialog offers no option for it either: options go 17 -> 16, back to exactly the
   // count before `clinepass` existed. Both halves of that pair are now OAuth cards, and neither is keyed.
-  assert.equal(providerCatalog.length, 29, `the catalog now has ${providerCatalog.length} cards`);
-  assert.equal(providerOptions.length, 19, `the dialog now offers ${providerOptions.length} options`);
+  assert.equal(providerCatalog.length, 30, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerOptions.length, 20, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

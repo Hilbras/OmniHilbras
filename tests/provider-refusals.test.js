@@ -87,14 +87,13 @@ test('a caller\'s real tools are never displaced by the placeholder', () => {
   // declared would trade a working request for a permitted one — and the tool would be missing from a
   // conversation that needs it.
   const source = code(readFileSync(join(ADAPTERS, 'zen', 'index.ts'), 'utf8'));
-  assert.match(source, /request\.tools && request\.tools\.length > 0 \? request\.tools\.map\(toGatedTool\) : \[zenPlaceholderTool\(\)\]/,
-    'the placeholder is a fallback, not an override');
+  assert.match(source, /tools: gatedTools\(request\.tools\)/,
+    'the caller\'s tools go through gatedTools, which keeps them and appends the quartet');
 });
 
-test('the placeholder name is configuration, because the accepted names move over time', () => {
-  // One made-up name was accepted on `big-pickle` and refused on two other free models the next day.
-  // That is an observation about someone else's service, so it must not need a release to change.
+test('the free-tier quartet is the contract, and the client version stays configurable', () => {
   const source = readFileSync(join(ADAPTERS, 'zen', 'zen-free-tier.ts'), 'utf8');
-  assert.match(source, /OMNIHILBRAS_ZEN_PLACEHOLDER_TOOL/, 'the placeholder is overridable');
-  assert.match(source, /OMNIHILBRAS_ZEN_USER_AGENT/, 'and so is the client version');
+  assert.match(source, /ZEN_FINGERPRINT_TOOL_NAMES = \['bash', 'glob', 'grep', 'read'\]/,
+    'the quartet is measured against the live gate, so it is a constant, not configuration');
+  assert.match(source, /OMNIHILBRAS_ZEN_USER_AGENT/, 'the client version is still overridable');
 });

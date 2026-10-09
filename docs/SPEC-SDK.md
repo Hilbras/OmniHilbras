@@ -224,7 +224,8 @@ The first local gateway exposes:
   most once: a second attempt against the same session is refused rather than sending an
   already-used code to Kiro.
 - `POST /v1/oauth/opencode-console/start` — begin an OpenCode Console device-flow sign-in.
-- `GET /v1/oauth/opencode-console/session/:id` — whether a device flow is awaiting approval, connected, or failed.
+- `GET /v1/oauth/opencode-console/session/:id` — whether a device flow is awaiting approval, connected, or failed. When the account has more than one workspace the status is `pending` and carries `workspaces` (`id`, `name`) to choose from.
+- `POST /v1/oauth/opencode-console/session/:id/workspace` — body `{ "workspaceId": "…" }`. Saves the OpenCode Console connection with the chosen workspace. The id must be one offered by the sign-in.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
 - `POST /v1/web-cookie/tokenharbor/check` — verify a pasted Token Harbor session cookie against
   `tokenharbor.ai` by reading the account profile, and store nothing. A credential check, not a
@@ -517,7 +518,8 @@ does. `/home/gin/work/OmniRoute` serves the same free models through the same ba
 requires together:
 
 1. `stream: true` in the body,
-2. a non-empty `tools` array, using the official client's placeholder name `_noop`,
+2. a non-empty `tools` array carrying the file-search quartet `bash`, `glob`, `grep` and `read` in lowercase
+   (a single `_noop` placeholder was measured to answer 403; the quartet answers 200 for the same request),
 3. an `x-opencode-session` header shaped `ses_` + 12 hex + 14 base62 (the shape is checked, the value is
    not),
 4. a `User-Agent` carrying `opencode/<version>` with version ≥ 1.17.
@@ -534,9 +536,10 @@ it needs a request from a residential IP. What is not a hypothesis is the error:
 **after** the contract was applied is not a credential problem, and the message says so rather than
 sending the operator to rotate a working key.
 
-Two parts of the contract move, and are therefore configuration rather than constants:
-`OMNIHILBRAS_ZEN_PLACEHOLDER_TOOL` (the accepted placeholder name differs per model and changed within a
-week) and `OMNIHILBRAS_ZEN_USER_AGENT`. Which models are gated is decided by the `-free` suffix rather
+The quartet is a constant, because it is what the gate was measured to accept. A caller's own tools are
+kept; any quartet member the caller lacks is appended, and a caller's casing variant (`Bash`) is renamed to
+the lowercase name rather than declared twice. The client version stays configurable through
+`OMNIHILBRAS_ZEN_USER_AGENT`. Which models are gated is decided by the `-free` suffix rather
 than a list, because the upstream rotates its free lineup — six models were delisted and replaced inside a
 week.
 

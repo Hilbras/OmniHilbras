@@ -5,7 +5,7 @@ import type { GatewayConfig } from './config.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { KimiCodeSessionStore, kimiCodeProviderId, type KimiCodeSessionStatus } from './kimiCode.js';
 import { ClaudeCodeSessionStore, beginClaudeCodeSignIn, completeClaudeCodeSignIn, type ClaudeCodeSessionStatus } from './claudeCode.js';
-import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
+import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, withConsoleWorkspace, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialDeviceFlow, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
 import { SlidingWindowRateLimiter, type RouteCandidate } from './routing.js';
@@ -647,6 +647,38 @@ export class GatewayService {
    * The order — claim, poll, save, then publish — is in `completeSignIn`, because getting it wrong
    * spends an OAuth grant twice or reports a connection that does not exist.
    */
+  /**
+   * Saves the OpenCode Console connection with the workspace the user picked.
+   *
+   * The id must be one of the workspaces the sign-in offered, so a made-up id is refused rather than
+   * saved. The parked credential is taken once, so a second pick cannot save it twice.
+   */
+  async chooseOpencodeConsoleWorkspace(sessionId: string, workspaceId: string, signal?: AbortSignal): Promise<OpencodeConsoleSessionStatus | undefined> {
+    const session = this.opencodeConsoleSessions.get(sessionId);
+    if (!session) return undefined;
+    const offered = session.workspaces?.find((workspace) => workspace.id === workspaceId);
+    if (!offered) throw new ProviderError('INVALID_REQUEST', 'That workspace was not offered for this sign-in.', { providerId: opencodeConsoleProviderId, publicMessage: 'That workspace was not offered for this sign-in.' });
+    const parked = this.opencodeConsoleSessions.takeChoice(sessionId);
+    if (!parked) throw new ProviderError('INVALID_REQUEST', 'This sign-in has no workspace waiting to be chosen.', { providerId: opencodeConsoleProviderId, publicMessage: 'This sign-in has no workspace waiting to be chosen.' });
+    const credential = withConsoleWorkspace(parked.credential, offered);
+    const orgName = credential.type === 'oauth' ? credential.orgName : undefined;
+    try {
+      const connection = await this.saveConnection({
+        id: opencodeConsoleProviderId,
+        providerId: opencodeConsoleProviderId,
+        name: `OpenCode Console${orgName ? ` (${orgName})` : ''}`,
+        endpoint: 'https://opencode.ai/inference/openai/v1',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      }, credential, signal, { tolerateDiscoveryFailure: true });
+      this.opencodeConsoleSessions.resolve(sessionId, { status: 'connected', connection });
+    } catch (error) {
+      this.opencodeConsoleSessions.resolve(sessionId, { status: 'failed', error: error instanceof Error ? error.message : 'The connection could not be saved.' });
+    }
+    return this.opencodeConsoleSessions.publicStatus(session);
+  }
+
   async opencodeConsoleSignInStatus(sessionId: string, signal?: AbortSignal): Promise<OpencodeConsoleSessionStatus | undefined> {
     return completeSignIn({
       sessions: this.opencodeConsoleSessions,
@@ -659,6 +691,10 @@ export class GatewayService {
         const outcome = await pollOpencodeConsoleSignIn(session.deviceCode);
         if (outcome.status === 'pending') return { status: 'pending' };
         if (outcome.status === 'denied') return { status: 'denied', error: outcome.error };
+        if (outcome.status === 'choose') {
+          this.opencodeConsoleSessions.parkForChoice(sessionId, { credential: outcome.credential, account: outcome.account }, outcome.workspaces);
+          return { status: 'pending' };
+        }
         return { status: 'connected', credential: outcome.credential };
       },
       connection: (credential) => {

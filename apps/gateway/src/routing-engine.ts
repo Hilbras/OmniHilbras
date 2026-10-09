@@ -1,6 +1,6 @@
 import { RateLimitPolicy } from './rate-limit-policy.js';
 import { defaultResilienceSettings, type ConnectionRecord, type ResilienceSettings } from './connections.js';
-import { SlidingWindowRateLimiter, resolveRoute, type RouteCandidate, type RouteDecision } from './routing.js';
+import { SlidingWindowRateLimiter, resolveRoute, splitProviderPrefix, type RouteCandidate, type RouteDecision } from './routing.js';
 import type { HealthManager } from './health.js';
 
 /**
@@ -107,12 +107,14 @@ export class RoutingEngine {
     this.retain(new Set(input.connections.map((connection) => connection.id)));
 
     const health = this.options.health.registry();
+    const split = splitProviderPrefix(input.model, input.connections);
+    const explicitProviderId = input.explicitProviderId ?? split.providerId;
     const decision = resolveRoute({
       // Copied because `resolveRoute` types its input as mutable while nothing here mutates it.
       // The copy is here rather than at every call site so the looseness is paid for once.
       connections: [...input.connections],
-      model: input.model,
-      ...(input.explicitProviderId === undefined ? {} : { explicitProviderId: input.explicitProviderId }),
+      model: split.model,
+      ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
       health,
       failureThreshold: this.options.health.getFailureThreshold(),
       // Asked of the limiter, per connection, for this request — see `currentWait`. Passing

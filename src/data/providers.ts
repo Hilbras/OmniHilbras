@@ -17,6 +17,7 @@ export const providerLogoMap = {
   tokenharbor: '/providers/tokenharbor.svg',
   xkiro: '/providers/xkiro-logo.svg',
   apmix: '/providers/apmix.png',
+  apinex: '/providers/apinex.png',
   tiarina: '/providers/Tirina.webp',
   // Added 1.43.0 with the ten API-key cards. Every path is a file already committed under
   // `public/providers/` — `tests/dashboard-assets.test.js` fails if a rendered mark is not, and 294
@@ -419,6 +420,27 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'A',
     logo: providerLogoMap.apmix,
     endpoint: 'https://api.apmix.ai/v1',
+    modelList: [],
+  },
+  {
+    id: 'apinex',
+    name: 'APInex',
+    description:
+      'One API key for OpenAI-compatible models, web research, Twitter/X and voice, with a single token balance. Key from apinex.bond.',
+    freeTier: 'The free tier is not described on the pages checked. Check the APInex dashboard for current free-model terms.',
+    category: 'Multi-model provider',
+    group: 'free-tier',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#7c3aed',
+    initial: 'A',
+    logo: providerLogoMap.apinex,
+    endpoint: 'https://api.apinex.bond/v1',
     modelList: [],
   },
   {

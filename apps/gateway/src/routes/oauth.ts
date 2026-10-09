@@ -108,6 +108,20 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
+    if (request.method === 'POST' && /^\/v1\/oauth\/opencode-console\/session\/[^/]+\/workspace$/.test(url.pathname)) {
+      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/opencode-console/session/'.length, -'/workspace'.length)).trim();
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const workspaceId = readRequiredString(body, 'workspaceId');
+      const status = await service.chooseOpencodeConsoleWorkspace(sessionId, workspaceId, signal);
+      if (!status) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
+        return true;
+      }
+      sendJson(response, 200, status, origin);
+      return true;
+    }
+
     /**
      * Kimi Code, the `api.kimi.com/coding` subscription.
      *

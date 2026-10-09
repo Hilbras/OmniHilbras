@@ -52,7 +52,11 @@ export class ModelCatalog {
     const connections = (await this.deps.connections.list()).filter((connection) => connection.enabled && connection.hasCredential);
     if (connections.length > 0) {
       return {
-        models: connections.flatMap((connection) => connection.modelIds.map((id) => ({ id, providerId: connection.providerId }) satisfies Model)),
+        models: connections.flatMap((connection) => connection.modelIds.map((id) => ({
+          id,
+          providerId: connection.providerId,
+          qualifiedId: `${connection.providerId}/${id}`,
+        }) satisfies Model & { qualifiedId: string })),
         unavailable: [],
       };
     }

@@ -4,7 +4,8 @@ import type { HttpTransport } from '../../core/transport.js';
 import { compactPricing, normalizeContextWindow, normalizeModalities, perMillionPrice } from '../../core/pricing.js';
 import { AnthropicAdapter } from '../anthropic/index.js';
 import { OpenAICompatibleAdapter } from '../openai-compatible/index.js';
-import { zenConversationSeed, zenContractSatisfied, zenFreeTierHeaders, zenPlaceholderTool, zenSessionId } from '../zen/zen-free-tier.js';
+import { zenConversationSeed, zenContractSatisfied, zenFreeTierHeaders, zenSessionId } from '../zen/zen-free-tier.js';
+import { gatedTools } from '../zen/index.js';
 import { parseSseStream } from '../../core/streaming.js';
 import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../../core/types.js';
 
@@ -304,8 +305,8 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
       model: id,
       messages: request.messages.map((message) => ({ role: message.role, content: message.content })),
       stream: true,
-      // The caller's tools when there are any; the placeholder otherwise, because an empty array is refused.
-      tools: request.tools && request.tools.length > 0 ? request.tools : [zenPlaceholderTool()],
+      // The caller's tools with the free-tier quartet appended where missing; never removed to make room.
+      tools: gatedTools(request.tools),
       ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
     };

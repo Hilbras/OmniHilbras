@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ProviderError, ZenAdapter } from '../dist/index.js';
-import { zenSessionId, zenFreeTierHeaders, zenPlaceholderTool, zenContractSatisfied, satisfiesZenUserAgentContract, zenPlaceholderToolName } from '../dist/providers/zen/zen-free-tier.js';
+import { zenSessionId, zenFreeTierHeaders, zenFingerprintTools, zenContractSatisfied, satisfiesZenUserAgentContract, ZEN_FINGERPRINT_TOOL_NAMES } from '../dist/providers/zen/zen-free-tier.js';
 
 /**
  * OpenCode Zen's free-tier request contract.
@@ -75,7 +75,7 @@ test('a free-tier request carries all four conditions of the contract', async ()
   const body = JSON.parse(sent.body);
   assert.equal(body.stream, true, 'condition 1: streaming');
   assert.ok(Array.isArray(body.tools) && body.tools.length > 0, 'condition 2: a non-empty tools array');
-  assert.equal(body.tools[0].function.name, zenPlaceholderToolName(), 'the official placeholder name');
+  assert.deepEqual(body.tools.map((tool) => tool.function.name), [...ZEN_FINGERPRINT_TOOL_NAMES], 'the file-search quartet, lowercase');
   assert.match(headers['x-opencode-session'], /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/, 'condition 3: the session shape');
   assert.ok(satisfiesZenUserAgentContract(headers['user-agent']), `condition 4: user-agent, got ${headers['user-agent']}`);
 
@@ -111,9 +111,11 @@ test('a caller\'s own tools are kept — the placeholder never displaces a real 
     tools: [{ name: 'read_file', description: 'Read a file', parameters: { type: 'object', properties: { path: { type: 'string' } } } }],
   }), credential);
   const body = JSON.parse(sent.body);
-  assert.equal(body.tools.length, 1);
-  assert.equal(body.tools[0].function.name, 'read_file');
-  assert.deepEqual(body.tools[0].function.parameters.properties.path, { type: 'string' }, 'and its schema survives');
+  const names = body.tools.map((tool) => tool.function.name);
+  assert.ok(names.includes('read_file'), 'the caller\'s tool is still declared');
+  const own = body.tools.find((tool) => tool.function.name === 'read_file');
+  assert.deepEqual(own.function.parameters.properties.path, { type: 'string' }, 'and its schema survives');
+  assert.deepEqual(names.filter((name) => ['bash', 'glob', 'grep', 'read'].includes(name)), ['bash', 'glob', 'grep', 'read'], 'the quartet is appended beside it');
 });
 
 test('the gate applies to free models only', async () => {
@@ -199,22 +201,24 @@ test('the user-agent rule is the upstream\'s, not a guess', () => {
   assert.equal(satisfiesZenUserAgentContract(undefined), false);
 });
 
-test('the placeholder tool is configurable, because the accepted names move over time', () => {
-  // The working implementation records one made-up name accepted on `big-pickle` and refused on two
-  // other free models the next day. That is an observation about someone else's service, so it belongs
-  // in configuration rather than in a constant that needs a release.
-  assert.equal(zenPlaceholderTool().function.name, '_noop', 'the official placeholder by default');
-  process.env.OMNIHILBRAS_ZEN_PLACEHOLDER_TOOL = '_other';
-  try {
-    assert.equal(zenPlaceholderTool().function.name, '_other');
-  } finally {
-    delete process.env.OMNIHILBRAS_ZEN_PLACEHOLDER_TOOL;
-  }
+test('the free-tier quartet is declared in lowercase, and a caller\'s casing variant is renamed, not duplicated', async () => {
+  const { gatedTools } = await import('../dist/providers/zen/index.js');
+  assert.deepEqual(zenFingerprintTools().map((tool) => tool.function.name), ['bash', 'glob', 'grep', 'read']);
+
+  const merged = gatedTools([
+    { name: 'Bash', description: 'run', parameters: { type: 'object', properties: {} } },
+    { name: 'write', description: 'write', parameters: { type: 'object', properties: {} } },
+  ]);
+  const names = merged.map((tool) => tool.function.name);
+  assert.equal(names.filter((name) => name === 'bash').length, 1, 'Bash becomes bash, declared once');
+  assert.ok(!names.includes('Bash'), 'the caller spelling is not sent');
+  assert.ok(names.includes('write'), 'a non-quartet tool the caller declared is kept');
+  assert.ok(names.includes('glob') && names.includes('grep') && names.includes('read'), 'missing quartet members are appended');
 });
 
 test('the contract check reports honestly rather than assuming it passed', () => {
   const headers = zenFreeTierHeaders(zenSessionId());
-  const full = { stream: true, tools: [zenPlaceholderTool()] };
+  const full = { stream: true, tools: zenFingerprintTools() };
   assert.equal(zenContractSatisfied(headers, full), true);
   assert.equal(zenContractSatisfied(headers, { ...full, stream: false }), false, 'a non-stream body is not satisfied');
   assert.equal(zenContractSatisfied(headers, { stream: true, tools: [] }), false, 'an empty tools array is not satisfied');

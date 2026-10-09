@@ -28,6 +28,8 @@ export type OpencodeConsoleSessionStatus = {
   expiresAt?: string;
   error?: string;
   connection?: unknown;
+  /** Set while the user has to pick a workspace before the connection is saved. */
+  workspaces?: ConsoleWorkspace[];
 };
 
 type Session = {
@@ -41,6 +43,13 @@ type Session = {
   error?: string;
   /** Set once the token has been claimed, so a poll cannot exchange it twice. */
   claimed: boolean;
+  /**
+   * The signed-in credential, held only while the user chooses a workspace. Never copied into
+   * `publicStatus`, which reads a fixed field list, so the token cannot reach the browser through it.
+   */
+  pending?: { credential: ProviderCredential; account: string };
+  /** The workspaces offered for the pick, in the order shown. */
+  workspaces?: ConsoleWorkspace[];
 };
 
 /**
@@ -86,7 +95,24 @@ export class OpencodeConsoleSessionStore {
   }
 
   publicStatus(session: Session): OpencodeConsoleSessionStatus {
-    return this.store.publicStatus(session);
+    const status = this.store.publicStatus(session);
+    return session.workspaces ? { ...status, workspaces: session.workspaces } : status;
+  }
+
+  parkForChoice(id: string, pending: NonNullable<Session['pending']>, workspaces: ConsoleWorkspace[]) {
+    const session = this.store.get(id);
+    if (!session) return;
+    session.pending = pending;
+    session.workspaces = workspaces;
+  }
+
+  /** The parked sign-in for a pick, or undefined once it has been taken or has expired. */
+  takeChoice(id: string): NonNullable<Session['pending']> | undefined {
+    const session = this.store.get(id);
+    if (!session?.pending) return undefined;
+    const pending = session.pending;
+    session.pending = undefined;
+    return pending;
   }
 }
 
@@ -168,10 +194,13 @@ export async function beginOpencodeConsoleSignIn(): Promise<{
   };
 }
 
+export type ConsoleWorkspace = { id: string; name: string };
+
 export type PollOutcome =
   | { status: 'pending' }
   | { status: 'denied'; error: string }
-  | { status: 'connected'; credential: ProviderCredential; account: string };
+  | { status: 'connected'; credential: ProviderCredential; account: string }
+  | { status: 'choose'; account: string; workspaces: ConsoleWorkspace[]; credential: ProviderCredential };
 
 /**
  * Polls the Console for the token. A pending answer is HTTP 400 with the reason in the
@@ -200,7 +229,11 @@ export async function pollOpencodeConsoleSignIn(deviceCode: string): Promise<Pol
   ]);
   // The client picks the alphabetically first org, so the same account resolves to the
   // same org here as it does there.
-  const org = [...(orgs ?? [])].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '') || (a.id ?? '').localeCompare(b.id ?? ''))[0];
+  const sorted = [...(orgs ?? [])].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '') || (a.id ?? '').localeCompare(b.id ?? ''));
+  const org = sorted[0];
+  const workspaces: ConsoleWorkspace[] = sorted
+    .filter((item): item is { id: string; name?: string } => typeof item.id === 'string' && item.id !== '')
+    .map((item) => ({ id: item.id, name: item.name || item.id }));
   /**
    * The config cannot be read without an org: it answers
    * `400 {"code":"org_required","message":"x-org-id is required"}`. So the org is
@@ -226,7 +259,20 @@ export async function pollOpencodeConsoleSignIn(deviceCode: string): Promise<Pol
     ...(org?.name ? { orgName: org.name } : {}),
     ...(user?.id ? { accountId: user.id } : {}),
   };
-  return { status: 'connected', credential, account: user?.email ?? org?.name ?? 'your OpenCode Console account' };
+  const account = user?.email ?? org?.name ?? 'your OpenCode Console account';
+  if (workspaces.length > 1) return { status: 'choose', account, workspaces, credential };
+  return { status: 'connected', credential, account };
+}
+
+/**
+ * The credential for the workspace the user picked.
+ *
+ * The picked id goes into `orgId`, which the adapter already sends on every request, so the
+ * connection is saved once with the workspace the user chose rather than the alphabetically first.
+ */
+export function withConsoleWorkspace(credential: ProviderCredential, workspace: ConsoleWorkspace): ProviderCredential {
+  if (credential.type !== 'oauth') return credential;
+  return { ...credential, orgId: workspace.id, orgName: workspace.name };
 }
 
 export const opencodeConsoleProviderLabel = 'OpenCode Console';
