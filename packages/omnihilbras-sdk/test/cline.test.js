@@ -295,7 +295,7 @@ test('Cline requests carry the client identification its own clients send', () =
   const headers = clineHeaders('jwt');
   assert.equal(headers['HTTP-Referer'], 'https://cline.bot');
   assert.equal(headers['X-Title'], 'Cline');
-  assert.equal(headers['X-CLIENT-TYPE'], 'OmniHilbras');
+  assert.equal(headers['X-CLIENT-TYPE'], 'cline-cli');
   for (const header of ['X-PLATFORM', 'X-PLATFORM-VERSION', 'X-CLIENT-VERSION', 'X-CORE-VERSION', 'X-IS-MULTIROOT']) {
     assert.equal(typeof headers[header], 'string', `${header} is sent`);
     assert.ok(headers[header].length > 0, `${header} is not empty`);

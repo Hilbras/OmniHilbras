@@ -252,6 +252,7 @@ export const providerCatalog: ProviderRecord[] = [
      * id still travels as `clinepass`, so a failure names this card.
      */
     connectionProviderId: 'cline',
+    logo: providerLogoMap.cline,
     models: '—',
     latency: '—',
     requests: '0',

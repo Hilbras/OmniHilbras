@@ -301,6 +301,88 @@ export async function exchangeKiroSocialCode(session: KiroSocialSession, code: s
   };
 }
 
+/**
+ * Kiro's device flow for Google and GitHub. No redirect is involved, so nothing has to come back to
+ * the gateway or the browser: the user approves a code on Kiro's page and the gateway polls for the
+ * result. Endpoints and the public client id are the ones OmniRoute uses (`KIRO_CONFIG` in
+ * `src/lib/oauth/constants/oauth.ts`), which is what makes this flow proven rather than guessed.
+ */
+export const KIRO_SOCIAL_DEVICE = {
+  authorizeUrl: `${KIRO_SOCIAL.authHost}/oauth/device/authorization`,
+  pollUrl: `${KIRO_SOCIAL.authHost}/oauth/device/poll`,
+  clientId: 'kiro-cli',
+} as const;
+
+export type KiroSocialDeviceSignIn = {
+  deviceCode: string;
+  userCode: string;
+  verificationUrl: string;
+  intervalSeconds: number;
+  expiresIn?: number;
+};
+
+export async function startKiroSocialDeviceSignIn(provider: KiroSocialProvider): Promise<KiroSocialDeviceSignIn> {
+  const { status, data } = await postAuthJson<Json>(KIRO_SOCIAL_DEVICE.authorizeUrl, {
+    clientId: KIRO_SOCIAL_DEVICE.clientId,
+    loginProvider: socialIdp(provider),
+  });
+  const deviceCode = typeof data.deviceCode === 'string' ? data.deviceCode : '';
+  const userCode = typeof data.userCode === 'string' ? data.userCode : '';
+  const verificationUrl = typeof data.verificationUriComplete === 'string' ? data.verificationUriComplete : '';
+  if (!deviceCode || !userCode || !verificationUrl) {
+    const detail = typeof data.error_description === 'string' ? data.error_description : typeof data.error === 'string' ? data.error : '';
+    throw new ProviderError('AUTHENTICATION_FAILED', detail || `Kiro did not return a device code (HTTP ${status}).`, {
+      providerId: kiroProviderId,
+      publicMessage: detail || 'Kiro did not return a device code. Try again in a moment.',
+    });
+  }
+  return {
+    deviceCode,
+    userCode,
+    verificationUrl,
+    intervalSeconds: typeof data.intervalInMilliseconds === 'number' ? Math.max(1, Math.floor(data.intervalInMilliseconds / 1000)) : 5,
+    ...(typeof data.expiresInMilliseconds === 'number' ? { expiresIn: Math.floor(data.expiresInMilliseconds / 1000) } : {}),
+  };
+}
+
+export type KiroSocialDevicePoll =
+  | { kind: 'pending'; error: 'authorization_pending' | 'slow_down' }
+  | { kind: 'connected'; credential: ProviderCredential }
+  | { kind: 'failed'; error: string };
+
+/**
+ * One poll of Kiro's device endpoint. `authorization_pending` and `slow_down` are progress, not
+ * failure: the caller waits and asks again. Anything else that is not a token is a failure with Kiro's
+ * own code, so the reason reaches the user rather than a generic error.
+ */
+export async function pollKiroSocialDeviceSignIn(deviceCode: string): Promise<KiroSocialDevicePoll> {
+  const { status, data } = await postAuthJson<Json>(KIRO_SOCIAL_DEVICE.pollUrl, {
+    deviceCode,
+    clientId: KIRO_SOCIAL_DEVICE.clientId,
+  });
+  const progress = data.error ?? data.status;
+  if (progress === 'authorization_pending' || progress === 'slow_down') {
+    return { kind: 'pending', error: progress };
+  }
+  const accessToken = typeof data.accessToken === 'string' ? data.accessToken : '';
+  const refreshToken = typeof data.refreshToken === 'string' ? data.refreshToken : '';
+  if (!accessToken && !refreshToken) {
+    const code = typeof data.error === 'string' && data.error ? data.error : `HTTP ${status}`;
+    return { kind: 'failed', error: code };
+  }
+  const expiresIn = typeof data.expiresIn === 'number' ? data.expiresIn : undefined;
+  return {
+    kind: 'connected',
+    credential: {
+      type: 'oauth',
+      value: accessToken,
+      ...(refreshToken ? { refreshToken } : {}),
+      ...(expiresIn === undefined ? {} : { expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() }),
+      ...(typeof data.profileArn === 'string' && data.profileArn ? { accountId: data.profileArn } : {}),
+    },
+  };
+}
+
 /** A social session is short: the code it is waiting for expires within minutes. */
 export const kiroSocialTtlMs = 10 * 60_000;
 

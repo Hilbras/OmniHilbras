@@ -40,7 +40,7 @@ test('a ClinePass request carries Cline’s client headers and the shared token'
   assert.equal(result.status, 'valid');
   const sent = transport.requests[0];
   assert.equal(sent.headers.Authorization, `Bearer workos:${jwt}`);
-  assert.equal(sent.headers['X-CLIENT-TYPE'], 'OmniHilbras');
+  assert.equal(sent.headers['X-CLIENT-TYPE'], 'cline-cli');
   assert.equal(sent.headers['HTTP-Referer'], 'https://cline.bot');
   assert.ok(sent.headers['X-CLIENT-VERSION'], 'the client version Cline attributes the request by is required');
 });

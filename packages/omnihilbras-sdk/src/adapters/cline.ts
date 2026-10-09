@@ -91,7 +91,7 @@ export function toClineAccessToken(token: string) {
 export function clineHeaders(
   token: string,
   extra: Record<string, string> = {},
-  userAgent = 'omnihilbras',
+  userAgent = `Cline/${omnihilbrasVersion}`,
 ): Record<string, string> {
   const accessToken = toClineAccessToken(token);
   return {
@@ -100,7 +100,9 @@ export function clineHeaders(
     'HTTP-Referer': 'https://cline.bot',
     'X-Title': 'Cline',
     'User-Agent': userAgent,
-    'X-CLIENT-TYPE': 'OmniHilbras',
+    // Cline's free models are served only to its own client identities: a request that identifies
+    // itself as anything else is refused with "only available via Cline product surfaces".
+    'X-CLIENT-TYPE': 'cline-cli',
     // Cline identifies its clients by this set. A request that omits them is
     // answered with a 4xx that reads like a bad request rather than an
     // unrecognised client, so all of them are sent.
@@ -368,12 +370,17 @@ export class ClineAdapter implements ProviderAdapter {
     this.id = options.id ?? 'cline';
     this.name = options.name ?? 'Cline';
     this.transport = options.transport ?? new FetchHttpTransport();
+    this.userAgent = options.userAgent ?? `Cline/${omnihilbrasVersion}`;
     this.delegate = new OpenAICompatibleAdapter(
       {
         id: this.id,
         name: this.name,
         baseUrl: CLINE_OAUTH.apiBasePath,
         auth: { header: 'Authorization', prefix: 'Bearer' },
+        // Chat goes through this delegate, so the Cline client identity has to be set here too. Without it
+        // the request is a stranger's, and Cline refuses its free models with "product surfaces". The
+        // Authorization header is left to the delegate, which fills it from the credential.
+        headers: clineHeaders('', {}, this.userAgent),
         // The envelope names whichever provider is asking, so a ClinePass refusal reports itself as
         // ClinePass. Hardcoding `cline` here would send the operator to fix the wrong card.
         unwrapResponse: (body) => unwrapClineEnvelope(body, { providerId: this.id, label: this.name }),
@@ -382,7 +389,7 @@ export class ClineAdapter implements ProviderAdapter {
     );
     this.onTokensRefreshed = options.onTokensRefreshed;
     this.refreshSkewMs = options.refreshSkewMs ?? defaultRefreshSkewMs;
-    this.userAgent = options.userAgent ?? 'omnihilbras';
+
   }
 
   /**
