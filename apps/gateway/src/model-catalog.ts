@@ -1,4 +1,4 @@
-import { ProviderError, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderRequestContext } from '@hilbras/omnihilbras';
+import { ProviderError, qualifiedModelId, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderRequestContext } from '@hilbras/omnihilbras';
 import { notSupported } from './capability.js';
 import type { ConnectionManager } from './connection-manager.js';
 import type { CredentialManager } from './credential-manager.js';
@@ -52,11 +52,11 @@ export class ModelCatalog {
     const connections = (await this.deps.connections.list()).filter((connection) => connection.enabled && connection.hasCredential);
     if (connections.length > 0) {
       return {
-        models: connections.flatMap((connection) => connection.modelIds.map((id) => ({
-          id,
+        models: connections.flatMap((connection) => connection.modelIds.map((modelId) => ({
+          id: qualifiedModelId(connection.providerId, modelId),
+          modelId,
           providerId: connection.providerId,
-          qualifiedId: `${connection.providerId}/${id}`,
-        }) satisfies Model & { qualifiedId: string })),
+        }) satisfies Model & { modelId: string })),
         unavailable: [],
       };
     }

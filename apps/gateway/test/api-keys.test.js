@@ -394,7 +394,7 @@ test('the model catalog only advertises saved, credentialed models', async (t) =
   const created = await createKey(apiKeys);
 
   const listed = await (await fetch(`${baseUrl}/v1/models`, { headers: { authorization: `Bearer ${created.key}` } })).json();
-  assert.deepEqual(listed.data.map((model) => model.id), ['stealth/space-bunny-alpha', 'qwen/qwen3.8-27b:free']);
+  assert.deepEqual(listed.data.map((model) => model.id), ['fake/stealth/space-bunny-alpha', 'fake/qwen/qwen3.8-27b:free'], 'the list names each model with its provider prefix');
   assert.deepEqual(listed.data.map((model) => model.owned_by), ['fake', 'fake']);
   assert.deepEqual(listed.unavailable, []);
 });

@@ -1,4 +1,4 @@
-import { ProviderError } from '@hilbras/omnihilbras';
+import { ProviderError, providerSlug } from '@hilbras/omnihilbras';
 import type { ConnectionRecord, ResilienceSettings } from './connections.js';
 
 /** Why a candidate was skipped, so the gateway can explain the decision. */
@@ -201,9 +201,8 @@ export function splitProviderPrefix(
   const prefix = trimmed.slice(0, slash);
   const rest = trimmed.slice(slash + 1);
   if (!rest) return { model: trimmed };
-  return connections.some((connection) => connection.providerId === prefix)
-    ? { model: rest, providerId: prefix }
-    : { model: trimmed };
+  const owner = connections.find((connection) => connection.providerId === prefix || providerSlug(connection.providerId) === prefix);
+  return owner ? { model: rest, providerId: owner.providerId } : { model: trimmed };
 }
 
 /** Resolves a failover chain, ordered by priority then name for determinism. */

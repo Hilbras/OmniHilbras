@@ -68,7 +68,7 @@ test('a saved catalogue is what clients see, not what a provider could serve', a
     adapters: [adapter('p', { models: [{ id: 'everything-they-sell' }] })],
   });
   const list = await instance.listAll();
-  assert.deepEqual(list.models, [{ id: 'imported', providerId: 'p', qualifiedId: 'p/imported' }]);
+  assert.deepEqual(list.models, [{ id: 'p/imported', modelId: 'imported', providerId: 'p' }]);
   assert.deepEqual(list.unavailable, []);
   assert.equal(adapters[0].asked.length, 0, 'no provider is asked, so none is billed for it');
 });
@@ -86,7 +86,7 @@ test('a connection without a credential or switched off contributes nothing', as
     ],
   });
   const list = await instance.listAll();
-  assert.deepEqual(list.models, [{ id: 'usable', providerId: 'p', qualifiedId: 'p/usable' }]);
+  assert.deepEqual(list.models, [{ id: 'p/usable', modelId: 'usable', providerId: 'p' }]);
   assert.equal(list.models.some((model) => model.id === 'disabled' || model.id === 'no-credential'), false);
 });
 
