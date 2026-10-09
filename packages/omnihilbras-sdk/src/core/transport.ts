@@ -1,4 +1,4 @@
-import { isProviderError, ProviderError } from './errors.js';
+import { isProviderError, ProviderError, type ProviderErrorCode } from './errors.js';
 import { assertSafeProviderRequestUrl, isLoopbackHostname } from './url.js';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -416,6 +416,28 @@ export function providerErrorDetail(body: unknown): string | undefined {
   return cleaned ? cleaned.slice(0, 200) : undefined;
 }
 
+/**
+ * The wait a provider asked for in `Retry-After`, in milliseconds, or undefined when it asked for none.
+ *
+ * RFC 9110 allows delay-seconds or an HTTP date. A value that is neither, or a date already past, is
+ * treated as no advice rather than a zero wait, so a malformed header cannot make the gateway retry at once.
+ */
+export function retryAfterMs(value: string | null, now: number = Date.now()): number | undefined {
+  if (value === null) return undefined;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
+  const at = Date.parse(trimmed);
+  if (Number.isNaN(at)) return undefined;
+  const wait = at - now;
+  return wait > 0 ? wait : undefined;
+}
+
+function retryAfterDetail(code: ProviderErrorCode, response: Response): { retryAfterMs?: number } {
+  if (code !== 'RATE_LIMITED') return {};
+  const retryAfter = retryAfterMs(response.headers.get('retry-after'));
+  return retryAfter === undefined ? {} : { retryAfterMs: retryAfter };
+}
+
 function providerErrorFromResponse(response: Response, body: unknown, providerId?: string): ProviderError {
   /**
    * A 403 is a refusal, not proof that the credential is bad.
@@ -456,7 +478,7 @@ function providerErrorFromResponse(response: Response, body: unknown, providerId
     providerId,
     statusCode: response.status,
     retryable: code === 'RATE_LIMITED' || code === 'PROVIDER_TIMEOUT' || code === 'PROVIDER_UNAVAILABLE',
-    ...(detail ? { details: { providerMessage: detail } } : {}),
+    ...(detail ? { details: { providerMessage: detail, ...retryAfterDetail(code, response) } } : {}),
   });
 }
 
