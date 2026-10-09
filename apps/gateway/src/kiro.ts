@@ -210,13 +210,13 @@ export async function pollKiroSignInWithClaim(store: KiroSessionStore, sessionId
   const session = store.get(sessionId);
   if (!session) return { status: 'denied', error: 'Unknown sign-in session.' };
   if (session.status !== 'pending') return 'in-progress';
-  if (!store.claim(sessionId)) return 'in-progress';
-
+  /**
+   * The claim is taken by the caller, `completeSignIn`, before this runs. Claiming again here found
+   * the session already spent, returned `in-progress`, and the status route then reported `pending`
+   * without ever asking Kiro, so an approved grant was never read. The single claim is the caller's.
+   */
   const outcome = await pollKiroSignInOutcome(session.authorization);
-  if (outcome.status === 'pending') {
-    store.release(session);
-    return { status: 'pending' };
-  }
+  if (outcome.status === 'pending') return { status: 'pending' };
   if (outcome.status === 'denied') {
     store.resolve(sessionId, { status: 'failed', error: outcome.error });
     return { status: 'denied', error: outcome.error };

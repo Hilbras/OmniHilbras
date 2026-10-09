@@ -1081,7 +1081,9 @@ export class GatewayService {
       fallback: 'The Kiro sign-in could not be completed.',
       poll: async () => {
         const outcome = await pollKiroSignInWithClaim(this.kiroSessions, sessionId);
-        if (outcome === 'in-progress') return { status: 'pending' };
+        // Both "another poll owns it" and "Kiro has not approved yet" are pending. Only a real refusal is
+        // a denial; reading an un-approved poll as a denial marked every new sign-in failed.
+        if (outcome === 'in-progress' || outcome.status === 'pending') return { status: 'pending' };
         if (outcome.status !== 'connected') return { status: 'denied', error: describeSignInFailure(outcome, 'The Kiro sign-in could not be completed.') };
         return { status: 'connected', credential: outcome.credential };
       },
