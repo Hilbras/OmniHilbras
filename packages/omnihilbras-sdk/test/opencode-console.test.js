@@ -53,6 +53,7 @@ const config = (orgId) => ({
           models: {
             'mimo-v2.6-flash-free': {},
             'space-bunny-free': {},
+            'gpt-paid': {},
             'claude-sonnet-5': { provider: { api: ANTHROPIC_LANE } },
             'gemini-3.5-flash': { provider: { api: GOOGLE_LANE } },
           },
@@ -76,29 +77,41 @@ test('a signed-in session lists the models the server routes, not a hardcoded se
   const models = await adapter.listModels({ credential: signedIn() });
   assert.deepEqual(
     models.map((m) => m.id).sort(),
-    ['claude-sonnet-5', 'gemini-3.5-flash', 'mimo-v2.6-flash-free', 'space-bunny-free'],
+    ['claude-sonnet-5', 'gemini-3.5-flash', 'gpt-paid', 'mimo-v2.6-flash-free', 'space-bunny-free'],
   );
   assert.equal(t.requests[0].headers.Authorization, 'Bearer access-token');
   assert.equal(t.requests[0].headers['x-opencode-org-id'], 'org_abc');
 });
 
-test('a free model is served from the openai lane the config names', async () => {
-  const t = transport({
-    [CONFIG_URL]: config('org_abc'),
-    [`${OPENAI_LANE}/chat/completions`]: {
-      data: { id: 'c1', model: 'mimo-v2.6-flash-free', choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }] },
+test('a free model is sent through the free-tier contract, not the plain lane', async () => {
+  // OpenCode answers a plain request for a free model with 403 FreeTierError. The adapter must send the
+  // gated request instead: a streaming body, a declared tool and the opencode client identity.
+  const streamed = [];
+  const t = {
+    ...transport({ [CONFIG_URL]: config('org_abc') }),
+    stream(request) {
+      streamed.push(request);
+      return (async function* () {
+        yield 'data: {"id":"c1","choices":[{"delta":{"content":"OK"}}]}\n\n';
+        yield 'data: {"id":"c1","choices":[{"delta":{},"finish_reason":"stop"}]}\n\n';
+        yield 'data: [DONE]\n\n';
+      })();
     },
-  });
+  };
   const adapter = new OpencodeConsoleAdapter({ transport: t });
   const response = await adapter.chat(
     { model: 'mimo-v2.6-flash-free', messages: [{ role: 'user', content: 'hi' }], maxOutputTokens: 64 },
     { credential: signedIn() },
   );
-  assert.ok(t.urls().includes(`${OPENAI_LANE}/chat/completions`), 'goes to the configured lane');
-  const body = JSON.parse(t.requests.at(-1).body);
-  assert.equal(body.model, 'mimo-v2.6-flash-free');
-  assert.equal(body.max_tokens, 64);
   assert.equal(response.message.content, 'OK');
+  assert.equal(streamed.length, 1, 'one gated streaming request');
+  const body = JSON.parse(streamed[0].body);
+  assert.equal(body.stream, true, 'the request streams');
+  assert.ok(Array.isArray(body.tools) && body.tools.length > 0, 'a tool is declared');
+  assert.equal(body.model, 'mimo-v2.6-flash-free');
+  assert.ok(String(streamed[0].headers['user-agent']).startsWith('opencode/'), 'the opencode client identity is sent');
+  assert.ok(streamed[0].headers['x-opencode-session'], 'a session header is sent');
+  assert.ok(!t.urls().includes(`${OPENAI_LANE}/chat/completions`), 'the plain lane is not used for a free model');
 });
 
 test('a Claude model is served from the anthropic lane, with the org header', async () => {
@@ -176,7 +189,7 @@ test('an expired session is renewed before the request is sent', async () => {
   const saved = [];
   const adapter = new OpencodeConsoleAdapter({ transport: t, onTokensRefreshed: (c) => saved.push(c) });
   const stale = { type: 'oauth', value: 'stale', refreshToken: 'r1', orgId: 'org_abc', expiresAt: new Date(Date.now() - 1000).toISOString() };
-  await adapter.chat({ model: 'space-bunny-free', messages: [{ role: 'user', content: 'hi' }] }, { credential: stale });
+  await adapter.chat({ model: 'gpt-paid', messages: [{ role: 'user', content: 'hi' }] }, { credential: stale });
 
   const refresh = t.requests[0];
   assert.equal(refresh.url, TOKEN_URL);
@@ -210,7 +223,7 @@ test('lanes are cached per session rather than refetched on every request', asyn
   });
   const adapter = new OpencodeConsoleAdapter({ transport: t });
   for (let i = 0; i < 3; i++) {
-    await adapter.chat({ model: 'space-bunny-free', messages: [{ role: 'user', content: 'hi' }] }, { credential: signedIn() });
+    await adapter.chat({ model: 'gpt-paid', messages: [{ role: 'user', content: 'hi' }] }, { credential: signedIn() });
   }
   assert.equal(t.urls().filter((u) => u === CONFIG_URL).length, 1, 'the config is read once');
 });
@@ -223,8 +236,8 @@ test('a renewed session does not reuse the previous session lanes', async () => 
   });
   const adapter = new OpencodeConsoleAdapter({ transport: t });
   const stale = { type: 'oauth', value: 'stale', refreshToken: 'r1', orgId: 'org_abc', expiresAt: new Date(0).toISOString() };
-  await adapter.chat({ model: 'space-bunny-free', messages: [{ role: 'user', content: 'hi' }] }, { credential: stale });
-  await adapter.chat({ model: 'space-bunny-free', messages: [{ role: 'user', content: 'hi' }] }, { credential: signedIn('org_abc') });
+  await adapter.chat({ model: 'gpt-paid', messages: [{ role: 'user', content: 'hi' }] }, { credential: stale });
+  await adapter.chat({ model: 'gpt-paid', messages: [{ role: 'user', content: 'hi' }] }, { credential: signedIn('org_abc') });
   assert.equal(t.urls().filter((u) => u === CONFIG_URL).length, 2, 'a different session reads its own config');
 });
 
@@ -238,7 +251,7 @@ test('the org id is taken from the config when the credential has none', async (
   });
   const adapter = new OpencodeConsoleAdapter({ transport: t });
   await adapter.chat(
-    { model: 'space-bunny-free', messages: [{ role: 'user', content: 'hi' }] },
+    { model: 'gpt-paid', messages: [{ role: 'user', content: 'hi' }] },
     { credential: { type: 'oauth', value: 'access-token' } },
   );
   assert.equal(t.requests.at(-1).headers['x-opencode-org-id'], 'org_from_server');

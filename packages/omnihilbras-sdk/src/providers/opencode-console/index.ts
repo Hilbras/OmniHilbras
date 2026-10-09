@@ -4,6 +4,8 @@ import type { HttpTransport } from '../../core/transport.js';
 import { compactPricing, normalizeContextWindow, normalizeModalities, perMillionPrice } from '../../core/pricing.js';
 import { AnthropicAdapter } from '../anthropic/index.js';
 import { OpenAICompatibleAdapter } from '../openai-compatible/index.js';
+import { zenConversationSeed, zenContractSatisfied, zenFreeTierHeaders, zenPlaceholderTool, zenSessionId } from '../zen/zen-free-tier.js';
+import { parseSseStream } from '../../core/streaming.js';
 import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../../core/types.js';
 
 /**
@@ -236,7 +238,36 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
     return { status: 'valid', checkedAt: new Date().toISOString(), ...(response.data?.email ? { account: response.data.email } : {}) };
   }
 
+  /**
+   * OpenCode's free models answer `403 FreeTierError` unless the request carries the free-tier contract:
+   * a streaming body, a declared tool, a session header and an `opencode/` client version. The lane
+   * adapters send none of those, so a `-free` model is routed through the contract instead. Paid models
+   * are not gated and keep their lane.
+   */
+  private isFreeModel(model: string): boolean {
+    const id = model.includes('/') ? model.slice(model.lastIndexOf('/') + 1) : model;
+    return /-free$/.test(id);
+  }
+
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
+    if (this.isFreeModel(request.model)) {
+      let text = '';
+      let finishReason: ChatResponse['finishReason'] | undefined;
+      let responseId = '';
+      for await (const chunk of this.streamFree(request, context)) {
+        responseId = chunk.id || responseId;
+        if (chunk.delta?.content) text += chunk.delta.content;
+        if (chunk.finishReason) finishReason = chunk.finishReason;
+      }
+      return {
+        id: responseId || `opencode-${request.model}`,
+        providerId: this.id,
+        model: request.model,
+        createdAt: new Date().toISOString(),
+        message: { role: 'assistant', content: text },
+        finishReason: finishReason ?? 'stop',
+      };
+    }
     const { lane, orgId } = await this.laneFor(request.model, context);
     const adapter = this.laneAdapter(lane, orgId);
     if (!adapter.chat) throw this.laneUnsupported(lane);
@@ -244,10 +275,68 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
   }
 
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
+    if (this.isFreeModel(request.model)) {
+      yield* this.streamFree(request, context);
+      return;
+    }
     const { lane, orgId } = await this.laneFor(request.model, context);
     const adapter = this.laneAdapter(lane, orgId);
     if (!adapter.streamChat) throw this.laneUnsupported(lane);
     yield* adapter.streamChat(request, { ...context, credential: this.laneCredential(await this.credential(context)) });
+  }
+
+  /**
+   * One gated request for a free model: the free-tier contract applied, stream requested, the answer read
+   * back as chunks. The client identity and session come from the shared Zen contract helpers, so the two
+   * adapters cannot drift on what OpenCode accepts.
+   */
+  private async *streamFree(request: ChatRequest, context: ProviderRequestContext): AsyncIterable<ChatChunk> {
+    const id = request.model.includes('/') ? request.model.slice(request.model.lastIndexOf('/') + 1) : request.model;
+    const credential = await this.credential(context);
+    // The lane comes from the same config the lanes use, so a free model is posted to the URL the console
+    // serves it on, and the org is resolved the same way. A hardcoded public route is not one the console answers.
+    const lanes = await this.resolveLanes(credential, context.signal);
+    const lane = lanes.byModel.get(id) ?? lanes.base;
+    if (!lane) throw this.laneUnsupported(id);
+    const seed = zenConversationSeed(request);
+    const headers = { ...this.headers(credential), ...zenFreeTierHeaders(zenSessionId(seed)) };
+    const body: Record<string, unknown> = {
+      model: id,
+      messages: request.messages.map((message) => ({ role: message.role, content: message.content })),
+      stream: true,
+      // The caller's tools when there are any; the placeholder otherwise, because an empty array is refused.
+      tools: request.tools && request.tools.length > 0 ? request.tools : [zenPlaceholderTool()],
+      ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
+      ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+    };
+    if (!zenContractSatisfied(headers, body)) {
+      throw new ProviderError('INVALID_REQUEST', 'The free-tier request contract is not satisfied.', { providerId: this.id });
+    }
+    const events = this.transport.stream({
+      method: 'POST',
+      providerId: this.id,
+      url: `${lane.replace(/\/$/, '')}/chat/completions`,
+      headers: { ...headers, accept: 'text/event-stream' },
+      body: JSON.stringify(body),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    let opened = false;
+    for await (const event of parseSseStream(events)) {
+      if (event.data.trim() === '[DONE]') return;
+      opened = true;
+      let chunk: { id?: string; choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>; error?: { message?: string } };
+      try {
+        chunk = JSON.parse(event.data);
+      } catch {
+        continue;
+      }
+      if (chunk.error) throw new ProviderError('PROVIDER_REQUEST_FAILED', chunk.error.message ?? 'OpenCode refused the free request.', { providerId: this.id });
+      const delta = chunk.choices?.[0]?.delta?.content;
+      if (delta) yield { id: chunk.id ?? `opencode-${id}`, providerId: this.id, model: id, delta: { content: delta } };
+      const finish = chunk.choices?.[0]?.finish_reason;
+      if (finish) yield { id: chunk.id ?? `opencode-${id}`, providerId: this.id, model: id, delta: {}, finishReason: finish === 'length' ? 'length' : 'stop' };
+    }
+    if (!opened) throw new ProviderError('PROVIDER_REQUEST_FAILED', 'OpenCode answered the free request with no stream.', { providerId: this.id });
   }
 
   /**

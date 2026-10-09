@@ -304,7 +304,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // connection (`connectionProviderId: 'cline'`), the opposite of every pair above.
   // Every one is OpenAI-compatible or already adapted, so each is a catalog card and no adapter work.
   // Mistral is **not** in that list — the catalog already had it, and the ten requested included it.
-  assert.equal(all.length, 26, `the catalog now has ${all.length} cards`);
+  assert.equal(all.length, 27, `the catalog now has ${all.length} cards`);
   // Six cards claim OAuth, but the gateway serves **five** start routes: `clinepass` shares `cline`'s,
   // which is why the count of routes and the count of claims no longer coincide.
   assert.equal(oauthCapableProviders().size, 5, 'the gateway serves an OAuth start route for five providers');

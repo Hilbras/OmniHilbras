@@ -226,7 +226,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 25 from 1.73.0, which added `tokenharbor-web` — a web session beside the `tokenharbor` API-key card.
   // each is catalog metadata and no merge behaviour — which is why this suite needed no new cases: the
   // property it asserts is about every card, and it holds for a new one without being extended.
-  assert.equal(providerCatalog.length, 26, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerCatalog.length, 27, `the catalog now has ${providerCatalog.length} cards`);
   const connected = mergeGatewayConnections(providerCatalog, [connection()], health());
   assert.equal(connected.length, providerCatalog.length, 'a merge must not add or drop a card');
   console.log(`    cards: ${providerCatalog.length}   fields that may change on a merge: 5   that may not: 2`);

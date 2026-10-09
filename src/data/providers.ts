@@ -394,6 +394,25 @@ export const providerCatalog: ProviderRecord[] = [
     modelList: [],
   },
   {
+    id: 'xkiro',
+    name: 'xKiro',
+    description:
+      'One API key for 90+ models from 16 providers, through OpenAI- or Anthropic-compatible requests. Key from xkiro.com; 40+ models are listed as free.',
+    category: 'Multi-model provider',
+    group: 'api-key',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#7c5cff',
+    initial: 'X',
+    endpoint: 'https://api.xkiro.com/v1',
+    modelList: [],
+  },
+  {
     /**
      * The **web** side of Token Harbor, as a separate card from the API-key one above — the same
      * split as Anthropic versus Claude Code, where the difference is the credential and not the
