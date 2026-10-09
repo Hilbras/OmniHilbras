@@ -15,6 +15,7 @@ export const providerLogoMap = {
   opencode: '/providers/opencode.png',
   nara: '/providers/bynara-logo-icon-light.svg',
   tokenharbor: '/providers/tokenharbor.svg',
+  xkiro: '/providers/xkiro-logo.svg',
   // Added 1.43.0 with the ten API-key cards. Every path is a file already committed under
   // `public/providers/` — `tests/dashboard-assets.test.js` fails if a rendered mark is not, and 294
   // assets went missing from 18 releases once because a blanket staging rule excluded that directory.
@@ -407,8 +408,9 @@ export const providerCatalog: ProviderRecord[] = [
     requests: '0',
     lastUsed: 'never',
     health: 0,
-    color: '#7c5cff',
+    color: '#16a34a',
     initial: 'X',
+    logo: providerLogoMap.xkiro,
     endpoint: 'https://api.xkiro.com/v1',
     modelList: [],
   },
