@@ -64,3 +64,30 @@ Provider and usage work not yet committed: Console workspace picker (gateway), m
 1. F3 first: make CI run the canonical `pnpm verify`, since it is cheapest and blocks every later change from being verified properly.
 2. F1: design the per-launch secret. This needs a decision before code.
 3. Replay, expiry and SSRF audits (1.4, 1.5), each with negative tests.
+
+## Phase 1 audit results (continued)
+
+### 1.3 API-key lifecycle: covered, with two stated gaps
+
+Keys are generated with `randomBytes`, stored as SHA-256 hashes, and compared with `timingSafeEqual` across every stored key (`apps/gateway/src/api-keys.ts`). Disabling a key takes effect on the next request, because `authorize()` reads the store each time. Failure messages do not echo the key.
+
+Not present: key expiry and per-key scopes. These are features, not defects, so they are recorded as limits rather than built without a decision.
+
+### 1.4 OAuth callbacks: covered
+
+Tests exist for a single claim, replay refusal, a state from another sign-in, expiry, and a late poll learning its cause (`apps/gateway/test/cline-sessions.test.js`, `sign-in-sessions.test.js`, `sign-in-coordinator.test.js`). Callback pages escape their message. No token appears in a callback response.
+
+### 1.5 SSRF: one verified gap (F5)
+
+`assertSafeProviderRequestUrl` (`packages/omnihilbras-sdk/src/core/url.ts`) refuses private and metadata addresses written as literals, including the IPv4-mapped IPv6 form. Redirects are refused (`transport.ts`: `redirect: 'error'`).
+
+**F5 — DNS names that resolve to private addresses are allowed.** The check reads the hostname string and never resolves it. Reproduced:
+
+```
+https://127.0.0.1.nip.io/   allowed   (resolves to 127.0.0.1)
+https://169.254.169.254/    refused
+```
+
+The transport calls the global `fetch`, which cannot be given a per-request DNS hook. The correct fix resolves the name, rejects private results, and connects to the checked address. It changes every outbound request, so it needs its own design and tests. Local HTTP endpoints (`localhost`, the default compatible base) are a deliberate exemption and must stay usable.
+
+Status: **verified, not fixed.**
