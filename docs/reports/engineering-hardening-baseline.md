@@ -105,3 +105,17 @@ the check to run on the connection's own lookup, which Node's global `fetch` doe
 would need `undici` (a runtime dependency the SDK does not have) or a Node-level lookup hook.
 
 Tests: `packages/omnihilbras-sdk/test/destination-check.test.js` (5), `apps/gateway/test/destination-check.test.js` (3).
+
+### 1.6 Secure storage: covered, with one design point to decide
+
+Tests: `apps/gateway/test/secure-storage.test.js` (9) and the existing `connections.test.js`. Covered: a
+tampered ciphertext and a tampered authentication tag are refused (GCM); a non-JSON or empty secrets file fails
+closed; an empty key file is refused rather than used as a blank key; a state directory or secrets file that is
+a symbolic link is refused and not written through; an interrupted write leaves the previous vault readable; the
+credentials file is written at 0600. A wrong master key fails closed (existing test).
+
+**Design point, not a defect:** the orphan rule discards any stored credential that has no matching connection
+record. So if `connections.json` is lost or emptied, every credential is erased on the next load. The existing
+test asserts this on purpose. It is the right trade for keeping stale secrets out, but it means the metadata file
+is as critical as the vault, and no backup of `connections.json` alone is enough to recover credentials. Documenting
+backup and restore of the whole state directory is the mitigation; this is for the operator to decide.
