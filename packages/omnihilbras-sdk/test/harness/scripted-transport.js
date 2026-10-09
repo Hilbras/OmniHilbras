@@ -18,7 +18,7 @@
  * `refuseWith: { status: 200, body: { ret: ['FAIL_…'] } }` the second. A harness that could only
  * express the first would have hidden that whole class.
  */
-import { ProviderError } from '../../dist/errors.js';
+import { ProviderError } from '../../dist/core/errors.js';
 
 /**
  * The same status-to-code mapping the real transport applies, so a refusal reaches the adapter

@@ -1,7 +1,7 @@
-import { ProviderError } from '../errors.js';
-import { FetchHttpTransport } from '../transport.js';
-import type { HttpTransport } from '../transport.js';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../types.js';
+import { ProviderError } from '../core/errors.js';
+import { FetchHttpTransport } from '../core/transport.js';
+import type { HttpTransport } from '../core/transport.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../core/types.js';
 
 /**
  * Kiro.

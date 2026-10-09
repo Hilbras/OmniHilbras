@@ -1,8 +1,8 @@
-import { ProviderError } from '../errors.js';
-import { parseSseJson, parseSseStream } from '../streaming.js';
-import { FetchHttpTransport, type HttpTransport } from '../transport.js';
-import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../url.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../types.js';
+import { ProviderError } from '../core/errors.js';
+import { parseSseJson, parseSseStream } from '../core/streaming.js';
+import { FetchHttpTransport, type HttpTransport } from '../core/transport.js';
+import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../core/url.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../core/types.js';
 
 /**
  * Kimi Code — the `api.kimi.com` coding subscription, reached by OAuth device code.

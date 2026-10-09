@@ -1,8 +1,8 @@
-import { ProviderError } from '../errors.js';
-import { parseSseJson, parseSseStream } from '../streaming.js';
-import { FetchHttpTransport, type HttpTransport } from '../transport.js';
-import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../url.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '../types.js';
+import { ProviderError } from '../core/errors.js';
+import { parseSseJson, parseSseStream } from '../core/streaming.js';
+import { FetchHttpTransport, type HttpTransport } from '../core/transport.js';
+import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../core/url.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '../core/types.js';
 
 export type AnthropicAdapterOptions = {
   baseUrl?: string;

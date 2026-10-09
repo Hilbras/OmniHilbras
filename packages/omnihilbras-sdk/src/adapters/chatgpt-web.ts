@@ -1,5 +1,5 @@
-import { ProviderError } from '../errors.js';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage } from '../types.js';
+import { ProviderError } from '../core/errors.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage } from '../core/types.js';
 
 /**
  * ChatGPT Web.

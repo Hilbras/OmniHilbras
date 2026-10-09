@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { QWEN_WEB_MODELS, parseQwenCookieHeader, probeQwenWeb, qwenWebProviderId } from '../dist/adapters/qwen-web.js';
-import { ProviderError } from '../dist/errors.js';
+import { ProviderError } from '../dist/core/errors.js';
 
 /**
  * Qwen Web, without a network.

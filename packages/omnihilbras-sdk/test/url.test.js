@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertSafeProviderRequestUrl, isPrivateHostname, isLoopbackHostname, resolveProviderUrl } from '../dist/url.js';
+import { assertSafeProviderRequestUrl, isPrivateHostname, isLoopbackHostname, resolveProviderUrl } from '../dist/core/url.js';
 
 /**
  * The SSRF guard had no test at all.

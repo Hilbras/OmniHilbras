@@ -21,8 +21,8 @@ import { KimiCodeAdapter } from '../dist/adapters/kimi-code.js';
 import { ClaudeCodeAdapter } from '../dist/adapters/claude-code.js';
 import { OpencodeConsoleAdapter } from '../dist/adapters/opencode-console.js';
 import { ZenAdapter } from '../dist/adapters/zen.js';
-import { ProviderRegistry } from '../dist/registry.js';
-import { ProviderError } from '../dist/errors.js';
+import { ProviderRegistry } from '../dist/core/registry.js';
+import { ProviderError } from '../dist/core/errors.js';
 
 /**
  * The contract, run against every adapter that can be driven offline.

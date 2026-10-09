@@ -1,5 +1,5 @@
-import { ProviderError } from '../errors.js';
-import type { ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderId, ProviderRequestContext } from '../types.js';
+import { ProviderError } from '../core/errors.js';
+import type { ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderId, ProviderRequestContext } from '../core/types.js';
 import { MAX_DEEPSEEK_POW_DIFFICULTY, findDeepSeekPowNonce } from './deepseek-pow.js';
 
 /**
