@@ -67,7 +67,7 @@ const withoutCard: ProviderOption[] = [];
  * `api-key`, and leaving it out drops the neutral option from the list entirely — which is what made
  * the positional fallback below resolve to Google while this refactor was being written.
  */
-const eligibleGroups = new Set(['api-key', 'local', 'custom']);
+const eligibleGroups = new Set(['api-key', 'free-tier', 'local', 'custom']);
 
 /** One list of providers, derived rather than re-declared. */
 export const providerOptions: ProviderOption[] = [

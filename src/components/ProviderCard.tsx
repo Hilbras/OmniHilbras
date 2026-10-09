@@ -42,6 +42,8 @@ export type ProviderRecord = {
   connectionProviderId?: string;
   name: string;
   description: string;
+  /** What the provider's free tier includes and how it is limited. Shown on the detail page. */
+  freeTier?: string;
   category: string;
   group: ProviderGroup;
   status: ProviderStatus;

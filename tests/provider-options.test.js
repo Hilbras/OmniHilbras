@@ -154,7 +154,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // three had moved, which is the arithmetic of a list described in two places — the reason the next
   // test exists.
   // Cards 23 -> 24 in 1.72.0 (`claude-code`); the dialog offers no option for it, because it is an
-  // OAuth card and `eligibleGroups` is `api-key`, `local` and `custom` only.
+  // OAuth card and `eligibleGroups` is `api-key`, `free-tier`, `local` and `custom` only.
   // Cards 24 -> 25 in 1.73.0 (`tokenharbor-web`); no option either, for the same reason one level
   // over — its group is `web-cookie`, which the keyed dialog does not offer.
   // Cards 25 -> 26 in 1.76.0 (`clinepass`), the first card added here whose *base* is also a card.
