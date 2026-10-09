@@ -416,6 +416,25 @@ export const providerCatalog: ProviderRecord[] = [
     modelList: [],
   },
   {
+    id: 'tiarina',
+    name: 'Tiarina',
+    description:
+      'OpenAI-compatible gateway with a free tier on selected models. Key from the Tiarina dashboard.',
+    category: 'Multi-model provider',
+    group: 'api-key',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#0f766e',
+    initial: 'T',
+    endpoint: 'https://ai.tiarina.cloud/v1',
+    modelList: [],
+  },
+  {
     id: 'xkiro',
     name: 'xKiro',
     description:
