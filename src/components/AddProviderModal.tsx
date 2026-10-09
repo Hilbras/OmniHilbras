@@ -226,7 +226,7 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
         // The key is handed over for any provider that asks for one. It used to
         // be passed for OpenRouter alone, which is why every other provider
         // reached the page with no key and could not be saved at all.
-      }, requiresKey ? apiKey : undefined);
+      }, requiresKey ? apiKey.trim() : undefined);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'The connection could not be saved.');
     } finally {
