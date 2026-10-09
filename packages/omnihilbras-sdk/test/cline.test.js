@@ -41,7 +41,7 @@ test('an expired token is refreshed once and the new token is persisted', async 
       async request(request) {
         requests.push(request);
         if (request.url.endsWith('/auth/refresh')) {
-          return { status: 200, headers: new Headers(), data: { accessToken: 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIyIn0.new', refreshToken: 'r2', expiresAt: '2030-01-01T00:00:00.000Z' } };
+          return { status: 200, headers: new Headers(), data: { success: true, data: { accessToken: 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIyIn0.new', refreshToken: 'r2', expiresAt: '2030-01-01T00:00:00.000Z' } } };
         }
         return { status: 200, headers: new Headers(), data: { id: 'acc_1' } };
       },
@@ -61,9 +61,10 @@ test('an expired token is refreshed once and the new token is persisted', async 
   assert.equal(result.status, 'valid');
   assert.equal(requests.length, 2, 'refresh, then the catalog check');
   assert.equal(requests[0].url, 'https://api.cline.bot/api/v1/auth/refresh');
+  // Cline's refresh is camelCase. Snake_case is refused with 400 "Validation failed".
   const body = JSON.parse(requests[0].body);
-  assert.equal(body.grant_type, 'refresh_token');
-  assert.equal(body.refresh_token, 'r1');
+  assert.equal(body.grantType, 'refresh_token');
+  assert.equal(body.refreshToken, 'r1');
   assert.equal(refreshed.length, 1, 'the renewed token is written back to the vault');
   assert.equal(refreshed[0].accessToken, 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIyIn0.new');
   assert.equal(requests[1].headers.Authorization, 'Bearer workos:eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIyIn0.new');

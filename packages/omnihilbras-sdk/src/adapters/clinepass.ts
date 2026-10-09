@@ -1,5 +1,4 @@
-import { CLINE_OAUTH } from './cline.js';
-import { ClineAdapter, type ClineAdapterOptions } from './cline.js';
+import { CLINE_OAUTH, ClineAdapter, clineHeaders, type ClineAdapterOptions } from './cline.js';
 import type { Model, ProviderRequestContext } from '../types.js';
 
 /**
@@ -53,15 +52,27 @@ export class ClinePassAdapter extends ClineAdapter {
   }
 
   /**
-   * Lists only the ClinePass models.
+   * Lists the ClinePass tier from Cline's recommended feed, which is the list Cline's own client shows.
    *
-   * The endpoint returns the whole Cline catalog to a ClinePass request, so an unfiltered list would
-   * offer a model this connection is not entitled to and fail on first use with a message about
-   * subscriptions. Filtering makes the connection mean one thing before the request is ever sent.
+   * The general `/models` catalog answers a ClinePass request with the whole Cline catalog and, for an
+   * account without the subscription, no `cline-pass/` ids at all — so filtering it leaves nothing to
+   * show. The recommended feed carries the tier explicitly, so it is read directly. A model can still be
+   * refused at request time if the subscription does not cover it; the list is what Cline offers, not a
+   * promise that the account can run each entry.
    */
   override async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
-    const models = await super.listModels(context);
-    return models.filter((model) => model.id.startsWith(CLINE_PASS_MODEL_PREFIX));
+    const credential = context.credential;
+    const response = await this.transport.request<{ clinePass?: Array<{ id?: unknown }> }>({
+      method: 'GET',
+      providerId: this.id,
+      url: CLINE_OAUTH.recommendedModelsUrl,
+      headers: clineHeaders(credential?.type === 'none' || !credential?.value ? '' : credential.value, { accept: 'application/json' }, this.userAgent),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    // The tiers are at the top level of the body, with no `data` envelope — read live, not assumed.
+    const tier = response.data?.clinePass ?? [];
+    const ids = tier.flatMap((entry) => (typeof entry?.id === 'string' && entry.id.startsWith(CLINE_PASS_MODEL_PREFIX) ? [entry.id] : []));
+    return [...new Set(ids)].map((id) => ({ id, providerId: this.id }));
   }
 }
 

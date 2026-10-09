@@ -100,7 +100,7 @@ export function scriptedTransport({ wireFormat = 'openai', catalog = ['contract-
       if (request.responseAs === 'bytes') {
         return { status: state.status, headers: new Headers(), data: binaryFrames(state.parts) };
       }
-      const data = isModelsRequest(request) || isConsoleConfigRequest(request) ? modelsPayload(wireFormat, catalog) : completionPayload(wireFormat, state.parts);
+      const data = isRecommendedRequest(request) ? modelsPayload('recommended', catalog) : isModelsRequest(request) || isConsoleConfigRequest(request) ? modelsPayload(wireFormat, catalog) : completionPayload(wireFormat, state.parts);
       return { status: state.status, headers: new Headers({ 'content-type': 'application/json' }), data };
     },
     async *stream(request) {
@@ -120,6 +120,10 @@ export function scriptedTransport({ wireFormat = 'openai', catalog = ['contract-
  * chat with a model list, and the adapter reported "missing a candidate" — a failure that named
  * the provider and was entirely the harness's fault.
  */
+function isRecommendedRequest(request) {
+  return /\/ai\/cline\/recommended-models\b/.test(request.url);
+}
+
 function isModelsRequest(request) {
   return /\/models\b/.test(request.url) && !/:(generateContent|streamGenerateContent|countTokens)/.test(request.url);
 }
@@ -159,6 +163,13 @@ function modelsPayload(wireFormat, catalog = ['contract-model']) {
     // Gemini requires the method it claims, and the adapter filters on it — so a fixture that
     // omits it returns an empty catalog and the attribution assertion fails for the wrong reason.
     return { models: catalog.map((id) => ({ name: id.startsWith('models/') ? id : `models/${id}`, supportedGenerationMethods: ['generateContent', 'streamGenerateContent'], inputTokenLimit: 1024 })) };
+  }
+  if (wireFormat === 'recommended') {
+    /**
+     * Cline's recommended feed carries its tiers at the top level and has no `data` envelope. The
+     * fixture serves the catalog as the `clinePass` tier, the shape the adapter reads.
+     */
+    return { recommended: [], free: [], clinePass: catalog.map((id) => ({ id })) };
   }
   return { object: 'list', data: catalog.map((id) => ({ id, object: 'model', owned_by: 'contract' })) };
 }

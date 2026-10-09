@@ -55,7 +55,7 @@ test('an expired shared token is renewed, so a ClinePass connection keeps workin
       async request(request) {
         requests.push(request);
         if (request.url.endsWith('/auth/refresh')) {
-          return { status: 200, headers: new Headers(), data: { accessToken: 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIyIn0.new', refreshToken: 'r2', expiresAt: '2030-01-01T00:00:00.000Z' } };
+          return { status: 200, headers: new Headers(), data: { success: true, data: { accessToken: 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIyIn0.new', refreshToken: 'r2', expiresAt: '2030-01-01T00:00:00.000Z' } } };
         }
         return { status: 200, headers: new Headers(), data: { id: 'acc_1' } };
       },
@@ -72,15 +72,15 @@ test('an expired shared token is renewed, so a ClinePass connection keeps workin
   assert.equal(requests[1].headers.Authorization, 'Bearer workos:eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIyIn0.new');
 });
 
-test('only ClinePass models are listed, so a connection cannot offer the free tier', async () => {
+test('the ClinePass list is the recommended feed’s clinePass tier, so the free tier cannot leak in', async () => {
+  // The general catalog is not the list: for an unsubscribed account it carries no `cline-pass/` ids, and
+  // Cline's own client reads this feed for the tier. Only the clinePass tier is taken, filtered to the prefix.
   const transport = stubTransport({
-    'https://api.cline.bot/api/v1/models': {
+    'https://api.cline.bot/api/v1/ai/cline/recommended-models': {
       data: {
-        data: [
-          { id: 'cline-pass/qwen3.7-max' },
-          { id: 'cline/gpt-5' },
-          { id: 'cline-pass/glm-5.3' },
-        ],
+        recommended: [{ id: 'anthropic/claude-sonnet-5.5' }],
+        free: [{ id: 'cline-free/mimo-v2.6-flash' }],
+        clinePass: [{ id: 'cline-pass/qwen3.7-max' }, { id: 'cline-pass/glm-5.3' }, { id: 'cline-pass/qwen3.7-max' }],
       },
     },
   });
@@ -91,6 +91,14 @@ test('only ClinePass models are listed, so a connection cannot offer the free ti
   assert.deepEqual(models.map((model) => model.id), ['cline-pass/qwen3.7-max', 'cline-pass/glm-5.3']);
   assert.ok(models.every((model) => model.id.startsWith(CLINE_PASS_MODEL_PREFIX)));
   assert.ok(models.every((model) => model.providerId === 'clinepass'));
+  assert.equal(transport.requests[0].url, 'https://api.cline.bot/api/v1/ai/cline/recommended-models');
+});
+
+test('an account with no ClinePass tier gets an empty list, not the general catalog', async () => {
+  const transport = stubTransport({
+    'https://api.cline.bot/api/v1/ai/cline/recommended-models': { data: { recommended: [], free: [], clinePass: [] } },
+  });
+  assert.deepEqual(await new ClinePassAdapter({ transport }).listModels({ credential: token }), []);
 });
 
 test('a chat failure is reported as ClinePass and keeps what Cline said', async () => {

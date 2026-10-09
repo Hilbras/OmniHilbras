@@ -32,6 +32,11 @@ export const CLINE_OAUTH = {
   refreshUrl: 'https://api.cline.bot/api/v1/auth/refresh',
   modelsUrl: 'https://api.cline.bot/api/v1/models',
   /**
+   * The feed Cline's own client reads for its tiers. Its `clinePass` list is the ClinePass model list the
+   * CLI shows; the general catalog above does not carry the subscription tier for every account.
+   */
+  recommendedModelsUrl: 'https://api.cline.bot/api/v1/ai/cline/recommended-models',
+  /**
    * The catalog is public: it answers 200 to an unauthenticated request, so it
    * cannot be used to check a token. This endpoint does check, and is what a
    * sign-in is proved against.
@@ -69,7 +74,7 @@ export type ClineAdapterOptions = {
 const defaultRefreshSkewMs = 60_000;
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '1.77.1';
+const omnihilbrasVersion = '1.77.2';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {
@@ -453,21 +458,25 @@ export class ClineAdapter implements ProviderAdapter {
 
   protected async refresh(credential: Extract<ProviderCredential, { type: 'oauth' }>, signal?: AbortSignal) {
     try {
-      const response = await this.transport.request<ClineTokenPayload>({
+      const response = await this.transport.request<{ success?: boolean; data?: ClineTokenPayload }>({
         method: 'POST',
         providerId: this.id,
         url: CLINE_OAUTH.refreshUrl,
         headers: clineHeaders(credential.value, { 'content-type': 'application/json', accept: 'application/json' }, this.userAgent),
-        body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: credential.refreshToken, client_type: CLINE_OAUTH.clientType }),
+        // Cline's refresh is camelCase, unlike its authorization-code exchange. Snake_case is refused with
+        // `400 Validation failed` naming `refreshtoken` and `granttype` as missing.
+        body: JSON.stringify({ refreshToken: credential.refreshToken, grantType: 'refresh_token' }),
         ...(signal ? { signal } : {}),
       });
-      const payload = response.data;
-      const accessToken = payload?.accessToken ?? payload?.access_token ?? payload?.data?.accessToken;
+      // The renewed tokens come back inside a `data` envelope, next to `success`. Reading the top level
+      // found nothing, so every renewal failed as "did not return a renewed access token".
+      const payload: ClineTokenPayload | undefined = response.data?.data ?? undefined;
+      const accessToken = payload?.accessToken;
       if (!accessToken) throw new ProviderError('AUTHENTICATION_FAILED', 'Cline did not return a renewed access token.', { providerId: this.id });
-      const expires = payload?.expiresAt ?? payload?.expires_at ?? payload?.data?.expiresAt;
+      const expires = payload?.expiresAt;
       const renewed: ClineTokens = {
         accessToken,
-        ...(typeof (payload?.refreshToken ?? payload?.refresh_token) === 'string' ? { refreshToken: (payload?.refreshToken ?? payload?.refresh_token) as string } : { refreshToken: credential.refreshToken }),
+        ...(typeof payload?.refreshToken === 'string' ? { refreshToken: payload.refreshToken } : { refreshToken: credential.refreshToken }),
         ...(expires === undefined ? {} : { expiresAt: toIsoString(expires) }),
         ...(credential.email ? { email: credential.email } : {}),
       };

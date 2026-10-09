@@ -2215,6 +2215,13 @@ the code as base64 JSON, which is read directly instead of exchanged.
 renewed token is handed back through `onTokensRefreshed`, which the gateway wires
 to the vault, so a refresh is persisted instead of repeated per request.
 
+The refresh request is **camelCase** — `{ refreshToken, grantType: "refresh_token" }`,
+the shape Cline's own client sends. Snake_case is refused with `400 Validation failed`
+naming `refreshtoken` and `granttype` as missing. The renewed tokens come back inside a
+`data` envelope beside `success`, so they are read from `data`. Earlier releases sent
+snake_case and read the top level, so every renewal failed and a Cline connection went
+stale after its hour; 1.77.2 fixes both.
+
 **A failed renewal is a sign-in problem, whatever shape the refusal takes.** The
 refresh endpoint refuses with a plain 4xx, which surfaced as
 `PROVIDER_REQUEST_FAILED` for what is really an expired session. It is now reported
@@ -2306,10 +2313,13 @@ Three consequences, all load-bearing:
   its errors name the right card. On the dashboard the card carries
   `connectionProviderId: 'cline'`, which is what makes the one connection light up
   both cards.
-- **The catalog is filtered.** `GET /api/v1/models` answers a ClinePass request with
-  the *whole* Cline catalog, so `listModels` keeps only ids beginning
-  `cline-pass/`. Unfiltered, the connection offers models it is not entitled to
-  and fails on first use with a message about subscriptions.
+- **The list is the recommended feed's tier.** `GET /api/v1/models` does not carry
+  the ClinePass tier for every account: an unsubscribed account gets the 469-model
+  Cline catalog and no `cline-pass/` id at all. So `listModels` reads the `clinePass`
+  array of `GET /api/v1/ai/cline/recommended-models`, which is the list Cline's own
+  CLI shows, and keeps only ids beginning `cline-pass/`. The feed's tiers sit at the
+  top level of the body, with no `data` envelope. An account with no tier gets an
+  empty list rather than the general catalog.
 - **Entitlement cannot be pre-checked.** It is decided server-side per request,
   from the subscription, and stated in the response body (*"no access to clinepass
   subscription models yet"*). There is no endpoint that answers "is this

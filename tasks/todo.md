@@ -4809,3 +4809,35 @@ dead button — is one no unit test was watching.
 
 - The sign-in itself was not completed in a browser. The button now calls the right route; whether Cline
   returns the redirect end to end is the same open question recorded at 1.75.2 and is not answered here.
+
+---
+
+## 1.77.2 — ClinePass lists the tier Cline's CLI shows, and Cline's token renews again
+
+### ClinePass list
+
+The card listed nothing for the user's account. The general `GET /api/v1/models` carries no `cline-pass/`
+id for an account without the tier (469 Cline models, zero ClinePass). Cline's own CLI reads
+`GET /api/v1/ai/cline/recommended-models`, whose `clinePass` array holds 14 models for the same account.
+`ClinePassAdapter.listModels` now reads that array and keeps the `cline-pass/` ids. The feed's tiers sit at
+the top level of the body with no `data` envelope; the first version read `data` and returned nothing, and
+its fixture used the envelope, so the unit tests passed against the wrong shape. The fixture now matches the
+live response, and the contract harness has a `recommended` wire format for it.
+
+### Cline token renewal
+
+Our refresh sent snake_case (`grant_type`, `refresh_token`, `client_type`) and read the top level. Cline's
+refresh takes camelCase `{ refreshToken, grantType }` and returns `{ success, data: { accessToken,
+refreshToken, expiresAt, ... } }`. The snake_case request is refused with `400 Validation failed` naming the
+two fields. A live forced refresh now returns healthy.
+
+### Verify
+
+- `pnpm verify` exit 0 at 1.77.2: repo 160, sdk 551, gateway 557.
+- Live: the ClinePass SDK list returns the 14 `cline-pass/` models the CLI shows.
+- Live: a forced renewal of the stored Cline token returns healthy.
+
+### Still unverified
+
+- No ClinePass completion has been sent. A listed model can still be refused if the subscription does not cover
+  it. Whether the 14 listed models run on the account needs a paid request, which has not been made.

@@ -110,7 +110,7 @@ const providers = [
     // the attribution assertion would fail for a reason that has nothing to do with attribution.
     name: 'clinepass',
     make: () => {
-      const { stub, transport: t } = transport('openai', ['cline-pass/contract-model', 'contract-model']);
+      const { stub, transport: t } = transport('recommended', ['cline-pass/contract-model', 'contract-model']);
       return { adapter: new ClinePassAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
     },
   },
