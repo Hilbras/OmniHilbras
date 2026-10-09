@@ -207,6 +207,10 @@ function gatewayProxy(): Plugin {
           if (typeof value === 'string' && name !== 'host') headers[name] = value;
         }
         headers.host = `127.0.0.1:${gatewayPort}`;
+        // A same-origin GET from the page often carries no Origin, and the gateway trusts the dashboard only
+        // when the Origin is allowlisted. The proxy is the dashboard's own server, so it states the origin it
+        // acts for. The token, not this header, is what proves the request came from the dashboard.
+        headers.origin = `http://${request.headers.host ?? 'localhost:5173'}`;
         if (token) headers['x-omnihilbras-dashboard-token'] = token;
         const chunks: Buffer[] = [];
         for await (const chunk of request) chunks.push(chunk as Buffer);
