@@ -211,6 +211,8 @@ function joinVerificationUrl(startUrl: string, path: string): string {
  */
 export const KIRO_SOCIAL = {
   authHost: 'https://prod.us-east-1.auth.desktop.kiro.dev',
+  /** Renews a Google or GitHub token. OmniRoute sends the same request to the same endpoint. */
+  refreshUrl: 'https://prod.us-east-1.auth.desktop.kiro.dev/refreshToken',
   /**
    * The callback is a custom scheme, not a web URL, and it cannot be changed: Kiro's
    * identity provider only has this one redirect registered. A browser will therefore not
@@ -375,6 +377,7 @@ export async function pollKiroSocialDeviceSignIn(deviceCode: string): Promise<Ki
     kind: 'connected',
     credential: {
       type: 'oauth',
+      kiroLogin: 'social',
       value: accessToken,
       ...(refreshToken ? { refreshToken } : {}),
       ...(expiresIn === undefined ? {} : { expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() }),
@@ -467,6 +470,37 @@ export function kiroCredentialFromApiKey(apiKey: string): ProviderCredential {
 }
 
 /** Renews the session. Kiro's refresh grant uses the same token endpoint. */
+/**
+ * Renews a Google or GitHub session at Kiro's own refresh endpoint. It takes the refresh token alone,
+ * and returns the new access token with the same expiry shape as the AWS path.
+ */
+async function refreshKiroSocialCredential(credential: ProviderCredential): Promise<ProviderCredential> {
+  if (credential.type !== 'oauth' || !credential.refreshToken) {
+    throw new ProviderError('AUTHENTICATION_FAILED', 'This Kiro session cannot be renewed. Sign in again.', {
+      providerId: kiroProviderId,
+      publicMessage: 'This Kiro session cannot be renewed. Sign in again.',
+    });
+  }
+  const { data } = await postAuthJson<Json>(KIRO_SOCIAL.refreshUrl, { refreshToken: credential.refreshToken });
+  const accessToken = typeof data.accessToken === 'string' ? data.accessToken : '';
+  if (!accessToken) {
+    const detail = typeof data.error_description === 'string' ? data.error_description : '';
+    throw new ProviderError('AUTHENTICATION_FAILED', detail || 'Kiro did not renew the session. Sign in again.', {
+      providerId: kiroProviderId,
+      publicMessage: detail || 'Kiro did not renew the session. Sign in again.',
+    });
+  }
+  const expiresIn = typeof data.expiresIn === 'number' ? data.expiresIn : undefined;
+  return {
+    type: 'oauth',
+    kiroLogin: 'social',
+    value: accessToken,
+    refreshToken: typeof data.refreshToken === 'string' && data.refreshToken ? data.refreshToken : credential.refreshToken,
+    ...(expiresIn === undefined ? {} : { expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() }),
+    ...(typeof data.profileArn === 'string' && data.profileArn ? { accountId: data.profileArn } : credential.accountId ? { accountId: credential.accountId } : {}),
+  };
+}
+
 export async function refreshKiroCredential(credential: ProviderCredential): Promise<ProviderCredential> {
   if (credential.type !== 'oauth' || !credential.refreshToken) {
     throw new ProviderError('AUTHENTICATION_FAILED', 'This Kiro session cannot be renewed. Sign in again.', {
@@ -475,9 +509,17 @@ export async function refreshKiroCredential(credential: ProviderCredential): Pro
     });
   }
   /**
+   * A Google or GitHub session is marked at sign-in and renews at Kiro's own refresh endpoint, not at
+   * AWS, which is what OmniRoute does for the same tokens. Any other credential with no client pair is
+   * refused here, before anything is sent.
+   */
+  if (credential.kiroLogin === 'social') return refreshKiroSocialCredential(credential);
+  /**
    * The refresh grant is bound to the client that was registered when the sign-in started.
    * AWS answers `invalid_client` for any other pair, including the client *name*, so the
-   * registered pair is carried on the credential and sent as issued.
+   * registered pair is carried on the credential and sent as issued. Without that pair there is
+   * nothing to send, so it is refused here, before any request, rather than sending a guess AWS
+   * would reject as a bad password.
    */
   const clientId = credential.oauthClientId;
   const clientSecret = credential.oauthClientSecret;
@@ -487,12 +529,30 @@ export async function refreshKiroCredential(credential: ProviderCredential): Pro
       publicMessage: 'This Kiro session cannot be renewed. Sign in again.',
     });
   }
-  const { data } = await postAuthJson<Json>(`${KIRO.oidc}/token`, {
+  let renewal = await postAuthJson<Json>(`${KIRO.oidc}/token`, {
     grantType: 'refresh_token',
     refreshToken: credential.refreshToken,
     clientId,
     clientSecret,
   });
+  /**
+   * A refused refresh is often a stale client registration rather than a dead session: the client
+   * may have expired or been cleared while the refresh token is still good. OmniRoute handles this by
+   * registering a fresh client and retrying once, so the same does here. A token that is refused for
+   * its own reasons is refused again and reported as before.
+   */
+  if (!(typeof renewal.data.accessToken === 'string' && renewal.data.accessToken)) {
+    const fresh = await registerKiroClient().catch(() => undefined);
+    if (fresh) {
+      renewal = await postAuthJson<Json>(`${KIRO.oidc}/token`, {
+        grantType: 'refresh_token',
+        refreshToken: credential.refreshToken,
+        clientId: fresh.clientId,
+        clientSecret: fresh.clientSecret,
+      });
+    }
+  }
+  const { data } = renewal;
   const accessToken = typeof data.accessToken === 'string' ? data.accessToken : '';
   if (!accessToken) {
     const detail = typeof data.error_description === 'string' ? data.error_description : '';

@@ -6,7 +6,7 @@ import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, creat
 import { KimiCodeSessionStore, kimiCodeProviderId, type KimiCodeSessionStatus } from './kimiCode.js';
 import { ClaudeCodeSessionStore, beginClaudeCodeSignIn, completeClaudeCodeSignIn, type ClaudeCodeSessionStatus } from './claudeCode.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
-import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialSignIn, type KiroSignInStatus } from './kiro.js';
+import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialDeviceFlow, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
 import { SlidingWindowRateLimiter, type RouteCandidate } from './routing.js';
 import { HealthManager } from './health.js';
@@ -1042,7 +1042,7 @@ export class GatewayService {
    * instead, and the exchange happens below.
    */
   async startKiroSocialSignInFlow(provider: 'google' | 'github') {
-    return startKiroSocialSignIn(this.kiroSocial, provider);
+    return startKiroSocialDeviceFlow(this.kiroSessions, provider);
   }
 
   /**

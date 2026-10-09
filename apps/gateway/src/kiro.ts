@@ -8,8 +8,11 @@ import {
   registerKiroClient,
   newKiroSocialState,
   pollKiroSignIn,
+  pollKiroSocialDeviceSignIn,
   refreshKiroCredential,
+  startKiroSocialDeviceSignIn,
   type KiroDeviceAuthorization,
+  type KiroPoll,
   type KiroSocialProvider,
   type KiroSocialSession,
 } from '@hilbras/omnihilbras';
@@ -143,10 +146,58 @@ export async function importKiroRefreshToken(refreshToken: string): Promise<Prov
   });
 }
 
+/**
+ * Google or GitHub through Kiro's device flow, the same one OmniRoute uses. Nothing redirects back to the
+ * gateway: the user approves a code on Kiro's page and this session polls Kiro's device endpoint for the
+ * result. It reuses the Builder ID session store, so the grant is claimed and released by the same rules.
+ */
+export async function startKiroSocialDeviceFlow(store: KiroSessionStore, provider: KiroSocialProvider) {
+  const authorization = await startKiroSocialDeviceSignIn(provider);
+  const session = store.create({
+    deviceCode: authorization.deviceCode,
+    userCode: authorization.userCode,
+    verificationUrl: authorization.verificationUrl,
+    intervalSeconds: authorization.intervalSeconds,
+    clientId: 'kiro-cli',
+    clientSecret: '',
+    ...(authorization.expiresIn === undefined ? {} : { expiresIn: authorization.expiresIn }),
+    social: true,
+  } as KiroDeviceAuthorization & { social: true });
+  return { sessionId: session.id, userCode: authorization.userCode, verificationUrl: authorization.verificationUrl };
+}
+
 export type KiroPollOutcome =
   | { status: 'pending' }
   | { status: 'denied'; error: string }
   | { status: 'connected'; credential: ProviderCredential };
+
+/**
+ * Asks Kiro for one poll of a device grant. A social grant (Google or GitHub) is polled at Kiro's own
+ * device endpoint and needs no client secret; a Builder ID grant is polled at AWS's token endpoint with
+ * the client it was registered to. Both return the same outcome, so the claim and status logic is shared.
+ */
+async function pollKiroSignInOutcome(authorization: KiroDeviceAuthorization & { social?: boolean }): Promise<KiroPollOutcomeAny> {
+  if (!authorization.social) return pollKiroSignIn(authorization);
+  const poll = await pollKiroSocialDeviceSignIn(authorization.deviceCode);
+  if (poll.kind === 'pending') return { status: 'pending' };
+  if (poll.kind === 'failed') return { status: 'denied', error: poll.error };
+  // A social grant always yields an OAuth credential, so narrow to it before reading its fields.
+  const credential = poll.credential;
+  if (credential.type !== 'oauth') return { status: 'denied', error: 'Kiro returned an unexpected credential type.' };
+  const expiresIn = credential.expiresAt ? Math.max(0, Math.round((Date.parse(credential.expiresAt) - Date.now()) / 1000)) : undefined;
+  return {
+    status: 'connected',
+    accessToken: credential.value,
+    ...(credential.refreshToken ? { refreshToken: credential.refreshToken } : {}),
+    ...(expiresIn === undefined ? {} : { expiresIn }),
+    ...(credential.accountId ? { profileArn: credential.accountId } : {}),
+  };
+}
+
+/** A Builder ID outcome, or a social one, which carries no client pair because its refresh is not AWS's. */
+type KiroPollOutcomeAny =
+  | KiroPoll
+  | { status: 'connected'; accessToken: string; refreshToken?: string; expiresIn?: number; profileArn?: string };
 
 /**
  * Polls AWS for the session.
@@ -161,7 +212,7 @@ export async function pollKiroSignInWithClaim(store: KiroSessionStore, sessionId
   if (session.status !== 'pending') return 'in-progress';
   if (!store.claim(sessionId)) return 'in-progress';
 
-  const outcome = await pollKiroSignIn(session.authorization);
+  const outcome = await pollKiroSignInOutcome(session.authorization);
   if (outcome.status === 'pending') {
     store.release(session);
     return { status: 'pending' };
@@ -177,9 +228,9 @@ export async function pollKiroSignInWithClaim(store: KiroSessionStore, sessionId
     ...(outcome.expiresIn === undefined ? {} : { expiresAt: new Date(Date.now() + outcome.expiresIn * 1000).toISOString() }),
     // AWS scopes the session to a profile, and Kiro echoes it back on inference.
     ...(outcome.profileArn ? { accountId: outcome.profileArn } : {}),
-    // The registered client, which the refresh grant is bound to.
-    oauthClientId: outcome.clientId,
-    oauthClientSecret: outcome.clientSecret,
+    // The registered client, which the refresh grant is bound to. A social grant has none: its
+    // token renews through Kiro's own refresh endpoint, so the pair is only set for Builder ID.
+    ...('clientId' in outcome ? { oauthClientId: outcome.clientId, oauthClientSecret: outcome.clientSecret } : {}),
   };
   return { status: 'connected', credential };
 }

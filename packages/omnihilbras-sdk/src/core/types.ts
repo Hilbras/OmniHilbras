@@ -215,7 +215,7 @@ export type ProviderCredential =
    * issued to. AWS binds a refresh token to that client and answers `invalid_client` for any
    * other pair, so an adapter that renews by OAuth has to carry it.
    */
-  | { type: 'oauth'; value: string; refreshToken?: string; expiresAt?: string; email?: string; orgId?: string; orgName?: string; accountId?: string; oauthClientId?: string; oauthClientSecret?: string }
+  | { type: 'oauth'; value: string; refreshToken?: string; expiresAt?: string; email?: string; orgId?: string; orgName?: string; accountId?: string; oauthClientId?: string; oauthClientSecret?: string; kiroLogin?: 'social' }
   | { type: 'none' };
 
 export type ProviderRequestContext = {
