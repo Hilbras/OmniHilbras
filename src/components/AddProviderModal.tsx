@@ -345,7 +345,7 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
                   </label>
                 )}
                 <p className="mt-5 text-xs leading-relaxed text-muted">One key per line. Format: <code className="font-mono text-gold-text">name|apiKey</code> or just <code className="font-mono text-gold-text">apiKey</code> (auto-named by index).</p>
-                <textarea id="bulk-api-keys" aria-label="API Keys" value={bulkText} onChange={(event) => { setBulkText(event.target.value); setError(''); }} placeholder={'name1|sk-key1\nname2|sk-key2\nsk-key-only-auto-named'} rows={8} className="input !mt-3 !min-h-[160px] !w-full !resize-y !rounded-lg !border-gold/35 !bg-surface-2 !p-3 !font-mono !text-xs focus:!border-gold/70" />
+                <textarea id="bulk-api-keys" aria-label="API Keys" autoComplete="off" spellCheck={false} value={bulkText} onChange={(event) => { setBulkText(event.target.value); setError(''); }} placeholder={'name1|sk-key1\nname2|sk-key2\nsk-key-only-auto-named'} rows={8} className="input !mt-3 !min-h-[160px] !w-full !resize-y !rounded-lg !border-gold/35 !bg-surface-2 !p-3 !font-mono !text-xs focus:!border-gold/70" />
               </div>
             )}
             {error && <p role="alert" className="mt-3 flex items-center gap-1.5 text-[11px] text-danger"><CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />{error}</p>}
