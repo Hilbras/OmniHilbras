@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { canonicalLoopbackHost } from '@hilbras/omnihilbras';
+import { canonicalLoopbackHost, isLoopbackHostname } from '@hilbras/omnihilbras';
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './config.js';
 import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, resolveCorsOrigins, sendError, sendJson, setCors } from './http.js';
 import { isTrustedDashboard, type AuthContext } from './runtime.js';
@@ -55,9 +55,30 @@ const routes = [
 /** The handle callers use to stop a gateway they started. */
 export type GatewayServer = Server;
 
+/**
+ * Refuses a request whose `Host` names something other than loopback.
+ *
+ * Origin checks do not stop DNS rebinding: a page on an attacker's domain, once its DNS is re-pointed at
+ * 127.0.0.1, is same-origin to itself and sends a valid-looking request. The `Host` header still carries
+ * the attacker's name, so requiring a loopback name here closes that path. The port is ignored because it
+ * varies between runs.
+ */
+function isLoopbackHostHeader(host: string | undefined) {
+  if (!host) return false;
+  const name = host.trim().toLowerCase();
+  const hostname = name.startsWith('[')
+    ? name.slice(0, name.indexOf(']') + 1)
+    : name.replace(/:\d+$/, '');
+  return isLoopbackHostname(hostname);
+}
+
 export function createGatewayServer(service: GatewayService, options: GatewayServerOptions = {}) {
   const corsOrigins = resolveCorsOrigins(options);
   return createServer((request, response) => {
+    if (!isLoopbackHostHeader(request.headers.host)) {
+      sendJson(response, 421, { error: { code: 'MISDIRECTED_REQUEST', message: 'This gateway only answers on a loopback host name.' } });
+      return;
+    }
     const requestOrigin = getRequestOrigin(request);
     if (requestOrigin && !corsOrigins.includes(requestOrigin)) {
       sendJson(response, 403, { error: { code: 'CORS_ORIGIN_DENIED', message: 'This browser origin is not allowed.' } });

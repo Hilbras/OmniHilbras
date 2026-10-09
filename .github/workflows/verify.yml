@@ -29,14 +29,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: One version, stated once
-        run: pnpm version:check
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Test
-        run: pnpm test
-
-      - name: Build
-        run: pnpm build
+      # The canonical command, so CI cannot check less than `pnpm verify` does locally. It runs the
+      # version check, brand check, typecheck, tests, build and bundle analysis in that order.
+      - name: Verify
+        run: pnpm verify

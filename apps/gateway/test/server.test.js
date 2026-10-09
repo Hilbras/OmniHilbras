@@ -338,3 +338,25 @@ test('the credential check is one route, so a field legal for one provider is le
   }
   assert.deepEqual(seen, ['openrouter:openrouter-key', 'anthropic:anthropic-key'], 'each request reached its own adapter');
 });
+
+test('a request addressed to a non-loopback host name is refused, even on the loopback socket', async (t) => {
+  // DNS rebinding: a page on another domain re-pointed at 127.0.0.1 reaches this socket under its own
+  // name. Origin checks do not stop it, because the page is same-origin to itself. The Host name must be
+  // loopback, and the port does not matter.
+  const baseUrl = await startServer(t);
+  const port = new URL(baseUrl).port;
+  const { request } = await import('node:http');
+  const statusFor = (host) => new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port, path: '/health', headers: { host } }, (res) => {
+      res.resume();
+      resolve(res.statusCode);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+
+  assert.equal(await statusFor(`127.0.0.1:${port}`), 200, 'the loopback IPv4 name is served');
+  assert.equal(await statusFor(`localhost:${port}`), 200, 'localhost is served');
+  assert.equal(await statusFor(`evil.example:${port}`), 421, 'a rebinding name is refused');
+  assert.equal(await statusFor(`rebind.attacker.test:${port}`), 421, 'a second rebinding name is refused');
+});
