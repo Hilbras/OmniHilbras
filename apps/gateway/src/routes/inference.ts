@@ -13,7 +13,7 @@ import { attachRequestId, type RequestScope } from '../request-context.js';
 import { isTrustedDashboard } from '../runtime.js';
 import type { GatewayServerOptions } from '../server.js';
 import type { GatewayService } from '../service.js';
-import type { UsageOutcome } from '../usage-store.js';
+import type { UsageAttempt, UsageOutcome } from '../usage-store.js';
 import type { GatewayFailoverAttempt } from '../request-executor.js';
 import {
   invalidRequest,
@@ -215,6 +215,8 @@ function recordUsage(
     latencyMs: number;
     errorCode?: string;
     usage?: { inputTokens?: number; outputTokens?: number };
+    requestId?: string;
+    ledger?: readonly GatewayFailoverAttempt[];
   },
 ): void {
   const store = service.usage;
@@ -238,8 +240,24 @@ function recordUsage(
       ...(input.errorCode ? { errorCode: input.errorCode } : {}),
       ...(input.usage?.inputTokens !== undefined ? { inputTokens: input.usage.inputTokens } : {}),
       ...(input.usage?.outputTokens !== undefined ? { outputTokens: input.usage.outputTokens } : {}),
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+      ...(input.ledger && input.ledger.length > 0 ? { path: input.ledger.map(toUsageAttempt) } : {}),
     }),
   ).catch(() => undefined);
+}
+
+/**
+ * One executor attempt, as the usage record stores it. Every attempt in the executor's ledger was sent,
+ * so `dispatched` is true; a hedge that never started is not in the ledger at all.
+ */
+function toUsageAttempt(attempt: GatewayFailoverAttempt): UsageAttempt {
+  return {
+    dispatched: true,
+    outcome: attempt.ok ? 'success' : 'failure',
+    ...(attempt.connectionId ? { connectionId: attempt.connectionId } : {}),
+    providerId: attempt.providerId,
+    ...(attempt.errorCode ? { errorCode: attempt.errorCode } : {}),
+  };
 }
 
 async function handleChatRequest(input: {
@@ -283,6 +301,8 @@ async function handleChatRequest(input: {
         attempts: ledger.length,
         latencyMs: Date.now() - startedAt,
         ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+        requestId: scope.id,
+        ledger,
       });
       throw error;
     }
@@ -295,6 +315,8 @@ async function handleChatRequest(input: {
       attempts: attempts.length,
       latencyMs: Date.now() - startedAt,
       usage: completion.usage,
+      requestId: scope.id,
+      ledger: attempts,
     });
     sendJson(response, 200, {
       ...toOpenAICompletion(completion),

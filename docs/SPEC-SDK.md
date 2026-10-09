@@ -202,6 +202,10 @@ The first local gateway exposes:
   presented as a measured zero. A gateway started without a usage store answers `recording: false` with empty
   totals rather than zeros that read as "nothing was spent". Behind the admin key when enforcement is on, with
   `/v1/routing`: a record describes what this machine talks to.
+  Each record also carries `requestId`, the logical request's id, and `path`, the ordered list of connections
+  tried with each outcome, so a failover shows which connection failed and which one answered. Both are optional:
+  records written before they existed show only the total `attempts`. `path` entries record a connection id, a
+  provider id, whether the attempt was sent (`dispatched`), its outcome and an error code, and nothing else.
 - `POST /v1/oauth/cline/start` — begin a sign-in; returns the sign-in URL, a session id, and a single-use `state`.
 - `GET /v1/oauth/cline/authorize` — build the Cline sign-in URL for a loopback callback.
 - `GET /v1/oauth/cline/callback` — where the provider redirects the browser; completes the exchange and reports the outcome.

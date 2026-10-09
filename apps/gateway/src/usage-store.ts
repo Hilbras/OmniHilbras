@@ -33,6 +33,19 @@ import { defaultConnectionDirectory } from './connections.js';
 /** How a request ended. `cancelled` is deliberately neither success nor failure. */
 export type UsageOutcome = 'success' | 'failure' | 'cancelled';
 
+/**
+ * One provider attempt within a logical request. `dispatched` is false when the attempt was planned but
+ * never sent (for example a hedge that was cancelled before it started), so a count of attempts is never
+ * read as a count of provider calls.
+ */
+export type UsageAttempt = {
+  connectionId?: string;
+  providerId?: string;
+  dispatched: boolean;
+  outcome: UsageOutcome | 'abandoned';
+  errorCode?: string;
+};
+
 export type UsageRecord = {
   /** Monotonic within a store; the stable id a UI row keys on. */
   id: string;
@@ -55,6 +68,16 @@ export type UsageRecord = {
   errorCode?: string;
   /** Total attempts across every route, so a failover is visible as more than one. */
   attempts: number;
+  /**
+   * The logical request this record belongs to. Opaque, generated per request, and never a credential or a
+   * prompt. Two records with one `requestId` are two attempts at one request, which a single count cannot show.
+   */
+  requestId?: string;
+  /**
+   * Each connection tried, in order, with what it did. Present on records written after this field existed;
+   * absent on older records, which therefore show only the total.
+   */
+  path?: UsageAttempt[];
   latencyMs: number;
   /**
    * Token counts, when the provider reported them. **Optional on purpose**: not every provider meters, and a
@@ -373,7 +396,20 @@ function isUsageRecord(value: unknown): value is UsageRecord {
     typeof value.outcome === 'string' &&
     ['success', 'failure', 'cancelled'].includes(value.outcome) &&
     typeof value.attempts === 'number' &&
-    Number.isFinite(value.attempts)
+    Number.isFinite(value.attempts) &&
+    (value.requestId === undefined || typeof value.requestId === 'string') &&
+    (value.path === undefined || (Array.isArray(value.path) && value.path.every(isUsageAttempt)))
+  );
+}
+
+function isUsageAttempt(value: unknown): value is UsageAttempt {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.dispatched === 'boolean' &&
+    (value.outcome === 'abandoned' || ['success', 'failure', 'cancelled'].includes(value.outcome as string)) &&
+    (value.connectionId === undefined || typeof value.connectionId === 'string') &&
+    (value.providerId === undefined || typeof value.providerId === 'string') &&
+    (value.errorCode === undefined || typeof value.errorCode === 'string')
   );
 }
 
@@ -391,5 +427,17 @@ function normalizeRecord(record: UsageRecord): UsageRecord {
     latencyMs: record.latencyMs,
     ...(typeof record.inputTokens === 'number' ? { inputTokens: record.inputTokens } : {}),
     ...(typeof record.outputTokens === 'number' ? { outputTokens: record.outputTokens } : {}),
+    ...(typeof record.requestId === 'string' ? { requestId: record.requestId } : {}),
+    ...(Array.isArray(record.path) ? { path: record.path.map(normalizeAttempt) } : {}),
+  };
+}
+
+function normalizeAttempt(attempt: UsageAttempt): UsageAttempt {
+  return {
+    dispatched: attempt.dispatched,
+    outcome: attempt.outcome,
+    ...(typeof attempt.connectionId === 'string' ? { connectionId: attempt.connectionId } : {}),
+    ...(typeof attempt.providerId === 'string' ? { providerId: attempt.providerId } : {}),
+    ...(typeof attempt.errorCode === 'string' ? { errorCode: attempt.errorCode } : {}),
   };
 }
