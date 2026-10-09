@@ -16,6 +16,7 @@ export const providerLogoMap = {
   nara: '/providers/bynara-logo-icon-light.svg',
   tokenharbor: '/providers/tokenharbor.svg',
   xkiro: '/providers/xkiro-logo.svg',
+  apmix: '/providers/apmix.png',
   // Added 1.43.0 with the ten API-key cards. Every path is a file already committed under
   // `public/providers/` — `tests/dashboard-assets.test.js` fails if a rendered mark is not, and 294
   // assets went missing from 18 releases once because a blanket staging rule excluded that directory.
@@ -392,6 +393,26 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'T',
     logo: providerLogoMap.tokenharbor,
     endpoint: 'https://tokenharbor.ai/v1',
+    modelList: [],
+  },
+  {
+    id: 'apmix',
+    name: 'apmix',
+    description:
+      'One API key for GPT, Claude, Gemini, Grok, DeepSeek and Qwen, on a monthly allowance rather than per-token billing. OpenAI- and Anthropic-compatible. Key from apmix.ai.',
+    category: 'Multi-model provider',
+    group: 'api-key',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#2563eb',
+    initial: 'A',
+    logo: providerLogoMap.apmix,
+    endpoint: 'https://api.apmix.ai/v1',
     modelList: [],
   },
   {
