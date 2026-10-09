@@ -139,6 +139,11 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
         body: `F12 → Application → Storage → Cookies → https://tokenharbor.ai, and copy the value of \`${'sb-auth-auth-token'}\`. If it is split into numbered rows (\`.0\`, \`.1\`), copy them all — they are rejoined in order for you.`,
       },
       {
+        label: 'Or the console',
+        body: 'With tokenharbor.ai open and signed in, open F12 → Console, paste this line and press Enter. It copies the session cookies (the chunks in order, plus cf_clearance) to your clipboard. This only works when the cookie is not HttpOnly; if nothing is copied, use one of the steps above.',
+        snippet: "copy(document.cookie.split('; ').filter((c) => c.startsWith('sb-auth-auth-token') || c.startsWith('cf_clearance')).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).join('; '))",
+      },
+      {
         label: 'What happens next',
         body: 'Check asks tokenharbor.ai whether the session is accepted, by reading your profile. Nothing is stored unless you press Save, and the check is a credential check — whether a model can answer is only known by sending a turn.',
       },
