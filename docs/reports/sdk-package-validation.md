@@ -30,7 +30,7 @@ The tarball declares `engines.node: ">=20"`. Tested here, with the smoke test ab
 | 22.23.3 | loads, round trip passes |
 | 24.21.0 | loads, round trip passes |
 | 26.10.0 | loads, round trip passes |
-| 20.x | **not installed here; not tested** |
+| 20.20.2 | loads, round trip passes (the declared minimum; from the npm `node@20` package, since nvm could not download it) |
 
 The declared floor (20) is not the version tested. The package runs on 18 as well, so the floor is looser than the
 evidence. Node 20 must be installed and tested before the floor is either confirmed or changed. Changing
