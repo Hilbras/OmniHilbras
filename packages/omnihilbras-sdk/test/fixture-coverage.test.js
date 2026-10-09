@@ -17,9 +17,9 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
  * `opencode-console` — captured from the providers themselves, all three of them **model listings**, so
  * the total cost was nothing.
  *
- * The remaining twelve are accounted for by a stated reason, and the count is asserted so the two
- * cannot drift apart. Eight of those twelve need a credential this machine does not have: `openai`,
- * `openai-compatible`, `anthropic`, `gemini`, `zen`, `zen-free-tier`, `kimi-code` and `claude-code`.
+ * The remaining nine are accounted for by a stated reason, and the count is asserted so the two
+ * cannot drift apart. Seven of those nine need a credential this machine does not have: `openai`,
+ * `openai`, `anthropic`, `gemini`, `zen-free-tier`, `kimi-code` and `claude-code`, plus `openai-compatible`, which is a shared base.
  * `chatgpt-web` and `deepseek-web` are browser DOM sessions, where a byte capture pins nothing useful,
  * and `tokenharbor-web` has no endpoint to capture at all. The twelfth is `clinepass`, whose capture
  * would be a *duplicate* rather than a gap: it shares Cline's host and wire format, so the bytes it
@@ -72,7 +72,6 @@ const NO_CAPTURE_YET = {
   gemini: 'its frames are hand-written in `gemini.test.js`; no real capture was taken',
   'chatgpt-web': 'the protocol is a browser DOM rather than a wire format, so a byte capture would pin nothing useful',
   'deepseek-web': 'its frames are hand-written in `deepseek-web.test.js`, and that is how a real truncation bug survived',
-  zen: 'a composite of other providers\' protocols; a capture would pin the composite, not a provider',
   // The free-tier contract is four request conditions measured against someone else's service on a
   // date, and it changes: the working implementation in OmniRoute records the accepted placeholder
   // tool name moving between models within a week. A byte capture would freeze one day of it and
