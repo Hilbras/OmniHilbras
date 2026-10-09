@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PNG } from 'pngjs';
 import { defineConfig, type Plugin } from 'vite';
@@ -186,8 +187,66 @@ function logoPolarity(): Plugin {
   };
 }
 
+/**
+ * Forwards the dashboard's `/v1` calls to the local gateway and adds the per-launch dashboard token.
+ *
+ * The token is read from the gateway's user-only state file on every request. That way a restarted
+ * gateway, which issues a new token, is picked up without restarting Vite, and the browser never holds
+ * the token. The file is read here, in the dev server, which runs as the same user.
+ */
+function gatewayProxy(): Plugin {
+  return {
+    name: 'omnihilbras-gateway-proxy',
+    configureServer(server) {
+      server.middlewares.use(async (request, response, next) => {
+        const path = request.url ?? '';
+        if (!path.startsWith('/v1/')) return next();
+        const token = readDashboardTokenFile();
+        const headers: Record<string, string> = {};
+        for (const [name, value] of Object.entries(request.headers)) {
+          if (typeof value === 'string' && name !== 'host') headers[name] = value;
+        }
+        headers.host = `127.0.0.1:${gatewayPort}`;
+        if (token) headers['x-omnihilbras-dashboard-token'] = token;
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(chunk as Buffer);
+        const body = chunks.length ? Buffer.concat(chunks) : undefined;
+        try {
+          const upstream = await fetch(`http://127.0.0.1:${gatewayPort}${path}`, {
+            method: request.method,
+            headers,
+            ...(body ? { body } : {}),
+            redirect: 'manual',
+          });
+          response.statusCode = upstream.status;
+          upstream.headers.forEach((value, name) => {
+            if (name !== 'content-encoding' && name !== 'transfer-encoding') response.setHeader(name, value);
+          });
+          response.end(Buffer.from(await upstream.arrayBuffer()));
+        } catch {
+          response.statusCode = 502;
+          response.setHeader('content-type', 'application/json');
+          response.end(JSON.stringify({ error: { code: 'PROVIDER_UNAVAILABLE', message: 'The local gateway did not answer. Start it with pnpm dev:gateway.' } }));
+        }
+      });
+    },
+  };
+}
+
+const gatewayPort = Number(process.env.OMNIHILBRAS_PORT?.trim() || 8787);
+
+function readDashboardTokenFile(): string | undefined {
+  const configHome = process.env.XDG_CONFIG_HOME?.trim();
+  const path = join(configHome || join(homedir(), '.config'), 'omnihilbras', 'dashboard-token');
+  try {
+    return readFileSync(path, 'utf8').trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export default defineConfig({
-  plugins: [dashboardFallback(), logoPolarity(), react(), tailwindcss()],
+  plugins: [dashboardFallback(), gatewayProxy(), logoPolarity(), react(), tailwindcss()],
   server: {
     port: 5173,
   },

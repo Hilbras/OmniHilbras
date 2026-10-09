@@ -127,7 +127,11 @@ export type GatewayApiKeyList = {
   requireApiKey: boolean;
 };
 
-const gatewayBaseUrl = normalizeGatewayBaseUrl(import.meta.env.VITE_GATEWAY_URL ?? 'http://127.0.0.1:8787');
+// In development the dashboard calls its own origin, and Vite forwards `/v1` to the gateway with the
+// per-launch dashboard token attached. In a production build there is no such proxy, so the gateway URL is used.
+const gatewayBaseUrl = import.meta.env.DEV && typeof window !== 'undefined'
+  ? normalizeGatewayBaseUrl(window.location.origin)
+  : normalizeGatewayBaseUrl(import.meta.env.VITE_GATEWAY_URL ?? 'http://127.0.0.1:8787');
 
 /**
  * The gateway's base URL, for callers that need to reach it outside `requestJson`.

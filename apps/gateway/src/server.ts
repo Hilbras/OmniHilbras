@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { canonicalLoopbackHost, isLoopbackHostname } from '@hilbras/omnihilbras';
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './config.js';
 import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, resolveCorsOrigins, sendError, sendJson, setCors } from './http.js';
+import { dashboardTokenHeader, issueDashboardToken, tokenMatches } from './dashboard-token.js';
 import { isTrustedDashboard, type AuthContext } from './runtime.js';
 import { handleApiKeysRoute } from './routes/api-keys.js';
 import { handleConnectionsRoute } from './routes/connections.js';
@@ -26,6 +27,12 @@ export type GatewayServerOptions = {
    * callback the provider redirects the browser to.
    */
   publicBaseUrl?: string;
+  /**
+   * The per-launch dashboard token. When set, a management request is trusted as the dashboard only
+   * if it presents this token. Without it, the Origin check alone decides, which is the weaker rule
+   * tests and embedders still rely on.
+   */
+  dashboardToken?: string;
 };
 
 /**
@@ -98,11 +105,15 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     // Who is asking, decided once here because this is the only place that understands the
     // request. `dashboard` is an allowlisted browser origin on this machine; anything else is
     // unauthenticated until a key says otherwise, which the LLM surface's gate checks for itself.
+    const allowedOrigin = requestOrigin && corsOrigins.includes(requestOrigin);
+    const presentedToken = request.headers[dashboardTokenHeader];
+    const tokenOk = options.dashboardToken === undefined
+      || tokenMatches(typeof presentedToken === 'string' ? presentedToken : undefined, options.dashboardToken);
     const auth: AuthContext = {
-      kind: requestOrigin && corsOrigins.includes(requestOrigin) ? 'dashboard' : 'system',
+      kind: allowedOrigin && tokenOk ? 'dashboard' : 'system',
       tenant: service.deployment().tenant,
     };
-    const responseOrigin = requestOrigin && corsOrigins.includes(requestOrigin) ? requestOrigin : undefined;
+    const responseOrigin = allowedOrigin ? requestOrigin : undefined;
     setCors(response, responseOrigin);
     if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage')) response.setHeader('cache-control', 'no-store');
     if ((request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') && !isJsonRequest(request)) {
@@ -129,10 +140,12 @@ export async function startGatewayServer(options: {
   const bindHost = canonicalLoopbackHost(config.host);
   const service = createGatewayService(config, options.env, options.connectionStore, options.apiKeyStore);
   service.setHealthInterval(options.healthIntervalMs ?? config.healthIntervalMs);
+  const dashboardToken = await issueDashboardToken(options.env);
   const server = createGatewayServer(service, {
     ...(options.corsOrigin ? { corsOrigin: options.corsOrigin } : {}),
     ...(options.corsOrigins ? { corsOrigins: options.corsOrigins } : options.corsOrigin ? {} : { corsOrigins: config.corsOrigins }),
     publicBaseUrl: `http://${config.host}:${config.port}`,
+    dashboardToken,
   });
 
   service.startHealthMonitor();

@@ -48,10 +48,15 @@ and does not un-copy it.
 
 ## Known limits, stated rather than implied
 
-- **The allowlisted dashboard Origin is a bootstrap path, not authentication.** An allowlisted origin can read
-  the management surface without a key, because the local dashboard has no login. Management routes
-  (`/v1/connections`, `/v1/keys`, `/v1/oauth`, `/v1/settings`, `/v1/web-cookie`, `/v1/routing`, `/v1/usage`)
-  require the admin key when enforcement is on, but the allowlist is the intended local path.
+- **The dashboard is recognised by a per-launch token, not by its Origin.** The gateway generates a random
+  token at each start and writes it to `dashboard-token` in the state directory, at mode 0600. The dashboard's
+  dev server reads that file and adds the token to the requests it forwards, so the browser never holds it. A
+  management request is treated as the dashboard only when it presents the token. An allowlisted `Origin` alone
+  is no longer enough. Management routes (`/v1/connections`, `/v1/keys`, `/v1/oauth`, `/v1/settings`,
+  `/v1/web-cookie`, `/v1/routing`, `/v1/usage`) still require the admin key when enforcement is on.
+- **The token protects the dev dashboard only.** A production build has no proxy and calls the gateway directly,
+  so it has no per-launch token; treat a production build served from another machine as unsupported until it is
+  given its own delivery path.
 - **The two OAuth callbacks are exempt from that gate, and here is what that means.** `GET
   /v1/oauth/cline/callback/:sessionId` and `GET /v1/oauth/claude-code/callback/:sessionId` answer the
   provider's redirect, which is a top-level navigation the browser is *sent* to — it carries no `Origin` and
