@@ -17,6 +17,7 @@ export const providerLogoMap = {
   tokenharbor: '/providers/tokenharbor.svg',
   xkiro: '/providers/xkiro-logo.svg',
   apmix: '/providers/apmix.png',
+  tiarina: '/providers/Tirina.webp',
   // Added 1.43.0 with the ten API-key cards. Every path is a file already committed under
   // `public/providers/` — `tests/dashboard-assets.test.js` fails if a rendered mark is not, and 294
   // assets went missing from 18 releases once because a blanket staging rule excluded that directory.
@@ -431,6 +432,7 @@ export const providerCatalog: ProviderRecord[] = [
     health: 0,
     color: '#0f766e',
     initial: 'T',
+    logo: providerLogoMap.tiarina,
     endpoint: 'https://ai.tiarina.cloud/v1',
     modelList: [],
   },
