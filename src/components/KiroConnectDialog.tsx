@@ -4,13 +4,11 @@ import { Building2, Check, CircleAlert, ExternalLink, GitBranch, KeyRound, Loade
 import {
   KIRO_METHODS,
   connectKiroApiKey,
-  exchangeKiroSocialCode,
-  extractKiroCode,
   getKiroSignInStatus,
   importKiroRefreshToken,
   kiroMethod,
   startKiroDeviceSignIn,
-  startKiroSocialSignIn,
+  startKiroSocialDeviceSignIn,
   type KiroAuthMethod,
 } from '../lib/kiroAuth';
 import type { GatewayConnection } from '../lib/gatewayClient';
@@ -68,14 +66,11 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
   const [acknowledged, setAcknowledged] = useState(false);
   const [startUrl, setStartUrl] = useState('');
   const [secret, setSecret] = useState('');
-  const [code, setCode] = useState('');
   const [deviceCode, setDeviceCode] = useState<{ userCode: string; verificationUrl: string } | null>(null);
-  const [socialUrl, setSocialUrl] = useState('');
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
   const pollRef = useRef<number | null>(null);
   const timeoutRef = useRef<number | null>(null);
   const settledRef = useRef(false);
-  const socialSessionRef = useRef<string | null>(null);
   const signInWindowRef = useRef<Window | null>(signInWindow ?? null);
 
   useEffect(() => {
@@ -209,27 +204,31 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
     [fail, navigateTo, watchDeviceSession],
   );
 
+  /**
+   * Google and GitHub use Kiro's device flow, the same one OmniRoute uses. The gateway starts it and the
+   * user approves the code on Kiro's page, so nothing has to be pasted back: this shows the code and
+   * waits on the same session as Builder ID.
+   */
   const runSocialFlow = useCallback(
     async (provider: 'google' | 'github') => {
       setPhase('running');
       setError('');
       try {
-        const signIn = await startKiroSocialSignIn(provider);
+        const signIn = await startKiroSocialDeviceSignIn(provider);
         if (settledRef.current) return;
-        setSocialUrl(signIn.authUrl);
-        setDeviceCode({ userCode: '', verificationUrl: signIn.authUrl });
-        setPhase('waiting');
+        setDeviceCode({ userCode: signIn.userCode, verificationUrl: signIn.verificationUrl });
+        const sentToOpenTab = navigateTo(signIn.verificationUrl);
         setMessage(
-          navigateTo(signIn.authUrl)
-            ? 'Sign in on the tab that just opened, then copy the code from its address bar and paste it below.'
-            : 'Your browser blocked the sign-in tab. Open the link below, then paste the code from its address bar.',
+          sentToOpenTab
+            ? 'Approve the request in the tab that just opened, using the code below. This tab will finish the connection.'
+            : 'Your browser blocked the sign-in tab. Open the link below to approve.',
         );
-        socialSessionRef.current = signIn.sessionId;
+        watchDeviceSession(signIn.sessionId);
       } catch (startError) {
         fail(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
       }
     },
-    [fail, navigateTo],
+    [fail, navigateTo, watchDeviceSession],
   );
 
   const submitSecret = useCallback(async () => {
@@ -252,38 +251,15 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
     }
   }, [finish, method, secret]);
 
-  const submitSocialCode = useCallback(async () => {
-    const sessionId = socialSessionRef.current;
-    if (!sessionId) return;
-    const extracted = extractKiroCode(code);
-    if (!extracted) {
-      setError('No code found in that. Paste the whole address, or just the code from it.');
-      return;
-    }
-    setPhase('running');
-    setError('');
-    try {
-      const result = await exchangeKiroSocialCode(sessionId, extracted);
-      await finish(result.connection);
-    } catch (submitError) {
-      setCode('');
-      setPhase('failed');
-      setError(submitError instanceof Error ? submitError.message : 'That code could not be exchanged.');
-    }
-  }, [code, finish]);
-
   const reset = useCallback(() => {
     stopWaiting();
     settledRef.current = false;
-    socialSessionRef.current = null;
     setPhase('choose');
     setError('');
     setMessage('');
     setDeviceCode(null);
-    setSocialUrl('');
     setStartUrl('');
     setSecret('');
-    setCode('');
   }, [stopWaiting]);
 
   if (!portalNode) return null;
@@ -457,64 +433,7 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
                 </>
               )}
 
-              {(method === 'google' || method === 'github') && (
-                <>
-                  {socialUrl && (
-                    <a href={socialUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-1 text-[11px] text-gold-text hover:underline">
-                      Or open it in a new tab
-                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                    </a>
-                  )}
-                  <div className="mt-4">
-                    <label htmlFor="kiro-social-code" className="block text-[11px] font-semibold">
-                      Code from your address bar
-                    </label>
-                    <input
-                      id="kiro-social-code"
-                      value={code}
-                      onChange={(event) => {
-                        setCode(event.target.value);
-                        setError('');
-                      }}
-                      placeholder="kiro://kiro.kiroAgent/authenticate-success?code=…"
-                      autoComplete="off"
-                      spellCheck={false}
-                      className="mt-1.5 w-full rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-text outline-none focus:border-gold/50"
-                    />
-                    <p className="muted mt-1.5 text-[11px] leading-relaxed">
-                      Your browser will show a &ldquo;can&rsquo;t open this page&rdquo; message. That is expected — the code
-                      is in the address bar above it.
-                    </p>
-                  </div>
-                  <div className="mt-4 flex gap-2">
-                    {socialUrl && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          settledRef.current = false;
-                          openSignInTab();
-                          void runSocialFlow(method);
-                        }}
-                        disabled={phase === 'running'}
-                        className="btn-ghost !h-9 flex-1 !px-2.5 !text-[11px]"
-                      >
-                        Reopen sign-in page
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        settledRef.current = false;
-                        void submitSocialCode();
-                      }}
-                      disabled={phase === 'running' || !code.trim()}
-                      className="btn-gold !h-9 flex-1 !text-xs"
-                    >
-                      {phase === 'running' ? 'Checking…' : 'Connect'}
-                    </button>
-                  </div>
-                </>
-              )}
+
 
               {(method === 'import-token' || method === 'api-key') && (
                 <>

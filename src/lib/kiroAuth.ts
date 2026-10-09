@@ -113,6 +113,20 @@ export function getKiroSignInStatus(sessionId: string, signal?: AbortSignal): Pr
 
 export type KiroSocialSignIn = { sessionId: string; authUrl: string };
 
+/**
+ * Google or GitHub through Kiro's device flow: the gateway returns a code and a verification URL, and the
+ * session is polled like Builder ID's. There is no paste step, so no authorization URL is involved.
+ */
+export type KiroSocialDeviceSignIn = { sessionId: string; userCode: string; verificationUrl: string };
+
+export function startKiroSocialDeviceSignIn(provider: 'google' | 'github'): Promise<KiroSocialDeviceSignIn> {
+  return requestJson<KiroSocialDeviceSignIn>('/v1/oauth/kiro/social/start', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ provider }),
+  });
+}
+
 export function startKiroSocialSignIn(provider: 'google' | 'github'): Promise<KiroSocialSignIn> {
   return requestJson<KiroSocialSignIn>('/v1/oauth/kiro/social/start', {
     method: 'POST',
