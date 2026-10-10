@@ -77,7 +77,7 @@ const defaultRefreshSkewMs = 60_000;
 const inFlightRefreshes = new Map<string, Promise<Exclude<ProviderCredential, { type: 'none' }>>>();
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '1.80.0';
+const omnihilbrasVersion = '1.81.0';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {

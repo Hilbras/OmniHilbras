@@ -4922,3 +4922,44 @@ two fields. A live forced refresh now returns healthy.
 
 - No ClinePass completion has been sent. A listed model can still be refused if the subscription does not cover
   it. Whether the 14 listed models run on the account needs a paid request, which has not been made.
+
+## 1.81.0 — plan items 2.1, 2.2, 4.1–4.3, 9, and the Logs page
+
+### Kiro stream integrity (2.1, 2.2)
+
+- A Kiro event stream whose prelude or message CRC32 does not match, or that is cut short, is refused as
+  `INVALID_RESPONSE` instead of returned as a partial answer. The captured stream still decodes in full.
+- A truncated or corrupted answer is retried on the same connection (`request-executor.test.js`).
+
+### Tools and reasoning (4.1–4.3)
+
+- `toolChoice` (auto, none, required) reaches Anthropic as `tool_choice` (required maps to `any`) and
+  OpenAI-compatible providers unchanged. Unknown values are refused with 400.
+- `reasoningEffort` (low, medium, high): `reasoning_effort` for OpenAI-compatible providers; a thinking
+  budget for Anthropic. The budget floor (1024) and shares (0.2 / 0.5 / 0.8) are a choice, not measured
+  against Anthropic's limits.
+- An assistant turn's thinking block and signature are replayed to Anthropic ahead of the text.
+
+### Responses API (9)
+
+- `POST /v1/responses` with `stream: true` is served as Responses server-sent events: `response.output_text.delta`
+  per text delta, then `response.completed` with the non-streaming body. It uses the same failover, usage and
+  cancellation as chat.
+
+### Logs (11.1)
+
+- `GET /v1/logs/stream` sends each finished request as a server-sent event (no message content), behind the
+  management gate. The Logs page shows the latest 200 and closes its stream on leaving.
+
+### Verify
+
+- `pnpm verify` passed before the bump (exit 0). Gateway suite 651/651, SDK suite 623/623, repo guards 162/162.
+- Revert proofs were run for each behaviour change; see the commit messages.
+
+### Still open
+
+- Kiro tool calls are not implemented in the adapter (no tool definitions are sent, and tool-use frames are
+  not decoded), so item 2.3 has no live capture to take. Recorded, not done.
+- Live provider behaviour for the streamed Responses path and the Kiro retry has not been checked against a
+  real account.
+- Quota reads (11.2), the logs filter (1.3) and remote-use hardening (12.x) remain parked.
