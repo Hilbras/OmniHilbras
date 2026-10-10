@@ -66,3 +66,54 @@ test('a Responses request is answered in the Responses shape, and reaches the pr
   assert.equal(seen[0].messages.find((message) => message.role === 'system')?.content, 'Be brief.', 'instructions become the system message');
   assert.equal(seen[0].messages.at(-1).content, 'ping', 'input becomes the user message');
 });
+
+function streamingProvider() {
+  return {
+    id: 'fake',
+    name: 'Fake',
+    capabilities: { chat: true, streaming: true, models: true },
+    async listModels() { return [{ id: 'fake-1', providerId: 'fake' }]; },
+    async healthCheck() { return { status: 'healthy', checkedAt: new Date().toISOString() }; },
+    async chat() { throw new Error('the streamed test must not reach the non-streaming path'); },
+    async *streamChat() {
+      yield { id: 'r2', providerId: 'fake', model: 'fake-1', delta: { role: 'assistant', content: 'po' } };
+      yield { id: 'r2', providerId: 'fake', model: 'fake-1', delta: { content: 'ng' }, finishReason: 'stop', usage: { inputTokens: 3, outputTokens: 1, totalTokens: 4 } };
+    },
+  };
+}
+
+test('stream: true on /v1/responses is answered as Responses events: text deltas, then response.completed with the full body', async (t) => {
+  const apiKeys = new InMemoryApiKeyStore();
+  const key = (await apiKeys.create('responses')).key;
+  const registry = new ProviderRegistry().register(streamingProvider());
+  const store = new InMemoryConnectionStore();
+  await store.save({ id: 'fake', providerId: 'fake', name: 'Fake', endpoint: 'https://f.example/v1', priority: 1, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 } },
+    { type: 'api-key', value: 'k' });
+  const service = new GatewayService(registry, new InMemorySecretStore({}), store, apiKeys, { failureThreshold: 1_000 });
+  service.setHealthInterval(0);
+  const server = createGatewayServer(service, { corsOrigin: 'http://localhost:5173' });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const response = await fetch(`${base}/v1/responses`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model: 'fake-1', input: 'ping', stream: true }),
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /text\/event-stream/);
+  const text = await response.text();
+  const events = text.split('\n\n').filter(Boolean).map((block) => {
+    const event = /^event: (.+)$/m.exec(block)?.[1];
+    const data = JSON.parse(/^data: (.+)$/m.exec(block)[1]);
+    return { event, data };
+  });
+  const deltas = events.filter((e) => e.event === 'response.output_text.delta').map((e) => e.data.delta);
+  assert.deepEqual(deltas, ['po', 'ng'], 'each text delta is its own event, in order');
+  const completed = events.at(-1);
+  assert.equal(completed.event, 'response.completed', 'the last event is response.completed');
+  assert.equal(completed.data.response.object, 'response');
+  assert.equal(completed.data.response.status, 'completed');
+  assert.equal(completed.data.response.output_text, 'pong', 'the completed body carries the joined text');
+});

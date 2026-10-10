@@ -185,10 +185,13 @@ function finishEmbeddingRequest(body: Record<string, unknown>, model: string, in
  */
 export async function handleResponses(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
   const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
-  if (isRecord(body) && body.stream === true) throw invalidRequest('Streaming is not available on /v1/responses yet; send stream: false.');
   const chatRequest = parseChatRequest(responsesToChatBody(body));
   const explicitProviderId = getExplicitProviderId(request, body);
   const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request));
+  if (chatRequest.stream) {
+    await streamResponses({ response, service, origin, signal, scope, chatRequest, explicitProviderId });
+    return;
+  }
   const startedAt = Date.now();
   let completion: ChatResponse;
   let attempts: GatewayFailoverAttempt[];
@@ -224,6 +227,93 @@ export async function handleResponses(request: IncomingMessage, response: Server
   });
   const text = typeof completion.message.content === 'string' ? completion.message.content : '';
   sendJson(response, 200, chatToResponsesBody({ id: completion.id, model: completion.model, createdAt: completion.createdAt, content: text, ...(completion.usage ? { usage: completion.usage } : {}) }), origin);
+}
+
+/**
+ * `stream: true` on `/v1/responses`: the chat stream, re-framed as Responses events.
+ *
+ * Failover is decided before the first byte is written, as on the chat path, so a stream that cannot
+ * start is a normal JSON error. Each text delta becomes `response.output_text.delta`; the last event
+ * is `response.completed`, carrying the same body a non-streaming call returns, so a client can read
+ * either. Usage and cancellation are recorded exactly as the chat stream records them.
+ */
+async function streamResponses(input: {
+  response: ServerResponse;
+  service: GatewayService;
+  origin: string | undefined;
+  signal: AbortSignal;
+  scope: RequestScope;
+  chatRequest: ChatRequest;
+  explicitProviderId: string | undefined;
+}) {
+  const { response, service, origin, signal, scope, chatRequest, explicitProviderId } = input;
+  const streamStartedAt = Date.now();
+  const outcome = await service.streamChatWithFailover(chatRequest, explicitProviderId, signal, scope);
+  response.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+    ...(origin ? { 'access-control-allow-origin': origin } : {}),
+  });
+  response.flushHeaders();
+
+  let id = `resp_${scope.id}`;
+  let model = chatRequest.model;
+  let createdAt = new Date(streamStartedAt).toISOString();
+  let text = '';
+  let usage: ChatChunk['usage'];
+  const servingOf = () => outcome.attempts.find((attempt) => attempt.ok);
+
+  try {
+    for await (const chunk of outcome.chunks) {
+      id = chunk.id || id;
+      model = chunk.model || model;
+      if (chunk.usage) usage = chunk.usage;
+      if (chunk.delta.content) {
+        text += chunk.delta.content;
+        await writeStreamData(response, `event: response.output_text.delta\ndata: ${JSON.stringify({ type: 'response.output_text.delta', delta: chunk.delta.content })}\n\n`, signal);
+      }
+    }
+    if (signal.aborted) {
+      recordUsage(service, {
+        model,
+        providerId: servingOf()?.providerId,
+        connectionId: servingOf()?.connectionId,
+        outcome: 'cancelled',
+        attempts: outcome.attempts.length,
+        latencyMs: Date.now() - streamStartedAt,
+      });
+      if (!response.destroyed && !response.writableEnded) response.end();
+      return;
+    }
+    const completed = chatToResponsesBody({ id, model, createdAt, content: text, ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens } } : {}) });
+    await writeStreamData(response, `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: completed })}\n\n`, signal);
+    recordUsage(service, {
+      model,
+      providerId: servingOf()?.providerId,
+      connectionId: servingOf()?.connectionId,
+      outcome: 'success',
+      attempts: outcome.attempts.length,
+      latencyMs: Date.now() - streamStartedAt,
+      ...(usage ? { usage } : {}),
+    });
+    response.end();
+  } catch (error) {
+    const cancelled = signal.aborted || (error instanceof ProviderError && error.code === 'CANCELLED');
+    recordUsage(service, {
+      model,
+      providerId: servingOf()?.providerId ?? outcome.attempts[0]?.providerId,
+      connectionId: servingOf()?.connectionId ?? outcome.attempts[0]?.connectionId,
+      outcome: cancelled ? 'cancelled' : 'failure',
+      attempts: outcome.attempts.length,
+      latencyMs: Date.now() - streamStartedAt,
+      ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+    });
+    if (!response.destroyed && !signal.aborted) {
+      await writeStreamData(response, `event: error\ndata: ${JSON.stringify(toErrorEnvelope(error))}\n\n`, signal).catch(() => undefined);
+      response.end();
+    }
+  }
 }
 
 export async function handleChat(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
