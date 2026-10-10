@@ -456,6 +456,7 @@ export function parseMessage(value: unknown): ChatMessage {
     content,
     ...(typeof value.name === 'string' ? { name: value.name } : {}),
     ...(typeof value.tool_call_id === 'string' ? { toolCallId: value.tool_call_id } : {}),
+    ...(value.is_error === true ? { isError: true } : {}),
     ...(toolCalls ? { toolCalls } : {}),
   };
 }

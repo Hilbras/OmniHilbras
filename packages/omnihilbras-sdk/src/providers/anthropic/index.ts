@@ -310,7 +310,7 @@ function toAnthropicMessage(message: ChatMessage) {
   if (message.role === 'tool') {
     return {
       role: 'user',
-      content: [{ type: 'tool_result', tool_use_id: message.toolCallId ?? '', content: contentToText(message.content) }],
+      content: [{ type: 'tool_result', tool_use_id: message.toolCallId ?? '', content: contentToText(message.content), ...(message.isError ? { is_error: true } : {}) }],
     };
   }
 

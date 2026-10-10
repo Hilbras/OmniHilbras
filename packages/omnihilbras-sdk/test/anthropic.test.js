@@ -60,6 +60,27 @@ test('AnthropicAdapter converts system messages, tools, and responses', async ()
   assert.deepEqual(response.usage, { inputTokens: 4, outputTokens: 3 });
 });
 
+test('a failed tool result reaches Claude with is_error, and a successful one carries no such field', async () => {
+  const transport = createTransport();
+  const adapter = new AnthropicAdapter({ transport });
+  await adapter.chat({
+    model: 'claude-sonnet-4',
+    messages: [
+      { role: 'user', content: 'run it' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'toolu_1', type: 'function', function: { name: 'run', arguments: '{}' } }] },
+      { role: 'tool', toolCallId: 'toolu_1', content: 'exit 1: command not found', isError: true },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'toolu_2', type: 'function', function: { name: 'run', arguments: '{}' } }] },
+      { role: 'tool', toolCallId: 'toolu_2', content: 'ok' },
+    ],
+  }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  const messages = JSON.parse(transport.calls[0].body).messages;
+  const failed = messages[2].content[0];
+  const succeeded = messages[4].content[0];
+  assert.equal(failed.type, 'tool_result');
+  assert.equal(failed.is_error, true, 'Claude must be told the tool failed');
+  assert.equal('is_error' in succeeded, false, 'a success keeps the default wire shape');
+});
+
 test('AnthropicAdapter represents a refusal as a content-filter response', async () => {
   const transport = createTransport({
     request: async () => ({ status: 200, headers: new Headers(), data: { id: 'msg-refusal', model: 'claude-sonnet-4', content: [], stop_reason: 'refusal' } }),

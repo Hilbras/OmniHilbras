@@ -52,6 +52,8 @@ export type ChatMessage = {
   name?: string;
   toolCallId?: string;
   toolCalls?: readonly ToolCall[];
+  /** A tool result that reports a failure, so the provider does not read it as success. */
+  isError?: boolean;
 };
 
 export type ChatRequest = {
