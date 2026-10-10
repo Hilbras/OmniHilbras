@@ -45,6 +45,8 @@ export type ConnectionRecord = {
   proxyPool: string;
   enabled: boolean;
   hasCredential: boolean;
+  /** Share traffic with the other balanced connections at the same priority, instead of always taking the first. */
+  balance?: boolean;
   modelPolicy: ModelImportPolicy;
   modelIds: string[];
   customModelIds: string[];

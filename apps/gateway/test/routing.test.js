@@ -737,3 +737,45 @@ test('a rate limit on one model cools that model only, and the provider\'s other
   const later = resolveRoute({ connections: [connection], model: 'busy', health, failureThreshold: 3 });
   assert.equal(later.candidates.length, 1, 'after the provider\'s reset time the model is routable again');
 });
+
+test('without balancing, equal-priority connections keep the name order on every request, as before', () => {
+  const health = new HealthRegistry(() => Date.now(), 60_000);
+  const connections = [
+    { id: 'c-b', providerId: 'p', name: 'Beta', priority: 1, enabled: true, hasCredential: true, modelIds: ['m'], resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 } },
+    { id: 'c-a', providerId: 'p', name: 'Alpha', priority: 1, enabled: true, hasCredential: true, modelIds: ['m'], resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 } },
+  ];
+  const firsts = [1, 2, 3].map(() => resolveRoute({ connections, model: 'm', health, failureThreshold: 3 }).candidates[0].connectionId);
+  assert.deepEqual(firsts, ['c-a', 'c-a', 'c-a'], 'the default is unchanged: the first name always leads');
+});
+
+test('a balanced connection rotates with the others at its priority, and a higher priority still wins', () => {
+  const health = new HealthRegistry(() => Date.now(), 60_000);
+  const resilience = { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 };
+  const connections = [
+    { id: 'c-a', providerId: 'p', name: 'Alpha', priority: 1, balance: true, enabled: true, hasCredential: true, modelIds: ['m'], resilience },
+    { id: 'c-b', providerId: 'p', name: 'Beta', priority: 1, balance: true, enabled: true, hasCredential: true, modelIds: ['m'], resilience },
+    { id: 'c-z', providerId: 'p', name: 'Zed', priority: 2, balance: true, enabled: true, hasCredential: true, modelIds: ['m'], resilience },
+  ];
+  const firsts = [0, 1, 2, 3].map((rotation) => resolveRoute({ connections, model: 'm', health, failureThreshold: 3, rotation }).candidates[0].connectionId);
+  assert.deepEqual(firsts, ['c-a', 'c-b', 'c-a', 'c-b'], 'the two priority-1 balanced connections alternate');
+  assert.equal(firsts.includes('c-z'), false, 'priority 2 is only a fallback, never a first choice');
+});
+
+test('the routing engine alternates balanced connections across requests, and leaves an unbalanced pair alone', async () => {
+  const { RoutingEngine } = await import('../dist/routing-engine.js');
+  const health = new HealthRegistry(() => Date.now(), 60_000);
+  const resilience = { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 };
+  const balanced = [
+    { id: 'c-a', providerId: 'p', name: 'Alpha', priority: 1, balance: true, enabled: true, hasCredential: true, modelIds: ['m'], resilience },
+    { id: 'c-b', providerId: 'p', name: 'Beta', priority: 1, balance: true, enabled: true, hasCredential: true, modelIds: ['m'], resilience },
+  ];
+  const unbalanced = balanced.map((connection) => ({ ...connection, balance: false }));
+  const { SlidingWindowRateLimiter } = await import('../dist/index.js');
+  const engine = new RoutingEngine({ health: { getFailureThreshold: () => 3, registry: () => health }, rateLimiter: new SlidingWindowRateLimiter(), defaultProviderId: 'p', requireAdapter: () => {} });
+  const pick = async (connections) => (await engine.plan({ connections, model: 'm' })).candidates[0].connectionId;
+  const alternating = [await pick(balanced), await pick(balanced), await pick(balanced), await pick(balanced)];
+  assert.equal(alternating[0] === alternating[1], false, 'the first pick changes between consecutive requests');
+  assert.deepEqual(alternating, [alternating[0], alternating[1], alternating[0], alternating[1]], 'and then keeps alternating');
+  const fixed = [await pick(unbalanced), await pick(unbalanced)];
+  assert.deepEqual(fixed, ['c-a', 'c-a'], 'without balancing the engine keeps the name order');
+});

@@ -45,6 +45,8 @@ export type RoutingEngineOptions = {
 
 export class RoutingEngine {
   private readonly limits: RateLimitPolicy;
+  /** One turn counter per provider and priority, so balanced connections at one priority take turns across requests. */
+  private readonly balanceTurns = new Map<string, number>();
 
   constructor(private readonly options: RoutingEngineOptions) {
     this.limits = new RateLimitPolicy({ limiter: options.rateLimiter });
@@ -96,6 +98,27 @@ export class RoutingEngine {
    * all. With connections present and every one skipped, the decision is returned as-is, because
    * *why* they were skipped is the answer the operator needs.
    */
+  /**
+   * The turn for this request among balanced connections. It advances only for a priority that has more than one
+   * balanced connection, so a single balanced connection, or none, never changes the order.
+   */
+  private nextBalanceTurn(connections: readonly ConnectionRecord[]): number {
+    const groups = new Map<string, number>();
+    for (const connection of connections) {
+      if (!connection.enabled || !connection.hasCredential || connection.balance !== true) continue;
+      const key = `${connection.providerId}:${connection.priority}`;
+      groups.set(key, (groups.get(key) ?? 0) + 1);
+    }
+    let turn = 0;
+    for (const [key, count] of groups) {
+      if (count < 2) continue;
+      const next = (this.balanceTurns.get(key) ?? 0) + 1;
+      this.balanceTurns.set(key, next);
+      turn = Math.max(turn, next);
+    }
+    return turn;
+  }
+
   async plan(input: {
     connections: readonly ConnectionRecord[];
     model: string;
@@ -109,11 +132,13 @@ export class RoutingEngine {
     const health = this.options.health.registry();
     const split = splitProviderPrefix(input.model, input.connections);
     const explicitProviderId = input.explicitProviderId ?? split.providerId;
+    const rotation = this.nextBalanceTurn(input.connections);
     const decision = resolveRoute({
       // Copied because `resolveRoute` types its input as mutable while nothing here mutates it.
       // The copy is here rather than at every call site so the looseness is paid for once.
       connections: [...input.connections],
       model: split.model,
+      rotation,
       ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
       health,
       failureThreshold: this.options.health.getFailureThreshold(),

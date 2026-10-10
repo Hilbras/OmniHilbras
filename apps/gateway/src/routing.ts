@@ -253,6 +253,31 @@ export function bareModelFor(model: string, providerId: string): string {
   return prefix === providerId || prefix === providerSlug(providerId) ? rest : trimmed;
 }
 
+/**
+ * Turns the balanced connections of one priority so the first one changes with each request. A connection that does not
+ * ask for balancing keeps its place, and so does every other priority, so a higher priority still wins.
+ */
+function rotateBalancedConnections(sorted: ConnectionRecord[], rotation: number) {
+  if (rotation <= 0) return;
+  let start = 0;
+  while (start < sorted.length) {
+    const priority = sorted[start]!.priority;
+    let end = start;
+    while (end < sorted.length && sorted[end]!.priority === priority) end += 1;
+    const group = sorted.slice(start, end);
+    const balanced = group.filter((connection) => connection.balance === true);
+    if (balanced.length > 1) {
+      const turn = rotation % balanced.length;
+      const rotated = [...balanced.slice(turn), ...balanced.slice(0, turn)];
+      let next = 0;
+      for (let index = start; index < end; index += 1) {
+        if (sorted[index]!.balance === true) sorted[index] = rotated[next++]!;
+      }
+    }
+    start = end;
+  }
+}
+
 /** Resolves a failover chain, ordered by priority then name for determinism. */
 export function resolveRoute(input: {
   connections: ConnectionRecord[];
@@ -261,11 +286,14 @@ export function resolveRoute(input: {
   health: HealthRegistry;
   failureThreshold: number;
   rateLimitWaitMs?: Map<string, number>;
+  /** Advances once per request, so balanced connections at one priority take turns. Zero keeps the name order. */
+  rotation?: number;
 }): RouteDecision {
   const modelId = input.model.trim();
   const usable = input.connections
     .filter((connection) => connection.enabled && connection.hasCredential)
     .sort((left, right) => left.priority - right.priority || left.name.localeCompare(right.name));
+  rotateBalancedConnections(usable, input.rotation ?? 0);
 
   const skipped: RouteDecision['skipped'] = [];
   const ownsModel = (connection: ConnectionRecord) => modelId.length > 0 && connection.modelIds.includes(modelId);
