@@ -229,7 +229,13 @@ export function resolveRoute(input: {
     if (pinned.length > 0) {
       return { candidates: pinned.map(toCandidate), skipped: [] };
     }
-    skipped.push({ providerId: input.explicitProviderId, reason: 'no-models' });
+    // A pin with no usable connection is refused here, not routed to another provider. The caller chose that
+    // provider, so serving the request elsewhere would bill a provider they did not pick.
+    const configured = input.connections.filter((connection) => connection.providerId === input.explicitProviderId);
+    const reason: RouteSkipReason = configured.some((connection) => !connection.enabled) ? 'disabled'
+      : configured.length > 0 ? 'no-credential'
+      : 'no-models';
+    return { candidates: [], skipped: [{ providerId: input.explicitProviderId, reason }] };
   }
 
   const matching = usable.filter(ownsModel);

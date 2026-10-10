@@ -701,3 +701,23 @@ test("a provider's own wording survives the failover path", async () => {
     },
   );
 });
+
+test('a request pinned to a provider with no usable connection is refused, not served by another provider', async () => {
+  // The pinned provider's only connection is switched off. The old rule recorded a skip and then routed to any
+  // other usable connection, so the request was served and billed to a provider the caller did not choose.
+  const calls = [];
+  const pinned = chattyAdapter('pinned', { calls });
+  const other = chattyAdapter('other', { calls });
+  const store = await storeWith([
+    { id: 'pinned', priority: 1, enabled: false },
+    { id: 'other', priority: 2 },
+  ]);
+  const service = buildService([pinned, other], store);
+
+  await assert.rejects(
+    () => service.chatWithFailover({ ...chatRequest, model: 'm' }, 'pinned'),
+    (error) => error.code === 'PROVIDER_UNAVAILABLE' && /pinned/.test(error.message),
+    'the pin must be honoured or refused, never silently served elsewhere',
+  );
+  assert.equal(calls.filter((id) => id === 'other').length, 0, 'the other provider must not be called');
+});
