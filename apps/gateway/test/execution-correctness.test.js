@@ -675,3 +675,41 @@ test('a route that hits its rate limit between planning and dispatch hands the r
   const body = await response.json();
   assert.equal(body.choices[0].message.content, 'from-c');
 });
+
+test('a request the caller got wrong does not count against the provider\'s health', async () => {
+  // A refusal of the request (INVALID_REQUEST, NOT_SUPPORTED) says nothing about the provider. Recording it as
+  // a provider failure let three bad requests from one client eject a healthy provider for everyone.
+  const health = { failure: [] };
+  const candidates = [{ providerId: 'p', connectionId: 'c-p', priority: 1, modelIds: ['m'], resilience: { maxRetries: 0, requestsPerMinute: 100, timeoutMs: 5_000, hedgeAfterMs: 0 } }];
+  const executor = new RequestExecutor({
+    planRoute: async () => ({ candidates }),
+    chat: async () => { throw new ProviderError('INVALID_REQUEST', 'bad field', { providerId: 'p' }); },
+    streamChat: async function* () {},
+    withDeadline: (signal, _ms, _id, run) => run(signal),
+    enforceRateLimit: () => {},
+    recordRateLimitUse: () => {},
+    recordSuccess: () => {},
+    recordFailure: (id, code) => health.failure.push(`${id}:${code}`),
+  });
+  for (let i = 0; i < 3; i += 1) {
+    await assert.rejects(() => executor.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, undefined));
+  }
+  assert.deepEqual(health.failure, [], 'three client errors must not be recorded as provider failures');
+});
+
+test('a real provider outage still counts against the provider\'s health', async () => {
+  const health = { failure: [] };
+  const candidates = [{ providerId: 'p', connectionId: 'c-p', priority: 1, modelIds: ['m'], resilience: { maxRetries: 0, requestsPerMinute: 100, timeoutMs: 5_000, hedgeAfterMs: 0 } }];
+  const executor = new RequestExecutor({
+    planRoute: async () => ({ candidates }),
+    chat: async () => { throw new ProviderError('PROVIDER_UNAVAILABLE', 'down', { providerId: 'p', retryable: true }); },
+    streamChat: async function* () {},
+    withDeadline: (signal, _ms, _id, run) => run(signal),
+    enforceRateLimit: () => {},
+    recordRateLimitUse: () => {},
+    recordSuccess: () => {},
+    recordFailure: (id, code) => health.failure.push(`${id}:${code}`),
+  });
+  await assert.rejects(() => executor.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, undefined));
+  assert.deepEqual(health.failure, ['p:PROVIDER_UNAVAILABLE'], 'an outage is still recorded');
+});

@@ -81,6 +81,14 @@ const terminalRouteCodes = new Set(['INVALID_REQUEST', 'AUTHENTICATION_FAILED', 
  * disguise and would make the tests below a re-implementation of the service rather than a
  * description of the loop.
  */
+/**
+ * Errors that describe the request or the model, not the provider. Counting them against the provider would let
+ * one client's bad requests eject a healthy provider for every client.
+ */
+function isCallerFault(code: string): boolean {
+  return code === 'INVALID_REQUEST' || code === 'NOT_SUPPORTED' || code === 'CANCELLED';
+}
+
 export type RequestExecutorDeps = {
   /** Which providers could serve this model, in preference order. */
   planRoute: (model: string, explicitProviderId?: string) => Promise<RouteDecision>;
@@ -275,7 +283,7 @@ export class RequestExecutor {
         } catch (error) {
           const latencyMs = Date.now() - startedAt;
           const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
-          this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.');
+          if (!isCallerFault(code)) this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.');
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs, errorCode: code });
           lastError = error;
           const action = this.retryPolicy.afterFailure({
@@ -373,7 +381,7 @@ export class RequestExecutor {
           if (outcome.ok) {
             this.deps.recordSuccess(candidate.providerId, outcome.latencyMs, new Date().toISOString());
           } else {
-            this.deps.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.');
+            if (!isCallerFault(code ?? 'PROVIDER_REQUEST_FAILED')) this.deps.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.');
           }
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: outcome.ok, latencyMs: outcome.latencyMs, ...(code ? { errorCode: code } : {}) });
           if (outcome.ok) {
@@ -498,7 +506,7 @@ export class RequestExecutor {
         rest = opened.remainder[Symbol.asyncIterator]();
       } catch (error) {
         const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
-        this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.');
+        if (!isCallerFault(code)) this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.');
         attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
         lastError = error;
         // `canRetry: false`, because a stream walks the route chain once: once the first chunk has
