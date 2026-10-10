@@ -4812,6 +4812,50 @@ dead button — is one no unit test was watching.
 
 ---
 
+## 1.79.0 — the agent path: tool rounds, reasoning, token saving, health, Anthropic errors
+
+### Tool rounds and reasoning
+
+- An interrupted tool call is answered with an empty result before dispatch (`completeToolRounds`), so a
+  provider no longer refuses the round with 400.
+- A thinking model's `reasoning_content` is kept on the assistant turn and sent back on the OpenAI-compatible
+  path. DeepSeek's `deepseek-flash` answered 400 "reasoning_content must be passed back" to every multi-turn
+  tool round before this; the same round now returns 200.
+- Anthropic: a failed tool result is marked `is_error: true`, so Claude reads it as a failure.
+
+### Token saving
+
+- A tool result over 250 lines is shortened to its first 120 and last 60 lines with a count of what was dropped.
+  On by default; `x-omnihilbras-token-saver: off` sends one request whole. Error results and non-text content
+  are never shortened. Each compressed request logs one line with the saved byte count and no tool content.
+- Live: a 2000-line result logged 50,994 bytes saved.
+
+### Health and providers
+
+- A request the caller got wrong (`INVALID_REQUEST`, `NOT_SUPPORTED`, `CANCELLED`) is no longer counted against
+  the provider's health. Outages still are.
+- Kiro advertises streaming. Its adapter already yielded the answer as a stream; the flag was refusing it with 501.
+- A provider/model id reaches the provider as the bare model name; the prefix only chooses the connection.
+- A renewal that fails because Cline is down keeps its outage code instead of reading as an expired login.
+- A real price below the 4-decimal floor (for example $0.00004 per 1M) is kept, not shown as free.
+- Trailing-dot private hostnames (`localhost.`) are refused; a temporary DNS failure is retryable; a cancelled
+  request stops waiting on the destination check.
+- `since` and `until` that are not dates return 400 instead of being ignored.
+- `tolerateRefusalBody` covers 4xx only, so a 5xx from a token endpoint is an outage, not an answer.
+
+### Verify
+
+- `pnpm verify` exit 0 at 1.79.0: version, brand, typecheck, all suites, build, bundle analysis.
+- Live, through the trusted path: the DeepSeek tool round returns 200 with the answer `3`; a plain request returns `4`.
+
+### Still unverified
+
+- Kiro tool calls are not implemented; the plan's item 2.3 needs one approved live capture, which has not run.
+- A multi-agent swarm run against the gateway has not been done; the failure was reproduced one round at a time.
+- Streamed tool rounds were not sent live.
+- The OpenCode Zen path could not be reached from this host during this session.
+- Anthropic thinking blocks with signatures are not round-tripped; only the OpenAI-compatible reasoning field is.
+
 ## 1.77.2 — ClinePass lists the tier Cline's CLI shows, and Cline's token renews again
 
 ### ClinePass list

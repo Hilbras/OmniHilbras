@@ -2355,6 +2355,10 @@ model ID. That constrains two behaviors:
   count. A tool message marked `is_error: true`, and any non-text content, is
   sent whole. A client that needs every line of a result for one request sends
   `x-omnihilbras-token-saver: off`.
+- **Assistant reasoning.** An assistant message may carry `reasoning_content`. It is kept with that turn and
+  sent back to OpenAI-compatible providers as `reasoning_content`, which a thinking model such as DeepSeek
+  requires on a multi-turn tool round.
+- **Failed tool results.** A tool message with `is_error: true` is sent to Anthropic as a failed `tool_result`.
 - **Catalog.** `GET /v1/models` advertises the saved model IDs of enabled,
   credentialed connections. Live provider listing remains the fallback only when
   no such connection exists, so clients never see paid models the operator did
