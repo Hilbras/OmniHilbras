@@ -52,7 +52,10 @@ and does not un-copy it.
   token at each start and writes it to `dashboard-token` in the state directory, at mode 0600. The dashboard's
   dev server reads that file and adds the token to the requests it forwards, so the browser never holds it. A
   management request is treated as the dashboard only when it presents the token. An allowlisted `Origin` alone
-  is no longer enough. Management routes (`/v1/connections`, `/v1/keys`, `/v1/oauth`, `/v1/settings`,
+  is no longer enough. The gateway checks requests against the token it issued at start and keeps that in memory.
+  The dev proxy reads the file on each request, so if the file is changed while the gateway runs, the proxy
+  forwards the new value and the gateway refuses it with 401. A restart re-issues and rewrites the file, which
+  brings them back into agreement. Management routes (`/v1/connections`, `/v1/keys`, `/v1/oauth`, `/v1/settings`,
   `/v1/web-cookie`, `/v1/routing`, `/v1/usage`) still require the admin key when enforcement is on.
 - **The token protects the dev dashboard only.** A production build has no proxy and calls the gateway directly,
   so it has no per-launch token; treat a production build served from another machine as unsupported until it is
