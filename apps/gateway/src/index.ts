@@ -8,3 +8,4 @@ export * from './server.js';
 export * from './service.js';
 export { InMemoryUsageStore, LocalUsageStore, summarizeUsage, selectUsageRecords, defaultMaxUsageRecords } from './usage-store.js';
 export type { UsageRecord, UsageOutcome, UsageQuery, UsageSummary, UsageTotals, UsageStore } from './usage-store.js';
+export { TokenRenewal, type RenewableConnection, type TokenRenewalSource, type TokenRenewalOptions } from './token-renewal.js';
