@@ -136,8 +136,10 @@ export class FetchHttpTransport implements HttpTransport {
         } catch {
           body = undefined;
         }
-        // Opted out only by an OAuth token exchange, where the body *is* the answer.
-        if (!request.tolerateRefusalBody) throw providerErrorFromResponse(response, body, request.providerId);
+        // Opted out only by an OAuth token exchange, where a 4xx body *is* the answer. A 5xx carries no answer:
+        // it is an outage in front of the endpoint, and is classified like any other.
+        const refusal = response.status >= 400 && response.status < 500;
+        if (!request.tolerateRefusalBody || !refusal) throw providerErrorFromResponse(response, body, request.providerId);
         return { status: response.status, headers: response.headers, data: body as T };
       }
       const data =

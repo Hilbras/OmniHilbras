@@ -313,9 +313,9 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       body: JSON.stringify({ grant_type: CLAUDE_CODE.refreshGrantType, refresh_token: refresh, client_id: CLAUDE_CODE.clientId }),
       ...(context.signal ? { signal: context.signal } : {}),
     });
-    const access = typeof data.access_token === 'string' ? data.access_token : '';
+    const access = typeof data?.access_token === 'string' ? data.access_token : '';
     if (!access) {
-      const description = typeof data.error_description === 'string' ? data.error_description : '';
+      const description = typeof data?.error_description === 'string' ? data.error_description : '';
       throw new ProviderError('AUTHENTICATION_FAILED', description || 'Claude refused to renew the session. Sign in again.', { providerId: this.id });
     }
     const renewed = toCredential(data, refresh);
@@ -460,10 +460,10 @@ export async function exchangeClaudeCodeCode(input: {
     tolerateRefusalBody: true,
     ...(input.signal ? { signal: input.signal } : {}),
   });
-  const access = typeof data.access_token === 'string' ? data.access_token : '';
+  const access = typeof data?.access_token === 'string' ? data.access_token : '';
   if (!access) {
-    const description = typeof data.error_description === 'string' ? data.error_description : '';
-    const named = typeof data.error === 'string' ? data.error : '';
+    const description = typeof data?.error_description === 'string' ? data.error_description : '';
+    const named = typeof data?.error === 'string' ? data.error : '';
     throw new ProviderError(
       'AUTHENTICATION_FAILED',
       description || (named ? `Claude reported ${named.replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 40)}.` : 'Claude did not return a session. Start the sign-in again.'),

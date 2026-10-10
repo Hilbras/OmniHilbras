@@ -242,6 +242,14 @@ test('a token with no access_token is refused with the description, not half-ret
     (error) => error.code === 'AUTHENTICATION_FAILED',
   );
 });
+test('an exchange whose body is empty or unreadable is refused as a sign-in failure, not a TypeError', async () => {
+  const transport = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: undefined }) });
+  await assert.rejects(
+    () => exchangeClaudeCodeCode({ code: 'c', codeVerifier: 'v', redirectUri: 'http://127.0.0.1:8787/v1/oauth/claude-code/callback/s1', transport }),
+    (error) => error.code === 'AUTHENTICATION_FAILED',
+  );
+});
+
 test('an expiry the adapter cannot read is "ask the provider", never "expired"', () => {
   // The value of the pre-check is entirely in what it refuses to claim: answering `false` for a
   // credential it cannot read would turn uncertainty into a confident "still valid".

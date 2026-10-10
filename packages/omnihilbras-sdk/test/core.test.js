@@ -212,14 +212,13 @@ test('tolerateRefusalBody returns the 4xx body instead of throwing, for a token 
   assert.equal(response.data.error_description, 'Authorization is pending', 'the body must survive intact, not be re-read');
 });
 
-test('a non-JSON refusal body is still returned rather than throwing', async () => {
+test('a non-JSON 4xx refusal body is still returned rather than throwing', async () => {
   // An HTML error page from a proxy in front of the token endpoint. What matters is that the caller sees
-  // the **status** rather than a transport error claiming the provider is unreachable — which is what
-  // happens if the body parse throws here. The body itself comes back as text, since `parseResponse` is
-  // content-type driven and a `text/html` body is not a parse failure.
+  // the **status** rather than a transport error claiming the provider is unreachable. The body comes back
+  // as text, since `parseResponse` is content-type driven and a `text/html` body is not a parse failure.
   const transport = new FetchHttpTransport({
-    fetch: async () => new Response('<html>gateway timeout</html>', {
-      status: 504,
+    fetch: async () => new Response('<html>forbidden</html>', {
+      status: 403,
       headers: { 'content-type': 'text/html' },
     }),
   });
@@ -229,9 +228,31 @@ test('a non-JSON refusal body is still returned rather than throwing', async () 
     url: 'https://auth.acme.test/oauth/token',
     tolerateRefusalBody: true,
   });
-  assert.equal(response.status, 504, 'the status is the part the caller branches on');
-  assert.equal(response.data, '<html>gateway timeout</html>');
-  // And the same body without the flag still throws, which is the property that keeps the flag sharp.
+  assert.equal(response.status, 403, 'the status is the part the caller branches on');
+  assert.equal(response.data, '<html>forbidden</html>');
+});
+
+test('a 5xx on a token exchange is an outage, not an answer, even with tolerateRefusalBody', async () => {
+  // The flag is for a refusal, which is a 4xx. A 503 from a load balancer in front of the token endpoint
+  // carries no answer, and returning it as data made the caller read it as "sign in again".
+  const transport = new FetchHttpTransport({
+    fetch: async () => new Response('<html>service unavailable</html>', {
+      status: 503,
+      headers: { 'content-type': 'text/html' },
+    }),
+  });
+  await assert.rejects(
+    () => transport.request({
+      method: 'POST',
+      providerId: 'acme',
+      url: 'https://auth.acme.test/oauth/token',
+      tolerateRefusalBody: true,
+    }),
+    (error) => error.code === 'PROVIDER_UNAVAILABLE' && error.retryable === true,
+  );
+});
+
+test('a 4xx with the flag unset still throws, which keeps the flag sharp', async () => {
   const strict = new FetchHttpTransport({
     fetch: async () => new Response('<html>gateway timeout</html>', {
       status: 504,
