@@ -25,3 +25,4 @@ export * from './providers/qwen-web/index.js';
 export * from './providers/tokenharbor-web/index.js';
 export * from './core/url.js';
 export * from './core/provider-slugs.js';
+export * from './core/tool-messages.js';
