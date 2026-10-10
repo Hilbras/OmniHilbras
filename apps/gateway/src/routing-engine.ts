@@ -32,6 +32,8 @@ export type RoutingHealth = Pick<HealthManager, 'getFailureThreshold'> & {
 export type RoutingEngineOptions = {
   health: RoutingHealth;
   rateLimiter: SlidingWindowRateLimiter;
+  /** A provider's model family, as its registration declares it. Used to route a bare model name within its family. */
+  familyOf?: (providerId: string) => string | undefined;
   /** A provider's strategy. `round-robin` balances all of that provider's connections; absent or `priority` leaves them alone. */
   strategyFor?: (providerId: string) => 'priority' | 'round-robin';
   /**
@@ -146,6 +148,7 @@ export class RoutingEngine {
       connections: input.connections.map((connection) => (this.isBalanced(connection) ? { ...connection, balance: true } : connection)),
       model: split.model,
       rotation,
+      ...(this.options.familyOf ? { familyOf: this.options.familyOf } : {}),
       ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
       health,
       failureThreshold: this.options.health.getFailureThreshold(),

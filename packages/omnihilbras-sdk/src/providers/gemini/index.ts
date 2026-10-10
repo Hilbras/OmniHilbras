@@ -53,6 +53,8 @@ export class GeminiAdapter implements ProviderAdapter {
   readonly id = 'gemini';
   readonly name = 'Gemini';
   readonly capabilities: ProviderCapabilities = { chat: true, streaming: true, models: true };
+  /** Serves the `gemini` model family, so a bare `gemini-*` name is routed here. */
+  readonly modelFamily = 'gemini';
   private readonly baseUrl: string;
   private readonly defaultHeaders: Record<string, string>;
   private readonly transport: HttpTransport;

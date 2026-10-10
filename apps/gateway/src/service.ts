@@ -280,6 +280,7 @@ export class GatewayService {
       rateLimiter: this.rateLimiter,
       defaultProviderId,
       requireAdapter: (providerId) => { this.requireAdapter(providerId); },
+      familyOf: (providerId) => this.registry.get(providerId)?.modelFamily,
       strategyFor: (providerId) => this.providerStrategies.get(providerId) ?? 'priority',
     });
     this.models = new ModelCatalog({

@@ -67,6 +67,8 @@ export class AnthropicAdapter implements ProviderAdapter {
   readonly id = 'anthropic';
   readonly name = 'Anthropic';
   readonly capabilities: ProviderCapabilities = { chat: true, streaming: true, models: true };
+  /** Serves the `claude` model family, so a bare `claude-*` name is routed here. */
+  readonly modelFamily = 'claude';
   private readonly baseUrl: string;
   private readonly apiVersion: string;
   private readonly defaultMaxTokens: number;

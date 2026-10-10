@@ -11,6 +11,7 @@ export class OpenAIAdapter extends OpenAICompatibleAdapter {
     super({
       id: 'openai',
       name: 'OpenAI',
+      modelFamily: 'gpt',
       baseUrl: options.baseUrl ?? 'https://api.openai.com/v1',
       auth: { header: 'Authorization', prefix: 'Bearer' },
       maxTokensField: 'max_completion_tokens',

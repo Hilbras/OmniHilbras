@@ -812,3 +812,17 @@ test('a model name is matched on its meaning, not its spelling: every spelling r
   assert.equal(first('claude-sonnet-4.5'), 'c-a', 'a dot between digits is the same version as a dash');
   assert.equal(first('claude-sonnet-4-5(high)'), 'c-a', 'a thinking suffix is stripped for the lookup');
 });
+
+test('a bare model name is routed to a connection only when its provider declares the name\'s family', () => {
+  // Without this, `claude-x` with only an OpenAI connection falls to the highest-priority usable connection and is
+  // billed to OpenAI. The family comes from each provider's own declaration, passed in, so routing names no provider.
+  const health = new HealthRegistry(() => Date.now(), 60_000);
+  const resilience = { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 };
+  const familyOf = (providerId) => ({ anthropic: 'claude', openai: 'gpt' })[providerId];
+  const openai = [{ id: 'c-o', providerId: 'openai', name: 'O', priority: 1, enabled: true, hasCredential: true, modelIds: ['gpt-5'], resilience }];
+  const anthropic = [{ id: 'c-a', providerId: 'anthropic', name: 'A', priority: 1, enabled: true, hasCredential: true, modelIds: ['claude-sonnet-4-5'], resilience }];
+  const route = (connections, model) => resolveRoute({ connections, model, health, failureThreshold: 3, familyOf });
+  assert.equal(route(openai, 'claude-x').candidates.length, 0, 'a claude name with only OpenAI connected is refused, not billed to OpenAI');
+  assert.equal(route(anthropic, 'claude-x').candidates[0]?.providerId, 'anthropic', 'the claude family reaches the claude provider');
+  assert.equal(route([...openai, ...anthropic], 'claude-x').candidates[0]?.providerId, 'anthropic', 'with both connected, claude still goes to its own family');
+});

@@ -265,6 +265,16 @@ export function lookupModelId(model: string): string {
 }
 
 /**
+ * The family a bare model name belongs to: its leading word, for the names that carry one. A prefixed name
+ * (`provider/model`) names its provider itself and has no family to match.
+ */
+export function bareModelFamily(model: string): string | undefined {
+  if (model.includes('/')) return undefined;
+  const match = /^(claude|gpt|gemini)/i.exec(model.trim());
+  return match ? match[1]!.toLowerCase() : undefined;
+}
+
+/**
  * Turns the balanced connections of one priority so the first one changes with each request. A connection that does not
  * ask for balancing keeps its place, and so does every other priority, so a higher priority still wins.
  */
@@ -299,6 +309,8 @@ export function resolveRoute(input: {
   rateLimitWaitMs?: Map<string, number>;
   /** Advances once per request, so balanced connections at one priority take turns. Zero keeps the name order. */
   rotation?: number;
+  /** The model family a provider declares (`claude`, `gpt`), so a bare name is routed only within its family. */
+  familyOf?: (providerId: string) => string | undefined;
 }): RouteDecision {
   const modelId = input.model.trim();
   const usable = input.connections
@@ -327,7 +339,14 @@ export function resolveRoute(input: {
   }
 
   const matching = usable.filter(ownsModel);
-  const fallbackPool = matching.length > 0 ? matching : usable;
+  const family = bareModelFamily(modelId);
+  const sameFamily = family === undefined || !input.familyOf
+    ? usable
+    : usable.filter((connection) => input.familyOf!(connection.providerId) === family);
+  if (matching.length === 0 && family !== undefined && input.familyOf && sameFamily.length === 0) {
+    return { candidates: [], skipped: usable.map((connection) => ({ providerId: connection.providerId, reason: 'no-models' as const })) };
+  }
+  const fallbackPool = matching.length > 0 ? matching : sameFamily;
   const candidates: RouteCandidate[] = [];
   for (const connection of fallbackPool) {
     if (input.health.isUnhealthy(connection.providerId, input.failureThreshold)) {

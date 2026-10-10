@@ -21,6 +21,11 @@ export class ProviderRegistry {
     return this;
   }
 
+  /** The ids of the registered providers that declare the given model family, in registration order. */
+  providersInFamily(family: string): ProviderId[] {
+    return [...this.adapters.values()].filter((adapter) => adapter.modelFamily === family).map((adapter) => adapter.id);
+  }
+
   unregister(providerId: ProviderId) {
     return this.adapters.delete(providerId);
   }

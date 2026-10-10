@@ -302,6 +302,11 @@ export type ProviderAdapter = {
   readonly id: ProviderId;
   readonly name: string;
   readonly capabilities: ProviderCapabilities;
+  /**
+   * The model family this provider serves (`claude`, `gpt`, `gemini`), so a bare model name can be routed to it.
+   * Absent means the provider claims no family, and a bare name is not routed to it on a guess.
+   */
+  readonly modelFamily?: string;
   listModels?: (context?: ProviderRequestContext) => Promise<readonly Model[]>;
   chat?: (request: ChatRequest, context?: ProviderRequestContext) => Promise<ChatResponse>;
   streamChat?: (request: ChatRequest, context?: ProviderRequestContext) => AsyncIterable<ChatChunk>;

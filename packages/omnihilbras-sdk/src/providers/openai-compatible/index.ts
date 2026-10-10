@@ -29,6 +29,8 @@ export type OpenAICompatibleAdapterConfig = {
   headers?: Record<string, string>;
   maxTokensField?: 'max_tokens' | 'max_completion_tokens';
   capabilities?: ProviderCapabilities;
+  /** The model family this endpoint serves, so a bare name of that family is routed here. */
+  modelFamily?: string;
   /**
    * Rewrites a non-streaming response body before it is read as an OpenAI
    * response, for a provider that wraps one. Scoped to non-streaming on purpose:
@@ -111,6 +113,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   readonly id: string;
   readonly name: string;
   readonly capabilities: ProviderCapabilities;
+  readonly modelFamily?: string;
   private readonly baseUrl: string;
   private readonly auth: Required<Pick<OpenAICompatibleAuth, 'required'>> & OpenAICompatibleAuth;
   private readonly modelsPath: string;
@@ -140,6 +143,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     this.unwrap = config.unwrapResponse;
     this.headers = sanitizeProviderHeaders(config.headers, config.id);
     this.maxTokensField = config.maxTokensField ?? 'max_tokens';
+    if (config.modelFamily !== undefined) this.modelFamily = config.modelFamily;
     this.capabilities = {
       chat: true,
       streaming: true,
