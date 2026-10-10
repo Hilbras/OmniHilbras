@@ -815,7 +815,7 @@ export type KiroAdapterOptions = {
 export class KiroAdapter implements ProviderAdapter {
   readonly id = kiroProviderId;
   readonly name = 'Kiro';
-  readonly capabilities = { chat: true, streaming: false, models: true } as const;
+  readonly capabilities = { chat: true, streaming: true, models: true } as const;
 
   private readonly transport: HttpTransport;
   private readonly onTokensRefreshed?: (credential: ProviderCredential) => void | Promise<void>;

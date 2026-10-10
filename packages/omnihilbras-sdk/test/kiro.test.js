@@ -112,6 +112,19 @@ test('credits and context usage are read rather than dropped', () => {
   assert.ok(typeof context.contextUsagePercent === 'number');
 });
 
+test('Kiro advertises streaming, and its stream carries the same answer as a chat request', async () => {
+  // The gateway refuses a streamed request to any adapter whose `streaming` flag is not true, with a 501
+  // "does not support streaming". Kiro's stream is assembled from the eventstream and yielded whole, so the
+  // capability is honest, and the flag was the only thing refusing it.
+  const adapter = new KiroAdapter({ transport: transport({ [KIRO.inferenceUrl]: { data: realStream } }) });
+  assert.equal(adapter.capabilities.streaming, true);
+  const chunks = [];
+  for await (const chunk of adapter.streamChat(request(), { credential: session })) chunks.push(chunk);
+  assert.ok(chunks.length >= 1, 'the stream yields at least one chunk');
+  const text = chunks.map((chunk) => chunk.delta?.content ?? '').join('');
+  assert.equal(text, 'Hey. What are you working on?');
+});
+
 test('a live request returns the text, the finish reason, and the credit cost', async () => {
   const t = transport({ [KIRO.inferenceUrl]: { data: realStream } });
   const adapter = new KiroAdapter({ transport: t });
