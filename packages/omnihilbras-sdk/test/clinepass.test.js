@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CLINE_PASS_MODEL_PREFIX, ClinePassAdapter, ProviderError } from '@hilbras/omnihilbras';
+import { CLINE_PASS_MODEL_PREFIX, ClineAdapter, ClinePassAdapter, ProviderError } from '@hilbras/omnihilbras';
 
 /**
  * A transport that records what was sent and answers from a routing table.
@@ -152,4 +152,26 @@ test('the health check names the live token, and a failure says why', async () =
   // pasted key.
   assert.match(health.message, /ClinePass rejected the token/);
   assert.match(health.message, /sign in again/i);
+});
+
+test('Cline and ClinePass sharing one expired login spend one refresh between them, not one each', async () => {
+  // Two adapter instances read the same Cline login. Each keeps its own renewal memo, so a renewal through one and a
+  // request through the other both refreshed, spending the refresh grant twice and invalidating the first token.
+  const refreshes = [];
+  const transport = {
+    async request(request) {
+      if (request.url.endsWith('/auth/refresh')) {
+        refreshes.push(request);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { status: 200, headers: new Headers(), data: { success: true, data: { accessToken: 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIyIn0.new', refreshToken: 'r2', expiresAt: '2030-01-01T00:00:00.000Z' } } };
+      }
+      return { status: 200, headers: new Headers(), data: { id: 'acc_1' } };
+    },
+    stream() { throw new Error('not used'); },
+  };
+  const cline = new ClineAdapter({ transport, refreshSkewMs: 0 });
+  const clinepass = new ClinePassAdapter({ transport, refreshSkewMs: 0 });
+  const expired = { type: 'oauth', value: jwt, refreshToken: 'r1', expiresAt: '2020-01-01T00:00:00.000Z' };
+  await Promise.all([cline.validateCredential(expired), clinepass.validateCredential(expired)]);
+  assert.equal(refreshes.length, 1, 'one shared login is refreshed once, however many adapters asked at the same time');
 });

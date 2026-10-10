@@ -73,6 +73,9 @@ export type ClineAdapterOptions = {
 
 const defaultRefreshSkewMs = 60_000;
 
+/** Refreshes in flight, keyed by the login they renew, so adapters that share a login share one renewal. */
+const inFlightRefreshes = new Map<string, Promise<Exclude<ProviderCredential, { type: 'none' }>>>();
+
 /** Reported to Cline as this client's version. */
 const omnihilbrasVersion = '1.79.0';
 
@@ -364,7 +367,6 @@ export class ClineAdapter implements ProviderAdapter {
   protected readonly onTokensRefreshed?: ClineAdapterOptions['onTokensRefreshed'];
   protected readonly refreshSkewMs: number;
   protected readonly userAgent: string;
-  protected refreshInFlight?: Promise<Exclude<ProviderCredential, { type: 'none' }>>;
 
   constructor(options: ClineAdapterOptions = {}) {
     this.id = options.id ?? 'cline';
@@ -458,9 +460,14 @@ export class ClineAdapter implements ProviderAdapter {
       throw new ProviderError('AUTHENTICATION_FAILED', 'A Cline access token is required.', { providerId: this.id, publicMessage: 'A Cline access token is required.' });
     }
     if (!this.needsRefresh(credential)) return credential;
-    // One refresh at a time: concurrent requests share the same renewal.
-    this.refreshInFlight ??= this.refresh(credential, signal).finally(() => { this.refreshInFlight = undefined; });
-    return this.refreshInFlight;
+    // One refresh per login, across every adapter that reads it: Cline and ClinePass hold separate adapter instances
+    // over the same login, and a per-instance promise let each spend the refresh grant.
+    const login = credential.refreshToken ?? credential.value;
+    const existing = inFlightRefreshes.get(login);
+    if (existing) return existing;
+    const renewal = this.refresh(credential, signal).finally(() => { inFlightRefreshes.delete(login); });
+    inFlightRefreshes.set(login, renewal);
+    return renewal;
   }
 
   protected async refresh(credential: Extract<ProviderCredential, { type: 'oauth' }>, signal?: AbortSignal) {
