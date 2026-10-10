@@ -461,3 +461,45 @@ test('the intact capture still decodes to the same answer after the integrity ch
   const events = decodeKiroStream(realStream);
   assert.equal(events.map((event) => event.text ?? '').join(''), 'Hey. What are you working on?');
 });
+
+test('tools are sent in the current message as toolSpecification entries, with their schema', () => {
+  const tools = [{ name: 'get_weather', description: 'Get the weather.', parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } }];
+  const body = toKiroBody({ ...request(), tools }, 'conv-1', session);
+  const context = body.conversationState.currentMessage.userInputMessage.userInputMessageContext;
+  assert.deepEqual(context.tools, [{
+    toolSpecification: {
+      name: 'get_weather',
+      description: 'Get the weather.',
+      inputSchema: { json: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } },
+    },
+  }]);
+});
+
+test('a request without tools carries no tool context at all', () => {
+  const body = toKiroBody(request(), 'conv-1', session);
+  assert.equal(body.conversationState.currentMessage.userInputMessage.userInputMessageContext, undefined);
+});
+
+test('a toolUseEvent frame is decoded to its id, name and the input fragment it carries', () => {
+  const bytes = frame('toolUseEvent', { toolUseId: 'tooluse_1', name: 'get_weather', input: '{"city":"Pa', stop: false });
+  const events = decodeKiroStream(new Uint8Array(bytes));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, 'toolUseEvent');
+  assert.equal(events[0].toolUseId, 'tooluse_1');
+  assert.equal(events[0].toolName, 'get_weather');
+  assert.equal(events[0].toolInput, '{"city":"Pa');
+  assert.equal(events[0].toolStop, false);
+});
+
+test('a model that calls a tool returns tool_calls with the arguments joined from its fragments', async () => {
+  const bytes = Buffer.concat([
+    frame('toolUseEvent', { toolUseId: 'tooluse_1', name: 'get_weather', input: '{"city":' }),
+    frame('toolUseEvent', { toolUseId: 'tooluse_1', name: 'get_weather', input: '"Paris"}', stop: true }),
+  ]);
+  const adapter = new KiroAdapter({ transport: transport({ [KIRO.inferenceUrl]: { data: new Uint8Array(bytes) } }) });
+  const response = await adapter.chat({ ...request(), tools: [{ name: 'get_weather', parameters: {} }] }, { credential: session });
+  assert.equal(response.finishReason, 'tool_calls');
+  assert.deepEqual(response.message.toolCalls, [
+    { id: 'tooluse_1', type: 'function', function: { name: 'get_weather', arguments: '{"city":"Paris"}' } },
+  ]);
+});

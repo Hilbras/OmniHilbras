@@ -1,7 +1,7 @@
 import { ProviderError } from '../../core/errors.js';
 import { FetchHttpTransport } from '../../core/transport.js';
 import type { HttpTransport } from '../../core/transport.js';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../../core/types.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, ToolDefinition } from '../../core/types.js';
 
 /**
  * Kiro.
@@ -604,6 +604,32 @@ function messageText(content: MessageContent): string {
 }
 
 /**
+ * Joins a tool call's argument fragments. Kiro streams each call as several `toolUseEvent` frames
+ * sharing one id, so the arguments are the concatenation of their `input` strings, in order.
+ */
+function assembleKiroToolCalls(events: readonly KiroEvent[]): Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> {
+  const calls = new Map<string, { name: string; arguments: string }>();
+  for (const event of events) {
+    if (event.type !== 'toolUseEvent' || !event.toolUseId) continue;
+    const call = calls.get(event.toolUseId) ?? { name: '', arguments: '' };
+    if (event.toolName) call.name = event.toolName;
+    if (event.toolInput) call.arguments += event.toolInput;
+    calls.set(event.toolUseId, call);
+  }
+  return [...calls.entries()].map(([id, call]) => ({ id, type: 'function', function: { name: call.name, arguments: call.arguments } }));
+}
+
+function toKiroToolSpecification(tool: ToolDefinition) {
+  return {
+    toolSpecification: {
+      name: tool.name,
+      description: tool.description ?? '',
+      inputSchema: { json: tool.parameters },
+    },
+  };
+}
+
+/**
  * Builds the `conversationState` envelope.
  *
  * Kiro takes the whole turn history rather than a message list, the model id is
@@ -626,6 +652,7 @@ export function toKiroBody(request: ChatRequest, conversationId: string, credent
   // `profileArn` is not the same as no profile, and Kiro answers
   // `400 Improperly formed request` for it.
   const profileArn = credential?.type === 'oauth' ? credential.accountId : undefined;
+  const tools = request.tools?.length ? request.tools.map(toKiroToolSpecification) : undefined;
   return {
     conversationState: {
       chatTriggerType: 'MANUAL',
@@ -635,6 +662,7 @@ export function toKiroBody(request: ChatRequest, conversationId: string, credent
           content,
           modelId: request.model,
           origin: 'AI_EDITOR',
+          ...(tools ? { userInputMessageContext: { tools } } : {}),
         },
       },
       history,
@@ -678,6 +706,11 @@ export type KiroEvent = {
    * event, so this is the only cost signal the service gives and it is not dropped.
    */
   creditsUsed?: number;
+  /** A tool call's id, name, and the fragment of its JSON arguments carried by this frame. */
+  toolUseId?: string;
+  toolName?: string;
+  toolInput?: string;
+  toolStop?: boolean;
 };
 
 const kiroEventTypeHeader = ':event-type';
@@ -801,6 +834,18 @@ export function toKiroEvent(eventType: string, payload: Json): KiroEvent {
   if (eventType === 'meteringEvent') {
     const used = readNumber(payload, ['usage', 'creditsUsed']);
     return used === undefined ? { type: eventType } : { type: eventType, creditsUsed: used };
+  }
+  if (eventType === 'toolUseEvent') {
+    const toolUseId = readString(payload, ['toolUseId']);
+    const toolName = readString(payload, ['name']);
+    const toolInput = typeof payload.input === 'string' ? payload.input : undefined;
+    return {
+      type: eventType,
+      ...(toolUseId === undefined ? {} : { toolUseId }),
+      ...(toolName === undefined ? {} : { toolName }),
+      ...(toolInput === undefined ? {} : { toolInput }),
+      toolStop: payload.stop === true,
+    };
   }
   return { type: eventType };
 }
@@ -927,7 +972,8 @@ export class KiroAdapter implements ProviderAdapter {
     // only honest answer rather than a reason read from an event that never arrives.
     const creditsUsed = lastOf(events, (event) => event.creditsUsed);
     const contextUsagePercent = lastOf(events, (event) => event.contextUsagePercent);
-    if (!text) {
+    const toolCalls = assembleKiroToolCalls(events);
+    if (!text && toolCalls.length === 0) {
       throw new ProviderError('INVALID_RESPONSE', 'Kiro returned no answer text.', {
         providerId: this.id,
         publicMessage: 'Kiro returned no answer text.',
@@ -938,8 +984,8 @@ export class KiroAdapter implements ProviderAdapter {
       providerId: this.id,
       model: request.model,
       createdAt: new Date().toISOString(),
-      message: { role: 'assistant', content: text },
-      finishReason: 'stop',
+      message: { role: 'assistant', content: text, ...(toolCalls.length ? { toolCalls } : {}) },
+      finishReason: toolCalls.length ? 'tool_calls' : 'stop',
       /**
        * Kiro meters credits and publishes no token counts, so `usage` is left unset
        * rather than reported as zero. The credit cost is carried separately because it is
@@ -961,7 +1007,13 @@ export class KiroAdapter implements ProviderAdapter {
       id: response.id,
       providerId: response.providerId,
       model: response.model,
-      delta: { role: 'assistant', content: messageText(response.message.content) },
+      delta: {
+        role: 'assistant',
+        content: messageText(response.message.content),
+        ...(response.message.toolCalls?.length
+          ? { toolCalls: response.message.toolCalls.map((call, index) => ({ index, id: call.id, function: call.function })) }
+          : {}),
+      },
       finishReason: response.finishReason,
       ...(response.usage ? { usage: response.usage } : {}),
     };
