@@ -33,3 +33,12 @@ function compressOne(message: ChatMessage): ChatMessage {
   if (shortened.length >= message.content.length) return message;
   return { ...message, content: shortened };
 }
+
+/** The total bytes of text in tool results, for reporting how much compression saved. */
+export function toolResultBytes(messages: readonly ChatMessage[]): number {
+  let total = 0;
+  for (const message of messages) {
+    if (message.role === 'tool' && typeof message.content === 'string') total += new TextEncoder().encode(message.content).length;
+  }
+  return total;
+}

@@ -77,3 +77,20 @@ test('a failed tool result is sent whole, even by default', async (t) => {
   assert.equal(toolMessage.content, longGrep, 'an error trace is never shortened');
   assert.equal(toolMessage.isError, true);
 });
+
+test('the savings log reports a byte count for the request and never prints tool content', async (t) => {
+  const seen = [];
+  const base = await start(t, seen);
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => lines.push(args.join(' '));
+  t.after(() => { console.log = original; });
+  const marker = 'UNIQUE-TOOL-OUTPUT-MARKER';
+  const content = `${marker}\n${longGrep}`;
+  const response = await post(base, body(content));
+  assert.equal(response.status, 200);
+  const saver = lines.filter((line) => line.startsWith('[token-saver]'));
+  assert.equal(saver.length, 1, 'one line per compressed request');
+  assert.match(saver[0], /saved \d+ bytes of tool output/);
+  assert.equal(lines.some((line) => line.includes(marker)), false, 'no tool content reaches the log');
+});

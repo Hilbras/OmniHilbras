@@ -57,3 +57,13 @@ test('the input is not mutated', () => {
   compressToolResults(messages);
   assert.equal(messages[0].content, before);
 });
+
+test('toolResultBytes counts only tool text, so a saving can be reported in bytes', async () => {
+  const { toolResultBytes } = await import('../dist/index.js');
+  const messages = [
+    { role: 'user', content: 'x'.repeat(500) },
+    { role: 'tool', toolCallId: 'c', content: 'abcd' },
+    { role: 'tool', toolCallId: 'd', content: [{ type: 'text', text: 'ignored' }] },
+  ];
+  assert.equal(toolResultBytes(messages), 4, 'user text and non-text content are not counted');
+});
