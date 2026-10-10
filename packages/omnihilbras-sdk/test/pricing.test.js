@@ -54,6 +54,13 @@ test('prices keep four decimals, which is finer than any of these figures', () =
   assert.equal(perMillionPrice(1.23456789), 1.2346);
 });
 
+test('a price that is not zero does not round to zero, so it is never shown as free', () => {
+  // $0.00004 per 1M tokens is a real charge. Rounding it to 0 made the model read as "Free".
+  assert.ok(Math.abs(perMillionPrice('0.00004') - 0.00004) < 1e-12, 'the real charge is kept, within float error');
+  assert.ok(Math.abs(perTokenPrice('0.00000000004') - 0.00004) < 1e-12);
+  assert.equal(perMillionPrice(0), 0, 'a true zero is still free');
+});
+
 test('an empty pricing object is dropped so it cannot read as free', () => {
   assert.equal(compactPricing({}), undefined);
   assert.deepEqual(compactPricing({ inputPer1M: 0 }), { inputPer1M: 0 });

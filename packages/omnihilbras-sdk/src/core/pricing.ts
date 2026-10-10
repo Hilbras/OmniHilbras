@@ -54,7 +54,10 @@ export function perMillionPrice(value: unknown): number | undefined {
  * on a filter and a tooltip, and four decimals is finer than any of these figures.
  */
 function roundPrice(value: number): number {
-  return Math.round(value * 10_000) / 10_000;
+  const rounded = Math.round(value * 10_000) / 10_000;
+  // A real charge below the 4-decimal floor is kept, not erased into a zero that reads as free.
+  if (rounded === 0 && value > 0) return value;
+  return rounded;
 }
 
 /** Drops absent entries so an unquoted model does not report a price of zero. */
