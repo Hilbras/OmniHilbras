@@ -285,3 +285,17 @@ test('a saved provider strategy is in effect after a restart, without anyone set
   await service.loadProviderStrategies();
   assert.equal(service.providerStrategy('p'), 'round-robin', 'the strategy is loaded at startup, so routing honours it from the first request');
 });
+
+test('a model alias is saved, survives a restart, and an alias to a provider that is not connected is refused', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-alias-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalConnectionStore({ directory });
+  await store.save(connectionInput, { type: 'api-key', value: 'k' });
+  assert.deepEqual(await store.aliases(), {}, 'no aliases until one is set');
+  await store.setAlias('fast', { providerId: 'openrouter', model: 'qwen/qwen3.8-27b:free' });
+  assert.deepEqual(await store.aliases(), { fast: { providerId: 'openrouter', model: 'qwen/qwen3.8-27b:free' } });
+  const reopened = new LocalConnectionStore({ directory });
+  assert.deepEqual(await reopened.aliases(), { fast: { providerId: 'openrouter', model: 'qwen/qwen3.8-27b:free' } }, 'the alias survives a restart');
+  await assert.rejects(() => store.setAlias('ghost', { providerId: 'nobody', model: 'm' }), /not connected/, 'an alias to an unconnected provider is refused');
+  assert.equal((await store.aliases()).ghost, undefined, 'nothing was stored for the refused alias');
+});

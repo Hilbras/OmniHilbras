@@ -198,10 +198,15 @@ type MetadataEnvelope = {
   connections: ConnectionRecord[];
   /** How a provider's connections share traffic. Absent means the default, priority. */
   strategies?: Record<string, ProviderStrategy>;
+  /** A requested model name mapped to the provider and model it should reach. */
+  aliases?: Record<string, ModelAlias>;
 };
 
 /** How connections of one provider are chosen. `priority` is the default, and it is what a file without a strategy means. */
 export type ProviderStrategy = 'priority' | 'round-robin';
+
+/** Where a requested model name is sent: a connected provider and the model id it publishes. */
+export type ModelAlias = { providerId: string; model: string };
 const providerStrategies: readonly ProviderStrategy[] = ['priority', 'round-robin'];
 
 export function defaultConnectionDirectory(env: Readonly<Record<string, string | undefined>> = process.env) {
@@ -330,6 +335,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   private credentials = new Map<ProviderId, ProviderCredential>();
   private connections = new Map<string, ConnectionRecord>();
   private strategies = new Map<string, ProviderStrategy>();
+  private aliasMap = new Map<string, ModelAlias>();
   private mutationQueue: Promise<void> = Promise.resolve();
   private loadPromise?: Promise<void>;
 
@@ -480,6 +486,31 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
     return this.strategies.get(providerId) ?? 'priority';
   }
 
+  async aliases(): Promise<Record<string, ModelAlias>> {
+    await this.ensureLoaded();
+    return Object.fromEntries(this.aliasMap);
+  }
+
+  /** Saves a model alias. Refused unless the target provider has a saved connection, so an alias cannot send traffic nowhere. */
+  async setAlias(name: string, target: ModelAlias): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('An alias needs a name.');
+    if (!target.model.trim()) throw new Error('An alias needs a model.');
+    await this.withMutation(async () => {
+      await this.ensureLoaded();
+      const connected = [...this.connections.values()].some((connection) => connection.providerId === target.providerId);
+      if (!connected) throw new Error(`The provider ${target.providerId} is not connected, so an alias to it cannot be used.`);
+      const previous = new Map(this.aliasMap);
+      this.aliasMap.set(trimmed, { providerId: target.providerId, model: target.model.trim() });
+      try {
+        await this.persistMetadata();
+      } catch (error) {
+        this.aliasMap = previous;
+        throw error;
+      }
+    });
+  }
+
   /** Every saved provider strategy, so routing can start with them in effect. */
   async allStrategies(): Promise<Array<[string, ProviderStrategy]>> {
     await this.ensureLoaded();
@@ -561,6 +592,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
     const parsedMetadata = parseMetadata(metadataText);
     this.connections = parsedMetadata.connections;
     this.strategies = parsedMetadata.strategies;
+    this.aliasMap = parsedMetadata.aliases;
     this.credentials = secretText ? await this.decryptSecrets(secretText) : new Map<ProviderId, ProviderCredential>();
     // Credentials are keyed by connection id, so a stored key that matches no
     // credential-bearing connection is an orphan. For a single-connection
@@ -582,7 +614,8 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
 
   private async persistMetadata() {
     const strategies = Object.fromEntries(this.strategies);
-    const payload = JSON.stringify({ version: metadataVersion, connections: [...this.connections.values()], ...(this.strategies.size > 0 ? { strategies } : {}) } satisfies MetadataEnvelope, null, 2) + '\n';
+    const aliases = Object.fromEntries(this.aliasMap);
+    const payload = JSON.stringify({ version: metadataVersion, connections: [...this.connections.values()], ...(this.strategies.size > 0 ? { strategies } : {}), ...(this.aliasMap.size > 0 ? { aliases } : {}) } satisfies MetadataEnvelope, null, 2) + '\n';
     if (Buffer.byteLength(payload, 'utf8') > maxMetadataBytes) throw new ConnectionMetadataLimitError();
     await atomicWrite(this.metadataPath, payload);
   }
@@ -736,7 +769,7 @@ function isSafeModelId(value: string) {
 }
 
 function parseMetadata(value: string | undefined) {
-  if (!value) return { connections: new Map<string, ConnectionRecord>(), strategies: new Map<string, ProviderStrategy>() };
+  if (!value) return { connections: new Map<string, ConnectionRecord>(), strategies: new Map<string, ProviderStrategy>(), aliases: new Map<string, ModelAlias>() };
   let parsed: unknown;
   try {
     parsed = JSON.parse(value) as unknown;
@@ -760,7 +793,15 @@ function parseMetadata(value: string | undefined) {
       strategies.set(providerId, strategy as ProviderStrategy);
     }
   }
-  return { connections, strategies };
+  const aliases = new Map<string, ModelAlias>();
+  if (parsed.aliases !== undefined) {
+    if (!isRecord(parsed.aliases)) throw new Error('Local connection metadata has an invalid alias map.');
+    for (const [name, value] of Object.entries(parsed.aliases)) {
+      if (!isRecord(value) || typeof value.providerId !== 'string' || typeof value.model !== 'string' || !value.model.trim()) throw new Error('Local connection metadata contains an invalid model alias.');
+      aliases.set(name, { providerId: value.providerId, model: value.model });
+    }
+  }
+  return { connections, strategies, aliases };
 }
 
 function parseRecord(value: unknown): ConnectionRecord {
