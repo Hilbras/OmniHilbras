@@ -97,6 +97,25 @@ test('a retryable failure is retried, and the attempt number counts up', async (
   assert.deepEqual(outcome.attempts.map((attempt) => attempt.attempt), [1, 2, 3]);
 });
 
+test('a truncated or corrupted answer is retried on the same connection, and the complete retry is returned', async () => {
+  // A Kiro stream cut short or with a bad checksum is refused as INVALID_RESPONSE, which is a
+  // property of that one answer, not of the account, so the next try on the same route is worth it.
+  let tries = 0;
+  const { executor, calls } = harness({
+    candidates: [candidate('a', { maxRetries: 1 })],
+    chat: async () => {
+      tries += 1;
+      if (tries === 1) throw new ProviderError('INVALID_RESPONSE', 'truncated event stream', { retryable: true });
+      return response('whole answer');
+    },
+  });
+  const outcome = await executor.chat(request(), undefined);
+  assert.equal(outcome.response.message.content, 'whole answer');
+  assert.equal(tries, 2);
+  assert.deepEqual(outcome.attempts.map((attempt) => attempt.attempt), [1, 2]);
+  assert.deepEqual(calls.failure, [{ providerId: 'a', code: 'INVALID_RESPONSE' }]);
+});
+
 test('a rate limit hands off instead of retrying the same connection', async () => {
   // Retrying a connection that is at its limit is guaranteed to fail and costs another wait; the
   // whole point of a per-connection limit is that the *next* connection can serve the request.
