@@ -28,7 +28,7 @@ async function start(t, seen) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-const longGrep = Array.from({ length: 2000 }, (_, index) => `src/file-${index}.ts:${index + 1}: match`).join('\n');
+const longGrep = Array.from({ length: 2000 }, (_, index) => (index % 400 === 0 ? `src/file-${index}.ts:${index + 1}: match` : `    context ${index + 1} without a match`)).join('\n');
 
 function body(toolContent, isError) {
   return {

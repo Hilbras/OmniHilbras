@@ -67,3 +67,32 @@ test('toolResultBytes counts only tool text, so a saving can be reported in byte
   ];
   assert.equal(toolResultBytes(messages), 4, 'user text and non-text content are not counted');
 });
+
+test('a grep result keeps every match and its surrounding lines, not just the head and tail', () => {
+  // A grep over a large tree puts the answer in the middle. The head-and-tail cut dropped it; the tool-aware filter
+  // keeps each match with two lines of context, and says how many lines it left out.
+  const lines = Array.from({ length: 2000 }, (_, index) => `    context line ${index + 1} with no match`);
+  lines[900] = 'src/target.ts:901: export function needle() {';
+  lines[1400] = 'src/target.ts:1401: needle();';
+  const messages = [
+    { role: 'assistant', content: '', toolCalls: [{ id: 'c-grep', type: 'function', function: { name: 'grep', arguments: '{}' } }] },
+    { role: 'tool', toolCallId: 'c-grep', content: lines.join('\n') },
+  ];
+  const [, out] = compressToolResults(messages);
+  assert.match(out.content, /src\/target\.ts:901: export function needle/, 'the match in the middle survives');
+  assert.match(out.content, /src\/target\.ts:1401: needle\(\);/, 'the second match survives');
+  assert.match(out.content, /context line 900 with no match/, 'two lines of context before a match are kept');
+  assert.equal(out.content.includes('context line 500 with no match'), false, 'a line far from every match is dropped');
+  assert.ok(out.content.length < messages[1].content.length, 'the result is still smaller');
+});
+
+test('a result from a tool with no filter keeps the generic head-and-tail cut', () => {
+  const lines = Array.from({ length: 2000 }, (_, index) => `output ${index + 1}`);
+  const messages = [
+    { role: 'assistant', content: '', toolCalls: [{ id: 'c-x', type: 'function', function: { name: 'unknown_tool', arguments: '{}' } }] },
+    { role: 'tool', toolCallId: 'c-x', content: lines.join('\n') },
+  ];
+  const [, out] = compressToolResults(messages);
+  assert.equal(out.content.split('\n')[0], 'output 1', 'the head is kept');
+  assert.match(out.content, /1820 lines omitted/, 'the generic count is stated');
+});
