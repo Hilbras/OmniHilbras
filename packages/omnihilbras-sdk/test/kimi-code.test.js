@@ -384,3 +384,20 @@ test('the model list is read from the coding endpoint', async () => {
   assert.equal(transport.calls[0].url, `${KIMI_CODE.server}/coding/v1/models`);
   assert.deepEqual(models.map((m) => m.id), ['kimi-latest', 'kimi-k2.5'], 'an entry with no id is dropped, not rendered as undefined');
 });
+test('a tool result reaches Kimi with the id that ties it to the assistant\'s call', async () => {
+  // Kimi dropped `tool_call_id`, so the result could not be matched to the call the model made. The id is
+  // carried on the message and must be on the wire.
+  const transport = createTransport();
+  const adapter = new KimiCodeAdapter({ transport });
+  await adapter.chat({
+    model: 'kimi-latest',
+    messages: [
+      { role: 'user', content: 'list files' },
+      { role: 'assistant', content: null, toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'Bash', arguments: '{"command":"ls"}' } }] },
+      { role: 'tool', content: 'a.txt', toolCallId: 'call_1' },
+    ],
+  }, { credential: OAUTH });
+  const body = JSON.parse(transport.calls[0].body);
+  const toolMessage = body.messages.find((message) => message.role === 'tool');
+  assert.equal(toolMessage.tool_call_id, 'call_1', 'the tool result names the call it answers');
+});

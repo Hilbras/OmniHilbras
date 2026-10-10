@@ -642,10 +642,14 @@ function normalizeToolCallDelta(call: { index?: number; id?: string; type?: stri
 }
 
 function toOpenAIMessage(message: ChatMessage) {
+  // A tool result is tied to the assistant's call by this id. Without it the model cannot match the result
+  // to the call it made, and a second turn of a tool conversation breaks.
+  const toolCallId = message.toolCallId ? { tool_call_id: message.toolCallId } : {};
   if (typeof message.content === 'string' || message.content === null) {
     return {
       role: message.role,
       content: message.content,
+      ...toolCallId,
       ...(message.toolCalls?.length
         ? { tool_calls: message.toolCalls.map((call) => ({ id: call.id, type: 'function', function: { name: call.function.name, arguments: call.function.arguments } })) }
         : {}),
@@ -654,6 +658,7 @@ function toOpenAIMessage(message: ChatMessage) {
   return {
     role: message.role,
     content: message.content.map((part) => (part.type === 'text' ? { type: 'text', text: part.text } : { type: 'image_url', image_url: { url: part.imageUrl.url } })),
+    ...toolCallId,
   };
 }
 
