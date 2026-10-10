@@ -2,6 +2,10 @@ import { ProviderError } from '../../core/errors.js';
 import { parseSseJson, parseSseStream } from '../../core/streaming.js';
 import { FetchHttpTransport, type HttpTransport } from '../../core/transport.js';
 import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../../core/url.js';
+import { boundedMap } from '../../core/bounded-map.js';
+
+/** Renewed credentials kept per adapter, enough for every token a live gateway has recently renewed. */
+const maxRenewalMemoEntries = 64;
 import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../../core/types.js';
 
 /**
@@ -132,7 +136,7 @@ export class KimiCodeAdapter implements ProviderAdapter {
   private readonly now: () => number;
   private readonly headers: Record<string, string>;
   /** Renewed credentials keyed by the access token they replaced. */
-  private readonly renewed = new Map<string, ProviderCredential>();
+  private readonly renewed = boundedMap<string, ProviderCredential>(maxRenewalMemoEntries);
 
   constructor(options: KimiCodeAdapterOptions = {}) {
     this.baseUrl = normalizeProviderBaseUrl(KIMI_CODE.server, this.id);

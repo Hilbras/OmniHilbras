@@ -4,6 +4,7 @@ import {
   CLAUDE_CODE,
   ClaudeCodeAdapter,
   ProviderError,
+  boundedMap,
   claudeCodeAuthorizeUrl,
   claudeCodeCredentialExpired,
   claudeCodeProviderId,
@@ -329,4 +330,20 @@ test('a streamed tool call reaches the caller with its id, name and joined argum
   assert.equal(pieces[0].id, 'toolu_1', 'the id arrives with the first fragment');
   assert.equal(pieces[0].function.name, 'Bash', 'the name arrives with the first fragment');
   assert.equal(pieces.map((p) => p.function?.arguments ?? '').join(''), '{"command":"ls"}', 'the fragments join into the whole JSON');
+});
+
+test('a renewal memo holds at most its cap, and evicts the least recently used entry first', () => {
+  // A memo keyed by every token ever renewed grew without bound on a long-running gateway. The cap keeps the newest
+  // renewals, and a read marks an entry as recently used so it survives the eviction.
+  const memo = boundedMap(3);
+  memo.set('a', 1);
+  memo.set('b', 2);
+  memo.set('c', 3);
+  assert.equal(memo.get('a'), 1, 'reading a marks it recently used');
+  memo.set('d', 4);
+  assert.equal(memo.size, 3, 'the cap holds');
+  assert.equal(memo.has('b'), false, 'b was least recently used, so it is the one evicted');
+  assert.equal(memo.has('a'), true, 'a was read, so it survived');
+  for (let i = 0; i < 100; i += 1) memo.set(`t${i}`, i);
+  assert.equal(memo.size, 3, 'a long run of renewals never exceeds the cap');
 });

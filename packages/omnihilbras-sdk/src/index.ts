@@ -24,6 +24,7 @@ export * from './providers/deepseek-web/index.js';
 export * from './providers/qwen-web/index.js';
 export * from './providers/tokenharbor-web/index.js';
 export * from './core/url.js';
+export * from './core/bounded-map.js';
 export * from './core/provider-slugs.js';
 export * from './core/tool-messages.js';
 export * from './core/tool-compress.js';
