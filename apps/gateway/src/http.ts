@@ -76,7 +76,9 @@ export function isCrossSiteRequest(request: IncomingMessage) {
  */
 export function isOauthCallbackNavigation(request: IncomingMessage) {
   if (request.method !== 'GET') return false;
-  const path = (request.url ?? '').split('?', 1)[0] ?? '';
+  // Normalised the way routing normalises it. Testing the raw string let `/callback/x/../../connections` pass
+  // the prefix check and then route to the management endpoint, with no key.
+  const path = new URL(request.url ?? '/', 'http://localhost').pathname;
   // Both redirect providers land here as a top-level navigation from the provider, so both carry
   // `sec-fetch-site: cross-site` and no `Origin`. The exemption is by path, and each path is the
   // gateway's own constant — never a value from the request.

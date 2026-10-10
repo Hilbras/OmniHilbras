@@ -207,11 +207,14 @@ function gatewayProxy(): Plugin {
           if (typeof value === 'string' && name !== 'host') headers[name] = value;
         }
         headers.host = `127.0.0.1:${gatewayPort}`;
-        // A same-origin GET from the page often carries no Origin, and the gateway trusts the dashboard only
-        // when the Origin is allowlisted. The proxy is the dashboard's own server, so it states the origin it
-        // acts for. The token, not this header, is what proves the request came from the dashboard.
-        headers.origin = `http://${request.headers.host ?? 'localhost:5173'}`;
-        if (token) headers['x-omnihilbras-dashboard-token'] = token;
+        // Only the dashboard's own page gets the token. A request that the browser marks cross-site, or that a
+        // local client sends with no browser context, is forwarded as it arrived: the gateway refuses it, which is
+        // the point. Attaching the token to every request made the proxy a way around the key gate.
+        const fromDashboardPage = request.headers['sec-fetch-site'] === 'same-origin';
+        if (fromDashboardPage && token) {
+          headers.origin = `http://${request.headers.host ?? 'localhost:5173'}`;
+          headers['x-omnihilbras-dashboard-token'] = token;
+        }
         const chunks: Buffer[] = [];
         for await (const chunk of request) chunks.push(chunk as Buffer);
         const body = chunks.length ? Buffer.concat(chunks) : undefined;
