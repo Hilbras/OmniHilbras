@@ -139,12 +139,16 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
         ? 'Gateway online'
         : problem === 'refused'
           ? 'Gateway refused this page'
-          : 'Gateway offline';
+          : problem === 'unauthorized'
+            ? 'Gateway needs sign-in'
+            : 'Gateway offline';
   const gatewayHint =
     reachable === false
       ? problem === 'refused'
         ? 'this page’s origin is not allowed'
-        : 'not answering · pnpm dev:gateway'
+        : problem === 'unauthorized'
+          ? 'gateway is up · dashboard token not accepted, reload the dashboard'
+          : 'not answering · pnpm dev:gateway'
       : 'localhost:8787 · local mode';
   return (
     <aside className={`dashboard-sidebar flex h-full w-[252px] shrink-0 flex-col border-r border-line bg-bg-soft transition-[width] duration-200 ${collapsed ? 'lg:w-[76px]' : 'lg:w-[252px]'}`}>

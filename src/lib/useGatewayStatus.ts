@@ -29,7 +29,18 @@ const POLL_MS = 4_000;
  * a server that is already running correctly — which is exactly what happened here, four
  * times, while a stray `vite preview` on :4173 was the actual cause.
  */
-export type GatewayProblem = 'unreachable' | 'refused';
+export type GatewayProblem = 'unreachable' | 'refused' | 'unauthorized';
+
+/**
+ * Names why a probe that got an HTTP answer was not OK. Only 403 means the gateway declined this
+ * origin. A 401 means the gateway is up and did not accept this page's credentials, which points at
+ * the dashboard token or a missing sign-in, not at the origin, so it must not read as "refused".
+ */
+export function problemForStatus(status: number): GatewayProblem {
+  if (status === 403) return 'refused';
+  if (status === 401) return 'unauthorized';
+  return 'unreachable';
+}
 
 export type GatewayState = {
   /** `undefined` until the first probe answers — "not known yet", not "up". */
@@ -65,12 +76,7 @@ export function useGatewayStatus(): GatewayState {
         if (cancelled) return;
         setReachable(response.ok);
         if (!response.ok) {
-          /**
-           * A 403 here is a CORS refusal, not an outage. The gateway is running and has
-           * declined this origin, and saying "offline" about that is a lie that points the
-           * user at the wrong thing entirely.
-           */
-          setProblem(response.status === 403 || response.status === 401 ? 'refused' : 'unreachable');
+          setProblem(problemForStatus(response.status));
           wasDown.current = true;
         } else {
           setProblem(undefined);
