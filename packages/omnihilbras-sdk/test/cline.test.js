@@ -359,6 +359,25 @@ test('a failed renewal says the session expired', async () => {
   );
 });
 
+test('a renewal that fails because Cline is down is not reported as an expired login', async () => {
+  // A 503 or a network failure says nothing about the session. Reporting it as "sign in again" sends the
+  // user to re-authenticate for an outage that will pass, so the outage keeps its own code and retryability.
+  const { ProviderError } = await import('@hilbras/omnihilbras');
+  const adapter = new ClineAdapter({
+    transport: {
+      async request() {
+        throw new ProviderError('PROVIDER_UNAVAILABLE', 'The provider could not be reached.', { providerId: 'cline', retryable: true, statusCode: 503 });
+      },
+      stream() { throw new Error('not used'); },
+    },
+    refreshSkewMs: 0,
+  });
+  await assert.rejects(
+    () => adapter.validateCredential({ type: 'oauth', value: 'jwt', refreshToken: 'r1', expiresAt: '2020-01-01T00:00:00.000Z' }),
+    (error) => error.code === 'PROVIDER_UNAVAILABLE' && error.retryable === true && !/sign in again/i.test(error.publicMessage ?? ''),
+  );
+});
+
 test('more provider error shapes are read', () => {
   // Zen: {"type":"error","error":{"type":"AuthError","message":"Invalid API key."}}
   assert.equal(providerErrorDetail({ type: 'error', error: { type: 'AuthError', message: 'Invalid API key.' } }), 'Invalid API key.');

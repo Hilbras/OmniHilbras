@@ -495,6 +495,7 @@ export class ClineAdapter implements ProviderAdapter {
       // for what is really an expired login, which gives the operator nothing to
       // act on. Cline's own wording is kept when there is one.
       if (error instanceof ProviderError && error.code === 'CANCELLED') throw error;
+      if (error instanceof ProviderError && (error.code === 'PROVIDER_UNAVAILABLE' || error.code === 'PROVIDER_TIMEOUT')) throw error;
       const detail = providerErrorDetail((error as ProviderError | undefined)?.details);
       throw new ProviderError('AUTHENTICATION_FAILED', 'The Cline access token could not be renewed. Sign in again.', {
         providerId: this.id,
