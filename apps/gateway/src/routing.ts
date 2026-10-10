@@ -205,6 +205,23 @@ export function splitProviderPrefix(
   return owner ? { model: rest, providerId: owner.providerId } : { model: trimmed };
 }
 
+/**
+ * The model name a provider must receive. A `provider/model` id is for the gateway, which uses the prefix to
+ * choose a connection; a provider does not know its own prefix and refuses the name with it.
+ *
+ * Only the dispatched provider's own id or slug is removed, so a model whose real name contains a slash
+ * (`qwen/qwen3.8-27b:free` on a provider that is not `qwen`) is sent unchanged.
+ */
+export function bareModelFor(model: string, providerId: string): string {
+  const trimmed = model.trim();
+  const slash = trimmed.indexOf('/');
+  if (slash <= 0) return trimmed;
+  const prefix = trimmed.slice(0, slash);
+  const rest = trimmed.slice(slash + 1);
+  if (!rest) return trimmed;
+  return prefix === providerId || prefix === providerSlug(providerId) ? rest : trimmed;
+}
+
 /** Resolves a failover chain, ordered by priority then name for determinism. */
 export function resolveRoute(input: {
   connections: ConnectionRecord[];

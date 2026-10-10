@@ -8,7 +8,7 @@ import { ClaudeCodeSessionStore, beginClaudeCodeSignIn, completeClaudeCodeSignIn
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, withConsoleWorkspace, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialDeviceFlow, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
-import { SlidingWindowRateLimiter, type RouteCandidate } from './routing.js';
+import { SlidingWindowRateLimiter, bareModelFor, type RouteCandidate } from './routing.js';
 import { HealthManager } from './health.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
@@ -1263,13 +1263,13 @@ export class GatewayService {
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    return adapter.chat(request, await this.credentials.contextForProvider(providerId, signal, scope));
+    return adapter.chat({ ...request, model: bareModelFor(request.model, providerId) }, await this.credentials.contextForProvider(providerId, signal, scope));
   }
 
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    yield* adapter.streamChat(request, await this.credentials.contextForProvider(providerId, signal, scope));
+    yield* adapter.streamChat({ ...request, model: bareModelFor(request.model, providerId) }, await this.credentials.contextForProvider(providerId, signal, scope));
   }
 
   /**
@@ -1288,7 +1288,7 @@ export class GatewayService {
   async embed(providerId: string, request: EmbeddingRequest, signal?: AbortSignal, scope?: RequestScope): Promise<EmbeddingResponse> {
     const adapter = await this.resolveAdapter(providerId);
     if (adapter.capabilities.embeddings !== true || typeof adapter.embed !== 'function') throw notSupported(adapter, 'embeddings');
-    return adapter.embed(request, await this.credentials.contextForProvider(providerId, signal, scope));
+    return adapter.embed({ ...request, model: bareModelFor(request.model, providerId) }, await this.credentials.contextForProvider(providerId, signal, scope));
   }
 
   /**
