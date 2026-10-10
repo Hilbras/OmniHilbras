@@ -321,9 +321,9 @@ function toAnthropicMessage(message: ChatMessage) {
   const content = toAnthropicContent(message.content);
   if (message.role === 'assistant' && message.toolCalls?.length) {
     const toolBlocks = message.toolCalls.map((toolCall) => ({ type: 'tool_use', id: toolCall.id, name: toolCall.function.name, input: parseToolArguments(toolCall.function.arguments) }));
-    return { role: message.role, content: [...content, ...toolBlocks] };
+    return { role: message.role, content: [...thinkingBlocks(message), ...content, ...toolBlocks] };
   }
-  return { role: message.role, content };
+  return { role: message.role, content: [...thinkingBlocks(message), ...content] };
 }
 
 function toAnthropicContent(content: MessageContent): Array<Record<string, unknown>> {
@@ -353,6 +353,11 @@ const thinkingShare: Record<'low' | 'medium' | 'high', number> = { low: 0.2, med
 function toAnthropicThinking(effort: 'low' | 'medium' | 'high', maxTokens: number) {
   const budget = Math.max(1024, Math.floor(maxTokens * thinkingShare[effort]));
   return { type: 'enabled', budget_tokens: Math.min(budget, maxTokens - 1) };
+}
+
+/** A replayed thinking block goes first, with the signature Anthropic issued, or it is refused. */
+function thinkingBlocks(message: ChatMessage) {
+  return message.thinking ? [{ type: 'thinking', thinking: message.thinking.text, signature: message.thinking.signature }] : [];
 }
 
 function toAnthropicToolChoice(choice: 'auto' | 'none' | 'required') {

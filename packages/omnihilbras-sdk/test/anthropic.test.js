@@ -186,3 +186,24 @@ test('a reasoningEffort becomes an Anthropic thinking budget that grows with the
   assert.ok(high.budget_tokens > low.budget_tokens, 'a higher effort gets a larger budget');
   assert.equal('thinking' in JSON.parse(transport.calls[2].body), false, 'an unset effort is not invented');
 });
+
+test('an assistant turn\'s thinking block and its signature are sent back to Anthropic before the tool use', async () => {
+  // Anthropic refuses a replayed thinking block that has lost its signature, and a multi-turn tool round needs the
+  // block back. The block is kept on the message with its signature and returned in the same position.
+  const transport = createTransport();
+  const adapter = new AnthropicAdapter({ transport });
+  await adapter.chat({
+    model: 'claude-sonnet-4',
+    messages: [
+      { role: 'user', content: 'run it' },
+      { role: 'assistant', content: '', thinking: { text: 'I should call the tool.', signature: 'sig-abc' }, toolCalls: [{ id: 'toolu_1', type: 'function', function: { name: 'run', arguments: '{}' } }] },
+      { role: 'tool', toolCallId: 'toolu_1', content: 'ok' },
+    ],
+  }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  const assistant = JSON.parse(transport.calls[0].body).messages[1];
+  assert.equal(assistant.content[0].type, 'thinking', 'the thinking block leads the assistant turn');
+  assert.equal(assistant.content[0].thinking, 'I should call the tool.');
+  assert.equal(assistant.content[0].signature, 'sig-abc', 'the signature is returned unchanged');
+  const toolUseAt = assistant.content.findIndex((block) => block.type === 'tool_use');
+  assert.ok(toolUseAt > 0, 'the tool use follows the thinking block');
+});

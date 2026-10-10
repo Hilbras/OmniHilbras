@@ -59,6 +59,8 @@ export type ChatMessage = {
    * it is sent back (DeepSeek answers 400 without it), so it is kept with the message and replayed to that provider.
    */
   reasoning?: string;
+  /** A thinking block with the signature Anthropic issued for it, replayed to Anthropic with the turn. */
+  thinking?: { text: string; signature: string };
 };
 
 export type ChatRequest = {
