@@ -193,6 +193,8 @@ export class GatewayService {
   private readonly routing: RoutingEngine;
   /** Each provider's strategy, synchronous for routing. Loaded from the store and updated only through this service. */
   private readonly providerStrategies = new Map<string, 'priority' | 'round-robin'>();
+  /** Saved model aliases, synchronous for routing. Loaded from the store and updated only through this service. */
+  private readonly aliasSnapshot = new Map<string, { providerId: string; model: string }>();
   /**
    * What this gateway serves, and which provider serves what.
    *
@@ -280,6 +282,7 @@ export class GatewayService {
       rateLimiter: this.rateLimiter,
       defaultProviderId,
       requireAdapter: (providerId) => { this.requireAdapter(providerId); },
+      aliasFor: (name) => this.aliasSnapshot.get(name),
       familyOf: (providerId) => this.registry.get(providerId)?.modelFamily,
       strategyFor: (providerId) => this.providerStrategies.get(providerId) ?? 'priority',
     });
@@ -412,6 +415,26 @@ export class GatewayService {
   /** A provider's connection strategy: `priority` (the default) or `round-robin`. */
   providerStrategy(providerId: string): 'priority' | 'round-robin' {
     return this.providerStrategies.get(providerId) ?? 'priority';
+  }
+
+  /** A requested name that is a saved alias is replaced by the model it points at; any other name is returned as given. */
+  private resolvedModel(model: string): string {
+    return this.aliasSnapshot.get(model.trim())?.model ?? model;
+  }
+
+  /** Saves a model alias and makes it routable at once. */
+  async setModelAlias(name: string, target: { providerId: string; model: string }): Promise<void> {
+    const store = this.connectionStore as { setAlias?: (n: string, t: { providerId: string; model: string }) => Promise<void> } | undefined;
+    if (!store?.setAlias) throw new ProviderError('CONFIGURATION_ERROR', 'Model aliases are not stored by this connection store.');
+    await store.setAlias(name, target);
+    this.aliasSnapshot.set(name.trim(), { providerId: target.providerId, model: target.model.trim() });
+  }
+
+  /** Reads the saved aliases into routing. Called at startup so an alias works from the first request. */
+  async loadModelAliases(): Promise<void> {
+    const store = this.connectionStore as { aliases?: () => Promise<Record<string, { providerId: string; model: string }>> } | undefined;
+    if (!store?.aliases) return;
+    for (const [name, target] of Object.entries(await store.aliases())) this.aliasSnapshot.set(name, target);
   }
 
   /** Reads the saved strategies into routing. Called at startup so a restart keeps every choice in effect. */
@@ -1368,13 +1391,13 @@ export class GatewayService {
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    return adapter.chat({ ...request, model: bareModelFor(request.model, providerId), messages: this.preparedMessages(request, scope) }, await this.credentials.contextForProvider(providerId, signal, scope));
+    return adapter.chat({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: this.preparedMessages(request, scope) }, await this.credentials.contextForProvider(providerId, signal, scope));
   }
 
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    yield* adapter.streamChat({ ...request, model: bareModelFor(request.model, providerId), messages: this.preparedMessages(request, scope) }, await this.credentials.contextForProvider(providerId, signal, scope));
+    yield* adapter.streamChat({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: this.preparedMessages(request, scope) }, await this.credentials.contextForProvider(providerId, signal, scope));
   }
 
   /**
@@ -1393,7 +1416,7 @@ export class GatewayService {
   async embed(providerId: string, request: EmbeddingRequest, signal?: AbortSignal, scope?: RequestScope): Promise<EmbeddingResponse> {
     const adapter = await this.resolveAdapter(providerId);
     if (adapter.capabilities.embeddings !== true || typeof adapter.embed !== 'function') throw notSupported(adapter, 'embeddings');
-    return adapter.embed({ ...request, model: bareModelFor(request.model, providerId) }, await this.credentials.contextForProvider(providerId, signal, scope));
+    return adapter.embed({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId) }, await this.credentials.contextForProvider(providerId, signal, scope));
   }
 
   /**

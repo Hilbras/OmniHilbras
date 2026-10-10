@@ -826,3 +826,20 @@ test('a bare model name is routed to a connection only when its provider declare
   assert.equal(route(anthropic, 'claude-x').candidates[0]?.providerId, 'anthropic', 'the claude family reaches the claude provider');
   assert.equal(route([...openai, ...anthropic], 'claude-x').candidates[0]?.providerId, 'anthropic', 'with both connected, claude still goes to its own family');
 });
+
+test('a requested alias is sent to its target provider and model, and the target receives the model it publishes', async () => {
+  // An alias is a name a user chose for a provider and model. Without this, saving an alias changes nothing, because
+  // the requested name is looked up as a model and matches nothing.
+  const { RoutingEngine } = await import('../dist/routing-engine.js');
+  const { SlidingWindowRateLimiter } = await import('../dist/index.js');
+  const health = new HealthRegistry(() => Date.now(), 60_000);
+  const resilience = { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 };
+  const connections = [
+    { id: 'c-z', providerId: 'zen', name: 'Z', priority: 1, enabled: true, hasCredential: true, modelIds: ['big-pickle'], resilience },
+    { id: 'c-or', providerId: 'openrouter', name: 'OR', priority: 2, enabled: true, hasCredential: true, modelIds: ['qwen/qwen3.8-27b:free'], resilience },
+  ];
+  const aliases = { fast: { providerId: 'openrouter', model: 'qwen/qwen3.8-27b:free' } };
+  const engine = new RoutingEngine({ health: { getFailureThreshold: () => 3, registry: () => health }, rateLimiter: new SlidingWindowRateLimiter(), defaultProviderId: 'p', requireAdapter: () => {}, aliasFor: (name) => aliases[name] });
+  const plan = await engine.plan({ connections, model: 'fast' });
+  assert.equal(plan.candidates[0]?.providerId, 'openrouter', 'the alias reaches its target provider');
+});

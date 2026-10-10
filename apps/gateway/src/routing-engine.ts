@@ -32,6 +32,8 @@ export type RoutingHealth = Pick<HealthManager, 'getFailureThreshold'> & {
 export type RoutingEngineOptions = {
   health: RoutingHealth;
   rateLimiter: SlidingWindowRateLimiter;
+  /** A saved alias: a requested name mapped to the provider and model it should reach. */
+  aliasFor?: (name: string) => { providerId: string; model: string } | undefined;
   /** A provider's model family, as its registration declares it. Used to route a bare model name within its family. */
   familyOf?: (providerId: string) => string | undefined;
   /** A provider's strategy. `round-robin` balances all of that provider's connections; absent or `priority` leaves them alone. */
@@ -139,7 +141,8 @@ export class RoutingEngine {
     this.retain(new Set(input.connections.map((connection) => connection.id)));
 
     const health = this.options.health.registry();
-    const split = splitProviderPrefix(input.model, input.connections);
+    const alias = this.options.aliasFor?.(input.model.trim());
+    const split = alias ? { model: alias.model, providerId: alias.providerId } : splitProviderPrefix(input.model, input.connections);
     const explicitProviderId = input.explicitProviderId ?? split.providerId;
     const rotation = this.nextBalanceTurn(input.connections);
     const decision = resolveRoute({

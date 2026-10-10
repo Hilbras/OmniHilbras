@@ -150,6 +150,7 @@ export async function startGatewayServer(options: {
   });
 
   await service.loadProviderStrategies();
+  await service.loadModelAliases();
   service.startHealthMonitor();
 
   await new Promise<void>((resolve, reject) => {
