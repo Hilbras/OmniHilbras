@@ -716,6 +716,22 @@ function readString(source: Json, keys: readonly string[]): string | undefined {
  * frame that claims an impossible length ends the walk instead of being read past — a
  * truncated body must not be mistaken for a complete one.
  */
+const crcTable = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes: Uint8Array, start: number, end: number): number {
+  let c = 0xffffffff;
+  for (let i = start; i < end; i++) c = (crcTable[(c ^ (bytes[i] as number)) & 0xff] as number) ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
 export function decodeKiroStream(bytes: Uint8Array): KiroEvent[] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const events: KiroEvent[] = [];
@@ -724,11 +740,20 @@ export function decodeKiroStream(bytes: Uint8Array): KiroEvent[] {
     // `total_length` counts itself, so a frame occupies exactly that many bytes.
     const totalLength = view.getUint32(offset);
     const headersLength = view.getUint32(offset + 4);
-    if (totalLength < 16 || offset + totalLength > bytes.length) break;
+    if (totalLength < 16 || offset + totalLength > bytes.length) {
+      throw new ProviderError('INVALID_RESPONSE', 'Kiro returned a truncated event stream.', { retryable: true });
+    }
+    if (view.getUint32(offset + 8) !== crc32(bytes, offset, offset + 8)) {
+      throw new ProviderError('INVALID_RESPONSE', 'Kiro returned an event stream with a bad prelude checksum.', { retryable: true });
+    }
+    if (view.getUint32(offset + totalLength - 4) !== crc32(bytes, offset, offset + totalLength - 4)) {
+      throw new ProviderError('INVALID_RESPONSE', 'Kiro returned an event stream with a bad message checksum.', { retryable: true });
+    }
     const headersEnd = offset + 12 + headersLength;
     const frameEnd = offset + totalLength;
-    // 12 prelude + headers + 4 trailing CRC must fit inside the frame.
-    if (headersEnd + 4 > frameEnd) break;
+    if (headersEnd + 4 > frameEnd) {
+      throw new ProviderError('INVALID_RESPONSE', 'Kiro returned an event stream with inconsistent header lengths.', { retryable: true });
+    }
 
     let cursor = offset + 12;
     let eventType = '';

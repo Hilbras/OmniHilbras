@@ -42,8 +42,27 @@ function frame(eventType, payload, { omitEventType = false } = {}) {
   const prelude = Buffer.alloc(12);
   prelude.writeUInt32BE(16 + headers.length + body.length, 0);
   prelude.writeUInt32BE(headers.length, 4);
-  // The CRCs are not verified by the decoder, so a fixed value is enough here.
-  return Buffer.concat([prelude, headers, body, Buffer.alloc(4)]);
+  prelude.writeUInt32BE(crc32(prelude.subarray(0, 8)), 8);
+  const withoutTrailer = Buffer.concat([prelude, headers, body]);
+  const trailer = Buffer.alloc(4);
+  trailer.writeUInt32BE(crc32(withoutTrailer), 0);
+  return Buffer.concat([withoutTrailer, trailer]);
+}
+
+const crcTable = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (const byte of bytes) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
 }
 
 function transport(script) {
@@ -167,17 +186,15 @@ test('an empty-string profileArn is not sent, because it is a 400', () => {
   assert.equal('profileArn' in body, false);
 });
 
-test('a truncated stream yields the frames that arrived and stops', () => {
-  // Cutting the body mid-frame must not read past the end or invent a final event.
-  const events = decodeKiroStream(realStream.subarray(0, 500));
-  assert.ok(events.length >= 1 && events.length < 7);
+test('a truncated stream is refused rather than returned as a partial answer', () => {
+  assert.throws(() => decodeKiroStream(realStream.subarray(0, 500)), { code: 'INVALID_RESPONSE' });
   assert.equal(decodeKiroStream(new Uint8Array()).length, 0);
 });
 
-test('a frame claiming an impossible length ends the walk instead of reading past it', () => {
+test('a frame claiming an impossible length is refused instead of read past', () => {
   const corrupt = Buffer.from(realStream);
   corrupt.writeUInt32BE(0xfffffff0, 0);
-  assert.deepEqual(decodeKiroStream(new Uint8Array(corrupt)), []);
+  assert.throws(() => decodeKiroStream(new Uint8Array(corrupt)), { code: 'INVALID_RESPONSE' });
 });
 
 test('a frame with no event-type header is still an event, not a dropped one', () => {
@@ -425,4 +442,22 @@ test('Kiro reports whether its OAuth token has expired, and says so only when it
   assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'x' }, now), undefined, 'no expiry is cannot-say, not expired');
   assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'x', expiresAt: 'not-a-date' }, now), undefined, 'an unreadable expiry is cannot-say');
   assert.equal(adapter.isCredentialExpired({ type: 'api-key', value: 'k' }, now), undefined, 'an API key has no expiry to read');
+});
+
+test('a Kiro stream cut off mid-frame is an invalid response, not a complete answer', () => {
+  // A truncated frame used to end the decode silently, so an answer cut off by the network read as finished. The frame
+  // length says more bytes must follow; when they do not, the answer is refused.
+  const cut = realStream.slice(0, realStream.length - 7);
+  assert.throws(() => decodeKiroStream(cut), (error) => error.code === 'INVALID_RESPONSE', 'a cut-off answer is not returned as complete');
+});
+
+test('a Kiro frame whose checksum does not match is refused, not decoded', () => {
+  const corrupt = new Uint8Array(realStream);
+  corrupt[40] ^= 0xff;
+  assert.throws(() => decodeKiroStream(corrupt), (error) => error.code === 'INVALID_RESPONSE', 'a corrupted frame is not read as text');
+});
+
+test('the intact capture still decodes to the same answer after the integrity checks', () => {
+  const events = decodeKiroStream(realStream);
+  assert.equal(events.map((event) => event.text ?? '').join(''), 'Hey. What are you working on?');
 });

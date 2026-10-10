@@ -224,6 +224,22 @@ function geminiFrames(parts) {
   return frames;
 }
 
+const crcTable = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function eventstreamCrc(bytes, start, end) {
+  let c = 0xffffffff;
+  for (let i = start; i < end; i++) c = crcTable[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
 /**
  * Kiro's binary framing, built the way `decodeKiroStream` reads it.
  *
@@ -261,9 +277,10 @@ function binaryFrames(parts) {
     const frameView = new DataView(frame.buffer);
     frameView.setUint32(0, total);
     frameView.setUint32(4, headerBytes.length);
-    frameView.setUint32(8, 0);
     frame.set(headerBytes, 12);
     frame.set(payload, 12 + headerBytes.length);
+    frameView.setUint32(8, eventstreamCrc(frame, 0, 8));
+    frameView.setUint32(total - 4, eventstreamCrc(frame, 0, total - 4));
     return frame;
   });
   // One joined buffer, because that is what the transport delivers.
