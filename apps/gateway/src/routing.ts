@@ -254,6 +254,17 @@ export function bareModelFor(model: string, providerId: string): string {
 }
 
 /**
+ * The form a model name is compared in, for finding its connection only. It never changes what is sent upstream.
+ *
+ * A dot between digits and a dash are the same version (`claude-sonnet-4.5` and `claude-sonnet-4-5`), and a trailing
+ * `(level)` is the thinking setting, not part of the model. Both are dropped for the comparison, so every spelling
+ * reaches the connection that lists the model.
+ */
+export function lookupModelId(model: string): string {
+  return model.trim().replace(/\(([^()]+)\)\s*$/, '').replace(/(\d)\.(\d)/g, '$1-$2').toLowerCase();
+}
+
+/**
  * Turns the balanced connections of one priority so the first one changes with each request. A connection that does not
  * ask for balancing keeps its place, and so does every other priority, so a higher priority still wins.
  */
@@ -296,7 +307,8 @@ export function resolveRoute(input: {
   rotateBalancedConnections(usable, input.rotation ?? 0);
 
   const skipped: RouteDecision['skipped'] = [];
-  const ownsModel = (connection: ConnectionRecord) => modelId.length > 0 && connection.modelIds.includes(modelId);
+  const lookupId = lookupModelId(modelId);
+  const ownsModel = (connection: ConnectionRecord) => lookupId.length > 0 && connection.modelIds.some((saved) => lookupModelId(saved) === lookupId);
 
   if (input.explicitProviderId) {
     // An explicit request is a deliberate pin: it is served even when the model

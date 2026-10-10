@@ -796,3 +796,19 @@ test('a provider set to round-robin balances all its connections, without each o
   assert.equal(firsts[0] === firsts[1], false, 'the provider strategy alternates its connections without the per-connection flag');
   assert.deepEqual(firsts, [firsts[0], firsts[1], firsts[0], firsts[1]]);
 });
+
+test('a model name is matched on its meaning, not its spelling: every spelling reaches the connection that lists the model', () => {
+  // Agent configs write `claude-sonnet-4.5` and `claude-sonnet-4-5` interchangeably, and some append `(high)` for
+  // thinking. With two connections, only the exact spelling reached the one that lists the model; the others fell
+  // through to a different provider. The lookup is normalised so all spellings reach the same connection.
+  const health = new HealthRegistry(() => Date.now(), 60_000);
+  const resilience = { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 };
+  const connections = [
+    { id: 'c-a', providerId: 'p', name: 'A', priority: 2, enabled: true, hasCredential: true, modelIds: ['claude-sonnet-4-5'], resilience },
+    { id: 'c-b', providerId: 'q', name: 'B', priority: 1, enabled: true, hasCredential: true, modelIds: ['other-model'], resilience },
+  ];
+  const first = (model) => resolveRoute({ connections, model, health, failureThreshold: 3 }).candidates[0]?.connectionId;
+  assert.equal(first('claude-sonnet-4-5'), 'c-a', 'the exact id reaches the connection that lists it');
+  assert.equal(first('claude-sonnet-4.5'), 'c-a', 'a dot between digits is the same version as a dash');
+  assert.equal(first('claude-sonnet-4-5(high)'), 'c-a', 'a thinking suffix is stripped for the lookup');
+});
