@@ -32,6 +32,8 @@ export type RoutingHealth = Pick<HealthManager, 'getFailureThreshold'> & {
 export type RoutingEngineOptions = {
   health: RoutingHealth;
   rateLimiter: SlidingWindowRateLimiter;
+  /** A provider's strategy. `round-robin` balances all of that provider's connections; absent or `priority` leaves them alone. */
+  strategyFor?: (providerId: string) => 'priority' | 'round-robin';
   /**
    * The provider to serve when nothing is configured.
    *
@@ -98,6 +100,11 @@ export class RoutingEngine {
    * all. With connections present and every one skipped, the decision is returned as-is, because
    * *why* they were skipped is the answer the operator needs.
    */
+  /** A connection balances when it asks to, or when its provider is set to round-robin. */
+  private isBalanced(connection: ConnectionRecord): boolean {
+    return connection.balance === true || this.options.strategyFor?.(connection.providerId) === 'round-robin';
+  }
+
   /**
    * The turn for this request among balanced connections. It advances only for a priority that has more than one
    * balanced connection, so a single balanced connection, or none, never changes the order.
@@ -105,7 +112,7 @@ export class RoutingEngine {
   private nextBalanceTurn(connections: readonly ConnectionRecord[]): number {
     const groups = new Map<string, number>();
     for (const connection of connections) {
-      if (!connection.enabled || !connection.hasCredential || connection.balance !== true) continue;
+      if (!connection.enabled || !connection.hasCredential || !this.isBalanced(connection)) continue;
       const key = `${connection.providerId}:${connection.priority}`;
       groups.set(key, (groups.get(key) ?? 0) + 1);
     }
@@ -136,7 +143,7 @@ export class RoutingEngine {
     const decision = resolveRoute({
       // Copied because `resolveRoute` types its input as mutable while nothing here mutates it.
       // The copy is here rather than at every call site so the looseness is paid for once.
-      connections: [...input.connections],
+      connections: input.connections.map((connection) => (this.isBalanced(connection) ? { ...connection, balance: true } : connection)),
       model: split.model,
       rotation,
       ...(explicitProviderId === undefined ? {} : { explicitProviderId }),

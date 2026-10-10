@@ -232,3 +232,56 @@ test('a save without modelMeta does not invent one, and does not clear an existi
   const third = await store.save({ ...base, modelMeta: { m: { p: [7] } } }, { type: 'api-key', value: 'k' });
   assert.deepEqual(third.modelMeta?.m?.p, [7]);
 });
+
+test('a provider strategy is saved, survives a reload, and an old file without one still loads with the default', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-strategy-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalConnectionStore({ directory });
+  await store.save(connectionInput, { type: 'api-key', value: 'k' });
+  assert.equal(await store.strategyFor('openrouter'), 'priority', 'an unset provider keeps the default');
+  await store.setStrategy('openrouter', 'round-robin');
+  assert.equal(await store.strategyFor('openrouter'), 'round-robin');
+  const reopened = new LocalConnectionStore({ directory });
+  assert.equal(await reopened.strategyFor('openrouter'), 'round-robin', 'the choice survives a restart');
+  const oldFile = JSON.parse(await readFile(join(directory, 'connections.json'), 'utf8'));
+  delete oldFile.strategies;
+  await writeFile(join(directory, 'connections.json'), JSON.stringify(oldFile));
+  assert.equal(await new LocalConnectionStore({ directory }).strategyFor('openrouter'), 'priority', 'a file from before this change still loads');
+});
+
+test('an unknown provider strategy is refused, not stored', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-strategy-bad-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalConnectionStore({ directory });
+  await store.save(connectionInput, { type: 'api-key', value: 'k' });
+  await assert.rejects(() => store.setStrategy('openrouter', 'random-walk'), /strategy/);
+  assert.equal(await store.strategyFor('openrouter'), 'priority', 'nothing was written');
+});
+
+test('the service reports and changes a provider\'s strategy, and routing reads the change at once', async (t) => {
+  const { GatewayService, InMemoryConnectionStore } = await import('../dist/index.js');
+  const { ProviderRegistry } = await import('@hilbras/omnihilbras');
+  const { LocalConnectionStore: LocalStore } = await import('../dist/index.js');
+  const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-service-strategy-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new LocalStore({ directory });
+  const service = new GatewayService(new ProviderRegistry(), store, store, undefined, { failureThreshold: 3 });
+  assert.equal(service.providerStrategy('p'), 'priority', 'the default is priority');
+  await service.setProviderStrategy('p', 'round-robin');
+  assert.equal(service.providerStrategy('p'), 'round-robin', 'the change is visible to routing without a restart');
+  await assert.rejects(() => service.setProviderStrategy('p', 'shuffle'), /strategy/);
+  assert.equal(service.providerStrategy('p'), 'round-robin', 'a refused change leaves the setting alone');
+});
+
+test('a saved provider strategy is in effect after a restart, without anyone setting it again', async (t) => {
+  const { GatewayService, LocalConnectionStore: LocalStore } = await import('../dist/index.js');
+  const { ProviderRegistry } = await import('@hilbras/omnihilbras');
+  const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-restart-strategy-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const first = new LocalStore({ directory });
+  await first.setStrategy('p', 'round-robin');
+  const restarted = new LocalStore({ directory });
+  const service = new GatewayService(new ProviderRegistry(), restarted, restarted, undefined, { failureThreshold: 3 });
+  await service.loadProviderStrategies();
+  assert.equal(service.providerStrategy('p'), 'round-robin', 'the strategy is loaded at startup, so routing honours it from the first request');
+});

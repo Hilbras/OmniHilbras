@@ -149,6 +149,7 @@ export async function startGatewayServer(options: {
     dashboardToken,
   });
 
+  await service.loadProviderStrategies();
   service.startHealthMonitor();
 
   await new Promise<void>((resolve, reject) => {

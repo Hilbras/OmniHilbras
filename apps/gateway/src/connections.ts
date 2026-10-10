@@ -196,7 +196,13 @@ type EncryptedSecretEnvelope = {
 type MetadataEnvelope = {
   version: number;
   connections: ConnectionRecord[];
+  /** How a provider's connections share traffic. Absent means the default, priority. */
+  strategies?: Record<string, ProviderStrategy>;
 };
+
+/** How connections of one provider are chosen. `priority` is the default, and it is what a file without a strategy means. */
+export type ProviderStrategy = 'priority' | 'round-robin';
+const providerStrategies: readonly ProviderStrategy[] = ['priority', 'round-robin'];
 
 export function defaultConnectionDirectory(env: Readonly<Record<string, string | undefined>> = process.env) {
   return defaultStateDirectory(env);
@@ -323,6 +329,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   private readonly configuredMasterKey?: Buffer;
   private credentials = new Map<ProviderId, ProviderCredential>();
   private connections = new Map<string, ConnectionRecord>();
+  private strategies = new Map<string, ProviderStrategy>();
   private mutationQueue: Promise<void> = Promise.resolve();
   private loadPromise?: Promise<void>;
 
@@ -467,6 +474,33 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
     });
   }
 
+  /** The strategy for a provider's connections. Unset means priority. */
+  async strategyFor(providerId: string): Promise<ProviderStrategy> {
+    await this.ensureLoaded();
+    return this.strategies.get(providerId) ?? 'priority';
+  }
+
+  /** Every saved provider strategy, so routing can start with them in effect. */
+  async allStrategies(): Promise<Array<[string, ProviderStrategy]>> {
+    await this.ensureLoaded();
+    return [...this.strategies.entries()];
+  }
+
+  async setStrategy(providerId: string, strategy: string): Promise<void> {
+    if (!providerStrategies.includes(strategy as ProviderStrategy)) throw new Error(`The provider strategy must be one of ${providerStrategies.join(', ')}.`);
+    await this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = new Map(this.strategies);
+      this.strategies.set(providerId, strategy as ProviderStrategy);
+      try {
+        await this.persistMetadata();
+      } catch (error) {
+        this.strategies = previous;
+        throw error;
+      }
+    });
+  }
+
   async remove(connectionId: string) {
     return this.withMutation(async () => {
       await this.ensureLoaded();
@@ -524,7 +558,9 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       readOptionalText(this.metadataPath, maxMetadataBytes),
       readOptionalText(this.secretsPath, maxSecretEnvelopeBytes),
     ]);
-    this.connections = parseMetadata(metadataText);
+    const parsedMetadata = parseMetadata(metadataText);
+    this.connections = parsedMetadata.connections;
+    this.strategies = parsedMetadata.strategies;
     this.credentials = secretText ? await this.decryptSecrets(secretText) : new Map<ProviderId, ProviderCredential>();
     // Credentials are keyed by connection id, so a stored key that matches no
     // credential-bearing connection is an orphan. For a single-connection
@@ -545,7 +581,8 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   }
 
   private async persistMetadata() {
-    const payload = JSON.stringify({ version: metadataVersion, connections: [...this.connections.values()] } satisfies MetadataEnvelope, null, 2) + '\n';
+    const strategies = Object.fromEntries(this.strategies);
+    const payload = JSON.stringify({ version: metadataVersion, connections: [...this.connections.values()], ...(this.strategies.size > 0 ? { strategies } : {}) } satisfies MetadataEnvelope, null, 2) + '\n';
     if (Buffer.byteLength(payload, 'utf8') > maxMetadataBytes) throw new ConnectionMetadataLimitError();
     await atomicWrite(this.metadataPath, payload);
   }
@@ -699,7 +736,7 @@ function isSafeModelId(value: string) {
 }
 
 function parseMetadata(value: string | undefined) {
-  if (!value) return new Map<string, ConnectionRecord>();
+  if (!value) return { connections: new Map<string, ConnectionRecord>(), strategies: new Map<string, ProviderStrategy>() };
   let parsed: unknown;
   try {
     parsed = JSON.parse(value) as unknown;
@@ -715,7 +752,15 @@ function parseMetadata(value: string | undefined) {
     if (connections.has(record.id)) throw new Error('Local connection metadata contains duplicate IDs.');
     connections.set(record.id, record);
   }
-  return connections;
+  const strategies = new Map<string, ProviderStrategy>();
+  if (parsed.strategies !== undefined) {
+    if (!isRecord(parsed.strategies)) throw new Error('Local connection metadata has an invalid strategy map.');
+    for (const [providerId, strategy] of Object.entries(parsed.strategies)) {
+      if (!providerStrategies.includes(strategy as ProviderStrategy)) throw new Error('Local connection metadata contains an unknown provider strategy.');
+      strategies.set(providerId, strategy as ProviderStrategy);
+    }
+  }
+  return { connections, strategies };
 }
 
 function parseRecord(value: unknown): ConnectionRecord {

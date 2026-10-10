@@ -191,6 +191,8 @@ export class GatewayService {
    * class, so a routing change looked like a service change.
    */
   private readonly routing: RoutingEngine;
+  /** Each provider's strategy, synchronous for routing. Loaded from the store and updated only through this service. */
+  private readonly providerStrategies = new Map<string, 'priority' | 'round-robin'>();
   /**
    * What this gateway serves, and which provider serves what.
    *
@@ -278,6 +280,7 @@ export class GatewayService {
       rateLimiter: this.rateLimiter,
       defaultProviderId,
       requireAdapter: (providerId) => { this.requireAdapter(providerId); },
+      strategyFor: (providerId) => this.providerStrategies.get(providerId) ?? 'priority',
     });
     this.models = new ModelCatalog({
       connections: this.connections,
@@ -403,6 +406,28 @@ export class GatewayService {
         this.healthManager.noteLoginRefused(connection.providerId, 'The login needs sign-in again: refresh was refused.');
       },
     });
+  }
+
+  /** A provider's connection strategy: `priority` (the default) or `round-robin`. */
+  providerStrategy(providerId: string): 'priority' | 'round-robin' {
+    return this.providerStrategies.get(providerId) ?? 'priority';
+  }
+
+  /** Reads the saved strategies into routing. Called at startup so a restart keeps every choice in effect. */
+  async loadProviderStrategies(): Promise<void> {
+    const store = this.connectionStore as { allStrategies?: () => Promise<Array<[string, string]>> } | undefined;
+    if (!store?.allStrategies) return;
+    for (const [providerId, strategy] of await store.allStrategies()) {
+      this.providerStrategies.set(providerId, strategy as 'priority' | 'round-robin');
+    }
+  }
+
+  /** Changes a provider's strategy. Routing reads the change on the next request, with no restart. */
+  async setProviderStrategy(providerId: string, strategy: string): Promise<void> {
+    const store = this.connectionStore as { setStrategy?: (id: string, value: string) => Promise<void> } | undefined;
+    if (!store?.setStrategy) throw new ProviderError('CONFIGURATION_ERROR', 'Provider strategies are not stored by this connection store.');
+    await store.setStrategy(providerId, strategy);
+    this.providerStrategies.set(providerId, strategy as 'priority' | 'round-robin');
   }
 
   /** How often background health polling runs. 0 keeps polling off. */

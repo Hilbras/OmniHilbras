@@ -779,3 +779,20 @@ test('the routing engine alternates balanced connections across requests, and le
   const fixed = [await pick(unbalanced), await pick(unbalanced)];
   assert.deepEqual(fixed, ['c-a', 'c-a'], 'without balancing the engine keeps the name order');
 });
+
+test('a provider set to round-robin balances all its connections, without each one needing the flag', async () => {
+  const { RoutingEngine } = await import('../dist/routing-engine.js');
+  const { SlidingWindowRateLimiter } = await import('../dist/index.js');
+  const health = new HealthRegistry(() => Date.now(), 60_000);
+  const resilience = { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 };
+  const connections = [
+    { id: 'c-a', providerId: 'p', name: 'Alpha', priority: 1, balance: false, enabled: true, hasCredential: true, modelIds: ['m'], resilience },
+    { id: 'c-b', providerId: 'p', name: 'Beta', priority: 1, balance: false, enabled: true, hasCredential: true, modelIds: ['m'], resilience },
+  ];
+  const strategies = new Map([['p', 'round-robin']]);
+  const engine = new RoutingEngine({ health: { getFailureThreshold: () => 3, registry: () => health }, rateLimiter: new SlidingWindowRateLimiter(), defaultProviderId: 'p', requireAdapter: () => {}, strategyFor: (providerId) => strategies.get(providerId) ?? 'priority' });
+  const pick = async () => (await engine.plan({ connections, model: 'm' })).candidates[0].connectionId;
+  const firsts = [await pick(), await pick(), await pick(), await pick()];
+  assert.equal(firsts[0] === firsts[1], false, 'the provider strategy alternates its connections without the per-connection flag');
+  assert.deepEqual(firsts, [firsts[0], firsts[1], firsts[0], firsts[1]]);
+});
