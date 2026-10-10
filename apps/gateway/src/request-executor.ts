@@ -84,6 +84,12 @@ const terminalRouteCodes = new Set(['INVALID_REQUEST', 'AUTHENTICATION_FAILED', 
 export type RequestExecutorDeps = {
   /** Which providers could serve this model, in preference order. */
   planRoute: (model: string, explicitProviderId?: string) => Promise<RouteDecision>;
+  /**
+   * Test seam, never set in production: runs after a route is planned and before anything is dispatched, so a
+   * test can use up a connection's budget in the gap between planning and dispatch. That gap is the only place a
+   * route can be refused at dispatch, and it is too narrow to hit reliably without this.
+   */
+  afterPlan?: () => Promise<void> | void;
   /** Sends one request to one provider. */
   chat: (providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope) => Promise<ChatResponse>;
   /** Opens a stream with one provider. Only the first chunk is a failover decision point. */
@@ -126,6 +132,7 @@ export class RequestExecutor {
 
   async chat(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayChatOutcome> {
     const decision = await this.deps.planRoute(request.model, explicitProviderId);
+    await this.deps.afterPlan?.();
     if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
     const attempts: GatewayFailoverAttempt[] = [];
     const race = await this.tryHedgedRace(decision.candidates, request, signal, scope);
@@ -246,11 +253,14 @@ export class RequestExecutor {
         } catch (error) {
           const code = error instanceof ProviderError ? error.code : 'RATE_LIMITED';
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs: 0, errorCode: code });
-          throw new ProviderError(
+          // Nothing was sent, so this connection is skipped and the next route is tried. The refusal is kept as
+          // the last error, and is what the caller sees only if no route answers.
+          lastError = new ProviderError(
             code,
             `The connection is at its rate limit.${code === 'RATE_LIMITED' ? '' : ''}`,
             { retryable: false, publicMessage: 'This connection is at its rate limit. Wait for the window to reset.', cause: error },
           );
+          break;
         }
         try {
           // Counted here, at dispatch, rather than on success: a request that was sent and then

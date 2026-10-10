@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore, createGatewayServer } from '../dist/index.js';
 import { RequestExecutor } from '../dist/request-executor.js';
-import { InMemorySecretStore, ProviderRegistry } from '@hilbras/omnihilbras';
+import { InMemorySecretStore, ProviderError, ProviderRegistry } from '@hilbras/omnihilbras';
 
 /**
  * Two execution-correctness defects, both found by measurement and both proven here first.
@@ -635,4 +635,43 @@ test('a leader that fails before the hedge fires still reaches the next route, i
   assert.equal(response.status, 200, 'the backup route answers once the leader has failed');
   const body = await response.json();
   assert.equal(body.choices[0].message.content, 'backup');
+});
+
+test('a route that hits its rate limit between planning and dispatch hands the request on, instead of ending it', async (t) => {
+  // The planner sees B with budget. The test then uses up B's one call after planning and before dispatch, so
+  // B's dispatch is refused. That refusal must move the request on to C, not end the chain.
+  const calls = [];
+  const a = scripted('a', {
+    calls,
+    chat: async () => { throw new ProviderError('PROVIDER_UNAVAILABLE', 'down', { providerId: 'a', retryable: true }); },
+    async *stream() { yield { id: 'c', providerId: 'a', model: 'm', content: 'x' }; },
+  });
+  const b = scripted('b', {
+    calls,
+    chat: async () => ({ id: 'r', providerId: 'b', model: 'm', createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'b' }, finishReason: 'stop' }),
+    async *stream() { yield { id: 'c', providerId: 'b', model: 'm', content: 'x' }; },
+  });
+  const c = scripted('c', {
+    calls,
+    chat: async () => ({ id: 'r', providerId: 'c', model: 'm', createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'from-c' }, finishReason: 'stop' }),
+    async *stream() { yield { id: 'c', providerId: 'c', model: 'm', content: 'x' }; },
+  });
+  const limited = { maxRetries: 0, requestsPerMinute: 1, timeoutMs: 5_000, hedgeAfterMs: 0 };
+  const open = { maxRetries: 0, requestsPerMinute: 100, timeoutMs: 5_000, hedgeAfterMs: 0 };
+  const { base, auth, service } = await serve(t, [a, b, c], [
+    { input: { id: 'a', providerId: 'a', name: 'A', endpoint: 'https://a.example/v1', priority: 1, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: open }, credential: { type: 'api-key', value: 'k' } },
+    { input: { id: 'b', providerId: 'b', name: 'B', endpoint: 'https://b.example/v1', priority: 2, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: limited }, credential: { type: 'api-key', value: 'k' } },
+    { input: { id: 'c', providerId: 'c', name: 'C', endpoint: 'https://c.example/v1', priority: 3, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: open }, credential: { type: 'api-key', value: 'k' } },
+  ], { failureThreshold: 3 });
+
+  // After the plan, B's single call is spent, so the dispatch to B is refused by the limiter.
+  service.testAfterPlan = () => { service.rateLimiter.record('b'); };
+  const response = await fetch(`${base}/v1/chat/completions`, {
+    method: 'POST', headers: { 'content-type': 'application/json', ...auth },
+    body: JSON.stringify({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+  });
+  service.testAfterPlan = undefined;
+  assert.equal(response.status, 200, 'the request refused at B\'s dispatch is answered by C, not ended');
+  const body = await response.json();
+  assert.equal(body.choices[0].message.content, 'from-c');
 });

@@ -163,6 +163,8 @@ export class GatewayService {
    * it performs is one of this service's methods, passed in above.
    */
   private readonly requests: RequestExecutor;
+  /** Test seam only. Undefined in production; see `RequestExecutorDeps.afterPlan`. */
+  testAfterPlan?: () => Promise<void> | void;
   /**
    * The credential surface a request is made with, and which connection serves a provider.
    *
@@ -284,6 +286,7 @@ export class GatewayService {
     this.timeouts = new TimeoutPolicy();
     this.requests = new RequestExecutor({
       planRoute: (model, explicitProviderId) => this.planRoute(model, explicitProviderId),
+      afterPlan: () => this.testAfterPlan?.(),
       chat: (providerId, request, signal, scope) => this.chat(providerId, request, signal, scope),
       streamChat: (providerId, request, signal, scope) => this.streamChat(providerId, request, signal, scope),
       embed: (providerId, request, signal, scope) => this.embed(providerId, request, signal, scope),
