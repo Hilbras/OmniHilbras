@@ -4812,6 +4812,43 @@ dead button — is one no unit test was watching.
 
 ---
 
+## 1.80.0 — routing: model names, aliases, balancing, the Responses API, and per-model cooldowns
+
+### Routing and models
+
+- A model name matches the connection that lists it whatever its spelling: `claude-sonnet-4.5`, `claude-sonnet-4-5` and `claude-sonnet-4-5(high)` reach the same connection.
+- A saved model alias routes to its target provider and sends the model that provider publishes.
+- A bare model name that no connection lists routes only within its declared family (`claude`, `gpt`, `gemini`). `claude-x` with only an OpenAI connection is refused rather than billed to OpenAI.
+- A provider can be set to `round-robin`, so its connections take turns. The choice is saved in `connections.json`, reported under `GET /v1/routing`, and set with `PUT /v1/providers/:id/strategy`.
+- A connection can opt into balancing with a per-connection flag.
+- A rate limit cools one model on one provider, using the provider's `Retry-After` (capped at 30 minutes).
+
+### Accounts and renewal
+
+- OAuth tokens near expiry are renewed on a timer that starts with the server and stops first on shutdown.
+- A refused renewal marks the login as needing sign-in and shows the reason, without ejecting the provider.
+- Cline and ClinePass sharing one login spend one refresh, not one each.
+- Renewal memo maps hold at most 64 entries.
+
+### API
+
+- `POST /v1/responses` serves the OpenAI Responses shape for Codex-style clients, through the chat path. Streaming is refused with 400 for now.
+
+### Verify
+
+- `pnpm verify` exit 0 at 1.80.0.
+- Gateway 645/645, SDK 610/610, guards 162/162 at the last full run.
+
+### Still unverified
+
+- Streamed `/v1/responses` is not built; `stream: true` is refused.
+- A Responses tool round has not been sent live.
+- Only Anthropic, Gemini and OpenAI declare a model family; other providers keep the old fallback for bare names.
+- A prefixed name such as `anthropic/claude-x` with only OpenAI connected still routes to OpenAI; the family rule covers bare names only.
+- The dispatch test that reads the model sent to the adapter for an alias has not been written.
+- The live gateway has not been restarted on the alias routing or the provider strategy UI, and no real provider has been set to round-robin.
+- The dashboard control for the provider strategy has been built and type-checked, but not looked at in a browser.
+
 ## 1.79.0 — the agent path: tool rounds, reasoning, token saving, health, Anthropic errors
 
 ### Tool rounds and reasoning
