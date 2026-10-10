@@ -87,6 +87,16 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
     return true;
   }
 
+  for (const name of ['since', 'until'] as const) {
+    const value = url.searchParams.get(name);
+    if (value !== null && value !== '' && Number.isNaN(Date.parse(value))) {
+      sendJson(response, 400, {
+        error: { code: 'INVALID_REQUEST', message: `${name} must be a date, for example 2026-01-01T00:00:00Z.` },
+      }, origin);
+      return true;
+    }
+  }
+
   try {
     const summary = await store.summary({
       ...(url.searchParams.get('provider') ? { providerId: url.searchParams.get('provider')! } : {}),

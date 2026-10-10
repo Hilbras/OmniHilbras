@@ -237,6 +237,19 @@ test('an unknown outcome or a malformed limit is a 400, not a filter that matche
   assert.equal((await gw.getUsage('?limit=5')).status, 200);
 });
 
+test('a since or until that is not a date is a 400, not a filter that is silently dropped', async (t) => {
+  const gw = await gateway();
+  t.after(gw.close);
+  await gw.post();
+
+  for (const query of ['?since=yesterday', '?until=not-a-date', '?since=2026-13-45']) {
+    const response = await gw.getUsage(query);
+    assert.equal(response.status, 400, `${query} must be refused`);
+    assert.equal((await response.json()).error.code, 'INVALID_REQUEST');
+  }
+  assert.equal((await gw.getUsage('?since=2026-01-01T00:00:00Z&until=2030-01-01')).status, 200);
+});
+
 test('paging moves through the list while the totals still cover every record', async (t) => {
   const gw = await gateway();
   t.after(gw.close);
