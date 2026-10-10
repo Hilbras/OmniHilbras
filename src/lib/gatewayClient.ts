@@ -657,6 +657,38 @@ export type GatewayUsage = {
   cost?: GatewayUsageCost;
 };
 
+/** One finished request, as `GET /v1/logs/stream` sends it. No message content, prompt or credential. */
+export type GatewayLogEvent = {
+  id: string;
+  at: string;
+  model: string;
+  providerId?: string;
+  connectionId?: string;
+  outcome: 'success' | 'failure' | 'cancelled';
+  errorCode?: string;
+  attempts: number;
+  latencyMs: number;
+  requestId?: string;
+};
+
+/**
+ * Opens the live request stream. Each finished request is passed to `onEvent`; `onState` reports whether the stream is
+ * connected. Returns a function that closes it.
+ */
+export function openGatewayLogStream(onEvent: (event: GatewayLogEvent) => void, onState: (connected: boolean) => void): () => void {
+  const source = new EventSource('/v1/logs/stream');
+  source.onopen = () => onState(true);
+  source.onerror = () => onState(false);
+  source.onmessage = (message) => {
+    try {
+      onEvent(JSON.parse(message.data) as GatewayLogEvent);
+    } catch {
+      // A line that is not a record is skipped, not shown.
+    }
+  };
+  return () => source.close();
+}
+
 export function getGatewayUsage(query?: { outcome?: 'success' | 'failure' | 'cancelled'; limit?: number; offset?: number }, signal?: AbortSignal) {
   const params = new URLSearchParams();
   if (query?.outcome) params.set('outcome', query.outcome);

@@ -6,6 +6,7 @@ import { ProviderDetailContent, fallbackProvider } from './pages/ProviderDetailP
 import { ProvidersContent } from './pages/ProvidersPage';
 import { RoutingContent } from './pages/RoutingPage';
 import { UsageContent } from './pages/UsagePage';
+import { LogsContent } from './pages/LogsPage';
 import { SettingsContent } from './pages/SettingsPage';
 
 /** Public path the dashboard is served under. Every route hangs off it. */
@@ -81,6 +82,7 @@ function DashboardRoutes() {
           <Route path="/routing" element={<RoutingContent />} />
           <Route path="/keys" element={<ApiKeysContent />} />
           <Route path="/usage" element={<UsageContent />} />
+          <Route path="/logs" element={<LogsContent />} />
           <Route path="/settings" element={<SettingsContent />} />
           <Route path="*" element={<Navigate to="/providers" replace />} />
         </Routes>

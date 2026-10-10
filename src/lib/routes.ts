@@ -28,6 +28,8 @@ export const dashboardRoutes = {
   usage: '/usage',
   /** Added in 1.65.0, with `GET /v1/settings` — see `SettingsPage.tsx`. */
   settings: '/settings',
+  /** Added in 1.81.0, with `GET /v1/logs/stream` — see `LogsPage.tsx`. */
+  logs: '/logs',
 } as const;
 
 export function providerRoute(providerId: string) {

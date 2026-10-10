@@ -32,7 +32,7 @@ import { useGatewayStatus } from '../lib/useGatewayStatus';
  * it. `tests/marketing-claims.test.js` pins which entries are still disabled, so this comment going stale
  * fails a test rather than misleading the next reader quietly.
  */
-type DashboardPage = 'overview' | 'providers' | 'routing' | 'keys' | 'usage' | 'settings';
+type DashboardPage = 'overview' | 'providers' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings';
 
 type SidebarItem = {
   label: string;
@@ -56,6 +56,7 @@ const insightItems: SidebarItem[] = [
   // gateway's usage store both landed — the nav had been saying so honestly for longer than the
   // data existed.
   { label: 'Usage', icon: BarChart3, to: '/usage', page: 'usage' },
+  { label: 'Logs', icon: BarChart3, to: '/logs', page: 'logs' },
   { label: 'Request log', icon: ScrollText, to: '/request-log', page: 'overview', pending: true },
   // Real since 1.65.0, when `GET /v1/settings` and the page landed. The last disabled entry:
   // every setting had been an environment variable, so there was nothing to show but a copy of
