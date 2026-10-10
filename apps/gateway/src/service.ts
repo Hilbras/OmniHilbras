@@ -10,7 +10,7 @@ import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSign
 import { createChatGptWebDriver } from './chatgptWeb.js';
 import { SlidingWindowRateLimiter, bareModelFor, type RouteCandidate } from './routing.js';
 import { HealthManager } from './health.js';
-import { TokenRenewal } from './token-renewal.js';
+import { TokenRenewal, classifyRenewalFailure } from './token-renewal.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
 import { assertPublicDestination } from './destination-check.js';
@@ -395,7 +395,14 @@ export class GatewayService {
         if (expiring !== true) return;
         await adapter.validateCredential?.(credential, context);
       },
-    }, { windowMs: renewalWindowMs, ...(intervalMs === undefined ? {} : { intervalMs }) });
+    }, {
+      windowMs: renewalWindowMs,
+      ...(intervalMs === undefined ? {} : { intervalMs }),
+      onError: (connection, error) => {
+        if (classifyRenewalFailure(error) !== 'needs-sign-in') return;
+        this.healthManager.noteLoginRefused(connection.providerId, 'The login needs sign-in again: refresh was refused.');
+      },
+    });
   }
 
   /** How often background health polling runs. 0 keeps polling off. */

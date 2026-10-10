@@ -1,3 +1,6 @@
+import { ProviderError } from '@hilbras/omnihilbras';
+import { isRetryableFailure } from './routing.js';
+
 /**
  * Renews OAuth tokens before they expire, on a timer of its own, so an idle connection is still live when the next
  * burst of requests arrives.
@@ -6,6 +9,18 @@
  * function that refreshes one; this file decides only which connections are due and runs the pass. A connection
  * that fails to renew is skipped for this pass and the others still renew.
  */
+
+/**
+ * What a failed renewal means for the connection.
+ *
+ * A refused refresh (the gateway's non-retryable codes: a rejected credential, a bad request) means the login is dead
+ * and the user has to sign in again, so the connection is marked. Anything else is treated as transient: an outage or
+ * an unknown failure keeps the credential, because a live token is not thrown away over a network blip.
+ */
+export function classifyRenewalFailure(error: unknown): 'needs-sign-in' | 'retry-later' {
+  if (!(error instanceof ProviderError)) return 'retry-later';
+  return isRetryableFailure(error) ? 'retry-later' : 'needs-sign-in';
+}
 
 export type RenewableConnection = {
   id: string;

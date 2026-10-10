@@ -132,6 +132,15 @@ export class HealthRegistry {
     this.state.set(providerId, { failures: 0, successes: current.successes + 1, lastCheckedAt: checkedAt, lastLatencyMs: latencyMs });
   }
 
+  /**
+   * A refused login is a fact about one connection's credential, not about the provider's health: the provider's other
+   * connections may be fine. The reason is kept for the dashboard, without counting toward ejecting the provider.
+   */
+  noteLoginRefused(providerId: string, reason: string) {
+    const current = this.state.get(providerId) ?? { failures: 0, successes: 0 };
+    this.state.set(providerId, { ...current, lastError: `AUTHENTICATION_FAILED: ${reason}` });
+  }
+
   recordFailure(providerId: string, errorCode: string, errorMessage: string) {
     const current = this.state.get(providerId) ?? { failures: 0, successes: 0 };
     this.state.set(providerId, { ...current, failures: current.failures + 1, lastFailureAt: this.now(), lastCheckedAt: new Date().toISOString(), lastError: `${errorCode}: ${errorMessage}` });

@@ -129,6 +129,10 @@ export class HealthManager {
     this.registry.recordSuccess(providerId, latencyMs, checkedAt);
   }
 
+  noteLoginRefused(providerId: string, reason: string) {
+    this.registry.noteLoginRefused(providerId, reason);
+  }
+
   recordFailure(providerId: string, code: string, message: string) {
     this.registry.recordFailure(providerId, code, message);
   }
