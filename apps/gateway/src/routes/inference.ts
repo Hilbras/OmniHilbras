@@ -519,6 +519,7 @@ export function parseChatRequest(body: unknown): ChatRequest {
   const maxOutputTokens = parseMaxTokens(body);
   const stop = parseStop(body);
   const tools = parseTools(body.tools);
+  const toolChoice = parseToolChoice(body.tool_choice);
   const providerOptions = body.provider_options === undefined ? undefined : parseProviderOptions(body.provider_options);
 
   return {
@@ -530,6 +531,7 @@ export function parseChatRequest(body: unknown): ChatRequest {
     ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
     ...(stop !== undefined ? { stop } : {}),
     ...(tools ? { tools } : {}),
+    ...(toolChoice ? { toolChoice } : {}),
     ...(providerOptions ? { providerOptions } : {}),
   };
 }
@@ -616,6 +618,13 @@ export function parseTool(value: unknown): ToolDefinition {
   };
 }
 
+
+/** The tool-use policy a client may send. Anything else is refused, rather than forwarded to a provider that may read it as a default. */
+export function parseToolChoice(value: unknown): 'auto' | 'none' | 'required' | undefined {
+  if (value === undefined) return undefined;
+  if (value === 'auto' || value === 'none' || value === 'required') return value;
+  throw invalidRequest('tool_choice must be auto, none or required.');
+}
 
 export function parseTools(value: unknown): ToolDefinition[] | undefined {
   if (value === undefined) return undefined;

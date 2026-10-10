@@ -70,6 +70,8 @@ export type ChatRequest = {
   stop?: readonly string[];
   stream?: boolean;
   tools?: readonly ToolDefinition[];
+  /** Whether the model may, must, or must not call a tool. Absent leaves the provider's default. */
+  toolChoice?: 'auto' | 'none' | 'required';
   providerOptions?: Record<string, unknown>;
 };
 

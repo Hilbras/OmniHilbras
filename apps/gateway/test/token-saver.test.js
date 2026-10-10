@@ -6,6 +6,8 @@ import { GatewayService, createGatewayServer } from '../dist/index.js';
 // A long tool result is resent on every turn of an agent loop. The gateway shortens it before the provider sees it,
 // unless the client opts out for one request with `x-omnihilbras-token-saver: off`. A failure trace is never shortened.
 
+let lastRequest;
+
 function recordingAdapter(seen) {
   return {
     id: 'fake',
@@ -15,6 +17,7 @@ function recordingAdapter(seen) {
     async healthCheck() { return { status: 'healthy', checkedAt: new Date().toISOString() }; },
     async chat(request) {
       seen.push(request.messages);
+      lastRequest = request;
       return { id: 'r', providerId: 'fake', model: request.model, createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'ok' }, finishReason: 'stop', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
     },
   };
@@ -93,4 +96,14 @@ test('the savings log reports a byte count for the request and never prints tool
   assert.equal(saver.length, 1, 'one line per compressed request');
   assert.match(saver[0], /saved \d+ bytes of tool output/);
   assert.equal(lines.some((line) => line.includes(marker)), false, 'no tool content reaches the log');
+});
+
+test('a tool_choice from the client reaches the provider, and an unknown choice is refused with 400', async (t) => {
+  const seen = [];
+  const base = await start(t, seen);
+  const ok = await post(base, { ...body(longGrep.slice(0, 40)), tool_choice: 'none' });
+  assert.equal(ok.status, 200);
+  assert.equal(lastRequest.toolChoice, 'none', 'the adapter receives the client\'s choice');
+  const bad = await post(base, { ...body(longGrep.slice(0, 40)), tool_choice: 'sometimes' });
+  assert.equal(bad.status, 400, 'a choice the gateway does not know is refused, not forwarded');
 });

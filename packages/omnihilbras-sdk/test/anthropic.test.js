@@ -153,3 +153,16 @@ test('AnthropicAdapter requires an API key', async () => {
     (error) => error instanceof ProviderError && error.code === 'AUTHENTICATION_FAILED',
   );
 });
+
+test('a toolChoice of none reaches Anthropic as tool_choice none, so the model is told not to call a tool', async () => {
+  const transport = createTransport();
+  const adapter = new AnthropicAdapter({ transport });
+  await adapter.chat({
+    model: 'claude-sonnet-4',
+    messages: [{ role: 'user', content: 'answer without tools' }],
+    tools: [{ name: 'get_weather', parameters: { type: 'object' } }],
+    toolChoice: 'none',
+  }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  const body = JSON.parse(transport.calls[0].body);
+  assert.deepEqual(body.tool_choice, { type: 'none' }, 'the caller\'s choice reaches the provider');
+});

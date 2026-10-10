@@ -205,3 +205,28 @@ test('an assistant turn without reasoning is sent exactly as before', async () =
   const sent = JSON.parse(transport.calls[0].body).messages;
   assert.equal('reasoning_content' in sent[1], false, 'no reasoning field is invented');
 });
+
+test('a toolChoice reaches an OpenAI-compatible provider as tool_choice, unchanged', async () => {
+  const transport = createTransport();
+  const adapter = createAdapter(transport);
+  await adapter.chat({
+    model: 'acme-1',
+    messages: [{ role: 'user', content: 'hi' }],
+    tools: [{ name: 'get_weather', parameters: { type: 'object' } }],
+    toolChoice: 'required',
+  }, { credential: { type: 'api-key', value: 'k' } });
+  const body = JSON.parse(transport.calls[0].body);
+  assert.equal(body.tool_choice, 'required', 'the choice is sent in OpenAI\'s own names');
+});
+
+test('without a toolChoice, the request carries no tool_choice field', async () => {
+  const transport = createTransport();
+  const adapter = createAdapter(transport);
+  await adapter.chat({
+    model: 'acme-1',
+    messages: [{ role: 'user', content: 'hi' }],
+    tools: [{ name: 'get_weather', parameters: { type: 'object' } }],
+  }, { credential: { type: 'api-key', value: 'k' } });
+  const body = JSON.parse(transport.calls[0].body);
+  assert.equal('tool_choice' in body, false, 'the provider keeps its own default');
+});

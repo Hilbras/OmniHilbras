@@ -262,6 +262,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     if (request.topP !== undefined) body.top_p = request.topP;
     if (request.stop !== undefined) body.stop_sequences = request.stop;
     if (request.tools !== undefined) body.tools = request.tools.map(toAnthropicTool);
+    if (request.toolChoice !== undefined) body.tool_choice = toAnthropicToolChoice(request.toolChoice);
     return body;
   }
 
@@ -339,6 +340,11 @@ function contentToText(content: MessageContent) {
   if (typeof content === 'string') return content;
   if (content === null) return '';
   return content.filter((part) => part.type === 'text').map((part) => part.text).join('');
+}
+
+/** Anthropic names a required tool call `any`; the other two choices carry the same meaning under the same names. */
+function toAnthropicToolChoice(choice: 'auto' | 'none' | 'required') {
+  return { type: choice === 'required' ? 'any' : choice };
 }
 
 function toAnthropicTool(tool: ToolDefinition) {

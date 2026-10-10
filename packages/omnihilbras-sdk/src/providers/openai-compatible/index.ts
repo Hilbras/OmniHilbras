@@ -362,6 +362,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     if (request.maxOutputTokens !== undefined) body[this.maxTokensField] = request.maxOutputTokens;
     if (request.stop !== undefined) body.stop = request.stop;
     if (request.tools !== undefined) body.tools = request.tools.map(toOpenAITool);
+    if (request.toolChoice !== undefined) body.tool_choice = request.toolChoice;
     return body;
   }
 
