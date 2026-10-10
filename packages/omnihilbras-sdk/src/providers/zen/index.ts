@@ -314,7 +314,7 @@ export type ZenAdapterOptions = {
 export class ZenAdapter implements ProviderAdapter {
   readonly id = 'opencode';
   readonly name = 'OpenCode Zen';
-  readonly capabilities = { chat: true, streaming: false, models: true } as const;
+  readonly capabilities = { chat: true, streaming: true, models: true } as const;
   private readonly transport: HttpTransport;
   private readonly chatLane: OpenAICompatibleAdapter;
   private readonly modelsUrl: string;
