@@ -150,6 +150,10 @@ export class HealthManager {
     return this.registry;
   }
 
+  recordModelRateLimit(providerId: string, modelId: string, input: { retryAfterMs?: number }) {
+    this.registry.recordModelRateLimit(providerId, modelId, input);
+  }
+
   /**
    * Polls every active adapter and folds the result into routing state.
    *

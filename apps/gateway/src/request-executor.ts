@@ -120,6 +120,8 @@ export type RequestExecutorDeps = {
   enforceRateLimit: (candidate: RouteCandidate) => void;
   recordSuccess: (providerId: string, latencyMs: number, at: string) => void;
   recordFailure: (providerId: string, code: string, reason: string) => void;
+  /** A rate limit on one model: cools that model on that provider, with the provider's reset time when it gave one. */
+  recordModelRateLimit?: (providerId: string, modelId: string, input: { retryAfterMs?: number }) => void;
   /** Credits a connection for a request that was actually sent. */
   recordRateLimitUse: (connectionId: string) => void;
 };
@@ -137,6 +139,16 @@ export class RequestExecutor {
   private readonly hedges = new HedgePolicy();
 
   constructor(private readonly deps: RequestExecutorDeps) {}
+
+  /**
+   * A rate limit cools the one model that caused it. The provider's reset time is read from the error when it gave
+   * one, so the cooldown matches what the provider asked for rather than a guess.
+   */
+  private noteModelRateLimit(providerId: string, modelId: string, error: ProviderError) {
+    const details = typeof error.details === 'object' && error.details !== null ? error.details as { retryAfterMs?: unknown } : {};
+    const retryAfterMs = typeof details.retryAfterMs === 'number' ? details.retryAfterMs : undefined;
+    this.deps.recordModelRateLimit?.(providerId, modelId, retryAfterMs === undefined ? {} : { retryAfterMs });
+  }
 
   async chat(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayChatOutcome> {
     const decision = await this.deps.planRoute(request.model, explicitProviderId);
@@ -157,8 +169,21 @@ export class RequestExecutor {
       lastError: race?.lastError,
       signal,
       scope,
-      dispatch: (candidate, deadline) => this.deps.chat(candidate.providerId, request, deadline, scope),
+      dispatch: (candidate, deadline) => this.dispatchChat(candidate, request, deadline, scope),
     });
+  }
+
+  /**
+   * One chat attempt. A rate limit cools this model on this provider, and is not recorded as a provider failure:
+   * the provider is still serving its other models.
+   */
+  private async dispatchChat(candidate: RouteCandidate, request: ChatRequest, deadline: AbortSignal | undefined, scope: RequestScope | undefined): Promise<ChatResponse> {
+    try {
+      return await this.deps.chat(candidate.providerId, request, deadline, scope);
+    } catch (error) {
+      if (error instanceof ProviderError && error.code === 'RATE_LIMITED') this.noteModelRateLimit(candidate.providerId, request.model, error);
+      throw error;
+    }
   }
 
   /**
@@ -283,7 +308,7 @@ export class RequestExecutor {
         } catch (error) {
           const latencyMs = Date.now() - startedAt;
           const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
-          if (!isCallerFault(code)) this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.');
+          if (!isCallerFault(code) && code !== 'RATE_LIMITED') this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.');
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs, errorCode: code });
           lastError = error;
           const action = this.retryPolicy.afterFailure({

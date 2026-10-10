@@ -294,6 +294,7 @@ export class GatewayService {
       enforceRateLimit: (candidate) => this.enforceRateLimit(candidate),
       recordSuccess: (providerId, latencyMs, at) => this.healthManager.recordSuccess(providerId, latencyMs, at),
       recordFailure: (providerId, code, reason) => this.healthManager.recordFailure(providerId, code, reason),
+      recordModelRateLimit: (providerId, modelId, input) => this.healthManager.recordModelRateLimit(providerId, modelId, input),
       recordRateLimitUse: (connectionId) => this.rateLimiter.record(connectionId),
     });
     this.providers = new ProviderResolver(registry)

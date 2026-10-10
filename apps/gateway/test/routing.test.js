@@ -721,3 +721,19 @@ test('a request pinned to a provider with no usable connection is refused, not s
   );
   assert.equal(calls.filter((id) => id === 'other').length, 0, 'the other provider must not be called');
 });
+
+test('a rate limit on one model cools that model only, and the provider\'s other models stay routable', () => {
+  // A 429 on one model used to eject the whole provider through its consecutive-failure count, so one busy model
+  // took every other model on that provider out of routing. A rate limit is a fact about one model's quota.
+  let clock = 1_000_000;
+  const health = new HealthRegistry(() => clock, 60_000);
+  const connection = { id: 'c-p', providerId: 'p', name: 'P', priority: 1, enabled: true, hasCredential: true, modelIds: ['busy', 'quiet'], resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 } };
+  for (let i = 0; i < 3; i += 1) health.recordModelRateLimit('p', 'busy', { code: 'RATE_LIMITED', retryAfterMs: 120_000 });
+  const quiet = resolveRoute({ connections: [connection], model: 'quiet', health, failureThreshold: 3 });
+  assert.equal(quiet.candidates.length, 1, 'the quiet model is still routable on the same provider');
+  const busy = resolveRoute({ connections: [connection], model: 'busy', health, failureThreshold: 3 });
+  assert.equal(busy.candidates.length, 0, 'the rate-limited model is skipped during its cooldown');
+  clock += 121_000;
+  const later = resolveRoute({ connections: [connection], model: 'busy', health, failureThreshold: 3 });
+  assert.equal(later.candidates.length, 1, 'after the provider\'s reset time the model is routable again');
+});

@@ -713,3 +713,22 @@ test('a real provider outage still counts against the provider\'s health', async
   await assert.rejects(() => executor.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, undefined));
   assert.deepEqual(health.failure, ['p:PROVIDER_UNAVAILABLE'], 'an outage is still recorded');
 });
+
+test('a 429 cools that model on that provider, with the provider\'s reset time, and does not count as a provider failure', async () => {
+  const cooled = [];
+  const health = { failure: [] };
+  const candidates = [{ providerId: 'p', connectionId: 'c-p', priority: 1, modelIds: ['m'], resilience: { maxRetries: 0, requestsPerMinute: 100, timeoutMs: 5_000, hedgeAfterMs: 0 } }];
+  const executor = new RequestExecutor({
+    planRoute: async () => ({ candidates }),
+    chat: async () => { throw new ProviderError('RATE_LIMITED', 'limited', { providerId: 'p', retryable: true, details: { retryAfterMs: 120_000 } }); },
+    streamChat: async function* () {},
+    withDeadline: (signal, _ms, _id, run) => run(signal),
+    enforceRateLimit: () => {},
+    recordRateLimitUse: () => {},
+    recordSuccess: () => {},
+    recordFailure: (id, code) => health.failure.push(`${id}:${code}`),
+    recordModelRateLimit: (providerId, modelId, input) => cooled.push({ providerId, modelId, ...input }),
+  });
+  await assert.rejects(() => executor.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, undefined));
+  assert.deepEqual(cooled, [{ providerId: 'p', modelId: 'm', retryAfterMs: 120_000 }], 'the model is cooled with the reset time the provider gave');
+});

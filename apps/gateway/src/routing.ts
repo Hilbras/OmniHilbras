@@ -2,7 +2,7 @@ import { ProviderError, providerSlug } from '@hilbras/omnihilbras';
 import type { ConnectionRecord, ResilienceSettings } from './connections.js';
 
 /** Why a candidate was skipped, so the gateway can explain the decision. */
-export type RouteSkipReason = 'disabled' | 'no-credential' | 'unhealthy' | 'rate-limited' | 'no-models';
+export type RouteSkipReason = 'disabled' | 'no-credential' | 'unhealthy' | 'rate-limited' | 'model-cooling-down' | 'no-models';
 
 export type RouteCandidate = {
   providerId: string;
@@ -110,9 +110,17 @@ export type ProviderOutcome = {
  */
 /** How long an ejected provider waits before one probe request is allowed. */
 const defaultRecoveryCooldownMs = 30_000;
+const defaultModelCooldownMs = 60_000;
+const maxModelCooldownMs = 30 * 60_000;
+
+function modelKey(providerId: string, modelId: string) {
+  return `${providerId}:${modelId}`;
+}
 
 export class HealthRegistry {
   private readonly state = new Map<string, { failures: number; successes: number; lastFailureAt?: number; lastCheckedAt?: string; lastLatencyMs?: number; lastError?: string }>();
+  /** Rate-limit cooldowns per `provider:model`, until a time in the registry's clock. */
+  private readonly modelCooldowns = new Map<string, number>();
 
   constructor(
     private readonly now: () => number = () => Date.now(),
@@ -127,6 +135,20 @@ export class HealthRegistry {
   recordFailure(providerId: string, errorCode: string, errorMessage: string) {
     const current = this.state.get(providerId) ?? { failures: 0, successes: 0 };
     this.state.set(providerId, { ...current, failures: current.failures + 1, lastFailureAt: this.now(), lastCheckedAt: new Date().toISOString(), lastError: `${errorCode}: ${errorMessage}` });
+  }
+
+  /**
+   * A rate limit is a fact about one model's quota, so it cools that model alone. The provider's reset time
+   * (`Retry-After`) is used when it gave one; otherwise a default, capped, so one bad header cannot park a model for hours.
+   */
+  recordModelRateLimit(providerId: string, modelId: string, input: { retryAfterMs?: number } = {}) {
+    const waitMs = Math.min(input.retryAfterMs ?? defaultModelCooldownMs, maxModelCooldownMs);
+    this.modelCooldowns.set(modelKey(providerId, modelId), this.now() + waitMs);
+  }
+
+  isModelCoolingDown(providerId: string, modelId: string) {
+    const until = this.modelCooldowns.get(modelKey(providerId, modelId));
+    return until !== undefined && this.now() < until;
   }
 
   /**
@@ -261,6 +283,10 @@ export function resolveRoute(input: {
   for (const connection of fallbackPool) {
     if (input.health.isUnhealthy(connection.providerId, input.failureThreshold)) {
       skipped.push({ providerId: connection.providerId, reason: 'unhealthy' });
+      continue;
+    }
+    if (input.health.isModelCoolingDown(connection.providerId, modelId)) {
+      skipped.push({ providerId: connection.providerId, reason: 'model-cooling-down' });
       continue;
     }
     const waitMs = input.rateLimitWaitMs?.get(connection.id) ?? 0;
