@@ -25,7 +25,7 @@ import { notSupported } from './capability.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
-import type { UsageStore } from './usage-store.js';
+import type { UsageRecord, UsageStore } from './usage-store.js';
 import { modelMetaPriceOrder } from './connections.js';
 
 function pricingFromConnection(connection: ConnectionRecord | undefined, model: string): ModelPricing | undefined {
@@ -258,7 +258,7 @@ export class GatewayService {
     deployment: DeploymentConfig = localDeployment(),
   ) {
     this.deploymentConfig = deployment;
-    this.usageStore = options.usageStore;
+    this.usageStore = options.usageStore ? this.publishingUsage(options.usageStore) : undefined;
     this.gatewayConfig = options.config;
     // Kept, not just read: the ChatGPT Web driver is built lazily on first use, long after
     // the constructor has returned, so the override has to outlive this call.
@@ -1580,6 +1580,34 @@ export class GatewayService {
    */
   get usage(): UsageStore | undefined {
     return this.usageStore;
+  }
+
+  /** Each finished request's record, as it is written, to a listener. Returns how to stop listening. */
+  onUsageRecorded(listener: (record: UsageRecord) => void): () => void {
+    this.usageListeners.add(listener);
+    return () => { this.usageListeners.delete(listener); };
+  }
+
+  private readonly usageListeners = new Set<(record: UsageRecord) => void>();
+
+  /** Wraps the store so every write is also delivered to the listeners. The store itself is unchanged. */
+  private publishingUsage(store: UsageStore): UsageStore {
+    const listeners = this.usageListeners;
+    return new Proxy(store, {
+      get(target, property) {
+        if (property === 'record') {
+          return async (entry: Parameters<UsageStore['record']>[0]) => {
+            const record = await target.record(entry);
+            for (const listener of listeners) {
+              try { listener(record); } catch { /* a listener must not fail the request */ }
+            }
+            return record;
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
   }
 
   /**

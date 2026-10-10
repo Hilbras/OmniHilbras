@@ -10,6 +10,7 @@ import { extractApiKey, handleInferenceRoute } from './routes/inference.js';
 import { handleOauthRoute } from './routes/oauth.js';
 import { handleStatusRoute } from './routes/status.js';
 import { handleUsageRoute } from './routes/usage.js';
+import { handleLogsRoute } from './routes/logs.js';
 import { handleSettingsRoute } from './routes/settings.js';
 import type { RouteContext } from './routes/route-context.js';
 import type { ApiKeyStore } from './api-keys.js';
@@ -53,6 +54,7 @@ const routes = [
   handleOauthRoute,
   handleApiKeysRoute,
   handleUsageRoute,
+  handleLogsRoute,
   handleSettingsRoute,
   // Last, because it carries the authentication gate for the LLM surface and must not shadow
   // anything above.
@@ -248,7 +250,7 @@ export async function startGatewayServer(options: {
  * were already reachable, because `authorize()` returns before it can refuse anything. What changed is that
  * a gateway *with* keys enforced now answers the navigation the same way a gateway without them does.
  */
-const MANAGEMENT_PREFIXES = ['/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers'] as const;
+const MANAGEMENT_PREFIXES = ['/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs'] as const;
 
 function isManagementPath(pathname: string) {
   return MANAGEMENT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
