@@ -56,6 +56,37 @@ test('the stream path is checked too, not only the request path', async () => {
   assert.equal(calls.length, 0);
 });
 
+test('the destination check receives the request signal, so a cancelled request stops waiting on it', async () => {
+  const { fetch, calls } = okFetch();
+  let seen;
+  const transport = new FetchHttpTransport({
+    fetch,
+    checkDestination: async (_host, signal) => {
+      seen = signal;
+      await new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+    },
+  });
+  const controller = new AbortController();
+  const pending = transport.request({ method: 'GET', url: 'https://slow.example.com/v1', providerId: 'p', signal: controller.signal });
+  setTimeout(() => controller.abort(new Error('user cancelled')), 10);
+  await assert.rejects(() => pending, (error) => error instanceof ProviderError && error.code === 'CANCELLED');
+  assert.ok(seen, 'the check was given a signal');
+  assert.equal(calls.length, 0, 'nothing is sent after the cancel');
+});
+
+test('a temporary DNS failure during the check is retryable, not a configuration error', async () => {
+  const { fetch, calls } = okFetch();
+  const transport = new FetchHttpTransport({
+    fetch,
+    checkDestination: async () => { const e = new Error('getaddrinfo EAI_AGAIN api.example.com'); e.code = 'EAI_AGAIN'; throw e; },
+  });
+  await assert.rejects(
+    () => transport.request({ method: 'GET', url: 'https://api.example.com/v1', providerId: 'p' }),
+    (error) => error instanceof ProviderError && error.code === 'PROVIDER_UNAVAILABLE' && error.retryable === true,
+  );
+  assert.equal(calls.length, 0);
+});
+
 test('without a check, a remote request is sent exactly as before', async () => {
   const { fetch, calls } = okFetch();
   const transport = new FetchHttpTransport({ fetch });

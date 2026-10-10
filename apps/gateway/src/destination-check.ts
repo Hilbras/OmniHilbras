@@ -16,10 +16,23 @@ import { isPrivateHostname } from '@hilbras/omnihilbras';
  * check to run on the connection's own lookup, which Node's global `fetch` does not expose. So this is a
  * narrowing, not a guarantee: it stops names that point at private addresses, not a deliberate rebinding.
  */
-export async function assertPublicDestination(hostname: string): Promise<void> {
-  const addresses = await lookup(hostname, { all: true, verbatim: true });
+export async function assertPublicDestination(hostname: string, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  const addresses = await raceAbort(lookup(hostname, { all: true, verbatim: true }), signal);
   if (addresses.length === 0) throw new Error(`The host ${hostname} did not resolve.`);
   if (addresses.some((entry) => isPrivateHostname(entry.address))) {
     throw new Error(`The host ${hostname} resolves to a private address.`);
   }
+}
+
+function raceAbort<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(
+      (value) => { signal.removeEventListener('abort', onAbort); resolve(value); },
+      (error) => { signal.removeEventListener('abort', onAbort); reject(error); },
+    );
+  });
 }

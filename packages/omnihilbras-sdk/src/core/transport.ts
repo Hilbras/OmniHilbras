@@ -65,7 +65,7 @@ export type FetchHttpTransportOptions = {
    * does not exist. A host that runs in Node supplies the check, and the gateway does. Absent, the
    * request is sent as before, so existing callers are unchanged.
    */
-  checkDestination?: (hostname: string) => Promise<void>;
+  checkDestination?: (hostname: string, signal?: AbortSignal) => Promise<void>;
 };
 
 type RequestLifecycle = {
@@ -87,7 +87,7 @@ export class FetchHttpTransport implements HttpTransport {
   private readonly maxResponseBytes: number;
   private readonly maxStreamBytes: number;
   private readonly maxStreamDurationMs: number;
-  private readonly checkDestination: ((hostname: string) => Promise<void>) | undefined;
+  private readonly checkDestination: ((hostname: string, signal?: AbortSignal) => Promise<void>) | undefined;
 
   constructor(options: FetchHttpTransportOptions = {}) {
     const fetchImpl = options.fetch ?? globalThis.fetch;
@@ -164,8 +164,18 @@ export class FetchHttpTransport implements HttpTransport {
     const hostname = new URL(request.url).hostname.replace(/^\[|\]$/g, '');
     if (isLoopbackHostname(hostname)) return;
     try {
-      await this.checkDestination(hostname);
+      await this.checkDestination(hostname, request.signal);
     } catch (error) {
+      if (request.signal?.aborted) {
+        throw new ProviderError('CANCELLED', 'The provider request was cancelled.', { providerId: request.providerId, cause: error });
+      }
+      if (isTemporaryDnsFailure(error)) {
+        throw new ProviderError('PROVIDER_UNAVAILABLE', 'The provider destination could not be resolved.', {
+          providerId: request.providerId,
+          cause: error,
+          retryable: true,
+        });
+      }
       throw new ProviderError('CONFIGURATION_ERROR', `Provider destination refused for ${request.providerId ?? 'provider'}.`, {
         providerId: request.providerId,
         cause: error,
@@ -491,6 +501,11 @@ function normalizeTransportError(error: unknown, requestSignal: AbortSignal | un
     return new ProviderError('CANCELLED', 'The provider request was cancelled.', { cause: error });
   }
   return new ProviderError('PROVIDER_UNAVAILABLE', 'The provider could not be reached.', { cause: error, retryable: true });
+}
+
+function isTemporaryDnsFailure(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === 'EAI_AGAIN';
 }
 
 function isAbortError(error: unknown): boolean {
