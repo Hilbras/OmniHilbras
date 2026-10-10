@@ -520,6 +520,7 @@ export function parseChatRequest(body: unknown): ChatRequest {
   const stop = parseStop(body);
   const tools = parseTools(body.tools);
   const toolChoice = parseToolChoice(body.tool_choice);
+  const reasoningEffort = parseReasoningEffort(body.reasoning_effort);
   const providerOptions = body.provider_options === undefined ? undefined : parseProviderOptions(body.provider_options);
 
   return {
@@ -532,6 +533,7 @@ export function parseChatRequest(body: unknown): ChatRequest {
     ...(stop !== undefined ? { stop } : {}),
     ...(tools ? { tools } : {}),
     ...(toolChoice ? { toolChoice } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     ...(providerOptions ? { providerOptions } : {}),
   };
 }
@@ -618,6 +620,13 @@ export function parseTool(value: unknown): ToolDefinition {
   };
 }
 
+
+/** The reasoning effort a client may ask for. Anything else is refused, rather than forwarded. */
+export function parseReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {
+  if (value === undefined) return undefined;
+  if (value === 'low' || value === 'medium' || value === 'high') return value;
+  throw invalidRequest('reasoning_effort must be low, medium or high.');
+}
 
 /** The tool-use policy a client may send. Anything else is refused, rather than forwarded to a provider that may read it as a default. */
 export function parseToolChoice(value: unknown): 'auto' | 'none' | 'required' | undefined {

@@ -72,6 +72,8 @@ export type ChatRequest = {
   tools?: readonly ToolDefinition[];
   /** Whether the model may, must, or must not call a tool. Absent leaves the provider's default. */
   toolChoice?: 'auto' | 'none' | 'required';
+  /** How much a thinking model reasons before answering. Absent leaves the provider's default. */
+  reasoningEffort?: 'low' | 'medium' | 'high';
   providerOptions?: Record<string, unknown>;
 };
 

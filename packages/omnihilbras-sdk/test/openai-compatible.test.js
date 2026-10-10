@@ -230,3 +230,12 @@ test('without a toolChoice, the request carries no tool_choice field', async () 
   const body = JSON.parse(transport.calls[0].body);
   assert.equal('tool_choice' in body, false, 'the provider keeps its own default');
 });
+
+test('a reasoningEffort reaches an OpenAI-compatible provider as reasoning_effort, and an unset effort sends nothing', async () => {
+  const transport = createTransport();
+  const adapter = createAdapter(transport);
+  await adapter.chat({ model: 'acme-1', messages: [{ role: 'user', content: 'hi' }], reasoningEffort: 'high' }, { credential: { type: 'api-key', value: 'k' } });
+  assert.equal(JSON.parse(transport.calls[0].body).reasoning_effort, 'high', 'the effort is sent in the provider\'s own name');
+  await adapter.chat({ model: 'acme-1', messages: [{ role: 'user', content: 'hi' }] }, { credential: { type: 'api-key', value: 'k' } });
+  assert.equal('reasoning_effort' in JSON.parse(transport.calls[1].body), false, 'an unset effort is not invented');
+});

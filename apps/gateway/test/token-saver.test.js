@@ -107,3 +107,13 @@ test('a tool_choice from the client reaches the provider, and an unknown choice 
   const bad = await post(base, { ...body(longGrep.slice(0, 40)), tool_choice: 'sometimes' });
   assert.equal(bad.status, 400, 'a choice the gateway does not know is refused, not forwarded');
 });
+
+test('a reasoning_effort from the client reaches the provider, and an unknown effort is refused with 400', async (t) => {
+  const seen = [];
+  const base = await start(t, seen);
+  const ok = await post(base, { ...body(longGrep.slice(0, 40)), reasoning_effort: 'high' });
+  assert.equal(ok.status, 200);
+  assert.equal(lastRequest.reasoningEffort, 'high', 'the adapter receives the client\'s effort');
+  const bad = await post(base, { ...body(longGrep.slice(0, 40)), reasoning_effort: 'maximum' });
+  assert.equal(bad.status, 400, 'an effort the gateway does not know is refused, not forwarded');
+});

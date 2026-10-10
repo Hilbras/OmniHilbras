@@ -166,3 +166,23 @@ test('a toolChoice of none reaches Anthropic as tool_choice none, so the model i
   const body = JSON.parse(transport.calls[0].body);
   assert.deepEqual(body.tool_choice, { type: 'none' }, 'the caller\'s choice reaches the provider');
 });
+
+test('a reasoningEffort becomes an Anthropic thinking budget that grows with the effort, and an unset effort sends no thinking block', async () => {
+  const transport = createTransport();
+  const adapter = new AnthropicAdapter({ transport });
+  const send = (reasoningEffort) => adapter.chat({
+    model: 'claude-sonnet-4',
+    messages: [{ role: 'user', content: 'think' }],
+    maxOutputTokens: 8192,
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+  }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  await send('low');
+  await send('high');
+  await send(undefined);
+  const low = JSON.parse(transport.calls[0].body).thinking;
+  const high = JSON.parse(transport.calls[1].body).thinking;
+  assert.equal(low.type, 'enabled');
+  assert.equal(high.type, 'enabled');
+  assert.ok(high.budget_tokens > low.budget_tokens, 'a higher effort gets a larger budget');
+  assert.equal('thinking' in JSON.parse(transport.calls[2].body), false, 'an unset effort is not invented');
+});
