@@ -119,6 +119,16 @@ export function describeConsoleModel(id: string, entry: ConsoleModelConfig | und
   };
 }
 
+/**
+ * The finish reason as the SDK names it. A tool-call finish must stay `tool_calls`: collapsing it to `stop`
+ * tells the caller the answer is complete when the model is waiting for a tool result.
+ */
+function normalizeFinish(reason: string): 'stop' | 'length' | 'tool_calls' | 'content_filter' {
+  if (reason === 'length' || reason === 'tool_calls' || reason === 'content_filter') return reason;
+  if (reason === 'function_call') return 'tool_calls';
+  return 'stop';
+}
+
 function orgHeaderValue(credential: ProviderCredential | undefined): string | undefined {
   return credential?.type === 'oauth' ? credential.orgId : undefined;
 }
@@ -303,7 +313,12 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
     const headers = { ...this.headers(credential), ...zenFreeTierHeaders(zenSessionId(seed)) };
     const body: Record<string, unknown> = {
       model: id,
-      messages: request.messages.map((message) => ({ role: message.role, content: message.content })),
+      // A tool result carries the id of the call it answers; without it the model cannot match them (as in Kimi).
+      messages: request.messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+        ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+      })),
       stream: true,
       // The caller's tools with the free-tier quartet appended where missing; never removed to make room.
       tools: gatedTools(request.tools),
@@ -325,7 +340,7 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
     for await (const event of parseSseStream(events)) {
       if (event.data.trim() === '[DONE]') return;
       opened = true;
-      let chunk: { id?: string; choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>; error?: { message?: string } };
+      let chunk: { id?: string; choices?: Array<{ delta?: { content?: string; tool_calls?: Array<{ index?: number; id?: string; type?: string; function?: { name?: string; arguments?: string } }> }; finish_reason?: string | null }>; error?: { message?: string } };
       try {
         chunk = JSON.parse(event.data);
       } catch {
@@ -334,8 +349,27 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
       if (chunk.error) throw new ProviderError('PROVIDER_REQUEST_FAILED', chunk.error.message ?? 'OpenCode refused the free request.', { providerId: this.id });
       const delta = chunk.choices?.[0]?.delta?.content;
       if (delta) yield { id: chunk.id ?? `opencode-${id}`, providerId: this.id, model: id, delta: { content: delta } };
+      const toolCalls = chunk.choices?.[0]?.delta?.tool_calls;
+      if (toolCalls?.length) {
+        yield {
+          id: chunk.id ?? `opencode-${id}`,
+          providerId: this.id,
+          model: id,
+          delta: {
+            toolCalls: toolCalls.map((toolCall) => ({
+              index: toolCall.index ?? 0,
+              ...(toolCall.id ? { id: toolCall.id } : {}),
+              ...(toolCall.type ? { type: 'function' as const } : {}),
+              ...(toolCall.function?.name || toolCall.function?.arguments ? { function: {
+                ...(toolCall.function.name ? { name: toolCall.function.name } : {}),
+                ...(toolCall.function.arguments ? { arguments: toolCall.function.arguments } : {}),
+              } } : {}),
+            })),
+          },
+        };
+      }
       const finish = chunk.choices?.[0]?.finish_reason;
-      if (finish) yield { id: chunk.id ?? `opencode-${id}`, providerId: this.id, model: id, delta: {}, finishReason: finish === 'length' ? 'length' : 'stop' };
+      if (finish) yield { id: chunk.id ?? `opencode-${id}`, providerId: this.id, model: id, delta: {}, finishReason: normalizeFinish(finish) };
     }
     if (!opened) throw new ProviderError('PROVIDER_REQUEST_FAILED', 'OpenCode answered the free request with no stream.', { providerId: this.id });
   }

@@ -272,3 +272,29 @@ test('a vendor-prefixed model id resolves to the same lane as the bare id', asyn
   assert.equal(response.message.content, 'OK');
   assert.ok(t.urls().includes(ANTHROPIC_MESSAGES), 'a prefix does not change the lane');
 });
+
+test('a streamed tool call on a free model reaches the caller, with its arguments joined', async () => {
+  // The free-tier stream read only text and the finish reason, so a tool call the model made was dropped and the
+  // finish reason was reported as stop. An agent cannot continue from that.
+  const t = {
+    ...transport({ [CONFIG_URL]: config('org_abc') }),
+    stream() {
+      return (async function* () {
+        yield 'data: {"id":"c1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"Bash","arguments":"{\\"command\\":"}}]}}]}\n\n';
+        yield 'data: {"id":"c1","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"ls\\"}"}}]}}]}\n\n';
+        yield 'data: {"id":"c1","choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+        yield 'data: [DONE]\n\n';
+      })();
+    },
+  };
+  const adapter = new OpencodeConsoleAdapter({ transport: t });
+  const pieces = [];
+  let finish;
+  for await (const chunk of adapter.streamChat({ model: 'mimo-v2.6-flash-free', messages: [{ role: 'user', content: 'ls' }] }, { credential: signedIn() })) {
+    pieces.push(...(chunk.delta.toolCalls ?? []));
+    if (chunk.finishReason) finish = chunk.finishReason;
+  }
+  assert.equal(pieces[0]?.id, 'call_1', 'the call is delivered, not dropped');
+  assert.equal(pieces.map((p) => p.function?.arguments ?? '').join(''), '{"command":"ls"}', 'the fragments join into the whole JSON');
+  assert.equal(finish, 'tool_calls', 'a tool-call finish is reported as tool_calls, not stop');
+});
