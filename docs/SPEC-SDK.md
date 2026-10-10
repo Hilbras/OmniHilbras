@@ -2350,6 +2350,11 @@ model ID. That constrains two behaviors:
   enabled credentialed connection, then the `openai` default. Resolution is
   provider-neutral and reads connection metadata only; it never inspects a model
   name for provider hints.
+- **Long tool results.** A tool message longer than 250 lines is sent to the
+  provider with its first 120 and last 60 lines and a marker giving the omitted
+  count. A tool message marked `is_error: true`, and any non-text content, is
+  sent whole. A client that needs every line of a result for one request sends
+  `x-omnihilbras-token-saver: off`.
 - **Catalog.** `GET /v1/models` advertises the saved model IDs of enabled,
   credentialed connections. Live provider listing remains the fallback only when
   no such connection exists, so clients never see paid models the operator did

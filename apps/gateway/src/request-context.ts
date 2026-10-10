@@ -49,6 +49,8 @@ export type RequestScope = {
   readonly requestedModel: string;
   /** The provider the client pinned, if it pinned one. */
   readonly explicitProviderId?: string;
+  /** False when the client opted this request out of shortening long tool results. Absent means on. */
+  readonly tokenSaver?: boolean;
 };
 
 /**
@@ -59,12 +61,13 @@ export type RequestScope = {
  * or a connection id. It is not a counter, because a counter is guessable and these appear in
  * client-visible output.
  */
-export function startRequestScope(input: { requestedModel: string; explicitProviderId?: string; id?: string }): RequestScope {
+export function startRequestScope(input: { requestedModel: string; explicitProviderId?: string; id?: string; tokenSaver?: boolean }): RequestScope {
   return Object.freeze({
     id: input.id ?? crypto.randomUUID().replace(/-/g, ''),
     startedAt: Date.now(),
     requestedModel: input.requestedModel,
     ...(input.explicitProviderId === undefined ? {} : { explicitProviderId: input.explicitProviderId }),
+    ...(input.tokenSaver === undefined ? {} : { tokenSaver: input.tokenSaver }),
   });
 }
 

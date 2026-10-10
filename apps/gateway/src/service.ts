@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, ClinePassAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, completeToolRounds, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, ClinePassAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, completeToolRounds, compressToolResults, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import type { GatewayConfig } from './config.js';
@@ -1260,16 +1260,26 @@ export class GatewayService {
   /** The connection that serves a provider: the only one, or the first enabled. */
 
 
+  /**
+   * The conversation a provider receives. An unanswered tool call is answered first, so the provider can accept it,
+   * then a long tool result is shortened unless the client opted this request out. The order matters: the empty
+   * results added in the first step are short and are left alone by the second.
+   */
+  private preparedMessages(request: ChatRequest, scope: RequestScope | undefined): ChatRequest['messages'] {
+    const complete = completeToolRounds(request.messages);
+    return scope?.tokenSaver === false ? complete : compressToolResults(complete);
+  }
+
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    return adapter.chat({ ...request, model: bareModelFor(request.model, providerId), messages: completeToolRounds(request.messages) }, await this.credentials.contextForProvider(providerId, signal, scope));
+    return adapter.chat({ ...request, model: bareModelFor(request.model, providerId), messages: this.preparedMessages(request, scope) }, await this.credentials.contextForProvider(providerId, signal, scope));
   }
 
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    yield* adapter.streamChat({ ...request, model: bareModelFor(request.model, providerId), messages: completeToolRounds(request.messages) }, await this.credentials.contextForProvider(providerId, signal, scope));
+    yield* adapter.streamChat({ ...request, model: bareModelFor(request.model, providerId), messages: this.preparedMessages(request, scope) }, await this.credentials.contextForProvider(providerId, signal, scope));
   }
 
   /**
@@ -1313,8 +1323,12 @@ export class GatewayService {
    * Public because the HTTP layer is the only place that knows a request has been accepted, and it
    * needs to hand the id to the client *and* to the providers it will be sent to.
    */
-  startScope(requestedModel: string, explicitProviderId?: string): RequestScope {
-    return startRequestScope({ requestedModel, ...(explicitProviderId === undefined ? {} : { explicitProviderId }) });
+  startScope(requestedModel: string, explicitProviderId?: string, tokenSaver?: boolean): RequestScope {
+    return startRequestScope({
+      requestedModel,
+      ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
+      ...(tokenSaver === undefined ? {} : { tokenSaver }),
+    });
   }
 
   /**

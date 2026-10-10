@@ -181,7 +181,7 @@ export async function handleChat(request: IncomingMessage, response: ServerRespo
   // Created once, here, where a request has been accepted. Everywhere else it is passed down, so
   // the id is per *request* rather than per provider — which is the only way a client can quote it
   // and an operator can find it.
-  const scope = service.startScope(chatRequest.model, explicitProviderId);
+  const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request));
 
   // A refusal is where the id matters most — it is the case where the user needs to quote
   // something — so the error is given the id on its way out rather than only on the success path.
@@ -585,6 +585,12 @@ export function parseImageUrl(value: string) {
   }
 }
 
+
+/** On unless the client sends `x-omnihilbras-token-saver: off` for this request. Any other value leaves it on. */
+export function tokenSaverEnabled(request: IncomingMessage): boolean {
+  const header = request.headers['x-omnihilbras-token-saver'];
+  return !(typeof header === 'string' && header.trim().toLowerCase() === 'off');
+}
 
 export function getExplicitProviderId(request: IncomingMessage, body: unknown) {
   const header = request.headers['x-omnihilbras-provider'];
