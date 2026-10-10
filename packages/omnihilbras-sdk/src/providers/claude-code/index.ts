@@ -207,6 +207,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     let started = false;
     let sawStop = false;
     let usage: TokenUsage | undefined;
+    const toolBlocks = new Map<number, { id?: string; name?: string }>();
     for await (const event of parseSseStream(events)) {
       if (event.data.trim() === '[DONE]') break;
       const payload = parseSseJson<AnthropicStreamEvent>(event, this.id);
@@ -237,17 +238,22 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
           delta: { content: payload.delta.text },
         };
       }
-      if (payload.type === 'content_block_stop' && payload.content_block?.type === 'tool_use') {
+      if (payload.type === 'content_block_start' && payload.index !== undefined && payload.content_block?.type === 'tool_use') {
+        toolBlocks.set(payload.index, { id: payload.content_block.id, name: payload.content_block.name });
+        continue;
+      }
+      if (payload.type === 'content_block_delta' && payload.index !== undefined && payload.delta?.type === 'input_json_delta' && payload.delta.partial_json !== undefined) {
+        const block = toolBlocks.get(payload.index);
         yield {
           id: `stream-${request.model}`,
           providerId: this.id,
           model: request.model,
           delta: {
             toolCalls: [{
-              index: payload.index ?? 0,
-              ...(payload.content_block.id ? { id: payload.content_block.id } : {}),
+              index: payload.index,
+              ...(block?.id ? { id: block.id } : {}),
               type: 'function',
-              function: { name: payload.content_block.name ?? '', arguments: '' },
+              function: { ...(block?.name ? { name: block.name } : {}), arguments: payload.delta.partial_json },
             }],
           },
         };

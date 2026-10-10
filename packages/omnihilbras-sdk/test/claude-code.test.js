@@ -298,3 +298,27 @@ test('a refused health check is unavailable and carries the provider\'s own mess
   assert.equal(health.status, 'unavailable');
   assert.match(health.message, /refused/);
 });
+
+test('a streamed tool call reaches the caller with its id, name and joined arguments', async () => {
+  // Claude Code streamed tool calls were never emitted: the stop event carries no content_block, so the
+  // branch that read it was never true. The id and name arrive on content_block_start, and the arguments
+  // arrive as input_json_delta fragments that must join into the JSON the model wrote.
+  const transport = createTransport({
+    stream: async function* () {
+      yield 'event: message_start\ndata: ' + JSON.stringify({ type: 'message_start', message: { id: 's1', model: 'claude-sonnet-4-5' } }) + '\n\n';
+      yield 'event: content_block_start\ndata: ' + JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_1', name: 'Bash' } }) + '\n\n';
+      yield 'event: content_block_delta\ndata: ' + JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"command":' } }) + '\n\n';
+      yield 'event: content_block_delta\ndata: ' + JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '"ls"}' } }) + '\n\n';
+      yield 'event: content_block_stop\ndata: ' + JSON.stringify({ type: 'content_block_stop', index: 0 }) + '\n\n';
+      yield 'event: message_delta\ndata: ' + JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'tool_use' } }) + '\n\n';
+    },
+  });
+  const adapter = new ClaudeCodeAdapter({ transport });
+  const pieces = [];
+  for await (const chunk of adapter.streamChat({ model: 'claude-sonnet-4-5', messages: [{ role: 'user', content: 'ls' }] }, { credential: OAUTH })) {
+    pieces.push(...(chunk.delta.toolCalls ?? []));
+  }
+  assert.equal(pieces[0].id, 'toolu_1', 'the id arrives with the first fragment');
+  assert.equal(pieces[0].function.name, 'Bash', 'the name arrives with the first fragment');
+  assert.equal(pieces.map((p) => p.function?.arguments ?? '').join(''), '{"command":"ls"}', 'the fragments join into the whole JSON');
+});
