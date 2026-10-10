@@ -34,9 +34,83 @@ function compressOne(message: ChatMessage, toolName: string | undefined): ChatMe
   if (message.role !== 'tool' || message.isError || typeof message.content !== 'string') return message;
   const lines = message.content.split('\n');
   if (lines.length <= longAfterLines) return message;
-  const shortened = (toolName === 'grep' ? keepGrepMatches(lines) : undefined) ?? keepHeadAndTail(lines);
+  const shortened = (toolName === 'grep' ? keepGrepMatches(lines) : toolName === 'git_diff' ? keepDiffChanges(lines) : toolName === 'ls' ? keepListingStructure(lines) : undefined) ?? keepHeadAndTail(lines);
   if (shortened.length >= message.content.length) return message;
   return { ...message, content: shortened };
+}
+
+/**
+ * A diff is read for what changed. Every hunk header and every changed line is kept, along with up to `grepContext`
+ * unchanged lines on each side, and the gaps are counted. The `---` and `+++` file headers are changed-looking text
+ * but describe the files, so they are kept as headers.
+ */
+function keepDiffChanges(lines: string[]): string | undefined {
+  const isChange = (line: string) => (line.startsWith('+') || line.startsWith('-')) && !line.startsWith('+++') && !line.startsWith('---');
+  const keep = new Set<number>();
+  lines.forEach((line, index) => {
+    if (line.startsWith('@@') || line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ') || isChange(line)) {
+      keep.add(index);
+      if (isChange(line)) {
+        for (let offset = -grepContext; offset <= grepContext; offset += 1) {
+          const at = index + offset;
+          if (at >= 0 && at < lines.length) keep.add(at);
+        }
+      }
+    }
+  });
+  if (keep.size === 0) return undefined;
+  const out: string[] = [];
+  let omitted = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (keep.has(index)) {
+      if (omitted > 0) out.push(`... ${omitted} lines omitted ...`);
+      omitted = 0;
+      out.push(lines[index]!);
+    } else {
+      omitted += 1;
+    }
+  }
+  if (omitted > 0) out.push(`... ${omitted} lines omitted ...`);
+  return out.join('\n');
+}
+
+/**
+ * A recursive listing is read for its structure. Every directory heading (`path:`) and its `total` line is kept, and
+ * within each directory the first and last few entries are kept, with the middle counted.
+ */
+const listingHeading = /^[^ ].*:$/;
+const listingEdge = 3;
+
+function keepListingStructure(lines: string[]): string | undefined {
+  const keep = new Set<number>();
+  let blockStart = 0;
+  const closeBlock = (end: number) => {
+    for (let index = blockStart; index < end; index += 1) {
+      if (index - blockStart < listingEdge || end - index <= listingEdge) keep.add(index);
+    }
+  };
+  lines.forEach((line, index) => {
+    if (listingHeading.test(line) || line.startsWith('total ')) {
+      keep.add(index);
+      closeBlock(index);
+      blockStart = index + 1;
+    }
+  });
+  closeBlock(lines.length);
+  if (keep.size === 0) return undefined;
+  const out: string[] = [];
+  let omitted = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (keep.has(index)) {
+      if (omitted > 0) out.push(`... ${omitted} entries omitted ...`);
+      omitted = 0;
+      out.push(lines[index]!);
+    } else {
+      omitted += 1;
+    }
+  }
+  if (omitted > 0) out.push(`... ${omitted} entries omitted ...`);
+  return out.join('\n');
 }
 
 function keepHeadAndTail(lines: string[]): string {
