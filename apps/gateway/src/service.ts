@@ -499,8 +499,10 @@ export class GatewayService {
   async describeRouting() {
     const connections = await this.listConnections();
     const waits = this.routing.waits();
+    const strategies = Object.fromEntries(this.providerStrategies);
     return {
       failureThreshold: this.healthManager.getFailureThreshold(),
+      strategies,
       connections: connections.map((connection) => ({
         connectionId: connection.id,
         providerId: connection.providerId,

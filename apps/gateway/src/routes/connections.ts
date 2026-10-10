@@ -89,6 +89,21 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
       return true;
     }
 
+    // Sets how a provider's connections share traffic. A management action, so it is gated with the other management
+    // routes; the body names one strategy, and anything else is refused before it is stored.
+    if (request.method === 'PUT' && url.pathname.startsWith('/v1/providers/') && url.pathname.endsWith('/strategy')) {
+      const providerId = decodeProviderId(url.pathname.slice('/v1/providers/'.length, -'/strategy'.length));
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['strategy']);
+      if (typeof body.strategy !== 'string') throw invalidRequest('strategy must be a string.');
+      await service.setProviderStrategy(providerId, body.strategy).catch((error: unknown) => {
+        throw invalidRequest(error instanceof Error ? error.message : 'The provider strategy could not be saved.');
+      });
+      sendJson(response, 200, { providerId, strategy: service.providerStrategy(providerId) }, origin);
+      return true;
+    }
+
     if (request.method === 'PUT' && url.pathname.endsWith('/resilience') && url.pathname.startsWith('/v1/connections/')) {
       const encodedConnectionId = url.pathname.slice('/v1/connections/'.length, -'/resilience'.length);
       const connectionId = decodeConnectionId(encodedConnectionId);

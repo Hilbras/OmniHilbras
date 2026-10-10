@@ -34,7 +34,7 @@ import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, f
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { ProviderPlayground } from '../components/ProviderPlayground';
-import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, putGatewayConnection, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, type GatewayConnection, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, putGatewayConnection, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import { dashboardRoutes } from '../lib/routes';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
@@ -237,7 +237,7 @@ const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro', 'cl
 /** Providers whose flow is a pasted credential rather than a browser sign-in. */
 const webCookieProviders = new Set(webSessionProviderIds());
 
-function ResiliencePanel({ connection, routingState, onSave }: { connection: GatewayConnection; routingState?: GatewayRoutingState; onSave: (next: GatewayResilience) => void | Promise<void> }) {
+function ResiliencePanel({ connection, routingState, onSave, strategy, onStrategy }: { connection: GatewayConnection; routingState?: GatewayRoutingState; onSave: (next: GatewayResilience) => void | Promise<void>; strategy: GatewayProviderStrategy; onStrategy: (next: GatewayProviderStrategy) => void | Promise<void> }) {
   const [open, setOpen] = useState(false);
   // A resilience block is required to render this panel. Reading it unguarded
   // meant one incomplete record threw during render and blanked the whole page,
@@ -270,6 +270,16 @@ function ResiliencePanel({ connection, routingState, onSave }: { connection: Gat
       {open && (
         <div className="mt-4 space-y-3">
           <p className="muted text-[11px] leading-relaxed">OmniHilbras retries a failed request here, then falls through to the next connection by priority. Requests without a valid key are never retried.</p>
+          <label className="block">
+            <span className="mono-label mb-1.5 block">Connections</span>
+            <select value={strategy} onChange={(event) => { void onStrategy(event.target.value as GatewayProviderStrategy); }} className="input !py-2 !text-xs">
+              <option value="priority">Follow priority</option>
+              <option value="round-robin">Take turns (round-robin)</option>
+            </select>
+          </label>
+          <p className="muted text-[11px] leading-relaxed">{strategy === 'round-robin'
+            ? 'Every connection of this provider takes turns, so no single account carries all the traffic.'
+            : 'The first connection by priority serves requests and the others are fallbacks.'}</p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="block"><span className="mono-label mb-1.5 block">Hedge after (ms)</span><input type="number" min={0} max={30000} step={100} value={draft.hedgeAfterMs} onChange={(event) => setDraft((current) => ({ ...current, hedgeAfterMs: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
             <label className="block"><span className="mono-label mb-1.5 block">Retries</span><input type="number" min={0} max={5} value={draft.maxRetries} onChange={(event) => setDraft((current) => ({ ...current, maxRetries: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
@@ -804,6 +814,16 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
     bulkAbortRef.current?.abort();
   }
 
+  async function saveStrategy(providerId: string, strategy: GatewayProviderStrategy) {
+    try {
+      await updateGatewayProviderStrategy(providerId, strategy);
+      setRoutingState(await getGatewayRoutingState().catch(() => routingState));
+      flash(strategy === 'round-robin' ? 'Connections now take turns.' : 'Connections now follow priority.');
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'The strategy could not be saved.', 'error');
+    }
+  }
+
   async function saveResilience(next: GatewayResilience) {
     if (!connection) return;
     try {
@@ -1021,7 +1041,7 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
   What routing actually does is set the priority on a connection, and that control exists and works.
   */}
           <div className="mt-5 space-y-3 border-t border-line pt-5"><div className="flex items-center justify-between text-xs"><span className="muted">Endpoint</span><button type="button" onClick={() => document.getElementById('endpoint')?.scrollIntoView({ behavior: 'smooth' })} className="max-w-[180px] truncate text-left font-mono text-[10px] text-gold-text hover:underline">{connection?.endpoint ?? provider.endpoint}</button></div><div className="flex items-center justify-between text-xs"><span className="muted">Priority</span><span className="font-mono text-[10px]">#{connection?.priority ?? 1}</span></div><div className="flex items-center justify-between text-xs"><span className="muted">Credentials</span><span className="flex items-center gap-1.5 font-mono text-[10px] text-success"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />local only</span></div></div>
-          {connection && <ResiliencePanel connection={connection} routingState={routingState} onSave={saveResilience} />}
+          {connection && <ResiliencePanel connection={connection} routingState={routingState} onSave={saveResilience} strategy={routingState?.strategies?.[connection.providerId] ?? 'priority'} onStrategy={(next) => saveStrategy(connection.providerId, next)} />}
           <div className="mt-5 rounded-lg border border-gold/20 bg-gold-soft/45 p-3 text-[11px] leading-relaxed text-muted"><Sparkles className="mr-1 inline h-3.5 w-3.5 text-gold-text" aria-hidden="true" />{provider.id === 'openrouter' ? 'OpenRouter credentials are managed by the local gateway.' : 'Policy changes are preview-only until a provider management API is connected.'}</div>
         </section>
       </div>

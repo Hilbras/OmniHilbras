@@ -59,6 +59,8 @@ export type GatewayConnection = {
 
 export type GatewayRoutingState = {
   failureThreshold: number;
+  /** The strategy set for each provider; a provider with none set is `priority`. */
+  strategies?: Partial<Record<string, GatewayProviderStrategy>>;
   connections: Array<{
     connectionId: string;
     providerId: string;
@@ -572,6 +574,18 @@ export function addGatewayConnectionModels(connectionId: string, modelIds: strin
     body: JSON.stringify({ modelIds }),
     ...(signal ? { signal } : {}),
   }).then((body) => body.connection);
+}
+
+/** How a provider's connections share traffic. `priority` is the default; `round-robin` takes turns across them. */
+export type GatewayProviderStrategy = 'priority' | 'round-robin';
+
+export function updateGatewayProviderStrategy(providerId: string, strategy: GatewayProviderStrategy, signal?: AbortSignal) {
+  return requestJson<{ providerId: string; strategy: GatewayProviderStrategy }>(`/v1/providers/${encodeURIComponent(providerId)}/strategy`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ strategy }),
+    ...(signal ? { signal } : {}),
+  });
 }
 
 export function updateGatewayConnectionResilience(connectionId: string, resilience: Partial<GatewayResilience>, signal?: AbortSignal) {
