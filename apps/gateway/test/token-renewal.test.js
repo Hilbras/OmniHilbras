@@ -57,3 +57,44 @@ test('stopping the renewal clears its timer, so nothing is left running at shutd
   renewal.stop();
   assert.equal(renewal.running(), false);
 });
+
+test('the service renews an OAuth connection whose token is near expiry, and leaves a fresh one alone', async () => {
+  const { GatewayService, InMemoryConnectionStore } = await import('../dist/index.js');
+  const { InMemorySecretStore, ProviderRegistry } = await import('@hilbras/omnihilbras');
+  const now = Date.now();
+  const validated = [];
+  const adapter = {
+    id: 'oauthprov',
+    name: 'OAuth provider',
+    capabilities: { chat: true, streaming: false, models: true },
+    async listModels() { return [{ id: 'm', providerId: 'oauthprov' }]; },
+    async healthCheck() { return { status: 'healthy', checkedAt: new Date().toISOString() }; },
+    isCredentialExpired(credential, at = Date.now()) {
+      if (credential?.type !== 'oauth' || typeof credential.expiresAt !== 'string') return undefined;
+      return Date.parse(credential.expiresAt) <= at;
+    },
+    async validateCredential(credential) {
+      validated.push(credential.value);
+      return { status: 'valid', checkedAt: new Date().toISOString() };
+    },
+  };
+  const store = new InMemoryConnectionStore();
+  const connection = (id, expiresInMs) => ({ id, providerId: 'oauthprov', name: id, endpoint: 'https://o.example/v1', priority: 1, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 } });
+  await store.save(connection('soon', 0), { type: 'oauth', value: 'soon-token', refreshToken: 'r', expiresAt: new Date(now + 10 * 60_000).toISOString() });
+  await store.save(connection('far', 0), { type: 'oauth', value: 'far-token', refreshToken: 'r', expiresAt: new Date(now + 2 * 3600_000).toISOString() });
+  const service = new GatewayService(new ProviderRegistry().register(adapter), store, store, undefined, { failureThreshold: 1_000 });
+  service.setHealthInterval(0);
+  await service.renewExpiringTokens();
+  assert.deepEqual(validated, ['soon-token'], 'only the token expiring within 30 minutes is refreshed');
+});
+
+test('the service runs renewal on a timer and clears it on close, so nothing renews after shutdown begins', async () => {
+  const { GatewayService, InMemoryConnectionStore } = await import('../dist/index.js');
+  const { ProviderRegistry } = await import('@hilbras/omnihilbras');
+  const store = new InMemoryConnectionStore();
+  const service = new GatewayService(new ProviderRegistry(), store, store, undefined, { failureThreshold: 1_000 });
+  service.startTokenRenewal(60_000);
+  assert.equal(service.tokenRenewalTimer?.running(), true, 'the renewal timer is running after start');
+  await service.close();
+  assert.equal(service.tokenRenewalTimer?.running(), false, 'close stops renewal before anything drains');
+});

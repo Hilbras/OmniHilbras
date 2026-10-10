@@ -414,3 +414,15 @@ test('an expired refresh token says so, rather than reporting a bad paste', asyn
   );
   assert.match(result.error.publicMessage ?? '', /expired/);
 });
+
+test('Kiro reports whether its OAuth token has expired, and says so only when it can tell', () => {
+  // Background renewal needs to know when a Kiro token expires without a network call. "Cannot say" must stay
+  // distinct from "valid": an API key or an unreadable expiry is undefined, never a confident false.
+  const adapter = new KiroAdapter({ transport: transport({}) });
+  const now = Date.parse('2026-10-10T12:00:00Z');
+  assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'x', expiresAt: new Date(now - 1000).toISOString() }, now), true, 'an expired token is expired');
+  assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'x', expiresAt: new Date(now + 3_600_000).toISOString() }, now), false, 'a valid token is not');
+  assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'x' }, now), undefined, 'no expiry is cannot-say, not expired');
+  assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'x', expiresAt: 'not-a-date' }, now), undefined, 'an unreadable expiry is cannot-say');
+  assert.equal(adapter.isCredentialExpired({ type: 'api-key', value: 'k' }, now), undefined, 'an API key has no expiry to read');
+});

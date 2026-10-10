@@ -10,6 +10,7 @@ import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSign
 import { createChatGptWebDriver } from './chatgptWeb.js';
 import { SlidingWindowRateLimiter, bareModelFor, type RouteCandidate } from './routing.js';
 import { HealthManager } from './health.js';
+import { TokenRenewal } from './token-renewal.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
 import { assertPublicDestination } from './destination-check.js';
@@ -63,6 +64,8 @@ export type GatewayApiKeyList = {
 
 const connectionMutationLock = 'connection-mutations';
 const defaultProviderId = 'openai';
+/** A token expiring within this window is renewed before a burst of requests can meet it expired. */
+const renewalWindowMs = 30 * 60_000;
 /** Consecutive failures before routing stops sending traffic to a connection. */
 /** How often background health polling runs. 0 disables it. */
 
@@ -344,6 +347,57 @@ export class GatewayService {
    */
 
 
+  /**
+   * One renewal pass: refreshes each OAuth connection whose token expires within the window, by asking its
+   * adapter to validate it. An adapter that cannot say whether a token has expired is left alone, rather than
+   * refreshed on a guess.
+   */
+  async renewExpiringTokens(): Promise<void> {
+    await this.tokenRenewal().pass();
+  }
+
+  /** Starts renewal passes on their own timer, so an idle OAuth token is refreshed before a burst meets it. */
+  startTokenRenewal(intervalMs?: number): void {
+    this.tokenRenewal(intervalMs).start();
+  }
+
+  stopTokenRenewal(): void {
+    this.tokenRenewalTimer?.stop();
+  }
+
+  private tokenRenewalTimer: TokenRenewal | undefined;
+
+  private tokenRenewal(intervalMs?: number): TokenRenewal {
+    if (this.tokenRenewalTimer) return this.tokenRenewalTimer;
+    this.tokenRenewalTimer = this.buildTokenRenewal(intervalMs);
+    return this.tokenRenewalTimer;
+  }
+
+  private buildTokenRenewal(intervalMs?: number): TokenRenewal {
+    return new TokenRenewal({
+      connections: async () => {
+        const due: Array<{ id: string; providerId: string; expiresAt?: string }> = [];
+        for (const connection of await this.listConnections()) {
+          if (!connection.enabled || !connection.hasCredential) continue;
+          const context = await this.credentials.context(connection.id, connection.providerId);
+          const credential = context.credential;
+          if (!credential || credential.type !== 'oauth' || typeof credential.expiresAt !== 'string') continue;
+          due.push({ id: connection.id, providerId: connection.providerId, expiresAt: credential.expiresAt });
+        }
+        return due;
+      },
+      renew: async (connection) => {
+        const adapter = await this.resolveAdapter(connection.providerId);
+        const context = await this.credentials.context(connection.id, connection.providerId);
+        const credential = context.credential;
+        if (!credential || credential.type !== 'oauth' || !adapter.isCredentialExpired) return;
+        const expiring = adapter.isCredentialExpired(credential, Date.now() + renewalWindowMs);
+        if (expiring !== true) return;
+        await adapter.validateCredential?.(credential, context);
+      },
+    }, { windowMs: renewalWindowMs, ...(intervalMs === undefined ? {} : { intervalMs }) });
+  }
+
   /** How often background health polling runs. 0 keeps polling off. */
   setHealthInterval(intervalMs: number) {
     this.healthManager.setInterval(intervalMs);
@@ -373,6 +427,7 @@ export class GatewayService {
    */
   async close(): Promise<void> {
     this.stopHealthMonitor();
+    this.stopTokenRenewal();
     await this.apiKeyStore?.close?.();
   }
 

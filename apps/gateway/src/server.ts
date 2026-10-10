@@ -140,6 +140,7 @@ export async function startGatewayServer(options: {
   const bindHost = canonicalLoopbackHost(config.host);
   const service = createGatewayService(config, options.env, options.connectionStore, options.apiKeyStore);
   service.setHealthInterval(options.healthIntervalMs ?? config.healthIntervalMs);
+  service.startTokenRenewal();
   const dashboardToken = await issueDashboardToken(options.env);
   const server = createGatewayServer(service, {
     ...(options.corsOrigin ? { corsOrigin: options.corsOrigin } : {}),

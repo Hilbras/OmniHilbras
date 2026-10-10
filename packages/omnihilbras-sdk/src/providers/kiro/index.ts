@@ -833,6 +833,14 @@ export class KiroAdapter implements ProviderAdapter {
    * stated rather than implied: a model not in it is refused below instead of being sent
    * and coming back as `400 Invalid model`.
    */
+  isCredentialExpired(credential: ProviderCredential | undefined, now = Date.now()): boolean | undefined {
+    if (credential?.type !== 'oauth') return undefined;
+    if (typeof credential.expiresAt !== 'string') return undefined;
+    const parsed = Date.parse(credential.expiresAt);
+    if (!Number.isFinite(parsed)) return undefined;
+    return parsed <= now;
+  }
+
   async listModels(): Promise<Model[]> {
     return KIRO_MODELS.map((model) => ({
       id: model.id,
