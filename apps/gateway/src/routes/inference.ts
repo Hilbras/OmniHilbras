@@ -457,6 +457,7 @@ export function parseMessage(value: unknown): ChatMessage {
     ...(typeof value.name === 'string' ? { name: value.name } : {}),
     ...(typeof value.tool_call_id === 'string' ? { toolCallId: value.tool_call_id } : {}),
     ...(value.is_error === true ? { isError: true } : {}),
+    ...(typeof value.reasoning_content === 'string' && value.reasoning_content.length > 0 ? { reasoning: value.reasoning_content } : {}),
     ...(toolCalls ? { toolCalls } : {}),
   };
 }

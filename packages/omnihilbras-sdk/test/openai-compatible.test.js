@@ -176,3 +176,32 @@ test('an unusable chat response says which part was missing', async () => {
     (error) => error.code === 'INVALID_RESPONSE' && /choice with no message/.test(error.message),
   );
 });
+
+test('a thinking model\'s reasoning is passed back on the assistant turn that made the tool call', async () => {
+  // DeepSeek's thinking mode refuses a tool round unless the reasoning from that turn is sent back as
+  // `reasoning_content`. Without it the provider answers 400 on every multi-turn tool call.
+  const transport = createTransport();
+  const adapter = createAdapter(transport);
+  await adapter.chat({
+    model: 'acme-1',
+    messages: [
+      { role: 'user', content: 'count' },
+      { role: 'assistant', content: '', reasoning: 'The output has 3 lines.', toolCalls: [{ id: 'c1', type: 'function', function: { name: 'grep', arguments: '{}' } }] },
+      { role: 'tool', toolCallId: 'c1', content: '3 lines' },
+    ],
+  }, { credential: { type: 'api-key', value: 'k' } });
+  const sent = JSON.parse(transport.calls[0].body).messages;
+  assert.equal(sent[1].reasoning_content, 'The output has 3 lines.', 'the reasoning reaches the provider');
+  assert.equal('reasoning_content' in sent[2], false, 'a tool result carries no reasoning');
+});
+
+test('an assistant turn without reasoning is sent exactly as before', async () => {
+  const transport = createTransport();
+  const adapter = createAdapter(transport);
+  await adapter.chat({
+    model: 'acme-1',
+    messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }],
+  }, { credential: { type: 'api-key', value: 'k' } });
+  const sent = JSON.parse(transport.calls[0].body).messages;
+  assert.equal('reasoning_content' in sent[1], false, 'no reasoning field is invented');
+});

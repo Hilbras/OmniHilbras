@@ -400,6 +400,7 @@ function toOpenAIMessage(message: ChatMessage) {
     ...(message.name ? { name: message.name } : {}),
     ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
     ...(message.toolCalls?.length ? { tool_calls: message.toolCalls.map(toOpenAIToolCall) } : {}),
+    ...(message.role === 'assistant' && message.reasoning ? { reasoning_content: message.reasoning } : {}),
   };
 }
 

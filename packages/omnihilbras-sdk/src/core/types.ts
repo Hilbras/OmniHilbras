@@ -54,6 +54,11 @@ export type ChatMessage = {
   toolCalls?: readonly ToolCall[];
   /** A tool result that reports a failure, so the provider does not read it as success. */
   isError?: boolean;
+  /**
+   * The reasoning a thinking model produced on this assistant turn. Some providers refuse a tool round unless
+   * it is sent back (DeepSeek answers 400 without it), so it is kept with the message and replayed to that provider.
+   */
+  reasoning?: string;
 };
 
 export type ChatRequest = {

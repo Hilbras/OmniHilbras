@@ -147,7 +147,7 @@ test('local gateway strictly validates fields and preserves assistant tool calls
         { role: 'user', content: 'Use a tool' },
         { role: 'assistant', content: null, tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'lookup', arguments: '{"q":"x"}' } }] },
         { role: 'tool', tool_call_id: 'call-1', content: 'result' },
-        { role: 'assistant', content: null, tool_calls: [{ id: 'call-2', type: 'function', function: { name: 'lookup', arguments: '{}' } }] },
+        { role: 'assistant', content: null, reasoning_content: 'I will look it up.', tool_calls: [{ id: 'call-2', type: 'function', function: { name: 'lookup', arguments: '{}' } }] },
         { role: 'tool', tool_call_id: 'call-2', content: 'boom', is_error: true },
       ],
     }),
@@ -157,6 +157,7 @@ test('local gateway strictly validates fields and preserves assistant tool calls
   assert.equal(received.messages[2].toolCallId, 'call-1');
   assert.equal(received.messages[2].isError, undefined, 'a result without the flag carries no error mark');
   assert.equal(received.messages[4].isError, true, 'the client flags a failed tool result so the provider can see it');
+  assert.equal(received.messages[3].reasoning, 'I will look it up.', 'a thinking model\'s reasoning survives the gateway, so it can be replayed');
 
   const missingProvider = await fetch(`${toolServer}/v1/chat/completions`, {
     method: 'POST',
