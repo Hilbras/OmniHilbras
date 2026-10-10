@@ -403,6 +403,9 @@ export class RequestExecutor {
         // makes should be assertable rather than discoverable by reading a timer callback.
         clearInterval(hedgeTimer);
         hedgePending = false;
+        // The loop is parked on `resetChange()`. Without this wake-up, a leader that failed before the timer
+        // fired leaves the loop waiting on a change that will never come, and the request never answers.
+        onChange();
         return;
       }
       start(decision.candidate);

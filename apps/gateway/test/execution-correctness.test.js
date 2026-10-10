@@ -608,3 +608,31 @@ test('every dispatch path refuses on the limiter OUTSIDE its provider-error hand
     );
   }
 });
+
+test('a leader that fails before the hedge fires still reaches the next route, instead of hanging', async (t) => {
+  // The leader fails at 5 ms, well before the 200 ms hedge timer. The timer then finds nothing left to hedge
+  // with and clears itself without waking the waiting loop. Before the fix the request never answered.
+  const calls = [];
+  const leader = scripted('leader', {
+    calls,
+    chat: async () => { await new Promise((r) => setTimeout(r, 5)); throw Object.assign(new Error('boom'), { code: 'PROVIDER_UNAVAILABLE' }); },
+    async *stream() { yield { id: 'c', providerId: 'leader', model: 'm', content: 'x' }; },
+  });
+  const backup = scripted('backup', {
+    calls,
+    chat: async () => ({ id: 'r', providerId: 'backup', model: 'm', createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'backup' }, finishReason: 'stop' }),
+    async *stream() { yield { id: 'c', providerId: 'backup', model: 'm', content: 'x' }; },
+  });
+  const { base, auth } = await serve(t, [leader, backup], [
+    { input: { id: 'leader', providerId: 'leader', name: 'Leader', endpoint: 'https://leader.example/v1', priority: 1, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: { maxRetries: 0, requestsPerMinute: 100, timeoutMs: 5_000, hedgeAfterMs: 200 } }, credential: { type: 'api-key', value: 'k' } },
+    { input: { id: 'backup', providerId: 'backup', name: 'Backup', endpoint: 'https://backup.example/v1', priority: 2, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: { maxRetries: 0, requestsPerMinute: 100, timeoutMs: 5_000, hedgeAfterMs: 0 } }, credential: { type: 'api-key', value: 'k' } },
+  ], { failureThreshold: 3 });
+
+  const response = await Promise.race([
+    fetch(`${base}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json', ...auth }, body: JSON.stringify({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }) }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('the request hung past 3 s')), 3_000)),
+  ]);
+  assert.equal(response.status, 200, 'the backup route answers once the leader has failed');
+  const body = await response.json();
+  assert.equal(body.choices[0].message.content, 'backup');
+});
