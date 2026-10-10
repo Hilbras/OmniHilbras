@@ -69,7 +69,9 @@ export function sanitizeProviderHeaders(headers: Record<string, string> | undefi
 }
 
 export function isPrivateHostname(hostname: string) {
-  const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  // `localhost.` and `nas.local.` are the same DNS names with a fully qualified trailing dot. Stripping it keeps
+  // the suffix checks below from being bypassed by a single character.
+  const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (normalized === 'localhost' || normalized.endsWith('.local') || normalized.endsWith('.internal')) return true;
   // An IPv4-mapped or -compatible IPv6 address is an IPv4 address wearing a hat: `::ffff:169.254.169.254`
   // reaches the same host as `169.254.169.254`, and the prefix checks below cannot see that. Without this,

@@ -68,6 +68,9 @@ const PRIVATE = [
   ['https://localhost/', 'loopback by name'],
   ['https://foo.local/', 'mDNS'],
   ['https://svc.internal/', 'the .internal convention'],
+  ['https://localhost./', 'loopback by name, fully qualified'],
+  ['https://nas.local./', 'mDNS, fully qualified'],
+  ['https://router.internal./', '.internal, fully qualified'],
 ];
 
 const PUBLIC = [
@@ -75,6 +78,7 @@ const PUBLIC = [
   'https://api.anthropic.com/v1',
   'https://generativelanguage.googleapis.com/v1beta',
   'https://openrouter.ai/api/v1',
+  'https://example.com./v1',
   'https://api.moonshot.ai/v1',
   // Outside the private ranges, so it must not be swept up by the fix.
   'https://[2606:4700:4700::1111]/',
