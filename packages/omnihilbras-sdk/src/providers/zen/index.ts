@@ -29,7 +29,13 @@ export const ZEN_LANES = {
 /** The slice of an OpenAI chat stream this adapter reads. */
 type GatedStreamChunk = {
   id?: string;
-  choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
+  choices?: Array<{
+    delta?: {
+      content?: string;
+      tool_calls?: Array<{ index?: number; id?: string; type?: string; function?: { name?: string; arguments?: string } }>;
+    };
+    finish_reason?: string | null;
+  }>;
   error?: { message?: string } | string;
 };
 
@@ -457,17 +463,36 @@ export class ZenAdapter implements ProviderAdapter {
     let text = '';
     let finishReason: FinishReason | undefined;
     let responseId = '';
+    // A tool call arrives in pieces: its id and name once, then its arguments across several deltas. Each
+    // piece is merged by index, so the arguments join into the whole JSON the model wrote.
+    const calls = new Map<number, { id: string; name: string; arguments: string }>();
     for await (const chunk of this.streamGated(request, context)) {
       responseId = chunk.id || responseId;
       if (chunk.delta?.content) text += chunk.delta.content;
+      for (const piece of chunk.delta?.toolCalls ?? []) {
+        const call = calls.get(piece.index) ?? { id: '', name: '', arguments: '' };
+        if (piece.id) call.id = piece.id;
+        if (piece.function?.name) call.name = piece.function.name;
+        if (piece.function?.arguments) call.arguments += piece.function.arguments;
+        calls.set(piece.index, call);
+      }
       if (chunk.finishReason) finishReason = chunk.finishReason;
     }
+    const toolCalls = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => ({
+      id: call.id,
+      type: 'function' as const,
+      function: { name: call.name, arguments: call.arguments },
+    }));
     return {
       id: responseId || `zen-${request.model}`,
       providerId: this.id,
       model: request.model,
       createdAt: new Date().toISOString(),
-      message: { role: 'assistant', content: text },
+      message: {
+        role: 'assistant',
+        content: text,
+        ...(toolCalls.length ? { toolCalls } : {}),
+      },
       finishReason: finishReason ?? 'stop',
     };
   }
@@ -523,6 +548,25 @@ export class ZenAdapter implements ProviderAdapter {
       const chunkId = chunk.id ?? `zen-${id}`;
       const delta = chunk.choices?.[0]?.delta?.content;
       if (delta) yield { id: chunkId, providerId: this.id, model: id, delta: { content: delta } };
+      const toolCalls = chunk.choices?.[0]?.delta?.tool_calls;
+      if (toolCalls?.length) {
+        yield {
+          id: chunkId,
+          providerId: this.id,
+          model: id,
+          delta: {
+            toolCalls: toolCalls.map((toolCall) => ({
+              index: toolCall.index ?? 0,
+              ...(toolCall.id ? { id: toolCall.id } : {}),
+              ...(toolCall.type ? { type: 'function' as const } : {}),
+              ...(toolCall.function?.name || toolCall.function?.arguments ? { function: {
+                ...(toolCall.function.name ? { name: toolCall.function.name } : {}),
+                ...(toolCall.function.arguments ? { arguments: toolCall.function.arguments } : {}),
+              } } : {}),
+            })),
+          },
+        };
+      }
       const finish = chunk.choices?.[0]?.finish_reason;
       if (finish) yield { id: chunkId, providerId: this.id, model: id, delta: {}, finishReason: toGatedFinishReason(finish) };
     }
