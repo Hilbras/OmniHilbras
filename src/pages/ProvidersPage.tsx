@@ -27,6 +27,7 @@ import { ProviderMark } from '../components/ProviderMark';
 import { providerRoute } from '../lib/routes';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 import { webSessionProviderIds } from '../lib/webSessionProviders';
+import { providerSlug } from '@hilbras/omnihilbras';
 import { providerCatalog } from '../data/providers';
 import { mergeGatewayConnections } from '../lib/providerCards';
 
@@ -513,10 +514,10 @@ export function ProvidersContent() {
                               <button
                                 type="button"
                                 onClick={() => navigate(providerRoute(provider.id))}
-                                title={`${model} — open ${provider.name}`}
+                                title={`${providerSlug(provider.id)}/${model} — open ${provider.name}`}
                                 className="max-w-[15rem] truncate rounded-md border border-line bg-bg-soft px-1.5 py-0.5 font-mono text-[10px] text-muted transition-colors hover:border-gold/40 hover:text-text"
                               >
-                                {model}
+                                {providerSlug(provider.id)}/{model}
                               </button>
                             </li>
                           ))}

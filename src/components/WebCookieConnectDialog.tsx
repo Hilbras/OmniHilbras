@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, CircleAlert, Cookie, ExternalLink, LoaderCircle, LogIn, ShieldAlert, Tag } from 'lucide-react';
+import { providerSlug } from '@hilbras/omnihilbras';
 import { requestJson, type GatewayConnection } from '../lib/gatewayClient';
 
 /**
@@ -418,7 +419,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
                       {probe.models.map((model) => (
                         <li key={model} className="flex items-center gap-1 rounded bg-black/25 px-1.5 py-0.5 font-mono text-[9px] text-muted">
                           <Tag className="h-2 w-2 shrink-0" aria-hidden="true" />
-                          {model}
+                          {providerSlug(descriptor.id)}/{model}
                         </li>
                       ))}
                     </ul>

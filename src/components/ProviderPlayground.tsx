@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, CircleAlert, LoaderCircle, MessageSquare, Square } from 'lucide-react';
 import { ProviderMark } from './ProviderMark';
+import { providerSlug } from '@hilbras/omnihilbras';
 import { streamGatewayChat, type GatewayChatMessage, type GatewayConnection } from '../lib/gatewayClient';
 import type { ProviderRecord } from './ProviderCard';
 
@@ -187,7 +188,7 @@ export function ProviderPlayground({ provider, connection }: { provider: Provide
           <select value={model} onChange={(event) => setModel(event.target.value)} className="input !h-9 !w-full !py-2 !text-xs sm:!w-96">
             {models.map((option) => (
               <option key={option} value={option}>
-                {option}
+                {providerSlug(provider.id)}/{option}
               </option>
             ))}
           </select>
