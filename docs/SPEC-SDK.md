@@ -169,6 +169,7 @@ The first local gateway exposes:
 - `PATCH /v1/keys/:id` — pause or resume a key.
 - `DELETE /v1/keys/:id` — revoke a key.
 - `PUT /v1/connections/:id/resilience` — update one connection's retry, timeout, and rate-limit budget.
+- `POST /v1/responses` — the OpenAI Responses API shape for Codex-style clients. `instructions` becomes the system message and `input` (a string, or a list of role/content messages) the conversation. It is served by the chat path, so routing, failover, usage and the key gate are the same. The reply carries `object: "response"`, `status`, `output`, `output_text` and `usage`. `stream: true` is refused with 400 for now.
 - `PUT /v1/providers/:providerId/strategy` — set how a provider's connections share traffic: `priority` (the default, the first connection by priority serves) or `round-robin` (connections at one priority take turns). Body `{"strategy": "round-robin"}`; any other value is a 400. Management route: requires a key when management enforcement is on. `GET /v1/routing` reports each set strategy under `strategies`.
 - `PUT /v1/connections/:id` — save or update a connection. A discovered **model metadata map** (display name, context window, modalities, and per-1M prices) is preserved across a save that does not supply one, and replaced by one that does; it was silently dropped on every save before 1.62.0.
 - `GET /v1/routing` — live routing state: budgets, recent failures and successes, ejection, last latency, last error, and `rateLimitWaitMs` (absent when never checked, `0` when checked and free).

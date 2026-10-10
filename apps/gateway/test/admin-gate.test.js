@@ -131,7 +131,9 @@ test('the prefix list and the router agree, so a new management route cannot be 
   // than through the prefix list. Putting it in `MANAGEMENT_PREFIXES` instead would be a *second*
   // gate on the same route — the 1.46.0 shape, where a route protected in one place and exempt in
   // another is a route whose protection depends on which check runs first.
-  const excluded = new Set(['/v1/models', '/v1/chat', '/v1/embeddings']);
+  // `/v1/responses` joins the inference surface for the same reason as `/v1/embeddings`: it is gated through
+  // `isPublicLlmRoute`, not the prefix list, and `responses-route.test.js` proves that gate refuses it without a key.
+  const excluded = new Set(['/v1/models', '/v1/chat', '/v1/embeddings', '/v1/responses']);
   for (const prefix of served) {
     if (excluded.has(prefix)) continue;
     assert.ok(

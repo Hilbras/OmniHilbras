@@ -49,6 +49,11 @@ export async function handleInferenceRoute(ctx: RouteContext): Promise<boolean> 
       return true;
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/responses') {
+      await handleResponses(request, response, service, options, origin, signal);
+      return true;
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/embeddings') {
       await handleEmbeddings(request, response, service, options, origin, signal);
       return true;
@@ -171,6 +176,54 @@ function finishEmbeddingRequest(body: Record<string, unknown>, model: string, in
     ...(dimensions === undefined ? {} : { dimensions }),
     ...(body.user === undefined ? {} : { user: body.user as string }),
   };
+}
+
+/**
+ * `POST /v1/responses`: the Responses API a Codex-style client speaks. It is served by the chat path, so routing,
+ * failover, usage and the key gate are the same; only the request is translated in and the reply translated out.
+ * Streaming is refused rather than served in a shape the client cannot read.
+ */
+export async function handleResponses(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
+  const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
+  if (isRecord(body) && body.stream === true) throw invalidRequest('Streaming is not available on /v1/responses yet; send stream: false.');
+  const chatRequest = parseChatRequest(responsesToChatBody(body));
+  const explicitProviderId = getExplicitProviderId(request, body);
+  const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request));
+  const startedAt = Date.now();
+  let completion: ChatResponse;
+  let attempts: GatewayFailoverAttempt[];
+  try {
+    ({ response: completion, attempts } = await service.chatWithFailover(chatRequest, explicitProviderId, signal, scope));
+  } catch (error) {
+    const details = error instanceof ProviderError ? error.details : undefined;
+    const ledger: GatewayFailoverAttempt[] =
+      typeof details === 'object' && details !== null && Array.isArray((details as { attempts?: unknown }).attempts)
+        ? ((details as { attempts: GatewayFailoverAttempt[] }).attempts)
+        : [];
+    const cancelled = signal.aborted || (error instanceof ProviderError && error.code === 'CANCELLED');
+    recordUsage(service, {
+      model: chatRequest.model,
+      providerId: ledger[ledger.length - 1]?.providerId,
+      connectionId: ledger[ledger.length - 1]?.connectionId,
+      outcome: cancelled ? 'cancelled' : 'failure',
+      attempts: ledger.length,
+      latencyMs: Date.now() - startedAt,
+      ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+    });
+    throw attachRequestId(error, scope);
+  }
+  const serving = attempts.find((attempt) => attempt.ok);
+  recordUsage(service, {
+    model: completion.model,
+    providerId: completion.providerId,
+    connectionId: serving?.connectionId,
+    outcome: 'success',
+    attempts: attempts.length,
+    latencyMs: Date.now() - startedAt,
+    ...(completion.usage ? { usage: completion.usage } : {}),
+  });
+  const text = typeof completion.message.content === 'string' ? completion.message.content : '';
+  sendJson(response, 200, chatToResponsesBody({ id: completion.id, model: completion.model, createdAt: completion.createdAt, content: text, ...(completion.usage ? { usage: completion.usage } : {}) }), origin);
 }
 
 export async function handleChat(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
@@ -406,6 +459,53 @@ export function toPublicAttempt(attempt: { providerId: string; attempt: number; 
   return { provider: attempt.providerId, attempt: attempt.attempt, ok: attempt.ok, latencyMs: attempt.latencyMs, ...(attempt.errorCode ? { error: attempt.errorCode } : {}) };
 }
 
+
+/**
+ * Turns a Responses API request into the chat request the gateway already serves. `instructions` is the system
+ * message; `input` is either a string (one user message) or a list of role/content items. Anything the chat path
+ * cannot express is refused by `parseChatRequest`, so both routes share one set of rules.
+ */
+export function responsesToChatBody(body: unknown): Record<string, unknown> {
+  if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+  const messages: Array<Record<string, unknown>> = [];
+  if (typeof body.instructions === 'string' && body.instructions.trim()) messages.push({ role: 'system', content: body.instructions });
+  if (typeof body.input === 'string') {
+    messages.push({ role: 'user', content: body.input });
+  } else if (Array.isArray(body.input)) {
+    for (const item of body.input) {
+      if (!isRecord(item) || typeof item.role !== 'string') throw invalidRequest('Each input item must have a role.');
+      messages.push({ role: item.role, content: item.content });
+    }
+  } else {
+    throw invalidRequest('input must be a string or a list of messages.');
+  }
+  return {
+    model: body.model,
+    messages,
+    ...(body.stream === undefined ? {} : { stream: body.stream }),
+    ...(body.temperature === undefined ? {} : { temperature: body.temperature }),
+    ...(body.top_p === undefined ? {} : { top_p: body.top_p }),
+    ...(body.max_output_tokens === undefined ? {} : { max_tokens: body.max_output_tokens }),
+  };
+}
+
+/** The Responses shape a client reads: an output list, plus `output_text` for the common single-text case. */
+export function chatToResponsesBody(chat: { id: string; model: string; createdAt: string; content: string; usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } }) {
+  return {
+    id: chat.id,
+    object: 'response',
+    created_at: Math.floor(Date.parse(chat.createdAt) / 1000),
+    model: chat.model,
+    status: 'completed',
+    output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: chat.content }] }],
+    output_text: chat.content,
+    usage: {
+      input_tokens: chat.usage?.inputTokens ?? 0,
+      output_tokens: chat.usage?.outputTokens ?? 0,
+      total_tokens: chat.usage?.totalTokens ?? (chat.usage?.inputTokens ?? 0) + (chat.usage?.outputTokens ?? 0),
+    },
+  };
+}
 
 export function parseChatRequest(body: unknown): ChatRequest {
   if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
@@ -712,6 +812,7 @@ export async function writeStreamData(response: ServerResponse, data: string, si
 export function isPublicLlmRoute(method: string | undefined, pathname: string) {
   return (method === 'GET' && pathname === '/v1/models')
     || (method === 'POST' && pathname === '/v1/chat/completions')
+    || (method === 'POST' && pathname === '/v1/responses')
     || (method === 'POST' && pathname === '/v1/embeddings');
 }
 
