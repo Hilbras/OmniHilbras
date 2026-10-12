@@ -253,3 +253,25 @@ test('the signal listeners are registered before startup, and a second signal is
     'a second signal must force an exit rather than waiting on a drain that may never finish',
   );
 });
+
+test('every process this file spawns gets a throwaway XDG_CONFIG_HOME', () => {
+  // The dashboard token is issued at start and written under `XDG_CONFIG_HOME`, **not** under
+  // `OMNIHILBRAS_DATA_DIR`. A spawned gateway without a temp config home therefore writes a new token into
+  // the developer's real `~/.config/omnihilbras` and invalidates the token of the gateway they are running —
+  // every dashboard request then answers 401 until it is restarted. That happened twice before this guard.
+  const source = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const spawns = source.split(/\bspawnSync\(|\bspawn\(/).slice(1);
+  assert.ok(spawns.length >= 2, 'this file is expected to spawn the gateway; no spawns found means the guard is checking nothing');
+  for (const [index, chunk] of spawns.entries()) {
+    // A fixed-size window, not "up to the first `});`": the calls contain nested parens, so the first `});`
+    // can fall before the env object and the check would pass on a spawn that has no temp config home.
+    const call = chunk.split('\n').slice(0, 12).join('\n');
+    // The **assignment**, not the word: the explanatory comment above the line mentions `XDG_CONFIG_HOME`, so a
+    // bare word match passed on a spawn whose only occurrence was in the comment — checked, and it did.
+    assert.match(
+      call,
+      /XDG_CONFIG_HOME:\s*mkdtempSync/,
+      `spawn #${index + 1} has no throwaway XDG_CONFIG_HOME, so it will overwrite the dashboard token of a running gateway`,
+    );
+  }
+});
