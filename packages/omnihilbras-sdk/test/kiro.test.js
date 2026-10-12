@@ -11,6 +11,7 @@ import {
   kiroCredentialExpired,
   toKiroBody,
   toKiroEvent,
+  parseKiroUsageLimits,
 } from '../dist/index.js';
 
 /**
@@ -502,4 +503,53 @@ test('a model that calls a tool returns tool_calls with the arguments joined fro
   assert.deepEqual(response.message.toolCalls, [
     { id: 'tooluse_1', type: 'function', function: { name: 'get_weather', arguments: '{"city":"Paris"}' } },
   ]);
+});
+
+test('a GetUsageLimits answer becomes per-resource quota: used, limit, remaining and reset', () => {
+  const quota = parseKiroUsageLimits({
+    nextDateReset: 1791000000,
+    subscriptionInfo: { subscriptionTitle: 'Kiro Pro' },
+    usageBreakdownList: [
+      { resourceType: 'AGENTIC_REQUEST', currentUsageWithPrecision: 120, usageLimitWithPrecision: 500 },
+    ],
+  });
+  assert.equal(quota.plan, 'Kiro Pro');
+  assert.deepEqual(quota.resources.agentic_request, { used: 120, limit: 500, remaining: 380, resetsAt: new Date(1791000000 * 1000).toISOString() });
+});
+
+test('a usage answer with no breakdown reports no resources rather than a zero quota', () => {
+  const quota = parseKiroUsageLimits({ subscriptionInfo: { subscriptionTitle: 'Kiro' }, usageBreakdownList: [] });
+  assert.deepEqual(quota.resources, {});
+});
+
+test('the usage read sends the bearer token and the origin Kiro expects, and returns the parsed quota', async () => {
+  const t = transport({
+    [`${KIRO.usageLimitsUrl}?origin=AI_EDITOR&resourceType=AGENTIC_REQUEST`]: { data: { subscriptionInfo: { subscriptionTitle: 'Kiro' }, usageBreakdownList: [{ resourceType: 'AGENTIC_REQUEST', currentUsageWithPrecision: 1, usageLimitWithPrecision: 10 }] } },
+  });
+  const adapter = new KiroAdapter({ transport: t });
+  const quota = await adapter.quota({ credential: session });
+  assert.equal(quota.resources.agentic_request.remaining, 9);
+  const sent = t.requests.find((request) => request.url.startsWith(KIRO.usageLimitsUrl));
+  assert.equal(sent.headers.Authorization, 'Bearer access-token');
+  assert.match(sent.url, /origin=AI_EDITOR/);
+});
+
+test('the live quota read is reproduced from the AWS body that implies it', () => {
+  // Real output from the live gateway on 2026-10-12, captured verbatim:
+  //
+  //   {"object":"kiro.quota","provider":"kiro","plan":"KIRO FREE","resources":
+  //    {"credit":{"used":0.44,"limit":50,"remaining":49.56,"resetsAt":"2026-11-01T00:00:00.000Z"}}}
+  //
+  // Two things it settled that a guess would have got wrong: the resource type is `credit`, not the
+  // `agentic_request` the request asks for, and it is a *fractional* credit figure. The AWS body below
+  // is this output's inverse — what GetUsageLimits must have sent — so the parse is pinned to the field
+  // names the live read confirmed.
+  const captured = { plan: 'KIRO FREE', resources: { credit: { used: 0.44, limit: 50, remaining: 49.56, resetsAt: '2026-11-01T00:00:00.000Z' } } };
+  const parsed = parseKiroUsageLimits({
+    subscriptionInfo: { subscriptionTitle: 'KIRO FREE' },
+    nextDateReset: Date.parse('2026-11-01T00:00:00.000Z') / 1000,
+    usageBreakdownList: [{ resourceType: 'CREDIT', currentUsageWithPrecision: 0.44, usageLimitWithPrecision: 50 }],
+  });
+  assert.equal(parsed.plan, captured.plan);
+  assert.deepEqual(parsed.resources, captured.resources);
 });

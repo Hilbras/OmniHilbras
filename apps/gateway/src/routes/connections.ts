@@ -41,6 +41,13 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
       return true;
     }
 
+    // Kiro's account quota. Declared ahead of the generic connection handlers, which would otherwise
+    // read `kiro/quota` as a connection id.
+    if (request.method === 'GET' && url.pathname === '/v1/connections/kiro/quota') {
+      sendJson(response, 200, { object: 'kiro.quota', provider: 'kiro', ...(await service.kiroQuota('kiro', signal)) }, origin);
+      return true;
+    }
+
     // Credential checking is handled once, generically, further down. It used to have a second copy
     // here for one provider, registered ahead of the generic handler, and the copy was the *worse*
     // of the two: it accepted fewer fields, so `POST /v1/connections/openrouter/check` refused an

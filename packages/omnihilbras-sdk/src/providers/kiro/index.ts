@@ -31,9 +31,51 @@ export const KIRO = {
   userAgent: 'AWS-SDK-JS/3.0.0 kiro-ide/1.0.0',
   amzUserAgent: 'aws-sdk-js/3.0.0 kiro-ide/1.0.0',
   eventStreamAccept: 'application/vnd.amazon.eventstream',
+  /** The account's quota, the same service that answers the chat call. */
+  usageLimitsUrl: 'https://codewhisperer.us-east-1.amazonaws.com/getUsageLimits',
 } as const;
 
 export const kiroProviderId = 'kiro';
+
+export type KiroResourceQuota = {
+  used: number;
+  limit: number;
+  remaining: number;
+  resetsAt?: string;
+};
+
+export type KiroQuota = {
+  plan?: string;
+  resources: Record<string, KiroResourceQuota>;
+};
+
+/**
+ * Reads a GetUsageLimits answer. A resource whose used or limit figure is missing is left out rather
+ * than reported as zero, so an unknown quota never reads as an exhausted or an unlimited one.
+ */
+export function parseKiroUsageLimits(body: Json): KiroQuota {
+  const reset = readNumber(body, ['nextDateReset', 'resetDate']);
+  const resetsAt = reset === undefined ? undefined : new Date(reset * 1000).toISOString();
+  const subscription = typeof body.subscriptionInfo === 'object' && body.subscriptionInfo !== null ? (body.subscriptionInfo as Json) : {};
+  const plan = readString(subscription, ['subscriptionTitle']);
+  const breakdowns = Array.isArray(body.usageBreakdownList) ? body.usageBreakdownList : [];
+  const resources: Record<string, KiroResourceQuota> = {};
+  for (const item of breakdowns) {
+    if (typeof item !== 'object' || item === null) continue;
+    const entry = item as Json;
+    const name = readString(entry, ['resourceType']);
+    const used = readNumber(entry, ['currentUsageWithPrecision']);
+    const limit = readNumber(entry, ['usageLimitWithPrecision']);
+    if (!name || used === undefined || limit === undefined) continue;
+    resources[name.toLowerCase()] = {
+      used,
+      limit,
+      remaining: Math.max(0, limit - used),
+      ...(resetsAt === undefined ? {} : { resetsAt }),
+    };
+  }
+  return { ...(plan === undefined ? {} : { plan }), resources };
+}
 
 /**
  * Kiro's catalog. Ids must match its upstream exactly — an unknown id is refused with
@@ -1017,6 +1059,29 @@ export class KiroAdapter implements ProviderAdapter {
       finishReason: response.finishReason,
       ...(response.usage ? { usage: response.usage } : {}),
     };
+  }
+
+  /**
+   * Kiro's quota for the signed-in account, read from GetUsageLimits. Kiro-only: the shared adapter
+   * contract has no quota surface, so this is not an interface the other providers implement.
+   */
+  async quota(context: ProviderRequestContext = {}): Promise<KiroQuota> {
+    const credential = context.credential;
+    if (credential?.type !== 'oauth' || !credential.value) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'Sign in to Kiro to read its quota.', {
+        providerId: this.id,
+        publicMessage: 'Sign in to Kiro to read its quota.',
+      });
+    }
+    const url = `${KIRO.usageLimitsUrl}?origin=AI_EDITOR&resourceType=AGENTIC_REQUEST`;
+    const response = await this.transport.request<Json>({
+      method: 'GET',
+      providerId: this.id,
+      url,
+      headers: { ...kiroHeaders(credential), accept: 'application/json' },
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    return parseKiroUsageLimits(response.data ?? {});
   }
 
   async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
