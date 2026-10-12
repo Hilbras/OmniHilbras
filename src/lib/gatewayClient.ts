@@ -644,6 +644,34 @@ export type GatewayUsageCost = {
   caveat: string | null;
 };
 
+export type GatewayUsageGroup = {
+  requests: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** Records in this group that reported tokens. Zero means the sums are an absence, not a measured zero. */
+  tokensMeasured: number;
+  costUsd: number;
+  /** Records that could be priced. Zero with `requests` above zero means "no published price". */
+  pricedRequests: number;
+  unpricedRequests: number;
+};
+
+export type GatewayUsageProviderGroup = GatewayUsageGroup & { id: string };
+export type GatewayUsageModelGroup = GatewayUsageGroup & { model: string; lastUsed: string };
+export type GatewayUsageTimelinePoint = GatewayUsageGroup & { label: string; bucketStart: string };
+
+/** The aggregates behind the charts, over the same window as the totals. */
+export type GatewayUsageBreakdown = {
+  period: string;
+  since?: string;
+  byProvider: GatewayUsageProviderGroup[];
+  byModel: GatewayUsageModelGroup[];
+  timeline: GatewayUsageTimelinePoint[];
+};
+
 export type GatewayUsage = {
   /**
    * False when the gateway was started without a usage store, so nothing has been recorded.
@@ -652,8 +680,12 @@ export type GatewayUsage = {
    */
   recording: boolean;
   reason?: string;
+  /** The window the figures cover, echoed by the gateway so the page states it rather than assuming. */
+  period?: string;
   totals: GatewayUsageTotals;
   records: GatewayUsageRecord[];
+  /** Absent on a gateway too old to send it; the page then shows the cards without the charts. */
+  breakdown?: GatewayUsageBreakdown;
   cost?: GatewayUsageCost;
 };
 
@@ -689,8 +721,9 @@ export function openGatewayLogStream(onEvent: (event: GatewayLogEvent) => void, 
   return () => source.close();
 }
 
-export function getGatewayUsage(query?: { outcome?: 'success' | 'failure' | 'cancelled'; limit?: number; offset?: number }, signal?: AbortSignal) {
+export function getGatewayUsage(query?: { period?: string; outcome?: 'success' | 'failure' | 'cancelled'; limit?: number; offset?: number }, signal?: AbortSignal) {
   const params = new URLSearchParams();
+  if (query?.period) params.set('period', query.period);
   if (query?.outcome) params.set('outcome', query.outcome);
   if (query?.limit !== undefined) params.set('limit', String(query.limit));
   if (query?.offset !== undefined) params.set('offset', String(query.offset));

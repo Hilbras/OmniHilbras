@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "1.81.0",
+  "version": "1.82.0",
   "packageManager": "pnpm@12.5.1",
   "type": "module",
   "scripts": {
@@ -34,7 +34,9 @@
     "motion": "^13.4.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "react-router-dom": "^7.18.4"
+    "react-is": "^19.3.0",
+    "react-router-dom": "^7.18.4",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

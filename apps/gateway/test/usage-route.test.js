@@ -325,3 +325,49 @@ test('GET /v1/usage requires the admin key when management enforcement is on', a
   const authenticated = await fetch(`${base}/v1/usage`, { headers: { authorization: `Bearer ${key}` } });
   assert.equal(authenticated.status, 200);
 });
+
+test('an unknown period is a 400, not a window that silently matches nothing', async (t) => {
+  // Same rule as `outcome`: a bad filter value that matched nothing would read as "you have no usage", which
+  // is the opposite of the truth.
+  const gw = await gateway();
+  t.after(() => gw.close());
+  const response = await gw.getUsage('?period=last-fortnight');
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.match(body.error.message, /period must be one of/);
+});
+
+test('a request carries a period, a breakdown, and group sums that agree with the totals', async (t) => {
+  const gw = await gateway();
+  t.after(() => gw.close());
+  await (await gw.post({})).json();
+  await (await gw.post({})).json();
+
+  const response = await gw.getUsage('?period=24h');
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.period, '24h');
+  assert.ok(Array.isArray(body.breakdown.byProvider), 'the page needs provider groups for its chart');
+  assert.ok(Array.isArray(body.breakdown.byModel));
+  assert.ok(Array.isArray(body.breakdown.timeline));
+
+  const total = (field) => body.breakdown.byProvider.reduce((sum, group) => sum + group[field], 0);
+  assert.equal(total('requests'), body.totals.requests, 'the provider chart cannot disagree with the card');
+  assert.equal(total('succeeded'), body.totals.succeeded);
+  assert.equal(total('inputTokens'), body.totals.inputTokens);
+  // Every group named a provider, because these requests all reached one.
+  assert.ok(body.breakdown.byProvider.every((group) => group.id !== 'unattributed'));
+});
+
+test('a period excludes a record outside its window', async (t) => {
+  const gw = await gateway();
+  t.after(() => gw.close());
+  // Written directly, because a request cannot be made to look a week old through the HTTP surface.
+  await gw.usage.record({ at: new Date(Date.now() - 30 * 86_400_000).toISOString(), model: 'old', providerId: 'p', outcome: 'success', attempts: 1, latencyMs: 5, inputTokens: 5, outputTokens: 5 });
+  await (await gw.post({})).json();
+
+  const week = await (await gw.getUsage('?period=7d')).json();
+  assert.equal(week.totals.requests, 1, 'the month-old record is outside a 7-day window');
+  const everything = await (await gw.getUsage('?period=all')).json();
+  assert.equal(everything.totals.requests, 2, 'all is bounded by the store, not by a date');
+});

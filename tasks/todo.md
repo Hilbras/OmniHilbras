@@ -4963,3 +4963,45 @@ two fields. A live forced refresh now returns healthy.
 - Live provider behaviour for the streamed Responses path and the Kiro retry has not been checked against a
   real account.
 - Quota reads (11.2), the logs filter (1.3) and remote-use hardening (12.x) remain parked.
+
+## 1.82.0 — the usage page: period windows, charts, and the aggregates behind them
+
+The usage page was rebuilt to the content of 9router's Overview: a time-window selector, outcome and volume
+cards, a time-series area chart, per-provider and top-model bar charts, the connection topology, and the recent
+requests table. What it shows is still only what the gateway measured.
+
+### The API grew a period and a breakdown
+
+`GET /v1/usage` now takes `period` (`today`/`24h`/`7d`/`30d`/`60d`/`all`, default `7d`) and returns a
+`breakdown` of `byProvider`, `byModel` and `timeline`. An unknown `period` is a 400, the same rule `outcome`
+already had: a filter that silently matched nothing would read as "you have no usage". The period resolves to
+**one** window used for the totals, the breakdown and the listed rows, so a chart cannot disagree with the card
+above it. The breakdown is built from the same priced array the totals are, over every matched record rather
+than the capped page slice.
+
+### The honesty rules reach the charts
+
+A record whose provider reported no tokens adds nothing and moves `tokensMeasured`; a record with no published
+price is `unpricedRequests`, not `$0`. So a group at `tokensMeasured: 0` is drawn as a labelled empty state, not
+a zero-height bar, and the cost mode is offered only when something in the window was priced. The live data
+proves this is not theoretical: the `kiro` group in the current window has `tokensMeasured: 0`.
+
+### recharts, behind a dynamic import
+
+The charts use recharts 3.10.1. Every page is statically imported from `dashboardApp.tsx`, so a static import
+would put recharts (581 KB rendered, 826 KB in its chunk) in front of every navigation. It is reached only
+through `lazy(() => import('./UsageCharts'))` from `UsagePage.tsx`, and three guards assert the import stays
+dynamic. Measured: `dashboard.html` loads 1034 KB over 3 chunks and does **not** include the UsageCharts chunk.
+
+### Verify
+
+- SDK suite 631/631, gateway suite 667/667, repo guards 172/172. `pnpm verify` exit 0.
+- Revert proofs: with a static recharts import the boundary guard fails; with the unmeasured-token gate removed
+  the truthfulness guard fails. Both restored and rebuilt.
+- Live: `GET /v1/usage?period=7d` returned 998 requests, groups by provider and model, 8 timeline buckets, and a
+  400 for `period=nope`.
+
+### Still not done here
+
+- No Details tab and no per-connection quota view (the Kiro-only `GET /v1/connections/kiro/quota` is separate).
+- No cached-token card: the usage record has no cached-token field.

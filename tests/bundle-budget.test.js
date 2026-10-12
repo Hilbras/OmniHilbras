@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
@@ -94,4 +94,94 @@ test('the particle canvas does not draw when it cannot be seen', () => {
   assert.match(source, /document\.hidden/, 'the particle loop no longer checks document.hidden, so a background tab keeps animating');
   assert.match(source, /IntersectionObserver/, 'the particle loop no longer pauses when scrolled out of view');
   assert.match(source, /FRAME_INTERVAL_MS/, 'the frame budget cap is gone, so the loop runs at the display rate');
+});
+// ── recharts: the same boundary as motion, for the same reason ────────────────
+//
+// `recharts` is 581 KB rendered (826 KB in its chunk with its dependencies) — twice what motion cost. Every
+// page is statically imported from `dashboardApp.tsx`, so a static import from `UsagePage.tsx` would put that
+// in front of every navigation, not just the usage page. So the property asserted is the *import form*:
+// recharts is reached only through a dynamic `import()`, from a leaf module nothing else imports statically.
+
+const RECHARTS_SPECIFIERS = ['recharts'];
+
+/** Every source file that `dashboardApp.tsx` reaches through static (non-dynamic) imports. */
+function staticallyReachableFromDashboard() {
+  const entry = read('src/dashboardApp.tsx');
+  const seen = new Set();
+  const queue = [];
+  const resolve = (from, specifier) => {
+    if (!specifier.startsWith('.')) return null;
+    const base = new URL(specifier, new URL(from, ROOT));
+    for (const candidate of [`${base.pathname}.tsx`, `${base.pathname}.ts`, base.pathname]) {
+      try {
+        readFileSync(candidate);
+        return candidate;
+      } catch {
+        // try the next extension
+      }
+    }
+    return null;
+  };
+  const matchAll = (text, re) => [...text.matchAll(re)].map((match) => match[1]);
+  // Static imports only: `import x from`, `export ... from`, and bare `import '...'`.
+  const staticImports = (text) => [
+    ...matchAll(text, /^\s*import[^;]*?from\s*['"]([^'"]+)['"]/gm),
+    ...matchAll(text, /^\s*import\s*['"]([^'"]+)['"]/gm),
+    ...matchAll(text, /^\s*export[^;]*?from\s*['"]([^'"]+)['"]/gm),
+  ];
+  queue.push(new URL('src/dashboardApp.tsx', ROOT).pathname);
+  while (queue.length) {
+    const file = queue.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    for (const specifier of staticImports(readFileSync(file, 'utf8'))) {
+      const resolved = resolve(file, specifier);
+      if (resolved) queue.push(resolved);
+    }
+  }
+  return seen;
+}
+
+test('recharts is never reached statically from a page the dashboard loads', () => {
+  for (const file of staticallyReachableFromDashboard()) {
+    const text = readFileSync(file, 'utf8');
+    for (const specifier of RECHARTS_SPECIFIERS) {
+      const staticImport = new RegExp(`^\\s*(import|export)[^;]*?from\\s*['"]${specifier}['"]`, 'm');
+      assert.equal(
+        staticImport.test(text),
+        false,
+        `${file.replace(`${ROOT.pathname}`, '')} statically imports ${specifier}, which puts ~581 KB of recharts in front of every dashboard navigation`,
+      );
+    }
+  }
+});
+
+test('the usage page reaches its charts only through a dynamic import', () => {
+  const page = read('src/pages/UsagePage.tsx');
+  assert.match(
+    page,
+    /lazy\(\s*\(\)\s*=>\s*import\(\s*['"]\.\.\/components\/UsageCharts['"]\s*\)/,
+    'UsagePage no longer reaches UsageCharts dynamically, so recharts is static again',
+  );
+});
+
+test('the chart module is the only importer of recharts, so the boundary is real', () => {
+  // If something else imported `recharts` statically, the dynamic import above would be decoration and the
+  // weight would be back on the initial chunk regardless of how UsagePage imports its charts.
+  const src = new URL('src/', ROOT);
+  const walk = (dir) => {
+    const out = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = new URL(`${entry.name}${entry.isDirectory() ? '/' : ''}`, dir);
+      if (entry.isDirectory()) out.push(...walk(path));
+      else if (/\.tsx?$/.test(entry.name)) out.push(path);
+    }
+    return out;
+  };
+  const importers = walk(src).filter((file) => /from\s*['"]recharts['"]/.test(readFileSync(file, 'utf8')));
+  assert.deepEqual(
+    importers.map((file) => file.pathname.replace(ROOT.pathname, '')),
+    ['src/components/UsageCharts.tsx'],
+    'recharts is imported outside the one lazily-loaded module',
+  );
 });

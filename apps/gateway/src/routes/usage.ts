@@ -2,6 +2,7 @@ import type { ProviderError } from '@hilbras/omnihilbras';
 import type { RouteContext } from './route-context.js';
 import type { UsageOutcome } from '../usage-store.js';
 import { priceUsage, pricingCaveat } from '../usage-pricing.js';
+import { buildUsageBreakdown, resolveUsagePeriod, usagePeriods, type UsagePeriod } from '../usage-breakdown.js';
 import { sendJson } from '../http.js';
 
 /**
@@ -71,6 +72,18 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
     return true;
   }
 
+  const periodParam = url.searchParams.get('period');
+  if (periodParam !== null && !usagePeriods.includes(periodParam as UsagePeriod)) {
+    sendJson(response, 400, {
+      error: { code: 'INVALID_REQUEST', message: `period must be one of ${usagePeriods.join(', ')}.` },
+    }, origin);
+    return true;
+  }
+  // Resolved once, here, and used for BOTH the store query and the breakdown, so the cards and the charts
+  // describe the same window. Two approximations of "the last 7 days" is how they drift apart.
+  const period = (periodParam as UsagePeriod | null) ?? '7d';
+  const window = resolveUsagePeriod(period, new Date());
+
   const limitParam = url.searchParams.get('limit');
   if (limitParam !== null && (!/^\d+$/.test(limitParam) || Number(limitParam) > 10_000)) {
     sendJson(response, 400, {
@@ -98,11 +111,15 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
   }
 
   try {
+    // The window from `period` applies to the store query, so the totals, the charts and the listed rows all
+    // describe the same slice. An explicit `since` still wins, because a caller that asked for exact bounds
+    // meant them.
+    const explicitSince = url.searchParams.get('since');
     const summary = await store.summary({
       ...(url.searchParams.get('provider') ? { providerId: url.searchParams.get('provider')! } : {}),
       ...(url.searchParams.get('model') ? { model: url.searchParams.get('model')! } : {}),
       ...(url.searchParams.get('connection') ? { connectionId: url.searchParams.get('connection')! } : {}),
-      ...(url.searchParams.get('since') ? { since: url.searchParams.get('since')! } : {}),
+      ...(explicitSince ? { since: explicitSince } : window.since ? { since: window.since.toISOString() } : {}),
       ...(url.searchParams.get('until') ? { until: url.searchParams.get('until')! } : {}),
       ...(outcomeParam ? { outcome: outcomeParam as UsageOutcome } : {}),
     });
@@ -117,10 +134,18 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
     // nothing to the cost, and the response says how much of the page that covers.
     const prices = await service.modelPrices(summary.records);
     const priced = priceUsage(summary.records.map((record, index) => ({ ...record, pricing: prices[index] })));
+    // Built from the **same** priced array the totals come from, so a chart bar cannot disagree with the card
+    // above it. The records here are every matched record, not the capped page slice.
+    const breakdown = buildUsageBreakdown(
+      summary.records.map((record, index) => ({ ...record, pricing: prices[index] })),
+      { period },
+    );
     sendJson(response, 200, {
       recording: true,
+      period,
       totals: summary.totals,
       records: listed,
+      breakdown,
       cost: {
         ...priced,
         // `null` rather than a string nobody should show: a caveat printed every time is a caveat read

@@ -200,14 +200,25 @@ The first local gateway exposes:
   quiet one that ships. A service constructed without a loaded configuration reports `settings: null` with a
   reason, because inventing defaults here would duplicate `config.ts`'s own and give one gateway two sets of
   numbers.
-- `GET /v1/usage` — recorded per-request usage: totals, the newest records first, and a `cost` object. Rendered by `UsagePage.tsx` at `/dashboard/usage`. Optional query
-  parameters `provider`, `model`, `connection`, `since`, `until`, `outcome` (`success`/`failure`/`cancelled`)
-  and `limit` (0–10000); an unknown `outcome` or a malformed `limit` is a 400 rather than a filter that
-  silently matches nothing. **A record holds no prompt, no response, no headers and no credential** — the
-  type has no field capable of holding one, so there is nothing to redact. Token totals sum only over records
-  whose provider reported usage, and `tokensUnmeasured` is `true` when *no* record did, so an absence is not
-  presented as a measured zero. A gateway started without a usage store answers `recording: false` with empty
-  totals rather than zeros that read as "nothing was spent". Behind the admin key when enforcement is on, with
+- `GET /v1/usage` — recorded per-request usage: totals, the newest records first, a `cost` object, and a
+  `breakdown`. Rendered by `UsagePage.tsx` at `/dashboard/usage`. Optional query
+  parameters `period` (`today`/`24h`/`7d`/`30d`/`60d`/`all`, default `7d`), `provider`, `model`, `connection`,
+  `since`, `until`, `outcome` (`success`/`failure`/`cancelled`)
+  and `limit` (0–10000); an unknown `period` or `outcome`, or a malformed `limit`, is a 400 rather than a filter
+  that silently matches nothing. `period` resolves server-side to one window (local midnight for `today`) that
+  applies to the totals, the breakdown and the listed rows alike, so a chart cannot disagree with the card above
+  it; an explicit `since` still wins. `breakdown` is built over **every** matched record, not the listed page
+  slice, and holds `byProvider`, `byModel` and `timeline` (hourly buckets for `today`/`24h`, daily otherwise,
+  padded across the window so a quiet hour draws as zero rather than collapsing the axis). Each group carries
+  `inputTokens`, `outputTokens` and `tokensMeasured`, where `tokensMeasured` is the count of records that
+  actually reported usage — so a group at `tokensMeasured: 0` is an absence the page labels rather than a
+  measured zero — plus `costUsd`, `pricedRequests` and `unpricedRequests`, where `pricedRequests: 0` with a
+  non-zero `requests` means no price was published. **A record holds no prompt, no response, no headers and no
+  credential** — the type has no field capable of holding one, so there is nothing to redact. Token totals sum
+  only over records whose provider reported usage, and `tokensUnmeasured` is `true` when *no* record did, so an
+  absence is not presented as a measured zero. A gateway started without a usage store answers `recording: false`
+  with empty totals rather than zeros that read as "nothing was spent". Behind the admin key when enforcement is
+  on, with
   `/v1/routing`: a record describes what this machine talks to.
   Each record also carries `requestId`, the logical request's id, and `path`, the ordered list of connections
   tried with each outcome, so a failover shows which connection failed and which one answered. Both are optional:
