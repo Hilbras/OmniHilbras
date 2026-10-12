@@ -531,6 +531,123 @@
   }
 }
 
+/* ── Usage topology ─────────────────────────────────────────────────────────────
+   The provider canvas: the router card pulses, and each active edge is an electric beam of a soft
+   halo, a plasma layer and a hot core, with energy orbs travelling along it.
+
+   Everything here is scoped to `.topology-*`, and all of the motion stops under two conditions, both
+   of which exist because this dashboard was slow once and the cause was per-frame work nobody could
+   see: `.topology-paused` (a background tab, or the canvas scrolled out of view — set from the
+   component) and `prefers-reduced-motion: reduce`. Both leave the geometry in place and drop only the
+   animation, so a paused canvas is still a readable diagram. */
+
+@keyframes topology-router-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 8px var(--gold), 0 0 20px var(--glow), inset 0 0 10px rgba(226, 189, 82, 0.3);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 14px var(--gold-bright), 0 0 28px var(--gold), 0 0 44px rgba(34, 211, 238, 0.5), inset 0 0 14px rgba(255, 255, 255, 0.25);
+  }
+}
+
+@keyframes topology-router-icon-shake {
+  0%, 100% { transform: rotate(0deg) scale(1); filter: drop-shadow(0 0 2px var(--gold-bright)); }
+  25% { transform: rotate(-5deg) scale(1.08); filter: drop-shadow(0 0 6px var(--gold)); }
+  75% { transform: rotate(5deg) scale(1.08); filter: drop-shadow(0 0 6px #22d3ee); }
+}
+
+@keyframes topology-router-label-flicker {
+  0%, 100% { text-shadow: 0 0 6px var(--gold-bright), 0 0 12px #22d3ee; }
+  50% { text-shadow: 0 0 10px #fff, 0 0 18px var(--gold); }
+}
+
+@keyframes topology-edge-dash {
+  to { stroke-dashoffset: -36; }
+}
+
+@keyframes topology-edge-flicker {
+  0%, 100% { opacity: 0.85; }
+  40% { opacity: 1; }
+  55% { opacity: 0.55; }
+  70% { opacity: 1; }
+}
+
+.topology-router-core {
+  animation: topology-router-pulse 0.75s ease-in-out infinite;
+  background: linear-gradient(135deg, var(--gold-soft), var(--surface) 55%, rgba(34, 211, 238, 0.08));
+}
+
+.topology-router-icon {
+  animation: topology-router-icon-shake 0.45s ease-in-out infinite;
+}
+
+.topology-router-label {
+  animation: topology-router-label-flicker 0.7s ease-in-out infinite;
+}
+
+.topology-edge-kame {
+  stroke-dasharray: 8 6;
+  animation: topology-edge-dash 0.22s linear infinite;
+}
+
+.topology-edge-halo {
+  animation: topology-edge-flicker 0.18s steps(2) infinite;
+}
+
+.topology-edge-plasma {
+  stroke-dasharray: 14 10;
+  animation: topology-edge-dash 0.18s linear infinite, topology-edge-flicker 0.22s steps(3) infinite;
+}
+
+/* The pause: same geometry, no motion. Set when the tab is hidden or the canvas is off-screen. */
+.topology-paused .topology-router-core,
+.topology-paused .topology-router-icon,
+.topology-paused .topology-router-label,
+.topology-paused .topology-edge-kame,
+.topology-paused .topology-edge-halo,
+.topology-paused .topology-edge-plasma,
+.topology-paused .topology-edge animate,
+.topology-paused .topology-edge animateMotion {
+  animation: none !important;
+}
+
+/* React Flow controls, on this app's surface colours. */
+.topology-controls {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.topology-controls button {
+  background: var(--surface);
+  color: var(--text);
+  border-bottom: 1px solid var(--line);
+}
+
+.topology-controls button:last-child {
+  border-bottom: 0;
+}
+
+.topology-controls button:hover {
+  background: var(--bg-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topology-router-core,
+  .topology-router-icon,
+  .topology-router-label,
+  .topology-edge-kame,
+  .topology-edge-halo,
+  .topology-edge-plasma,
+  .topology-edge animate,
+  .topology-edge animateMotion {
+    animation: none !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

@@ -348,12 +348,14 @@ export function UsageContent() {
           ) : null}
 
           <section className="card mt-4 overflow-hidden p-4" aria-label="Provider connections">
-            <div className="mb-3 flex items-center gap-2">
-              <h3 className="text-sm font-semibold">Connections</h3>
-              <span className="muted text-[11px]">providers that served the latest requests are highlighted</span>
+            <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h3 className="text-sm font-semibold">Providers</h3>
+              {/* The classification is the windowed aggregate, not liveness, and the hint says so rather than
+                  letting "active" read as "in flight right now". */}
+              <span className="muted text-[11px]">gold served a request in this window · red failed only · dim never used</span>
             </div>
             <Suspense fallback={<p className="muted py-10 text-center text-xs">Loading diagram...</p>}>
-              <UsageTopology records={records} />
+              <UsageTopology groups={breakdown?.byProvider ?? []} />
             </Suspense>
           </section>
 

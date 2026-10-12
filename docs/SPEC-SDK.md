@@ -224,6 +224,11 @@ The first local gateway exposes:
   tried with each outcome, so a failover shows which connection failed and which one answered. Both are optional:
   records written before they existed show only the total `attempts`. `path` entries record a connection id, a
   provider id, whether the attempt was sent (`dispatched`), its outcome and an error code, and nothing else.
+  The page's provider canvas is drawn from `breakdown.byProvider` and **classifies from the window, not from
+  live state**: gold means the provider served a request in the window, red means everything it did failed,
+  dim means it is configured and unused. There is no in-flight state on this page, so "active" does not mean
+  "serving right now". Its animation stops when the tab is hidden or the canvas is off-screen, which is why the
+  effect is affordable.
 - `POST /v1/oauth/cline/start` — begin a sign-in; returns the sign-in URL, a session id, and a single-use `state`.
 - `GET /v1/oauth/cline/authorize` — build the Cline sign-in URL for a loopback callback.
 - `GET /v1/oauth/cline/callback` — where the provider redirects the browser; completes the exchange and reports the outcome.

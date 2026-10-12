@@ -5027,3 +5027,47 @@ comment alone.
 **Verify.** With the old env the suite rewrites the live token; with the fix the token is unchanged after the
 full gateway suite (668/668) and the live usage request still answers 200 with the same gateway process. The
 guard fails when the assignment is removed (6 pass, 1 fail).
+
+## 1.83.0 — the usage page's provider canvas: 9router's animated topology
+
+The usage page's provider diagram was rebuilt to the shape of 9router's: the gateway card in the middle, every
+configured provider on an ellipse around it, and an electric beam — a displaced halo, a plasma layer, a hot
+core and travelling energy orbs — along the edges that served something in the current window.
+
+### What an edge's colour means
+
+This page has no live request stream, so the canvas classifies from the windowed `breakdown.byProvider`:
+
+- **gold** — served at least one request in the window;
+- **red** — failures and no successes;
+- **dim** — configured but unused in the window.
+
+A cancellation-only group is **not** an error, because the client stopping says nothing about the provider —
+the same rule the rest of the page applies. `unattributed` (requests no provider served) is not a catalog
+provider, so it is ignored rather than drawn as a node that does not exist. "Active" here means "served in this
+window", not "in flight right now", and the page's hint says so.
+
+The classification and the geometry live in `src/lib/providerTopology.ts` — a `.ts` module, not the `.tsx`, so
+`tests/usage-topology.test.js` **calls** it. Node cannot import a `.tsx`, so anything worth asserting has to be
+outside one; that is the same reason `providerCards.ts` exists.
+
+### Cost, since this dashboard was slow once
+
+The full effect is deliberate, and three things bound it rather than hope:
+
+1. **Nothing animates while it cannot be seen** — a background tab or a canvas scrolled past adds
+   `topology-paused`, and the CSS drops the motion but keeps the geometry.
+2. **Particle layers are capped** at 12 active edges; the rest still draw the beam. Thirty active providers
+   would otherwise be 330 continuously-moving SVG nodes.
+3. **`prefers-reduced-motion: reduce`** turns the animation off, as the rest of the app already does.
+
+### Verify
+
+- Repo guards 183/183 (12 new topology tests), typecheck 0, build 0.
+- Bundle: `@xyflow/react` (233 KB across its two packages) stays in the lazily-loaded `UsageTopology` chunk;
+  `dashboard.html` loads 1034 KB over 3 chunks without it.
+- Revert proofs: treating cancellations as errors, lifting the particle cap, and removing the paused class each
+  fail a test; all restored.
+- Live: with 998 requests in the window, 20 providers have groups (10 would draw gold, 3 red) and the rest of
+  the 30-provider catalog draws dim. The rendered canvas itself still needs a human eye — no browser
+  automation is installed here.
