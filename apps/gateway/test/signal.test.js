@@ -82,7 +82,7 @@ function measureModuleLoadMs() {
       ['--input-type=module', '-e', `const t = Date.now();
         await import(${JSON.stringify(SERVER_MODULE)}).catch(() => {});
         process.stdout.write(String(Date.now() - t));`],
-      { cwd: ROOT, encoding: 'utf8', env: { ...process.env, OMNIHILBRAS_PORT: '0' } },
+      { cwd: ROOT, encoding: 'utf8', env: { ...process.env, OMNIHILBRAS_PORT: '0', XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), 'omnih-signal-probe-config-')) } },
     );
     const measured = Number.parseInt(probe.stdout ?? '', 10);
     if (Number.isFinite(measured) && measured > 0) samples.push(measured);
@@ -104,7 +104,12 @@ function launch(port) {
     env: {
       ...process.env,
       OMNIHILBRAS_PORT: String(port),
-      OMNIHILBRAS_DATA_DIR: mkdtempSync(join(tmpdir(), 'omnih-signal-')),
+      OMNIHILBRAS_DATA_DIR: mkdtempSync(join(tmpdir(), 'omnih-signal-data-')),
+      // **The dashboard token lives under `XDG_CONFIG_HOME`, not under `OMNIHILBRAS_DATA_DIR`, and it is
+      // written at every start.** Without this the spawned gateway issues a token into the developer's real
+      // `~/.config/omnihilbras`, so running this suite silently invalidated the token of the gateway they
+      // were already running — every dashboard request then answered 401 until it was restarted.
+      XDG_CONFIG_HOME: mkdtempSync(join(tmpdir(), 'omnih-signal-config-')),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
