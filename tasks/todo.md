@@ -5005,3 +5005,25 @@ dynamic. Measured: `dashboard.html` loads 1034 KB over 3 chunks and does **not**
 
 - No Details tab and no per-connection quota view (the Kiro-only `GET /v1/connections/kiro/quota` is separate).
 - No cached-token card: the usage record has no cached-token field.
+
+## 1.82.1 — running the gateway test suite no longer breaks a running dashboard
+
+Two commits, both from one symptom: the dashboard answered *"The gateway did not answer. Start it with
+`pnpm dev:gateway` and refresh."*, and the request behind it was a 401.
+
+**The cause.** `apps/gateway/test/signal.test.js` spawns a real `dist/main.js` to test signal handling. It
+redirected `OMNIHILBRAS_DATA_DIR` to a temp directory but not `XDG_CONFIG_HOME`, and the **dashboard token is
+written under `XDG_CONFIG_HOME`** (`secure-store.ts`'s `defaultStateDirectory`), not under the data dir. So the
+spawned gateway issued a token into the developer's real `~/.config/omnihilbras`, and the gateway they were
+already running kept the token it had issued at *its* start. The dev proxy reads the file per request, so it
+forwarded the new token and the running gateway refused it — 401 on every dashboard request until a restart.
+This is the same mechanism recorded in `SECURITY.md`; what was new is that the test suite triggered it.
+
+**The fix.** Both spawn sites pass a throwaway `XDG_CONFIG_HOME`, so no test can write into the real state
+directory. A guard in the same file fails if any spawn lacks it — matched on the **assignment**
+(`XDG_CONFIG_HOME: mkdtempSync`), because a first version matched the bare word and passed on the explanatory
+comment alone.
+
+**Verify.** With the old env the suite rewrites the live token; with the fix the token is unchanged after the
+full gateway suite (668/668) and the live usage request still answers 200 with the same gateway process. The
+guard fails when the assignment is removed (6 pass, 1 fail).
