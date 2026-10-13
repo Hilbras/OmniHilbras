@@ -14,8 +14,12 @@ const dashboardBase = '/dashboard';
 
 function ProviderRoute() {
   const { providerId } = useParams();
+  const location = useLocation();
   const provider = getProviderById(providerId) ?? fallbackProvider;
-  return <ProviderDetailContent provider={provider} />;
+  // One component serves both paths, so the header and tab strip cannot drift between the two tabs. The tab is
+  // read from the pathname rather than passed in, so a reload lands on the same tab.
+  const tab = location.pathname.endsWith('/usage') ? 'usage' : 'overview';
+  return <ProviderDetailContent provider={provider} tab={tab} />;
 }
 
 const activePageTitles = {
@@ -79,6 +83,8 @@ function DashboardRoutes() {
           <Route path="/" element={<Navigate to="/providers" replace />} />
           <Route path="/providers" element={<ProvidersContent />} />
           <Route path="/providers/:providerId" element={<ProviderRoute />} />
+          {/* The provider page's own usage tab, a real route so it can be linked to and reloaded. */}
+          <Route path="/providers/:providerId/usage" element={<ProviderRoute />} />
           <Route path="/routing" element={<RoutingContent />} />
           <Route path="/keys" element={<ApiKeysContent />} />
           <Route path="/usage" element={<UsageContent />} />

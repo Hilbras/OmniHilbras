@@ -156,7 +156,15 @@ function RecordRow({ record }: { record: GatewayUsageRecord }) {
   );
 }
 
-export function UsageContent() {
+/**
+ * The usage view. Rendered whole at `/dashboard/usage`, and per provider on the provider page's Usage tab.
+ *
+ * `providerId` scopes **every** query to one provider's records. Two sections are then dropped rather than
+ * shown misleadingly: the by-provider bar chart, which with one provider is a single bar, and the provider
+ * canvas, which is a whole-catalog diagram and would place this provider among all the others it is not about.
+ * The cards, the time-series, the top-models chart and the table all stay.
+ */
+export function UsageContent({ providerId }: { providerId?: string } = {}) {
   const [usage, setUsage] = useState<GatewayUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -173,6 +181,7 @@ export function UsageContent() {
       period,
       limit: REQUESTS_PER_PAGE,
       offset,
+      ...(providerId ? { provider: providerId } : {}),
       ...(filter === 'all' ? {} : { outcome: filter }),
     })
       .then((next) => { setUsage(next); setError(null); })
@@ -180,7 +189,7 @@ export function UsageContent() {
       // states and only one of them is the operator's fault.
       .catch(() => setError('The gateway did not answer. Start it with `pnpm dev:gateway` and refresh.'))
       .finally(() => setLoading(false));
-  }, [filter, page, period]);
+  }, [filter, page, period, providerId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -205,10 +214,13 @@ export function UsageContent() {
       <div className="mb-6 flex flex-col justify-between gap-5 sm:mb-8 sm:flex-row sm:items-end">
         <div>
           <span className="eyebrow"><span className="eyebrow-dot" aria-hidden="true" />Recorded usage</span>
-          <h2 className="mt-4 text-2xl font-semibold tracking-[-0.035em] sm:text-3xl">What was actually spent.</h2>
+          <h2 className="mt-4 text-2xl font-semibold tracking-[-0.035em] sm:text-3xl">
+            {providerId ? 'What this provider was asked.' : 'What was actually spent.'}
+          </h2>
           <p className="muted mt-2 max-w-xl text-sm leading-relaxed">
-            Every figure below was measured by the gateway and is read from a record it wrote. Nothing here is
-            estimated, and anything the gateway could not measure is labelled as such.
+            {providerId
+              ? `Measured records for ${providerId} only. Every figure was written by the gateway, and anything it could not measure is labelled as such.`
+              : 'Every figure below was measured by the gateway and is read from a record it wrote. Nothing here is estimated, and anything the gateway could not measure is labelled as such.'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -257,8 +269,9 @@ export function UsageContent() {
           <BarChart3 className="mx-auto h-6 w-6 text-muted" aria-hidden="true" />
           <p className="mt-3 text-sm font-semibold">No requests in this window</p>
           <p className="muted mt-1 text-xs leading-relaxed">
-            Send a request through the gateway, or widen the time window above. The gateway keeps the most
-            recent records only, so this list is a tail rather than a history.
+            {providerId
+              ? `No recorded request was served by ${providerId} in this window. Widen the window above, or send one through the gateway. It keeps the most recent records only, so this is a tail rather than a history.`
+              : 'Send a request through the gateway, or widen the time window above. The gateway keeps the most recent records only, so this list is a tail rather than a history.'}
           </p>
         </section>
       ) : (
@@ -336,10 +349,14 @@ export function UsageContent() {
                   <UsageCharts timeline={breakdown.timeline} />
                 </Suspense>
               </div>
-              <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                <Suspense fallback={<p className="muted py-10 text-center text-xs">Loading chart...</p>}>
-                  <ProviderBarChart groups={breakdown.byProvider} />
-                </Suspense>
+              <div className={`mt-4 grid gap-3 ${providerId ? '' : 'lg:grid-cols-2'}`}>
+                {/* The by-provider chart is dropped on a provider page: filtered to one provider it is a single
+                    bar, which is a worse way to show the same number the card above already shows. */}
+                {providerId ? null : (
+                  <Suspense fallback={<p className="muted py-10 text-center text-xs">Loading chart...</p>}>
+                    <ProviderBarChart groups={breakdown.byProvider} />
+                  </Suspense>
+                )}
                 <Suspense fallback={<p className="muted py-10 text-center text-xs">Loading chart...</p>}>
                   <TopModelsChart groups={breakdown.byModel} />
                 </Suspense>
@@ -347,17 +364,19 @@ export function UsageContent() {
             </>
           ) : null}
 
-          <section className="card mt-4 overflow-hidden p-4" aria-label="Provider connections">
-            <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <h3 className="text-sm font-semibold">Providers</h3>
-              {/* The classification is the windowed aggregate, not liveness, and the hint says so rather than
-                  letting "active" read as "in flight right now". */}
-              <span className="muted text-[11px]">gold served a request in this window · red failed only · dim never used</span>
-            </div>
-            <Suspense fallback={<p className="muted py-10 text-center text-xs">Loading diagram...</p>}>
-              <UsageTopology groups={breakdown?.byProvider ?? []} />
-            </Suspense>
-          </section>
+          {providerId ? null : (
+            <section className="card mt-4 overflow-hidden p-4" aria-label="Provider connections">
+              <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <h3 className="text-sm font-semibold">Providers</h3>
+                {/* The classification is the windowed aggregate, not liveness, and the hint says so rather than
+                    letting "active" read as "in flight right now". */}
+                <span className="muted text-[11px]">gold served a request in this window · red failed only · dim never used</span>
+              </div>
+              <Suspense fallback={<p className="muted py-10 text-center text-xs">Loading diagram...</p>}>
+                <UsageTopology groups={breakdown?.byProvider ?? []} />
+              </Suspense>
+            </section>
+          )}
 
           <section className="card mt-4 overflow-hidden" aria-label="Recorded requests">
             <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between">

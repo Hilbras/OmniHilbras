@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.83.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.84.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -23,10 +23,15 @@ The dashboard is one React Router app mounted at `/dashboard`:
 
 - `/dashboard/providers`
 - `/dashboard/providers/:providerId`
+- `/dashboard/providers/:providerId/usage`
 - `/dashboard/routing`
 - `/dashboard/keys`
 - `/dashboard/usage`
 - `/dashboard/settings`
+
+A provider page carries two tabs: its overview, and `/dashboard/providers/:providerId/usage` — the usage view
+scoped to that provider's recorded requests. The tab follows the **connection**, so a card that shares another
+provider's credential (`clinepass` under `cline`) shows the usage its requests are actually recorded under.
 
 **Request log** is the one sidebar entry still disabled with no route. `Usage` and `Settings` were both
 disabled for the whole life of the project for the same reason — **there was nothing to show** — and both are

@@ -36,6 +36,17 @@ export function providerRoute(providerId: string) {
   return `/providers/${encodeURIComponent(providerId)}`;
 }
 
+/**
+ * A provider's own usage tab, added in 1.84.0.
+ *
+ * A **real sub-route** rather than a query string or local state, so it can be linked to and survives a
+ * reload. The provider page reads it to decide which tab is showing, and the README documents it — the guard
+ * in `tests/documentation-counts.test.js` checks both, so a route added here without a line there fails.
+ */
+export function providerUsageRoute(providerId: string) {
+  return `${providerRoute(providerId)}/usage`;
+}
+
 /** Public URL for a dashboard route, for links that leave the router. */
 export function dashboardUrl(route: string = dashboardRoutes.providers) {
   return `/dashboard${route === dashboardRoutes.providers ? '' : route}`;

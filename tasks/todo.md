@@ -5071,3 +5071,47 @@ The full effect is deliberate, and three things bound it rather than hope:
 - Live: with 998 requests in the window, 20 providers have groups (10 would draw gold, 3 red) and the rest of
   the 30-provider catalog draws dim. The rendered canvas itself still needs a human eye — no browser
   automation is installed here.
+
+## 1.84.0 — a Usage tab on every provider page
+
+`/dashboard/providers/:providerId` now carries a tab strip, **Overview | Usage**, and the Usage tab is a real
+sub-route (`/dashboard/providers/:providerId/usage`) so it can be linked to and survives a reload. It shows the
+usage view scoped to that one provider. No gateway change: `GET /v1/usage?provider=<id>` already filtered, and
+already had a test.
+
+### One view, two callers
+
+`UsageContent` gained an optional `providerId` prop rather than a second copy of the page. Scoped, it sends the
+provider filter and **drops two sections that would mislead**: the by-provider bar chart (one bar, when the card
+above already shows the number) and the provider canvas (a whole-catalog diagram, wrong on a single-provider
+page). The cards, time-series, top-models chart and the request table all stay.
+
+### The tab follows the connection, not the card
+
+A card whose credential belongs to another provider records its usage under the **owner's** id, so the filter is
+`provider.connectionProviderId ?? provider.id`. This is not hypothetical — measured on this machine:
+
+```
+opencode         68 requests
+opencode-console 55 requests
+clinepass         0 requests   ← the card's own id records nothing
+cline           415 requests   ← where its requests actually are
+```
+
+Filtering by the card's id would have given ClinePass a permanently empty tab.
+
+### The docs guard had a blind spot, and this closed it
+
+`tests/documentation-counts.test.js` matched only `/dashboard/<one-lowercase-segment>`, so the existing
+`/dashboard/providers/:providerId` line in the README **was never checked at all**. The regex now accepts
+parameterised nested paths, and the provider helpers are asserted to exist in `routes.ts`, so a documented route
+and a served route cannot drift apart again.
+
+### Verify
+
+- Typecheck 0, build 0, repo guards 189/189 (6 new).
+- Revert proofs: dropping the provider filter, dropping the connection-owner fallback, and removing the route
+  each fail a test; all restored. The fallback test needed anchoring to the `UsageContent` line — the first
+  version matched the same expression elsewhere in the file and passed on the wrong occurrence.
+- Live: `/dashboard/providers/opencode/usage` and `/dashboard/providers/clinepass/usage` both serve 200, and the
+  filtered API returns one provider group as expected.

@@ -36,7 +36,8 @@ import { ProviderMark } from '../components/ProviderMark';
 import { ProviderPlayground } from '../components/ProviderPlayground';
 import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, putGatewayConnection, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
-import { dashboardRoutes } from '../lib/routes';
+import { dashboardRoutes, providerRoute, providerUsageRoute } from '../lib/routes';
+import { UsageContent } from './UsagePage';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
 
 export const fallbackProvider: ProviderRecord = {
@@ -329,7 +330,7 @@ function AddModelForm({ onAdd, providerId }: { onAdd: (model: string) => void | 
   );
 }
 
-export function ProviderDetailContent({ provider }: { provider: ProviderRecord }) {
+export function ProviderDetailContent({ provider, tab = 'overview' }: { provider: ProviderRecord; tab?: 'overview' | 'usage' }) {
   /**
    * The connect dialog's per-provider instructions. A web-session card with no descriptor
    * has no connect path at all, which is deliberate: it is better than a card whose button
@@ -869,6 +870,41 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
 
       {notice && <div role={noticeError ? 'alert' : 'status'} className={`mb-5 flex items-center gap-2 rounded-xl border px-3.5 py-3 text-xs ${noticeError ? 'border-danger/25 bg-danger/10 text-danger' : 'border-success/25 bg-success/10 text-success'}`}>{noticeError ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}{notice}</div>}
 
+      {/*
+        The tab strip. Both tabs are real routes, so the Usage tab can be linked to and survives a reload;
+        the active one is marked with `aria-current` and both read their path from `routes.ts`.
+      */}
+      <div className="mb-5 flex w-fit items-center gap-0.5 rounded-lg border border-line bg-bg-soft p-0.5" role="tablist" aria-label={`${provider.name} sections`}>
+        <Link
+          to={providerRoute(provider.id)}
+          role="tab"
+          aria-selected={tab === 'overview'}
+          aria-current={tab === 'overview' ? 'page' : undefined}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${tab === 'overview' ? 'bg-surface text-gold-text shadow-sm' : 'text-muted hover:text-text'}`}
+        >
+          Overview
+        </Link>
+        <Link
+          to={providerUsageRoute(provider.id)}
+          role="tab"
+          aria-selected={tab === 'usage'}
+          aria-current={tab === 'usage' ? 'page' : undefined}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${tab === 'usage' ? 'bg-surface text-gold-text shadow-sm' : 'text-muted hover:text-text'}`}
+        >
+          Usage
+        </Link>
+      </div>
+
+      {tab === 'usage' ? (
+        /*
+          A card whose credential belongs to another provider records its usage under the **owner's** id — the
+          gateway attributes a request to the provider that served it, and for a shared connection that is the
+          owner. So the filter follows the connection, not the card, or `clinepass` would show an empty tab while
+          its requests sit under `cline`. `ProviderRecord.connectionProviderId` exists for exactly this.
+        */
+        <UsageContent providerId={provider.connectionProviderId ?? provider.id} />
+      ) : (
+        <>
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <DetailStat label="Connections" value={connectionState === 'ready' ? (connectionAdded ? '1 active' : '0') : '—'} icon={KeyRound} tone={connectionAdded && connectionState === 'ready' ? 'green' : 'muted'} />
         <DetailStat label="Models" value={allModels.length > 0 ? String(allModels.length) : '—'} icon={Cpu} tone="blue" />
@@ -1047,6 +1083,8 @@ export function ProviderDetailContent({ provider }: { provider: ProviderRecord }
       </div>
 
       <section id="endpoint" className="card mt-5 p-4 sm:p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-sm font-semibold">Endpoint details</h2><p className="muted mt-1 text-xs">The base URL OmniHilbras will use for this provider.</p></div><code className="max-w-full overflow-x-auto rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-muted sm:max-w-[420px]">{connection?.endpoint ?? provider.endpoint}</code></div></section>
+        </>
+      )}
 
       {/* Last on the page, after everything that establishes the connection. The point of this
           one is to be reached *after* connecting, so it explains rather than offering a control

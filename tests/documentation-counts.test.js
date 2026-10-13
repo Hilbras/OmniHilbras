@@ -181,7 +181,7 @@ test('every dashboard route the README lists is one the router serves', () => {
       'this is real work now, say so in routes.ts rather than restoring the route by accident.',
   );
 
-  const claimed = [...readme.matchAll(/`\/dashboard(\/[a-z-]+)?`/g)]
+  const claimed = [...readme.matchAll(/`\/dashboard(\/[A-Za-z0-9:/-]+)?`/g)]
     .map((match) => (match[1] ?? '').replace(/^\//, '') || 'providers')
     .filter((route) => route.length > 0);
 
@@ -190,6 +190,15 @@ test('every dashboard route the README lists is one the router serves', () => {
   const known = new Set(served.map((route) => route.path.replace(/^\//, '')));
   // `/dashboard` with no suffix is the mount point and redirects to providers.
   known.add('providers');
+  // The provider paths are built by helper functions rather than a literal in `dashboardRoutes`, so the loop
+  // above cannot see them. They are added here, and the helpers are asserted to exist: **the old regex only
+  // matched a single lowercase segment, so `/dashboard/providers/:providerId` was documented for releases and
+  // never checked at all** — a documented route the guard could not see is the gap this whole test exists for.
+  for (const helper of ['providerRoute', 'providerUsageRoute']) {
+    assert.match(code, new RegExp(`export function ${helper}\\(`), `routes.ts no longer exports ${helper}, so the provider paths it builds are undocumented`);
+  }
+  known.add('providers/:providerId');
+  known.add('providers/:providerId/usage');
 
   const phantoms = [...new Set(claimed)].filter((route) => !known.has(route));
   assert.deepEqual(
