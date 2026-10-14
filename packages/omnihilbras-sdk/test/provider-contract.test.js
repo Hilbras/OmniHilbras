@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
 import { scriptedFetch } from './harness/scripted-fetch.js';
 import { scriptedTokenHarborFetch } from './harness/scripted-tokenharbor-fetch.js';
-import { scriptedDriver, chatGptWebFixtureCredential, CHATGPT_WEB_CONTRACT_MODEL } from './harness/scripted-driver.js';
+import { scriptedDriver, chatGptWebFixtureCredential, CHATGPT_WEB_CONTRACT_MODEL, scriptedGeminiDriver, geminiWebFixtureCredential, GEMINI_WEB_CONTRACT_MODEL } from './harness/scripted-driver.js';
 import test from 'node:test';
 import { runProviderContract, CONTRACT_TEXT } from './provider-contract.js';
 import { framesFor, scriptedTransport } from './harness/scripted-transport.js';
@@ -14,6 +14,7 @@ import { GeminiAdapter } from '../dist/providers/gemini/index.js';
 import { DeepSeekWebAdapter } from '../dist/providers/deepseek-web/index.js';
 import { TokenHarborWebAdapter } from '../dist/providers/tokenharbor-web/index.js';
 import { ChatGptWebAdapter } from '../dist/providers/chatgpt-web/index.js';
+import { GeminiWebAdapter } from '../dist/providers/gemini-web/index.js';
 import { ClineAdapter } from '../dist/providers/cline/index.js';
 import { ClinePassAdapter } from '../dist/providers/clinepass/index.js';
 import { KiroAdapter } from '../dist/providers/kiro/index.js';
@@ -198,6 +199,25 @@ const providers = [
             // assertions are checking.
             driver.setThrow(new Error('The page said the session is no longer signed in.'));
           }
+          return async () => { driver.setThrow(undefined); };
+        },
+      };
+    },
+  },
+  {
+    name: 'gemini-web',
+    make: () => {
+      // The driver is the seam, exactly as for ChatGPT Web: answering means driving a page, so there is no
+      // transport to intercept. The double's `verify` takes the cookie header string, which is the real
+      // signature — a harness that passed parsed cookies would pass while testing the wrong interface.
+      const driver = scriptedGeminiDriver();
+      return {
+        adapter: new GeminiWebAdapter({ driver }),
+        credential: geminiWebFixtureCredential(),
+        model: GEMINI_WEB_CONTRACT_MODEL,
+        script: (parts, options) => {
+          driver.set(parts);
+          if (options?.refuseWith !== undefined) driver.setThrow(new Error('The page said the session is no longer signed in.'));
           return async () => { driver.setThrow(undefined); };
         },
       };

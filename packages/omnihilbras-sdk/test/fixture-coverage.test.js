@@ -70,6 +70,12 @@ const NO_CAPTURE_YET = {
   openai: 'shares the OpenAI-compatible wire format, so a capture here would duplicate that one',
   anthropic: 'its frames are hand-written in `anthropic.test.js`; no real capture was taken',
   gemini: 'its frames are hand-written in `gemini.test.js`; no real capture was taken',
+  // Gemini Web's protocol is the **web UI**, not a wire format: the answer is read out of a page's own
+  // `StreamGenerate` response, which needs a signed-in Google session to produce. The one captureable thing —
+  // that response body — is transcribed in `gemini-web.test.js` from the published shape, including the
+  // cumulative-frame rule, rather than invented. A real capture has to wait for a credential this machine does
+  // not have, the same gap Kimi Code and Claude Code are excused for.
+  'gemini-web': 'the only captureable bytes are a `StreamGenerate` body from a signed-in gemini.google.com session, which this machine has no cookie for; the parse (including the cumulative-frame rule) is pinned against a transcribed body in `gemini-web.test.js`',
   'chatgpt-web': 'the protocol is a browser DOM rather than a wire format, so a byte capture would pin nothing useful',
   'deepseek-web': 'its frames are hand-written in `deepseek-web.test.js`, and that is how a real truncation bug survived',
   // The free-tier contract is four request conditions measured against someone else's service on a

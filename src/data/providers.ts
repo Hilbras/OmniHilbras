@@ -527,6 +527,45 @@ export const providerCatalog: ProviderRecord[] = [
     riskSeverity: 'high',
   },
   {
+    /**
+     * Gemini Web — gemini.google.com driven in a real browser with your own session cookies.
+     *
+     * Distinct from the `gemini` card above, which is Google's Generative Language API with an API key.
+     * Google publishes no endpoint that accepts a browser session, so this reaches the model the only way
+     * that exists: load the page, let it solve its own challenges, type, and read the answer out of the
+     * response the page makes for itself. `__Secure-1PSID` and `__Secure-1PSIDTS` are the credential.
+     */
+    id: 'gemini-web',
+    name: 'Gemini Web',
+    description:
+      'Drives gemini.google.com in a browser using the session cookies you export yourself. The page is the client; there is no API behind this.',
+    category: 'Web session',
+    group: 'web-cookie',
+    status: 'available',
+    auth: 'Session cookie',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#4285f4',
+    initial: 'G',
+    logo: providerLogoMap.google,
+    endpoint: 'https://gemini.google.com',
+    modelList: [],
+    /**
+     * A live session for a whole Google account, and Google's terms.
+     *
+     * The credential is not scoped to inference: `__Secure-1PSID` is the cookie that keeps you signed in to
+     * Google, and everything the person who exported it can do, it can do. Driving the page also means the
+     * requests carry a browser, which is what Google's protections are there to notice. Both facts are the
+     * user's to weigh, so both are on the card.
+     */
+    riskNotice:
+      'This is a live session for your whole Google account — not a token limited to inference — and Google’s terms do not permit automating gemini.google.com. OmniHilbras loads the page in a real browser and lets it solve its own challenges. If you have a Gemini API key, the Gemini card beside this one is the supported path.',
+    riskSeverity: 'high',
+  },
+  {
     id: 'kimi',
     name: 'Kimi',
     description: 'Moonshot AI long-context and agentic models, reached through their OpenAI-compatible endpoint.',

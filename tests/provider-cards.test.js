@@ -304,10 +304,37 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // connection (`connectionProviderId: 'cline'`), the opposite of every pair above.
   // Every one is OpenAI-compatible or already adapted, so each is a catalog card and no adapter work.
   // Mistral is **not** in that list — the catalog already had it, and the ten requested included it.
-  assert.equal(all.length, 30, `the catalog now has ${all.length} cards`);
+  assert.equal(all.length, 31, `the catalog now has ${all.length} cards`);
   // Six cards claim OAuth, but the gateway serves **five** start routes: `clinepass` shares `cline`'s,
   // which is why the count of routes and the count of claims no longer coincide.
   assert.equal(oauthCapableProviders().size, 5, 'the gateway serves an OAuth start route for five providers');
   assert.equal(all.filter((card) => card.auth === 'OAuth').length, 6, 'six cards claim OAuth, one of them over a shared route');
   console.log(`    cards: ${all.length}   claiming OAuth: ${all.filter((c) => c.auth === 'OAuth').length}   gateway OAuth routes: ${oauthCapableProviders().size}   claiming a measurement: 0`);
+});
+
+test('the Gemini Web driver checks the sign-in wall before the composer, because the composer check alone lied', () => {
+  // **Measured, on this machine, with a bogus cookie.** Gemini's signed-out page carries hidden
+  // contenteditable nodes, so `waitForSelector('.ql-editor, [contenteditable="true"]')` resolves truthy while
+  // `locator('.ql-editor').count()` is 0 and a sign-in link is present:
+  //
+  //   ql-editor: 0   [contenteditable=true]: 0   sign-in link: 1   waitForSelector -> resolved truthy
+  //
+  // A check built on `waitForSelector` therefore reported a dead session as **connected** — the worst answer
+  // this button can give, because the user saves a dead connection and finds out when a turn fails. The fix is
+  // the sign-in wall first, and a composer that is counted *and* visible. This is asserted in source because it
+  // is browser behaviour a node test cannot drive.
+  const driver = readFileSync(join(GATEWAY, 'geminiWeb.ts'), 'utf8');
+  assert.match(driver, /signedOutLink/, 'the driver no longer looks for the sign-in wall at all');
+  assert.match(driver, /isVisible\(\)/, 'the composer check no longer requires visibility, so a hidden element counts again');
+  assert.doesNotMatch(driver, /waitForSelector\(GEMINI_WEB\.composer/, 'the composer is checked with waitForSelector, which resolves on a hidden node');
+  // Both the check and the turn must look for the wall before the composer. Checked per function, because a
+// single window spanning both would pass on the first path alone.
+  const verifyBody = driver.slice(driver.indexOf('async verify('), driver.indexOf('async ask('));
+  const askBody = driver.slice(driver.indexOf('async ask('));
+  for (const [name, body] of [['verify', verifyBody], ['ask', askBody]]) {
+    const wall = body.indexOf('signedOutLink');
+    const composer = body.indexOf('GEMINI_WEB.composer');
+    assert.ok(wall !== -1 && composer !== -1, `${name} no longer checks both the wall and the composer`);
+    assert.ok(wall < composer, `${name} checks the composer before the sign-in wall, so a signed-out page can read as connected`);
+  }
 });

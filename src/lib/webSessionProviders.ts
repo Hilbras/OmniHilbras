@@ -159,6 +159,43 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     check: { path: '/v1/web-cookie/tokenharbor/check', field: 'cookieHeader' },
     planNote: 'Token Harbor serves its catalog to every account; the ":free" models are the ones that never bill.',
   },
+
+  'gemini-web': {
+    id: 'gemini-web',
+    name: 'Gemini Web',
+    website: 'https://gemini.google.com',
+    credentialName: '__Secure-1PSID',
+    /**
+     * No console one-liner, and this is the ChatGPT Web lesson applied rather than repeated.
+     *
+     * `__Secure-1PSID` is set `HttpOnly`, so `document.cookie` **cannot** read it — a snippet would fail for
+     * everyone, in a way that looks like being signed out. Only the request header and the Application panel can
+     * see it, so the steps send people there.
+     */
+    extractionSteps: [
+      {
+        label: 'The two cookies',
+        body: 'With gemini.google.com open and signed in: F12 → Application → Storage → Cookies → **https://gemini.google.com**. Copy the values of `__Secure-1PSID` and `__Secure-1PSIDTS` and paste them here as `__Secure-1PSID=...; __Secure-1PSIDTS=...`. Do not use the Console — `__Secure-1PSID` is HttpOnly, so no console command can read it.',
+      },
+      {
+        label: 'Or the request header',
+        body: 'F12 → Network → reload → click any request to gemini.google.com → Headers → Request Headers → Cookie. Copy that entire line.',
+      },
+      {
+        label: 'What happens next',
+        body: 'Check opens gemini.google.com in a browser on this machine and reports whether the session is signed in — cookie presence and expiry are local checks and neither can tell a working session from one Google has revoked. Nothing is stored unless you press Save. A turn is sent by driving the page: it is slower than an API and there is a browser in the path by design.',
+      },
+    ],
+    paste: {
+      path: '/v1/web-cookie/gemini/connect',
+      field: 'cookieHeader',
+      placeholder: '__Secure-1PSID=...; __Secure-1PSIDTS=...',
+      sectionLabel: 'Or paste the cookies instead',
+      fieldLabel: 'Cookie header, or the __Secure-1PSID value',
+    },
+    check: { path: '/v1/web-cookie/gemini/check', field: 'cookieHeader' },
+    planNote: 'Gemini Web drives the page, so the model list is the modes the page offers (3.1 Pro, 3.7 Flash, 3.1 Flash-Lite), not Google’s API model ids.',
+  },
 };
 
 export function webSessionDescriptor(providerId: string): WebSessionDescriptor | undefined {

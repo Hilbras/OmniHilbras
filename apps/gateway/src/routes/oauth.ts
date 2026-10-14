@@ -224,6 +224,23 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
      * written, so the browser's decision about which cookies belong to this connection is
      * made here rather than trusted from the client.
      */
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/gemini/check') {
+      // Opens gemini.google.com and reports whether the session is signed in, then stores nothing. Cookie
+      // presence and expiry are local checks and neither can tell a working session from a revoked one, so the
+      // button costs a page load — which is the point of a check.
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      sendJson(response, 200, await service.checkGeminiWeb(readRequiredString(body, 'cookieHeader'), signal), origin);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/gemini/connect') {
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      // Checked before the save, so a cookie the page refuses never becomes a connection that reads as
+      // connected and answers nothing.
+      sendJson(response, 201, { connection: await service.connectGeminiWeb(readRequiredString(body, 'cookieHeader'), signal) }, origin);
+      return true;
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/web-cookie/deepseek/connect') {
       const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
       sendJson(response, 201, { connection: await service.connectDeepSeekWeb(readRequiredString(body, 'userToken'), signal) }, origin);

@@ -76,8 +76,8 @@ test('the neutral option is the local custom endpoint, not a hosted vendor', () 
 test('a web-session provider is recognised, so the keyed dialog is never opened for one', () => {
   // A card for a provider that is *signed into* has no key to collect, and opening the keyed dialog
   // for one produces a form that asks for a credential the provider does not use.
-  const webSession = providerCatalog.filter((card) => ['chatgpt-web', 'qwen-web', 'deepseek-web', 'tokenharbor-web'].includes(card.id));
-  assert.equal(webSession.length, 4, 'the fixture moved: update the ids here');
+  const webSession = providerCatalog.filter((card) => ['chatgpt-web', 'qwen-web', 'deepseek-web', 'tokenharbor-web', 'gemini-web'].includes(card.id));
+  assert.equal(webSession.length, 5, 'the fixture moved: update the ids here');
   for (const card of webSession) assert.equal(isWebSessionProvider(card.id), true, `${card.id} is a web-session provider`);
   for (const card of providerCatalog.filter((c) => !webSession.includes(c))) {
     assert.equal(isWebSessionProvider(card.id), false, `${card.id} should not be treated as a web-session provider`);
@@ -161,7 +161,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 1.77.0 moved `clinepass` to the OAuth group — it is the same account as Cline, reached by the same
   // sign-in — so the dialog offers no option for it either: options go 17 -> 16, back to exactly the
   // count before `clinepass` existed. Both halves of that pair are now OAuth cards, and neither is keyed.
-  assert.equal(providerCatalog.length, 30, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerCatalog.length, 31, `the catalog now has ${providerCatalog.length} cards`);
   assert.equal(providerOptions.length, 20, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

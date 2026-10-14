@@ -260,6 +260,15 @@ The first local gateway exposes:
 - `POST /v1/web-cookie/tokenharbor/connect` — store the session cookie as a connection after it is
   verified. Accepts the whole `Cookie:` header or the `sb-auth-auth-token` value alone, rejoins its
   numbered chunks, and honours `freeOnly`.
+- `POST /v1/web-cookie/gemini/check` — open `gemini.google.com` in a browser with the pasted
+  `__Secure-1PSID`/`__Secure-1PSIDTS` cookies and report whether the session is signed in, storing nothing.
+  It costs a page load because a local check cannot tell a working session from a revoked one, and it is a
+  credential check rather than a completion. Accepts the whole `Cookie:` header or the bare
+  `__Secure-1PSID` value; the models reported are the web UI's modes, not Google's API model ids.
+- `POST /v1/web-cookie/gemini/connect` — store the cookies as a connection, after the check accepts them, so
+  a refused cookie never becomes a connection that reads as connected and answers nothing. A turn is served by
+  driving the page in a browser, so a request is more expensive than an API call and the refresh of the
+  rotating cookies is written back to the connection.
 - `POST /v1/oauth/kimi-code/start` — begin a Kimi Code sign-in. Kimi's device flow, so the response
   carries a `userCode` and a `verificationUrl` for the user to approve in their own browser; there is no
   redirect back. Both halves of the flow are **form-encoded**, which is measured: Kimi answers a JSON
@@ -2634,7 +2643,7 @@ measurement, and `apps/gateway/test/spec-success-criteria.mjs` fails if any stop
       `build` script; `packages/omnihilbras-sdk/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **18 files** in `packages/omnihilbras-sdk/src/providers/` — 16 provider folders, each with an `index.ts`, plus two helpers nested inside them (`deepseek-web/deepseek-pow.ts`, `zen/zen-free-tier.ts`). `openai-compatible` is a shared base that providers extend, not a provider. The two helpers and `qwen-web` are not protocol adapters, so the guard does not count them, which is why the capture guard counts 14: its file count exceeds that because the helpers are not protocol adapters — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **19 files** in `packages/omnihilbras-sdk/src/providers/` — 17 provider folders, each with an `index.ts`, plus two helpers nested inside them (`deepseek-web/deepseek-pow.ts`, `zen/zen-free-tier.ts`). `openai-compatible` is a shared base that providers extend, not a provider. The two helpers and `qwen-web` are not protocol adapters, so the guard does not count them, which is why the capture guard counts 15: its file count exceeds that because the helpers are not protocol adapters — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

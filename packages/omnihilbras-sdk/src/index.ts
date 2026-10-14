@@ -22,6 +22,7 @@ export * from './providers/chatgpt-web/index.js';
 export * from './providers/deepseek-web/deepseek-pow.js';
 export * from './providers/deepseek-web/index.js';
 export * from './providers/qwen-web/index.js';
+export * from './providers/gemini-web/index.js';
 export * from './providers/tokenharbor-web/index.js';
 export * from './core/url.js';
 export * from './core/bounded-map.js';

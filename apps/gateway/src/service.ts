@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, ClinePassAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, type KiroQuota, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, probeQwenWeb, TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, ClinePassAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, type KiroQuota, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, GeminiWebAdapter, geminiWebProviderId, GEMINI_WEB_MODELS, normalizeGeminiWebCookie, geminiWebCookiePresent, type GeminiWebDriver, probeQwenWeb, TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import type { GatewayConfig } from './config.js';
@@ -8,6 +8,7 @@ import { ClaudeCodeSessionStore, beginClaudeCodeSignIn, completeClaudeCodeSignIn
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, withConsoleWorkspace, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialDeviceFlow, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
+import { createGeminiWebDriver } from './geminiWeb.js';
 import { SlidingWindowRateLimiter, bareModelFor, type RouteCandidate } from './routing.js';
 import { HealthManager } from './health.js';
 import { TokenRenewal, classifyRenewalFailure } from './token-renewal.js';
@@ -122,6 +123,8 @@ export type GatewayServiceOptions = {
    * caller would use to supply a browser of their own.
    */
   chatGptWebDriver?: ChatGptWebDriver;
+  /** Injected the same way, so a test can drive the Gemini provider without a browser. */
+  geminiWebDriver?: GeminiWebDriver;
 };
 
 export class GatewayService {
@@ -144,6 +147,7 @@ export class GatewayService {
   private readonly kiroSessions = new KiroSessionStore();
   private readonly kiroSocial = new KiroSocialStore();
   private chatGptWeb?: ProviderAdapter;
+  private geminiWeb?: ProviderAdapter;
   /** DeepSeek Web, built once so its access-token cache is shared across requests. */
   private deepSeek?: DeepSeekWebAdapter;
   private tokenHarborWeb?: TokenHarborWebAdapter;
@@ -318,6 +322,7 @@ export class GatewayService {
       .onDemand(claudeCodeProviderId, ({ providerId, connection }) => this.claudeCodeAdapter(connection?.id ?? providerId))
       .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId))
       .onDemand(chatGptWebProviderId, () => this.chatGptWebAdapter())
+      .onDemand(geminiWebProviderId, () => this.geminiWebAdapter())
       .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter())
       .onDemand(tokenHarborWebProviderId, () => this.tokenHarborWebAdapter());
     this.credentialLifecycle = new CredentialLifecycle({
@@ -979,6 +984,80 @@ export class GatewayService {
       verified: true,
       models: chatGptWebModels(state.planType).map((model) => ({ id: model.id, name: model.name })),
     };
+  }
+
+  /**
+   * Gemini Web, built once so the Playwright import and the browser check are not repeated per request.
+   *
+   * Typed as `ProviderAdapter` like ChatGPT Web's, because nothing here reaches past the interface — the
+   * rotation callback is what carries a refreshed cookie back, and it is wired in.
+   */
+  geminiWebAdapter(): ProviderAdapter {
+    this.geminiWeb ??= new GeminiWebAdapter({
+      driver: this.options.geminiWebDriver ?? createGeminiWebDriver(),
+      // Rotation reaches storage here. Deliberately tolerant: a turn that produced an answer must not be
+      // reported as failed because the refreshed cookie could not be written.
+      onTokensRefreshed: async (merged) => {
+        await this.connectionStore?.set(geminiWebProviderId, { type: 'api-key', value: merged }).catch(() => undefined);
+      },
+    });
+    return this.geminiWeb;
+  }
+
+  /** Checks a pasted Gemini cookie and stores nothing. */
+  async checkGeminiWeb(raw: string, signal?: AbortSignal) {
+    const cookie = normalizeGeminiWebCookie(raw);
+    if (!geminiWebCookiePresent(cookie)) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'No usable Gemini cookie was pasted.', {
+        providerId: geminiWebProviderId,
+        publicMessage: 'Paste the value of `__Secure-1PSID`, or a whole `Cookie:` header from gemini.google.com.',
+      });
+    }
+    const driver = this.options.geminiWebDriver ?? createGeminiWebDriver();
+    // Whether a turn can be served needs a browser and a live session; whether the *page* accepts the cookie is
+    // answerable now, and it is the one that says whether the pasted value is worth storing.
+    if (!driver.verify) return { verified: false, note: 'This build cannot open a browser to verify the session.', models: GEMINI_WEB_MODELS.map((model) => ({ id: model.id, name: model.name })) };
+    const result = await driver.verify({ cookie, ...(signal ? { signal } : {}) });
+    return {
+      verified: result.ok,
+      ...(result.note ? { note: result.note } : {}),
+      models: GEMINI_WEB_MODELS.map((model) => ({ id: model.id, name: model.name })),
+    };
+  }
+
+  /**
+   * Stores a Gemini Web cookie, after checking the page accepts it.
+   *
+   * Checked first, so a refused cookie never becomes a connection that looks connected and answers nothing.
+   */
+  async connectGeminiWeb(raw: string, signal?: AbortSignal) {
+    const cookie = normalizeGeminiWebCookie(raw);
+    if (!geminiWebCookiePresent(cookie)) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'No usable Gemini cookie was pasted.', {
+        providerId: geminiWebProviderId,
+        publicMessage: 'Paste the value of `__Secure-1PSID`, or a whole `Cookie:` header from gemini.google.com.',
+      });
+    }
+    const check = await this.checkGeminiWeb(cookie, signal);
+    if (!check.verified) {
+      throw new ProviderError('AUTHENTICATION_FAILED', check.note ?? 'The Gemini session was not accepted.', {
+        providerId: geminiWebProviderId,
+        publicMessage: check.note ?? 'Gemini did not accept that session. Copy fresh cookies from gemini.google.com while signed in.',
+      });
+    }
+    return this.saveConnection(
+      {
+        id: geminiWebProviderId,
+        providerId: geminiWebProviderId,
+        name: 'Gemini Web',
+        endpoint: 'https://gemini.google.com',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      },
+      { type: 'api-key', value: cookie },
+      signal,
+    );
   }
 
 

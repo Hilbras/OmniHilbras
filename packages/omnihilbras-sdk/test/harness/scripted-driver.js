@@ -59,3 +59,45 @@ export function scriptedDriver({ parts = ['Hello', ', ', 'world'], throws } = {}
 
   return driver;
 }
+
+/** The one model the contract drives for Gemini Web. */
+export const GEMINI_WEB_CONTRACT_MODEL = 'gemini-3.1-pro';
+
+/** A cookie header, which is the only thing a Gemini Web check will accept. */
+export function geminiWebFixtureCredential() {
+  return { type: 'api-key', value: '__Secure-1PSID=fixture-psid; __Secure-1PSIDTS=fixture-psidts' };
+}
+
+/**
+ * A driver for `GeminiWebAdapter`.
+ *
+ * Separate from `scriptedDriver` above because the interface differs in one field — Gemini's `verify` takes the
+ * cookie **header string**, ChatGPT's takes parsed cookies — and a harness that pretended they were the same
+ * would pass while testing the wrong signature. The rest is the same principle: it implements the real
+ * interface and does not quietly succeed where the real driver would fail.
+ */
+export function scriptedGeminiDriver({ parts = ['Hello', ', ', 'world'], throws } = {}) {
+  const state = { parts, throws };
+  const driver = {
+    ask: async () => {
+      if (state.throws) throw state.throws;
+      return { text: state.parts.join('') };
+    },
+    /**
+     * Always a browser here: the double models a host that has one.
+     *
+     * This is deliberately **not** tied to `throws`. It was, and that made the refusal assertions test the
+     * wrong thing — a refusal set `throws`, `available()` then reported no browser, and the adapter refused
+     * before it ever reached `ask`, so a real page refusal was never exercised. The missing-browser path has its
+     * own test in `gemini-web.test.js` with a driver that says so.
+     */
+    available: async () => ({ ok: true }),
+    verify: async () => {
+      if (state.throws) throw state.throws;
+      return { ok: true };
+    },
+  };
+  driver.set = (next) => { state.parts = next; };
+  driver.setThrow = (error) => { state.throws = error; };
+  return driver;
+}

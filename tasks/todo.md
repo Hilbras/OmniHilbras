@@ -5115,3 +5115,69 @@ and a served route cannot drift apart again.
   version matched the same expression elsewhere in the file and passed on the wrong occurrence.
 - Live: `/dashboard/providers/opencode/usage` and `/dashboard/providers/clinepass/usage` both serve 200, and the
   filtered API returns one provider group as expected.
+
+## 1.85.0 — Gemini Web, a browser-driven web-cookie provider
+
+`gemini.google.com` in the **Web Cookie Providers** group. Paste `__Secure-1PSID` and `__Secure-1PSIDTS`, and
+the gateway loads the page in a real browser, types the prompt, and reads the answer out of the response the
+page makes for itself. Distinct from the existing `gemini` card, which is Google's API with an API key.
+
+Ported from OmniRoute's `open-sse/executors/gemini-web.ts`, including the traps its comments record:
+
+- **`insertText`, not per-character typing** — one DOM input event, so a newline in a prompt cannot press Enter
+  early and a long prompt cannot race the timeout.
+- **`StreamGenerate` is observed, never called**, and **only the first one** is used.
+- **The frames are cumulative snapshots.** Concatenating them duplicates the reply; the parser keeps the last
+  non-empty frame. This is the bug that is invisible on a one-word answer, so a test pins it.
+- **Model selection fails closed**: a click that lands is not evidence, so the active mode is read back and
+  matched; anything else refuses rather than answering with the wrong model.
+- **The selectors are marked unvalidated** in the code, because they were never confirmed against a live account.
+
+### Where each half lives
+
+`packages/omnihilbras-sdk/src/providers/gemini-web/` owns everything testable without a browser: the cookie
+normaliser (bare value, header, JSON export), rotation merge, the `wrb.fr` parse, the model table, the prompt
+building, and the refusals. `apps/gateway/src/geminiWeb.ts` owns the browser, behind a `GeminiWebDriver`
+interface the SDK defines — the same boundary `chatgpt-web` uses, so the SDK never depends on Playwright.
+
+A forced `tool_choice` and an unknown model are refused **before the browser launches**, and a missing Chromium
+is its own non-retryable failure naming `npx playwright install chromium`. A signed-out page maps to
+`AUTHENTICATION_FAILED` rather than a retryable request failure.
+
+### Verify
+
+- Repo guards 189/189, SDK 659/659 (19 new), gateway 676/676 (8 new).
+- `gemini-web` is now **contracted**, not exempt: it runs the shared provider-contract suite through a scripted
+  driver, including the answer-in-parts and refusal-cause assertions.
+- Revert proofs: concatenating the frames, dropping the forced-`tool_choice` refusal, and allowing the connect
+  to store a rejected session each fail a test; all restored.
+- Found and fixed a harness bug: the scripted Gemini driver reported "no browser" whenever a refusal was
+  scripted, so the refusal assertions were testing the browser check instead of the refusal. It now models a
+  host that has a browser, and the missing-browser path keeps its own test.
+
+### A defect caught only by running it
+
+The sign-in check was wrong, and the tests did not catch it because it is browser behaviour. Measured with a
+bogus cookie on this machine:
+
+```
+url: https://gemini.google.com/app
+ql-editor: 0     [contenteditable=true]: 0     sign-in link: 1
+waitForSelector('.ql-editor, [contenteditable="true"]') -> resolved truthy
+```
+
+Gemini's signed-out page carries **hidden** contenteditable nodes, so `waitForSelector` resolved against one and
+the check reported a dead session as **connected** — the worst answer the button can give, because the user saves
+a dead connection and finds out when a turn fails. Fixed by checking the sign-in wall first and requiring the
+composer to be counted **and visible**, in both the check and the turn. Re-measured: a bogus cookie now returns
+`ok: false` with the sign-in-wall message. A source guard pins the ordering, and it was revert-proved.
+
+`isVisible` was added to the driver's Playwright type for this, and `waitForSelector` is no longer used for the
+composer anywhere in the driver.
+
+### Unverified, stated plainly
+
+**No turn has been run against a live Google session** — this machine has no `__Secure-1PSID`. So the page
+selectors, the mode read-back and the `StreamGenerate` capture are unverified against the real page. The
+cookie handling, the parse and every refusal are covered by tests. `fixture-coverage.test.js` records the
+missing capture and why.

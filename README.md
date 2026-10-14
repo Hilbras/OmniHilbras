@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.84.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.85.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -214,16 +214,24 @@ terms cover.
 The **Web Cookie Providers** group holds providers with no API — you export a session from
 your own browser and OmniHilbras drives the web app to get an answer out of it.
 
-**ChatGPT Web** is the one implemented. Two things you should weigh before using it:
+**ChatGPT Web** and **Gemini Web** are implemented, and they work the same way: a real browser
+loads the provider's page, types the prompt, and the answer is read out of the response the page
+makes for itself. Two things you should weigh before using either:
 
-- **The credential is your whole account, not a token.** A `__Secure-next-auth.session-token`
-  is a live session for everything you can do on OpenAI. Every other credential in this
-  gateway is scoped to inference; this one is not.
-- **OpenAI's terms do not permit automating chatgpt.com.** The flow exists because a real
+- **The credential is your whole account, not a token.** A `__Secure-next-auth.session-token` is a
+  live session for everything you can do on OpenAI; Gemini's `__Secure-1PSID` is the same for your
+  Google account. Every other credential in this gateway is scoped to inference; these are not.
+- **Neither provider's terms permit automating its web app.** The flow exists because a real
   browser is used so the page can run its own anti-automation challenges.
 
-The card says both before you paste anything, and nothing is stored until you acknowledge
-it. Only `chatgpt.com` and `openai.com` cookies are kept out of your export.
+The cards say both before you paste anything, and nothing is stored until you acknowledge it. Only
+the provider's own cookies are kept out of your export.
+
+**What is verified, and what is not.** ChatGPT Web has been run end to end against a real account.
+Gemini Web's logic — the cookie, the `StreamGenerate` parse, the model table, the refusals — is
+covered by tests, but **no turn has been run against a live Google session**, so its page selectors
+and its answer capture are unverified. If its mode menu does not confirm a model, it refuses to send
+rather than answering with a different one.
 
 ### ChatGPT Web needs a browser
 
@@ -233,7 +241,7 @@ It is installed on demand rather than with the rest of the workspace:
 npx playwright install chromium
 ```
 
-Without it, ChatGPT Web says so by name rather than failing as a provider error.
+Without it, both web-cookie providers say so by name rather than failing as a provider error.
 
 **ChatGPT Web works.** A real turn returns a real answer in about 20–40 seconds:
 
