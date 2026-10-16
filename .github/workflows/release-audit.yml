@@ -1,0 +1,41 @@
+# The release trail, checked on a schedule instead of on attention.
+#
+# `AGENTS.md` has required since 1.32.1 that every tag be pushed, released on GitHub and published to
+# npm — and `v1.60.0` and `v1.72.0` were tagged and never published anyway, for thirty releases, with
+# nothing to notice. The rule was enforced by a `for` loop pasted into the document, and a thing done
+# by hand runs exactly as often as somebody remembers it.
+#
+# Deliberately **not** folded into `verify.yml`: `pnpm verify` runs on every push and is offline, and
+# making the release gate depend on the registry would fail it whenever npm hiccups. This runs where
+# network is the point.
+name: release-audit
+
+on:
+  schedule:
+    # Daily, at a minute that is not :00 — every job on a cron default lands on the same instant.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The audit reads the tags, so a shallow clone would audit an empty list and pass.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Audit the release trail
+        env:
+          # `gh` is preinstalled on the runner; the token is what lets it read releases. An empty
+          # token makes `gh release list` fail, which the script reports as "unreachable" rather than
+          # as a missing release — the distinction it exists to keep.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/audit-release-trail.mjs

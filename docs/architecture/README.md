@@ -15,28 +15,39 @@ execution, health, or the SDK core.
 
 ## Measured state
 
-Counts are from the tree, not from intention. They are the honest starting point for any
-refactor, and several of them contradict what an outsider might assume.
+Counts are from the tree, not from intention. Both numeric columns are **recomputed by
+`tests/documentation-counts.test.js`** — added in 1.85.1, because this table had been read as measured
+while every line count in it had gone stale: `service.ts` was quoted at 1103 and measured 1755, and
+nothing had looked. A caption saying "measured" is a claim like any other, so the only version of it
+that holds is one a machine re-derives.
 
-| Surface | Lines | Provider-id literals | Note |
+- **Lines** — the file's line count.
+- **Provider ids named** — how many of the provider ids the SDK ships (one directory each under
+  `packages/omnihilbras-sdk/src/providers/`, so a new provider extends the check without editing it)
+  occur as a whole word inside a string literal in the file's executable code, comments stripped. That
+  is the definition `shared-execution-has-no-provider-names.test.js` applies to the shared algorithm,
+  generalised from "is this zero" to "how many". **Zero is the claim this column exists to make**; a
+  non-zero row is the honest size of a provider-specific surface, not an allegation.
+
+| Surface | Lines | Provider ids named | Note |
 | --- | --- | --- | --- |
-| `apps/gateway/src/routing.ts` | 195 | **0** | routing was already provider-agnostic |
-| `apps/gateway/src/routing.ts` → see above | 195 | **0** | `isRetryableFailure` now judges an unreadable answer a provider fault |
-| `apps/gateway/src/provider-resolver.ts` | 120 | **0** | enforced by a test that greps the file |
-| `apps/gateway/src/request-executor.ts` | 331 | **0** | the failover loop, the attempt ledger, the ordering |
-| `apps/gateway/src/connection-manager.ts` | 241 | **0** | one error mapper, one catalog merge, one lock scope |
-| `apps/gateway/src/service.ts` | 1103 | 8 | down from 12, all `.onDemand()` registrations |
-| `apps/gateway/src/http.ts` | 256 | **0** | the vocabulary every route shares |
-| `apps/gateway/src/routes/oauth.ts` | 249 | 4 | the module a provider split would help most |
-| `apps/gateway/src/routes/connections.ts` | 233 | 5 | all in connection lifecycle |
-| `apps/gateway/src/routes/inference.ts` | 386 | **0** | `/v1/models`, `/v1/chat/completions`, and the auth gate |
-| `apps/gateway/src/routes/api-keys.ts` | 71 | **0** | |
-| `apps/gateway/src/routes/status.ts` | 37 | **0** | `/health`, `/v1/routing` |
-| `apps/gateway/src/server.ts` | 155 | **0** | was 1202 with 5 provider ids |
+| `apps/gateway/src/routing.ts` | 379 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
+| `apps/gateway/src/provider-resolver.ts` | 237 | **0** | enforced by a test that greps the file |
+| `apps/gateway/src/request-executor.ts` | 705 | **0** | the failover loop, the attempt ledger, the ordering |
+| `apps/gateway/src/connection-manager.ts` | 250 | **0** | one error mapper, one catalog merge, one lock scope |
+| `apps/gateway/src/service.ts` | 1755 | 4 | all twelve `.onDemand()` registrations, in one constructor |
+| `apps/gateway/src/http.ts` | 296 | **0** | the vocabulary every route shares |
+| `apps/gateway/src/routes/oauth.ts` | 425 | 4 | the module a provider split would help most |
+| `apps/gateway/src/routes/connections.ts` | 261 | 2 | both in connection lifecycle |
+| `apps/gateway/src/routes/inference.ts` | 942 | **0** | `/v1/models`, `/v1/chat/completions`, and the auth gate |
+| `apps/gateway/src/routes/api-keys.ts` | 74 | **0** | |
+| `apps/gateway/src/routes/status.ts` | 43 | **0** | `/health`, `/v1/routing` |
+| `apps/gateway/src/server.ts` | 306 | **0** | was 1202 with 5 provider ids |
 
-**The Core was far more provider-neutral than it looked.** Twelve literals in 1500 lines is not a
-codebase littered with provider conditionals, and the ones that existed were not scattered — they
-concentrated in a single factory:
+**The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
+provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a
+registration block and a credential alias. What used to be a chain of `if` statements concentrated in a
+single factory:
 
 ```ts
 private async resolveAdapter(providerId: string, pendingEndpoint?: {...}) {
@@ -58,43 +69,45 @@ or a shared access-token cache. That is a factory, and a factory is a registrati
 this.providers = new ProviderResolver(registry)
   .onDemand('cline', () => this.clineAdapter())
   .onDemand('opencode', () => this.zenAdapter())
-  // … six registrations, in one place
+  // … twelve registrations, in one place
 ```
 
 `ProviderResolver` now contains **zero** provider ids, and a test strips the comments and fails if
-a provider-shaped string appears. That is the whole provider-coupled execution surface, closed.
+a provider-shaped string appears. `service.ts`'s own `resolveAdapter` is down to a single delegation —
+`return this.providers.resolve(providerId, pendingEndpoint, () => this.listConnections())` — so the
+branching that used to name providers is gone and what remains is the registration list itself.
 
 **What remains, honestly:** the service still names each on-demand provider *once*, in that
-constructor. The step from here to "a provider adds itself" is for adapter modules to carry their
-own registration.
+constructor, which is why it is one of the three files in the table above with a non-zero count. The
+step from here to "a provider adds itself" is for adapter modules to carry their own registration.
 
 ### What the numbers mean
 
-**Stateless providers already need no Core changes.** Nine connections are live —
-`openrouter`, `cline`, `opencode`, `opencode-console`, `nara-router`, `tokenharbor`, `kiro`,
-`chatgpt-web`, `deepseek-web` — and the OpenAI-compatible ones are served by the generic branch at
-the end of `resolveAdapter` with no per-provider code at all. Adding one required an adapter and a
-connect route. Nothing else.
+**Stateless providers already need no Core changes.** A provider the gateway can reach with a stored
+credential is served by `ProviderResolver`'s saved-endpoint fallback — any id, registered or not — and
+the OpenAI-compatible ones land on one generic branch with no per-provider code at all. Adding one
+required an adapter and a connect route. Nothing else.
 
-**Lifecycle providers are the exception, and for a structural reason.** The Core has no lifecycle
-concept at all:
+**Lifecycle providers are the exception, and for a structural reason.** A provider whose credential is
+simply a stored secret fits the Core's model. A provider that must be *created, refreshed, and revoked*
+— a Cline session, an OAuth grant, a console token — has nowhere to live, so it is wired in by hand:
+the adapter is built on demand, its credential is written by a bespoke block, and its refresh is
+orchestrated in the Core.
 
-```
-lifecycle   0 occurrences in service.ts
-revoke      0
-onboard     0
-provision   0
-```
+This section used to prove that with a word count — `lifecycle`, `revoke`, `onboard` and `provision`,
+each "0 occurrences in `service.ts`". **That evidence has expired, and 1.85.1 removed the claim along
+with it:** `lifecycle` appears in `service.ts` four times, because `CredentialLifecycle` now exists. It
+is *not* the contract proposed below — it pre-checks whether a stored credential has already expired,
+so that a health sweep does not launch a browser to be told what the credential said in writing — and it
+creates, refreshes and revokes nothing. `revoke`, `onboard` and `provision` are still 0. A count offered
+as evidence stops being evidence the moment it moves, and this one was left standing as though it had
+not.
 
-A provider whose credential is simply a stored secret fits the Core's model. A provider that must
-be *created, refreshed, and revoked* — a Cline session, an OAuth grant, a console token — has
-nowhere to live, so it is wired in by hand: the adapter is built on demand, its credential is
-written by a bespoke block, and its refresh is orchestrated in the Core.
-
-**That is the real gap, and it is one abstraction, not twelve refactors.** A `CredentialLifecycle`
-contract — `create` / `refresh` / `revoke` / `describe`, with the Core owning *when* to call it and
-the adapter owning *how* — would absorb every one of those hand-wired branches, and
-`resolveAdapter` would shrink to a lookup.
+**That is the real gap, and it is one abstraction, not twelve refactors.** A contract offering
+`create` / `refresh` / `revoke` / `describe`, with the Core owning *when* to call it and the adapter
+owning *how*, would absorb every one of those hand-wired branches. It cannot be called
+`CredentialLifecycle`, because that name is taken by the pre-check above — `CredentialProvisioner` is
+the name available.
 
 ---
 
@@ -120,11 +133,6 @@ apps/gateway/src/
                        `currentWait` is a query; `enforce` records the verdict. A plan asks
                        `currentWait`, never the recorded map — 1.39.0, where reading the record
                        latched a limited connection off for the life of the process.
-  zen-free-tier       The four request conditions OpenCode Zen's free tier requires, in one place.
-                       A rule about a request, not a provider: `zen` applies it to any `-free` model.
-                       The two parts that drift (placeholder tool name, client version) are read from
-                       the environment, and a refusal after they are met names the network rather
-                       than the credential — 1.42.0.
   hedge-policy        Whether a second request is worth sending, and which route. Every refusal is named.
   request-context     One request's id, from the edge to whichever provider answered it.
   credential-lifecycle  Whether a stored credential still works, asked without a request.
@@ -133,14 +141,20 @@ apps/gateway/src/
   health.ts          Probing, ejection and recovery, asked two questions only.
   api-key-manager    API keys and the two user-facing messages about them.
   routing.ts         Provider-agnostic selection, ejection and recovery. Zero provider ids.
-  transport.ts       One configured HTTP client, bounded bodies, URL validation.
 
 packages/omnihilbras-sdk/src/
-  registry.ts        ProviderAdapter contract and registration.
-  types.ts           The contract every adapter satisfies.
-  transport.ts       HttpTransport, shared by adapters and the gateway.
-  errors.ts          ProviderError and the normalised error codes routing reasons about.
-  adapters/          One directory per provider. All provider-specific wire formats live here.
+  core/              Shared machinery. No provider-specific wire format lives in here.
+    registry.ts      ProviderAdapter contract and registration.
+    types.ts         The contract every adapter satisfies.
+    transport.ts     HttpTransport: one configured client, bounded bodies, URL validation. The
+                     gateway takes this interface rather than keeping a second one of its own.
+    errors.ts        ProviderError and the normalised error codes routing reasons about.
+    url.ts           The SSRF boundary — which destinations a user-supplied endpoint may reach.
+    streaming.ts     SSE frames, read the same way by every streaming adapter.
+  providers/         One directory per provider. All provider-specific wire formats live here.
+    zen/zen-free-tier.ts  OpenCode Zen's free tier: the four conditions its request must meet, in
+                     one place. A rule about a request rather than a provider, so `zen` applies it
+                     to any `-free` model, and the two parts that drift are read from the environment.
 
 src/                 Dashboard. Presentation and gateway management only.
 ```
@@ -174,7 +188,7 @@ it — which is exactly what happened to Qwen, and why its card says what it mea
 ## Adding a provider
 
 ```text
-1. Write the adapter in packages/omnihilbras-sdk/src/adapters/<name>/
+1. Write the adapter in packages/omnihilbras-sdk/src/providers/<name>/
 2. Satisfy ProviderAdapter: chat, listModels, validateCredential, healthCheck, capabilities
 3. Export it from the SDK index
 4. Register it in the gateway registry
@@ -189,8 +203,9 @@ abstraction instead of a branch.
 Web-session providers additionally need a connect route, because the credential is obtained by a
 manual step rather than a request body. Those routes live in `routes/oauth.ts` and are the one
 *intentional* provider-specific surface in the HTTP layer. It is also the module where a provider
-split would pay for itself fastest: a fifth OAuth provider is five more `if` blocks in one file,
-next to the four that already exist.
+split would pay for itself fastest: that one file serves **five** OAuth start routes —
+`claude-code`, `cline`, `kimi-code`, `kiro`, `opencode-console` — each with its own session and
+callback handling, so a sixth arrives as another block of branches beside them.
 
 ### The marks are input, not build output
 
@@ -238,9 +253,9 @@ thirty methods. Threading a value nothing reads would be decoration shaped like 
 
 `packages/omnihilbras-sdk/test/provider-contract.js` holds the invariants the Core is entitled to
 assume, and `provider-contract.test.js` runs them against every adapter that can be driven offline
-— **all eleven adapters**, which is the point of the coverage guard below: every `.ts` in
-`src/adapters/` is either contracted or listed with a reason why not, and adding an eleventh (or a
-twelfth) fails the suite until it is dealt with.
+— **all sixteen**, which is the point of the coverage guard below: every directory under
+`src/providers/` is either contracted or listed with a reason why not, and adding a seventeenth fails
+the suite until it is dealt with.
 
 The split is the design: **the contract owns the invariants, a provider supplies only its wire
 format.** Asking a provider to describe its own expectations would make this a second copy of its
@@ -281,17 +296,19 @@ things to go and fix. Six other adapters already carried the reason, so the shap
 
 | Style | Adapters | Harness |
 | --- | --- | --- |
-| `{ transport }` | openai, openrouter, openai-compatible, anthropic, gemini, cline, kiro, opencode-console | `test/harness/scripted-transport.js` |
-| `{ fetch }` | deepseek-web | `test/harness/scripted-fetch.js` |
-| `{ driver }` | chatgpt-web | `test/harness/scripted-driver.js` |
+| `{ transport }` | openai, openrouter, openai-compatible, anthropic, cline, clinepass, claude-code, gemini, kimi-code, kiro, opencode-console, zen | `test/harness/scripted-transport.js` |
+| `{ fetch }` | deepseek-web, tokenharbor-web | `test/harness/scripted-fetch.js` |
+| `{ driver }` | chatgpt-web, gemini-web | `test/harness/scripted-driver.js` |
 
 Each harness implements the *real* interface it stands in for, because a harness that implements a
 similar one cannot exercise the adapter at all. The `fetch` double is built from real `Response`
 objects, because DeepSeek's reader streams `response.body` and refuses a body past 8 MB; the driver
 double has no HTTP request to intercept, so the driver interface *is* the seam.
 
-Every contract test needs a harness per style, so a single seam here would remove real cost. It
-ranks below closing `resolveAdapter` but above decomposing the service.
+Every contract test needs a harness per style, so a single seam here would remove real cost. It is the
+largest piece of the refactor still outstanding — `resolveAdapter` is closed, since it now delegates to
+the resolver's registrations and the branches that named providers are gone — and it ranks above
+decomposing the service.
 
 ## Contracts worth keeping
 
@@ -312,7 +329,8 @@ Three things in this repository have earned their keep and should be protected:
 
 - **Splitting the SDK into per-provider packages.** The SDK is small and the adapters are the
   point. Package sprawl costs more than it saves until there is a size or ownership reason.
-- **A rewrite.** The provider-specific surface is twelve literals in one factory. That is a
-  refactor's size, and doing it incrementally keeps the whole suite green throughout.
+- **A rewrite.** The provider-specific surface of the Core is a registration list and two route
+  modules, not a scattered set of conditionals — so a rewrite has nothing to collect. Doing it
+  incrementally keeps the whole suite green throughout.
 - **Cloud infrastructure.** The store interfaces are worth having; implementing remote stores
   before they are needed is speculative.

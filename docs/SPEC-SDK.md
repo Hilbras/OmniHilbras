@@ -402,7 +402,7 @@ inside this repository, and both have caused defects:
 - **`@types/node` is a devDependency here and absent from the published surface.** Anything inferred
   from `process.*` or `Buffer` into an emitted declaration becomes a type the consumer may not have. This
   shipped: `clineHeaders` had `'X-PLATFORM': process.platform`, which infers as `NodeJS.Platform`, and
-  `tsc` writes that inference straight into `dist/adapters/cline.d.ts`. Packed into a consumer with no
+  `tsc` writes that inference straight into `dist/providers/cline/index.d.ts`. Packed into a consumer with no
   `@types/node`, it failed to compile — `error TS2503: Cannot find namespace 'NodeJS'`, exit 2.
 - **Four independent reasons hid it here:** the SDK typechecks against its own `@types/node`; the root
   `tsconfig.json` sets `skipLibCheck: true`; the dashboard consumes the `workspace:*` link rather than
@@ -416,6 +416,16 @@ one line, because the next instance would be a different file with a different s
 The consumer check that found it is worth keeping: `npm pack`, install the tarball into a project with no
 `@types/node`, and compile with `skipLibCheck: false`. Capture `tsc`'s exit code directly — piping to
 `head` reports *head's* status, which is zero whether or not the compile failed.
+
+### A version is released when three things exist, and that is now a command
+
+A tag on `main`, a GitHub release for it, and a version on npm. The rule was written in `AGENTS.md`
+and enforced by a `for` loop pasted beside it, so it ran when somebody remembered: `v1.60.0` was
+tagged on 2026-10-04 with neither an npm version nor a release, and `v1.72.0` with no npm version, and
+thirty releases passed before anything noticed. `pnpm release:audit` is that loop as a command that
+exits non-zero, `.github/workflows/release-audit.yml` runs it daily so a new gap is found by a schedule
+rather than by attention, and the half of it knowable offline runs inside `pnpm verify` as
+`tests/release-trail.test.js`.
 
 ## Gateway API Keys
 
@@ -2550,12 +2560,13 @@ Behavior when serving a request:
 packages/omnihilbras-sdk/
   src/
     index.ts
-    types.ts
-    errors.ts
-    transport.ts
-    registry.ts
-    secret-store.ts
-    adapters/
+    core/
+      types.ts
+      errors.ts
+      transport.ts
+      registry.ts
+      secret-store.ts
+    providers/        one directory per provider
   package.json
   tsconfig.json
 

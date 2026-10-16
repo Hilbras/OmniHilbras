@@ -24,7 +24,7 @@ If your change makes a number appear on screen, one of these must be true:
 
 | You are changing | Read first |
 | --- | --- |
-| anything under `packages/omnihilbras-sdk/src/adapters/` | `docs/SPEC-SDK.md`, and `packages/omnihilbras-sdk/test/fixture-coverage.test.js` |
+| anything under `packages/omnihilbras-sdk/src/providers/` | `docs/SPEC-SDK.md`, and `packages/omnihilbras-sdk/test/fixture-coverage.test.js` |
 | routing, retries, hedging, rate limits | the comments on `RequestExecutor` in `apps/gateway/src/request-executor.ts` |
 | the dashboard | `AGENTS.md`, and the `file:line` comments in the file you are editing |
 | anything that adds a route | `AGENTS.md` § *Boundaries*, plus `tests/gateway-routes.test.js` |
@@ -41,7 +41,8 @@ check, and 1.43.0 added nine providers without touching core logic.
 In practice: add a card to `src/data/providers.ts`. If the provider speaks a protocol no adapter implements,
 the generic OpenAI-compatible fallback already routes it — measured in 1.45.0, which showed the gateway
 serving all nine with no adapter at all. Write an adapter only when the wire format genuinely differs, and
-keep provider-specific formats inside `packages/omnihilbras-sdk/src/adapters/`.
+keep provider-specific formats inside `packages/omnihilbras-sdk/src/providers/<name>/`, and shared
+machinery in `src/core/`. Both paths here said `src/adapters/` for releases after the rename.
 
 ## Tests, and mutation testing
 

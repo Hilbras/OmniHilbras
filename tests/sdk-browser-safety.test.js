@@ -9,8 +9,9 @@ import { dirname, join } from 'node:path';
  *
  * ## What shipped, and what it looked like
  *
- * 1.42.0 added `adapters/zen-free-tier.ts`, which imported `randomBytes` from `node:crypto` and used
- * `Buffer`. The dashboard imports the SDK barrel — `ProviderDetailPage.tsx` imports
+ * 1.42.0 added what is now `providers/zen/zen-free-tier.ts` — `adapters/zen-free-tier.ts` at the time,
+ * before the SDK was split into one folder per provider — which imported `randomBytes` from
+ * `node:crypto` and used `Buffer`. The dashboard imports the SDK barrel — `ProviderDetailPage.tsx` imports
  * `applyModelFilters`, `webSessionProviders.ts` imports a constant — so Vite bundled the new module for
  * the browser and the dev server logged:
  *
@@ -59,9 +60,11 @@ function barrelExports() {
   while (queue.length > 0) {
     const file = queue.pop();
     const source = readFileSync(file, 'utf8');
-    // The character class must include `/`, or `./adapters/anthropic.js` never matches and the
-    // resolver stops dead at the ten modules the barrel names without a directory. It read
-    // `['\w.-]+`, so every one of the fourteen adapters was invisible to it — see the header note.
+    // The character class must include `/`, or a nested import like `./providers/anthropic/index.js`
+    // never matches and the resolver stops dead at the modules the barrel names without a directory.
+    // It read `[\w.-]+`, so every adapter was invisible to it — see the header note. At the time the
+    // barrel's paths were `./adapters/<name>.js`; the defect was the same one either way, which is why
+    // this is written against the character class rather than against a list of paths.
     for (const match of source.matchAll(/(?:export\s+(?:\*|\{[^}]*\})\s+from|import\s+[^;]*from)\s+['"]\.\/([\w.\/-]+)\.js['"]/g)) {
       const target = join(dirname(file), `${match[1]}.ts`);
       if (existsSync(target) && !seen.has(target)) {
@@ -96,12 +99,17 @@ test('no SDK module uses Buffer at module scope, which breaks the bundle before 
   // So the rule is about WHERE, not whether. A module-scope `Buffer` — a top-level constant computed at
   // import time — reaches the browser the moment the barrel is loaded, and that is the blank page again.
   //
-  // ## Why this test now reaches fourteen files it could not see before
+  // ## Why this test reaches files it could not see before
   //
-  // The resolver's character class was `[\w.-]+`, so `./adapters/anthropic.js` never matched and the walk
-  // stopped after ten modules. Every adapter was invisible to it — including the three that use `Buffer`.
-  // The exemption that justified narrowing the rule ("no `.tsx` imports cline") was written from a graph
-  // that silently excluded the very modules it was reasoning about.
+  // The resolver's character class was `[\w.-]+`, so a nested import like
+  // `./providers/anthropic/index.js` never matched and the walk stopped after the modules the barrel
+  // names without a directory. Every adapter was invisible to it — including the three that use
+  // `Buffer`. The exemption that justified narrowing the rule ("no `.tsx` imports cline") was written
+  // from a graph that silently excluded the very modules it was reasoning about.
+  //
+  // The floor below is a floor rather than a count, deliberately: the walk reaches well past it, so
+  // adding or removing a module does not break this test, while a return to the old character class —
+  // which reached about ten — does.
   const reachable = barrelExports();
   assert.ok(
     reachable.length >= 24,

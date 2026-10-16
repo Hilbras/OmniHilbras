@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "1.85.0",
+  "version": "1.85.1",
   "packageManager": "pnpm@12.5.1",
   "type": "module",
   "scripts": {
@@ -25,7 +25,8 @@
     "analyze:check": "node scripts/analyze-bundle.mjs --check",
     "verify": "pnpm version:check && pnpm test:brand && pnpm typecheck && pnpm test && pnpm build && pnpm analyze:check",
     "test:brand": "BRAND_STRICT=1 node --test tests/brand-assets.test.js",
-    "brand": "node scripts/generate-brand.mjs"
+    "brand": "node scripts/generate-brand.mjs",
+    "release:audit": "node scripts/audit-release-trail.mjs"
   },
   "dependencies": {
     "@hilbras/omnihilbras": "workspace:*",

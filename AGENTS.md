@@ -65,18 +65,29 @@ staged version`. So step 6's "confirm" is a real check, not a formality:
 npm view @hilbras/omnihilbras@<version> version   # poll until it echoes the version
 ```
 
-A `409` means *wait*, not *retry harder* and not *bump the version*. Every
-version between 1.16.0 and 1.32.0 has all three steps; this audit reproduces it:
+A `409` means *wait*, not *retry harder* and not *bump the version*.
+
+**The audit is a command, not a loop to paste.** It used to be a `for` loop written into this file, and
+a check that lives in prose runs exactly as often as somebody reads it — which is how `v1.60.0` was
+tagged on 2026-10-04 with no npm version and no GitHub release, and `v1.72.0` with no npm version, and
+thirty releases passed before anything noticed. What replaces it:
 
 ```bash
-for t in $(git tag --sort=v:refname); do
-  v=${t#v}
-  printf '%-8s %s %s %s\n' "$v" \
-    "$(git merge-base --is-ancestor "$t" origin/main && echo pushed || echo MISSING)" \
-    "$(gh release view "$t" >/dev/null 2>&1 && echo released || echo MISSING)" \
-    "$(npm view @hilbras/omnihilbras@$v version 2>/dev/null | tail -1 | grep -qx "$v" && echo published || echo MISSING)"
-done
+pnpm release:audit        # every tag: on npm? released on GitHub? exits non-zero on a new gap
 ```
+
+`scripts/audit-release-trail.mjs`. Two network calls, not one per tag. It runs in
+`.github/workflows/release-audit.yml` daily and on demand, so a new gap is found by a schedule rather
+than by attention, and the offline half of the same rule — every tag on `main`, and every tag's own
+`package.json` stating the version the tag names — runs inside `pnpm verify` as
+`tests/release-trail.test.js`. It is deliberately *not* in `verify` itself: verify runs on every push
+and is offline, and a release gate that fails whenever npm hiccups is a gate people learn to skip.
+
+**The five unrecoverable gaps are recorded, with reasons, in `knownGaps`** — `0.3.0`–`0.5.0` on npm,
+`0.6.1`–`0.7.0` on GitHub, `1.8.2` on both, and `1.60.0` and `1.72.0` on npm — and the test pins the
+count at 21, so exempting a release is an edit a reviewer sees. Republishing them is not the fix: npm publishes
+forward, and both late versions are more than a hundred commits behind the tree. Publishing stale code
+to close a bookkeeping gap is a worse outcome than the gap.
 
 Never publish a version that does not exist on GitHub, and never tag a commit
 that is not on `main`.
@@ -107,8 +118,11 @@ that is not on `main`.
 
 ## Boundaries
 
-- Provider-specific wire formats stay inside `packages/omnihilbras-sdk/src/adapters/`.
-  The gateway service and SDK index must stay provider-neutral.
+- Provider-specific wire formats stay inside `packages/omnihilbras-sdk/src/providers/<name>/`;
+  shared machinery lives in `packages/omnihilbras-sdk/src/core/`. The gateway service and SDK index
+  must stay provider-neutral. **This line named `src/adapters/` for releases after that directory was
+  renamed**, so a contributor following it wrote into a path that does not exist — which is what a
+  path written in prose does when nothing reads it.
 - Real requests only. A test, health check, or simulated result must not be presented as a live one.
   A new provider request costs money, so say so. **Asserted where it is easiest to get wrong:**
   `tests/dashboard-truthfulness.test.js` fails if a success state in `src/` is set inside a timer
@@ -145,8 +159,12 @@ that is not on `main`.
   `providerCatalog`, never re-declared: it used to repeat `name`, `description`, `auth`, `color`,
   `initial`, `logo` and the endpoint for ten providers, and seven of the seven shared providers had two
   different descriptions — the dialog's being the one a user reads while pasting a key that will be sent
-  to that vendor. The only hand-written entries are the three providers the dialog can connect that have
-  no card (`openai`, `anthropic`, `google`), and adding a card for one of them means deleting its entry.
+  to that vendor. **The hand-written list is empty, and has been since 1.43.0** — it held `openai`,
+  `anthropic` and `google`, and all three now have cards, so `withoutCard` in
+  `src/lib/providerOptions.ts` is an empty array whose own comment says why. This line claimed those
+  three were still listed for releases after they were not, and named `tests/provider-cards.test.js` as
+  the guard when the assertion is in `tests/provider-options.test.js`. A hand-written entry for a
+  provider that has a card is still a duplicate, and that test still fails on one.
   `customOption()` finds the neutral fallback **by id**, never by position.
   **A derived card's id must not be a prefix of a base card's.** `clinepass` is a distinct card from
   `cline`, but `'clinepass'.startsWith('cline')` is `true` — so a test that treats "a card whose id
@@ -213,4 +231,5 @@ pnpm test           # SDK then gateway
 pnpm build
 pnpm analyze        # per-page bundle cost, attributed per package
 pnpm verify         # the release gate: version, typecheck, test, build, bundle budget
+pnpm release:audit  # every tag: pushed, released on GitHub, published to npm
 ```

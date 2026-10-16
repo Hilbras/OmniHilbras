@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.85.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.85.1** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -432,6 +432,15 @@ published to npm as `@hilbras/omnihilbras`.
 | Medium — new capability, route, option, or page; backward compatible | `0.x.0` | `0.2.0` → `0.3.0` |
 | Small — fix, refinement, docs, or internal cleanup | `0.0.x` | `0.2.0` → `0.2.1` |
 
+A release is all **three** of: a tag on `main`, a GitHub release for that tag, and a version on npm.
+`pnpm release:audit` checks all three for every tag in two network calls and exits non-zero on a new
+gap; it runs daily in `.github/workflows/release-audit.yml`, because the rule had been enforced by a
+`for` loop pasted into `AGENTS.md` and that is how `v1.60.0` and `v1.72.0` were tagged and never
+published for thirty releases. The two facts knowable from the checkout alone — every tag is on `main`,
+and every tag's own `package.json` states the version the tag names — are asserted by
+`tests/release-trail.test.js` inside `pnpm verify`. Five historical gaps, covering 21 versions, are recorded with their reasons in `knownGaps`; republishing
+them is not the fix, because npm publishes forward.
+
 `@hilbras/omnihilbras` is this project. It is unrelated to `@hilbras/sdk`, which
 is a separate package under the same npm scope.
 
@@ -449,6 +458,7 @@ pnpm analyze       # what each page downloads, attributed to the package that sh
 pnpm analyze:check # the same, failing if the dashboard pulls the animation library again
 pnpm version:check # one version, stated once — fails if the copies disagree
 pnpm version:fix   # rewrite the derived copies from package.json
+pnpm release:audit # every tag: on main, released on GitHub, published to npm
 ./scripts/dev.sh   # the gateway and the dashboard together, in one terminal
 ```
 

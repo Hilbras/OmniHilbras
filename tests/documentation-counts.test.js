@@ -1,8 +1,9 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { providerIds } from '../apps/gateway/test/support/providerIds.js';
 
 // A number in prose is a claim, and a claim in prose rots.
 //
@@ -207,4 +208,105 @@ test('every dashboard route the README lists is one the router serves', () => {
     `the README lists ${phantoms.map((route) => `/dashboard/${route}`).join(', ')}, which the router does not ` +
       `serve. Routes it does: ${[...known].map((route) => `/dashboard/${route}`).join(', ')}`,
   );
+});
+
+/**
+ * How many of the ids the SDK ships a file names.
+ *
+ * This is the definition `shared-execution-has-no-provider-names.test.js` applies to the shared
+ * algorithm, generalised from "is this zero" to "how many": a provider is named when its id occurs as
+ * a whole word inside a string literal, in executable text with comments stripped. The vocabulary is
+ * the SDK's own provider directories, so a new provider extends the check without editing it.
+ */
+function providerIdsNamed(relative) {
+  const code = read(relative)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map((line) => line.replace(/\/\/.*$/, ''))
+    .join('\n');
+  const literals = [...code.matchAll(/(['"`])((?:\\.|(?!\1)[^\\])*)\1/g)].map((match) => match[2]).join('\n');
+  return providerIds().filter((id) => new RegExp(`(?<![A-Za-z0-9])${id}(?![A-Za-z0-9])`).test(literals)).length;
+}
+
+test('the architecture doc measures the numbers its measured-state table states', () => {
+  // The table's own caption — "Counts are from the tree, not from intention" — was read as a
+  // measurement for releases while every line count in it had drifted: `service.ts` was quoted at 1103
+  // and measured 1755. A caption is a claim, and this is the check that makes it one.
+  //
+  // Neither column was recomputed by anything until 1.85.1. The second column could not have been
+  // reproduced by hand either: the numbers in it disagreed with each other's rules, which is what a
+  // count with no stated denominator looks like.
+  const rows = [...architecture.matchAll(/^\|\s*`([^`]+\.ts)`\s*\|\s*(\d+)\s*\|\s*\**(\d+)\**\s*\|/gm)].map(
+    (match) => ({ path: match[1], lines: Number(match[2]), ids: Number(match[3]) }),
+  );
+
+  assert.ok(
+    rows.length >= 10,
+    `the measured-state table should list the gateway core; ${rows.length} rows were parsed, so the guard would pass vacuously`,
+  );
+
+  const wrong = [];
+  for (const row of rows) {
+    const actualLines = read(row.path).split('\n').length - 1;
+    if (actualLines !== row.lines) wrong.push(`${row.path}: the doc says ${row.lines} lines, the file has ${actualLines}`);
+    const actualIds = providerIdsNamed(row.path);
+    if (actualIds !== row.ids) {
+      wrong.push(`${row.path}: the doc says ${row.ids} provider ids named, ${actualIds} are named`);
+    }
+  }
+
+  assert.deepEqual(wrong, [], `the measured-state table no longer measures the tree:\n  ${wrong.join('\n  ')}`);
+});
+
+test('every path the Layers diagram names is where the diagram says it is', () => {
+  // The diagram kept drawing the SDK as a flat `src/` with an `adapters/` directory for nine releases
+  // after the restructure made it `core/` + `providers/`, listed a gateway `transport.ts` that has
+  // never existed — the gateway takes the SDK's `HttpTransport` interface rather than keeping a second
+  // one — and filed the SDK's own `zen/zen-free-tier.ts` under `apps/gateway/src/`. Nothing compared
+  // the map to the tree, and this file is where a reader starts.
+  //
+  // It checks placement, not completeness: a diagram is allowed to be selective, which is why the
+  // assertion is "every path named exists", not "every file is named".
+  const layers = architecture.slice(architecture.indexOf('## Layers'));
+  const opened = layers.indexOf('```text');
+  const block = layers.slice(opened, layers.indexOf('```', opened + 7));
+
+  let base = null;
+  let subdir = '';
+  const missing = [];
+  let checked = 0;
+
+  for (const line of block.split('\n')) {
+    const header = line.match(/^(apps\/gateway\/src\/|packages\/omnihilbras-sdk\/src\/|src\/)(?:\s|$)/);
+    if (header) {
+      base = header[1];
+      subdir = '';
+      continue;
+    }
+    if (base === null) continue;
+
+    // Only the two indents the diagram uses for entries. A continuation line is indented far enough
+    // that a `^( {2}| {4})` without the lookahead would match it and read its first word as a filename.
+    const entry = line.match(/^( {2}| {4})(?=\S)(\S+)/);
+    if (!entry) continue;
+    const token = entry[2];
+    const indent = entry[1].length;
+
+    if (token.endsWith('/')) {
+      const dir = indent === 2 ? base + token : base + subdir + token;
+      checked += 1;
+      if (!existsSync(join(ROOT_URL, dir))) missing.push(dir);
+      // `core/` and `providers/` nest the entries that follow them; `routes/` does not, because the
+      // gateway section is flat and `routes/` sits in the middle of it.
+      if (indent === 2 && base === 'packages/omnihilbras-sdk/src/') subdir = token;
+      continue;
+    }
+    if (!/^[\w./-]+$/.test(token)) continue;
+    const file = base + subdir + (token.endsWith('.ts') ? token : `${token}.ts`);
+    checked += 1;
+    if (!existsSync(join(ROOT_URL, file))) missing.push(file);
+  }
+
+  assert.ok(checked >= 15, `the diagram should name the gateway core; only ${checked} entries were checked`);
+  assert.deepEqual(missing, [], `the Layers diagram names paths that are not there:\n  ${missing.join('\n  ')}`);
 });

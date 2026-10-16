@@ -296,14 +296,24 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // with separate billing from the `kimi` platform card rather than a second auth mode on it.
   // 24 from 1.72.0, which added `claude-code` — the same shape again: the Claude *subscription*,
   // reached by OAuth, is a separate account from the metered `anthropic` API key.
-  // 25 from 1.73.0, which added `tokenharbor-web` — the web-session twin of the `tokenharbor` API-key
-  // card, the same split as Anthropic versus Claude Code: one vendor, two credentials.
+  // 25 from 1.75.0, which added `tokenharbor-web` — the web-session twin of the `tokenharbor` API-key
+  // card, the same split as Anthropic versus Claude Code: one vendor, two credentials. (This line said
+  // 1.73.0 until 1.85.1; there is no `v1.73.0` tag, and the card's commit is first contained by
+  // `v1.75.0`, so the version a reader would look it up under did not exist.)
   // 26 from 1.76.0, which added `clinepass` — the *same* account as the `cline` OAuth card, not a second
   // credential: same vendor, same host, and Cline's own auth registry registers `cline-pass` as an alias
   // of the `cline` handler reusing the identical stored credential. So it is a second *card* over one
   // connection (`connectionProviderId: 'cline'`), the opposite of every pair above.
+  // 30 from 1.78.0, which added four free-tier aggregators — `apinex`, `apmix`, `tiarina`, `xkiro`, each
+  // one key in front of other vendors' models over an OpenAI- or Anthropic-compatible path.
+  // 31 from 1.85.0, which added `gemini-web` — a web session driving gemini.google.com with cookies the
+  // user exports, so there is no API behind it at all.
   // Every one is OpenAI-compatible or already adapted, so each is a catalog card and no adapter work.
   // Mistral is **not** in that list — the catalog already had it, and the ten requested included it.
+  //
+  // **The log stopped at 26 and the assertion said 31 until 1.85.1**, so five cards were counted by a
+  // number whose provenance ended five entries earlier — the drift this comment exists to prevent,
+  // in the comment itself. The assertion is unchanged; the entries that explain it are now present.
   assert.equal(all.length, 31, `the catalog now has ${all.length} cards`);
   // Six cards claim OAuth, but the gateway serves **five** start routes: `clinepass` shares `cline`'s,
   // which is why the count of routes and the count of claims no longer coincide.

@@ -155,12 +155,21 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // test exists.
   // Cards 23 -> 24 in 1.72.0 (`claude-code`); the dialog offers no option for it, because it is an
   // OAuth card and `eligibleGroups` is `api-key`, `free-tier`, `local` and `custom` only.
-  // Cards 24 -> 25 in 1.73.0 (`tokenharbor-web`); no option either, for the same reason one level
-  // over — its group is `web-cookie`, which the keyed dialog does not offer.
+  // Cards 24 -> 25 in 1.75.0 (`tokenharbor-web`); no option either, for the same reason one level
+  // over — its group is `web-cookie`, which the keyed dialog does not offer. (This line said 1.73.0
+  // until 1.85.1, and there is no `v1.73.0` tag to look it up under.)
   // Cards 25 -> 26 in 1.76.0 (`clinepass`), the first card added here whose *base* is also a card.
   // 1.77.0 moved `clinepass` to the OAuth group — it is the same account as Cline, reached by the same
   // sign-in — so the dialog offers no option for it either: options go 17 -> 16, back to exactly the
   // count before `clinepass` existed. Both halves of that pair are now OAuth cards, and neither is keyed.
+  // Cards 26 -> 30 in 1.78.0 (`apinex`, `apmix`, `tiarina`, `xkiro`), four free-tier aggregators — so
+  // each one *is* keyed and the dialog offers an option for it: options 16 -> 20.
+  // Cards 30 -> 31 in 1.85.0 (`gemini-web`); group `web-cookie`, so no option, as with `tokenharbor-web`.
+  //
+  // **The log stopped at 26 and the assertions said 31 and 20 until 1.85.1.** Five cards and four
+  // options were counted by numbers whose provenance stopped five entries earlier — the drift this
+  // comment exists to prevent, inside the comment. The assertions are unchanged; the entries that
+  // explain them are now present.
   assert.equal(providerCatalog.length, 31, `the catalog now has ${providerCatalog.length} cards`);
   assert.equal(providerOptions.length, 20, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);

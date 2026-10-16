@@ -5,13 +5,28 @@
   long time, reporting progress against the wrong one. The correction, stated so it is not repeated:
 
   - **`tasks/plan.md` is the plan.** Five phases: SDK foundation, provider adapters, local gateway,
-    dashboard integration, cloud readiness. 49 of its 50 tasks are complete. Its phases are numbered
-    1-5 and there is no Phase 6.
+    dashboard integration, cloud readiness — the fourth carrying lettered sub-phases, 4b through 4g.
+    Its phases are numbered 1-5 and it has no Phase 6. **Every box in it is ticked.** This header said
+    "49 of its 50 tasks are complete" until 1.85.1, by which point all 50 were: a count that only ever
+    moves in one direction is a count that is wrong the moment anyone acts on it, and this one was
+    read as current for releases.
   - **This file is the refactoring log** for the work carried out against that plan. Its tasks are
     labelled "Phase 1/2/3" meaning *extraction round*, not plan phase. Nothing here is a plan phase.
 
-  So "Phase 3" below does not mean plan Phase 3, and there are no "Phases 4-12" in either document.
-  Progress is measured against `tasks/plan.md`.
+  So a bare "Phase 3" below does not mean plan Phase 3. **The sentence that used to follow — "there are
+  no 'Phases 4-12' in either document" — was false when it was written and is falser now**, so what a
+  phase number in this file can refer to is worth stating precisely instead:
+
+  - **"Phase 1/2/3", as an extraction round** — a round of pulling one decision into one place. That is
+    this file's own usage, and the one every bare "Phase 3" below means.
+  - **"Phase 6.1", "6.2", "6.3"** (Tasks 105-107) — the 9router borrowing plan, defined in
+    `docs/architecture/phase6-plan.md`.
+  - **"Phase 5", "Phase 10", "Phase 11"** (Tasks 97-104) — a twelve-phase *stabilization roadmap* that
+    arrived from outside this repository. Those numbers have no definition here at all, which is
+    exactly why they cannot be looked up when they are read.
+
+  Progress is measured against `tasks/plan.md` for the phases it names, and against
+  `docs/architecture/phase6-plan.md` after it.
 -->
 
 
@@ -5181,3 +5196,115 @@ composer anywhere in the driver.
 selectors, the mode read-back and the `StreamGenerate` capture are unverified against the real page. The
 cookie handling, the parse and every refusal are covered by tests. `fixture-coverage.test.js` records the
 missing capture and why.
+
+## 1.85.1 — an audit of the repository's own claims, and a release-trail check that runs
+
+Asked for a deep check of the project. The build, the tests and the release trail were measured first, and
+the measurement *was* the finding: **`pnpm verify` was green and every suite passed while five kinds of
+written claim had drifted from the tree.** Not one of them was a failing check — every one was prose that
+nothing read. Which is this file's own subject: a claim with no second copy to disagree with it is not a
+claim anybody can check.
+
+### The release trail had two holes, and the rule forbidding them was a paragraph
+
+`AGENTS.md` has required since 1.32.1 that every tag be pushed, released on GitHub and published to npm.
+Measured across all 156 tags:
+
+| Tag | Tagged | GitHub release | npm |
+| --- | --- | --- | --- |
+| `v1.60.0` | 2026-10-04 | **missing** | **missing** |
+| `v1.72.0` | 2026-10-06 | present | **missing** |
+| `v1.8.2` | 2026-09-29 (pre-rule) | missing | missing |
+
+Thirty releases passed before anything noticed, because the enforcement was a `for` loop pasted into the
+document — the same shape as the 141 provider logos that 18 releases left out, dropped by a shell command
+that existed only in shell history.
+
+Fixed in three parts, because there were three ways to recur:
+
+- **`scripts/audit-release-trail.mjs`** — the loop as a command, in **two** network calls rather than one
+  per tag: `npm view … versions` and `gh release list` each answer for everything at once. Exits **1** on a
+  new gap and **2** when the registry is unreachable, which is not the same finding and must not read as
+  one.
+- **`.github/workflows/release-audit.yml`** — daily and on demand, so a new gap is found by a schedule
+  rather than by attention.
+- **`tests/release-trail.test.js`**, inside `pnpm verify` — the offline half: every tag is an ancestor of
+  `origin/main`, and every tag's own `package.json` states the version the tag names. Deliberately *not*
+  the network half: a release gate that fails when npm hiccups is a gate people learn to skip.
+
+Five unrecoverable gaps are recorded in `knownGaps` with reasons, and the test pins the count at **21**, so
+exempting a release is an edit a reviewer sees. Republishing `1.60.0` and `1.72.0` is not the fix — npm
+publishes forward and both are more than a hundred commits behind the tree. The missing release for
+`v1.60.0` was created, with notes saying it was never published and why, `--latest=false` so it did not
+displace `v1.85.0`.
+
+**Proven by planting.** A tag whose commit states a different version fails the offline check; renaming an
+exemption makes the audit print `v1.72.0 has no npm version` and exit 1; removing `cron:` fails the
+schedule check. The first attempt at the second plant broke the script's syntax and exited 1 for the wrong
+reason — so it proved nothing, and had to be redone. A plant that cannot fail loudly is not a plant.
+
+### Every line count in `docs/architecture/README.md` had drifted
+
+Its own caption is "Counts are from the tree, not from intention". `service.ts` was quoted at 1103 and
+measured **1755**; `routes/inference.ts` 386 → **942**; `routing.ts` 195 → **379**. The provider-id column
+could not be reproduced by *any* rule, which is what a count with no stated denominator looks like:
+`oauth.ts` was quoted at 4 literals and has **zero** — it names providers inside route paths, not in string
+literals.
+
+Rather than restate the numbers, both columns are now **recomputed** by `tests/documentation-counts.test.js`,
+and the second column's rule is stated where a reader can check it: how many of the ids under
+`packages/omnihilbras-sdk/src/providers/` occur as a whole word inside a string literal, comments stripped —
+the definition `shared-execution-has-no-provider-names.test.js` applies, generalised from "is this zero" to
+"how many". Four plants, all caught, including the original defect shape.
+
+The file was wrong about more than numbers. The SDK half of the Layers diagram drew a flat `src/` with an
+`adapters/` directory nine releases after the restructure, filed the SDK's own `zen/zen-free-tier.ts` under
+`apps/gateway/src/`, and listed a gateway `transport.ts` that has never existed — the gateway takes the
+SDK's `HttpTransport` interface. A second guard asserts every path the diagram names is where it says.
+
+And its central narrative had expired: "The Core has no lifecycle concept at all" rested on
+`lifecycle: 0 occurrences in service.ts`, which is now **4**, because `CredentialLifecycle` exists. That is
+a different thing from the contract the same section proposes — a pre-check for expired credentials, not a
+create/refresh/revoke surface — so the paragraph says so, and the proposed contract gets a name that is
+not taken.
+
+### `AGENTS.md` contradicted the code in two places
+
+- Line 110 sent provider wire formats to `packages/omnihilbras-sdk/src/adapters/`, **a directory that does
+  not exist**. A contributor following the file's own instruction wrote into nothing.
+- The `withoutCard` paragraph claimed "the three providers the dialog can connect that have no card
+  (`openai`, `anthropic`, `google`)"; that list has been **empty since 1.43.0** and all three are cards. It
+  also named `tests/provider-cards.test.js` as the guard, where the assertion is in
+  `tests/provider-options.test.js`.
+
+`CONTRIBUTING.md` carried the same dead path twice, and `docs/SPEC-SDK.md` named `dist/adapters/cline.d.ts`
+for a declaration emitted at `dist/providers/cline/index.d.ts`.
+
+### `tasks/todo.md`'s phase-numbering header was false about its own file
+
+It read "49 of its 50 tasks are complete" — `tasks/plan.md` is **50/50** — and "there are no 'Phases 4-12'
+in either document", which this file contradicts 2,700 lines below: Task 105 is "Phase 6.1", Task 106 is
+"Phase 6.2", Task 102 is "Phase 10", and `docs/architecture/phase6-plan.md` exists. What a phase number in
+this file can refer to is now written down as three cases instead of a denial.
+
+### Two provenance logs stopped before the numbers they explain
+
+`tests/provider-cards.test.js` logged card additions to "26 from 1.76.0" and then asserted **31**;
+`tests/provider-options.test.js` did the same and asserted 31 cards and 20 options. Both are extended — the
+four free-tier aggregators in 1.78.0 and `gemini-web` in 1.85.0 — and both carried a wrong version: "25 from
+1.73.0" for `tokenharbor-web`, where **there is no `v1.73.0` tag** and the commit is first contained by
+`v1.75.0`.
+
+### Also measured, and clean
+
+- `pnpm verify` exit 0. Repo guards **197/197**, SDK **659/659**, gateway **676/676**, standalone brand
+  check **18/18** — the 197 is the pre-audit 190 plus the seven guards this release adds.
+- All 156 tags are on `origin/main`, HEAD is tagged, the tree is clean and in sync, and every one of the
+  last fifteen CI runs is green with CI running `pnpm verify` rather than a subset.
+- `pnpm audit --prod`: no known vulnerabilities. Eight dependencies a patch or minor behind, two majors
+  (`typescript` 5.9→7.0, `motion` 13→14), neither taken here.
+- No `TODO`/`FIXME`/`HACK` anywhere in `src/`, `apps/` or `packages/`; one deliberate `eslint-disable`. No
+  orphaned module — 0 unreachable files across 123 `.ts`/`.tsx`, all six scripts referenced.
+- A background `pnpm test` invocation reported failure while writing no output file. It is not
+  reproducible and a clean re-run passed everything, so it is recorded rather than explained away: one
+  unverified failure is not evidence of a flaky suite, and it is not evidence of a clean one either.
