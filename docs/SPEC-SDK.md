@@ -169,7 +169,9 @@ The first local gateway exposes:
 - `PATCH /v1/keys/:id` — pause or resume a key.
 - `DELETE /v1/keys/:id` — revoke a key.
 - `PUT /v1/connections/:id/resilience` — update one connection's retry, timeout, and rate-limit budget.
-- `GET /v1/connections/kiro/quota` — Kiro's account quota: the plan and, per resource, `used`, `limit`, `remaining` and `resetsAt`. A resource whose figures Kiro does not report is left out, never shown as zero. It reads the Kiro credential through the same refreshed context as chat, and is refused with 401 when no Kiro sign-in exists.
+- `GET /v1/connections/:id/quota` — what the account behind a connection has left: the `plan`, and per resource `used`, `limit`, `remaining` and `resetsAt`. Served for any provider whose adapter implements `quota`; a resource whose figures the provider does not report is left out, never shown as zero. It reads the same refreshed credential context as chat, and is refused with 401 when no sign-in exists.
+  - **A provider that publishes no quota is refused with 501 `NOT_SUPPORTED`, never answered with an empty balance.** "This provider does not say" and "this account has nothing left" look identical to a consumer and mean opposite things, so the refusal names the adapter and the capability instead of returning an empty `resources`. Most providers are in that state: several decide entitlement per request and reveal it only by refusing a call.
+  - The route names no provider, so a second metered provider needs an adapter that implements `quota` and no change to the gateway. It replaces the earlier `/v1/connections/kiro/quota`, which was this provider's alone and reached through a per-provider branch in the service.
 - `POST /v1/responses` — the OpenAI Responses API shape for Codex-style clients. `instructions` becomes the system message and `input` (a string, or a list of role/content messages) the conversation. It is served by the chat path, so routing, failover, usage and the key gate are the same. The reply carries `object: "response"`, `status`, `output`, `output_text` and `usage`. `stream: true` is served as Responses server-sent events: each text delta as `response.output_text.delta`, then `response.completed` carrying the same body a non-streaming call returns.
 - **Model aliases.** A saved alias maps a name a client chooses to a provider and model. A request for the alias is routed to that provider and sent the model it publishes. An alias to a provider with no saved connection is refused and nothing is stored.
 - **Bare model names.** A bare name (no `provider/` prefix) that no connection lists is routed only to a provider that declares its family (`claude`, `gpt`, `gemini`). A `claude-*` name with only an OpenAI connection is refused, not billed to OpenAI. A name a connection lists still routes to that connection.
@@ -193,6 +195,9 @@ The first local gateway exposes:
 - `GET /v1/settings` — the configuration **this process loaded**, after defaults, parsing and validation.
   Read-only, and it answers `405` to anything else rather than accepting a write that does nothing. Reports
   `host`, `port`, `localOnly`, the four resilience values, `corsOrigins`, `dataDir`, the provider base URLs,
+  a `codex` readiness block (`configured`, whether the client in effect is the operator's own or the public
+  Codex CLI client, and the redirect URI in effect) so the dashboard can explain a sign-in before the user
+  clicks rather than after,
   and two lists: `mutableAtRuntime` (`requireApiKey`, the only one) and `mutableByRestart` (everything else),
   so the dashboard does not present a restart-only value as editable. **No secret is served** — the response
   is built from an explicit field allowlist rather than by filtering, and `assertNoSecrets` then refuses
@@ -308,6 +313,35 @@ The first local gateway exposes:
 - `GET /v1/oauth/claude-code/session/:id` — whether a started Claude Code sign-in is pending, connected,
   failed, or expired. A well-formed id that does not exist is `404`; an id that is not a plausible session
   id is `400`, refused before any lookup. The PKCE verifier is never in this response.
+- `POST /v1/oauth/codex/start` — begin a Codex OAuth authorization-code flow with PKCE. With no local
+  configuration this uses the public Codex CLI OAuth client and its registered loopback redirect
+  (`http://localhost:1455/auth/callback`); because that port is not the gateway's own, the gateway
+  opens a loopback listener there for the duration of the sign-in and closes it when the callback
+  lands. Setting `OMNIHILBRAS_CODEX_CLIENT_ID` and `OMNIHILBRAS_CODEX_REDIRECT_URI` switches to an
+  operator's own client; both are required together, and an overridden redirect must match the
+  gateway listener's origin and avoid a gateway route, or startup refuses it. The verifier remains in
+  the gateway's expiring session; the response includes only a session id, authorization URL and expiry.
+  The authorization request identifies itself the way the Codex CLI does (`originator`,
+  `codex_cli_simplified_flow`, `id_token_add_organizations`).
+- `GET /v1/oauth/codex/callback` — this exact path, permitted as a cross-site GET navigation without a
+  dashboard key. The route is always served, so a browser returning here before the gateway is configured
+  for Codex gets a status page rather than a routing error; only an active session can exchange anything.
+  Its `state` must match one pending session before its one-time code can be exchanged. Provider rejection
+  resolves that matching session as failed; replayed or mismatched callbacks exchange nothing. The HTML
+  callback page never renders the code or tokens. The same handler answers on the registered loopback
+  port, so state correlation and the one-time claim are identical on either socket.
+- `GET /v1/oauth/codex/session/:id` — pending, connected, failed or expired Codex sign-in status. A
+  connected response carries only connection metadata, never the OAuth credential or PKCE verifier.
+  Codex's SDK adapter uses the Responses SSE protocol and requires a terminal `response.completed` event;
+  unsupported tool calls and non-text content are rejected rather than silently flattened. Refreshes are
+  coalesced and preserve available account identity metadata.
+  **The model list is discovered, not written down.** The adapter asks
+  `GET https://chatgpt.com/backend-api/codex/models?client_version=<cliVersion>` with the connection's OAuth
+  token, after renewing it if it has expired. An empty answer is raised as a named failure rather than
+  returned as an empty or placeholder catalog, because that endpoint filters entries by
+  `minimal_client_version` and answers `200` with the missing ones silently dropped — a stale client
+  version is therefore reported, not mistaken for an account with no models. `POST
+  /v1/connections/:id/models/refresh` re-reads it on demand from the provider page.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
 - `POST /v1/embeddings` — normalized embeddings, one vector per input. `input` is a non-empty
   string or a non-empty array of them; `encoding_format` must be `float` (base64 is refused rather
@@ -2668,7 +2702,7 @@ measurement, and `apps/gateway/test/spec-success-criteria.mjs` fails if any stop
       `build` script; `packages/omnihilbras-sdk/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **20 files** in `packages/omnihilbras-sdk/src/providers/` — 18 provider folders, each with an `index.ts`, plus two helpers nested inside them (`deepseek-web/deepseek-pow.ts`, `zen/zen-free-tier.ts`). `openai-compatible` is a shared base that providers extend, not a provider. The two helpers and `qwen-web` are not protocol adapters, so the guard does not count them, which is why the capture guard counts 16: its file count exceeds that because the helpers are not protocol adapters — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **21 files** in `packages/omnihilbras-sdk/src/providers/` — 19 provider folders, each with an `index.ts`, plus two helpers nested inside them (`deepseek-web/deepseek-pow.ts`, `zen/zen-free-tier.ts`). `openai-compatible` is a shared base that providers extend, not a provider. The helpers and `qwen-web` are not protocol adapters, so the guard does not count them, which is why the capture guard counts 17: its file count exceeds that because the helpers are not protocol adapters — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

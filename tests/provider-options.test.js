@@ -142,10 +142,8 @@ test('the neutral custom option is still reachable, and nothing else shadows it'
 });
 
 test('THE COUNT, asserted so it cannot drift quietly', () => {
-  // Sixteen options from thirteen eligible cards and no declared exceptions, over twenty-two cards
-  // (1.43.0 added nine API-key providers and emptied `withoutCard`). These
-  // were the counts when the list stopped being a second copy; a change to any of them is a product
-  // decision, so it has to be made here rather than arriving as an off-by-one.
+  // The assertions below measure the current catalog and option list; the history comments explain
+  // the significant changes without treating the older inventory as current.
   // Cards 13 -> 22 in 1.43.0: Kimi, DeepSeek, Qwen, Groq, Grok, NVIDIA, OpenAI, Anthropic, Gemini.
   // Mistral was already a card, so it is not among the additions.
   //
@@ -165,12 +163,13 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // Cards 26 -> 30 in 1.78.0 (`apinex`, `apmix`, `tiarina`, `xkiro`), four free-tier aggregators — so
   // each one *is* keyed and the dialog offers an option for it: options 16 -> 20.
   // Cards 30 -> 31 in 1.85.0 (`gemini-web`); group `web-cookie`, so no option, as with `tokenharbor-web`.
+  // Card 32 is Duck.ai and card 33 Codex; neither is a keyed dialog option.
   //
   // **The log stopped at 26 and the assertions said 31 and 20 until 1.85.1.** Five cards and four
   // options were counted by numbers whose provenance stopped five entries earlier — the drift this
   // comment exists to prevent, inside the comment. The assertions are unchanged; the entries that
   // explain them are now present.
-  assert.equal(providerCatalog.length, 32, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerCatalog.length, 33, `the catalog now has ${providerCatalog.length} cards`);
   assert.equal(providerOptions.length, 20, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

@@ -109,9 +109,12 @@ test('it never serves a credential, whatever the configuration holds', async (t)
   assert.match(raw, /"settings":\s*\{/, 'the response is not the expected shape');
 
   // And the allowlist itself is what must hold: no field outside the named set can appear.
+  // `codex` is here because a Codex sign-in can only be started when the gateway knows which client and
+  // registered redirect URI to use, and the dashboard needs to say so *before* the user clicks Connect —
+  // a refusal discovered at click time is the failure this route now prevents.
   const allowed = new Set([
     'host', 'port', 'localOnly', 'timeoutMs', 'healthIntervalMs', 'failureThreshold', 'recoveryCooldownMs',
-    'corsOrigins', 'dataDir', 'endpoints', 'mutableAtRuntime', 'mutableByRestart',
+    'corsOrigins', 'dataDir', 'endpoints', 'codex', 'mutableAtRuntime', 'mutableByRestart',
   ]);
   const keys = Object.keys(JSON.parse(raw).settings ?? {});
   const extra = keys.filter((key) => !allowed.has(key));

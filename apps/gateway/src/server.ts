@@ -16,6 +16,7 @@ import type { RouteContext } from './routes/route-context.js';
 import type { ApiKeyStore } from './api-keys.js';
 import type { ConnectionStore } from './connections.js';
 import type { GatewayService } from './service.js';
+import { resolveCodexConfig } from './codexOAuth.js';
 
 export type GatewayServerOptions = {
   /** Backwards-compatible single-origin option for tests and embedders. */
@@ -96,9 +97,8 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     // Chromium may classify loopback host aliases (localhost -> 127.0.0.1)
     // as cross-site. The exact Origin allowlist is the authorization check;
     // an allowlisted dashboard origin is safe to accept here.
-    // The OAuth callback is the one exception: it is a top-level navigation
-    // from the provider, so it carries `sec-fetch-site: cross-site` and no
-    // Origin at all. It only displays the code the browser already holds.
+    // OAuth callback navigations carry no Origin. Each exemption is an exact callback path that
+    // renders an outcome page; all other management paths remain gated.
     if (!isOauthCallbackNavigation(request) && isCrossSiteRequest(request) && (!requestOrigin || !corsOrigins.includes(requestOrigin))) {
       sendJson(response, 403, { error: { code: 'CROSS_SITE_REQUEST_DENIED', message: 'Cross-site requests are not allowed.' } });
       return;
@@ -140,6 +140,12 @@ export async function startGatewayServer(options: {
   const config = options.config ?? loadGatewayConfig(options.env);
   assertLoopbackHost(config.host);
   const bindHost = canonicalLoopbackHost(config.host);
+  const publicBaseUrl = `http://${config.host}:${config.port}`;
+  // A partial override is a configuration error worth refusing at startup rather than at the click:
+  // the client and its registered redirect URI only make sense as a pair.
+  if (config.codex.clientId || config.codex.redirectUri) {
+    resolveCodexConfig({ clientId: config.codex.clientId, redirectUri: config.codex.redirectUri, publicBaseUrl });
+  }
   const service = createGatewayService(config, options.env, options.connectionStore, options.apiKeyStore);
   service.setHealthInterval(options.healthIntervalMs ?? config.healthIntervalMs);
   service.startTokenRenewal();
@@ -147,7 +153,7 @@ export async function startGatewayServer(options: {
   const server = createGatewayServer(service, {
     ...(options.corsOrigin ? { corsOrigin: options.corsOrigin } : {}),
     ...(options.corsOrigins ? { corsOrigins: options.corsOrigins } : options.corsOrigin ? {} : { corsOrigins: config.corsOrigins }),
-    publicBaseUrl: `http://${config.host}:${config.port}`,
+    publicBaseUrl,
     dashboardToken,
   });
 

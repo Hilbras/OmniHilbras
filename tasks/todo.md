@@ -5368,3 +5368,67 @@ handler restored → *"handleAddConnections in ProviderDetailPage.tsx never reac
 restored → two failures); the vault round-trip and the route's refusal shapes. `pnpm test` green.
 
 Release 2 (1.87.0) adds the Duck.ai web-cookie card, gateway routes, and HTTP challenge solver; unlike the sibling cards, its cookie is optional. See the Phase 4h entry in `tasks/plan.md` for the measured protocol traps and checks.
+
+## Release 3 (1.88.0) — Codex signs in with no configuration
+
+Codex could not be connected at all before this. `startCodexSignIn` validated the OAuth client through a
+helper that threw a **plain `Error`** when `OMNIHILBRAS_CODEX_CLIENT_ID` / `OMNIHILBRAS_CODEX_REDIRECT_URI`
+were unset, and a plain `Error` is not a `ProviderError` — so `toErrorEnvelope` replaced the real reason
+with *"the gateway encountered an unexpected error"*. The user could not tell a missing setting from a fault.
+
+Two changes, and the second is the one that actually removes the wall:
+
+- **The refusal is now honest.** A configuration problem raises a `ProviderError` whose public message
+  names the setting to change — the variable, never its value. The route is operator-gated, so this says
+  nothing to an untrusted caller. `GET /v1/settings` gained a `codex` readiness block so the dashboard can
+  say so *before* the click rather than after.
+- **No configuration is needed at all.** The SDK ships the public Codex CLI OAuth client and its registered
+  loopback redirect (`http://localhost:1455/auth/callback`). That client authenticates nobody and holds no
+  secret, which is why it is safe to commit; `OMNIHILBRAS_CODEX_CLIENT_ID` still overrides it as a pair,
+  and a half-configured pair is refused at startup rather than failing at the click.
+
+The registered redirect is on port **1455, not the gateway's own port**, so a browser redirected there
+reaches nothing unless something is listening. `apps/gateway/src/codexCallbackListener.ts` opens that
+loopback port when a sign-in starts and closes it the moment the callback lands — the same lifecycle the
+reference project uses — so a fixed port is never held for the gateway's lifetime, and a busy port is
+reported rather than silently ignored. State correlation and the one-time claim are identical on either
+socket, which is what makes the second one safe rather than a way around the first.
+
+**The trade, stated rather than hidden:** this authorises a ChatGPT *subscription* session, not an
+inference-scoped API key. OpenAI does not license that for proxy or router use, and an account connected
+this way can be restricted. The reference project deprecates this exact provider with that warning; the
+Codex card now carries it too, because the user is the one weighing it.
+
+**Not verified:** no live sign-in was performed. The authorize/exchange/refresh path is unproven against
+OpenAI's live servers, because completing it needs a real account and an approved credential, and neither
+was authorised. `pnpm verify` proves the wiring, not the handshake.
+
+## Release 4 (1.88.0) — the provider's own allowance, on its Usage tab
+
+The capability was already ~80% built and entirely unwired: `KiroAdapter.quota()` had read
+`getUsageLimits` for a while, `service.kiroQuota()` reached it, and `GET /v1/connections/kiro/quota` was
+served and documented — while `grep quota src/` returned **zero**. The panel did not exist.
+
+What it now is, and why it is shaped this way:
+
+- **`quota` is a contract member, not a Kiro method.** It was `KiroAdapter.quota()`, which compiled only
+  because TypeScript lets a class carry members beyond the implemented type, so the gateway reached it with
+  `instanceof KiroAdapter` — a per-provider branch in shared code, which is what
+  `shared-execution-has-no-provider-names.test.js` and `AGENTS.md:123` exist to prevent. `ProviderQuota` is
+  now declared once, neutrally, in `core/types.ts`, and `quota` is an **optional** member for the same
+  reason `embed` is: making it required would turn "this provider publishes no balance" into a compile
+  error on every adapter rather than the truthful runtime `NOT_SUPPORTED` the gateway raises.
+- **The route names no provider.** `GET /v1/connections/kiro/quota` became
+  `GET /v1/connections/:id/quota`, so a second metered provider needs an adapter and no gateway edit. The
+  connections route's provider-id count in the architecture table dropped from 2 to 1 as a result.
+- **Three states, worded as three things.** Still asking; *this provider publishes no allowance*; and a real
+  reading. The middle one is the trap: an empty `resources: {}` renders as "no allowance", which is
+  indistinguishable from a measurement at a glance. `tests/provider-quota-truthfulness.test.js` exists
+  because that is the failure, and the panel is rendered *outside* the recorded-usage branch so neither
+  measurement can hide the other.
+
+**The limit, stated rather than papered over:** only Kiro has a proven upstream quota endpoint in this
+repository. Cline's adapter says outright that none exists; Kimi, Zen, Claude Code, ChatGPT Web and the
+API-key providers reveal credits only as a `402`, which is not a reading. Codex has one in 9router's
+registry that nothing here references and that I cannot call. Every other provider shows "does not publish
+an allowance" — which is the true answer, and the one the panel is built to give.

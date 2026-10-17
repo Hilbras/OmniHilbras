@@ -1,10 +1,13 @@
-import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, ClinePassAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, type KiroQuota, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, GeminiWebAdapter, geminiWebProviderId, GEMINI_WEB_MODELS, normalizeGeminiWebCookie, geminiWebCookiePresent, type GeminiWebDriver, DuckDuckGoWebAdapter, duckduckgoWebProviderId, DUCKDUCKGO_WEB, normalizeDuckDuckGoWebCookie, freeDuckDuckGoWebModels, type DuckDuckGoWebDriver, probeQwenWeb, TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, ClinePassAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, GeminiWebAdapter, geminiWebProviderId, GEMINI_WEB_MODELS, normalizeGeminiWebCookie, geminiWebCookiePresent, type GeminiWebDriver, DuckDuckGoWebAdapter, duckduckgoWebProviderId, DUCKDUCKGO_WEB, normalizeDuckDuckGoWebCookie, freeDuckDuckGoWebModels, type DuckDuckGoWebDriver, probeQwenWeb, TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import type { GatewayConfig } from './config.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { KimiCodeSessionStore, kimiCodeProviderId, type KimiCodeSessionStatus } from './kimiCode.js';
 import { ClaudeCodeSessionStore, beginClaudeCodeSignIn, completeClaudeCodeSignIn, type ClaudeCodeSessionStatus } from './claudeCode.js';
+import { CodexAdapter, codexProviderId } from '@hilbras/omnihilbras';
+import { beginCodexSignIn, CodexSessionStore, completeCodexSignIn, resolveCodexConfig, type CodexSignInStatus } from './codexOAuth.js';
+import { CodexCallbackListener } from './codexCallbackListener.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, withConsoleWorkspace, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialDeviceFlow, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
@@ -146,6 +149,9 @@ export class GatewayService {
   private readonly claudeCodeSessions = new ClaudeCodeSessionStore();
   /** Built on demand, so signing in is what constructs it. */
   private claudeCode?: ClaudeCodeAdapter;
+  private readonly codexSessions = new CodexSessionStore();
+  /** Serves the registered redirect port while a Codex sign-in is in flight. */
+  private readonly codexCallbackListener = new CodexCallbackListener((pathname, params) => this.codexRegisteredCallback(pathname, params));
   private readonly kiroSessions = new KiroSessionStore();
   private readonly kiroSocial = new KiroSocialStore();
   private chatGptWeb?: ProviderAdapter;
@@ -323,6 +329,7 @@ export class GatewayService {
       .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId))
       .onDemand(kimiCodeProviderId, ({ providerId, connection }) => this.kimiCodeAdapter(connection?.id ?? providerId))
       .onDemand(claudeCodeProviderId, ({ providerId, connection }) => this.claudeCodeAdapter(connection?.id ?? providerId))
+      .onDemand(codexProviderId, ({ providerId, connection }) => this.codexAdapter(connection?.id ?? providerId))
       .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId))
       .onDemand(chatGptWebProviderId, () => this.chatGptWebAdapter())
       .onDemand(geminiWebProviderId, () => this.geminiWebAdapter())
@@ -493,6 +500,7 @@ export class GatewayService {
   async close(): Promise<void> {
     this.stopHealthMonitor();
     this.stopTokenRenewal();
+    this.codexCallbackListener.close();
     await this.apiKeyStore?.close?.();
   }
 
@@ -712,6 +720,86 @@ export class GatewayService {
    */
   startClaudeCodeSignIn(publicBaseUrl: string) {
     return beginClaudeCodeSignIn({ store: this.claudeCodeSessions, publicBaseUrl });
+  }
+
+  /**
+   * Begins a Codex sign-in, opening the loopback port its redirect URI points at.
+   *
+   * The public Codex client is registered against a callback on a port this gateway does not
+   * otherwise serve, so a second loopback listener has to stand in for it. It is opened here rather
+   * than at startup so that fixed port is held only while a sign-in is in flight, and it closes the
+   * moment the callback lands. A redirect that already points at the gateway's own listener — which
+   * is what an operator's registered URI does — needs no second socket, and opening one there
+   * would simply collide with the server that is already bound to it.
+   */
+  async startCodexSignIn(publicBaseUrl: string) {
+    const config = this.gatewayConfig?.codex;
+    const redirect = resolveCodexConfig({ clientId: config?.clientId, redirectUri: config?.redirectUri, publicBaseUrl });
+    const gatewayPort = Number(new URL(publicBaseUrl).port || 80);
+    if (redirect.redirectPort !== gatewayPort) {
+      await this.codexCallbackListener.open(redirect.redirectPort, '127.0.0.1');
+    }
+    return beginCodexSignIn({ store: this.codexSessions, ...redirect });
+  }
+
+  /**
+   * Serves a callback that arrived on the registered loopback port rather than on the gateway's own.
+   *
+   * Same state correlation and one-time claim as the gateway route — only the socket differs, and
+   * the correlation is what makes the second socket safe rather than a way around the first.
+   */
+  private async codexRegisteredCallback(pathname: string, params: URLSearchParams) {
+    const state = params.get('state') ?? '';
+    const code = params.get('code') ?? '';
+    const providerError = params.has('error');
+    const session = state ? this.codexSessions.findCallback(pathname, state) : undefined;
+    const status = session && providerError
+      ? this.codexSessions.failCallback(pathname, state, 'Codex sign-in was not approved. Start again from OmniHilbras.')
+      : session && code
+        ? await this.completeCodexCallback({ sessionId: session.id, code, state })
+        : undefined;
+    return {
+      ok: status?.status === 'connected',
+      message: status?.error ?? (status?.status === 'connected' ? 'Connected to Codex.' : 'This callback did not identify a Codex sign-in. Start again from OmniHilbras.'),
+    };
+  }
+
+  codexCallbackSession(path: string, state: string) {
+    return this.codexSessions.findCallback(path, state);
+  }
+
+  failCodexCallback(path: string, state: string, error: string) {
+    const session = this.codexSessions.failCallback(path, state, error);
+    return session ? this.codexSessions.publicStatus(session) : undefined;
+  }
+
+  codexSignInStatus(sessionId: string): CodexSignInStatus | undefined {
+    const session = this.codexSessions.get(sessionId);
+    return session ? this.codexSessions.publicStatus(session) : undefined;
+  }
+
+  completeCodexCallback(input: { sessionId: string; code: string; state: string }, signal?: AbortSignal) {
+    // The client is the session's own, not this process's current configuration: the authorize
+    // request and the exchange have to present the same client, and a sign-in started before a
+    // configuration change must still finish with the pair it was begun with.
+    return completeCodexSignIn({
+      store: this.codexSessions,
+      ...input,
+      transport: this.transport,
+      ...(signal ? { signal } : {}),
+      // Tolerant on purpose: the credential is already exchanged and valid, so a catalog that cannot
+      // be read must not throw away a completed sign-in. The connection is stored and the reason the
+      // model list is missing travels with it, which is what the dashboard shows afterwards.
+      saveConnection: async (credential) => this.saveConnection({
+        id: codexProviderId,
+        providerId: codexProviderId,
+        name: 'Codex',
+        endpoint: 'https://chatgpt.com/backend-api/codex/responses',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      }, credential, signal, { tolerateDiscoveryFailure: true }),
+    });
   }
 
   /** Whether a started Claude Code sign-in has finished, and how it went. */
@@ -1323,6 +1411,18 @@ export class GatewayService {
     return this.claudeCode;
   }
 
+  codexAdapter(connectionId: string): CodexAdapter {
+    return new CodexAdapter({
+      clientId: this.gatewayConfig?.codex.clientId ?? '',
+      ...(this.gatewayConfig?.codex.clientVersion ? { clientVersion: this.gatewayConfig.codex.clientVersion } : {}),
+      transport: this.transport,
+      onTokensRefreshed: async (credential) => {
+        if (!this.connectionStore) return;
+        await this.connectionStore.set(connectionId, credential).catch(() => undefined);
+      },
+    });
+  }
+
   kiroAdapter(connectionId: string): ProviderAdapter {
     if (!this.kiro) {
       this.kiro = new KiroAdapter({
@@ -1567,13 +1667,18 @@ export class GatewayService {
   }
 
   /**
-   * Kiro's account quota. Kiro-only: it reads the same credential context as chat, so a refreshed
-   * token is used here too. Refused for any other provider rather than answered with an empty quota.
+   * What a connection's account has left, for a provider that meters its accounts.
+   *
+   * Delegated to whichever adapter the connection resolves to. This used to name one provider and
+   * narrow with `instanceof`, which put a single provider's quirk into shared code and meant a second
+   * metered provider would need a second branch here. A provider that does not publish a balance is
+   * refused by name rather than answered with an empty quota — "publishes nothing" and "has nothing
+   * left" look identical from outside and mean opposite things.
    */
-  async kiroQuota(providerId: string, signal?: AbortSignal, scope?: RequestScope): Promise<KiroQuota> {
-    const adapter = await this.resolveAdapter(providerId);
-    if (!(adapter instanceof KiroAdapter)) throw notSupported(adapter, 'quota');
-    return adapter.quota(await this.credentials.contextForProvider(providerId, signal, scope));
+  async connectionQuota(connectionId: string, signal?: AbortSignal, scope?: RequestScope): Promise<ProviderQuota> {
+    const adapter = await this.resolveAdapter(connectionId);
+    if (!adapter.quota) throw notSupported(adapter, 'quota');
+    return adapter.quota(await this.credentials.contextForProvider(connectionId, signal, scope));
   }
 
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope): Promise<ChatResponse> {

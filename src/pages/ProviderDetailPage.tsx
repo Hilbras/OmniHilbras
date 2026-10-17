@@ -13,6 +13,7 @@ import {
   Copy,
   Cpu,
   KeyRound,
+  ListRestart,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -34,7 +35,7 @@ import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, f
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { ProviderPlayground } from '../components/ProviderPlayground';
-import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, putGatewayConnection, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, putGatewayConnection, refreshGatewayConnectionModels, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import { dashboardRoutes, providerRoute, providerUsageRoute } from '../lib/routes';
 import { UsageContent } from './UsagePage';
@@ -233,7 +234,7 @@ const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, req
  * does not serve: the request 404s, the tab opened for it is never navigated, and the button looks dead
  * with a blank page. The dialog is sent to the connection owner instead (see `signInProviderId`).
  */
-const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro', 'claude-code']);
+const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro', 'claude-code', 'codex']);
 
 /** Providers whose flow is a pasted credential rather than a browser sign-in. */
 const webCookieProviders = new Set(webSessionProviderIds());
@@ -379,6 +380,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   const [addOpen, setAddOpen] = useState(false);
   const [signInWindow, setSignInWindow] = useState<Window | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
+  const [refreshingModels, setRefreshingModels] = useState(false);
   const [connection, setConnection] = useState<GatewayConnection | undefined>();
   const [connectionHealthy, setConnectionHealthy] = useState(false);
   /**
@@ -580,7 +582,13 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       // Kiro opens its own tab from the click that picks a method, which is closer to the
       // gesture a popup needs. Opening one here instead left a blank tab sitting on
       // about:blank through the whole method chooser, doing nothing.
-      setSignInWindow(signInProviderId === 'kiro' ? null : window.open('about:blank', '_blank'));
+      //
+      // A card carrying a caution does not open one here at all: its flow waits for the user
+      // to accept the warning, so the tab is opened from that checkbox instead. Opening it on
+      // this click left it on about:blank until the warning was read, which reads as a dead
+      // button rather than a choice.
+      const opensOnAcknowledge = Boolean(provider.riskNotice) && signInProviderId !== 'kiro';
+      setSignInWindow(opensOnAcknowledge || signInProviderId === 'kiro' ? null : window.open('about:blank', '_blank'));
     } else {
       setSignInWindow(null);
     }
@@ -644,6 +652,29 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       flash(error instanceof Error ? error.message : 'The local gateway could not verify this connection.', 'error');
     } finally {
       setTestingConnection(false);
+    }
+  }
+
+  /**
+   * Asks the provider what models it serves now, and saves what it says.
+   *
+   * A saved model list is a snapshot taken when the connection was made, so it goes stale whenever a
+   * provider adds or retires a model. There is no local list to re-read — this is the only way to
+   * find out, which is why it is a button rather than something done silently on page load.
+   */
+  async function refreshModels() {
+    if (refreshingModels || !connection?.id) return;
+    scrollAnchorRef.current = window.scrollY;
+    setRefreshingModels(true);
+    try {
+      const updated = await refreshGatewayConnectionModels(connection.id);
+      setConnection(updated);
+      const count = updated.modelIds.length;
+      flash(`Updated ${provider.name} models — ${count} available.`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : `The local gateway could not read ${provider.name} models.`, 'error');
+    } finally {
+      setRefreshingModels(false);
     }
   }
 
@@ -892,7 +923,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
             <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-12 w-12 rounded-xl text-sm" />
             <div className="min-w-0"><div className="flex flex-wrap items-center gap-2.5"><h2 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{provider.name}</h2><span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[9px] ${meta.className}`}><span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />{meta.label}</span></div><p className="muted mt-1 text-sm">{provider.description}</p>{provider.freeTier && <p className="mt-2 text-sm text-gold-text"><span className="font-semibold">Free tier: </span>{provider.freeTier}</p>}</div>
           </div>
-          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={testConnection} disabled={testingConnection || testing} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable || planned} title={planned ? provider.unavailableReason : !oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
+          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={refreshModels} disabled={!connection || refreshingModels} title={connection ? 'Ask the provider which models it serves right now' : 'Connect this provider first'} className="btn-ghost !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40">{refreshingModels ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <ListRestart className="h-3.5 w-3.5" aria-hidden="true" />}{refreshingModels ? 'Updating' : 'Update models'}</button><button type="button" onClick={testConnection} disabled={testingConnection || testing} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable || planned} title={planned ? provider.unavailableReason : !oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
         </div>
       </div>
 
@@ -937,7 +968,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
           owner. So the filter follows the connection, not the card, or `clinepass` would show an empty tab while
           its requests sit under `cline`. `ProviderRecord.connectionProviderId` exists for exactly this.
         */
-        <UsageContent providerId={provider.connectionProviderId ?? provider.id} />
+        <UsageContent providerId={provider.connectionProviderId ?? provider.id} connectionId={connection?.id} />
       ) : (
         <>
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -1157,6 +1188,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
           providerName={provider.name}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           signInWindow={signInWindow}
+          onAcknowledged={() => setSignInWindow(window.open('about:blank', '_blank'))}
           onClose={() => { setAddOpen(false); setSignInWindow(null); }}
           onConnected={handleOauthConnected}
         />

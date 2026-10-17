@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ProviderError, publicProviderMessage, type ModelImportPolicy } from '@hilbras/omnihilbras';
 import { claudeCodeCallbackPath, clineCallbackPath } from './oauth.js';
 import type { GatewayServerOptions } from './server.js';
+import { codexCallbackRoutePath } from './routes/oauth.js';
 
 /**
  * The HTTP vocabulary every route shares.
@@ -79,11 +80,11 @@ export function isOauthCallbackNavigation(request: IncomingMessage) {
   // Normalised the way routing normalises it. Testing the raw string let `/callback/x/../../connections` pass
   // the prefix check and then route to the management endpoint, with no key.
   const path = new URL(request.url ?? '/', 'http://localhost').pathname;
-  // Both redirect providers land here as a top-level navigation from the provider, so both carry
-  // `sec-fetch-site: cross-site` and no `Origin`. The exemption is by path, and each path is the
-  // gateway's own constant — never a value from the request.
+  // OAuth callbacks land here as top-level navigations without an Origin or key. Codex's
+  // canonical callback always renders a safe outcome page; only an active session can exchange.
   return path === clineCallbackPath || path.startsWith(`${clineCallbackPath}/`)
-    || path === claudeCodeCallbackPath || path.startsWith(`${claudeCodeCallbackPath}/`);
+    || path === claudeCodeCallbackPath || path.startsWith(`${claudeCodeCallbackPath}/`)
+    || path === codexCallbackRoutePath;
 }
 
 

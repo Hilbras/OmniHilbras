@@ -16,6 +16,7 @@ export * from './core/modelFilters.js';
 export * from './providers/zen/index.js';
 export * from './providers/opencode-console/index.js';
 export * from './providers/claude-code/index.js';
+export * from './providers/codex/index.js';
 export * from './providers/kimi-code/index.js';
 export * from './providers/kiro/index.js';
 export * from './providers/chatgpt-web/index.js';

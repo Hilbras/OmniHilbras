@@ -587,6 +587,25 @@ export function addGatewayConnectionModels(connectionId: string, modelIds: strin
   }).then((body) => body.connection);
 }
 
+/**
+ * Ask the provider what models this connection can serve right now, and save the answer.
+ *
+ * A card's model list is what the provider said when the connection was saved, so it goes stale
+ * whenever a provider adds or retires a model. This is the only way to find out — there is no
+ * local list to re-read.
+ */
+export function refreshGatewayConnectionModels(connectionId: string, signal?: AbortSignal) {
+  return requestJson<{ connection: GatewayConnection }>(`/v1/connections/${encodeURIComponent(connectionId)}/models/refresh`, {
+    // The JSON media type is required even though this call has nothing to say: the gateway
+    // refuses a JSON-routed POST without it, so omitting the header answered 415 and the button
+    // looked broken rather than mis-declared.
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+    ...(signal ? { signal } : {}),
+  }).then((body) => body.connection);
+}
+
 /** How a provider's connections share traffic. `priority` is the default; `round-robin` takes turns across them. */
 export type GatewayProviderStrategy = 'priority' | 'round-robin';
 
@@ -807,6 +826,8 @@ export type GatewayOauthSignInStatus = {
   status: 'pending' | 'connected' | 'failed' | 'expired';
   connection?: GatewayConnection;
   error?: string;
+  expiresAt?: string;
+  verificationUrl?: string;
 };
 
 /** Starts a sign-in and returns the URL to send the browser to. */
@@ -844,6 +865,18 @@ export function getClaudeCodeSignInStatus(sessionId: string, signal?: AbortSigna
   return requestJson<GatewayOauthSignInStatus & { verificationUrl?: string }>(
     `/v1/oauth/claude-code/session/${encodeURIComponent(sessionId)}`,
     { signal },
+  );
+}
+
+export function startCodexSignIn(signal?: AbortSignal) {
+  return requestJson<{ sessionId: string; verificationUrl: string; expiresAt: string }>('/v1/oauth/codex/start', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ }), ...(signal ? { signal } : {}),
+  });
+}
+
+export function getCodexSignInStatus(sessionId: string, signal?: AbortSignal) {
+  return requestJson<GatewayOauthSignInStatus & { verificationUrl?: string }>(
+    `/v1/oauth/codex/session/${encodeURIComponent(sessionId)}`, { signal },
   );
 }
 
@@ -963,6 +996,60 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * A refused gateway request, keeping the machine-readable code beside the sentence.
+ *
+ * The message alone cannot answer "is this provider out of quota, or does it not publish a balance?"
+ * — those are different answers with the same shape of failure, and a panel that cannot tell them
+ * apart shows zeroes for a provider that never reported any. Existing callers read `.message` and are
+ * unaffected by the added field.
+ */
+export class GatewayRequestError extends Error {
+  readonly code?: string;
+  readonly status?: number;
+
+  constructor(message: string, options: { code?: string; status?: number } = {}) {
+    super(message);
+    this.name = 'GatewayRequestError';
+    if (options.code) this.code = options.code;
+    if (options.status !== undefined) this.status = options.status;
+  }
+}
+
+/** One metered resource on a provider's account, as the provider itself reports it. */
+export type GatewayProviderResourceQuota = {
+  used: number;
+  limit: number;
+  remaining: number;
+  resetsAt?: string;
+};
+
+export type GatewayProviderQuota = {
+  plan?: string;
+  resources: Record<string, GatewayProviderResourceQuota>;
+};
+
+/**
+ * What the account behind a connection has left.
+ *
+ * Rejects with a `GatewayRequestError` carrying code `NOT_SUPPORTED` when the provider publishes no
+ * quota at all — which is most of them, and is not the same as an account with nothing remaining.
+ */
+/**
+ * Whether a refusal means "this provider does not publish that" rather than "the request failed".
+ *
+ * A named helper rather than an `instanceof` at the call site, because the two must not be confused:
+ * a page that treats a failure as "nothing to report" would show a healthy-looking panel for a gateway
+ * that is simply down.
+ */
+export function isNotSupported(error: unknown): boolean {
+  return error instanceof GatewayRequestError && error.code === 'NOT_SUPPORTED';
+}
+
+export function getProviderQuota(connectionId: string, signal?: AbortSignal) {
+  return requestJson<{ object: 'quota' } & GatewayProviderQuota>(`/v1/connections/${encodeURIComponent(connectionId)}/quota`, { signal });
+}
+
 export async function requestJson<T>(path: string, init: RequestInit = {}) {
   if (!gatewayBaseUrl) throw new Error('Gateway URL must target a loopback address.');
   let response: Response;
@@ -986,7 +1073,7 @@ export async function requestJson<T>(path: string, init: RequestInit = {}) {
   // and treating it as "down" would flash the offline banner at the user at the wrong moment.
   noteGatewayReachability(true);
 
-  const body = await response.json().catch(() => undefined) as { error?: { message?: string; providerMessage?: string } } | undefined;
+  const body = await response.json().catch(() => undefined) as { error?: { code?: string; message?: string; providerMessage?: string } } | undefined;
   /**
    * The gateway's neutral message is written for API clients, so it says little. The
    * provider's own words ride alongside in `providerMessage` and are only sent to a
@@ -996,10 +1083,11 @@ export async function requestJson<T>(path: string, init: RequestInit = {}) {
   if (!response.ok) {
     const providerMessage = body?.error?.providerMessage?.trim();
     const summary = body?.error?.message?.trim();
-    throw new Error(
+    throw new GatewayRequestError(
       providerMessage && providerMessage !== summary
         ? `${summary ? `${summary} ` : ''}${providerMessage}`.trim()
         : summary || `Gateway request failed with status ${response.status}.`,
+      { ...(body?.error?.code ? { code: body.error.code } : {}), status: response.status },
     );
   }
   return body as T;

@@ -29,6 +29,7 @@ export const providerLogoMap = {
   // Claude Code is the Anthropic *subscription*, reached by OAuth — a separate account from the
   // metered `anthropic` API key. Its own card and its own mark, for the same reason `kimi-code` has.
   'claude-code': '/providers/claude.svg',
+  codex: '/providers/codex.svg',
   moonshot: '/providers/moonshot.svg',
   groq: '/providers/groq.svg',
   xai: '/providers/xai.svg',
@@ -678,6 +679,38 @@ export const providerCatalog: ProviderRecord[] = [
     riskNotice:
       'Anthropic’s consumer terms do not permit using a Claude subscription for third-party API access. The credential here is an OAuth grant for your Claude account, not an API key. If you have an Anthropic API key, prefer the Anthropic card.',
     riskSeverity: 'standard',
+  },
+  {
+    id: 'codex',
+    name: 'Codex',
+    description:
+      'Sign in with your ChatGPT account to serve Codex models through the subscription OAuth session. Works with no setup; see the card before you connect.',
+    category: 'Coding agent',
+    group: 'oauth',
+    status: 'available',
+    auth: 'OAuth',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#10a37f',
+    initial: 'C',
+    logo: providerLogoMap.codex,
+    endpoint: 'https://chatgpt.com/backend-api/codex/responses',
+    modelList: [],
+    /**
+     * Stated on the card because it is the user's trade to make, not ours to hide.
+     *
+     * With no local configuration this signs in through the public Codex CLI OAuth client, which
+     * means the credential is a ChatGPT *subscription* session rather than an API key scoped to
+     * inference. OpenAI does not license that session for proxy or router use, and an account
+     * authorised this way can be restricted. Anyone who would rather not accept that can set
+     * their own client ID and registered redirect URI; the card then says so instead.
+     */
+    riskNotice:
+      'Sign-in uses your ChatGPT subscription session, not an API key — OpenAI does not license that session for proxy or router use, and an account connected this way can be restricted or banned. Out of the box it uses the public Codex CLI OAuth client. Set your own OMNIHILBRAS_CODEX_CLIENT_ID and registered redirect URI to avoid that default.',
+    riskSeverity: 'high',
   },
   {
     id: 'deepseek',

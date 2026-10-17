@@ -1,7 +1,7 @@
 import { ProviderError } from '../../core/errors.js';
 import { FetchHttpTransport } from '../../core/transport.js';
 import type { HttpTransport } from '../../core/transport.js';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, ToolDefinition } from '../../core/types.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, MessageContent, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderQuota, ProviderRequestContext, ProviderResourceQuota, ToolDefinition } from '../../core/types.js';
 
 /**
  * Kiro.
@@ -37,17 +37,13 @@ export const KIRO = {
 
 export const kiroProviderId = 'kiro';
 
-export type KiroResourceQuota = {
-  used: number;
-  limit: number;
-  remaining: number;
-  resetsAt?: string;
-};
+/**
+ * Kiro's reading of the same shape the shared contract declares. Kept as an alias so existing
+ * importers keep working while the contract is the definition rather than this file.
+ */
+export type KiroResourceQuota = ProviderResourceQuota;
 
-export type KiroQuota = {
-  plan?: string;
-  resources: Record<string, KiroResourceQuota>;
-};
+export type KiroQuota = ProviderQuota;
 
 /**
  * Reads a GetUsageLimits answer. A resource whose used or limit figure is missing is left out rather
@@ -1062,10 +1058,12 @@ export class KiroAdapter implements ProviderAdapter {
   }
 
   /**
-   * Kiro's quota for the signed-in account, read from GetUsageLimits. Kiro-only: the shared adapter
-   * contract has no quota surface, so this is not an interface the other providers implement.
+   * Kiro's quota for the signed-in account, read from GetUsageLimits.
+   *
+   * Typed against the shared `ProviderQuota` contract, so the shape is declared once: a second
+   * provider with real metering implements the same member and the gateway learns nothing about either.
    */
-  async quota(context: ProviderRequestContext = {}): Promise<KiroQuota> {
+  async quota(context: ProviderRequestContext = {}): Promise<ProviderQuota> {
     const credential = context.credential;
     if (credential?.type !== 'oauth' || !credential.value) {
       throw new ProviderError('AUTHENTICATION_FAILED', 'Sign in to Kiro to read its quota.', {

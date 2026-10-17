@@ -41,10 +41,15 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
       return true;
     }
 
-    // Kiro's account quota. Declared ahead of the generic connection handlers, which would otherwise
-    // read `kiro/quota` as a connection id.
-    if (request.method === 'GET' && url.pathname === '/v1/connections/kiro/quota') {
-      sendJson(response, 200, { object: 'kiro.quota', provider: 'kiro', ...(await service.kiroQuota('kiro', signal)) }, origin);
+    // What a connection's account has left, for any provider that meters its accounts. Declared ahead
+    // of the generic connection handlers, which would otherwise read the id in this path as a provider
+    // literal or fail to match the trailing segment at all.
+    //
+    // This was a single provider's route before, and generalising it is the point: a second metered
+    // provider now needs an adapter that implements `quota`, not an edit to this file.
+    if (request.method === 'GET' && /^\/v1\/connections\/[^/]+\/quota$/.test(url.pathname)) {
+      const connectionId = decodeConnectionId(url.pathname.slice('/v1/connections/'.length, -'/quota'.length));
+      sendJson(response, 200, { object: 'quota', ...(await service.connectionQuota(connectionId, signal)) }, origin);
       return true;
     }
 

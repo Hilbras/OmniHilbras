@@ -1,6 +1,7 @@
 import type { RouteContext } from './route-context.js';
 import type { GatewayConfig } from '../config.js';
 import { sendJson } from '../http.js';
+import { CODEX } from '@hilbras/omnihilbras';
 
 /**
  * `GET /v1/settings` — the configuration this gateway actually loaded.
@@ -71,8 +72,32 @@ function assertNoSecrets(value: unknown, path = ''): void {
   }
 }
 
+/**
+ * Whether Codex can be signed in against this gateway, and on what terms.
+ *
+ * `source` distinguishes an operator's own registered client from the public Codex CLI client, which
+ * is what decides whether the callback needs a second listener and which loopback port is bound.
+ * `publicClient` is stated because the user is about to authorise a subscription account through it,
+ * which is not the same thing as authorising an API key.
+ */
+function codexReadiness(config: GatewayConfig) {
+  const configured = Boolean(config.codex.clientId && config.codex.redirectUri);
+  return {
+    configured,
+    source: configured ? ('operator' as const) : ('public-client' as const),
+    redirectUri: configured ? config.codex.redirectUri : CODEX.publicRedirectUri,
+    /**
+     * The CLI version gating the catalog, stated because it decides how many entries come back.
+     * Too low and models are hidden in a 200 with no error, which is invisible without this.
+     */
+    clientVersion: config.codex.clientVersion ?? CODEX.cliVersion,
+    subscriptionOAuth: true,
+  };
+}
+
 /** The subset worth showing, and nothing else. An allowlist rather than a redaction pass. */
 function publicSettings(config: GatewayConfig) {
+
   return {
     host: config.host,
     port: config.port,
@@ -84,6 +109,13 @@ function publicSettings(config: GatewayConfig) {
     recoveryCooldownMs: config.recoveryCooldownMs,
     corsOrigins: config.corsOrigins,
     dataDir: config.dataDir,
+    /**
+     * Whether a Codex sign-in can start here, and where the browser will be sent back to.
+     *
+     * A readiness fact, not a credential: it says which client and registered redirect URI are in
+     * effect so the dashboard can explain a failure before the user clicks rather than after.
+     */
+    codex: codexReadiness(config),
     endpoints: {
       openai: config.openai.baseUrl,
       anthropic: config.anthropic.baseUrl,

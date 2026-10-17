@@ -4,10 +4,12 @@ import { Check, CircleAlert, ExternalLink, LoaderCircle, ShieldCheck } from 'luc
 import {
   connectGatewayOauthProvider,
   getClaudeCodeSignInStatus,
+  getCodexSignInStatus,
   getClineSignInStatus,
   getDeviceSignInStatus,
   getKiroSignInStatus,
   startClaudeCodeSignIn,
+  startCodexSignIn,
   startGatewayDeviceSignIn,
   startGatewayOauthSignIn,
   startKiroSignIn,
@@ -30,6 +32,15 @@ type Props = {
    * this dialog navigates it once the sign-in URL exists.
    */
   signInWindow?: Window | null;
+  /**
+   * Called when a standing caution is accepted, before the flow starts.
+   *
+   * The caller opens the sign-in tab here rather than on the click that opened this dialog, because
+   * a provider with a caution does not start its flow until the caution is acknowledged. Opening the
+   * tab earlier leaves it sitting on about:blank for as long as it takes the user to read the
+   * warning, which looks like a broken button and is what a Codex sign-in did before this existed.
+   */
+  onAcknowledged?: () => void;
   onConnected: (connection: GatewayConnection) => void | Promise<void>;
   onClose: () => void;
 };
@@ -51,7 +62,7 @@ const deviceFlowProviders = new Set(['opencode-console', 'kiro']);
  * `code + PKCE verifier`, and the verifier lives only on the gateway's session, so a code pasted into
  * a fresh dialog could never be spent. Offering the field would promise something that cannot work.
  */
-const pkceOnlyProviders = new Set(['claude-code']);
+const pkceOnlyProviders = new Set(['claude-code', 'codex']);
 
 /** How often to ask the gateway whether the browser sign-in finished. */
 const pollIntervalMs = 1000;
@@ -67,7 +78,7 @@ const waitTimeoutMs = 5 * 60_000;
  * nothing to paste. The paste field stays available for the case where the
  * provider does not hand the code to a browser redirect.
  */
-export function OauthConnectDialog({ providerId, providerName, riskNotice, signInWindow, onConnected, onClose }: Props) {
+export function OauthConnectDialog({ providerId, providerName, riskNotice, signInWindow, onAcknowledged, onConnected, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>('starting');
   const [message, setMessage] = useState('Opening the sign-in page…');
   const [error, setError] = useState('');
@@ -233,6 +244,24 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
       return;
     }
 
+    if (providerId === 'codex') {
+      try {
+        const signIn = await startCodexSignIn();
+        if (settledRef.current) return;
+        const sentToOpenTab = navigateTo(signIn.verificationUrl);
+        setPhase('waiting');
+        setMessage(sentToOpenTab
+          ? 'Approve the request in your browser. This tab will finish the connection.'
+          : 'Your browser blocked the sign-in tab. Open the link below to continue.');
+        watch(signIn.sessionId, getCodexSignInStatus, 'The sign-in timed out. Start again from OmniHilbras.');
+      } catch (startError) {
+        settledRef.current = true;
+        setPhase('failed');
+        setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
+      }
+      return;
+    }
+
     if (deviceFlowProviders.has(providerId)) {
       try {
         const signIn = await startGatewayDeviceSignIn(providerId);
@@ -347,7 +376,11 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
                 <input
                   type="checkbox"
                   checked={acknowledged}
-                  onChange={(event) => setAcknowledged(event.target.checked)}
+                  onChange={(event) => {
+                    // Ticking this is a user gesture, so it is the one moment a tab may be opened.
+                    if (event.target.checked) onAcknowledged?.();
+                    setAcknowledged(event.target.checked);
+                  }}
                   className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[#ff6b35]"
                 />
                 I have read this and accept the risk.

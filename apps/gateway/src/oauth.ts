@@ -60,6 +60,7 @@ export function sessionIdFromCallbackPath(pathname: string): string | undefined 
  * also carries `code` and `state` as ordinary query parameters.
  */
 export const claudeCodeCallbackPath = '/v1/oauth/claude-code/callback';
+export const codexCallbackPath = '/v1/oauth/codex/callback';
 
 /** Pulls the Claude Code sign-in id out of a callback path, if it carries one. */
 export function claudeCodeSessionIdFromCallbackPath(pathname: string): string | undefined {

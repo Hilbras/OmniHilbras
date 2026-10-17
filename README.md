@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.87.1** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.88.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -32,6 +32,13 @@ The dashboard is one React Router app mounted at `/dashboard`:
 A provider page carries two tabs: its overview, and `/dashboard/providers/:providerId/usage` — the usage view
 scoped to that provider's recorded requests. The tab follows the **connection**, so a card that shares another
 provider's credential (`clinepass` under `cline`) shows the usage its requests are actually recorded under.
+
+That tab also carries the **account allowance** when the provider publishes one, read over
+`GET /v1/connections/:id/quota`. It is a different measurement from a different source — the provider
+answering about its own subscription, rather than records OmniHilbras wrote — so the two are never merged
+into one figure. Most providers publish no allowance at all, and say so: several decide entitlement per
+request and reveal it only by refusing a call. "This provider does not say" is rendered as a sentence, never
+as a zero, because an unanswerable question and an exhausted account are different facts.
 
 **Request log** is the one sidebar entry still disabled with no route. `Usage` and `Settings` were both
 disabled for the whole life of the project for the same reason — **there was nothing to show** — and both are
@@ -59,8 +66,13 @@ first provider with a live connection flow: the dashboard sends a candidate key
 only to the loopback gateway, which validates it against OpenRouter and stores it
 in an encrypted local vault. The connection dialog also lets you choose whether
 Save imports free models or all text models; model IDs are persisted separately
-from the credential. Any other provider can be added with a base URL through
-`PUT /v1/connections/:id`.
+from the credential. Codex signs in with no configuration: it uses the public
+Codex CLI OAuth client and its registered loopback callback, opening that port
+only while a sign-in is in flight. Set `OMNIHILBRAS_CODEX_CLIENT_ID` and its
+matching `OMNIHILBRAS_CODEX_REDIRECT_URI` together to use your own OAuth client
+instead. Either way the credential is a ChatGPT subscription session rather than
+an inference-scoped API key, which is stated on the Codex card. Other providers can
+be added with a base URL through `PUT /v1/connections/:id`.
 
 The providers page groups cards as **OAuth Providers**, **API Key Providers**,
 **Hosted API Providers**, **Free Tier Providers**, **Local Providers**, and

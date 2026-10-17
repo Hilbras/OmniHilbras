@@ -299,7 +299,9 @@ for (const provider of providers) {
  * double — were both resolved by a harness that speaks the provider's real protocol rather than by
  * a looser assertion.
  */
-const NOT_YET_CONTRACTED = {};
+const NOT_YET_CONTRACTED = {
+  codex: 'Its OAuth grant and Responses SSE contract is covered by codex.test.js, but the shared generic harness does not model token refresh or Responses events.',
+};
 
 test('an adapter that can tell when a credential expired never throws and never guesses', () => {
   // The value of `isCredentialExpired` is entirely in what it *refuses* to claim. An adapter that
@@ -345,6 +347,24 @@ test('the contract knows which adapters it does not cover, and says why', () => 
     assert.ok(reason.length > 20, `${id} is listed without saying why it is not covered`);
     assert.equal(covered.has(id), false, `${id} is listed as uncovered but is in the suite`);
   }
+});
+
+test('quota is optional, so a provider that publishes none is still a working adapter', () => {
+  // Optional is the entire point. Most providers have no account-quota endpoint — several decide
+  // entitlement per request and only reveal it by refusing — so requiring this member would turn "this
+  // provider does not publish a balance" into a compile error on every adapter rather than the truthful
+  // runtime `NOT_SUPPORTED` the gateway raises. An adapter without it must register and serve normally.
+  const withoutQuota = { id: 'meterless', name: 'Meterless', capabilities: { chat: true, streaming: false, models: false }, chat: async () => ({}) };
+  const registry = new ProviderRegistry().register(withoutQuota);
+  assert.equal(registry.require('meterless').quota, undefined, 'an adapter that omits quota must not be given one');
+});
+
+test('a provider that does meter its accounts implements the same member', () => {
+  // The two halves of the contract, together: the shape is declared once and neutrally, and a real
+  // metered provider conforms to it, so a second one needs no gateway change at all.
+  const metered = { id: 'metered', name: 'Metered', capabilities: { chat: true, streaming: false, models: false }, chat: async () => ({}), quota: async () => ({ plan: 'Pro', resources: { credit: { used: 1, limit: 10, remaining: 9 } } }) };
+  const registry = new ProviderRegistry().register(metered);
+  assert.equal(typeof registry.require('metered').quota, 'function');
 });
 
 test('every adapter in the SDK is either contracted or listed as not', () => {

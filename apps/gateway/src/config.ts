@@ -30,6 +30,15 @@ export type GatewayConfig = {
   recoveryCooldownMs: number;
   corsOrigins: string[];
   dataDir: string;
+  codex: {
+    clientId?: string;
+    redirectUri?: string;
+    /**
+     * The CLI version sent to the Codex catalog endpoint. Overridable because that value decides
+     * how many model entries come back, and too low a value hides them silently.
+     */
+    clientVersion?: string;
+  };
   openai: {
     baseUrl: string;
     organization?: string;
@@ -87,6 +96,11 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
     recoveryCooldownMs: parseNonNegativeInteger(env.OMNIHILBRAS_RECOVERY_COOLDOWN_MS, 30_000, 'OMNIHILBRAS_RECOVERY_COOLDOWN_MS', 3_600_000),
     corsOrigins: parseCorsOrigins(env.OMNIHILBRAS_CORS_ORIGINS),
     dataDir: env.OMNIHILBRAS_DATA_DIR?.trim() || defaultConnectionDirectory(env),
+    codex: {
+      clientId: env.OMNIHILBRAS_CODEX_CLIENT_ID?.trim() || undefined,
+      redirectUri: env.OMNIHILBRAS_CODEX_REDIRECT_URI?.trim() || undefined,
+      clientVersion: env.OMNIHILBRAS_CODEX_CLIENT_VERSION?.trim() || undefined,
+    },
     openai: {
       baseUrl: env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
       organization: env.OPENAI_ORGANIZATION,

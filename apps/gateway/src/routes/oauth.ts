@@ -6,8 +6,10 @@
  * that already exist.
  */
 
-import { claudeCodeCallbackPath, claudeCodeSessionIdFromCallbackPath, clineCallbackPath, sessionIdFromCallbackPath } from '../oauth.js';
+import { claudeCodeCallbackPath, claudeCodeSessionIdFromCallbackPath, clineCallbackPath, codexCallbackPath, sessionIdFromCallbackPath } from '../oauth.js';
 import type { RouteContext } from './route-context.js';
+
+export const codexCallbackRoutePath = codexCallbackPath;
 import {
   assertOnlyFields,
   escapeHtml,
@@ -181,6 +183,39 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
         ? `Connected to ${(status?.connection as { name?: string } | undefined)?.name ?? 'Claude Code'}.`
         : status?.error ?? 'This callback did not identify a Claude Code sign-in. Start the sign-in again from OmniHilbras.';
       sendHtml(response, 200, claudeCodeCallbackPage(ok, message), origin);
+      return true;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/v1/oauth/codex/callback') {
+      const state = url.searchParams.get('state') ?? '';
+      const session = state ? service.codexCallbackSession(url.pathname, state) : undefined;
+      const code = url.searchParams.get('code') ?? '';
+      const providerError = url.searchParams.has('error');
+      const status = session && providerError
+        ? service.failCodexCallback(url.pathname, state, 'Codex sign-in was not approved. Start again from OmniHilbras.')
+        : session && code
+          ? await service.completeCodexCallback({ sessionId: session.id, code, state }, signal)
+          : undefined;
+      const ok = status?.status === 'connected';
+      const message = ok ? 'Connected to Codex.' : status?.error ?? 'This callback did not identify a Codex sign-in. Start again from OmniHilbras.';
+      sendHtml(response, 200, oauthCallbackPage('Codex', ok, message), origin);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/codex/start') {
+      sendJson(response, 201, await service.startCodexSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:8787'), origin);
+      return true;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/codex/session/')) {
+      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/codex/session/'.length)).trim();
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
+      const status = service.codexSignInStatus(sessionId);
+      if (!status) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
+        return true;
+      }
+      sendJson(response, 200, status, origin);
       return true;
     }
 
@@ -381,15 +416,20 @@ export function defaultClineRedirect(publicBaseUrl: string | undefined) {
  * words becoming markup.
  */
 export function claudeCodeCallbackPage(ok: boolean, message: string) {
+  return oauthCallbackPage('Claude Code', ok, message);
+}
+
+export function oauthCallbackPage(provider: string, ok: boolean, message: string) {
   const safeMessage = /^[\S ]{1,300}$/.test(message) && !/[<>]/.test(message)
     ? message
     : 'The sign-in could not be completed.';
+  const safeProvider = /^[A-Za-z0-9 ]{1,48}$/.test(provider) ? provider : 'Provider';
   return `<!doctype html>
 <html lang="en">
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex, nofollow" />
-<title>${ok ? 'Claude Code connected' : 'Claude Code sign-in failed'}</title>
+<title>${ok ? `${safeProvider} connected` : `${safeProvider} sign-in failed`}</title>
 <style>
   body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0b0d10; color: #e6e8eb;
          font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -404,7 +444,7 @@ export function claudeCodeCallbackPage(ok: boolean, message: string) {
 </style>
 <main class="${ok ? 'ok' : 'bad'}">
   <div class="mark" aria-hidden="true">${ok ? '&#10003;' : '!'}</div>
-  <h1>${ok ? 'Claude Code connected' : 'Claude Code sign-in failed'}</h1>
+  <h1>${ok ? `${safeProvider} connected` : `${safeProvider} sign-in failed`}</h1>
   <p>${escapeHtml(safeMessage)}</p>
   <p class="note">${ok ? 'You can close this tab and go back to OmniHilbras.' : 'Go back to OmniHilbras and start the sign-in again.'}</p>
 </main>

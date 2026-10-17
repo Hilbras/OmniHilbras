@@ -304,6 +304,33 @@ export type CredentialValidation = {
   latencyMs?: number;
 };
 
+/**
+ * One metered resource on a provider's account, as the provider reports it.
+ *
+ * `used`, `limit` and `remaining` are the provider's own figures. A provider that withholds either
+ * figure omits the resource rather than reporting it as zero — a quota that was never read must not
+ * read as an exhausted one, which is the same rule the usage page applies to token counts.
+ */
+export type ProviderResourceQuota = {
+  used: number;
+  limit: number;
+  remaining: number;
+  /** When the provider says this resource refills. Absent when it does not say. */
+  resetsAt?: string;
+};
+
+/**
+ * What a provider reports about the account's remaining allowance.
+ *
+ * Deliberately neutral: `plan` and a map of resources describe any provider's metering without naming
+ * one, so the gateway can carry a reading without knowing which provider produced it. A provider with
+ * no quota endpoint reports nothing at all — see `ProviderAdapter.quota`.
+ */
+export type ProviderQuota = {
+  plan?: string;
+  resources: Record<string, ProviderResourceQuota>;
+};
+
 export type ProviderAdapter = {
   readonly id: ProviderId;
   readonly name: string;
@@ -330,6 +357,19 @@ export type ProviderAdapter = {
    * act on.
    */
   embed?: (request: EmbeddingRequest, context?: ProviderRequestContext) => Promise<EmbeddingResponse>;
+  /**
+   * Reads what the account has left, when the provider meters its accounts.
+   *
+   * **Optional for the same reason `embed` is.** Most providers have no account-quota endpoint at
+   * all — some decide entitlement per request and never expose a reading — so requiring this would
+   * make "this provider does not publish a balance" a compile error on every adapter rather than a
+   * truthful runtime `NOT_SUPPORTED`.
+   *
+   * An adapter without `quota` is not broken and must never be reported as having *no allowance left*.
+   * The two states look identical from outside and mean opposite things, so consumers distinguish
+   * them by the member's absence, never by an empty result.
+   */
+  quota?: (context?: ProviderRequestContext) => Promise<ProviderQuota>;
   /** Performs a provider-specific, side-effect-free credential check. */
   validateCredential?: (credential: ProviderCredential | undefined, context?: ProviderRequestContext) => Promise<CredentialValidation | void>;
   /** Discovers models for a connection import policy. */

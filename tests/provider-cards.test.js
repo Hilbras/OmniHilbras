@@ -314,11 +314,11 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // **The log stopped at 26 and the assertion said 31 until 1.85.1**, so five cards were counted by a
   // number whose provenance ended five entries earlier — the drift this comment exists to prevent,
   // in the comment itself. The assertion is unchanged; the entries that explain it are now present.
-  assert.equal(all.length, 32, `the catalog now has ${all.length} cards`);
-  // Six cards claim OAuth, but the gateway serves **five** start routes: `clinepass` shares `cline`'s,
+  assert.equal(all.length, 33, `the catalog now has ${all.length} cards`);
+  // Seven cards claim OAuth, but the gateway serves six start routes: `clinepass` shares `cline`'s,
   // which is why the count of routes and the count of claims no longer coincide.
-  assert.equal(oauthCapableProviders().size, 5, 'the gateway serves an OAuth start route for five providers');
-  assert.equal(all.filter((card) => card.auth === 'OAuth').length, 6, 'six cards claim OAuth, one of them over a shared route');
+  assert.equal(oauthCapableProviders().size, 6, 'the gateway serves an OAuth start route for six providers');
+  assert.equal(all.filter((card) => card.auth === 'OAuth').length, 7, 'seven cards claim OAuth, one of them over a shared route');
   console.log(`    cards: ${all.length}   claiming OAuth: ${all.filter((c) => c.auth === 'OAuth').length}   gateway OAuth routes: ${oauthCapableProviders().size}   claiming a measurement: 0`);
 });
 

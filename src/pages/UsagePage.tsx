@@ -12,7 +12,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { DashboardShell } from '../components/DashboardShell';
-import { getGatewayUsage, type GatewayUsage, type GatewayUsageRecord } from '../lib/gatewayClient';
+import { getGatewayUsage, getProviderQuota, isNotSupported, type GatewayProviderQuota, type GatewayUsage, type GatewayUsageRecord } from '../lib/gatewayClient';
 
 const REQUESTS_PER_PAGE = 10;
 
@@ -65,6 +65,121 @@ const UsageTopology = lazy(() => import('../components/UsageTopology').then((mod
  * The gateway's usage record has no field capable of holding a message, so this page cannot display one and
  * there is nothing to redact. That is a property of the store, not a promise this page makes.
  */
+
+/**
+ * What the account behind this provider has left.
+ *
+ * This is a different measurement from everything else on this page, and it is kept separate on
+ * purpose: the records below are OmniHilbras' own, and this is the provider answering about the
+ * subscription. Merging them into one card would let "we never measured it" and "the provider says
+ * zero" read as the same number.
+ *
+ * Three outcomes are worded as three things, because they are three things:
+ *
+ * - **Still asking** — nothing is claimed.
+ * - **The provider publishes no quota** — the overwhelming majority do not. This is *not* an empty
+ *   allowance and is never rendered as one; `NOT_SUPPORTED` means the question was never answerable.
+ * - **A reading** — the provider's own figures, with its own reset time when it gives one.
+ */
+function QuotaPanel({ connectionId, providerName }: { connectionId: string; providerName: string }) {
+  const [quota, setQuota] = useState<GatewayProviderQuota | null>(null);
+  const [state, setState] = useState<'loading' | 'ready' | 'unsupported' | 'failed'>('loading');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    setState('loading');
+    setError(null);
+    getProviderQuota(connectionId)
+      .then((reading) => { if (current) { setQuota(reading); setState('ready'); } })
+      .catch((cause: unknown) => {
+        if (!current) return;
+        // Distinguished by the gateway's code rather than by the sentence: "does not support quota" and
+        // "the request failed" both arrive as an Error, and only one of them means the provider is fine.
+        if (isNotSupported(cause)) { setState('unsupported'); return; }
+        setState('failed');
+        setError(cause instanceof Error ? cause.message : 'The local gateway did not answer.');
+      });
+    return () => { current = false; };
+  }, [connectionId]);
+
+  if (state === 'loading') {
+    return (
+      <section className="card mt-4 p-5" aria-label="Account allowance">
+        <p className="muted text-xs">Asking {providerName} what this account has left…</p>
+      </section>
+    );
+  }
+
+  if (state === 'unsupported') {
+    return (
+      <section className="card mt-4 p-5" aria-label="Account allowance">
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Coins className="h-4 w-4 text-muted" aria-hidden="true" />{providerName} does not publish an allowance
+        </p>
+        <p className="muted mt-2 text-[11px] leading-relaxed">
+          Not an empty balance — the provider answers nothing about how much is left, so there is no
+          figure to show. Some of them decide per request instead, and only a refusal would show it.
+        </p>
+      </section>
+    );
+  }
+
+  if (state === 'failed') {
+    return (
+      <section className="card mt-4 p-5" aria-label="Account allowance">
+        <p className="flex items-center gap-2 text-sm font-semibold text-danger">
+          <CircleAlert className="h-4 w-4" aria-hidden="true" />Could not read this account&rsquo;s allowance
+        </p>
+        <p className="muted mt-2 text-[11px] leading-relaxed">{error}</p>
+      </section>
+    );
+  }
+
+  const resources = Object.entries(quota?.resources ?? {});
+  return (
+    <section className="card mt-4 p-5" aria-label="Account allowance">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <h3 className="text-sm font-semibold">Account allowance</h3>
+        {quota?.plan ? <span className="muted text-[11px]">as {providerName} reports it · {quota.plan}</span> : null}
+      </div>
+      {resources.length === 0 ? (
+        <p className="muted mt-2 text-[11px] leading-relaxed">
+          {providerName} answered, but named no metered resource — which is not the same as an
+          unlimited one.
+        </p>
+      ) : (
+        <ul className="mt-4 space-y-3">
+          {resources.map(([name, resource]) => {
+            // A limit of zero would divide by nothing; and a provider that published no limit cannot
+            // have a percentage computed from it. Both render as the figures, without a bar.
+            const share = resource.limit > 0 ? Math.min(100, Math.max(0, (resource.remaining / resource.limit) * 100)) : null;
+            return (
+              <li key={name}>
+                <div className="flex items-baseline justify-between gap-3 text-xs">
+                  <span className="font-medium">{name}</span>
+                  <span className="muted tabular-nums">
+                    {resource.remaining} of {resource.limit} left
+                    {resource.resetsAt ? ` · resets ${new Date(resource.resetsAt).toLocaleDateString()}` : ''}
+                  </span>
+                </div>
+                {share === null ? null : (
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-line">
+                    <div className="h-full rounded-full bg-gold-text" style={{ width: `${share}%` }} />
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <p className="muted mt-4 text-[11px] leading-relaxed">
+        Reported by {providerName} itself. These figures move as you use the account, and are not
+        OmniHilbras&rsquo; own measurement — the records below are.
+      </p>
+    </section>
+  );
+}
 
 type OutcomeFilter = 'all' | 'success' | 'failure' | 'cancelled';
 
@@ -164,7 +279,7 @@ function RecordRow({ record }: { record: GatewayUsageRecord }) {
  * canvas, which is a whole-catalog diagram and would place this provider among all the others it is not about.
  * The cards, the time-series, the top-models chart and the table all stay.
  */
-export function UsageContent({ providerId }: { providerId?: string } = {}) {
+export function UsageContent({ providerId, connectionId }: { providerId?: string; connectionId?: string } = {}) {
   const [usage, setUsage] = useState<GatewayUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -245,6 +360,13 @@ export function UsageContent({ providerId }: { providerId?: string } = {}) {
           </button>
         </div>
       </div>
+
+      {/*
+        The allowance is rendered above, and outside, the recorded-usage branch below. It is a different
+        measurement from a different source, so it must not inherit that branch's states: a gateway with no
+        usage store still answers a quota question, and a provider with no quota still has records.
+      */}
+      {providerId && connectionId ? <QuotaPanel connectionId={connectionId} providerName={providerId} /> : null}
 
       {error ? (
         <section className="card p-5" role="alert">

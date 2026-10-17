@@ -125,6 +125,7 @@ const NO_CAPTURE_YET = {
    * and the per-turn headers are pinned there as *behaviour* rather than as a frozen payload.
    */
   'duckduckgo-web': 'not excused for cost or a credential — a signed-out turn was spent to port it; a capture would pin a rotating challenge hash and a per-deploy x-fe-version alongside the body, so the durable contract is asserted against the measured shapes instead',
+  codex: 'a real Responses SSE capture requires an approved Codex account and locally configured OAuth client; no live sign-in was authorized, so request and terminal-frame behavior is covered by scripted tests without claiming a provider capture',
 };
 
 test('the fixtures directory holds only captures, named for the adapter they came from', () => {

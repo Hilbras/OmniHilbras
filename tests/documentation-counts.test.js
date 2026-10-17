@@ -25,7 +25,7 @@ const ROOT = new URL('..', import.meta.url);
 const ROOT_URL = fileURLToPath(ROOT);
 const read = (file) => readFileSync(new URL(file, ROOT), 'utf8');
 
-/** Adapters the capture guard considers, which is the 16 behind the 18 files. */
+/** Adapters the capture guard considers, measured from the provider directory. */
 function consideredAdapters() {
   const dir = new URL('packages/omnihilbras-sdk/src/providers/', ROOT);
   return readdirSync(dir, { withFileTypes: true })
@@ -72,9 +72,8 @@ test('the adapter count in the SPEC is the real file count', () => {
 });
 
 test('the SPEC reconciles its file count with the capture guard\'s count', () => {
-  // The SPEC says 16 files, the capture guard says 14 adapters. Both are right — three files are not
-  // protocol adapters — and both are quoted in plan.md as live numbers. Left unreconciled they read as a
-  // contradiction, and the fix someone applies under time pressure is to "correct" the wrong one.
+  // The SDK file count and capture-guard adapter count refer to different sets; both values are verified
+  // below against the directories that define them, then reconciled in the SPEC.
   const providersDir = new URL('packages/omnihilbras-sdk/src/providers/', ROOT);
   const files = readdirSync(providersDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -138,8 +137,8 @@ test('no document states a test count as a bare number', () => {
 });
 
 test('no document claims an adapter count without naming what it counted', () => {
-  // "14 adapters" and "16 files" are both currently correct and both were wrong at some point in the
-  // same sentence. The bare number is the problem; the fix is that a reader can tell which set is meant.
+  // File totals and capture-guard adapter totals describe different sets; the useful rule is that every
+  // count says which one it measures.
   const offenders = [];
   for (const [name, text] of [['docs/SPEC-SDK.md', spec], ['tasks/plan.md', plan]]) {
     for (const [index, line] of text.split('\n').entries()) {

@@ -236,8 +236,8 @@ test('both guards exempt the callback from the same predicate, so they cannot dr
   const { readFileSync } = await import('node:fs');
   const source = readFileSync(new URL('../src/server.ts', import.meta.url), 'utf8');
   const guard = source.match(/if \(isManagementPath\([^)]*\) && [^\n]*/)?.[0] ?? '';
-  assert.match(guard, /!isOauthCallbackNavigation\(request\)/, 'the management gate must exempt the callback navigation');
-  assert.match(source, /!isOauthCallbackNavigation\(request\) && isCrossSiteRequest/, 'the cross-site guard must exempt the same navigation');
+  assert.match(guard, /!isOauthCallbackNavigation\(request\)/, 'the management gate must exempt only a callback navigation');
+  assert.match(source, /!isOauthCallbackNavigation\(request\) && isCrossSiteRequest/, 'the cross-site guard must exempt the same callback navigation');
   void t;
 });
 

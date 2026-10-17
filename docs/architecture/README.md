@@ -35,14 +35,15 @@ that holds is one a machine re-derives.
 | `apps/gateway/src/provider-resolver.ts` | 237 | **0** | enforced by a test that greps the file |
 | `apps/gateway/src/request-executor.ts` | 705 | **0** | the failover loop, the attempt ledger, the ordering |
 | `apps/gateway/src/connection-manager.ts` | 250 | **0** | one error mapper, one catalog merge, one lock scope |
-| `apps/gateway/src/service.ts` | 1854 | 4 | all thirteen `.onDemand()` registrations, in one constructor |
-| `apps/gateway/src/http.ts` | 296 | **0** | the vocabulary every route shares |
-| `apps/gateway/src/routes/oauth.ts` | 450 | 4 | the module a provider split would help most |
-| `apps/gateway/src/routes/connections.ts` | 281 | 2 | both in connection lifecycle |
+| `apps/gateway/src/service.ts` | 1959 | 6 | all thirteen `.onDemand()` registrations, in one constructor |
+| `apps/gateway/src/http.ts` | 297 | **0** | the vocabulary every route shares |
+| `apps/gateway/src/routes/oauth.ts` | 490 | 7 | the module a provider split would help most |
+| `apps/gateway/src/routes/connections.ts` | 286 | 1 | one OpenRouter save shortcut, and the generic quota route |
 | `apps/gateway/src/routes/inference.ts` | 942 | **0** | `/v1/models`, `/v1/chat/completions`, and the auth gate |
 | `apps/gateway/src/routes/api-keys.ts` | 74 | **0** | |
 | `apps/gateway/src/routes/status.ts` | 43 | **0** | `/health`, `/v1/routing` |
-| `apps/gateway/src/server.ts` | 306 | **0** | was 1202 with 5 provider ids |
+| `apps/gateway/src/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
+| `apps/gateway/src/server.ts` | 312 | 1 | refuses a half-configured Codex OAuth override at startup |
 
 **The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
 provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a
