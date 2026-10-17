@@ -240,14 +240,25 @@ export function checkConnectionCredential(providerId: string, input: { apiKey: s
   });
 }
 
+/**
+ * A connection to save: **a key, or no credential at all — never an empty string.**
+ *
+ * This was `{ apiKey: string; ... }`, and that one required field is why two shipped defects existed. A
+ * caller with no key to send had to invent one, so `ProvidersPage` sent `apiKey: ''` — which the gateway
+ * refuses — under a comment asserting that the gateway "stores nothing secret for it", and
+ * `ProviderDetailPage` threw before asking at all. Ollama, the only `auth: 'No key'` card, could not be
+ * connected from either page.
+ *
+ * As a union there is no third option to reach for: a caller that cannot produce a key must say
+ * `credential: 'none'` out loud, and `pnpm typecheck` is what makes it do so.
+ */
 export type GatewayConnectionInput = {
-  apiKey: string;
   name?: string;
   endpoint: string;
   priority?: number;
   proxyPool?: string;
   modelPolicy?: 'free' | 'all';
-};
+} & ({ apiKey: string; credential?: never } | { credential: 'none'; apiKey?: never });
 
 /**
  * Saves any OpenAI-compatible provider by id. The gateway builds an adapter for

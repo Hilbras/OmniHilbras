@@ -5308,3 +5308,63 @@ four free-tier aggregators in 1.78.0 and `gemini-web` in 1.85.0 — and both car
 - A background `pnpm test` invocation reported failure while writing no output file. It is not
   reproducible and a clean re-run passed everything, so it is recorded rather than explained away: one
   unverified failure is not evidence of a flaky suite, and it is not evidence of a clean one either.
+
+## 1.86.0 — the keyless connection path, which three defects had closed
+
+Planned as "add Duck.ai as a Web Cookie provider". The plan's Phase 1 was a gate — *prove a connection
+holding `{ type: 'none' }` is routable before building on it* — and the gate failed, which is the whole
+reason it existed. What it found was larger than the feature.
+
+### A provider with no key could not be connected at all
+
+`Ollama` is the only `auth: 'No key'` card in the catalog, and it could not be connected from **any** path:
+
+| Where | Measured |
+| --- | --- |
+| the gateway route | `parseGenericConnectionRequest` ran `parseApiKey` unconditionally. `parseApiKey({})` → `apiKey is required.`; `parseApiKey({ apiKey: '' })` → `apiKey must be a non-empty safe string.` |
+| `ProviderDetailPage` | `if (!apiKey) throw new Error(\`Enter the ${name} API key before saving.\`)` — an instruction that cannot be followed for a provider that has none |
+| `ProvidersPage` | sent `apiKey: ''`, under a comment asserting *"the gateway stores nothing secret for it"*, which the gateway contradicts |
+| `ProviderDetailPage` bulk | `handleAddConnections` was `setConnectionAdded(true)` + a *"N connections added."* notice with **nothing saved** |
+
+The fourth is the same false success the single path's own comment records as fixed — in the same file, one
+function above — and `tests/provider-card-honesty.test.js`, the guard written for exactly that class, could
+not see it: it read `ProvidersPage.tsx` alone. Its header states the lesson (*"a guard scoped to the merge
+cannot see a defect in the non-merge path"*) and then scoped itself to one page.
+
+### Two more, from one disagreement about a credential's shape
+
+`cloneCredential` built the object that gets **stored**, and `parseCredentials` rebuilt it on the way back.
+They disagreed twice, silently:
+
+- **`{ type: 'none' }` was written and refused on read.** The reader demanded a non-empty `value` before it
+  looked at `type`. Because that reader is the *loader*, the throw did not cost one connection: `list()`
+  calls `ensureLoaded()`, so every connection in the vault became unreadable. Measured with a probe that
+  wrote one and reopened the store: `Encrypted credential payload contains an invalid credential.`
+- **An OAuth credential kept three of its nine declared fields.** `oauthClientId`/`oauthClientSecret` were
+  discarded — **at save time**, not on reload: measured, `oauthClientId` read back `undefined` in the same
+  process. `apps/gateway/src/kiro.ts:144` stores that pair and `providers/kiro/index.ts:566` refuses to
+  renew without it (*"This Kiro session cannot be renewed. Sign in again."*), so a Kiro session could not be
+  renewed from the moment it was saved — and the user would be told to sign in again, every time.
+
+### What ships
+
+- **`storedCredential()`** — one function deciding a credential's shape, used by the writer *and* the
+  reader, with `oauthStringFields` as the single list of optional fields. A round trip is now exact by
+  construction.
+- **`credential: 'none'`** on `PUT /v1/connections/:id`, mutually exclusive with `apiKey`, with both, an
+  unknown value, and neither all refused — so "no credential" cannot be reached by forgetting.
+- **`GatewayConnectionInput` is a union** (`{ apiKey } | { credential: 'none' }`). The required
+  `apiKey: string` was what *forced* the dashboard to invent `''`, so making the wrong shape
+  unrepresentable is the fix rather than a tidier signature.
+- **The bulk tab works.** The modal parsed each line for a name and threw the key away, so the batch could
+  not save anything in either page; the parser is now `src/lib/bulkEntries.ts` and is **called** by
+  `tests/bulk-entries.test.js`. `ProviderDetailPage`'s batch handler now saves one at a time and reports
+  per-entry failures.
+
+### Proven by planting
+
+The bulk parser (dropping the key again → 4 of 6 tests fail); the widened honesty guard (the no-op bulk
+handler restored → *"handleAddConnections in ProviderDetailPage.tsx never reaches the gateway"*; `apiKey: ''`
+restored → two failures); the vault round-trip and the route's refusal shapes. `pnpm test` green.
+
+Not claimed: the Duck.ai provider itself. That is Release 2, on top of this, as planned.

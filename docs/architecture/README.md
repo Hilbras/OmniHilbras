@@ -38,7 +38,7 @@ that holds is one a machine re-derives.
 | `apps/gateway/src/service.ts` | 1755 | 4 | all twelve `.onDemand()` registrations, in one constructor |
 | `apps/gateway/src/http.ts` | 296 | **0** | the vocabulary every route shares |
 | `apps/gateway/src/routes/oauth.ts` | 425 | 4 | the module a provider split would help most |
-| `apps/gateway/src/routes/connections.ts` | 261 | 2 | both in connection lifecycle |
+| `apps/gateway/src/routes/connections.ts` | 281 | 2 | both in connection lifecycle |
 | `apps/gateway/src/routes/inference.ts` | 942 | **0** | `/v1/models`, `/v1/chat/completions`, and the auth gate |
 | `apps/gateway/src/routes/api-keys.ts` | 74 | **0** | |
 | `apps/gateway/src/routes/status.ts` | 43 | **0** | `/health`, `/v1/routing` |

@@ -648,8 +648,16 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   }
 
   async function handleAddConnection(newProvider: NewProvider, apiKey?: string) {
-    if (!apiKey) throw new Error(`Enter the ${newProvider.name} API key before saving.`);
+    /**
+     * A keyless provider has no key to enter, and the dialog already knows that — it passes no key at all
+     * for a card whose `auth` is `'No key'`. This used to be a flat `if (!apiKey) throw`, which is why
+     * Ollama could not be connected from this page: the error told the user to *"Enter the Ollama API key"*,
+     * an instruction that cannot be followed for a provider that has none.
+     */
+    const keyless = getProviderById(newProvider.providerId)?.auth === 'No key';
+    if (!keyless && !apiKey) throw new Error(`Enter the ${newProvider.name} API key before saving.`);
     if (newProvider.providerId === 'openrouter') {
+      if (!apiKey) throw new Error('Enter the OpenRouter API key before saving.');
       const savedConnection = await saveOpenRouterConnection({
         name: newProvider.name,
         apiKey,
@@ -670,7 +678,9 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     // report success: the dialog said "connection added" while nothing was
     // written, so the card looked connected with no credential behind it.
     const savedConnection = await putGatewayConnection(newProvider.providerId, {
-      apiKey,
+      // `credential: 'none'` rather than an empty key: the gateway refuses `''`, so sending it made every
+      // keyless save a 400 dressed as a connection.
+      ...(keyless ? { credential: 'none' as const } : { apiKey: apiKey! }),
       endpoint: newProvider.endpoint,
       name: newProvider.name,
       priority: newProvider.priority ?? 1,
@@ -685,10 +695,35 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     flash(`${savedConnection.name} saved with ${savedConnection.modelIds.length} models.`);
   }
 
-  function handleAddConnections(newProviders: NewProvider[]) {
-    setConnectionAdded(true);
-    setAddOpen(false);
-    flash(`${newProviders.length} ${newProviders.length === 1 ? 'connection' : 'connections'} added.`);
+  /**
+   * The batch, saved one at a time.
+   *
+   * This function used to be three lines — `setConnectionAdded(true)`, `setAddOpen(false)`, and a
+   * `${newProviders.length} connections added.` notice — with **nothing saved**. It reported a batch of
+   * connections from a single sentence, which is the same false success the single path's comment records
+   * as fixed two releases earlier, in the same file, one function above.
+   *
+   * `tests/provider-card-honesty.test.js` exists to stop exactly this and could not see it: that guard reads
+   * `ProvidersPage.tsx` only, and this handler lives in `ProviderDetailPage.tsx`. Its own header documents
+   * the lesson — *"a guard scoped to the merge cannot see a defect in the non-merge path"* — and then scoped
+   * itself to one page. It now reads both.
+   */
+  async function handleAddConnections(entries: Array<{ provider: NewProvider; key: string }>) {
+    const saved: string[] = [];
+    const failed: string[] = [];
+    for (const { provider: entry, key } of entries) {
+      try {
+        await handleAddConnection(entry, key);
+        saved.push(entry.name);
+      } catch (error) {
+        failed.push(`${entry.name}: ${error instanceof Error ? error.message : 'the gateway refused it'}`);
+      }
+    }
+    if (failed.length > 0) {
+      flash(`${saved.length} of ${entries.length} saved. Not saved — ${failed.join('; ')}`, 'error');
+    } else if (saved.length > 0) {
+      flash(`${saved.length} ${saved.length === 1 ? 'connection' : 'connections'} saved.`);
+    }
   }
 
   async function addModel(model: string) {

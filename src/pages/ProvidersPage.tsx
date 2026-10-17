@@ -310,16 +310,20 @@ export function ProvidersContent() {
     // `putGatewayConnection` was already implemented in `gatewayClient.ts` and had no caller: a working
     // save path, unreachable. The card is now built from the connection the gateway *reports back*, which
     // is the only thing that can honestly say whether the credential works.
-    // `apiKey` and `endpoint` are both required by `GatewayConnectionInput`. A keyless provider (Ollama,
-    // LM Studio) has no key to send, so it sends the placeholder the modal uses for "no key" and the
-    // gateway stores nothing secret for it. Building the object conditionally instead would not typecheck
-    // against a type that says both are required — which is the type telling us the save needs a decision
-    // here, not silently taking an undefined.
+    // **`credential: 'none'` is the decision this line used to answer with `''`**, which the gateway
+    // refuses — so a keyless provider could not be saved from this page either, and the comment that stood
+    // here asserted the opposite ("the gateway stores nothing secret for it"). Measured, before the fix:
+    // `parseApiKey({ apiKey: '' })` → `apiKey must be a non-empty safe string.` The union in
+    // `GatewayConnectionInput` now makes the choice explicit instead of leaving it to be guessed from a
+    // comment about what the gateway does with an empty string.
     if (!newProvider.endpoint) throw new Error('Enter the provider endpoint before saving.');
+    const card = providerCatalog.find((item) => item.id === newProvider.providerId);
+    const keyless = card?.auth === 'No key';
+    if (!keyless && !apiKey) throw new Error(`Enter the ${newProvider.name} API key before saving.`);
     const connection = await putGatewayConnection(newProvider.providerId, {
       name: newProvider.name,
       endpoint: newProvider.endpoint,
-      apiKey: apiKey ?? '',
+      ...(keyless ? { credential: 'none' as const } : { apiKey: apiKey! }),
       ...(newProvider.priority ? { priority: newProvider.priority } : {}),
       ...(newProvider.modelPolicy ? { modelPolicy: newProvider.modelPolicy } : {}),
     });
@@ -339,21 +343,27 @@ export function ProvidersContent() {
     window.setTimeout(() => setNotice(''), 4000);
   }
 
-  async function handleSaveMany(newProviders: NewProvider[]) {
+  async function handleSaveMany(entries: Array<{ provider: NewProvider; key: string }>) {
     // Saved one at a time, and reported honestly. The bulk path used to add every card to the local list
     // at once, so one rejected credential still produced a green card for it.
+    //
+    // Each entry now brings **its own key**. This loop was already honest, and it still could not save
+    // anything: the modal built its entries with `hasKey: true` and no key, so every iteration reached
+    // `handleSave` with nothing to send. `tests/bulk-entries.test.js` calls the parser that used to drop it.
     const saved: string[] = [];
     const failed: string[] = [];
-    for (const provider of newProviders) {
+    const notSaved: NewProvider[] = [];
+    for (const { provider, key } of entries) {
       try {
-        await handleSave(provider);
+        await handleSave(provider, key);
         saved.push(provider.name);
       } catch (error) {
         failed.push(`${provider.name}: ${error instanceof Error ? error.message : 'the gateway refused it'}`);
+        notSaved.push(provider);
       }
     }
     if (failed.length > 0) {
-      finishAddLocally(newProviders.filter((provider) => failed.some((message) => message.startsWith(provider.name))));
+      finishAddLocally(notSaved);
       setNotice(`${saved.length} saved. ${failed.length} not saved — ${failed.join('; ')}`);
     } else if (saved.length > 0) {
       setNotice(`${saved.length} ${saved.length === 1 ? 'connection was' : 'connections were'} saved.`);

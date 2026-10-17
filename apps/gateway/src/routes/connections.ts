@@ -182,11 +182,31 @@ export function decodeProviderId(value: string) {
 }
 
 
+/**
+ * A connection's credential, including the deliberate *absence* of one.
+ *
+ * `apiKey` alone cannot express "this provider needs no key": `parseApiKey` refuses both a missing and an
+ * empty string, and it was called for every generic save — so a keyless provider (Ollama is the card, and
+ * it is the only one) could not be saved at all, by any route or any UI path. Measured before the fix:
+ * `parseApiKey({})` → `apiKey is required.`, `parseApiKey({ apiKey: '' })` → `apiKey must be a non-empty
+ * safe string.`
+ *
+ * `credential: 'none'` is that statement, spelled so it cannot be made by accident. Omitting both fields
+ * still fails, so a forgotten key is still a mistake; sending both is refused rather than resolved by a
+ * precedence rule, because a body that says two things about one credential has no correct reading.
+ */
+function parseConnectionCredential(body: Record<string, unknown>): ProviderCredential {
+  if (body.credential === undefined) return parseApiKey(body);
+  if (body.credential !== 'none') throw invalidRequest("credential must be 'none' when present.");
+  if (body.apiKey !== undefined) throw invalidRequest("Send either apiKey or credential: 'none', not both.");
+  return { type: 'none' };
+}
+
 export function parseGenericConnectionRequest(body: unknown, providerId: string): { id?: string; providerId: string; name: string; endpoint: string; priority: number; proxyPool: string; enabled?: boolean; modelPolicy?: ModelImportPolicy; credential: ProviderCredential } {
   if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
   // `id` is accepted so a caller can add a second connection for a provider that
   // already has one. Omitting it reuses that provider's existing connection.
-  assertOnlyFields(body, ['apiKey', 'name', 'endpoint', 'id', 'priority', 'proxyPool', 'enabled', 'modelPolicy', 'resilience']);
+  assertOnlyFields(body, ['apiKey', 'credential', 'name', 'endpoint', 'id', 'priority', 'proxyPool', 'enabled', 'modelPolicy', 'resilience']);
   const endpoint = body.endpoint === undefined ? '' : parseBoundedString(body.endpoint, 'endpoint', 2048);
   if (!endpoint) throw invalidRequest('endpoint is required.');
   assertSafeEndpoint(endpoint, providerId);
@@ -204,7 +224,7 @@ export function parseGenericConnectionRequest(body: unknown, providerId: string)
     proxyPool,
     ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
     ...(body.modelPolicy === undefined ? {} : { modelPolicy: parseModelPolicy(body.modelPolicy) }),
-    credential: parseApiKey(body),
+    credential: parseConnectionCredential(body),
   };
 }
 

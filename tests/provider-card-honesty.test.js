@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { providerCatalog } from '../src/data/providers.ts';
 
 /**
  * A card must not claim a connection, a health score, or a use that never happened.
@@ -35,6 +36,25 @@ import { dirname, join } from 'node:path';
  */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const page = readFileSync(join(ROOT, 'src/pages/ProvidersPage.tsx'), 'utf8');
+
+/**
+ * The second page that saves connections, and the reason this file was widened.
+ *
+ * Every assertion below used to read `ProvidersPage.tsx` alone. `ProviderDetailPage.tsx` has the same job —
+ * it renders the same dialog with an `onSave` — and its bulk handler was `setConnectionAdded(true)` plus a
+ * "N connections added." notice with **nothing saved**, for the whole life of the bulk tab. This file could
+ * not see it, which makes it the third guard in this repository to be green, plausible, and blind in the
+ * place it existed to look. The header above already states the lesson — *"a guard scoped to the merge
+ * cannot see a defect in the non-merge path"* — and this guard had scoped itself to one page.
+ *
+ * Both are read now, and the assertions are stated per page rather than once, because "the page I read
+ * reaches the gateway" is not the claim anyone needed.
+ */
+const detail = readFileSync(join(ROOT, 'src/pages/ProviderDetailPage.tsx'), 'utf8');
+const PAGES = [
+  ['ProvidersPage.tsx', page],
+  ['ProviderDetailPage.tsx', detail],
+];
 
 /** Comments stripped, so a comment describing the old defect is not read as the defect. */
 const code = (source) => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
@@ -75,42 +95,77 @@ test('no record builder in the dashboard hard-codes a connection, a health score
   );
 });
 
-test('every provider save path reaches the gateway, so a pasted key is never discarded', () => {
+test('every provider save path reaches the gateway, on every page that saves one', () => {
   // The second half of the defect, and the half no field assertion would catch: the card looked honest
   // *and* the credential was thrown away. `putGatewayConnection` was implemented in `gatewayClient.ts`
   // with no caller at all.
-  assert.ok(
-    page.includes('putGatewayConnection('),
-    'ProvidersPage must call the generic connection save; otherwise the key is dropped and a card is invented',
-  );
-  // No save handler may end in the local-only helper without having called the gateway first.
-  const handlers = [...code(page).matchAll(/async function (handleSave\w*)\([^)]*\)\s*\{([\s\S]*?)\n  \}/g)];
-  assert.ok(handlers.length >= 2, `expected the single and bulk save handlers, found ${handlers.length}`);
-  for (const [, name, body] of handlers) {
+  for (const [name, source] of PAGES) {
+    const text = code(source);
     assert.ok(
-      body.includes('putGatewayConnection(') || body.includes('saveOpenRouterConnection(') || body.includes('handleSave('),
-      `${name} never reaches the gateway — it must save a connection, not add a card to the local list`,
+      text.includes('putGatewayConnection('),
+      `${name} must call the generic connection save; otherwise the key is dropped and a card is invented`,
+    );
+
+    // No save handler may end in the local-only helper without having called the gateway first. The handler
+    // names differ per page (`handleSave`/`handleSaveMany` here, `handleAddConnection`/`handleAddConnections`
+    // there), which is itself a small part of how one of them went unchecked.
+    const handlers = [...text.matchAll(/async function (handle\w+)\([^)]*\)\s*\{([\s\S]*?)\n  \}/g)];
+    assert.ok(handlers.length >= 1, `${name}: expected a save handler, found ${handlers.length}`);
+    for (const [, handler, body] of handlers) {
+      if (!/^handle(Save|Add)/.test(handler)) continue;
+      assert.ok(
+        body.includes('putGatewayConnection(') ||
+          body.includes('saveOpenRouterConnection(') ||
+          body.includes('handleSave(') ||
+          body.includes('handleAddConnection('),
+        `${handler} in ${name} never reaches the gateway — it must save a connection, not report one`,
+      );
+    }
+
+    // **Awaited, and its result used.** The first version of this test only asked whether the name appeared
+    // anywhere in the file. Planting `void putGatewayConnection(...)` with a hand-built object in its place
+    // passed it — the call was present, unreachably, and the key was discarded exactly as before. So the
+    // assertion is on the *shape*: awaited, and bound to the connection the card is built from.
+    const generic = text.match(/const (\w+) = await putGatewayConnection\(([\s\S]*?)\);/);
+    assert.ok(generic, `${name}: the generic save must be awaited and its result bound — an un-awaited call discards the key`);
+    assert.match(
+      text.slice(text.indexOf(generic[0])).slice(0, 1200),
+      new RegExp(`set\\w*\\([\\s\\S]{0,200}${generic[1]}`),
+      `${name}: the connection the gateway returned must be what gets stored, not a locally invented one`,
+    );
+
+    // And the credential must reach the call — as a key, or as an explicit absence. Never as an empty string.
+    assert.match(
+      generic[2],
+      /apiKey|credential: 'none'/,
+      `${name}: the save must carry a key, or say credential: 'none'; this is the field that was discarded`,
+    );
+    assert.doesNotMatch(
+      text,
+      /apiKey:\s*(?:''|apiKey\s*\?\?\s*'')/,
+      `${name} sends an empty apiKey, which the gateway refuses ('apiKey must be a non-empty safe string')`,
     );
   }
+});
 
-  // **Awaited, and its result used.** The first version of this test only asked whether the name appeared
-  // anywhere in the file. Planting `void putGatewayConnection(...)` with a hand-built object in its place
-  // passed it — the call was present, unreachably, and the key was discarded exactly as before. So the
-  // assertion is on the *shape*: awaited, and its result bound to a connection that the card is built from.
-  const generic = code(page).match(/const connection = await putGatewayConnection\(([^;]*)\);/);
-  assert.ok(generic, 'the generic save must be awaited and its result bound — an un-awaited call discards the key');
-  const after = code(page).slice(code(page).indexOf('const connection = await putGatewayConnection('));
-  assert.match(
-    after.slice(0, 1200),
-    /setGatewayConnections\([\s\S]{0,200}connection/,
-    'the connection the gateway returned must be what gets stored, not a locally invented one',
+test('a card that needs no key is saved by saying so, not by inventing an empty key', () => {
+  // `Ollama` is the only `auth: 'No key'` card, and it could not be connected from either page. The gateway
+  // requires a non-empty `apiKey` on every generic save, so the two pages disagreed about a provider whose
+  // own card says it has no key: one threw "Enter the Ollama API key before saving." — an instruction that
+  // cannot be followed — and the other sent `apiKey: ''` under a comment asserting the gateway stored
+  // "nothing secret for it". Measured: `parseApiKey({ apiKey: '' })` → `apiKey must be a non-empty safe
+  // string.`, so both were dead ends.
+  assert.ok(
+    providerCatalog.some((card) => card.auth === 'No key'),
+    'this guard is about a card that needs no key; if none exists, delete the guard rather than let it pass vacuously',
   );
-  // And the credential must reach the call, not a placeholder that drops it.
-  assert.match(
-    generic[1],
-    /apiKey/,
-    'the pasted key must be part of the request body; this is the field that was being discarded',
-  );
+  for (const [name, source] of PAGES) {
+    assert.match(
+      code(source),
+      /credential: 'none'/,
+      `${name} must be able to save a provider that needs no credential`,
+    );
+  }
 });
 
 test('the local-only helper exists, and says out loud that nothing was saved', () => {

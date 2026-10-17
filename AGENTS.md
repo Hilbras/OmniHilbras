@@ -219,6 +219,28 @@ that is not on `main`.
   **it survived 8 of 8 navigations without the key, and 0 of 8 with it.** Route-level caching is
   *not* the answer to a slow navigation — keeping pages mounted is most of what makes a dashboard
   feel heavy.
+- **A connection may have no credential, and saying so is a deliberate act.** `PUT /v1/connections/:id`
+  takes `apiKey` **or** `credential: "none"`, mutually exclusive, and refuses a body with neither — so a
+  keyless provider (Ollama is the card) is saved by saying so, never by inventing an empty key. It was
+  not expressible at all until 1.86.0, and the cost was three defects across four files: the route ran
+  the API-key parser unconditionally, `ProviderDetailPage` threw *"Enter the Ollama API key before
+  saving."* for a provider whose own card says `auth: 'No key'`, and `ProvidersPage` sent `apiKey: ''`
+  under a comment asserting the gateway ignored it. **Asserted:** `tests/provider-card-honesty.test.js`
+  now reads **both** pages that save a connection, and fails if a save path cannot reach the gateway, if
+  one sends an empty `apiKey`, or if one has no `credential: 'none'` path. It read `ProvidersPage.tsx`
+  alone before that — which is exactly how `ProviderDetailPage`'s bulk handler stayed a no-op that
+  reported *"N connections added."* with nothing saved, in the same file whose single-save path documents
+  that defect as fixed.
+- **Whatever the vault writes, the vault must read.** `storedCredential()` in
+  `apps/gateway/src/connections.ts` is the one decision about a credential's shape, used by the writer and
+  the reader alike; two copies of it had drifted twice, both silently. `{ type: 'none' }` was written and
+  then refused on read — and because `parseCredentials` *is* the loader, one such credential made every
+  connection in the vault unreadable rather than one. And an OAuth credential kept three of its nine
+  declared fields, so `oauthClientId`/`oauthClientSecret` were dropped **at save time** and Kiro's renewal
+  — which refuses to send a guess when the registered client pair is missing — broke from the moment a
+  session was saved. **Asserted:** `apps/gateway/test/connection-credential-round-trip.test.js` writes each
+  variant and reads it back after a restart, with every declared field populated, so a tenth field cannot
+  be added without that test failing.
 
 ## Commands
 

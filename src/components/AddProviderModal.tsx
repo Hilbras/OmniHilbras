@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, CheckCircle2, ChevronDown, CircleAlert, LoaderCircle, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { checkConnectionCredential } from '../lib/gatewayClient';
+import { bulkEntryName, parseBulkEntries } from '../lib/bulkEntries';
 
 // The provider list, the fallback, and the two guards around them live in `lib/providerOptions`.
 //
@@ -34,8 +35,16 @@ type AddProviderModalProps = {
   initialProviderId?: string;
   initialModelPolicy?: 'free' | 'all';
   onClose: () => void;
+  /**
+   * Save one connection. The Single tab's path.
+   */
   onSave: (provider: NewProvider, apiKey?: string) => void | Promise<void>;
-  onSaveMany?: (providers: NewProvider[]) => void | Promise<void>;
+  /**
+   * Save a batch. Each entry carries the key from its own line, because `NewProvider` has no field a key
+   * could live in — and that is how the bulk path spent its whole life reporting connections it could not
+   * make: the key was parsed and dropped, so every save had nothing to send.
+   */
+  onSaveMany?: (entries: Array<{ provider: NewProvider; key: string }>) => void | Promise<void>;
 };
 
 export function AddProviderModal({ open, initialProviderId, initialModelPolicy, onClose, onSave, onSaveMany }: AddProviderModalProps) {
@@ -193,22 +202,30 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
     try {
       if (mode === 'bulk') {
         if (selected.id === 'openrouter') throw new Error('OpenRouter connections are saved one at a time. Use Single Add for this provider.');
-        const entries = bulkText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        if (!requiresKey) throw new Error(`${selected.name} needs no key, so there is nothing to add in bulk. Use Single Add.`);
+        const entries = parseBulkEntries(bulkText);
         if (entries.length === 0) throw new Error('Add at least one key before saving the batch.');
-        const providers = entries.map((entry, index) => {
-          const separator = entry.indexOf('|');
-          const entryName = separator > 0 ? entry.slice(0, separator).trim() : '';
-          return {
+        /**
+         * Each entry carries **its own key**, which is the whole fix here.
+         *
+         * The entries used to be built with `hasKey: true` and no key at all — the line was parsed for a
+         * name and the rest of it was discarded — so the batch could not save anything, in either page. A
+         * boolean claiming a key is not a key, and no guard could see the difference because both save
+         * handlers took `NewProvider[]` and `NewProvider` has no field a key could live in.
+         */
+        const batch = entries.map((entry, index) => ({
+          provider: {
             providerId: selected.id,
-            name: entryName || name.trim() || `${selected.name} ${index + 1}`,
+            name: bulkEntryName(entry, name, selected.name, index),
             endpoint: endpoint.trim(),
             hasKey: true,
             priority: Number(priority) || 1,
             proxyPool,
-          };
-        });
-        if (onSaveMany) await onSaveMany(providers);
-        else await onSave(providers[0]);
+          },
+          key: entry.key,
+        }));
+        if (onSaveMany) await onSaveMany(batch);
+        else await onSave(batch[0].provider, batch[0].key);
         return;
       }
 
@@ -252,7 +269,7 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
             <p id="add-provider-description" className="sr-only">Add a local provider connection and choose its routing settings.</p>
             <div className="mb-5 flex gap-2" role="tablist" aria-label="Connection add mode">
               <button type="button" role="tab" aria-selected={mode === 'single'} onClick={() => { setMode('single'); setTestState('idle'); setError(''); }} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${mode === 'single' ? 'bg-gold-soft text-gold-text ring-1 ring-gold/30' : 'text-muted hover:bg-bg-soft hover:text-text'}`}>Single</button>
-              <button type="button" role="tab" aria-selected={mode === 'bulk'} disabled={selected.id === 'openrouter'} onClick={() => { setMode('bulk'); setTestState('idle'); setError(''); }} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${mode === 'bulk' ? 'bg-gold-soft text-gold-text ring-1 ring-gold/30' : 'text-muted hover:bg-bg-soft hover:text-text'}`}>Bulk Add</button>
+              <button type="button" role="tab" aria-selected={mode === 'bulk'} disabled={selected.id === 'openrouter' || !requiresKey} title={!requiresKey ? `${selected.name} needs no key, so there is nothing to add in bulk` : undefined} onClick={() => { setMode('bulk'); setTestState('idle'); setError(''); }} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${mode === 'bulk' ? 'bg-gold-soft text-gold-text ring-1 ring-gold/30' : 'text-muted hover:bg-bg-soft hover:text-text'}`}>Bulk Add</button>
             </div>
 
             {mode === 'single' ? (

@@ -229,7 +229,7 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
   }
 
   async set(providerId: ProviderId, credential: ProviderCredential) {
-    this.credentials.set(providerId, cloneCredential(credential));
+    this.credentials.set(providerId, storedCredential(credential));
   }
 
   async delete(providerId: ProviderId) {
@@ -247,9 +247,9 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     if (existing && existing.providerId !== normalized.providerId) throw new Error('Connection ID is already used by another provider.');
     if (!existing && this.connections.size >= maxConnections) throw new Error('The local connection limit has been reached.');
 
-    const record = buildRecord({ ...normalized, id }, existing, credential.type !== 'none');
+    const record = buildRecord({ ...normalized, id }, existing);
     this.connections.set(id, record);
-    this.credentials.set(id, cloneCredential(credential));
+    this.credentials.set(id, storedCredential(credential));
     return cloneRecord(record);
   }
 
@@ -288,7 +288,18 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
   }
 }
 
-function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefined, hasCredential: boolean): ConnectionRecord {
+/**
+ * A record, built by `save`. It always has a credential record behind it — that is what `save` means —
+ * so `hasCredential` is not a parameter.
+ *
+ * It used to be, and both callers passed `credential.type !== 'none'`. That made the *persisted* value
+ * disagree with the one `list()` recomputes (`this.credentials.has(connection.id)`, which is true for any
+ * stored credential including `none`), and the disagreement had a consequence no reader could see: on
+ * load, the vault prunes credentials belonging to connections whose metadata says `hasCredential: false`
+ * — so a keyless connection's credential was deleted on the first restart and the connection quietly
+ * stopped being a routing candidate. Two spellings of one decision, and the one that won was the wrong one.
+ */
+function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefined): ConnectionRecord {
   const normalized = normalizeInput(input);
   const now = new Date().toISOString();
   const modelLists = mergeModelLists(normalized.modelIds ?? existing?.modelIds, normalized.customModelIds ?? existing?.customModelIds);
@@ -300,7 +311,7 @@ function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefi
     priority: normalized.priority,
     proxyPool: normalized.proxyPool,
     enabled: normalized.enabled ?? existing?.enabled ?? true,
-    hasCredential,
+    hasCredential: true,
     modelPolicy: normalized.modelPolicy ?? existing?.modelPolicy ?? 'all',
     modelIds: modelLists.modelIds,
     customModelIds: modelLists.customModelIds,
@@ -364,7 +375,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
     return this.withMutation(async () => {
       await this.ensureLoaded();
       const previous = this.credentials.get(connectionId);
-      this.credentials.set(connectionId, cloneCredential(credential));
+      this.credentials.set(connectionId, storedCredential(credential));
       try {
         await this.persistSecrets();
       } catch (error) {
@@ -412,9 +423,9 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       // newest credential overwriting the others.
       const previousCredential = this.credentials.get(id);
       const previousConnections = new Map(this.connections);
-      const record = buildRecord({ ...normalized, id }, existing, credential.type !== 'none');
+      const record = buildRecord({ ...normalized, id }, existing);
 
-      this.credentials.set(id, cloneCredential(credential));
+      this.credentials.set(id, storedCredential(credential));
       this.connections.set(id, record);
       try {
         await this.persistSecrets();
@@ -851,30 +862,20 @@ function parseCredentials(value: unknown) {
   if (!isRecord(value)) throw new Error('Encrypted credential payload has an unsupported format.');
   const credentials = new Map<ProviderId, ProviderCredential>();
   for (const [providerId, credential] of Object.entries(value)) {
-    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(providerId) || !isRecord(credential) || typeof credential.value !== 'string' || !credential.value || /[\r\n\0]/.test(credential.value)) {
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(providerId)) {
       throw new Error('Encrypted credential payload contains an invalid credential.');
     }
-    if (credential.type === 'api-key') {
-      credentials.set(providerId, { type: 'api-key', value: credential.value });
-      continue;
+    /**
+     * The rules live in `storedCredential`, which the writer also uses, so the two cannot disagree —
+     * which is exactly how they disagreed twice: a `{ type: 'none' }` written and refused on read, and
+     * an OAuth credential that kept three of its nine declared fields. The context is added here rather
+     * than there because only this function knows the failure is in the encrypted payload.
+     */
+    try {
+      credentials.set(providerId, storedCredential(credential));
+    } catch (error) {
+      throw new Error(`Encrypted credential payload contains an invalid credential: ${error instanceof Error ? error.message : 'unknown'}`);
     }
-    if (credential.type === 'oauth') {
-      const { refreshToken, expiresAt, email } = credential;
-      if ((refreshToken !== undefined && (typeof refreshToken !== 'string' || !refreshToken))
-        || (expiresAt !== undefined && (typeof expiresAt !== 'string' || !expiresAt))
-        || (email !== undefined && typeof email !== 'string')) {
-        throw new Error('Encrypted credential payload contains an invalid OAuth credential.');
-      }
-      credentials.set(providerId, {
-        type: 'oauth',
-        value: credential.value,
-        ...(typeof refreshToken === 'string' ? { refreshToken } : {}),
-        ...(typeof expiresAt === 'string' ? { expiresAt } : {}),
-        ...(typeof email === 'string' ? { email } : {}),
-      });
-      continue;
-    }
-    throw new Error('Encrypted credential payload contains an invalid credential.');
   }
   return credentials;
 }
@@ -910,18 +911,56 @@ function decodeBase64(value: string, expectedLength: number | undefined, label: 
   return decoded;
 }
 
-function cloneCredential(credential: ProviderCredential): ProviderCredential {
-  if (credential.type === 'api-key') return { type: 'api-key', value: credential.value };
-  if (credential.type === 'oauth') {
-    return {
-      type: 'oauth',
-      value: credential.value,
-      ...(credential.refreshToken ? { refreshToken: credential.refreshToken } : {}),
-      ...(credential.expiresAt ? { expiresAt: credential.expiresAt } : {}),
-      ...(credential.email ? { email: credential.email } : {}),
-    };
+/**
+ * Every optional field the `oauth` variant declares. **One list**, because two lists that "happen to
+ * agree" is what this function replaces.
+ */
+const oauthStringFields = ['refreshToken', 'expiresAt', 'email', 'orgId', 'orgName', 'accountId', 'oauthClientId', 'oauthClientSecret'] as const;
+
+/**
+ * The credential shape, decided in one place — for the writer and the reader alike.
+ *
+ * Two shipped defects came from this file keeping two copies of that decision, and both were silent:
+ *
+ * - **`{ type: 'none' }` was written and then refused on read.** The reader demanded a non-empty string
+ *   `value` *before* it looked at `type`, and the writer validated nothing. Because the reader is the
+ *   loader, one such credential made every connection in the vault unreadable.
+ * - **An OAuth credential lost every field outside `refreshToken` / `expiresAt` / `email`.** This
+ *   function used to be `cloneCredential`, and it built the object that gets *stored*, so the fields
+ *   were dropped at save time — not on reload. Measured before the fix: a credential carrying
+ *   `oauthClientId` read back with `oauthClientId: undefined` **in the same process**.
+ *   `apps/gateway/src/kiro.ts:144` stores that pair and `providers/kiro/index.ts:566` refuses to renew
+ *   without it, so a Kiro session could not be renewed from the moment it was saved.
+ *
+ * Normalising through one function makes a round trip exact by construction.
+ * `apps/gateway/test/connection-credential-round-trip.test.js` populates every field the type declares,
+ * so a tenth one cannot be added without that test failing.
+ */
+function storedCredential(value: unknown): ProviderCredential {
+  if (!isRecord(value)) throw new Error('a credential must be an object');
+  if (value.type === 'none') {
+    // A `none` credential carrying a secret is a contradiction, not a shape to tolerate.
+    if (value.value !== undefined) throw new Error('a none credential cannot carry a value');
+    return { type: 'none' };
   }
-  return { type: 'none' };
+  if (typeof value.value !== 'string' || !value.value || /[\r\n\0]/.test(value.value)) {
+    throw new Error('a credential needs a non-empty value with no control characters');
+  }
+  if (value.type === 'api-key') return { type: 'api-key', value: value.value };
+  if (value.type !== 'oauth') throw new Error(`unknown credential type ${JSON.stringify(value.type)}`);
+
+  const oauth: Record<string, unknown> = { type: 'oauth', value: value.value };
+  for (const field of oauthStringFields) {
+    const candidate = value[field];
+    if (candidate === undefined) continue;
+    if (typeof candidate !== 'string' || !candidate) throw new Error(`oauth.${field} must be a non-empty string`);
+    oauth[field] = candidate;
+  }
+  if (value.kiroLogin !== undefined) {
+    if (value.kiroLogin !== 'social') throw new Error("oauth.kiroLogin must be 'social'");
+    oauth.kiroLogin = 'social';
+  }
+  return oauth as ProviderCredential;
 }
 
 function cloneRecord(record: ConnectionRecord): ConnectionRecord {
