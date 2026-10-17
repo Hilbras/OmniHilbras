@@ -92,9 +92,18 @@ function localTags() {
     .filter(Boolean);
 }
 
-/** One request for every published version. A public package, so no credentials are involved. */
+/**
+ * One request for every published version. A public package, so no credentials are involved.
+ *
+ * **`--prefer-online` is load-bearing, and it was measured rather than assumed.** The npm client caches
+ * registry metadata, so a plain `npm view` can answer from a document that predates a publish: `v1.86.0`
+ * was published at 06:48 and confirmed live by the registry API, and thirteen consecutive
+ * `npm view @hilbras/omnihilbras@1.86.0 version` polls still said it did not exist. A check that reads a
+ * cache reports a gap that is not there — the failure mode this command exists to prevent, with the sign
+ * flipped, and one that would train a reader to ignore it. The flag costs one uncached request.
+ */
 function npmVersions() {
-  const json = execFileSync('npm', ['view', PACKAGE, 'versions', '--json'], {
+  const json = execFileSync('npm', ['view', PACKAGE, 'versions', '--json', '--prefer-online'], {
     cwd: root,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
