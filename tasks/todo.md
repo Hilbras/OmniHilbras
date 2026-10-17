@@ -5367,4 +5367,4 @@ The bulk parser (dropping the key again → 4 of 6 tests fail); the widened hone
 handler restored → *"handleAddConnections in ProviderDetailPage.tsx never reaches the gateway"*; `apiKey: ''`
 restored → two failures); the vault round-trip and the route's refusal shapes. `pnpm test` green.
 
-Not claimed: the Duck.ai provider itself. That is Release 2, on top of this, as planned.
+Release 2 (1.87.0) adds the Duck.ai web-cookie card, gateway routes, and HTTP challenge solver; unlike the sibling cards, its cookie is optional. See the Phase 4h entry in `tasks/plan.md` for the measured protocol traps and checks.
