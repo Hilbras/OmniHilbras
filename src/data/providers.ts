@@ -585,10 +585,7 @@ export const providerCatalog: ProviderRecord[] = [
     health: 0,
     color: '#de5833',
     initial: 'D',
-    // No `logo`, deliberately. Every other mark on these cards is the vendor's own file under
-    // `public/providers/`, and there is no committed DuckDuckGo mark to point at. Inventing one
-    // would put a logo in front of a service that never licensed it, so `ProviderMark` falls back to
-    // the initial above — which is what `tests/provider-cards.test.js` permits and what `custom` does.
+    logo: '/providers/duckai.png',
     endpoint: 'https://duck.ai',
     modelList: [],
     /**
