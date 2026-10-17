@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "1.88.0",
+  "version": "1.89.0",
   "packageManager": "pnpm@12.5.1",
   "type": "module",
   "scripts": {
@@ -53,5 +53,8 @@
   },
   "engines": {
     "node": ">=24"
+  },
+  "bin": {
+    "omnihilbras": "./bin/omnihilbras.js"
   }
 }

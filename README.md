@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.88.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.89.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -499,7 +499,8 @@ pnpm analyze:check # the same, failing if the dashboard pulls the animation libr
 pnpm version:check # one version, stated once — fails if the copies disagree
 pnpm version:fix   # rewrite the derived copies from package.json
 pnpm release:audit # every tag: on main, released on GitHub, published to npm
-./scripts/dev.sh   # the gateway and the dashboard together, in one terminal
+omnihilbras        # the gateway and the dashboard together, in one terminal
+./scripts/dev.sh   # the same thing, for before you have run `npm link`
 ```
 
 `pnpm verify` is what CI runs on every push and pull request. `version:check` exists because the
@@ -515,10 +516,13 @@ or focus on the toggle — so a dashboard page load downloads none of it, and `p
 runs last in `pnpm verify` so it cannot come back quietly. `tests/bundle-budget.test.js` asserts the
 source side of the same rule in two seconds, before anything is built.
 
-`scripts/dev.sh` starts the gateway, waits until its port answers, then starts the dashboard, and stops
-both when either exits. The wait is the point: starting the dashboard first means the opening page load
-reaches a gateway that is not listening yet, and every card reads "not connected" with nothing saying
-why. `OMNIHILBRAS_HOST`, `OMNIHILBRAS_PORT` and `DASHBOARD_PORT` override the two defaults.
+`omnihilbras` starts the gateway, waits until its port answers, then starts the dashboard, and stops both
+when either exits. The wait is the point: starting the dashboard first means the opening page load reaches
+a gateway that is not listening yet, and every card reads "not connected" with nothing saying why. Run
+`npm link` once to put the command on your `PATH`; `./scripts/dev.sh` is the same launcher for before then.
+`--port`, `--gateway-port` and `--no-browser` move the ports and stop the browser opening. A second run
+replaces the first rather than colliding with it, and a port held by anything else is refused rather than
+taken.
 
 ## Architecture
 

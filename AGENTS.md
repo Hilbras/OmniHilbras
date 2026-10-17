@@ -248,6 +248,7 @@ that is not on `main`.
 pnpm install
 pnpm dev            # dashboard + marketing site on :5173
 pnpm dev:gateway    # local gateway on 127.0.0.1:8787
+omnihilbras         # both of the above in one terminal (needs `npm link` once)
 pnpm typecheck
 pnpm test           # SDK then gateway
 pnpm build
@@ -255,3 +256,20 @@ pnpm analyze        # per-page bundle cost, attributed per package
 pnpm verify         # the release gate: version, typecheck, test, build, bundle budget
 pnpm release:audit  # every tag: pushed, released on GitHub, published to npm
 ```
+
+`omnihilbras` is `bin/omnihilbras.js`, registered as a `bin` on the **private root** package — not on
+`@hilbras/omnihilbras`, because that one is the published library and a consumer who installed it must not
+acquire a command that starts a development server. `npm link` puts it on your `PATH`, pointed at this
+checkout.
+
+It adopts three things from the reference launcher (`9router`'s `cli.js`), each learned the hard way there:
+readiness is a **TCP connect, not a sleep**, so the page never loads before the gateway answers; the spinner
+is written inline rather than taking a dependency for twelve frames; and nothing is killed that the
+launcher did not start.
+
+That last one is why it keeps a **process-group** file under `$XDG_STATE_HOME/omnihilbras/run.json` rather
+than scanning `ps`. What it spawns is `pnpm`, but the process that binds a port is pnpm's child — recording
+the spawned pid alone left the previous run holding the ports on restart. So it records the group and
+**still verifies the group's command lines before signalling it**, because a group id can outlive its
+members and be reused. A port held by anything else is **refused, never killed**, and it is checked
+*before* the previous run is stopped, so a typo in a port cannot cost you a running server.
