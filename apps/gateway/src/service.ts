@@ -1,4 +1,4 @@
-import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, ClinePassAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, type KiroQuota, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, GeminiWebAdapter, geminiWebProviderId, GEMINI_WEB_MODELS, normalizeGeminiWebCookie, geminiWebCookiePresent, type GeminiWebDriver, probeQwenWeb, TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, CLAUDE_CODE, ChatGptWebAdapter, ClaudeCodeAdapter, ClinePassAdapter, FetchHttpTransport, KIMI_CODE, KimiCodeAdapter, KiroAdapter, type KiroQuota, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, claudeCodeProviderId, deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter, GeminiWebAdapter, geminiWebProviderId, GEMINI_WEB_MODELS, normalizeGeminiWebCookie, geminiWebCookiePresent, type GeminiWebDriver, DuckDuckGoWebAdapter, duckduckgoWebProviderId, DUCKDUCKGO_WEB, normalizeDuckDuckGoWebCookie, freeDuckDuckGoWebModels, type DuckDuckGoWebDriver, probeQwenWeb, TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId, OpencodeConsoleAdapter, ProviderError, ZenAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ChatGptWebDriver, type ProviderRegistry, type ProviderRequestContext , type ModelPricing } from '@hilbras/omnihilbras';
 import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
 import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
 import type { GatewayConfig } from './config.js';
@@ -9,6 +9,7 @@ import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsol
 import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialDeviceFlow, type KiroSignInStatus } from './kiro.js';
 import { createChatGptWebDriver } from './chatgptWeb.js';
 import { createGeminiWebDriver } from './geminiWeb.js';
+import { createDuckDuckGoWebDriver } from './duckduckgoWeb.js';
 import { SlidingWindowRateLimiter, bareModelFor, type RouteCandidate } from './routing.js';
 import { HealthManager } from './health.js';
 import { TokenRenewal, classifyRenewalFailure } from './token-renewal.js';
@@ -125,6 +126,7 @@ export type GatewayServiceOptions = {
   chatGptWebDriver?: ChatGptWebDriver;
   /** Injected the same way, so a test can drive the Gemini provider without a browser. */
   geminiWebDriver?: GeminiWebDriver;
+  duckDuckGoWebDriver?: DuckDuckGoWebDriver;
 };
 
 export class GatewayService {
@@ -148,6 +150,7 @@ export class GatewayService {
   private readonly kiroSocial = new KiroSocialStore();
   private chatGptWeb?: ProviderAdapter;
   private geminiWeb?: ProviderAdapter;
+  private duckDuckGoWeb?: ProviderAdapter;
   /** DeepSeek Web, built once so its access-token cache is shared across requests. */
   private deepSeek?: DeepSeekWebAdapter;
   private tokenHarborWeb?: TokenHarborWebAdapter;
@@ -323,6 +326,7 @@ export class GatewayService {
       .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId))
       .onDemand(chatGptWebProviderId, () => this.chatGptWebAdapter())
       .onDemand(geminiWebProviderId, () => this.geminiWebAdapter())
+      .onDemand(duckduckgoWebProviderId, () => this.duckDuckGoWebAdapter())
       .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter())
       .onDemand(tokenHarborWebProviderId, () => this.tokenHarborWebAdapter());
     this.credentialLifecycle = new CredentialLifecycle({
@@ -1060,7 +1064,102 @@ export class GatewayService {
     );
   }
 
+  /**
+   * The Duck.ai adapter.
+   *
+   * One structural difference from the two browser-driven web-session providers: there is nothing external to
+   * be missing. The anti-bot challenge runs in a `vm`, which is part of Node, so `available()` cannot fail and
+   * the gateway needs no driver from its options to serve a turn.
+   */
+  duckDuckGoWebAdapter(): ProviderAdapter {
+    this.duckDuckGoWeb ??= new DuckDuckGoWebAdapter({
+      driver: this.options.duckDuckGoWebDriver ?? createDuckDuckGoWebDriver(),
+    });
+    return this.duckDuckGoWeb;
+  }
 
+  /**
+   * The pasted cookie, normalised — or `undefined` when nothing was pasted.
+   *
+   * A paste that carries text but reads as no cookie is a **mistake** and is refused here; an empty paste is
+   * this provider's normal case. Collapsing those two is how "no cookie is needed" becomes indistinguishable
+   * from "the cookie you gave me is bad", which is the distinction the whole provider turns on.
+   */
+  private duckDuckGoWebPaste(raw: string | undefined): string | undefined {
+    if (raw === undefined || raw.trim() === '') return undefined;
+    const cookie = normalizeDuckDuckGoWebCookie(raw);
+    if (!cookie) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'The pasted Duck.ai cookie could not be read.', {
+        providerId: duckduckgoWebProviderId,
+        publicMessage: 'That does not look like a cookie. Paste the whole `Cookie:` line from duck.ai, or leave the field empty — no cookie is required.',
+      });
+    }
+    return cookie;
+  }
+
+  /**
+   * Checks the endpoint and stores nothing. **The cookie is optional here too.**
+   *
+   * What a check can honestly establish for this provider is that the service answered and served a challenge
+   * this gateway solved. It cannot establish that a cookie works, because the service does not read one — so
+   * the note says which of the two happened and never claims the stronger thing.
+   */
+  async checkDuckDuckGoWeb(raw: string | undefined, signal?: AbortSignal) {
+    const cookieHeader = this.duckDuckGoWebPaste(raw);
+    const driver = this.options.duckDuckGoWebDriver ?? createDuckDuckGoWebDriver();
+
+    let models: Array<{ id: string; name: string }> = [];
+    try {
+      models = freeDuckDuckGoWebModels(await driver.catalog({ ...(signal ? { signal } : {}) })).map((model) => ({ id: model.id, name: model.displayName }));
+    } catch {
+      // A catalog that could not be read is not a failure of the endpoint check, and reporting it as one would
+      // blame the request for a listing problem.
+    }
+
+    const status = await driver.status({ ...(signal ? { signal } : {}) });
+    return {
+      verified: status.challengeServed,
+      note: status.challengeServed
+        ? cookieHeader
+          ? 'Duck.ai answered and served a challenge this gateway solved. The cookie was sent; this service does not read one, so this does not prove the cookie is valid.'
+          : 'Duck.ai answered and served a challenge this gateway solved. No cookie was needed.'
+        : 'Duck.ai answered without serving an anti-bot challenge, so a turn cannot be proven from here.',
+      models,
+    };
+  }
+
+  /**
+   * Stores the connection, after checking the endpoint.
+   *
+   * The credential is `{ type: 'none' }` when nothing was pasted, and that is a decision rather than a gap: a
+   * fabricated placeholder would be a secret the vault keeps and audits as real, and *no* credential would
+   * leave the connection outside routing entirely — `hasCredential` is what `RoutingEngine.plan` filters on.
+   * `none` is the honest third option, and 1.86.0 is the release that made it a credential the vault can read
+   * back.
+   */
+  async connectDuckDuckGoWeb(raw: string | undefined, signal?: AbortSignal) {
+    const cookieHeader = this.duckDuckGoWebPaste(raw);
+    const check = await this.checkDuckDuckGoWeb(raw, signal);
+    if (!check.verified) {
+      throw new ProviderError('PROVIDER_UNAVAILABLE', check.note ?? 'Duck.ai could not be reached.', {
+        providerId: duckduckgoWebProviderId,
+        publicMessage: check.note ?? 'Duck.ai did not answer with a solvable challenge, so no connection was saved.',
+      });
+    }
+    return this.saveConnection(
+      {
+        id: duckduckgoWebProviderId,
+        providerId: duckduckgoWebProviderId,
+        name: 'Duck.ai',
+        endpoint: DUCKDUCKGO_WEB.origin,
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      },
+      cookieHeader ? { type: 'api-key', value: cookieHeader } : { type: 'none' },
+      signal,
+    );
+  }
 
   /**
    * The DeepSeek Web adapter, built once so its access-token cache is shared.

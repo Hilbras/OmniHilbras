@@ -76,8 +76,8 @@ test('the neutral option is the local custom endpoint, not a hosted vendor', () 
 test('a web-session provider is recognised, so the keyed dialog is never opened for one', () => {
   // A card for a provider that is *signed into* has no key to collect, and opening the keyed dialog
   // for one produces a form that asks for a credential the provider does not use.
-  const webSession = providerCatalog.filter((card) => ['chatgpt-web', 'qwen-web', 'deepseek-web', 'tokenharbor-web', 'gemini-web'].includes(card.id));
-  assert.equal(webSession.length, 5, 'the fixture moved: update the ids here');
+  const webSession = providerCatalog.filter((card) => ['chatgpt-web', 'qwen-web', 'deepseek-web', 'tokenharbor-web', 'gemini-web', 'duckduckgo-web'].includes(card.id));
+  assert.equal(webSession.length, 6, 'the fixture moved: update the ids here');
   for (const card of webSession) assert.equal(isWebSessionProvider(card.id), true, `${card.id} is a web-session provider`);
   for (const card of providerCatalog.filter((c) => !webSession.includes(c))) {
     assert.equal(isWebSessionProvider(card.id), false, `${card.id} should not be treated as a web-session provider`);
@@ -170,7 +170,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // options were counted by numbers whose provenance stopped five entries earlier — the drift this
   // comment exists to prevent, inside the comment. The assertions are unchanged; the entries that
   // explain them are now present.
-  assert.equal(providerCatalog.length, 31, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerCatalog.length, 32, `the catalog now has ${providerCatalog.length} cards`);
   assert.equal(providerOptions.length, 20, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

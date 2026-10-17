@@ -296,6 +296,31 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
+    /**
+     * Duck.ai — an anti-bot challenge, not a credential.
+     *
+     * The one web-cookie route whose credential is optional. Every sibling above refuses to
+     * proceed without a paste because the service it talks to reads one; duck.ai does not, so
+     * requiring a paste here would make a keyless connection impossible and would teach the
+     * dashboard that this field is mandatory. What the button proves is stated in the service's
+     * note: the endpoint answered and served a challenge this gateway solved.
+     */
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/duckduckgo/check') {
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      sendJson(response, 200, await service.checkDuckDuckGoWeb(readOptionalString(body, 'cookieHeader'), signal), origin);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/duckduckgo/connect') {
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      // Optional here, unlike every other web-cookie connect route: an empty paste is this
+      // provider's normal case and stores the honest `{ type: 'none' }` rather than a fake secret.
+      const cookieHeader = readOptionalString(body, 'cookieHeader');
+      const connection = await service.connectDuckDuckGoWeb(cookieHeader, signal);
+      sendJson(response, 201, { connection }, origin);
+      return true;
+    }
+
     // Google or GitHub. The browser cannot return from a `kiro://` callback, so this
     // returns a URL to open and the code is pasted back on the exchange route below.
     if (request.method === 'POST' && url.pathname === '/v1/oauth/kiro/social/start') {

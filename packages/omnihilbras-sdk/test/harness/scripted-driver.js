@@ -101,3 +101,45 @@ export function scriptedGeminiDriver({ parts = ['Hello', ', ', 'world'], throws 
   driver.setThrow = (error) => { state.throws = error; };
   return driver;
 }
+
+/** The one model the contract drives for Duck.ai. It is free today, which is what the catalog says. */
+export const DUCKDUCKGO_WEB_CONTRACT_MODEL = 'gpt-5.4-mini';
+
+/**
+ * A driver for `DuckDuckGoWebAdapter`.
+ *
+ * Its own double for the same reason as Gemini's: the real interface is four methods, and `catalog` and
+ * `status` are not `verify` — the adapter filters the catalog by each model's own `accessTier` and calls
+ * `status` for the check, so a harness that only stubbed `ask` would leave both paths unexercised and the
+ * contract would pass while testing a third of the adapter.
+ *
+ * The catalog here is deliberately mixed — one free model and one paid — because the free filter is the
+ * adapter's whole claim about what it offers. A catalog of free models only would pass with the filter
+ * removed.
+ */
+export function scriptedDuckDuckGoDriver({ parts = ['port', '-', 'ok'], throws } = {}) {
+  const state = { parts, throws };
+  const driver = {
+    available: async () => ({ ok: true }),
+    catalog: async () => {
+      if (state.throws) throw state.throws;
+      return {
+        models: [
+          { id: DUCKDUCKGO_WEB_CONTRACT_MODEL, modelName: 'GPT-5.4 mini', accessTier: ['free', 'plus'] },
+          { id: 'paid-model', modelName: 'Paid', accessTier: ['plus', 'pro'] },
+        ],
+      };
+    },
+    status: async () => {
+      if (state.throws) throw state.throws;
+      return { challengeServed: true, solvedMs: 2 };
+    },
+    ask: async () => {
+      if (state.throws) throw state.throws;
+      return { text: state.parts.join(''), model: DUCKDUCKGO_WEB_CONTRACT_MODEL };
+    },
+  };
+  driver.set = (next) => { state.parts = next; };
+  driver.setThrow = (error) => { state.throws = error; };
+  return driver;
+}

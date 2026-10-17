@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.86.1** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.87.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -211,8 +211,10 @@ terms cover.
 
 ## Web Cookie providers, and the warning that comes with them
 
-The **Web Cookie Providers** group holds providers with no API — you export a session from
-your own browser and OmniHilbras drives the web app to get an answer out of it.
+The **Web Cookie Providers** group holds providers with no API — for most of them you export a
+session from your own browser and OmniHilbras drives the web app to get an answer out of it. **Duck.ai**
+is in the group but needs neither: it answers signed-out visitors, and the gateway solves its anti-bot
+challenge directly.
 
 **ChatGPT Web** and **Gemini Web** are implemented, and they work the same way: a real browser
 loads the provider's page, types the prompt, and the answer is read out of the response the page
@@ -255,6 +257,32 @@ curl -s -X POST http://127.0.0.1:8787/v1/chat/completions \
 
 It is **not perfectly reliable** — a fetch inside the page can fail on the network, and gets
 one retry. Attachments are not supported; a text-only turn is the whole of it.
+
+### Duck.ai needs no cookie, and no browser
+
+**Duck.ai** is in this group, and it is the odd one out: it needs **no account and no cookie**.
+It serves a free model lineup to signed-out visitors behind an anti-bot challenge, and the gateway
+solves that challenge with `node:vm` — so the connection is stored with no credential at all, and
+there is no browser, no DevTools step, and nothing for you to paste.
+
+It works over HTTP rather than by driving a page, which makes it faster than the other two and
+means there is no browser to install. A real turn was run end to end while it was built, and it
+answered `port-ok`:
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/v1/chat/completions \
+  -H 'content-type: application/json' -H 'Origin: http://localhost:5173' \
+  -H 'x-omnihilbras-provider: duckduckgo-web' \
+  -d '{"model":"gpt-5.4-mini","messages":[{"role":"user","content":"Reply with the single word: working"}]}'
+```
+
+Two things are worth knowing before you rely on it. **The free lineup is a courtesy, not a
+contract** — duck.ai can rate-limit or withdraw it, and a refusal carrying HTTP 418 means backing
+off for a few minutes, not fixing a key: the same request was measured failing 43 seconds after a
+success and working 4.9 minutes later. And a cookie is **accepted but never required** — paste one
+if you want your browser session sent along, and Check will tell you the endpoint answered and
+served a solvable challenge, which is the only thing it can honestly establish about a cookie the
+service does not read.
 
 Two earlier notes here were wrong and are corrected in the spec: the 403 was **not** the
 network, it was Playwright's default headless user agent containing `HeadlessChrome`; and

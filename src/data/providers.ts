@@ -566,6 +566,47 @@ export const providerCatalog: ProviderRecord[] = [
     riskSeverity: 'high',
   },
   {
+    id: 'duckduckgo-web',
+    name: 'Duck.ai',
+    description:
+      'Duck.ai’s free model lineup, reached over its own chat endpoint behind an anti-bot challenge this gateway solves. No account and no cookie required.',
+    category: 'Web session',
+    group: 'web-cookie',
+    // Placeholders, because this catalog is the state a card shows when the gateway has no connection
+    // for the provider. The free lineup is real and read at connect time — six models, from each
+    // model's own `accessTier` — but it lives in the adapter rather than here, because this catalog
+    // must claim no measurement.
+    status: 'available',
+    auth: 'Session cookie',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#de5833',
+    initial: 'D',
+    // No `logo`, deliberately. Every other mark on these cards is the vendor's own file under
+    // `public/providers/`, and there is no committed DuckDuckGo mark to point at. Inventing one
+    // would put a logo in front of a service that never licensed it, so `ProviderMark` falls back to
+    // the initial above — which is what `tests/provider-cards.test.js` permits and what `custom` does.
+    endpoint: 'https://duck.ai',
+    modelList: [],
+    /**
+     * A public, anonymous service — and the free tier is a courtesy, not a contract.
+     *
+     * The risk here is the opposite shape to the other web-session cards. Those hold a whole-account
+     * session, and the warning is that the cookie is far more powerful than inference. Here there is no
+     * cookie: the connection is stored with `{ type: 'none' }`, so there is no account to act as. What the
+     * user is agreeing to instead is automated use of a service that serves signed-out visitors for
+     * free and can rate-limit or withdraw that at any time — the `418` this provider answers with is the
+     * visible form of it. So the notice says the two things that are true, and the dialog makes the
+     * credential optional rather than implying one is needed.
+     */
+    riskNotice:
+      'Duck.ai needs no account and no cookie — the connection is stored with no credential at all, so there is no signed-in session for OmniHilbras to act as. What you are agreeing to is automated use of a service that serves signed-out visitors for free. It can rate-limit or withdraw that at any time, and a refusal here (HTTP 418) means backing off, not a broken key. If you have an account with Duck.ai, connect through their own client instead.',
+    riskSeverity: 'high',
+  },
+  {
     id: 'kimi',
     name: 'Kimi',
     description: 'Moonshot AI long-context and agentic models, reached through their OpenAI-compatible endpoint.',

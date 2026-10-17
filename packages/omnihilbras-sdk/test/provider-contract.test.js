@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
 import { scriptedFetch } from './harness/scripted-fetch.js';
 import { scriptedTokenHarborFetch } from './harness/scripted-tokenharbor-fetch.js';
-import { scriptedDriver, chatGptWebFixtureCredential, CHATGPT_WEB_CONTRACT_MODEL, scriptedGeminiDriver, geminiWebFixtureCredential, GEMINI_WEB_CONTRACT_MODEL } from './harness/scripted-driver.js';
+import { scriptedDriver, chatGptWebFixtureCredential, CHATGPT_WEB_CONTRACT_MODEL, scriptedGeminiDriver, geminiWebFixtureCredential, GEMINI_WEB_CONTRACT_MODEL, scriptedDuckDuckGoDriver, DUCKDUCKGO_WEB_CONTRACT_MODEL } from './harness/scripted-driver.js';
 import test from 'node:test';
 import { runProviderContract, CONTRACT_TEXT } from './provider-contract.js';
 import { framesFor, scriptedTransport } from './harness/scripted-transport.js';
@@ -15,6 +15,7 @@ import { DeepSeekWebAdapter } from '../dist/providers/deepseek-web/index.js';
 import { TokenHarborWebAdapter } from '../dist/providers/tokenharbor-web/index.js';
 import { ChatGptWebAdapter } from '../dist/providers/chatgpt-web/index.js';
 import { GeminiWebAdapter } from '../dist/providers/gemini-web/index.js';
+import { DuckDuckGoWebAdapter, DuckDuckGoWebError } from '../dist/providers/duckduckgo-web/index.js';
 import { ClineAdapter } from '../dist/providers/cline/index.js';
 import { ClinePassAdapter } from '../dist/providers/clinepass/index.js';
 import { KiroAdapter } from '../dist/providers/kiro/index.js';
@@ -230,10 +231,40 @@ const providers = [
       return { adapter: new GeminiAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
     },
   },
+  {
+    name: 'duckduckgo-web',
+    make: () => {
+      // The driver is the seam, as for the other two web providers: answering means solving a challenge
+      // and streaming an SSE, so there is no transport to intercept. The contract drives a fixed model
+      // because the adapter refuses a model the free catalog does not list, and the double's catalog is
+      // mixed on purpose — a free-only catalog would pass with the free filter removed.
+      const driver = scriptedDuckDuckGoDriver();
+      return {
+        adapter: new DuckDuckGoWebAdapter({ driver }),
+        // `{ type: 'none' }`, because that is what a keyless Duck.ai connection actually holds and the
+        // adapter has to accept a turn from it. An api-key here would pass while testing a path no
+        // connection takes.
+        credential: { type: 'none' },
+        model: DUCKDUCKGO_WEB_CONTRACT_MODEL,
+        // The connection holds nothing, so a 401 cannot be a bad key. Declared here rather than
+        // inferred: the reason the contract relaxes this one assertion for this one provider is in
+        // `provider-contract.js`, next to the assertion it relaxes.
+        refusalIsAuthFailure: false,
+        script: (parts, options) => {
+          driver.set(parts);
+          // A **typed** refusal, not a bare `Error`. The real driver throws `DuckDuckGoWebError`, and the
+          // `kind` is what the adapter maps to a code — a bare error would land on the `unavailable`
+          // default and never reach the mapping this assertion exists to check.
+          if (options?.refuseWith !== undefined) driver.setThrow(new DuckDuckGoWebError('challenge', '401 the service refused this request'));
+          return async () => { driver.setThrow(undefined); };
+        },
+      };
+    },
+  },
 ];
 
 for (const provider of providers) {
-  const { adapter, script, model, credential } = provider.make();
+  const { adapter, script, model, credential, refusalIsAuthFailure } = provider.make();
   runProviderContract({
     name: provider.name,
     adapter,
@@ -242,6 +273,7 @@ for (const provider of providers) {
     // Only a provider that cannot be *asked* for its catalog nominates one; the rest let the
     // contract ask, so a change to a catalog does not require editing this file.
     ...(model ? { model } : {}),
+    ...(refusalIsAuthFailure === false ? { refusalIsAuthFailure: false } : {}),
   });
 }
 

@@ -231,6 +231,24 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
     - **Tenancy is named and carried, not threaded.** A tenant is a property of a *deployment*, so it is configured once; a multi-tenant deployment scopes a store by construction rather than adding a parameter to thirty methods. Threading a value nothing reads would be decoration shaped like architecture.
     - `readonly` is a type and not a runtime guarantee — asserted by a test, which is the third time this project has been caught by that distinction.
 
+### Phase 4h: Duck.ai, the first web-cookie provider that needs no cookie
+
+- [x] Task 9j: Add Duck.ai as a web-session provider whose credential is optional.
+  - Acceptance: `duckduckgo-web` is served through the gateway's routing like any other provider; its anti-bot challenge is solved in-process; a connection can be saved with **no credential at all** and still answer a turn; and a pasted cookie is optional rather than required on both routes.
+  - Verify: `apps/gateway/test/duckduckgo-web-route.test.js` (11 tests) covers the admin gate, an absent and a blank paste, a paste that reads as no cookie, the note that refuses to call a cookie valid, a catalog failure that is not an endpoint failure, and a saved keyless connection routing. `packages/omnihilbras-sdk/test/duckduckgo-web.test.js` (16) and `apps/gateway/test/duckduckgo-challenge.test.js` (7), `duckduckgo-web-driver.test.js` (11). One live turn answered `port-ok`.
+  - Files: `packages/omnihilbras-sdk/src/providers/duckduckgo-web/index.ts` (new), `apps/gateway/src/duckduckgoChallenge.ts`, `duckduckgoChallengeStubs.ts`, `duckduckgoWeb.ts` (new), `service.ts`, `routes/oauth.ts`, `src/data/providers.ts`, `src/lib/webSessionProviders.ts`, `src/components/WebCookieConnectDialog.tsx`, docs.
+  - Depends on: Task 9i.
+  - Scope: Medium.
+  - Findings:
+    - **The free tier is on a top-level `accessTier`, not the nested one.** `reasoningEffortAccess[].accessTier` marks three models free and `accessTier` marks six. A reader checking the nested field — which is the one the request payload uses — imports three models and silently drops the rest.
+    - **The answer arrives in `message`, never `content`.** A reader looking for `content` gets a 200 with an empty answer, which is indistinguishable from success unless the adapter refuses an empty stream.
+    - **`x-vqd-4` is dead weight.** The service never returns it; only `x-vqd-hash-1` is real. The source implementation sends both.
+    - **`x-fe-version` must be assembled from two homepage attributes**, and the source's regex for the joined string never matched — so it sent a hardcoded version from an earlier release on every request. A page missing either attribute now **refuses** the turn, because a stale version is worse than none: it looks like a measurement.
+    - **418 is overloaded and is not a retry.** `ERR_CHALLENGE` and `ERR_BN_LIMIT` share a user-facing token, and the same byte-identical request was measured failing 43 s after a success and working 4.9 min later. The driver classifies by the JSON `type` field rather than the message, and only `ERR_RATE_LIMIT` is retryable.
+    - **The credential had to become `{ type: 'none' }`, not an absent one.** `hasCredential` is what `RoutingEngine.plan` filters on, so a keyless connection with *no* credential is saved and never routed. 1.86.0 made `none` readable by the vault; this is the first caller that needs it, and the reason it had to exist.
+    - **The dialog made the credential mandatory and would have taught the user a falsehood.** `pasteReady` was `exported.trim().length > 0`, so a provider needing nothing got Check and Save disabled with no explanation. `optionalCredential` waives *only* the paste — the acknowledgement still gates, so a high-risk notice cannot be connected past unread.
+    - **A guard's blind spot was walked into, not inherited.** A comment reading `` `/v1/web-cookie/*/connect` `` contains the characters `/*`, which `stripComments` treats as a block-comment opener: three Kiro routes became invisible to `tests/gateway-routes.test.js` and were reported as phantom routes. Caught because the suite failed, not because anyone read it.
+
 ## Risks and Mitations
 
 | Risk | Impact | Mitigation |
@@ -250,7 +268,7 @@ written, while the plan continued to read as finished:
 
 | Risk | Claimed mitigation | Measured |
 | --- | --- | --- |
-| Provider APIs change independently (**High**) | pin response fixtures per adapter | **5 of 15 adapters** (19 `.ts` files in `src/providers/`, 17 provider folders, one shared base `openai-compatible` and two helpers nested in them, none counted as adapters) — `kiro-stream.bin` plus `openrouter`, `cline` and `opencode-console` (1.48.0), and `zen` (its public model listing, shape and keys only). The other nine have a stated reason, and **seven of those need a credential this machine does not have**. `clinepass` is the one whose capture would *duplicate* rather than fill a gap — it shares Cline's host and wire format, so the bytes it would pin are the bytes `cline-models.json` already pins. The count is printed by `fixture-coverage.test.js`, so it cannot go stale again without a test failing. |
+| Provider APIs change independently (**High**) | pin response fixtures per adapter | **5 of 16 adapters** (20 `.ts` files in `src/providers/`, 18 provider folders, one shared base `openai-compatible` and two helpers nested in them, none counted as adapters) — `kiro-stream.bin` plus `openrouter`, `cline` and `opencode-console` (1.48.0), and `zen` (its public model listing, shape and keys only). The other nine have a stated reason, and **seven of those need a credential this machine does not have**. `clinepass` is the one whose capture would *duplicate* rather than fill a gap — it shares Cline's host and wire format, so the bytes it would pin are the bytes `cline-models.json` already pins. The count is printed by `fixture-coverage.test.js`, so it cannot go stale again without a test failing. |
 | Streaming formats differ (**High**) | test event boundaries explicitly | real: frame-level assertions across the adapter tests |
 | Secrets leak through logs/errors (**High**) | redaction helpers and tests that scan errors/log output | real: error-output scanning tests exist |
 | Gateway becomes coupled to one provider | no provider IDs in shared service logic | real: 12 files carry a zero-provider-id invariant test |

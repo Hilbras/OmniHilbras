@@ -196,6 +196,45 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     check: { path: '/v1/web-cookie/gemini/check', field: 'cookieHeader' },
     planNote: 'Gemini Web drives the page, so the model list is the modes the page offers (3.1 Pro, 3.7 Flash, 3.1 Flash-Lite), not Google’s API model ids.',
   },
+
+  'duckduckgo-web': {
+    id: 'duckduckgo-web',
+    name: 'Duck.ai',
+    website: 'https://duck.ai',
+    /**
+     * There is no credential to name, which is the whole point of this entry.
+     *
+     * Duck.ai serves a signed-out visitor a free model lineup behind an anti-bot challenge rather than a
+     * session. A cookie is accepted if one is pasted — it travels with the request — but nothing about a
+     * turn depends on it, and the gateway stores the honest `{ type: 'none' }` when the field is left empty.
+     * The steps below say so rather than sending someone to DevTools for a secret this provider never needed.
+     */
+    credentialName: 'Nothing — no cookie is required',
+    extractionSteps: [
+      {
+        label: 'Nothing to export',
+        body: 'Duck.ai answers signed-out visitors, so there is no cookie to copy. You can press Check and then Save with the field below empty, and the connection will work.',
+      },
+      {
+        label: 'If you would rather send your browser session',
+        body: 'With duck.ai open: F12 → Network → reload → click any request to duck.ai → Headers → Request Headers → Cookie. Copy that entire line and paste it here. OmniHilbras does not read it — the service does not either — so it cannot tell you whether the cookie is valid, and Check will say so rather than claiming otherwise.',
+      },
+      {
+        label: 'What happens next',
+        body: 'Check asks duck.ai for its anti-bot challenge and solves it here, then reports the free models it offers. What it proves is that the endpoint answered and served a solvable challenge — not that a turn will always succeed. A refusal carrying HTTP 418 is a rate limit rather than a broken key: the same request was measured failing 43 seconds after a success and working 4.9 minutes later, so back off rather than retrying.',
+      },
+    ],
+    optionalCredential: true,
+    paste: {
+      path: '/v1/web-cookie/duckduckgo/connect',
+      field: 'cookieHeader',
+      placeholder: 'Leave empty — or paste the whole Cookie: line from duck.ai',
+      sectionLabel: 'Or paste a cookie you would rather send along',
+      fieldLabel: 'Cookie header',
+    },
+    check: { path: '/v1/web-cookie/duckduckgo/check', field: 'cookieHeader' },
+    planNote: 'Only the free lineup is served without a subscription. The list is read from each model\'s own `accessTier` and changes with duck.ai, so it is reported at connect time rather than written on the card.',
+  },
 };
 
 export function webSessionDescriptor(providerId: string): WebSessionDescriptor | undefined {

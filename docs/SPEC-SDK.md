@@ -269,6 +269,20 @@ The first local gateway exposes:
   a refused cookie never becomes a connection that reads as connected and answers nothing. A turn is served by
   driving the page in a browser, so a request is more expensive than an API call and the refresh of the
   rotating cookies is written back to the connection.
+- `POST /v1/web-cookie/duckduckgo/check` — report whether `duck.ai` answered and served an anti-bot challenge
+  this gateway solved, and store nothing. **The cookie is optional on this route**, unlike every other route
+  under `/v1/web-cookie/`: duck.ai gates on a challenge rather than on a session, so an absent cookie is the
+  normal case rather than a missing input. A pasted cookie is carried but not claimed as valid — the service
+  does not read one, so a check cannot verify it and the `note` says which of the two happened. The free
+  models are read from the top-level `accessTier` on each model, not from `reasoningEffortAccess`.
+- `POST /v1/web-cookie/duckduckgo/connect` — store the Duck.ai connection after the check accepts it, so an
+  endpoint that served no solvable challenge never becomes a connection that reads as connected and answers
+  nothing. `cookieHeader` is **optional here** and stored as `{ "type": "none" }` when absent, which is a
+  routable credential rather than a fabricated secret. A turn is served over HTTP — no browser is involved —
+  by reading `data-version-tag`/`data-version-sha` from the homepage to assemble `x-fe-version`, solving the
+  `x-vqd-hash-1` challenge, and streaming the answer out of the `message` field. A `418` is a back-off, not a
+  retry: the same byte-identical request was measured failing 43 s after a success and succeeding 4.9 min
+  later.
 - `POST /v1/oauth/kimi-code/start` — begin a Kimi Code sign-in. Kimi's device flow, so the response
   carries a `userCode` and a `verificationUrl` for the user to approve in their own browser; there is no
   redirect back. Both halves of the flow are **form-encoded**, which is measured: Kimi answers a JSON
@@ -2654,7 +2668,7 @@ measurement, and `apps/gateway/test/spec-success-criteria.mjs` fails if any stop
       `build` script; `packages/omnihilbras-sdk/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **19 files** in `packages/omnihilbras-sdk/src/providers/` — 17 provider folders, each with an `index.ts`, plus two helpers nested inside them (`deepseek-web/deepseek-pow.ts`, `zen/zen-free-tier.ts`). `openai-compatible` is a shared base that providers extend, not a provider. The two helpers and `qwen-web` are not protocol adapters, so the guard does not count them, which is why the capture guard counts 15: its file count exceeds that because the helpers are not protocol adapters — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **20 files** in `packages/omnihilbras-sdk/src/providers/` — 18 provider folders, each with an `index.ts`, plus two helpers nested inside them (`deepseek-web/deepseek-pow.ts`, `zen/zen-free-tier.ts`). `openai-compatible` is a shared base that providers extend, not a provider. The two helpers and `qwen-web` are not protocol adapters, so the guard does not count them, which is why the capture guard counts 16: its file count exceeds that because the helpers are not protocol adapters — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

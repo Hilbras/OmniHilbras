@@ -110,6 +110,21 @@ const NO_CAPTURE_YET = {
   // holds, which the vendor decides per request and never sends. A capture taken with an
   // unsubscribed key would pin the free tier and call it ClinePass.
   clinepass: 'the same host and the same wire format as `cline`, so a capture would pin `cline.json` a second time; what distinguishes the two is a server-side subscription no response body reveals',
+  /**
+   * Duck.ai is **not** excused for cost or for a missing credential, and the distinction matters
+   * because it is the excuse every other entry in this list gives. A turn here needs no account and
+   * no cookie — the endpoint answers a signed-out visitor behind an anti-bot challenge — and one
+   * live chat request was spent to prove the port end to end, so "we could not capture it" is not
+   * available as a reason.
+   *
+   * What is missing is that a `chat` capture would pin a **rotating** artefact: `x-vqd-hash-1` is
+   * solved per turn and `x-fe-version` changes with every front-end deploy, so a captured body is
+   * valid only alongside the two headers that produced it and is unreadable weeks later. The
+   * durable part — the catalog's `accessTier`, the `message` delta, the `[CHAT_TITLE]` and `[DONE]`
+   * frames — is asserted in `duckduckgo-web.test.js` from the shapes measured on that one request,
+   * and the per-turn headers are pinned there as *behaviour* rather than as a frozen payload.
+   */
+  'duckduckgo-web': 'not excused for cost or a credential — a signed-out turn was spent to port it; a capture would pin a rotating challenge hash and a per-deploy x-fe-version alongside the body, so the durable contract is asserted against the measured shapes instead',
 };
 
 test('the fixtures directory holds only captures, named for the adapter they came from', () => {

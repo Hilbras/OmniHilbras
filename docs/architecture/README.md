@@ -35,9 +35,9 @@ that holds is one a machine re-derives.
 | `apps/gateway/src/provider-resolver.ts` | 237 | **0** | enforced by a test that greps the file |
 | `apps/gateway/src/request-executor.ts` | 705 | **0** | the failover loop, the attempt ledger, the ordering |
 | `apps/gateway/src/connection-manager.ts` | 250 | **0** | one error mapper, one catalog merge, one lock scope |
-| `apps/gateway/src/service.ts` | 1755 | 4 | all twelve `.onDemand()` registrations, in one constructor |
+| `apps/gateway/src/service.ts` | 1854 | 4 | all thirteen `.onDemand()` registrations, in one constructor |
 | `apps/gateway/src/http.ts` | 296 | **0** | the vocabulary every route shares |
-| `apps/gateway/src/routes/oauth.ts` | 425 | 4 | the module a provider split would help most |
+| `apps/gateway/src/routes/oauth.ts` | 450 | 4 | the module a provider split would help most |
 | `apps/gateway/src/routes/connections.ts` | 281 | 2 | both in connection lifecycle |
 | `apps/gateway/src/routes/inference.ts` | 942 | **0** | `/v1/models`, `/v1/chat/completions`, and the auth gate |
 | `apps/gateway/src/routes/api-keys.ts` | 74 | **0** | |

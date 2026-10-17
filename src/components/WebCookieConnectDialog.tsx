@@ -51,6 +51,20 @@ export type WebSessionDescriptor = {
   check?: { path: string; field: string };
   /** What a signed-in account offers, when the provider varies its models by plan. */
   planNote?: string;
+  /**
+   * The credential may be left out, and the provider still connects.
+   *
+   * True for exactly one provider today, and the reason it needs saying is that the field is
+   * otherwise mandatory: `pasteReady` is `exported.trim().length > 0`, so an empty box leaves
+   * Check and Save disabled with no explanation — which for a provider that needs nothing reads
+   * as a broken dialog rather than as "you are already done".
+   *
+   * Duck.ai is the case. It gates on an anti-bot challenge, not on a session, so a cookie is not
+   * what makes a turn work. Turning this on without the gateway also accepting an absent
+   * `field` would just move the failure, so the flag is only read for a descriptor whose
+   * gateway route already takes it as optional.
+   */
+  optionalCredential?: boolean;
 };
 
 type Props = {
@@ -199,7 +213,16 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
    * dialog, not as a lock. The gate and the thing that can open it have to be the same condition.
    */
   const mustAcknowledge = Boolean(riskNotice);
-  const pasteReady = exported.trim().length > 0 && (!mustAcknowledge || acknowledged);
+  /**
+   * Whether the form may be sent.
+   *
+   * A non-empty paste is the gate for every provider whose service reads the credential. Where
+   * the credential is optional, an empty field is a valid request — so the acknowledgement still
+   * has to be given, and only the paste is waived. Dropping `acknowledged` here as well would let
+   * a high-risk provider be connected without the user ever being shown its warning.
+   */
+  const credentialSatisfied = descriptor.optionalCredential || exported.trim().length > 0;
+  const pasteReady = credentialSatisfied && (!mustAcknowledge || acknowledged);
   // The models the account would get, narrowed by the toggle — the same narrowing the save
   // applies, so what is shown here is what will be there afterwards.
   const offered = freeOnly && checked ? checked.models.filter((model) => model.id.includes('free')) : checked?.models ?? [];
@@ -336,7 +359,9 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
               ))}
               <li className="flex gap-2 text-[11px] leading-relaxed text-muted">
                 <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border border-line font-mono text-[9px] text-gold-text">4</span>
-                Paste it below and check the cookie. If it stops working, sign in again and paste a fresh value.
+                {descriptor.optionalCredential
+                  ? 'No credential is required. You can check and connect with the field below empty; paste a cookie only if you want your browser session sent along.'
+                  : 'Paste it below and check the cookie. If it stops working, sign in again and paste a fresh value.'}
               </li>
             </ol>
             <p className="mt-2.5 text-[10px] leading-relaxed text-amber-600 dark:text-amber-400">
@@ -346,6 +371,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
             <div className="mt-3">
               <label htmlFor="web-cookie-export" className="block text-[11px] font-semibold">
               {descriptor.paste?.fieldLabel ?? 'Cookie header'}
+              {descriptor.optionalCredential && <span className="ml-1.5 font-normal text-muted">(optional)</span>}
             </label>
             <textarea
               id="web-cookie-export"
@@ -463,7 +489,9 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
                 // Named rather than silently greyed. A disabled primary button with no
                 // explanation is read as a broken feature, which is exactly the wrong
                 // conclusion — the thing it wants is one field, described two steps above.
-                title={pasteReady ? undefined : 'Paste the credential above first.'}
+                // For an optional credential the blocker is the acknowledgement, not the paste,
+                // so the hint names whichever one is actually holding the button.
+                title={pasteReady ? undefined : mustAcknowledge && !acknowledged ? 'Acknowledge the notice above first.' : 'Paste the credential above first.'}
                 className="btn-gold mt-3 w-full !h-9 !text-xs"
               >
                 {phase === 'checking' ? (

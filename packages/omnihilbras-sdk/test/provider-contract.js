@@ -83,8 +83,11 @@ export const CONTRACT_TEXT = CONTRACT_PARTS.join('');
  *   Kiro publishes a fixed list and refuses anything else by name, so asking it what it has and
  *   using the answer is right for OpenAI and wrong for Kiro. Declaring the model is how a
  *   provider says "this is the one to use", and it costs one line.
+ * @param provider.refusalIsAuthFailure  set `false` for a provider whose connection holds **no
+ *   credential**, so a 401 cannot mean "your key is wrong" there. One provider sets it, and the
+ *   assertion says why in the place where it is relaxed rather than here.
  */
-export function runProviderContract({ name, adapter, script, model: nominated, credential = { type: 'api-key', value: 'contract-test-key' } }) {
+export function runProviderContract({ name, adapter, script, model: nominated, credential = { type: 'api-key', value: 'contract-test-key' }, refusalIsAuthFailure = true }) {
   /**
    * A real request always carries a credential, so the contract must supply one.
    *
@@ -171,6 +174,19 @@ export function runProviderContract({ name, adapter, script, model: nominated, c
       await adapter.chat({ model: await firstModel(adapter, context, nominated), messages: [{ role: 'user', content: 'hi' }] }, context).catch((error) => {
         // 401 is an authentication refusal everywhere. "Something went wrong" would fail over to
         // another provider for no reason and tell the user nothing about the key that is wrong.
+        //
+        // **The exception is a provider that holds no key at all**, which Duck.ai is. Its whole turn is
+        // an anti-bot challenge over a connection stored as `{ type: 'none' }`, so there is no credential
+        // that can be wrong and nothing a user could paste to fix it. Reporting `AUTHENTICATION_FAILED`
+        // there would send someone to re-copy a cookie for a service that never read one — the same class
+        // of misdiagnosis this assertion exists to prevent, pointing the other way. The opt-out is per
+        // provider and stated above rather than inferred, because "this provider disagrees with the
+        // contract" should be something a reader sees and can argue with.
+        if (!refusalIsAuthFailure) {
+          assert.notEqual(error.code, 'AUTHENTICATION_FAILED', 'a provider holding no credential must not blame one');
+          assert.ok(error.code && error.code !== 'INTERNAL_ERROR', `a refusal that names no cause at all: ${error.code}`);
+          return;
+        }
         assert.equal(error.code, 'AUTHENTICATION_FAILED', `a 401 mapped to ${error.code}`);
       });
     } finally {
