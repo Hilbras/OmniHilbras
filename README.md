@@ -1,6 +1,4 @@
 <div align="center">
-  <img src="./images/omnihilbras.png?1" alt="OmniHilbras Dashboard" width="800"/>
-  
   # OmniHilbras - FREE AI Router & Token Saver
   
   **Never stop coding. Save 20-40% tokens with RTK + auto-fallback to FREE & cheap AI models.**
