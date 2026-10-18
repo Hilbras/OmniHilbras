@@ -1,0 +1,1033 @@
+/* source() sets scan base to src/ for both webpack + Turbopack; auto-detection still skips binaries + gitignore */
+@import "tailwindcss" source("../../");
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Hide icon ligature text until font is ready */
+.material-symbols-outlined { opacity: 0; }
+.fonts-loaded .material-symbols-outlined { opacity: 1; transition: opacity .12s ease-out; }
+
+/* ============================================================
+   OmniHilbras palette — Hilbras gold on near-black / warm cream
+   Light: warm paper · Dark: charcoal with gold accents
+   ============================================================ */
+:root {
+  /* Gold scale (light) — centered on #D4AF37 */
+  --color-brand-50: #fdf9ed;
+  --color-brand-100: #faf0d0;
+  --color-brand-200: #f5e3a8;
+  --color-brand-300: #edd27a;
+  --color-brand-400: #e5c156;
+  --color-brand-500: #d4af37;
+  --color-brand-600: #b8942a;
+  --color-brand-700: #927320;
+  --color-brand-800: #6b5418;
+  --color-brand-900: #453610;
+
+  --color-primary: var(--color-brand-500);
+  --color-primary-hover: var(--color-brand-600);
+
+  /* Surfaces & backgrounds (light) */
+  --color-bg: #faf9f5;
+  --color-bg-alt: #f3f0e7;
+  --color-surface: #ffffff;
+  --color-surface-2: #f7f4ec;
+  --color-surface-3: #efe9db;
+  --color-sidebar: #f3f0e7;
+
+  /* Borders */
+  --color-border: #e7e1d1;
+  --color-border-subtle: #efe9db;
+
+  /* Text */
+  --color-text: #17150f;
+  --color-text-main: #17150f;
+  --color-text-muted: #6f6857;
+  --color-text-subtle: #8f8877;
+
+  /* Gold tokens (landing + shell) */
+  --gold: #d4af37;
+  --gold-bright: #e9c963;
+  --gold-text: #8a6d12;
+  --gold-ink: #ffffff;
+  --gold-soft: rgba(212, 175, 55, 0.14);
+  --glow: rgba(212, 175, 55, 0.35);
+  --line-strong: #d8d0bb;
+
+  /* Status */
+  --color-danger: #c23b31;
+  --color-success: #177d47;
+  --color-warning: #b8860b;
+  --color-info: #3b6ea5;
+
+  /* Radius */
+  --radius-brand: 10px;
+  --radius-brand-lg: 16px;
+
+  /* Shadows */
+  --shadow-soft: 0 1px 2px rgba(30, 25, 5, 0.05), 0 4px 16px rgba(30, 25, 5, 0.04);
+  --shadow-warm: 0 6px 24px rgba(212, 175, 55, 0.22);
+  --shadow-elevated: 0 12px 40px rgba(30, 25, 5, 0.07);
+  --shadow-elev:
+    0 1px 2px rgba(30, 25, 5, 0.05),
+    0 12px 40px rgba(30, 25, 5, 0.07);
+  --shadow-focus: 0 0 0 3px rgba(212, 175, 55, 0.22);
+
+  color-scheme: light;
+}
+
+.dark {
+  /* Gold scale (dark) — centered on #E2BD52 */
+  --color-brand-50: #1a1503;
+  --color-brand-100: #2a2208;
+  --color-brand-200: #3d3110;
+  --color-brand-300: #5c4a18;
+  --color-brand-400: #a07f28;
+  --color-brand-500: #e2bd52;
+  --color-brand-600: #e9c963;
+  --color-brand-700: #f3d789;
+  --color-brand-800: #f7e4a8;
+  --color-brand-900: #fbf0d0;
+
+  --color-primary: #e2bd52;
+  --color-primary-hover: #e9c963;
+
+  /* Surfaces (dark) */
+  --color-bg: #0c0b09;
+  --color-bg-alt: #12100c;
+  --color-surface: #15130e;
+  --color-surface-2: #1b1812;
+  --color-surface-3: #242016;
+  --color-sidebar: #12100c;
+
+  --color-border: #262117;
+  --color-border-subtle: #1f1b12;
+
+  --color-text: #f2efe6;
+  --color-text-main: #f2efe6;
+  --color-text-muted: #9c9584;
+  --color-text-subtle: #6f6857;
+
+  --gold: #e2bd52;
+  --gold-bright: #f3d789;
+  --gold-text: #e6c768;
+  --gold-ink: #1a1503;
+  --gold-soft: rgba(226, 189, 82, 0.12);
+  --glow: rgba(226, 189, 82, 0.25);
+  --line-strong: #353021;
+
+  --color-danger: #ff8a80;
+  --color-success: #6fdb9b;
+  --color-warning: #e6c768;
+  --color-info: #83b7ff;
+
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
+  --shadow-warm: 0 6px 24px rgba(226, 189, 82, 0.18);
+  --shadow-elevated: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --shadow-elev:
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 16px 48px rgba(0, 0, 0, 0.5);
+  --shadow-focus: 0 0 0 3px rgba(226, 189, 82, 0.2);
+
+  color-scheme: dark;
+}
+
+/* ============================================================
+   Fix native select dropdowns in dark mode
+   ============================================================ */
+select {
+  color-scheme: light;
+}
+
+.dark select {
+  color-scheme: dark;
+}
+
+.dark select option {
+  background-color: var(--color-surface);
+  color: var(--color-text-main);
+}
+
+@theme inline {
+  /* Brand scale */
+  --color-brand-50: var(--color-brand-50);
+  --color-brand-100: var(--color-brand-100);
+  --color-brand-200: var(--color-brand-200);
+  --color-brand-300: var(--color-brand-300);
+  --color-brand-400: var(--color-brand-400);
+  --color-brand-500: var(--color-brand-500);
+  --color-brand-600: var(--color-brand-600);
+  --color-brand-700: var(--color-brand-700);
+  --color-brand-800: var(--color-brand-800);
+  --color-brand-900: var(--color-brand-900);
+
+  /* Primary aliases */
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+
+  /* Semantic */
+  --color-bg: var(--color-bg);
+  --color-bg-alt: var(--color-bg-alt);
+  --color-bg-soft: var(--color-bg-alt);
+  --color-surface: var(--color-surface);
+  --color-surface-2: var(--color-surface-2);
+  --color-surface-3: var(--color-surface-3);
+  --color-sidebar: var(--color-sidebar);
+  --color-border: var(--color-border);
+  --color-border-subtle: var(--color-border-subtle);
+  --color-text: var(--color-text);
+  --color-text-main: var(--color-text-main);
+  --color-text-muted: var(--color-text-muted);
+  --color-text-subtle: var(--color-text-subtle);
+  --color-muted: var(--color-text-muted);
+  --color-accent: var(--color-brand-500);
+  --color-danger: var(--color-danger);
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+  --color-info: var(--color-info);
+
+  /* Gold utilities (landing + shell) */
+  --color-gold: var(--gold);
+  --color-gold-bright: var(--gold-bright);
+  --color-gold-text: var(--gold-text);
+  --color-gold-ink: var(--gold-ink);
+  --color-gold-soft: var(--gold-soft);
+  --color-glow: var(--glow);
+  --color-line: var(--color-border);
+  --color-line-strong: var(--line-strong);
+
+  /* Radius */
+  --radius-brand: var(--radius-brand);
+  --radius-brand-lg: var(--radius-brand-lg);
+
+  /* Shadows */
+  --shadow-soft: var(--shadow-soft);
+  --shadow-warm: var(--shadow-warm);
+  --shadow-elevated: var(--shadow-elevated);
+  --shadow-elev: var(--shadow-elev);
+  --shadow-focus: var(--shadow-focus);
+
+  /* Font — Geist with system fallbacks */
+  --font-sans: var(--font-geist), 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/* Base */
+* {
+  box-sizing: border-box;
+  border-color: var(--color-border);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text-main);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Selection - gold-tinted */
+::selection {
+  background-color: var(--glow);
+  color: var(--color-text-main);
+}
+
+/* iOS keyboard accent */
+input, textarea {
+  accent-color: var(--color-primary);
+}
+
+:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+
+/* Scrollbar (custom-scrollbar utility kept for compat) */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--line-strong);
+  border-radius: 999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--gold);
+}
+
+/* Thin horizontal scrollbar - gold colored */
+.scroll-thin-x {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--gold) 55%, transparent) transparent;
+}
+.scroll-thin-x::-webkit-scrollbar { height: 3px; }
+.scroll-thin-x::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin-x::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--gold) 55%, transparent);
+  border-radius: 3px;
+}
+
+/* Global thin mac-like scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--line-strong);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--gold);
+}
+
+/* Reusable elevated card */
+.card-soft {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-soft);
+  border-radius: var(--radius-brand-lg);
+}
+.card-elev {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-elev);
+  border-radius: var(--radius-brand-lg);
+}
+
+/* Hero gradient (compat) */
+.bg-hero-gradient {
+  background: linear-gradient(180deg, var(--color-bg-alt) 0%, var(--color-bg) 100%);
+}
+
+/*
+ * Translucent surface without a backdrop filter.
+ *
+ * Was `backdrop-filter: blur(20px)` over a 72%-opaque background — content scrolling
+ * underneath is re-sampled and re-blurred every frame. A filter is only paid for when
+ * something shows through, so dropping the filter while leaving the translucency would
+ * have kept most of the cost. Opaque by default; the alpha variant is opt-in.
+ */
+.bg-vibrancy {
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+}
+.dark .bg-vibrancy {
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+}
+
+/* macOS Traffic Lights (legacy; sidebar no longer uses them) */
+.traffic-lights {
+  display: flex;
+  gap: 8px;
+}
+.traffic-light {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.traffic-light.red { background: #FF5F56; }
+.traffic-light.yellow { background: #FFBD2E; }
+.traffic-light.green { background: #27C93F; }
+
+/* Material Symbols */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined', sans-serif;
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: 'liga';
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+.material-symbols-outlined.fill-1 {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* Disable text selection on buttons */
+button {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Tailwind v4 dropped default button cursor — restore globally */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+label[for],
+summary,
+select {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+/* ============================================================
+   Design components (Hilbras gold shell)
+   ============================================================ */
+
+/*
+ * Opaque, not frosted — the same performance decision as the dashboard header.
+ * A backdrop filter behind a sticky element re-samples and re-blurs everything
+ * scrolling under it on every frame.
+ */
+.nav-blur {
+  background: color-mix(in srgb, var(--color-bg) 96%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+
+.btn-gold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--gold) 70%, #000 30%);
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-bright) 55%, var(--gold) 100%);
+  box-shadow: 0 6px 24px var(--glow);
+  color: var(--gold-ink);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1;
+  padding: 10px 17px;
+  transition: transform 150ms ease, box-shadow 150ms ease, filter 150ms ease;
+}
+
+.btn-gold:hover {
+  box-shadow: 0 10px 32px var(--glow);
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.btn-gold:active {
+  transform: translateY(0);
+}
+
+.btn-gold:disabled,
+.btn-ghost:disabled,
+.btn-quiet:disabled {
+  opacity: 0.45;
+  filter: saturate(0.5);
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 550;
+  line-height: 1;
+  padding: 10px 17px;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.btn-ghost:hover {
+  border-color: var(--gold);
+  background: var(--gold-soft);
+  transform: translateY(-1px);
+}
+
+.btn-quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 550;
+  padding: 9px 10px;
+  transition: color 150ms ease, background 150ms ease;
+}
+
+.btn-quiet:hover {
+  background: var(--gold-soft);
+  color: var(--gold-text);
+}
+
+.theme-toggle {
+  border: 1px solid var(--line-strong);
+  background: var(--color-surface);
+  color: var(--gold-text);
+  transition: border-color 200ms ease, background 200ms ease, box-shadow 200ms ease;
+}
+
+.theme-toggle:hover {
+  border-color: var(--gold);
+  background: var(--gold-soft);
+}
+
+.card {
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
+  border-radius: 999px;
+  background: var(--gold-soft);
+  color: var(--gold-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  line-height: 1;
+  padding: 7px 12px;
+  text-transform: uppercase;
+}
+
+.eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--gold);
+  box-shadow: 0 0 0 4px var(--gold-soft);
+}
+
+.section-title {
+  font-size: clamp(28px, 4vw, 42px);
+  font-weight: 720;
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+.mono-label {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hairline {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  opacity: 0.55;
+}
+
+.gold-text {
+  background: linear-gradient(100deg, var(--gold-text), var(--gold-bright) 45%, var(--gold-text) 90%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.skip-link {
+  position: fixed;
+  top: -64px;
+  left: 16px;
+  z-index: 300;
+  transition: top 150ms ease;
+}
+
+.skip-link:focus {
+  top: 12px;
+}
+
+.particle-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.bg-glow {
+  background: radial-gradient(ellipse 90% 60% at 50% -15%, color-mix(in srgb, var(--gold) 16%, transparent), transparent 70%);
+}
+
+.grid-wash {
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--color-border) 50%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--color-border) 50%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, black, transparent 78%);
+  -webkit-mask-image: linear-gradient(to bottom, black, transparent 78%);
+}
+
+.route-panel {
+  background: color-mix(in srgb, var(--color-surface) 86%, transparent);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.18), 0 0 0 1px color-mix(in srgb, var(--color-border) 75%, transparent);
+}
+
+.route-line {
+  background: linear-gradient(90deg, var(--gold), color-mix(in srgb, var(--gold) 15%, transparent));
+  transform-origin: left center;
+  animation: route-travel 2.8s ease-in-out infinite;
+}
+
+.route-dot {
+  box-shadow: 0 0 0 5px var(--gold-soft), 0 0 18px var(--glow);
+}
+
+.code-window {
+  background: #0d0c09;
+  color: #e6c768;
+}
+
+.code-muted {
+  color: #8c8575;
+}
+
+.code-green {
+  color: #7fd88f;
+}
+
+.code-blue {
+  color: #83b7ff;
+}
+
+.footer-link {
+  color: var(--color-text-muted);
+  transition: color 150ms ease;
+}
+
+.footer-link:hover {
+  color: var(--gold-text);
+}
+
+/* Scroll reveal (IntersectionObserver-driven; replaces motion/react) */
+.reveal {
+  opacity: 0;
+  transform: translateY(22px);
+  transition: opacity 0.58s cubic-bezier(0.22, 1, 0.36, 1), transform 0.58s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reveal-card {
+  opacity: 0;
+  transform: translateY(28px) scale(0.98);
+  transition: opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1), transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reveal.is-visible,
+.reveal-card.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .reveal-card {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * Dashboard shell — compact control-room surface
+ * ---------------------------------------------------------------- */
+.dashboard-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.dashboard-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dashboard-scroll::-webkit-scrollbar-thumb {
+  border: 0;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+.dashboard-header {
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-border) 35%, transparent);
+}
+
+.dashboard-grid-bg {
+  background-color: var(--color-bg);
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--color-border) 32%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--color-border) 32%, transparent) 1px, transparent 1px);
+  background-position: center top;
+  background-size: 48px 48px;
+}
+
+.dashboard-grid-bg::before {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 70% 36% at 50% 0%, var(--gold-soft), transparent 72%);
+  content: '';
+  pointer-events: none;
+}
+
+/* ============================================================
+   Animations
+   ============================================================ */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin { animation: spin 1s linear infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+@keyframes border-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px var(--glow), 0 0 10px color-mix(in srgb, var(--gold) 20%, transparent);
+    border-color: color-mix(in srgb, var(--gold) 50%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 10px var(--glow), 0 0 20px color-mix(in srgb, var(--gold) 30%, transparent);
+    border-color: color-mix(in srgb, var(--gold) 80%, transparent);
+  }
+}
+.animate-border-glow { animation: border-glow 2s ease-in-out infinite; }
+
+@keyframes slideInFromRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideInFromTop {
+  from { transform: translateY(-10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.slide-in-right { animation: slideInFromRight 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.fade-in { animation: fadeIn 0.2s ease-out forwards; }
+.slide-in-top { animation: slideInFromTop 0.18s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.05); }
+}
+.animate-pulse-glow { animation: pulseGlow 3s ease-in-out infinite; }
+
+/* CTA shimmer + glow pulse */
+@keyframes ctaShimmer {
+  0% { transform: translateX(-120%) skewX(-20deg); }
+  100% { transform: translateX(220%) skewX(-20deg); }
+}
+@keyframes ctaGlowPulse {
+  0%, 100% { box-shadow: 0 8px 24px -8px var(--glow), 0 0 0 0 color-mix(in srgb, var(--gold) 50%, transparent); }
+  50% { box-shadow: 0 12px 32px -8px var(--glow), 0 0 0 8px transparent; }
+}
+.btn-cta {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  animation: ctaGlowPulse 2.4s ease-in-out infinite;
+}
+.btn-cta::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+  animation: ctaShimmer 2.8s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+.btn-cta > * { position: relative; z-index: 2; }
+
+/* Dot Grid Background Pattern */
+.dot-grid-bg {
+  background-color: var(--color-bg);
+  background-image:
+    radial-gradient(circle at 15% 20%, color-mix(in srgb, var(--gold) 10%, transparent) 0%, transparent 40%),
+    radial-gradient(circle at 85% 80%, color-mix(in srgb, var(--gold) 6%, transparent) 0%, transparent 40%);
+}
+.dark .dot-grid-bg {
+  background-image:
+    radial-gradient(circle at 15% 20%, color-mix(in srgb, var(--gold) 14%, transparent) 0%, transparent 40%),
+    radial-gradient(circle at 85% 80%, color-mix(in srgb, var(--gold) 8%, transparent) 0%, transparent 40%);
+}
+
+/* Landing-style faint grid overlay */
+.landing-grid {
+  background-image:
+    linear-gradient(to right, var(--color-border) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-border) 1px, transparent 1px);
+  background-size: 48px 48px;
+  opacity: 0.55;
+}
+
+/* Page transitions */
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: page-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes route-travel {
+  0% {
+    opacity: 0;
+    transform: translateX(-12px) scaleX(0.3);
+  }
+  18%,
+  72% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(92px) scaleX(1);
+  }
+}
+
+@keyframes soft-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee {
+  animation: marquee 34s linear infinite;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html.theme-anim body,
+  html.theme-anim *,
+  html.theme-anim *::before,
+  html.theme-anim *::after {
+    transition:
+      background-color 350ms cubic-bezier(0.4, 0, 0.2, 1),
+      border-color 350ms cubic-bezier(0.4, 0, 0.2, 1),
+      color 350ms cubic-bezier(0.4, 0, 0.2, 1),
+      box-shadow 350ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+/* ── Usage topology ───────────────────────────────────────────────────────────── */
+@keyframes topology-router-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 8px var(--gold), 0 0 20px var(--glow), inset 0 0 10px color-mix(in srgb, var(--gold) 30%, transparent);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 14px var(--gold-bright), 0 0 28px var(--gold), 0 0 44px rgba(34, 211, 238, 0.4), inset 0 0 14px rgba(255, 255, 255, 0.25);
+  }
+}
+
+@keyframes topology-router-icon-shake {
+  0%, 100% { transform: rotate(0deg) scale(1); filter: drop-shadow(0 0 2px var(--gold-bright)); }
+  25% { transform: rotate(-5deg) scale(1.08); filter: drop-shadow(0 0 6px var(--gold)); }
+  75% { transform: rotate(5deg) scale(1.08); filter: drop-shadow(0 0 6px #22d3ee); }
+}
+
+@keyframes topology-router-label-flicker {
+  0%, 100% { text-shadow: 0 0 6px var(--gold-bright), 0 0 12px #22d3ee; }
+  50% { text-shadow: 0 0 10px #fff, 0 0 18px var(--gold); }
+}
+
+@keyframes topology-edge-dash {
+  to { stroke-dashoffset: -36; }
+}
+@keyframes topology-edge-flicker {
+  0%, 100% { opacity: 0.85; }
+  40% { opacity: 1; }
+  55% { opacity: 0.55; }
+  70% { opacity: 1; }
+}
+.topology-router-core {
+  animation: topology-router-pulse 0.75s ease-in-out infinite;
+  border-color: var(--gold) !important;
+}
+.topology-router-icon {
+  animation: topology-router-icon-shake 0.45s ease-in-out infinite;
+}
+.topology-router-label {
+  animation: topology-router-label-flicker 0.7s ease-in-out infinite;
+}
+.topology-router-badge {
+  box-shadow: 0 0 10px var(--gold), 0 0 16px rgba(34, 211, 238, 0.5);
+}
+.topology-edge-kame {
+  stroke-dasharray: 8 6;
+  animation: topology-edge-dash 0.22s linear infinite;
+}
+.topology-edge-halo {
+  animation: topology-edge-flicker 0.18s steps(2) infinite;
+}
+.topology-edge-plasma {
+  stroke-dasharray: 14 10;
+  animation: topology-edge-dash 0.18s linear infinite, topology-edge-flicker 0.22s steps(3) infinite;
+}
+
+.topology-paused .topology-router-core,
+.topology-paused .topology-router-icon,
+.topology-paused .topology-router-label,
+.topology-paused .topology-edge-kame,
+.topology-paused .topology-edge-halo,
+.topology-paused .topology-edge-plasma,
+.topology-paused .topology-edge animate,
+.topology-paused .topology-edge animateMotion {
+  animation: none !important;
+}
+
+/* React Flow controls: match app theme */
+.react-flow-controls-custom,
+.topology-controls {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+
+.react-flow-controls-custom button,
+.topology-controls button {
+  background: var(--color-surface);
+  color: var(--color-text-main);
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.react-flow-controls-custom button:last-child,
+.topology-controls button:last-child {
+  border-bottom: 0;
+}
+
+.react-flow-controls-custom button:hover,
+.topology-controls button:hover {
+  background: var(--color-bg-alt);
+}
+
+/* Changelog markdown body */
+.changelog-body h1 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 1.5rem 0 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.changelog-body h1:first-child { margin-top: 0; }
+.changelog-body h2 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 1rem 0 0.5rem;
+  color: var(--color-primary);
+}
+.changelog-body h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0.75rem 0 0.4rem;
+}
+.changelog-body ul {
+  list-style: disc;
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+.changelog-body li { margin: 0.25rem 0; line-height: 1.6; }
+.changelog-body p { margin: 0.5rem 0; line-height: 1.6; }
+.changelog-body code {
+  background: var(--color-bg-alt);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.875em;
+  font-family: ui-monospace, monospace;
+}
+.changelog-body a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+.changelog-body hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 1.5rem 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .page-enter,
+  .marquee,
+  .route-line,
+  .route-dot,
+  .eyebrow-dot,
+  .topology-router-core,
+  .topology-router-icon,
+  .topology-router-label,
+  .topology-edge-kame,
+  .topology-edge-halo,
+  .topology-edge-plasma,
+  .topology-edge animate,
+  .topology-edge animateMotion {
+    animation: none !important;
+  }
+}
