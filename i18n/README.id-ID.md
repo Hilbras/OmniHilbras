@@ -7,9 +7,9 @@
 
   **Hubungkan semua tool AI coding (Claude Code, Cursor, Antigravity, Copilot, Codex, Gemini, OpenCode, Cline, OpenClaw...) ke 40+ provider AI dan 100+ model.**
 
-  [![npm](https://img.shields.io/npm/v/omnihilbras.svg)](https://www.npmjs.com/package/omnihilbras)
-  [![Downloads](https://img.shields.io/npm/dm/omnihilbras.svg)](https://www.npmjs.com/package/omnihilbras)
-  [![License](https://img.shields.io/npm/l/omnihilbras.svg)](https://github.com/hilbras/omnihilbras/blob/main/LICENSE)
+  [![npm](https://img.shields.io/npm/v/@hilbras/omnihilbras.svg)](https://www.npmjs.com/package/@hilbras/omnihilbras)
+  [![Downloads](https://img.shields.io/npm/dm/@hilbras/omnihilbras.svg)](https://www.npmjs.com/package/@hilbras/omnihilbras)
+  [![License](https://img.shields.io/npm/l/@hilbras/omnihilbras.svg)](https://github.com/hilbras/omnihilbras/blob/main/LICENSE)
 
   [🚀 Mulai Cepat](#-mulai-cepat) • [💡 Fitur](#-fitur-utama) • [📖 Setup](#-panduan-setup) • [🌐 Website](https://omnihilbras.com)
 
@@ -68,7 +68,7 @@ Hasil: ngoding tanpa berhenti, biaya minimum
 **1. Install secara global:**
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 ```
 
@@ -887,7 +887,7 @@ Dashboard: `http://localhost:20128/dashboard`
 <summary><b>VPS / Cloud</b></summary>
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 PORT=20128 HOSTNAME=0.0.0.0 BASE_URL=https://your-domain.com omnihilbras
 ```
 
@@ -946,6 +946,6 @@ MIT License — lihat [LICENSE](https://github.com/hilbras/omnihilbras/blob/main
 
 **Kalau OmniHilbras membantumu, kasih ⭐ di [GitHub](https://github.com/hilbras/omnihilbras)!**
 
-[🌐 Website](https://omnihilbras.com) • [📦 npm](https://www.npmjs.com/package/omnihilbras) • [🐛 Laporkan Bug](https://github.com/hilbras/omnihilbras/issues)
+[🌐 Website](https://omnihilbras.com) • [📦 npm](https://www.npmjs.com/package/@hilbras/omnihilbras) • [🐛 Laporkan Bug](https://github.com/hilbras/omnihilbras/issues)
 
 </div>

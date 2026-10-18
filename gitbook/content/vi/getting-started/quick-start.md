@@ -9,7 +9,7 @@ Khởi chạy OmniHilbras trong 5 phút và bắt đầu định tuyến các re
 ### 1. Cài đặt
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **Yêu cầu:** Node.js 20+ ([Chi tiết cài đặt](getting-started/installation.md))

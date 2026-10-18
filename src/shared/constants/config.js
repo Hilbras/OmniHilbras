@@ -15,9 +15,9 @@ export const GITHUB_CONFIG = {
 
 // Updater configuration
 export const UPDATER_CONFIG = {
-  npmPackageName: "omnihilbras",
-  installCmd: "npm i -g omnihilbras",
-  installCmdLatest: "npm i -g omnihilbras@latest --prefer-online",
+  npmPackageName: "@hilbras/omnihilbras",
+  installCmd: "npm i -g @hilbras/omnihilbras",
+  installCmdLatest: "npm i -g @hilbras/omnihilbras@latest --prefer-online",
   shutdownCountdownSec: 3,
   exitDelayMs: 500,
   statusPort: 20129,

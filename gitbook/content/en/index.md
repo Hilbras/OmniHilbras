@@ -105,7 +105,7 @@ Get started in 2 minutes:
 
 ```bash
 # Install globally
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 
 # Start (dashboard opens automatically)
 omnihilbras

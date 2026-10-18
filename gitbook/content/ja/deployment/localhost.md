@@ -9,7 +9,7 @@
 npm経由でOmniHilbrasをグローバルインストール:
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **要件:**
@@ -81,13 +81,13 @@ omnihilbras
 最新バージョンに更新:
 
 ```bash
-npm update -g omnihilbras
+npm update -g @hilbras/omnihilbras
 ```
 
 現在のバージョンを確認:
 
 ```bash
-npm list -g omnihilbras
+npm list -g @hilbras/omnihilbras
 ```
 
 ---
@@ -113,7 +113,7 @@ kill -9 <PID>
 
 ```bash
 # sudoを使用 (非推奨)
-sudo npm install -g omnihilbras
+sudo npm install -g @hilbras/omnihilbras
 
 # またはnpm権限を修正 (推奨)
 mkdir ~/.npm-global

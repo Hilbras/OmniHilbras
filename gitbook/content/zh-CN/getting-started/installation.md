@@ -34,7 +34,7 @@ npm --version
 全局安装,任何位置都能使用:
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **启动 OmniHilbras:**
@@ -46,7 +46,7 @@ omnihilbras
 **优势:**
 - ✅ 任意目录均可运行
 - ✅ 命令简单:`omnihilbras`
-- ✅ 通过 `npm update -g omnihilbras` 自动更新
+- ✅ 通过 `npm update -g @hilbras/omnihilbras` 自动更新
 
 ### 方式 2:本地安装
 
@@ -283,7 +283,7 @@ echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
 
 # 然后重新安装
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 ### Node.js 版本过低
@@ -372,7 +372,7 @@ pm2 save
 ### 本地开发
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 ```
 
@@ -382,7 +382,7 @@ omnihilbras
 
 ```bash
 # 安装
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 
 # 配置
 export JWT_SECRET="your-secure-secret"
@@ -444,7 +444,7 @@ server {
 ### 移除全局安装
 
 ```bash
-npm uninstall -g omnihilbras
+npm uninstall -g @hilbras/omnihilbras
 ```
 
 ### 移除数据目录

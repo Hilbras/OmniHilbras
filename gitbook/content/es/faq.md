@@ -198,7 +198,7 @@ Consulta la [guía de integración de Cursor](integration/cursor.md) para detall
 
 ### Localhost (Por defecto)
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 → Dashboard: http://localhost:20127
 → API: http://localhost:20128/v1
@@ -287,7 +287,7 @@ Consulta la [guía de despliegue](getting-started/installation.md#deployment) pa
 
 ### Instalación global NPM
 ```bash
-npm update -g omnihilbras
+npm update -g @hilbras/omnihilbras
 ```
 
 ### Instalación local

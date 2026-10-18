@@ -9,7 +9,7 @@ Get OmniHilbras running in 5 minutes and start routing AI requests intelligently
 ### 1. Install
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **Requirements:** Node.js 20+ ([Installation details](getting-started/installation.md))

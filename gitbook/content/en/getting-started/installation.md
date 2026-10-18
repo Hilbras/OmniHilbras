@@ -34,7 +34,7 @@ npm --version
 Install OmniHilbras globally to use from anywhere:
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **Start OmniHilbras:**
@@ -46,7 +46,7 @@ omnihilbras
 **Benefits:**
 - ✅ Run from any directory
 - ✅ Simple command: `omnihilbras`
-- ✅ Auto-updates with `npm update -g omnihilbras`
+- ✅ Auto-updates with `npm update -g @hilbras/omnihilbras`
 
 ### Method 2: Local Installation
 
@@ -283,7 +283,7 @@ echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
 
 # Then install again
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 ### Node.js Version Too Old
@@ -372,7 +372,7 @@ pm2 save
 ### Local Development
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 ```
 
@@ -382,7 +382,7 @@ omnihilbras
 
 ```bash
 # Install
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 
 # Configure
 export JWT_SECRET="your-secure-secret"
@@ -444,7 +444,7 @@ server {
 ### Remove Global Installation
 
 ```bash
-npm uninstall -g omnihilbras
+npm uninstall -g @hilbras/omnihilbras
 ```
 
 ### Remove Data Directory

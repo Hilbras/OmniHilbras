@@ -105,7 +105,7 @@ Comienza en 2 minutos:
 
 ```bash
 # Instala globalmente
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 
 # Inicia (el dashboard se abre automáticamente)
 omnihilbras

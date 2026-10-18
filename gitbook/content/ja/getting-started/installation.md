@@ -34,7 +34,7 @@ npm --version
 どこからでも使用できるようにOmniHilbrasをグローバルインストール:
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **OmniHilbrasを起動:**
@@ -46,7 +46,7 @@ omnihilbras
 **利点:**
 - ✅ どのディレクトリからでも実行
 - ✅ シンプルなコマンド: `omnihilbras`
-- ✅ `npm update -g omnihilbras` で自動更新
+- ✅ `npm update -g @hilbras/omnihilbras` で自動更新
 
 ### 方法2: ローカルインストール
 
@@ -283,7 +283,7 @@ echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
 
 # 再度インストール
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 ### Node.jsバージョンが古すぎる
@@ -372,7 +372,7 @@ pm2 save
 ### ローカル開発
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 ```
 
@@ -382,7 +382,7 @@ omnihilbras
 
 ```bash
 # インストール
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 
 # 設定
 export JWT_SECRET="your-secure-secret"
@@ -444,7 +444,7 @@ server {
 ### グローバルインストールを削除
 
 ```bash
-npm uninstall -g omnihilbras
+npm uninstall -g @hilbras/omnihilbras
 ```
 
 ### データディレクトリを削除

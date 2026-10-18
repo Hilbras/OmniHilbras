@@ -1,7 +1,8 @@
 import https from "https";
 import pkg from "../../../../package.json" with { type: "json" };
 
-const NPM_PACKAGE_NAME = "omnihilbras";
+const NPM_PACKAGE_NAME = "@hilbras/omnihilbras";
+const NPM_PACKAGE_NAME_LATEST = `https://registry.npmjs.org/${encodeURIComponent(NPM_PACKAGE_NAME)}/latest`;
 const VERSION_CACHE_TTL_MS = 3600000; // cache npm latest lookup for 1h
 
 // Survive hot reload; one cache per process
@@ -10,8 +11,7 @@ const versionCache = (global.__npmVersionCache ??= { value: null, fetchedAt: 0 }
 // Fetch latest version from npm registry
 function fetchLatestVersion() {
   return new Promise((resolve) => {
-    const req = https.get(
-      `https://registry.npmjs.org/${NPM_PACKAGE_NAME}/latest`,
+    const req = https.get(NPM_PACKAGE_NAME_LATEST,
       { timeout: 4000 },
       (res) => {
         let data = "";

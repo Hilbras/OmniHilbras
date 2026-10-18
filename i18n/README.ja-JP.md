@@ -7,9 +7,9 @@
 
   **すべてのAIコーディングツール（Claude Code、Cursor、Antigravity、Copilot、Codex、Gemini、OpenCode、Cline、OpenClaw...）を40以上のAIプロバイダーと100以上のモデルに接続。**
 
-  [![npm](https://img.shields.io/npm/v/omnihilbras.svg)](https://www.npmjs.com/package/omnihilbras)
-  [![Downloads](https://img.shields.io/npm/dm/omnihilbras.svg)](https://www.npmjs.com/package/omnihilbras)
-  [![License](https://img.shields.io/npm/l/omnihilbras.svg)](https://github.com/hilbras/omnihilbras/blob/main/LICENSE)
+  [![npm](https://img.shields.io/npm/v/@hilbras/omnihilbras.svg)](https://www.npmjs.com/package/@hilbras/omnihilbras)
+  [![Downloads](https://img.shields.io/npm/dm/@hilbras/omnihilbras.svg)](https://www.npmjs.com/package/@hilbras/omnihilbras)
+  [![License](https://img.shields.io/npm/l/@hilbras/omnihilbras.svg)](https://github.com/hilbras/omnihilbras/blob/main/LICENSE)
 
   [🚀 クイックスタート](#-クイックスタート) • [💡 機能](#-主な機能) • [📖 セットアップ](#-セットアップガイド) • [🌐 ウェブサイト](https://omnihilbras.com)
 
@@ -68,7 +68,7 @@
 **1. グローバルインストール：**
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 ```
 

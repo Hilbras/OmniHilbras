@@ -34,7 +34,7 @@ npm --version
 Cài OmniHilbras toàn cục để dùng ở bất kỳ đâu:
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **Khởi động OmniHilbras:**
@@ -46,7 +46,7 @@ omnihilbras
 **Lợi ích:**
 - ✅ Chạy từ mọi thư mục
 - ✅ Lệnh đơn giản: `omnihilbras`
-- ✅ Auto-update với `npm update -g omnihilbras`
+- ✅ Auto-update với `npm update -g @hilbras/omnihilbras`
 
 ### Cách 2: Cài Local
 
@@ -283,7 +283,7 @@ echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
 
 # Then install again
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 ### Node.js Phiên bản quá cũ
@@ -372,7 +372,7 @@ pm2 save
 ### Phát triển cục bộ
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 ```
 
@@ -382,7 +382,7 @@ omnihilbras
 
 ```bash
 # Install
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 
 # Configure
 export JWT_SECRET="your-secure-secret"
@@ -444,7 +444,7 @@ server {
 ### Gỡ Global Installation
 
 ```bash
-npm uninstall -g omnihilbras
+npm uninstall -g @hilbras/omnihilbras
 ```
 
 ### Xóa Data Directory

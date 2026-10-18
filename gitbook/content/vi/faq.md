@@ -198,7 +198,7 @@ Xem [hướng dẫn tích hợp Cursor](integration/cursor.md) để biết chi 
 
 ### Localhost (Mặc định)
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 → Dashboard: http://localhost:20127
 → API: http://localhost:20128/v1
@@ -287,7 +287,7 @@ Xem [hướng dẫn deployment](getting-started/installation.md#deployment) đ�
 
 ### Global NPM Install
 ```bash
-npm update -g omnihilbras
+npm update -g @hilbras/omnihilbras
 ```
 
 ### Local Install

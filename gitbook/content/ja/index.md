@@ -105,7 +105,7 @@ MiniMax経由で200万: $0.40
 
 ```bash
 # グローバルインストール
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 
 # 起動(ダッシュボードが自動で開きます)
 omnihilbras

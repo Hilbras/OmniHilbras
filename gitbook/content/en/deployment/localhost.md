@@ -9,7 +9,7 @@ Run OmniHilbras on your local machine for development and personal use.
 Install OmniHilbras globally via npm:
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **Requirements:**
@@ -81,13 +81,13 @@ All your configurations, API keys, and combos are preserved in the data director
 Update to the latest version:
 
 ```bash
-npm update -g omnihilbras
+npm update -g @hilbras/omnihilbras
 ```
 
 Check your current version:
 
 ```bash
-npm list -g omnihilbras
+npm list -g @hilbras/omnihilbras
 ```
 
 ---
@@ -113,7 +113,7 @@ If you encounter permission errors during installation:
 
 ```bash
 # Use sudo (not recommended)
-sudo npm install -g omnihilbras
+sudo npm install -g @hilbras/omnihilbras
 
 # Or fix npm permissions (recommended)
 mkdir ~/.npm-global

@@ -198,7 +198,7 @@ npm start
 
 ### Localhost(デフォルト)
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 → Dashboard: http://localhost:20127
 → API: http://localhost:20128/v1
@@ -287,7 +287,7 @@ npm run deploy:cloudflare
 
 ### グローバルNPMインストール
 ```bash
-npm update -g omnihilbras
+npm update -g @hilbras/omnihilbras
 ```
 
 ### ローカルインストール

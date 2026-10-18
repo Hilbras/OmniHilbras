@@ -9,7 +9,7 @@
 通过 npm 全局安装 OmniHilbras:
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **要求:**
@@ -81,13 +81,13 @@ omnihilbras
 更新到最新版本:
 
 ```bash
-npm update -g omnihilbras
+npm update -g @hilbras/omnihilbras
 ```
 
 查看当前版本:
 
 ```bash
-npm list -g omnihilbras
+npm list -g @hilbras/omnihilbras
 ```
 
 ---
@@ -113,7 +113,7 @@ kill -9 <PID>
 
 ```bash
 # 使用 sudo(不推荐)
-sudo npm install -g omnihilbras
+sudo npm install -g @hilbras/omnihilbras
 
 # 或修复 npm 权限(推荐)
 mkdir ~/.npm-global

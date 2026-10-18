@@ -198,7 +198,7 @@ npm start
 
 ### Localhost(默认)
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 → 仪表盘: http://localhost:20127
 → API: http://localhost:20128/v1
@@ -287,7 +287,7 @@ npm run deploy:cloudflare
 
 ### 全局 NPM 安装
 ```bash
-npm update -g omnihilbras
+npm update -g @hilbras/omnihilbras
 ```
 
 ### 本地安装

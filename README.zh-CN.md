@@ -8,9 +8,9 @@
   
   **将所有 AI 编程工具（Claude Code、Cursor、Antigravity、Copilot、Codex、Gemini、OpenCode、Cline、OpenClaw...）连接到 40+ AI 提供商和 100+ 模型。**
   
-  [![npm](https://img.shields.io/npm/v/omnihilbras.svg)](https://www.npmjs.com/package/omnihilbras)
-  [![Downloads](https://img.shields.io/npm/dm/omnihilbras.svg)](https://www.npmjs.com/package/omnihilbras)
-  [![License](https://img.shields.io/npm/l/omnihilbras.svg)](https://github.com/hilbras/omnihilbras/blob/main/LICENSE)
+  [![npm](https://img.shields.io/npm/v/@hilbras/omnihilbras.svg)](https://www.npmjs.com/package/@hilbras/omnihilbras)
+  [![Downloads](https://img.shields.io/npm/dm/@hilbras/omnihilbras.svg)](https://www.npmjs.com/package/@hilbras/omnihilbras)
+  [![License](https://img.shields.io/npm/l/@hilbras/omnihilbras.svg)](https://github.com/hilbras/omnihilbras/blob/main/LICENSE)
 
   <a href="https://trendshift.io/repositories/22628" target="_blank"><img src="https://trendshift.io/api/badge/repositories/22628" alt="hilbras%2Fomnihilbras | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
   
@@ -74,7 +74,7 @@
 **1. 全局安装：**
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 ```
 

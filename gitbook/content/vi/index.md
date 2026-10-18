@@ -105,7 +105,7 @@ Bắt đầu trong 2 phút:
 
 ```bash
 # Install globally
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 
 # Start (dashboard opens automatically)
 omnihilbras

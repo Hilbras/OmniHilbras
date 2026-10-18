@@ -9,7 +9,7 @@ Chạy OmniHilbras trên máy cá nhân để phát triển và dùng cá nhân.
 Cài đặt OmniHilbras toàn cục qua npm:
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **Yêu cầu:**
@@ -81,13 +81,13 @@ Mọi cấu hình, API keys và combos được giữ lại trong thư mục dat
 Cập nhật phiên bản mới nhất:
 
 ```bash
-npm update -g omnihilbras
+npm update -g @hilbras/omnihilbras
 ```
 
 Kiểm tra version hiện tại:
 
 ```bash
-npm list -g omnihilbras
+npm list -g @hilbras/omnihilbras
 ```
 
 ---
@@ -113,7 +113,7 @@ Nếu gặp lỗi permission khi cài đặt:
 
 ```bash
 # Use sudo (not recommended)
-sudo npm install -g omnihilbras
+sudo npm install -g @hilbras/omnihilbras
 
 # Or fix npm permissions (recommended)
 mkdir ~/.npm-global

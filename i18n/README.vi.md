@@ -7,8 +7,8 @@
   
   **Kết nối tất cả công cụ AI Code (Claude Code, Codex, Cursor, Cline, Copilot, Antigravity...) tới 40+ Nhà cung cấp AI & 100+ Mô hình.**
   
-  [![npm](https://img.shields.io/npm/v/omnihilbras.svg)](https://www.npmjs.com/package/omnihilbras)
-  [![Downloads](https://img.shields.io/npm/dm/omnihilbras.svg)](https://www.npmjs.com/package/omnihilbras)
+  [![npm](https://img.shields.io/npm/v/@hilbras/omnihilbras.svg)](https://www.npmjs.com/package/@hilbras/omnihilbras)
+  [![Downloads](https://img.shields.io/npm/dm/@hilbras/omnihilbras.svg)](https://www.npmjs.com/package/@hilbras/omnihilbras)
   [![License](https://github.com/hilbras/omnihilbras/blob/main/LICENSE)](https://github.com/hilbras/omnihilbras/blob/main/LICENSE)
   
   [🚀 Bắt đầu nhanh](#-quick-start) • [💡 Tính năng](#-key-features) • [📖 Cài đặt](#-setup-guide) • [🌐 Website](https://omnihilbras.com)
@@ -69,7 +69,7 @@ Kết quả: Không bao giờ ngừng code, chi phí tối thiểu + tiết ki�
 **1. Cài đặt toàn cục:**
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 ```
 

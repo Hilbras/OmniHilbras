@@ -11,9 +11,9 @@
     <img src="../public/providers/openclaw.png" alt="OpenClaw" width="80"/>
   </p>
   
-  [![npm](https://img.shields.io/npm/v/omnihilbras.svg)](https://www.npmjs.com/package/omnihilbras)
-  [![Downloads](https://img.shields.io/npm/dm/omnihilbras.svg)](https://www.npmjs.com/package/omnihilbras)
-  [![License](https://img.shields.io/npm/l/omnihilbras.svg)](https://github.com/hilbras/omnihilbras/blob/main/LICENSE)
+  [![npm](https://img.shields.io/npm/v/@hilbras/omnihilbras.svg)](https://www.npmjs.com/package/@hilbras/omnihilbras)
+  [![Downloads](https://img.shields.io/npm/dm/@hilbras/omnihilbras.svg)](https://www.npmjs.com/package/@hilbras/omnihilbras)
+  [![License](https://img.shields.io/npm/l/@hilbras/omnihilbras.svg)](https://github.com/hilbras/omnihilbras/blob/main/LICENSE)
   
   [🚀 快速开始](#-quick-start) • [💡 特性](#-key-features) • [📖 设置](#-setup) • [🌐 网站](https://omnihilbras.com)
 </div>
@@ -71,7 +71,7 @@
 **1. 全局安装：**
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 ```
 

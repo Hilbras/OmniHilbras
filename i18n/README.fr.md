@@ -7,11 +7,11 @@
   
   **Connectez tous vos outils de codage IA (Claude Code, Cursor, Antigravity, Copilot, Codex, Gemini, OpenCode, Cline, OpenClaw...) à plus de 40 fournisseurs d'IA et plus de 100 modèles.**
   
-  [![npm](https://img.shields.io/npm/v/omnihilbras.svg)](https://www.npmjs.com/package/omnihilbras)
-  [![Downloads](https://img.shields.io/npm/dm/omnihilbras.svg)](https://www.npmjs.com/package/omnihilbras)
+  [![npm](https://img.shields.io/npm/v/@hilbras/omnihilbras.svg)](https://www.npmjs.com/package/@hilbras/omnihilbras)
+  [![Downloads](https://img.shields.io/npm/dm/@hilbras/omnihilbras.svg)](https://www.npmjs.com/package/@hilbras/omnihilbras)
   [![Docker Pulls](https://img.shields.io/docker/pulls/hilbras/omnihilbras.svg?logo=docker&label=Docker%20pulls)](https://hub.docker.com/r/hilbras/omnihilbras)
   [![GHCR](https://img.shields.io/badge/GHCR-hilbras%2Fomnihilbras-blue?logo=github)](https://github.com/hilbras/omnihilbras/pkgs/container/omnihilbras)
-  [![License](https://img.shields.io/npm/l/omnihilbras.svg)](https://github.com/hilbras/omnihilbras/blob/main/LICENSE)
+  [![License](https://img.shields.io/npm/l/@hilbras/omnihilbras.svg)](https://github.com/hilbras/omnihilbras/blob/main/LICENSE)
 
 <a href="https://trendshift.io/repositories/22628" target="_blank"><img src="https://trendshift.io/api/badge/repositories/22628" alt="hilbras%2Fomnihilbras | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
@@ -76,7 +76,7 @@ Result: Never stop coding, minimal cost + 20-40% token savings via RTK
 **1. Installez globalement :**
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 omnihilbras
 ```
 

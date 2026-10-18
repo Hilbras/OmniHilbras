@@ -105,7 +105,7 @@ OmniHilbras 是一款智能代理,位于你的编码工具(Cursor、Cline、Clau
 
 ```bash
 # 全局安装
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 
 # 启动(仪表盘自动打开)
 omnihilbras

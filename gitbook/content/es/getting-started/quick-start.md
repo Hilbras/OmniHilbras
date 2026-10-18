@@ -9,7 +9,7 @@ Pon en marcha OmniHilbras en 5 minutos y comienza a enrutar solicitudes de IA de
 ### 1. Instalar
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **Requisitos:** Node.js 20+ ([Detalles de instalación](getting-started/installation.md))

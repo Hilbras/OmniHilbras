@@ -9,7 +9,7 @@ OmniHilbrasを5分で起動し、AIリクエストをインテリジェントに
 ### 1. インストール
 
 ```bash
-npm install -g omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **要件:** Node.js 20+ ([インストール詳細](getting-started/installation.md))
