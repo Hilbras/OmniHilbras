@@ -26,6 +26,9 @@ export default {
       scheme: "bearer",
     },
     retry: { 429: 2 },
+    usage: {
+      apiBase: "https://ai.tiarina.cloud/v1",
+    },
   },
   models: [
     { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
@@ -33,4 +36,8 @@ export default {
   ],
   modelsFetcher: { url: "https://ai.tiarina.cloud/v1/models", type: "openai" },
   passthroughModels: true,
+  features: {
+    usage: true,
+    usageApikey: true,
+  },
 };

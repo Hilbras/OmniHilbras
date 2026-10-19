@@ -155,6 +155,35 @@ async function calculateCost(provider, model, tokens) {
   }
 }
 
+// Per-connection totals over a recent window, straight from usageHistory.
+// Feeds the quota tracker's "local history" fallback for providers whose
+// upstream exposes no usage API: we show what this router observed itself.
+export async function getUsageTotalsForConnection(connectionId, durationMs = 30 * 86400000) {
+  if (!connectionId) return null;
+  try {
+    const db = await getAdapter();
+    const since = new Date(Date.now() - durationMs).toISOString();
+    const row = db.get(
+      `SELECT COUNT(*) AS requests,
+              COALESCE(SUM(promptTokens), 0) AS promptTokens,
+              COALESCE(SUM(completionTokens), 0) AS completionTokens,
+              COALESCE(SUM(cost), 0) AS cost
+       FROM usageHistory WHERE connectionId = ? AND timestamp >= ?`,
+      [connectionId, since],
+    );
+    if (!row || !(row.requests > 0)) return null;
+    return {
+      windowMs: durationMs,
+      requests: row.requests,
+      tokens: row.promptTokens + row.completionTokens,
+      cost: row.cost,
+    };
+  } catch (e) {
+    console.error("getUsageTotalsForConnection failed:", e.message);
+    return null;
+  }
+}
+
 export function trackPendingRequest(model, provider, connectionId, started, error = false) {
   const modelKey = provider ? `${model} (${provider})` : model;
   const timerKey = `${connectionId}|${modelKey}`;

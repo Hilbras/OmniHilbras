@@ -788,6 +788,32 @@ export function parseQuotaData(provider, data) {
         }
         break;
 
+      case "tokenharbor":
+      case "nara-router":
+      case "apmix":
+      case "apinex":
+      case "tiarina":
+      case "xkiro":
+        // Aggregator hosts share one adapter (open-sse/services/usage/aggregator.js);
+        // its rows arrive already normalized — a wallet row is a currency
+        // balance, rate-limit rows carry absolute used/total, and the
+        // local-history fallback ships unlimited rows. Pass everything through.
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name,
+              used: quota.used || 0,
+              total: quota.total,
+              remainingPercentage: quota.remainingPercentage,
+              resetAt: quota.resetAt || null,
+              unlimited: quota.unlimited === true,
+              isCreditBalance: quota.isCreditBalance === true,
+              currency: quota.currency || "USD",
+            });
+          });
+        }
+        break;
+
       default:
         // Generic fallback for unknown providers
         if (data.quotas) {

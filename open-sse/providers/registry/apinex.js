@@ -26,6 +26,9 @@ export default {
       scheme: "bearer",
     },
     retry: { 429: 2 },
+    usage: {
+      apiBase: "https://api.apinex.bond/v1",
+    },
   },
   models: [
     { id: "gpt-4o-mini", name: "GPT-4o Mini" },
@@ -33,4 +36,8 @@ export default {
   ],
   modelsFetcher: { url: "https://api.apinex.bond/v1/models", type: "openai" },
   passthroughModels: true,
+  features: {
+    usage: true,
+    usageApikey: true,
+  },
 };

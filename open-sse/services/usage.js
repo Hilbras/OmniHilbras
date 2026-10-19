@@ -24,6 +24,7 @@ import { getCursorUsage } from "./usage/cursor.js";
 import { resolveQoderCredentials } from "./qoderModels.js";
 import { getGlmUsage } from "./usage/glm.js";
 import { getCommandCodeUsage } from "./usage/commandcode.js";
+import { getAggregatorUsage } from "./usage/aggregator.js";
 import {
   getIflowUsage,
   getOllamaUsage,
@@ -69,6 +70,13 @@ const USAGE_HANDLERS = {
   "xiaomi-mimo": (c) => getXiaomiMimoUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
   commandcode: (c) => getCommandCodeUsage(c.apiKey, c.proxyOptions),
   cursor: (c) => getCursorUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
+  // Aggregator (one-api/new-api family) hosts — shared adapter, endpoints from registry.
+  tokenharbor: (c) => getAggregatorUsage(c),
+  "nara-router": (c) => getAggregatorUsage(c),
+  apmix: (c) => getAggregatorUsage(c),
+  apinex: (c) => getAggregatorUsage(c),
+  tiarina: (c) => getAggregatorUsage(c),
+  xkiro: (c) => getAggregatorUsage(c),
 };
 
 // Qoder intl/CN share one usage path: PATs must be exchanged to a job token
@@ -90,6 +98,7 @@ export async function getUsageForProvider(connection, proxyOptions = null, optio
   if (!handler) return { message: `Usage API not implemented for ${provider}` };
   return await handler({
     provider,
+    connectionId: connection.id,
     accessToken,
     apiKey,
     providerSpecificData,

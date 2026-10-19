@@ -96,3 +96,23 @@ export function resolveRetryEntry(entry) {
 export const SKIP_PATTERNS = [
   "Please write a 5-10 word title for the following conversation:"
 ];
+
+// Quota tracking for aggregator providers (one-api/new-api style hosts such as
+// tokenharbor, nara-router, apmix, apinex, tiarina, xkiro). Candidate endpoint
+// flavors are tried in order; per-provider pinning lives in each registry's
+// usage.flavor. Env: AGGREGATOR_USAGE_* overrides.
+export const AGGREGATOR_USAGE_CONFIG = {
+  candidates: [
+    // OpenAI-billing pair (one-api/new-api expose /v1/dashboard/billing/…);
+    // usage values come back in USD cents.
+    { flavor: "openai-billing", path: "/dashboard/billing/subscription" },
+    { flavor: "openai-billing", path: "/dashboard/billing/usage" },
+    // new-api user/self lane; quota fields are in quota units.
+    { flavor: "new-api", path: "/api/user/self" },
+  ],
+  usageWindowDays: 30,
+  unsupportedTtlMs: envMs("AGGREGATOR_UNSUPPORTED_TTL_MS", 10 * 60 * 1000),
+  // new-api family: quota units per USD (QuotaPerUnit default).
+  newApiQuotaPerUnit: 500000,
+  fetchTimeoutMs: 10000,
+};

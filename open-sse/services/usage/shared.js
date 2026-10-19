@@ -68,3 +68,28 @@ export async function fetchWithTimeout(url, opts, ms = 10000, proxyOptions = nul
     clearTimeout(timeoutId);
   }
 }
+
+// Parse Go-style duration strings ("2m59.56s", "7.66s", "1h") — used by rate
+// limit headers that carry a reset duration instead of a timestamp.
+export function parseDurationMs(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+
+  const re = /(\d+(?:\.\d+)?)(ms|s|m|h)/g;
+  let match;
+  let totalMs = 0;
+  let matched = false;
+  while ((match = re.exec(value))) {
+    matched = true;
+    const amount = Number(match[1]);
+    const unit = match[2];
+    const unitMs = unit === "h" ? 3600000 : unit === "m" ? 60000 : unit === "ms" ? 1 : 1000;
+    totalMs += amount * unitMs;
+  }
+  return matched ? totalMs : null;
+}
+
+// Convert a duration-string reset header into an absolute ISO timestamp.
+export function resetAtFromDuration(value) {
+  const ms = parseDurationMs(value);
+  return ms === null ? null : new Date(Date.now() + ms).toISOString();
+}

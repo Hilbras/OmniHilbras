@@ -31,6 +31,11 @@ export default {
     retry: {
       429: 2,
     },
+    usage: {
+      // Aggregator billing endpoints (see open-sse/services/usage/aggregator.js).
+      // flavor pins the candidate order once we know how this host answers.
+      apiBase: "https://tokenharbor.ai/v1",
+    },
   },
   // Curated seed; the live catalogue is fetched via modelsFetcher and any other
   // id is accepted via passthroughModels. Their catalogue rotates (the :free set
@@ -46,4 +51,8 @@ export default {
   ],
   modelsFetcher: { url: "https://tokenharbor.ai/v1/models", type: "openai" },
   passthroughModels: true,
+  features: {
+    usage: true,
+    usageApikey: true,
+  },
 };

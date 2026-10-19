@@ -27,6 +27,9 @@ export default {
       scheme: "bearer",
     },
     retry: { 429: 2 },
+    usage: {
+      apiBase: "https://router.bynara.id/v1",
+    },
   },
   // Curated seed; live catalogue via modelsFetcher. Anything else accepted via passthroughModels.
   models: [
@@ -36,4 +39,8 @@ export default {
   ],
   modelsFetcher: { url: "https://router.bynara.id/v1/models", type: "openai" },
   passthroughModels: true,
+  features: {
+    usage: true,
+    usageApikey: true,
+  },
 };
