@@ -49,6 +49,7 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
   const [checkModelId, setCheckModelId] = useState("");
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
+  const [submitError, setSubmitError] = useState(null);
 
   // openai: reset baseUrl when apiType changes; anthropic: reset checks when opened
   useEffect(() => {
@@ -64,6 +65,7 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
   const handleSubmit = async () => {
     if (!formData.name.trim() || !formData.prefix.trim() || !formData.baseUrl.trim()) return;
     setSubmitting(true);
+    setSubmitError(null);
     try {
       const res = await fetch("/api/provider-nodes", {
         method: "POST",
@@ -76,12 +78,14 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
           type: config.type,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         onCreated(data.node);
         setFormData(initialFormData());
         setCheckKey("");
         setValidationResult(null);
+      } else {
+        setSubmitError(data.error || `Failed to create ${config.errorLabel} node (${res.status})`);
       }
     } catch (error) {
       console.log(`Error creating ${config.errorLabel} node:`, error);
@@ -189,6 +193,12 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
           </Button>
           {renderValidationResult()}
         </div>
+        {submitError && (
+          <div className="flex flex-col gap-1">
+            <Badge variant="error">Failed</Badge>
+            <span className="text-sm text-red-500">{submitError}</span>
+          </div>
+        )}
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             onClick={handleSubmit}

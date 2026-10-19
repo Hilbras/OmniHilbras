@@ -53,6 +53,15 @@ const MIMO_BASES = {
 const DEFAULT_REGION = "sgp";
 // passToken-prefix -> last failure ts (60s backoff for the service exchange)
 const _exchangeBackoff = new Map();
+// Cap the backoff map so stale passToken entries can't grow it unbounded.
+// Insertions evict the oldest key once the cap is reached.
+const _EXCHANGE_BACKOFF_CAP = 256;
+function setExchangeBackoff(key, ts) {
+  if (!_exchangeBackoff.has(key) && _exchangeBackoff.size >= _EXCHANGE_BACKOFF_CAP) {
+    _exchangeBackoff.delete(_exchangeBackoff.keys().next().value);
+  }
+  _exchangeBackoff.set(key, ts);
+}
 
 export function resolveMimoRegionBase(region) {
   const r = String(region || "").toLowerCase();
@@ -304,7 +313,7 @@ export async function ensureServiceSession(sess) {
     );
     if (!serviceCookie) {
       log("exchange failed: no service cookie");
-      _exchangeBackoff.set(bkKey, Date.now());
+      setExchangeBackoff(bkKey, Date.now());
       return false;
     }
     // Flatten "a=b; c=d" into the jar under the mimo-server host.
@@ -332,7 +341,7 @@ export async function ensureServiceSession(sess) {
     return res.status === 200;
   } catch (e) {
     log(`exchange error: ${e?.message || e}`);
-    _exchangeBackoff.set(bkKey, Date.now());
+    setExchangeBackoff(bkKey, Date.now());
     return false;
   }
 }

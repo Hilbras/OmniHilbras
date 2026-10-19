@@ -102,6 +102,7 @@ export async function handleChat(request, clientRawRequest = null) {
   const requiredCapabilities = detectRequiredCapabilities(body);
 
   // Check if model is a combo (has multiple models with fallback)
+  // NOTE: combo-dispatch block below is duplicated verbatim in handleSingleModelChat's nested-combo branch — keep both in sync.
   const comboModels = await getComboModels(modelStr);
   if (comboModels) {
     // Check for combo-specific strategy first, fallback to global
@@ -176,6 +177,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   const modelInfo = await getModelInfo(modelStr);
 
   // If provider is null, this might be a combo name - check and handle
+  // NOTE: combo-dispatch block below duplicates verbatim the one in handleChat above — keep both in sync.
   if (!modelInfo.provider) {
     const comboModels = await getComboModels(modelStr);
     if (comboModels) {

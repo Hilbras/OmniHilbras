@@ -66,6 +66,45 @@ async function pipeSSE(routerRes, res, dumper) {
 }
 
 /**
+ * Parse one SSE line and write transformFn's output frames to the response.
+ * Shared by pipeTransformedSSE / pipeTransformedEventStream — keep their line
+ * handling in sync (they differ only in response headers).
+ *
+ * @param {string} rawLine - One SSE line (may lack a trailing newline)
+ * @param {http.ServerResponse} res - Client response
+ * @param {Function} transformFn - (parsedChunk, state) => output|null
+ * @param {object} state - Mutable state object shared across chunks and flush
+ */
+function handleSseData(rawLine, res, transformFn, state) {
+  const trimmed = rawLine.trim();
+  if (!trimmed || !trimmed.startsWith("data:")) return;
+
+  const data = trimmed.slice(5).trim();
+  if (data === "[DONE]") return;
+
+  if (process.env.DEBUG_MITM) {
+    log(`[SSE in] ${data.slice(0, 200)}`);
+  }
+
+  try {
+    const parsed = JSON.parse(data);
+    const result = transformFn(parsed, state);
+    if (result != null) {
+      const outputs = Array.isArray(result) ? result : [result];
+      for (const output of outputs) {
+        if (process.env.DEBUG_MITM) {
+          const len = output.length || output.byteLength || 0;
+          log(`[write binary frame] (${len}B) first 20B: ${Array.from(output.slice(0, 20)).join(',')}`);
+        }
+        res.write(Buffer.from(output));
+      }
+    }
+  } catch {
+    // Skip unparseable lines
+  }
+}
+
+/**
  * Pipe SSE stream from router, transforming each chunk through a user function.
  * Reads SSE data: lines, parses JSON, calls transformFn(parsed, state),
  * and writes returned SSE strings to the client response.
@@ -76,6 +115,8 @@ async function pipeSSE(routerRes, res, dumper) {
  * @param {object} state - Mutable state object shared across chunks and flush
  */
 async function pipeTransformedSSE(routerRes, res, transformFn, state) {
+  // NOTE: keep in sync with pipeTransformedEventStream (same line handling —
+  // shared via handleSseData; functions differ only in response headers).
   const ct = routerRes.headers.get("content-type") || "application/json";
   const resHeaders = { "Content-Type": ct, "Cache-Control": "no-cache", "Connection": "keep-alive" };
   if (ct.includes("text/event-stream")) resHeaders["X-Accel-Buffering"] = "no";
@@ -99,34 +140,13 @@ async function pipeTransformedSSE(routerRes, res, transformFn, state) {
     buffer = lines.pop() || "";
 
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.startsWith("data:")) continue;
-
-      const data = trimmed.slice(5).trim();
-      if (data === "[DONE]") continue;
-
-      if (process.env.DEBUG_MITM) {
-        log(`[SSE in] ${data.slice(0, 200)}`);
-      }
-
-      try {
-        const parsed = JSON.parse(data);
-        const result = transformFn(parsed, state);
-        if (result != null) {
-          const outputs = Array.isArray(result) ? result : [result];
-          for (const output of outputs) {
-            if (process.env.DEBUG_MITM) {
-              const len = output.length || output.byteLength || 0;
-              log(`[write binary frame] (${len}B) first 20B: ${Array.from(output.slice(0, 20)).join(',')}`);
-            }
-            res.write(Buffer.from(output));
-          }
-        }
-      } catch {
-        // Skip unparseable lines
-      }
+      handleSseData(line, res, transformFn, state);
     }
   }
+
+  // Upstream may end without a trailing newline — the leftover buffer is a
+  // complete SSE line, not garbage; don't drop it.
+  if (buffer) handleSseData(buffer, res, transformFn, state);
 
   // Flush: pass null to signal stream end
   try {
@@ -155,6 +175,8 @@ async function pipeTransformedSSE(routerRes, res, transformFn, state) {
  * @param {object} state - Mutable state object shared across chunks and flush
  */
 async function pipeTransformedEventStream(routerRes, res, transformFn, state) {
+  // NOTE: keep in sync with pipeTransformedSSE (same line handling — shared
+  // via handleSseData; functions differ only in response headers).
   const resHeaders = {
     "Content-Type": "application/vnd.amazon.eventstream",
     "Cache-Control": "no-cache",
@@ -180,34 +202,13 @@ async function pipeTransformedEventStream(routerRes, res, transformFn, state) {
     buffer = lines.pop() || "";
 
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.startsWith("data:")) continue;
-
-      const data = trimmed.slice(5).trim();
-      if (data === "[DONE]") continue;
-
-      if (process.env.DEBUG_MITM) {
-        log(`[SSE in] ${data.slice(0, 200)}`);
-      }
-
-      try {
-        const parsed = JSON.parse(data);
-        const result = transformFn(parsed, state);
-        if (result != null) {
-          const outputs = Array.isArray(result) ? result : [result];
-          for (const output of outputs) {
-            if (process.env.DEBUG_MITM) {
-              const len = output.length || output.byteLength || 0;
-              log(`[write binary frame] (${len}B) first 20B: ${Array.from(output.slice(0, 20)).join(',')}`);
-            }
-            res.write(Buffer.from(output));
-          }
-        }
-      } catch {
-        // Skip unparseable lines
-      }
+      handleSseData(line, res, transformFn, state);
     }
   }
+
+  // Upstream may end without a trailing newline — the leftover buffer is a
+  // complete SSE line, not garbage; don't drop it.
+  if (buffer) handleSseData(buffer, res, transformFn, state);
 
   // Flush: pass null to signal stream end
   try {

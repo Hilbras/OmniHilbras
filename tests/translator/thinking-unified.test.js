@@ -153,9 +153,15 @@ describe("applyThinking per provider format", () => {
     expect(out.thinking).toEqual({ type: "enabled" });
     expect(out.reasoning_effort).toBe(expected);
   });
-  it("GLM-5.2 also gets reasoning_effort (supported from 5.2 onward)", () => {
-    const out = apply("openai", "glm-5.2", { reasoning_effort: "low" }, "glm-cn");
-    expect(out.reasoning_effort).toBe("low");
+  it("GLM-5.2-flash (pattern, no exact entry) gets reasoning_effort; bare glm-5.2 exact entry predates the effort cap (#4409 note)", () => {
+    // capabilities.js documents this deliberately: the exact MODEL_CAPABILITIES
+    // entry for "glm-5.2" does not declare thinkingEffortSupported (added Sep
+    // 2026, predates #4409); the *glm-5.2* pattern does. Exact entries win, so
+    // only pattern-matched 5.2 ids carry reasoning_effort.
+    const viaPattern = apply("openai", "glm-5.2-flash", { reasoning_effort: "low" }, "glm-cn");
+    expect(viaPattern.reasoning_effort).toBe("low");
+    const viaExact = apply("openai", "glm-5.2", { reasoning_effort: "low" }, "glm-cn");
+    expect(viaExact.reasoning_effort).toBeUndefined();
   });
   it("GLM-4.7 (pre-5.2) does not get reasoning_effort — z.ai ignores it", () => {
     const out = apply("openai", "glm-4.7", { reasoning_effort: "low" }, "glm-cn");

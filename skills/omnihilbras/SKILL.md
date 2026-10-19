@@ -46,13 +46,13 @@ When the user needs a specific capability, fetch that skill's `SKILL.md` from it
 
 | Capability | Raw URL |
 |---|---|
-| Chat / code-gen | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-chat/SKILL.md |
-| Image generation | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-image/SKILL.md |
-| Text-to-speech | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-tts/SKILL.md |
-| Speech-to-text | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-stt/SKILL.md |
-| Embeddings | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-embeddings/SKILL.md |
-| Web search | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-web-search/SKILL.md |
-| Web fetch (URL → markdown) | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-web-fetch/SKILL.md |
+| Chat / code-gen | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-chat/SKILL.md |
+| Image generation | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-image/SKILL.md |
+| Text-to-speech | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-tts/SKILL.md |
+| Speech-to-text | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-stt/SKILL.md |
+| Embeddings | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-embeddings/SKILL.md |
+| Web search | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-web-search/SKILL.md |
+| Web fetch (URL → markdown) | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-web-fetch/SKILL.md |
 
 ## Errors
 

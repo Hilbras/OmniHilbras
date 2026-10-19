@@ -8,22 +8,22 @@ Drop-in skills for any AI agent (Claude, Cursor, ChatGPT, custom SDK). Just **co
 
 | Capability | Copy link below and paste to your AI |
 |---|---|
-| **Entry / Setup** (start here) | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras/SKILL.md |
-| Chat / code-gen | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-chat/SKILL.md |
-| Image generation | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-image/SKILL.md |
-| Video generation (xAI Grok Imagine) | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-video/SKILL.md |
-| Text-to-speech | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-tts/SKILL.md |
-| Speech-to-text | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-stt/SKILL.md |
-| Embeddings | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-embeddings/SKILL.md |
-| Web search | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-web-search/SKILL.md |
-| Web fetch (URL → markdown) | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras-web-fetch/SKILL.md |
+| **Entry / Setup** (start here) | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras/SKILL.md |
+| Chat / code-gen | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-chat/SKILL.md |
+| Image generation | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-image/SKILL.md |
+| Video generation (xAI Grok Imagine) | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-video/SKILL.md |
+| Text-to-speech | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-tts/SKILL.md |
+| Speech-to-text | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-stt/SKILL.md |
+| Embeddings | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-embeddings/SKILL.md |
+| Web search | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-web-search/SKILL.md |
+| Web fetch (URL → markdown) | https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras-web-fetch/SKILL.md |
 
 ## How to use
 
 Paste to your AI (Claude, Cursor, ChatGPT, …):
 
 ```
-Read this skill and use it: https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/skills/omnihilbras/SKILL.md
+Read this skill and use it: https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/skills/omnihilbras/SKILL.md
 ```
 
 Then ask normally — *"generate an image of a cat"*, *"transcribe this URL"*, etc.

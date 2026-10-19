@@ -210,6 +210,13 @@ export default function BasicChatPageClient() {
     setIsHydrated(true);
   }, []);
 
+  // Leaving the page mid-stream must abort the request, otherwise the fetch
+  // keeps running and the reader loop keeps calling setState on an unmounted
+  // component for as long as the stream lasts.
+  useEffect(() => () => {
+    abortRef.current?.abort();
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 

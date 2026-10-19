@@ -208,7 +208,14 @@ async function fetchCompatibleModelIds(connection) {
 
   if (!baseUrl) return [];
 
-  let url = `${baseUrl}/models`;
+  let normalizedBaseUrl = baseUrl;
+  if (isAnthropicCompatibleProvider(connection.provider) && normalizedBaseUrl.endsWith("/messages")) {
+    // Anthropic-compatible apps often expose the chat base as .../v1/messages; the models
+    // endpoint is sibling of /messages (see providers/[id]/models/route.js)
+    normalizedBaseUrl = normalizedBaseUrl.slice(0, -"/messages".length);
+  }
+
+  const url = `${normalizedBaseUrl}/models`;
   const headers = {
     "Content-Type": "application/json",
   };
@@ -216,11 +223,6 @@ async function fetchCompatibleModelIds(connection) {
   if (isOpenAICompatibleProvider(connection.provider)) {
     headers.Authorization = `Bearer ${connection.apiKey}`;
   } else if (isAnthropicCompatibleProvider(connection.provider)) {
-    if (url.endsWith("/messages/models")) {
-      url = url.slice(0, -9);
-    } else if (url.endsWith("/messages")) {
-      url = `${url.slice(0, -9)}/models`;
-    }
     headers["x-api-key"] = connection.apiKey;
     headers["anthropic-version"] = "2023-06-01";
     headers.Authorization = `Bearer ${connection.apiKey}`;

@@ -82,7 +82,7 @@ if (args[0] === "xai" && args[1] === "video") {
 
 // `omnihilbras connect <url>` configures local CLI tools against a remote server, and
 // `omnihilbras show` prints what they're currently set to — no local server, no
-// runtime deps. Usable via `npx omnihilbras …`.
+// runtime deps. Usable via `npx @hilbras/omnihilbras …`.
 if (args[0] === "connect" || args[0] === "show") {
   const { run } = require(args[0] === "show" ? "./src/cli/commands/show" : "./src/cli/commands/connect");
   run(args.slice(1))
@@ -106,6 +106,15 @@ try { ensureTrayRuntime({ silent: true }); } catch {}
 const APP_NAME = "omnihilbras"; // CLI command (bin) name
 const INSTALL_CMD_LATEST = `npm i -g ${pkg.name}@latest --prefer-online`;
 
+// Same app-dir convention as cli/src/cli/api/client.js getDataDir().
+function getDataDir() {
+  if (process.env.DATA_DIR) return process.env.DATA_DIR;
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), APP_NAME);
+  }
+  return path.join(os.homedir(), `.${APP_NAME}`);
+}
+
 const DEFAULT_PORT = 20128;
 const DEFAULT_HOST = "0.0.0.0";
 
@@ -124,10 +133,6 @@ function getDisplayHost() {
   return host === DEFAULT_HOST ? "localhost" : host;
 }
 const MAX_PORT_ATTEMPTS = 10;
-// Identifiers for killAllAppProcesses - only kill omnihilbras specifically
-const PROCESS_IDENTIFIERS = [
-  'omnihilbras'  // Only package name - avoid killing other apps
-];
 
 // Parse arguments
 let port = DEFAULT_PORT;
@@ -169,7 +174,7 @@ Options:
 
 Commands:
   connect <server-url> Configure Claude Code for a remote omnihilbras server
-                      (npx omnihilbras connect http://host:20128 — no install needed)
+                      (npx @hilbras/omnihilbras connect http://host:20128 — no install needed)
   show [tool…]        Show each CLI tool's current omnihilbras config and models
                       (e.g. omnihilbras show claude)
   xai video --prompt "..." --output video.mp4
@@ -856,7 +861,7 @@ function startServer(updatePromise) {
     if (restartCount >= MAX_RESTARTS) {
       console.error(`\n⚠️  Server crashed ${MAX_RESTARTS} times. Disabling MIT and restarting...`);
       try {
-        const dbPath = path.join(os.homedir(), process.platform === "win32" ? path.join("AppData", "Roaming", "omnihilbras", "db.json") : path.join(".omnihilbras", "db.json"));
+        const dbPath = path.join(getDataDir(), "db.json");
         if (fs.existsSync(dbPath)) {
           const db = JSON.parse(fs.readFileSync(dbPath, "utf-8"));
           if (db.settings) db.settings.mitmEnabled = false;

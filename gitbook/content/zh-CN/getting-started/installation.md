@@ -55,13 +55,13 @@ omnihilbras
 ```bash
 mkdir my-omnihilbras
 cd my-omnihilbras
-npm install omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **启动 OmniHilbras:**
 
 ```bash
-npx omnihilbras
+npx @hilbras/omnihilbras
 ```
 
 **优势:**

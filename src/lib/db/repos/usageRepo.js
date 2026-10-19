@@ -87,7 +87,11 @@ function aggregateEntryToDay(day, entry) {
   addToCounter(day.byModel, modelKey, { ...vals, meta: { rawModel: entry.model, provider: entry.provider } });
 
   if (entry.connectionId) {
-    addToCounter(day.byAccount, entry.connectionId, { ...vals, meta: { rawModel: entry.model, provider: entry.provider } });
+    // Key by connectionId|model|provider (same convention as byApiKey/byEndpoint)
+    // so a connection that used several models keeps one accurate row per model
+    // instead of one collapsed row whose label is whatever came last.
+    const byAccountKey = `${entry.connectionId}|${entry.model}|${entry.provider || "unknown"}`;
+    addToCounter(day.byAccount, byAccountKey, { ...vals, meta: { rawModel: entry.model, provider: entry.provider } });
   }
 
   const apiKeyVal = entry.apiKey && typeof entry.apiKey === "string" ? entry.apiKey : "local-no-key";
@@ -487,10 +491,20 @@ export async function getUsageStats(period = "all") {
         if (dateKey > (stats.byModel[statsKey].lastUsed || "")) stats.byModel[statsKey].lastUsed = dateKey;
       }
 
-      for (const [connId, a] of Object.entries(day.byAccount || {})) {
+      for (const [entry, a] of Object.entries(day.byAccount || {})) {
+        // New keys are `${connectionId}|${model}|${provider}`; legacy rows
+        // (pre-rename DBs) stored the bare connectionId with last-write-wins
+        // meta — keep rendering them with their stored meta.
+        let connId = entry;
+        let rawModel = a.rawModel || "";
+        let provider = a.provider || "";
+        if (entry.includes("|")) {
+          const parts = entry.split("|");
+          connId = parts[0];
+          rawModel = parts[1] ?? rawModel;
+          provider = parts[2] ?? provider;
+        }
         const accountName = connectionMap[connId] || `Account ${connId.slice(0, 8)}...`;
-        const rawModel = a.rawModel || "";
-        const provider = a.provider || "";
         const providerDisplayName = providerNodeNameMap[provider] || provider;
         const accountKey = `${rawModel} (${provider} - ${accountName})`;
         if (!stats.byAccount[accountKey]) {

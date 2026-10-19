@@ -55,13 +55,13 @@ Install in a specific project:
 ```bash
 mkdir my-omnihilbras
 cd my-omnihilbras
-npm install omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **Start OmniHilbras:**
 
 ```bash
-npx omnihilbras
+npx @hilbras/omnihilbras
 ```
 
 **Benefits:**

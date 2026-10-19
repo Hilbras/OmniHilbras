@@ -480,7 +480,7 @@ async function validateProviderNode(data) {
 
 /**
  * Get tunnel status
- * @returns {Promise<Object>} { success, data: { enabled, tunnelUrl, shortId, running } }
+ * @returns {Promise<Object>} { success, data: { tunnel: { enabled, settingsEnabled, tunnelUrl, shortId, publicUrl, running }, tailscale, download } }
  */
 async function getTunnelStatus() {
   return makeRequest("GET", "/api/tunnel/status");

@@ -51,6 +51,8 @@ function extractCustomToolInput(argumentsValue) {
   return argumentsText;
 }
 
+// KEEP IN SYNC: deliberately a near-duplicate of openAICompletionToResponses in
+// nonStreamingHandler.js (inlined here to avoid a circular import).
 function chatCompletionToResponses(responseBody, customToolNames = null) {
   const choice = responseBody?.choices?.[0];
   if (!choice) return responseBody;

@@ -55,13 +55,13 @@ Cài trong project cụ thể:
 ```bash
 mkdir my-omnihilbras
 cd my-omnihilbras
-npm install omnihilbras
+npm install -g @hilbras/omnihilbras
 ```
 
 **Khởi động OmniHilbras:**
 
 ```bash
-npx omnihilbras
+npx @hilbras/omnihilbras
 ```
 
 **Lợi ích:**

@@ -887,9 +887,17 @@ export class CursorExecutor extends BaseExecutor {
           log?.info?.("CURSOR", `empty_turn on ${originalMessages.length}-message session; retry ${attempt}/${CURSOR_EMPTY_TURN_MAX_RETRIES} with tail-only frame`);
           workingMessages = tailOnlyCursorMessages(originalMessages);
           session = openAgentSession(workingMessages);
-          const retryHeaders = await session.responseHeaders;
+          let retryHeaders;
+          try {
+            retryHeaders = await session.responseHeaders;
+          } catch {
+            try { session.close(); } catch {}
+            wrapped(turnError);
+            return result;
+          }
           const retryStatus = Number(retryHeaders[":status"] || 0);
           if (retryStatus !== 200) {
+            try { session.close(); } catch {}
             wrapped(turnError);
             return result;
           }

@@ -30,6 +30,8 @@ function extractCustomToolInput(argumentsValue) {
   return argumentsText;
 }
 
+// KEEP IN SYNC: deliberately a near-duplicate of chatCompletionToResponses in
+// sseToJsonHandler.js.
 function openAICompletionToResponses(responseBody, customToolNames = null) {
   const choice = responseBody?.choices?.[0];
   if (!choice) return responseBody;

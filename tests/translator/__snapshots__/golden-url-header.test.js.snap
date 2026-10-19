@@ -145,6 +145,44 @@ exports[`GOLDEN buildHeaders (default executor providers) > api-airforce → hea
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > apinex → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
+exports[`GOLDEN buildHeaders (default executor providers) > apmix → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > assemblyai → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
@@ -419,10 +457,10 @@ exports[`GOLDEN buildHeaders (default executor providers) > cline → headers (a
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
-    "User-Agent": "OmniHilbras/0.5.104",
+    "User-Agent": "OmniHilbras/2.0.0",
     "X-CLIENT-TYPE": "omnihilbras",
-    "X-CLIENT-VERSION": "0.5.104",
-    "X-CORE-VERSION": "0.5.104",
+    "X-CLIENT-VERSION": "2.0.0",
+    "X-CORE-VERSION": "2.0.0",
     "X-IS-MULTIROOT": "false",
     "X-PLATFORM": "linux",
     "X-PLATFORM-VERSION": "v24.21.0",
@@ -432,10 +470,10 @@ exports[`GOLDEN buildHeaders (default executor providers) > cline → headers (a
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
-    "User-Agent": "OmniHilbras/0.5.104",
+    "User-Agent": "OmniHilbras/2.0.0",
     "X-CLIENT-TYPE": "omnihilbras",
-    "X-CLIENT-VERSION": "0.5.104",
-    "X-CORE-VERSION": "0.5.104",
+    "X-CLIENT-VERSION": "2.0.0",
+    "X-CORE-VERSION": "2.0.0",
     "X-IS-MULTIROOT": "false",
     "X-PLATFORM": "linux",
     "X-PLATFORM-VERSION": "v24.21.0",
@@ -446,10 +484,10 @@ exports[`GOLDEN buildHeaders (default executor providers) > cline → headers (a
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
-    "User-Agent": "OmniHilbras/0.5.104",
+    "User-Agent": "OmniHilbras/2.0.0",
     "X-CLIENT-TYPE": "omnihilbras",
-    "X-CLIENT-VERSION": "0.5.104",
-    "X-CORE-VERSION": "0.5.104",
+    "X-CLIENT-VERSION": "2.0.0",
+    "X-CORE-VERSION": "2.0.0",
     "X-IS-MULTIROOT": "false",
     "X-PLATFORM": "linux",
     "X-PLATFORM-VERSION": "v24.21.0",
@@ -465,10 +503,10 @@ exports[`GOLDEN buildHeaders (default executor providers) > clinepass → header
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
-    "User-Agent": "OmniHilbras/0.5.104",
+    "User-Agent": "OmniHilbras/2.0.0",
     "X-CLIENT-TYPE": "omnihilbras",
-    "X-CLIENT-VERSION": "0.5.104",
-    "X-CORE-VERSION": "0.5.104",
+    "X-CLIENT-VERSION": "2.0.0",
+    "X-CORE-VERSION": "2.0.0",
     "X-IS-MULTIROOT": "false",
     "X-PLATFORM": "linux",
     "X-PLATFORM-VERSION": "v24.21.0",
@@ -478,10 +516,10 @@ exports[`GOLDEN buildHeaders (default executor providers) > clinepass → header
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
-    "User-Agent": "OmniHilbras/0.5.104",
+    "User-Agent": "OmniHilbras/2.0.0",
     "X-CLIENT-TYPE": "omnihilbras",
-    "X-CLIENT-VERSION": "0.5.104",
-    "X-CORE-VERSION": "0.5.104",
+    "X-CLIENT-VERSION": "2.0.0",
+    "X-CORE-VERSION": "2.0.0",
     "X-IS-MULTIROOT": "false",
     "X-PLATFORM": "linux",
     "X-PLATFORM-VERSION": "v24.21.0",
@@ -492,10 +530,10 @@ exports[`GOLDEN buildHeaders (default executor providers) > clinepass → header
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
     "HTTP-Referer": "https://cline.bot",
-    "User-Agent": "OmniHilbras/0.5.104",
+    "User-Agent": "OmniHilbras/2.0.0",
     "X-CLIENT-TYPE": "omnihilbras",
-    "X-CLIENT-VERSION": "0.5.104",
-    "X-CORE-VERSION": "0.5.104",
+    "X-CLIENT-VERSION": "2.0.0",
+    "X-CORE-VERSION": "2.0.0",
     "X-IS-MULTIROOT": "false",
     "X-PLATFORM": "linux",
     "X-PLATFORM-VERSION": "v24.21.0",
@@ -930,7 +968,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > kimi → headers (ap
     "X-Msh-Device-Model": "Linux x64",
     "X-Msh-Device-Name": "lacrous",
     "X-Msh-Platform": "omnihilbras",
-    "X-Msh-Version": "0.5.104",
+    "X-Msh-Version": "2.0.0",
     "x-api-key": "<CRED>",
   },
   "nonStream": {
@@ -941,7 +979,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > kimi → headers (ap
     "X-Msh-Device-Model": "Linux x64",
     "X-Msh-Device-Name": "lacrous",
     "X-Msh-Platform": "omnihilbras",
-    "X-Msh-Version": "0.5.104",
+    "X-Msh-Version": "2.0.0",
     "x-api-key": "<CRED>",
   },
   "oauth": {
@@ -953,7 +991,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > kimi → headers (ap
     "X-Msh-Device-Model": "Linux x64",
     "X-Msh-Device-Name": "lacrous",
     "X-Msh-Platform": "omnihilbras",
-    "X-Msh-Version": "0.5.104",
+    "X-Msh-Version": "2.0.0",
     "x-api-key": "<CRED>",
   },
 }
@@ -1036,7 +1074,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > minimax-code → hea
     "Content-Type": "application/json",
     "User-Agent": "MiniMaxAgent",
     "X-Mavis-Agent-Id": "main",
-    "X-Mavis-Session-Id": "cee39ddc-4b56-425b-9875-335710e58593",
+    "X-Mavis-Session-Id": "<UUID>",
     "X-Mavis-Timezone-Offset": "10800",
     "anthropic-version": "2023-06-01",
     "x-api-key": "sk-xxx",
@@ -1046,7 +1084,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > minimax-code → hea
     "Content-Type": "application/json",
     "User-Agent": "MiniMaxAgent",
     "X-Mavis-Agent-Id": "main",
-    "X-Mavis-Session-Id": "afa88cde-45ec-49d9-b415-31071d72f2ad",
+    "X-Mavis-Session-Id": "<UUID>",
     "X-Mavis-Timezone-Offset": "10800",
     "anthropic-version": "2023-06-01",
     "x-api-key": "sk-xxx",
@@ -1057,7 +1095,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > minimax-code → hea
     "Content-Type": "application/json",
     "User-Agent": "MiniMaxAgent",
     "X-Mavis-Agent-Id": "main",
-    "X-Mavis-Session-Id": "97c83559-a51c-44d3-b995-4dd1e8b8b167",
+    "X-Mavis-Session-Id": "<UUID>",
     "X-Mavis-Timezone-Offset": "10800",
     "anthropic-version": "2023-06-01",
     "x-api-key": "sk-xxx",
@@ -1073,7 +1111,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > minimax-code-global 
     "Content-Type": "application/json",
     "User-Agent": "MiniMaxAgent",
     "X-Mavis-Agent-Id": "main",
-    "X-Mavis-Session-Id": "fc023efb-9fb2-4589-af42-56ffea972666",
+    "X-Mavis-Session-Id": "<UUID>",
     "X-Mavis-Timezone-Offset": "10800",
     "anthropic-version": "2023-06-01",
     "x-api-key": "sk-xxx",
@@ -1083,7 +1121,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > minimax-code-global 
     "Content-Type": "application/json",
     "User-Agent": "MiniMaxAgent",
     "X-Mavis-Agent-Id": "main",
-    "X-Mavis-Session-Id": "aff152e5-6634-412d-bc1e-07e7a9ccf337",
+    "X-Mavis-Session-Id": "<UUID>",
     "X-Mavis-Timezone-Offset": "10800",
     "anthropic-version": "2023-06-01",
     "x-api-key": "sk-xxx",
@@ -1094,7 +1132,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > minimax-code-global 
     "Content-Type": "application/json",
     "User-Agent": "MiniMaxAgent",
     "X-Mavis-Agent-Id": "main",
-    "X-Mavis-Session-Id": "b9ca0228-1635-4e2b-b206-2c9e7e0aa500",
+    "X-Mavis-Session-Id": "<UUID>",
     "X-Mavis-Timezone-Offset": "10800",
     "anthropic-version": "2023-06-01",
     "x-api-key": "sk-xxx",
@@ -1180,6 +1218,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > muse → headers (ap
 `;
 
 exports[`GOLDEN buildHeaders (default executor providers) > nanobanana → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
+exports[`GOLDEN buildHeaders (default executor providers) > nara-router → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
     "Accept": "text/event-stream",
@@ -1470,6 +1527,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > tencent → headers 
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > tiarina → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > together → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
@@ -1622,6 +1698,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > xiaomi-mimo → head
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > xkiro → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > zed → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
@@ -1690,6 +1785,20 @@ exports[`GOLDEN buildUrl (default executor providers) > api-airforce → url (st
 {
   "nonStream": "https://api.airforce/v1/chat/completions",
   "stream": "https://api.airforce/v1/chat/completions",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > apinex → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://api.apinex.bond/v1/chat/completions",
+  "stream": "https://api.apinex.bond/v1/chat/completions",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > apmix → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://api.apmix.ai/v1/chat/completions",
+  "stream": "https://api.apmix.ai/v1/chat/completions",
 }
 `;
 
@@ -2008,6 +2117,13 @@ exports[`GOLDEN buildUrl (default executor providers) > nanobanana → url (stre
 }
 `;
 
+exports[`GOLDEN buildUrl (default executor providers) > nara-router → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://router.bynara.id/v1/chat/completions",
+  "stream": "https://router.bynara.id/v1/chat/completions",
+}
+`;
+
 exports[`GOLDEN buildUrl (default executor providers) > nebius → url (stream + non-stream) 1`] = `
 {
   "nonStream": "https://api.studio.nebius.ai/v1/chat/completions",
@@ -2106,6 +2222,13 @@ exports[`GOLDEN buildUrl (default executor providers) > tencent → url (stream 
 }
 `;
 
+exports[`GOLDEN buildUrl (default executor providers) > tiarina → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://ai.tiarina.cloud/v1/chat/completions",
+  "stream": "https://ai.tiarina.cloud/v1/chat/completions",
+}
+`;
+
 exports[`GOLDEN buildUrl (default executor providers) > together → url (stream + non-stream) 1`] = `
 {
   "nonStream": "https://api.together.xyz/v1/chat/completions",
@@ -2159,6 +2282,13 @@ exports[`GOLDEN buildUrl (default executor providers) > xiaomi-mimo → url (str
 {
   "nonStream": "https://api.xiaomimimo.com/v1/chat/completions",
   "stream": "https://api.xiaomimimo.com/v1/chat/completions",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > xkiro → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://api.xkiro.com/v1/chat/completions",
+  "stream": "https://api.xkiro.com/v1/chat/completions",
 }
 `;
 

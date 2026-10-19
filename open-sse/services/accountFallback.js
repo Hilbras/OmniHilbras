@@ -207,24 +207,3 @@ export function resetAccountState(account) {
   };
 }
 
-/**
- * Apply error state to account
- * @param {object} account - Account object
- * @param {number} status - HTTP status code
- * @param {string} errorText - Error message
- * @returns {object} Updated account with error state
- */
-export function applyErrorState(account, status, errorText) {
-  if (!account) return account;
-
-  const backoffLevel = account.backoffLevel || 0;
-  const { cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel);
-
-  return {
-    ...account,
-    rateLimitedUntil: cooldownMs > 0 ? getUnavailableUntil(cooldownMs) : null,
-    backoffLevel: newBackoffLevel ?? backoffLevel,
-    lastError: { status, message: errorText, timestamp: new Date().toISOString() },
-    status: "error"
-  };
-}

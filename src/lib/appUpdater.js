@@ -49,12 +49,13 @@ function collectAppPids() {
       const lines = output.split("\n").slice(1).filter(l => l.trim());
       lines.forEach(line => {
         const lower = line.toLowerCase();
-        // Match anything running from omnihilbras install dir or wrapper cli.js
-        const isAppProcess = lower.includes("omnihilbras") ||
-          lower.includes("next-server") ||
-          lower.includes("\\bin\\app\\") ||
-          lower.includes("/bin/app/") ||
-          lower.includes("cli.js");
+        // Whitelist: a real node process running omnihilbras's cli.js / bin/app
+        // entry, or next-server. Require BOTH the package dir and an entry
+        // token on the same command line so unrelated processes that merely
+        // mention "omnihilbras" keep running.
+        const isAppProcess = (lower.includes("node") && lower.includes("omnihilbras") &&
+          (lower.includes("cli.js") || lower.includes("\\bin\\app\\") || lower.includes("/bin/app/"))) ||
+          lower.includes("next-server");
         if (isAppProcess) {
           const match = line.match(/^"(\d+)"/);
           if (match && match[1] && match[1] !== process.pid.toString()) pids.push(match[1]);
@@ -77,12 +78,17 @@ function collectAppPids() {
     try {
       const output = execSync("ps aux 2>/dev/null", { encoding: "utf8", timeout: KILL_TIMEOUT_MS });
       output.split("\n").forEach(line => {
-        const isAppProcess = line.includes("omnihilbras") ||
-          line.includes("next-server") ||
-          line.includes("cloudflared") ||
-          line.includes("/bin/app/") ||
-          line.includes("tray_darwin") ||
-          line.includes("tray_linux");
+        // Whitelist: a real node process running omnihilbras's cli.js / bin/app
+        // entry, or next-server. Require BOTH the package dir and an entry
+        // token on the same command line so unrelated processes that merely
+        // mention "omnihilbras" keep running.
+        const cmd = line.toLowerCase();
+        const isAppProcess = (cmd.includes("node") && cmd.includes("omnihilbras") &&
+          (cmd.includes("cli.js") || cmd.includes("/bin/app/"))) ||
+          cmd.includes("next-server") ||
+          cmd.includes("cloudflared") ||
+          cmd.includes("tray_darwin") ||
+          cmd.includes("tray_linux");
         if (isAppProcess) {
           const parts = line.trim().split(/\s+/);
           const pid = parts[1];

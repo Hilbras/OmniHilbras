@@ -366,17 +366,28 @@ function convertOpenAIToKiro(chunk, state) {
   // Flush: ensure clean stream termination
   if (!chunk) {
     if (state.finishSent) return null;
+    const flushFrames = [];
     // Flush any remaining buffered thinking
     if (state.inThink && state.thinkBuf) {
       state.inThink = false;
-      const thinking = state.thinkBuf;
-      state.thinkBuf = "";
-      return withInitialFrame(state, buildEventStreamFrame("reasoningContentEvent", {
-        content: thinking,
+      flushFrames.push(buildEventStreamFrame("reasoningContentEvent", {
+        content: state.thinkBuf,
         modelId: state.modelId || "kiro-unknown"
       }));
+      state.thinkBuf = "";
     }
-    return withInitialFrame(state, buildEventStreamFrame("messageStopEvent", {}));
+    // Upstream ended without a finish_reason chunk: still close any open
+    // tool calls (stop:true per tool) and emit usage — same frames a normal
+    // finish would produce, otherwise Kiro's client hangs on the tool call.
+    const finishFrames = emitFinish(state);
+    if (finishFrames) {
+      flushFrames.push(...(Array.isArray(finishFrames) ? finishFrames : [finishFrames]));
+    }
+    if (flushFrames.length === 0) {
+      if (!state.initialSent) return withInitialFrame(state, null);
+      return null;
+    }
+    return withInitialFrame(state, flushFrames.length === 1 ? flushFrames[0] : flushFrames);
   }
 
   const frames = [];

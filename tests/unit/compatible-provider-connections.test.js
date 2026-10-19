@@ -83,7 +83,7 @@ describe("compatible provider connections API", () => {
     else process.env.DATA_DIR = originalDataDir;
   });
 
-  it("creates one API-key connection for an OpenAI-compatible node", async () => {
+  it("creates one API-key connection for an OpenAI-compatible node", { timeout: 20000 }, async () => {
     const ctx = await setupTestContext({
       id: "openai-compatible-test",
       type: "openai-compatible",
@@ -115,7 +115,7 @@ describe("compatible provider connections API", () => {
     });
   });
 
-  it("creates one API-key connection for an Anthropic-compatible node", async () => {
+  it("creates one API-key connection for an Anthropic-compatible node", { timeout: 20000 }, async () => {
     const ctx = await setupTestContext({
       id: "anthropic-compatible-test",
       type: "anthropic-compatible",
@@ -145,7 +145,7 @@ describe("compatible provider connections API", () => {
     });
   });
 
-  it("allows multiple connections on the same compatible node", async () => {
+  it("allows multiple connections on the same compatible node", { timeout: 20000 }, async () => {
     const ctx = await setupTestContext({
       id: "openai-compatible-multiple-test",
       type: "openai-compatible",

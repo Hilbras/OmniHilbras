@@ -12,8 +12,8 @@ const COLORS = {
  */
 async function getEndpoint(port) {
   const result = await api.getTunnelStatus();
-  const tunnelEnabled = result.success && result.data?.enabled === true;
-  const publicUrl = result.success ? result.data?.publicUrl : "";
+  const tunnelEnabled = result.success && result.data?.tunnel?.enabled === true;
+  const publicUrl = result.success ? result.data?.tunnel?.publicUrl : "";
   
   const endpoint = tunnelEnabled && publicUrl ? `${publicUrl}/v1` : `http://localhost:${port}/v1`;
   return { endpoint, tunnelEnabled };

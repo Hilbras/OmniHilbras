@@ -126,6 +126,12 @@ export async function handleSystemone(request) {
 
     if (result.success) {
       if (result.usage) {
+        // Usage may omit either field for some upstreams; guard the sum so NaN
+        // never reaches the usage DB (same Number.isSafeInteger pattern as
+        // embeddings/image handlers).
+        const totalTokens =
+          (Number.isSafeInteger(result.usage.prompt_tokens) ? result.usage.prompt_tokens : 0) +
+          (Number.isSafeInteger(result.usage.completion_tokens) ? result.usage.completion_tokens : 0);
         saveRequestUsage({
           provider,
           model,
@@ -134,7 +140,7 @@ export async function handleSystemone(request) {
           endpoint: url.pathname,
           tokens: {
             ...result.usage,
-            total_tokens: result.usage.prompt_tokens + result.usage.completion_tokens,
+            total_tokens: totalTokens,
           },
           status: "success",
         }).catch(() => {});

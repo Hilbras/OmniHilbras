@@ -123,8 +123,14 @@ export default function ClaudeToolCard({
   }, [isExpanded]);
 
   useEffect(() => {
-    fetch("/api/settings").then(r => r.json()).then(data => {
-      setCcFilterNaming(!!data.ccFilterNaming);
+    fetch("/api/settings").then(r => {
+      if (!r.ok) {
+        setMessage({ type: "error", text: "Failed to load settings" });
+        return null;
+      }
+      return r.json();
+    }).then(data => {
+      if (data) setCcFilterNaming(!!data.ccFilterNaming);
     }).catch(() => {});
   }, []);
 

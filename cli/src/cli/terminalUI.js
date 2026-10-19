@@ -46,7 +46,7 @@ async function refreshHeaderBg(port) {
       api.getTunnelStatus()
     ]);
     const keys = keysResult.success ? (keysResult.data.keys || []) : [];
-    const tunnel = tunnelResult.success ? (tunnelResult.data || {}) : {};
+    const tunnel = tunnelResult.success ? (tunnelResult.data?.tunnel || {}) : {};
     cachedHeader = renderHeader(port, keys, tunnel);
   } finally {
     fetchingHeader = false;

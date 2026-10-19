@@ -71,9 +71,27 @@ describe("strictProxy refuses a direct connection (#4333)", () => {
     // The Qoder executor passes strictProxy:true to mean "do not replay this
     // request directly if the proxy fails" — a replayed COSY signature gets a
     // 403. With nothing configured it must still reach the network.
-    await expect(
-      proxyAwareFetch("https://nonexistent.invalid/v1/chat", {}, { strictProxy: true }),
-    ).rejects.not.toThrow(/strictProxy/);
+    // "Nothing configured" must also exclude the machine's env proxy, which in
+    // proxied sandboxes would otherwise make strict mode correctly refuse.
+    const envBackup = {};
+    for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]) {
+      envBackup[name] = process.env[name];
+      envBackup[name.toLowerCase()] = process.env[name.toLowerCase()];
+      delete process.env[name];
+      delete process.env[name.toLowerCase()];
+    }
+    envBackup.NO_PROXY = process.env.NO_PROXY;
+    process.env.NO_PROXY = "*";
+    try {
+      await expect(
+        proxyAwareFetch("https://nonexistent.invalid/v1/chat", {}, { strictProxy: true }),
+      ).rejects.not.toThrow(/strictProxy/);
+    } finally {
+      for (const [name, val] of Object.entries(envBackup)) {
+        if (val === undefined) delete process.env[name];
+        else process.env[name] = val;
+      }
+    }
   });
 
   it("does not block a request when strictProxy is off", async () => {

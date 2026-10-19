@@ -326,6 +326,24 @@ async function createBypassRequest(parsedUrl, realIP, options) {
     });
 
     socket.on("error", reject);
+
+    // Wire the caller's AbortSignal into the manual request so a disconnecting
+    // client cancels the upstream request instead of leaving it mid-flight.
+    if (options.signal) {
+      let aborted = false;
+      const onAbort = () => {
+        if (aborted) return;
+        aborted = true;
+        socket.destroy();
+        reject(new DOMException("The operation was aborted", "AbortError"));
+      };
+      if (options.signal.aborted) {
+        onAbort();
+      } else {
+        options.signal.addEventListener("abort", onAbort, { once: true });
+        socket.once("close", () => options.signal.removeEventListener("abort", onAbort));
+      }
+    }
   });
 }
 

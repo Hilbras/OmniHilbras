@@ -9,7 +9,7 @@ export const APP_CONFIG = {
 
 // GitHub configuration
 export const GITHUB_CONFIG = {
-  changelogUrl: "https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/master/CHANGELOG.md",
+  changelogUrl: "https://raw.githubusercontent.com/hilbras/omnihilbras/refs/heads/main/CHANGELOG.md",
   donateUrl: "https://omnihilbras.com/api/donate",
 };
 

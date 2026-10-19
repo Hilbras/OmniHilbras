@@ -2,7 +2,7 @@
  * `omnihilbras connect <server-url>` — point local CLI tools (Claude Code, Codex, …) at a
  * REMOTE omnihilbras server. Nothing runs locally: we log in with the dashboard
  * password, reuse/create an API key for this machine, then write the tool's
- * settings files (see connectTools.js). Works via `npx omnihilbras connect …` with no global install.
+ * settings files (see connectTools.js). Works via `npx @hilbras/omnihilbras connect …` with no global install.
  *
  * The password and API key are never printed (key is masked).
  */
@@ -18,8 +18,8 @@ Usage: omnihilbras connect <server-url> [options]
 Configure CLI tools on THIS machine to use a remote omnihilbras server.
 No local server is started. Run without installing:
 
-  npx omnihilbras connect http://<server-host>:20128
-  npx omnihilbras connect http://<server-host>:20128 --tools claude,codex,opencode
+  npx @hilbras/omnihilbras connect http://<server-host>:20128
+  npx @hilbras/omnihilbras connect http://<server-host>:20128 --tools claude,codex,opencode
 
 Options:
   --tools <list>         Comma-separated tools to configure (prompted if omitted
@@ -45,8 +45,8 @@ Models come from the server's own CLI-tools config (set on its dashboard).
 Nothing is hardcoded: a Claude tier the server leaves unset is left unset,
 and a non-Claude tool with no model anywhere is skipped. Flags override:
 
-  npx omnihilbras connect http://<server-host>:20128 --tools claude --sonnet cc/claude-sonnet-5-5
-  npx omnihilbras connect http://<server-host>:20128 --tools codex,opencode --model ocg/deepseek-flash
+  npx @hilbras/omnihilbras connect http://<server-host>:20128 --tools claude --sonnet cc/claude-sonnet-5-5
+  npx @hilbras/omnihilbras connect http://<server-host>:20128 --tools codex,opencode --model ocg/deepseek-flash
 `;
 
 function parseArgs(argv) {
@@ -395,7 +395,7 @@ async function runConnect(argv) {
   }
   for (const [id, m] of Object.entries(toolModels)) if (m) console.log(`   ${id} model: ${m}`);
   if (tools.some((t) => t.id === "omp")) console.log("   omp models: every server model, listed under omnihilbras in /model");
-  console.log(`   Restart the tools to apply. Undo: npx omnihilbras connect --reset --tools ${tools.map((t) => t.id).join(",")}`);
+  console.log(`   Restart the tools to apply. Undo: npx @hilbras/omnihilbras connect --reset --tools ${tools.map((t) => t.id).join(",")}`);
 
   if (opts.printEnv) {
     console.log("\nOpenAI-compatible CLIs (codex, opencode, aider, …):");

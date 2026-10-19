@@ -9,9 +9,10 @@ import { DefaultExecutor } from "../../open-sse/executors/default.js";
 describe("Token Harbor provider", () => {
   const entry = REGISTRY.find((e) => e.id === "tokenharbor");
 
-  it("is registered as an OpenAI-compatible apikey provider", () => {
+  it("is registered as an OpenAI-compatible apikey provider (freeTier category)", () => {
     expect(entry).toBeDefined();
-    expect(entry.category).toBe("apikey");
+    // Recategorized freeTier in the registry sweep (same as kimchi/byteplus/etc.).
+    expect(entry.category).toBe("freeTier");
     expect(entry.authType).toBe("apikey");
     expect(entry.alias).toBe("tokenharbor");
     expect(entry.aliases).toContain("th");

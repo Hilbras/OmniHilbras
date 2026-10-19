@@ -10,6 +10,10 @@ const origCreate = http.createServer.bind(http);
 // A bare `next start` / `next dev` never loads this file, so it cannot produce a matching
 // header even though the env var is inherited by child processes. Named like x-9r-cli-token
 // so the request-detail header sanitizer redacts it too.
+//
+// The `x-9r-` prefix on the stamped headers below is a legacy branding remnant and is
+// intentional — do NOT rename these header names. The stamped token is validated by
+// src/lib/auth/trustedPeer.js via OMNIHILBRAS_PEER_TOKEN.
 const PEER_TOKEN = crypto.randomBytes(24).toString("hex");
 process.env.OMNIHILBRAS_PEER_TOKEN = PEER_TOKEN;
 
@@ -63,6 +67,9 @@ http.createServer = (...args) => {
     // Direct/public sockets remain keyed by the unspoofable peer address.
     const proxyIp = xRealIp || (xff ? String(xff).split(",")[0].trim() : "");
     const ip = isLoopbackProxy && proxyIp ? proxyIp : socketIp;
+    // Stamped headers below (legacy `x-9r-` prefix kept on purpose — do not rename).
+    // x-9r-peer-token is checked by src/lib/auth/trustedPeer.js against
+    // OMNIHILBRAS_PEER_TOKEN (set above).
     delete req.headers["x-9r-real-ip"];
     delete req.headers["x-forwarded-for"];
     delete req.headers["x-9r-via-proxy"];

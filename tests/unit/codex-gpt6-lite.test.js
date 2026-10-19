@@ -15,12 +15,15 @@ describe("Codex GPT-6 Sol/Luna transport", () => {
     const entry = getModelsByProviderId("codex").find((item) => item.id === model);
     expect(entry?.responsesLite).toBe(true);
     expect(entry?.thinkingLevels).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    // Exact-model overrides in capabilities.js: gpt-6-sol/luna are 272k contexts,
+    // gpt-6.1-sol matches the *gpt-6* pattern (1.05M).
+    const contextWindow = model === "gpt-6.1-sol" ? 1050000 : 272000;
     expect(getCapabilitiesForModel("codex", model)).toMatchObject({
       vision: true,
       reasoning: true,
       search: true,
       thinkingFormat: "openai",
-      contextWindow: 272000,
+      contextWindow,
       maxOutput: 128000,
     });
     expect(getThinkingLevels("codex", model)).toEqual(["low", "medium", "high", "xhigh", "max"]);

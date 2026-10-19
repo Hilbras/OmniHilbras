@@ -63,7 +63,7 @@ function resolveBundledServerPath() {
 }
 
 // Copy bundled server.js into DATA_DIR so MITM doesn't lock node_modules
-// (prevents EBUSY on `npm i -g omnihilbras@latest` while MITM is running).
+// (prevents EBUSY on `npm i -g @hilbras/omnihilbras@latest` while MITM is running).
 function ensureRuntimeServer(bundledPath) {
   try {
     if (!bundledPath || !fs.existsSync(bundledPath)) return bundledPath;
@@ -578,7 +578,7 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
     log(`[MITM] server.js missing at ${effectiveServerPath} → recopying`);
     effectiveServerPath = ensureRuntimeServer(resolveBundledServerPath());
     if (!effectiveServerPath || !fs.existsSync(effectiveServerPath)) {
-      throw new Error(`MITM server.js not found at ${effectiveServerPath}. Reinstall omnihilbras.`);
+      throw new Error(`MITM server.js not found at ${effectiveServerPath}. Reinstall @hilbras/omnihilbras.`);
     }
   }
   const mitmRouterBase = await resolveMitmRouterBaseUrl();
@@ -719,6 +719,11 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
   if (_updateSettings) await _updateSettings({ mitmCertInstalled: true }).catch(() => { });
 
   log(`✅ Server healthy (PID: ${serverPid || health.pid})`);
+
+  // Re-arm auto-restart: a previous wrong-password stderr sets the guard so its
+  // own exit does not schedule a restart; once the server is healthy again the
+  // guard must not stay tripped for the rest of the session.
+  mitmIsRestarting = false;
 
   // Log DNS status per tool
   const dnsStatus = checkAllDNSStatus();

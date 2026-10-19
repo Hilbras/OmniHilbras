@@ -44,7 +44,7 @@ npm install -g @hilbras/omnihilbras
 omnihilbras
 
 # Or run directly with npx
-npx omnihilbras
+npx @hilbras/omnihilbras
 ```
 
 **Option 2 — Docker (server/VPS):**
@@ -95,9 +95,9 @@ omnihilbras --help             # Show all options
 Already running OmniHilbras on another machine (e.g. a team server on your LAN)? Point this machine's CLI tools at it — no local server is started:
 
 ```bash
-npx omnihilbras connect http://<server-host>:20128                       # pick tools interactively
-npx omnihilbras connect http://<server-host>:20128 --tools claude,codex  # or choose up front
-npx omnihilbras connect --reset --tools claude,codex                     # undo
+npx @hilbras/omnihilbras connect http://<server-host>:20128                       # pick tools interactively
+npx @hilbras/omnihilbras connect http://<server-host>:20128 --tools claude,codex  # or choose up front
+npx @hilbras/omnihilbras connect --reset --tools claude,codex                     # undo
 ```
 
 It logs in with the dashboard password (hidden prompt), reuses or creates an API key named `cli-<hostname>`, and writes each tool's config (backing up the original once as `*.bak-omnihilbras`).
@@ -119,22 +119,22 @@ Models come from the **server's own CLI-tools configuration**, so a client gets 
 
 ```bash
 # One Claude tier; the other tiers still come from the server
-npx omnihilbras connect http://<server-host>:20128 --tools claude --sonnet cc/claude-sonnet-5-5
+npx @hilbras/omnihilbras connect http://<server-host>:20128 --tools claude --sonnet cc/claude-sonnet-5-5
 
 # Every Claude tier
-npx omnihilbras connect http://<server-host>:20128 --tools claude \
+npx @hilbras/omnihilbras connect http://<server-host>:20128 --tools claude \
   --fable cc/claude-fable-5-1 --opus cc/claude-opus-5-5 \
   --sonnet cc/claude-sonnet-5-5 --haiku cc/claude-haiku-4-5-20251001
 
 # All non-Claude tools at once
-npx omnihilbras connect http://<server-host>:20128 --tools codex,opencode,kilo --model ocg/deepseek-flash
+npx @hilbras/omnihilbras connect http://<server-host>:20128 --tools codex,opencode,kilo --model ocg/deepseek-flash
 
 # Claude and other tools in one run
-npx omnihilbras connect http://<server-host>:20128 --tools claude,codex --opus cc/claude-opus-5-5 --model gpt-6
+npx @hilbras/omnihilbras connect http://<server-host>:20128 --tools claude,codex --opus cc/claude-opus-5-5 --model gpt-6
 
 # A different model per tool: --model covers every non-Claude tool in a run, so run once per tool
-npx omnihilbras connect http://<server-host>:20128 --tools codex --model gpt-6
-npx omnihilbras connect http://<server-host>:20128 --tools opencode --model ocg/glm-5.3
+npx @hilbras/omnihilbras connect http://<server-host>:20128 --tools codex --model gpt-6
+npx @hilbras/omnihilbras connect http://<server-host>:20128 --tools opencode --model ocg/glm-5.3
 ```
 
 A model the server doesn't list is still written, with a `not listed by server` warning. To see the ids it serves: `curl http://<server-host>:20128/v1/models -H "Authorization: Bearer <your key>"`.
@@ -144,10 +144,10 @@ A model the server doesn't list is still written, with a `not listed by server` 
 `omnihilbras show` prints what each CLI tool on this machine is currently set to — base URL, masked API key and models. It only reads local files and never contacts a server.
 
 ```bash
-npx omnihilbras show                 # every supported tool
-npx omnihilbras show claude          # one tool
-npx omnihilbras show claude codex    # several
-npx omnihilbras show claude --json   # machine-readable (key still masked)
+npx @hilbras/omnihilbras show                 # every supported tool
+npx @hilbras/omnihilbras show claude          # one tool
+npx @hilbras/omnihilbras show claude codex    # several
+npx @hilbras/omnihilbras show claude --json   # machine-readable (key still masked)
 ```
 
 ```

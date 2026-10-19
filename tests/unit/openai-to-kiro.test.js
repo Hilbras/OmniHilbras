@@ -11,7 +11,14 @@ import { openaiToKiroRequest } from "../../open-sse/translator/request/openai-to
 
 const contentOf = (result) =>
   result.conversationState.currentMessage.userInputMessage.content;
-const systemPromptOf = (result) => result.systemPrompt || "";
+// The system prompt now travels inside the first user turn's content (replay
+// cache for msg0): top-level `systemPrompt` is only the session-replay key and
+// is empty for fresh sessions (CodeWhisperer rejects a real top-level prompt).
+const systemPromptOf = (result) =>
+  result.systemPrompt ||
+  result.conversationState?.currentMessage?.userInputMessage?.content ||
+  result.conversationState?.history?.[0]?.userInputMessage?.content ||
+  "";
 
 describe("openaiToKiroRequest", () => {
   describe("basic message conversion", () => {
@@ -532,7 +539,9 @@ describe("openaiToKiroRequest", () => {
       const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
 
       expect(systemPromptOf(result)).toContain("<max_thinking_length>32000</max_thinking_length>");
-      expect(result.additionalModelRequestFields?.output_config?.effort).toBe("high");
+      // "max" now passes through natively (Kiro CLI parity); the legacy system
+      // prompt still clamps the thinking budget at 32000.
+      expect(result.additionalModelRequestFields?.output_config?.effort).toBe("max");
     });
 
     it("clamps OpenAI Responses reasoning.effort xhigh to max_thinking_length 32000", () => {
@@ -568,7 +577,7 @@ describe("openaiToKiroRequest", () => {
       expect(systemPromptOf(result)).toContain("<max_thinking_length>16000</max_thinking_length>");
     });
 
-    it("keeps top-level systemPrompt stable across turns", () => {
+    it("keeps the frozen session-start prompt stable across turns (only current time moves)", () => {
       const first = openaiToKiroRequest(
         "claude-sonnet-4.6-thinking",
         { messages: [{ role: "user", content: "first" }] },
@@ -582,9 +591,14 @@ describe("openaiToKiroRequest", () => {
         {}
       );
 
+      // systemPrompt is the session-replay cache key now (absent for fresh
+      // sessions) and must not embed volatile time; the visible prompt and the
+      // thinking tags travel in the user-turn content.
+      expect(first.systemPrompt).toBeUndefined();
       expect(first.systemPrompt).toBe(second.systemPrompt);
-      expect(first.systemPrompt).not.toContain("Current time");
+      expect(String(contentOf(first))).toContain("<thinking_mode>");
       expect(first.conversationState.currentMessage.userInputMessage.content).toContain("Current time");
+      expect(second.conversationState.currentMessage.userInputMessage.content).toContain("Current time");
     });
 
     it("replays frozen msg0 for explicit Kiro sessions while keeping current time fresh", () => {

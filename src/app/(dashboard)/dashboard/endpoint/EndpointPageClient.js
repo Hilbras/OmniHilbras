@@ -61,6 +61,21 @@ export default function APIPageClient({ machineId }) {
   const [showTsModal, setShowTsModal] = useState(false);
   const [showDisableTsModal, setShowDisableTsModal] = useState(false);
   const tsLogRef = useRef(null);
+  // Unmount flag + abort controller for background poll/health loops: the enable
+  // fetch can hang indefinitely, so without these the loops would keep fetching
+  // (and setState) forever after the page is gone.
+  const mountedRef = useRef(true);
+  const pollControllerRef = useRef(null);
+
+  useEffect(() => {
+    // Re-armed here too because StrictMode's simulated unmount+remount runs
+    // this cleanup once without truly discarding the component.
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      pollControllerRef.current?.abort();
+    };
+  }, []);
 
   // Debounce reachable=false: server may briefly return false during background refresh.
   // Only flip UI to "reconnecting" after N consecutive misses to avoid spinner flicker.
@@ -278,14 +293,18 @@ export default function APIPageClient({ machineId }) {
   // u2500u2500u2500 Cloudflare Tunnel handlers
   // Ping tunnel health until reachable. Race multiple URLs (shortlink + direct) — 1 OK is enough.
   const pingTunnelHealth = async (...urls) => {
+    if (!mountedRef.current) return false;
     setTunnelLoading(true);
     setTunnelProgress("Waiting for tunnel ready...");
     const targets = urls.filter(Boolean).map((u) => `${u}/api/health`);
+    const controller = new AbortController();
+    const { signal } = controller;
     const start = Date.now();
-    while (Date.now() - start < TUNNEL_PING_MAX_MS) {
+    while (Date.now() - start < TUNNEL_PING_MAX_MS && mountedRef.current) {
       await new Promise((r) => setTimeout(r, TUNNEL_PING_INTERVAL_MS));
+      if (!mountedRef.current) break;
       const ok = await Promise.any(targets.map(async (h) => {
-        const p = await fetch(h, { mode: "cors", cache: "no-store" });
+        const p = await fetch(h, { mode: "cors", cache: "no-store", signal });
         if (p.ok) return true;
         throw new Error("not ready");
       })).catch(() => false);
@@ -298,7 +317,7 @@ export default function APIPageClient({ machineId }) {
       // Every 5 pings (~10s), check if backend process still alive
       if ((Date.now() - start) % 10000 < TUNNEL_PING_INTERVAL_MS) {
         try {
-          const statusRes = await fetch("/api/tunnel/status");
+          const statusRes = await fetch("/api/tunnel/status", { signal });
           if (statusRes.ok) {
             const status = await statusRes.json();
             if (!status.tunnel?.enabled) {
@@ -311,6 +330,8 @@ export default function APIPageClient({ machineId }) {
         } catch { /* ignore */ }
       }
     }
+    controller.abort();
+    if (!mountedRef.current) return false;
     setTunnelStatus({ type: "error", message: "Tunnel created but not reachable. Please try again." });
     setTunnelLoading(false);
     setTunnelProgress("");
@@ -326,9 +347,12 @@ export default function APIPageClient({ machineId }) {
     // Poll download progress while enable request is pending
     let polling = true;
     const pollProgress = async () => {
+      const controller = new AbortController();
+      pollControllerRef.current = controller;
       while (polling) {
+        if (!mountedRef.current) { polling = false; break; }
         try {
-          const r = await fetch("/api/tunnel/status");
+          const r = await fetch("/api/tunnel/status", { signal: controller.signal });
           if (r.ok) {
             const s = await r.json();
             if (s.download?.downloading) {
@@ -338,8 +362,10 @@ export default function APIPageClient({ machineId }) {
             }
           }
         } catch { /* ignore */ }
+        if (!polling || !mountedRef.current) break;
         await new Promise((r) => setTimeout(r, 1000));
       }
+      if (pollControllerRef.current === controller) pollControllerRef.current = null;
     };
     pollProgress();
 
@@ -461,16 +487,21 @@ export default function APIPageClient({ machineId }) {
 
   // Ping Tailscale health until reachable
   const pingTsHealth = async (url) => {
+    if (!mountedRef.current) return false;
     setTsProgress("Waiting for Tailscale ready...");
     const healthUrl = `${url}/api/health`;
+    const controller = new AbortController();
+    const { signal } = controller;
     const start = Date.now();
-    while (Date.now() - start < TUNNEL_PING_MAX_MS) {
+    while (Date.now() - start < TUNNEL_PING_MAX_MS && mountedRef.current) {
       await new Promise((r) => setTimeout(r, TUNNEL_PING_INTERVAL_MS));
+      if (!mountedRef.current) break;
       try {
-        const ping = await fetch(healthUrl, { mode: "no-cors", cache: "no-store" });
+        const ping = await fetch(healthUrl, { mode: "no-cors", cache: "no-store", signal });
         if (ping.ok || ping.type === "opaque") return true;
       } catch { /* not ready yet */ }
     }
+    controller.abort();
     return false;
   };
 
@@ -790,7 +821,7 @@ export default function APIPageClient({ machineId }) {
                   {tunnelProgress || "Creating tunnel..."}
                 </div>
                 <button
-                  onClick={() => { setTunnelLoading(false); setTunnelProgress(""); }}
+                  onClick={() => { pollControllerRef.current?.abort(); pollControllerRef.current = null; setTunnelLoading(false); setTunnelProgress(""); }}
                   className="p-2 hover:bg-red-500/10 rounded text-red-500 transition-colors shrink-0"
                   title="Stop"
                 >

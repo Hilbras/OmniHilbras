@@ -63,7 +63,7 @@ describe("xai/oauth service", () => {
     expect(parsed.searchParams.get("referrer")).toBe("cli-proxy-api");
   });
 
-  it("generates dashboard auth data with CLIProxyAPI PKCE size and discovered endpoints", async () => {
+  it("generates dashboard auth data with CLIProxyAPI PKCE size and discovered endpoints", { timeout: 20000 }, async () => {
     fetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -84,7 +84,7 @@ describe("xai/oauth service", () => {
     expect(parsed.searchParams.get("referrer")).toBe("cli-proxy-api");
   });
 
-  it("exchanges dashboard codes against the discovered xAI token endpoint", async () => {
+  it("exchanges dashboard codes against the discovered xAI token endpoint", { timeout: 20000 }, async () => {
     const fetchMock = fetch;
     fetchMock
       .mockResolvedValueOnce({

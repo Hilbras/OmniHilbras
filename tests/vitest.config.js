@@ -12,7 +12,15 @@ export default defineConfig({
     // Don't scan into git worktrees nested under .claude/ — they carry their
     // own copies of the test files but lack an installed node_modules (open-sse,
     // etc.), which makes provider imports fail during collection.
-    exclude: ["**/node_modules/**", "**/.claude/**", "**/dist/**"],
+    // unit/embeddings.cloud.test.js imports `cloud/src/...` from the external
+    // Cloudflare Worker companion repo, which is not part of this deployment
+    // snapshot — the file stays in-tree but is not runnable here.
+    exclude: [
+      "**/node_modules/**",
+      "**/.claude/**",
+      "**/dist/**",
+      "unit/embeddings.cloud.test.js",
+    ],
     // Allow many it.concurrent cases (real provider smoke runs ~50 providers in parallel)
     maxConcurrency: 60,
     // Suppress noisy console output from handlers under test
