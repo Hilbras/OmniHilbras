@@ -220,7 +220,7 @@ describe("/v1/models routes filter by key", () => {
     expect(await list("sk-combo")).toEqual(["Main"]);
     expect(await list("sk-empty")).toEqual([]);
     expect(await list(null)).toEqual(all); // no key: unchanged (middleware governs remote access)
-  });
+  }, 30000); // loads the full model catalogue from the DB
   it("/v1/models/{kind} and single-model lookup are filtered too", async () => {
     const kind = async (k, path) => modelsKindRoute.GET(new Request(`http://localhost/v1/models/${path.join("/")}`, { headers: auth(k) }), { params: Promise.resolve({ model: path }) });
     const emb = await (await kind("sk-open", ["embedding"])).json();
@@ -230,5 +230,5 @@ describe("/v1/models routes filter by key", () => {
     const one = all.find((m) => m.owned_by !== "combo").id;
     expect((await kind("sk-open", one.split("/"))).status).toBe(200);
     expect((await kind("sk-empty", one.split("/"))).status).toBe(404);
-  });
+  }, 30000); // loads the full model catalogue from the DB
 });

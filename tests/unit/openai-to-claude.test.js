@@ -193,8 +193,18 @@ describe("openaiToClaudeResponse", () => {
       }]
     };
 
-    const result = openaiToClaudeResponse(chunk, state);
-    const inputDelta = result.find(event => event.delta?.type === "input_json_delta");
+    // Tool arguments are buffered and sanitized at finish, so the delta is
+    // emitted by the finish chunk (not by the argument chunk itself).
+    openaiToClaudeResponse(chunk, state);
+    const finishResult = openaiToClaudeResponse(
+      {
+        id: "chatcmpl-test",
+        model: "gpt-test",
+        choices: [{ delta: {}, finish_reason: "tool_calls" }],
+      },
+      state,
+    );
+    const inputDelta = finishResult.find(event => event.delta?.type === "input_json_delta");
 
     expect(inputDelta).toBeDefined();
     expect(JSON.parse(inputDelta.delta.partial_json)).toEqual({

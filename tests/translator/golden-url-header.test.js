@@ -27,12 +27,24 @@ const SPECIALIZED = new Set([
 function sanitize(headers) {
   const out = {};
   for (const [k, v] of Object.entries(headers)) {
-    out[k] = typeof v === "string"
+    let value = typeof v === "string"
       ? v.replace(/Bearer .+/, "Bearer <TOK>")
           .replace(/sk-test-APIKEY|tok-test-ACCESS/g, "<CRED>")
           .replace(/kimi-\d{10,}/g, "kimi-<TS>")
           .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<UUID>") // X-Mavis-Session-Id is randomUUID() per request (default.js)
+          // The auth fingerprint carries the app version (cline/clinepass
+          // User-Agent), so a pinned version breaks the golden snapshot on
+          // every release. Normalize it — the version bump is not what this
+          // test is about.
+          .replace(/OmniHilbras\/\d+\.\d+\.\d+/g, "OmniHilbras/<VER>")
       : v;
+    // X-CLIENT-VERSION / X-CORE-VERSION are the bare app version. Keyed
+    // normalization (rather than a value pattern) so unrelated headers that
+    // happen to look like a version are left alone.
+    if (typeof value === "string" && (k === "X-CLIENT-VERSION" || k === "X-CORE-VERSION")) {
+      value = "<VER>";
+    }
+    out[k] = value;
   }
   return out;
 }

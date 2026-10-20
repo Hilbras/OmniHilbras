@@ -4,7 +4,14 @@ import { SSE_DONE } from "./sseConstants.js";
 
 const sharedEncoder = new TextEncoder();
 
-// Parse SSE data line
+// Parse a provider stream line: either an SSE "data: {...}" line or a raw
+// NDJSON object.
+//
+// Several providers (Ollama, GitHub Models, some OpenAI-compatible gateways)
+// answer with bare JSON objects, one per line, while the rest use SSE
+// framing. A line starting with "{" can never be SSE framing (those always
+// begin with "data:"), so the two are unambiguous and can be told apart
+// without being told the source format.
 export function parseSSELine(line, format = null) {
   if (!line) return null;
 
@@ -22,7 +29,16 @@ export function parseSSELine(line, format = null) {
   }
 
   // Standard SSE format: "data: {...}"
-  if (line.charCodeAt(0) !== 100) return null; // 'd' = 100
+  if (line.charCodeAt(0) !== 100) {
+    // Not SSE framing — a raw NDJSON object?
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) return null;
+    try {
+      return JSON.parse(trimmed);
+    } catch (error) {
+      return null;
+    }
+  }
 
   const data = line.slice(5).trim();
   if (data === "[DONE]") return { done: true };

@@ -32,7 +32,9 @@ beforeAll(async () => {
   ({ startZedProxy, stopZedProxy, registerZedSession, getZedSessionStatus, clearZedSession } =
     await import("@/lib/oauth/utils/server.js"));
   ({ generateAuthData, exchangeTokens } = await import("@/lib/oauth/providers/index.js"));
-});
+  // The oauth provider index pulls in every provider module; under the
+  // parallel suite run that import alone can exceed vitest's 10s hook budget.
+}, 60000);
 
 afterAll(() => {
   fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });

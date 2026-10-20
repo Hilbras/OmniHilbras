@@ -1,5 +1,10 @@
 // Benchmark: SQLite vs lowdb on equivalent workloads.
 // Run: cd app/tests && npm test -- db-benchmark
+//
+// The project moved off lowdb to SQLite, and lowdb is no longer a dependency.
+// The legacy half of the comparison therefore only runs when the package
+// happens to be installed; the SQLite numbers (the ones that matter) always
+// do.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +16,7 @@ const N_QUERIES = 200;
 const originalDataDir = process.env.DATA_DIR;
 let tempSqlite, tempLowdb;
 let sqliteDb, lowDb;
+let lowdbAvailable = false;
 
 function fmt(ms) { return `${ms.toFixed(2)}ms`; }
 
@@ -32,14 +38,22 @@ beforeAll(async () => {
   sqliteDb = await import("@/lib/db/index.js");
   await sqliteDb.initDb();
 
-  // Lowdb setup — direct lowdb usage (mimics legacy behavior)
-  tempLowdb = fs.mkdtempSync(path.join(os.tmpdir(), "omnihilbras-bench-lowdb-"));
-  const { Low } = await import("lowdb");
-  const { JSONFile } = await import("lowdb/node");
-  const dbFile = path.join(tempLowdb, "db.json");
-  fs.writeFileSync(dbFile, JSON.stringify({ providerConnections: [], usageHistory: [] }));
-  lowDb = new Low(new JSONFile(dbFile), { providerConnections: [], usageHistory: [] });
-  await lowDb.read();
+  // Lowdb setup — direct lowdb usage (mimics legacy behavior). Optional:
+  // lowdb was dropped from the dependencies when the storage layer moved to
+  // SQLite, so it is usually not installed at all.
+  try {
+    tempLowdb = fs.mkdtempSync(path.join(os.tmpdir(), "omnihilbras-bench-lowdb-"));
+    const { Low } = await import("lowdb");
+    const { JSONFile } = await import("lowdb/node");
+    const dbFile = path.join(tempLowdb, "db.json");
+    fs.writeFileSync(dbFile, JSON.stringify({ providerConnections: [], usageHistory: [] }));
+    lowDb = new Low(new JSONFile(dbFile), { providerConnections: [], usageHistory: [] });
+    await lowDb.read();
+    lowdbAvailable = true;
+  } catch {
+    lowdbAvailable = false;
+    console.log("  (lowdb not installed — benchmarking SQLite only)");
+  }
 });
 
 afterAll(() => {
@@ -62,6 +76,7 @@ describe("DB Benchmark — SQLite vs Lowdb", () => {
       }
     });
 
+    if (!lowdbAvailable) return;
     const lowdbTime = await bench("Lowdb push + write", async () => {
       for (let i = 0; i < N_ITEMS; i++) {
         lowDb.data.providerConnections.push({
@@ -86,6 +101,7 @@ describe("DB Benchmark — SQLite vs Lowdb", () => {
       }
     });
 
+    if (!lowdbAvailable) return;
     const lowdbTime = await bench("Lowdb read + filter", async () => {
       for (let i = 0; i < N_QUERIES; i++) {
         await lowDb.read();
@@ -107,6 +123,7 @@ describe("DB Benchmark — SQLite vs Lowdb", () => {
       for (const id of ids) await sqliteDb.getProviderConnectionById(id);
     });
 
+    if (!lowdbAvailable) return;
     const lowdbIds = lowDb.data.providerConnections.slice(0, N_QUERIES).map((c) => c.id);
     const lowdbTime = await bench("Lowdb find by id", async () => {
       for (const id of lowdbIds) {
@@ -132,6 +149,7 @@ describe("DB Benchmark — SQLite vs Lowdb", () => {
       }
     });
 
+    if (!lowdbAvailable) return;
     const lowdbTime = await bench("Lowdb push history + write", async () => {
       lowDb.data.usageHistory = [];
       for (let i = 0; i < N_ITEMS; i++) {
@@ -155,6 +173,7 @@ describe("DB Benchmark — SQLite vs Lowdb", () => {
       for (let i = 0; i < 50; i++) await sqliteDb.getUsageStats("24h");
     });
 
+    if (!lowdbAvailable) return;
     const lowdbTime = await bench("Lowdb read + aggregate", async () => {
       for (let i = 0; i < 50; i++) {
         await lowDb.read();

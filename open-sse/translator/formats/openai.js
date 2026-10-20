@@ -53,7 +53,21 @@ export function filterToOpenAIFormat(body, opts = {}) {
       if (filteredContent.length === 0) {
         filteredContent.push({ type: OPENAI_BLOCK.TEXT, text: "" });
       }
-      
+
+      // A text-only message must end up as a plain string: strict
+      // OpenAI-compatible endpoints (Ollama, gpt-oss, vLLM) reject an array
+      // content when it carries nothing but text. Same rule as
+      // collapseTextParts in translator/concerns/message.js.
+      //
+      // A block carrying `cache_control` is NOT plain text — prompt caching
+      // is expressed on the block, so that array has to stay an array.
+      const plainText = filteredContent.every(
+        (b) => b?.type === OPENAI_BLOCK.TEXT && b.cache_control === undefined,
+      );
+      if (plainText) {
+        return { ...msg, content: filteredContent.map((b) => b.text ?? "").join("\n") };
+      }
+
       return { ...msg, content: filteredContent };
     }
     

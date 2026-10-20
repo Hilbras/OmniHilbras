@@ -75,10 +75,18 @@ const normalize = (value) => {
 /**
  * Extract tokens via better-sqlite3 (bundled dependency).
  * This is the preferred strategy — no external CLI required.
+ *
+ * Skipped on Bun and on Node >= 24: the native addon SIGSEGVs on load there,
+ * which is a process-level crash the try/catch below cannot recover from.
+ * The repo's own DB driver skips it for the same reason (src/lib/db/driver.js).
+ * Those runtimes fall through to the sqlite3 CLI and then the manual paste.
  */
 function extractTokensViaBetterSqlite(dbPath) {
+  if (process.versions.bun) return { accessToken: null, machineId: null };
+  const [nodeMajor] = process.versions.node.split(".").map(Number);
+  if (nodeMajor >= 24) return { accessToken: null, machineId: null };
+
   // Dynamic require so the route stays importable even if native bindings fail
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const Database = require("better-sqlite3");
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
 
