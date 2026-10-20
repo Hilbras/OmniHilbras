@@ -20,6 +20,9 @@ export default {
   },
   category: "freeTier",
   authType: "apikey",
+  // Both an API key (routes traffic) and an account login (reads the wallet)
+  // are offered for this provider.
+  authModes: ["apikey", "oauth"],
   transport: {
     // OpenAI-compatible. `format` is left at the shared "openai" default and
     // `thinkingFormat` is deliberately NOT declared: Token Harbor forwards
@@ -35,6 +38,10 @@ export default {
       // Aggregator billing endpoints (see open-sse/services/usage/aggregator.js).
       // flavor pins the candidate order once we know how this host answers.
       apiBase: "https://tokenharbor.ai/v1",
+      // Token Harbor is a Supabase app: its prepaid wallet lives in the
+      // `wallets` table and is readable only with the account session (the
+      // model API key is not a JWT and cannot read it).
+      wallet: true,
     },
   },
   // Curated seed; the live catalogue is fetched via modelsFetcher and any other

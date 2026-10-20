@@ -326,6 +326,50 @@ export function clearXaiSession(state) {
   xaiPendingExchanges.delete(state);
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Token Harbor session store.
+//
+// The PKCE verifier must survive between /authorize and /exchange, and the
+// exchange must be bound to the attempt that started it: GoTrue issues its own
+// `state`, so we keep ours server-side and check it on exchange. Without this
+// binding a stray callback could swap the code for another account's.
+// ───────────────────────────────────────────────────────────────────────────
+
+const TOKENHARBOR_SESSION_TTL_MS = 10 * 60 * 1000;
+const tokenharborSessions = new Map();
+
+function pruneTokenharborSessions() {
+  const now = Date.now();
+  for (const [state, session] of tokenharborSessions) {
+    if (now - session.createdAt > TOKENHARBOR_SESSION_TTL_MS) {
+      tokenharborSessions.delete(state);
+    }
+  }
+}
+
+export function registerTokenharborSession({ state, codeVerifier, redirectUri, authMethod }) {
+  if (!state || !codeVerifier || !redirectUri) return false;
+  pruneTokenharborSessions();
+  tokenharborSessions.set(state, {
+    codeVerifier,
+    redirectUri,
+    authMethod: authMethod || "google",
+    status: "pending",
+    createdAt: Date.now(),
+  });
+  return true;
+}
+
+export function getTokenharborSession(state) {
+  if (!state) return null;
+  pruneTokenharborSessions();
+  return tokenharborSessions.get(state) || null;
+}
+
+export function clearTokenharborSession(state) {
+  tokenharborSessions.delete(state);
+}
+
 function renderXaiResultPage(success, message) {
   return renderCodexResultPage(success, message);
 }

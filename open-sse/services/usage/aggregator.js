@@ -26,7 +26,7 @@
 
 import REGISTRY from "../../providers/registry/index.js";
 import { PROVIDERS } from "../../providers/index.js";
-import { AGGREGATOR_USAGE_CONFIG } from "../../config/runtimeConfig.js";
+import { AGGREGATOR_USAGE_CONFIG, AGGREGATOR_WALLET_CONFIG } from "../../config/runtimeConfig.js";
 import { fetchWithTimeout, resetAtFromDuration, toFiniteNumber } from "./shared.js";
 
 // providerId → epoch ms; hits suppress re-probing for unsupportedTtlMs so each
@@ -50,6 +50,8 @@ function resolveTargets(provider) {
     apiBase,
     validateUrl,
     pinned: (cfg.usage && cfg.usage.flavor) || null,
+    // Hosts whose account session can read a prepaid wallet.
+    wallet: !!(cfg.usage && cfg.usage.wallet),
   };
 }
 
@@ -216,6 +218,140 @@ async function tryRateLimitHeaders(targets, apiKey, proxyOptions) {
   return { flavor: "headers", plan: "headers", quotas, auth: false };
 }
 
+// Refresh an expired account session (GoTrue rotates the refresh token) and
+// persist the new pair on the connection. Returns the fresh access token, or
+// null when the session cannot be refreshed (the user must log in again).
+async function refreshAccountSession({ connectionId, accessToken, proxyOptions }) {
+  try {
+    const { getProviderConnectionById, updateProviderConnection } = await import("@/lib/localDb.js");
+    const connection = await getProviderConnectionById(connectionId);
+    const refreshToken = connection?.refreshToken;
+    if (!refreshToken) return null;
+
+    const cfg = AGGREGATOR_WALLET_CONFIG;
+    const response = await fetchWithTimeout(
+      `${cfg.authBaseUrl}/token?grant_type=refresh_token`,
+      {
+        method: "POST",
+        headers: {
+          apikey: cfg.anonKey,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      },
+      AGGREGATOR_USAGE_CONFIG.fetchTimeoutMs,
+      proxyOptions,
+    );
+    if (!response || !response.ok) return null;
+    const tokens = await response.json().catch(() => null);
+    if (!tokens?.access_token) return null;
+
+    await updateProviderConnection(connectionId, {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token || refreshToken,
+      expiresAt: tokens.expires_in
+        ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
+        : null,
+    });
+    return tokens.access_token;
+  } catch {
+    return null;
+  }
+}
+
+// supabase-wallet: the account's prepaid wallet (Token Harbor).
+//
+// The model API key cannot read the wallet — only the account session can
+// (Supabase rejects a non-JWT key with "Expected 3 parts in JWT"). So this
+// flavor needs the connection's Supabase user token, which the OAuth flow
+// stores as the connection's accessToken.
+//
+// Renders as one blue 💰 credit row: paid + trial + bonus are all spendable
+// credit, while the locked bonus is not (it stays out of the total).
+async function trySupabaseWallet({ accessToken, connectionId, proxyOptions }) {
+  if (!accessToken || typeof accessToken !== "string" || !accessToken.trim()) return null;
+  const cfg = AGGREGATOR_WALLET_CONFIG;
+  if (!cfg.anonKey || !cfg.supabaseUrl) return null;
+
+  const url = `${cfg.supabaseUrl}/rest/v1/${cfg.walletTable}?select=${cfg.walletColumns.join(",")}`;
+  let response;
+  try {
+    response = await fetchWithTimeout(
+      url,
+      {
+        method: "GET",
+        headers: {
+          apikey: cfg.anonKey,
+          Authorization: `Bearer ${accessToken.trim()}`,
+          Accept: "application/json",
+        },
+      },
+      AGGREGATOR_USAGE_CONFIG.fetchTimeoutMs,
+      proxyOptions,
+    );
+  } catch {
+    return null;
+  }
+
+  // An expired session is the common case here: refresh it once and retry.
+  if (response && (response.status === 401 || response.status === 403) && connectionId) {
+    const refreshed = await refreshAccountSession({ connectionId, accessToken, proxyOptions });
+    if (!refreshed) return null;
+    try {
+      response = await fetchWithTimeout(
+        url,
+        {
+          method: "GET",
+          headers: {
+            apikey: cfg.anonKey,
+            Authorization: `Bearer ${refreshed}`,
+            Accept: "application/json",
+          },
+        },
+        AGGREGATOR_USAGE_CONFIG.fetchTimeoutMs,
+        proxyOptions,
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  if (!response || !response.ok) return null;
+  const rows = await response.json().catch(() => null);
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row || typeof row !== "object") return null;
+
+  const toAmount = (value) => {
+    const n = toFiniteNumber(value, NaN);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const paid = toAmount(row.balance_paid);
+  const trial = toAmount(row.balance_trial);
+  const bonus = toAmount(row.balance_bonus);
+  const locked = toAmount(row[cfg.lockedColumn]);
+  const total = Math.round((paid + trial + bonus) * 100) / 100;
+
+  return {
+    flavor: "supabase-wallet",
+    plan: "supabase-wallet",
+    quotas: {
+      "Wallet balance": {
+        used: 0,
+        total,
+        remainingPercentage: 100,
+        resetAt: null,
+        unlimited: false,
+        isCreditBalance: true,
+        currency: "USD",
+        // Kept for the UI's "show details" affordance and for debugging:
+        // which part of the balance is locked.
+        breakdown: { paid, trial, bonus, locked },
+      },
+    },
+  };
+}
+
 // local: fall back to this router's own usage history for the connection.
 // QuotaTable renders `unlimited` rows as "N used · Unlimited" (green, no bar),
 // which is exactly right — locally observed usage has no limit to compare to.
@@ -243,30 +379,40 @@ async function tryLocalHistory({ connectionId, windowDays }) {
  * @param {Object} ctx - connection fields from getUsageForProvider
  * @param {string} ctx.provider - provider id (registry key)
  * @param {string|null} ctx.connectionId - local connection id (for the local-history fallback)
+ * @param {string|null} ctx.accessToken - account session (Token Harbor wallet)
  * @param {string|null} ctx.apiKey
  * @param {Object|null} ctx.proxyOptions
  */
-export async function getAggregatorUsage({ provider, connectionId = null, apiKey, proxyOptions = null } = {}) {
+export async function getAggregatorUsage({ provider, connectionId = null, accessToken = null, apiKey, proxyOptions = null } = {}) {
   const name = planName(provider);
   try {
-    if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
-      return { plan: name, message: `${name} API key not available. Add a key to view usage.` };
-    }
-
     const targets = resolveTargets(provider);
     if (!targets) {
       return { plan: name, message: `${name} usage endpoints are not configured.` };
     }
 
+    const hasKey = !!(apiKey && typeof apiKey === "string" && apiKey.trim());
+    const hasSession = !!(accessToken && typeof accessToken === "string" && accessToken.trim());
+    if (!hasKey && !hasSession) {
+      return { plan: name, message: `${name} API key not available. Add a key to view usage.` };
+    }
+
     const sawAuthError = { value: false };
     let result = null;
+
+    // Account wallet (Token Harbor): the session reads the prepaid balance.
+    // It is the most accurate answer, so it runs before the API-key probes.
+    if (targets.wallet) {
+      result = await trySupabaseWallet({ accessToken, connectionId, proxyOptions });
+    }
+
     // Local history is our own data: it survives (and feeds through) the
     // unsupported-probe cooldown instead of repeating the stale message.
     const probingSuppressed =
       targets.pinned !== "local"
       && (() => { const until = unsupportedUntil.get(provider); return !!(until && Date.now() < until); })();
 
-    if (!probingSuppressed && targets.pinned !== "local") {
+    if (!result && hasKey && !probingSuppressed && targets.pinned !== "local") {
       const runners = [
         ["openai-billing", () => tryOpenAIBilling(targets, apiKey, proxyOptions, sawAuthError)],
         ["new-api", () => tryNewApi(targets, apiKey, proxyOptions, sawAuthError)],

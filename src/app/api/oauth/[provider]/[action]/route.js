@@ -40,6 +40,9 @@ import {
   registerXiaomiMimoSession,
   getXiaomiMimoSessionStatus,
   clearXiaomiMimoSession,
+  registerTokenharborSession,
+  getTokenharborSession,
+  clearTokenharborSession,
 } from "@/lib/oauth/utils/server";
 import { detectIdeInstalled } from "@/lib/oauth/utils/ideDetect";
 import { ZED_HOSTED_CONFIG } from "@/lib/oauth/constants/oauth";
@@ -133,6 +136,17 @@ export async function GET(request, { params }) {
         try { const p = new URL(redirectUri).port; if (p) meta.nativeAppPort = p; } catch { /* ignore */ }
       }
       const authData = await generateAuthData(provider, redirectUri, Object.keys(meta).length ? meta : undefined);
+      // Token Harbor: GoTrue mints its own `state`, so ours cannot ride the
+      // usual way. Keep the PKCE verifier server-side, bound to our state, so
+      // the exchange can prove it belongs to this attempt.
+      if (provider === "tokenharbor") {
+        registerTokenharborSession({
+          state: authData.state,
+          codeVerifier: authData.codeVerifier,
+          redirectUri,
+          authMethod: meta.authMethod || "google",
+        });
+      }
       return NextResponse.json(authData);
     }
 
@@ -320,6 +334,52 @@ export async function POST(request, { params }) {
 
     if (action === "exchange") {
       const { code, redirectUri, codeVerifier, state, meta, systemId } = body;
+
+      // Token Harbor: the PKCE verifier and the attempt's state live
+      // server-side. The callback carries GoTrue's own state, so our state
+      // comes back in the `th_state` query param of the redirect — the client
+      // forwards it as `state`. Refuse anything we did not start.
+      if (provider === "tokenharbor") {
+        const session = getTokenharborSession(state);
+        if (!session) {
+          return NextResponse.json(
+            { error: "Token Harbor login session expired or not found. Please start the login again." },
+            { status: 400 },
+          );
+        }
+        try {
+          const tokenData = await exchangeTokens(
+            "tokenharbor",
+            code,
+            session.redirectUri,
+            session.codeVerifier,
+            state,
+            { authMethod: session.authMethod },
+          );
+          const connection = await createProviderConnection({
+            provider: "tokenharbor",
+            authType: "oauth",
+            ...tokenData,
+            expiresAt: tokenData.expiresIn
+              ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString()
+              : null,
+            testStatus: "active",
+          });
+          clearTokenharborSession(state);
+          return NextResponse.json({
+            success: true,
+            connection: {
+              id: connection.id,
+              provider: connection.provider,
+              email: connection.email,
+              displayName: connection.displayName,
+            },
+          });
+        } catch (err) {
+          clearTokenharborSession(state);
+          return NextResponse.json({ error: err.message }, { status: 500 });
+        }
+      }
 
       // Xiaomi MiMo: no token exchange needed — the callback already decrypted the sk.
       // Just read the session result and create the connection.
@@ -558,6 +618,52 @@ export async function POST(request, { params }) {
         // fatal: unrecoverable (e.g. post-exchange failure) — client must stop polling and show it
         ...(result.fatal ? { fatal: true } : {}),
       });
+    }
+
+    if (action === "password-login") {
+      if (provider !== "tokenharbor") {
+        return NextResponse.json(
+          { error: "Password login is not supported for this provider" },
+          { status: 400 },
+        );
+      }
+      const email = String(body?.email || "").trim();
+      const password = String(body?.password || "");
+      if (!email || !password) {
+        return NextResponse.json({ error: "Email and password are required" }, { status: 400 });
+      }
+      try {
+        const { getProvider } = await import("@/lib/oauth/providers");
+        const tokenharborProvider = getProvider("tokenharbor");
+        const tokens = await tokenharborProvider.passwordLogin(
+          tokenharborProvider.config,
+          email,
+          password,
+        );
+        const tokenData = tokenharborProvider.mapTokens(tokens);
+        const connection = await createProviderConnection({
+          provider: "tokenharbor",
+          authType: "oauth",
+          ...tokenData,
+          expiresAt: tokenData.expiresIn
+            ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString()
+            : null,
+          testStatus: "active",
+        });
+        return NextResponse.json({
+          success: true,
+          connection: {
+            id: connection.id,
+            provider: connection.provider,
+            email: connection.email,
+            displayName: connection.displayName,
+          },
+        });
+      } catch (err) {
+        // GoTrue reports bad credentials as a 400 with a generic message;
+        // surface it as-is so the user knows which field is wrong.
+        return NextResponse.json({ error: err.message }, { status: 400 });
+      }
     }
 
     if (action === "manual-code") {

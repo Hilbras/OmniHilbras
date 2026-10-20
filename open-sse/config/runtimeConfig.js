@@ -116,3 +116,24 @@ export const AGGREGATOR_USAGE_CONFIG = {
   newApiQuotaPerUnit: 500000,
   fetchTimeoutMs: 10000,
 };
+
+// Supabase-hosted wallets (Token Harbor). The account session — not the model
+// API key — is what can read the prepaid wallet, so this flavor needs the
+// connection's Supabase user token. The anon key is the provider's own public
+// key (it ships in its frontend bundle).
+//
+// This config lives here (not in the OAuth constants) because open-sse/config
+// is imported by contexts where the "@/" alias does not resolve — the wallet
+// reader must not drag the app's src tree in with it.
+export const AGGREGATOR_WALLET_CONFIG = {
+  supabaseUrl: process.env.AGGREGATOR_WALLET_SUPABASE_URL || "https://isbnzmwjmtiuipesgmmg.supabase.co",
+  // Token Harbor's own public Supabase anon key (it ships in the
+  // provider's frontend bundle) — not a secret, but config is its home.
+  anonKey: process.env.AGGREGATOR_WALLET_ANON_KEY ||
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlzYm56bXdqbXRpdWlwZXNnbW1nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3NjU1MzYsImV4cCI6MjA5MjM0MTUzNn0.CodUcchio6jNW_k68vaAb--LshBQXK51tZ6VTxNSz_A",
+  authBaseUrl: process.env.AGGREGATOR_WALLET_AUTH_BASE_URL || "https://auth.tokenharbor.ai/auth/v1",
+  walletTable: "wallets",
+  walletColumns: ["balance_paid", "balance_trial", "balance_bonus", "balance_bonus_locked"],
+  // Locked bonus credits are not spendable yet, so they stay out of the total.
+  lockedColumn: "balance_bonus_locked",
+};

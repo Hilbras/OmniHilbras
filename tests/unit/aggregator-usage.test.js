@@ -7,15 +7,29 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // Queue of canned upstream responses, one per proxyAwareFetch call (FIFO).
 // Shape: { status, json, text, headers: { "x-ratelimit-limit-requests": ".." } }
 // totals: what the (otherwise DB-backed) local-history repo returns.
-const setup = { calls: [], responses: [], totals: null };
+const setup = { calls: [], responses: [], totals: null, refreshToken: null, updated: [] };
 
 vi.mock("@/lib/db/repos/usageRepo.js", () => ({
   getUsageTotalsForConnection: async () => setup.totals,
 }));
 
+// The account-session refresh reads the connection and writes the new token
+// pair back; both are mocked so no DB is touched.
+vi.mock("@/lib/localDb.js", () => ({
+  getProviderConnectionById: async (id) => ({
+    id,
+    provider: "tokenharbor",
+    refreshToken: setup.refreshToken || null,
+  }),
+  updateProviderConnection: async (id, data) => {
+    setup.updated.push({ id, ...data });
+    return { id, ...data };
+  },
+}));
+
 vi.mock("open-sse/utils/proxyFetch.js", () => ({
-  proxyAwareFetch: async (url) => {
-    setup.calls.push(url);
+  proxyAwareFetch: async (url, opts = {}) => {
+    setup.calls.push({ url, headers: opts.headers || {} });
     const next = setup.responses.shift() ?? { status: 404 };
     const headers = next.headers ?? {};
     return {
@@ -34,6 +48,8 @@ beforeEach(() => {
   setup.calls.length = 0;
   setup.responses.length = 0;
   setup.totals = null;
+  setup.refreshToken = null;
+  setup.updated.length = 0;
 });
 
 describe("aggregator usage adapter", () => {
@@ -44,8 +60,8 @@ describe("aggregator usage adapter", () => {
     ];
     const out = await getAggregatorUsage({ provider: "tokenharbor", apiKey: "th-test-key" });
 
-    expect(setup.calls[0]).toContain("/dashboard/billing/subscription");
-    expect(setup.calls[1]).toContain("/dashboard/billing/usage");
+    expect(setup.calls[0].url).toContain("/dashboard/billing/subscription");
+    expect(setup.calls[1].url).toContain("/dashboard/billing/usage");
     expect(out.message).toBeUndefined();
     expect(out.plan).toBe("Token Harbor");
     const wallet = out.quotas["Wallet (USD)"];
@@ -66,7 +82,7 @@ describe("aggregator usage adapter", () => {
     ];
     const out = await getAggregatorUsage({ provider: "nara-router", apiKey: "nr-test-key" });
 
-    expect(setup.calls[1]).toContain("/api/user/self");
+    expect(setup.calls[1].url).toContain("/api/user/self");
     // remaining 25000000/500000 = $50; used 12500000/500000 = $25; total $75
     const wallet = out.quotas["Wallet (USD)"];
     expect(wallet).toMatchObject({
@@ -136,7 +152,7 @@ describe("aggregator usage adapter", () => {
       { status: 200, json: { total_usage: 1000 } },
     ];
     const out = await getAggregatorUsage({ provider: "apinex", apiKey: "ax-test-key" });
-    expect(setup.calls[0]).toContain("/dashboard/billing/subscription");
+    expect(setup.calls[0].url).toContain("/dashboard/billing/subscription");
     expect(out.quotas["Wallet (USD)"]).toMatchObject({ used: 10, total: 50, remainingPercentage: 80 });
   });
 
@@ -174,5 +190,88 @@ describe("aggregator usage adapter", () => {
     setup.responses = [{ status: 404 }, { status: 404 }, { status: 404 }];
     const out = await getAggregatorUsage({ provider: "apmix", apiKey: "am-test-key", connectionId: "conn-empty" });
     expect(out.message).toMatch(/doesn't expose a usage API/i);
+  });
+
+  it("account session → Supabase wallet balance row (no API-key probes)", async () => {
+    setup.responses = [
+      {
+        status: 200,
+        json: [{ balance_paid: 12.5, balance_trial: 3, balance_bonus: 1.25, balance_bonus_locked: 5 }],
+      },
+    ];
+    const out = await getAggregatorUsage({
+      provider: "tokenharbor",
+      apiKey: "th-key",
+      accessToken: "user-jwt",
+    });
+
+    expect(out.message).toBeUndefined();
+    expect(out.plan).toBe("Token Harbor");
+    // The wallet is the authoritative answer, so no API-key probing happened.
+    expect(setup.calls.length).toBe(1);
+    expect(setup.calls[0].url).toContain("/rest/v1/wallets");
+    expect(setup.calls[0].url).toContain("balance_paid");
+    expect(setup.calls[0].headers.Authorization).toBe("Bearer user-jwt");
+    expect(setup.calls[0].headers.apikey).toBeTruthy();
+
+    const wallet = out.quotas["Wallet balance"];
+    // paid + trial + bonus are spendable; the locked bonus is not.
+    expect(wallet).toMatchObject({
+      used: 0,
+      total: 16.75,
+      isCreditBalance: true,
+      currency: "USD",
+      unlimited: false,
+      resetAt: null,
+    });
+  });
+
+  it("expired account session → falls back to the API-key flavors / local history", async () => {
+    // Wallet read fails (expired session) → the key-based lanes run next.
+    setup.responses = [
+      { status: 401, json: { message: "invalid JWT" } },
+      { status: 404 },
+      { status: 404 },
+      { status: 404 },
+    ];
+    setup.totals = { windowMs: 2592000000, requests: 2, tokens: 40, cost: 0 };
+    const out = await getAggregatorUsage({
+      provider: "tokenharbor",
+      apiKey: "th-key",
+      accessToken: "expired-jwt",
+      connectionId: "conn-wallet",
+    });
+
+    expect(out.quotas["Tokens · local history (30d)"]).toMatchObject({ used: 40, unlimited: true });
+    expect(out.quotas["Wallet balance"]).toBeUndefined();
+  });
+
+  it("no session and no key → message without any network call", async () => {
+    const out = await getAggregatorUsage({ provider: "tokenharbor" });
+    expect(setup.calls.length).toBe(0);
+    expect(out.message).toMatch(/API key not available/i);
+  });
+
+  it("expired session refreshes once and retries the wallet read", async () => {
+    // 401 on the wallet read → refresh → 200 with the balance.
+    setup.responses = [
+      { status: 401, json: { message: "invalid JWT" } },
+      { status: 200, json: { access_token: "fresh-jwt", refresh_token: "refresh-9" } },
+      { status: 200, json: [{ balance_paid: 7, balance_trial: 0, balance_bonus: 0, balance_bonus_locked: 0 }] },
+    ];
+    setup.refreshToken = "refresh-1";
+
+    const out = await getAggregatorUsage({
+      provider: "tokenharbor",
+      accessToken: "expired-jwt",
+      connectionId: "conn-refresh",
+    });
+
+    expect(out.quotas["Wallet balance"]).toMatchObject({ total: 7, isCreditBalance: true });
+    // The retry used the refreshed token, not the expired one.
+    const walletCalls = setup.calls.filter((c) => c.url.includes("/rest/v1/wallets"));
+    expect(walletCalls.length).toBe(2);
+    expect(walletCalls[0].headers.Authorization).toBe("Bearer expired-jwt");
+    expect(walletCalls[1].headers.Authorization).toBe("Bearer fresh-jwt");
   });
 });
