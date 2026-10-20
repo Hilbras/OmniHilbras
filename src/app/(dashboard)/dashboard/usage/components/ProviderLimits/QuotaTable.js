@@ -152,8 +152,13 @@ export default function QuotaTable({
         {currentPageRows.map((quota) => {
           const isUnlimited = quota.unlimited === true;
           const isCreditBalance = quota.isCreditBalance === true;
+          // Unlimited rows have no percentage to grade — they carry no limit,
+          // so they read as green (never red) instead of falling through to
+          // the 0% branch and showing a false "🔴 out of quota".
           const colors = isCreditBalance
             ? { text: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500", bgLight: "bg-blue-500/10", emoji: "💰" }
+            : isUnlimited
+            ? { text: "text-green-600 dark:text-green-400", bg: "bg-green-500", bgLight: "bg-green-500/10", emoji: "🟢" }
             : getColorClasses(quota.remaining);
           // Qoder flags open-ended plans with `neverExpires` (its API reports a
           // year-9999 sentinel). Return "-"/"Never expires" rather than an empty
