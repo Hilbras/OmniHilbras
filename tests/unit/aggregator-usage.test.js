@@ -97,6 +97,7 @@ describe("aggregator usage adapter", () => {
     setup.responses = [
       { status: 404 },             // billing/subscription (usage URL never reached)
       { status: 404 },             // /api/user/self
+      { status: 404 },             // /usage (beatapi-usage lane)
       {
         status: 200,
         json: { data: [] },
@@ -116,7 +117,7 @@ describe("aggregator usage adapter", () => {
   });
 
   it("401 on every candidate → auth-failed message, never a throw", async () => {
-    setup.responses = [{ status: 401 }, { status: 403 }, { status: 401 }];
+    setup.responses = [{ status: 401 }, { status: 403 }, { status: 401 }, { status: 401 }];
     const out = await getAggregatorUsage({ provider: "xkiro", apiKey: "xk-test-key" });
 
     expect(out.quotas).toBeUndefined();
@@ -124,10 +125,10 @@ describe("aggregator usage adapter", () => {
   });
 
   it("full miss → graceful message + negative cache stops re-probing immediately", async () => {
-    setup.responses = [{ status: 404 }, { status: 404 }, { status: 404 }];
+    setup.responses = [{ status: 404 }, { status: 404 }, { status: 404 }, { status: 404 }];
     const first = await getAggregatorUsage({ provider: "tiarina", apiKey: "ti-test-key" });
     expect(first.message).toMatch(/doesn't expose a usage API/i);
-    expect(setup.calls.length).toBe(3);
+    expect(setup.calls.length).toBe(4); // one probe per flavor
 
     const callsAfterFirst = setup.calls.length;
     const second = await getAggregatorUsage({ provider: "tiarina", apiKey: "ti-test-key" });
@@ -157,7 +158,7 @@ describe("aggregator usage adapter", () => {
   });
 
   it("remote full miss + local history → 'local history' unlimited rows", async () => {
-    setup.responses = [{ status: 404 }, { status: 404 }, { status: 404 }];
+    setup.responses = [{ status: 404 }, { status: 404 }, { status: 404 }, { status: 404 }];
     setup.totals = { windowMs: 2592000000, requests: 6, tokens: 725, cost: 0.0001 };
 
     const out = await getAggregatorUsage({ provider: "tokenharbor", apiKey: "th-test-key", connectionId: "conn-abc" });
@@ -170,7 +171,7 @@ describe("aggregator usage adapter", () => {
   });
 
   it("negative-cache cooldown still surfaces local history data", async () => {
-    setup.responses = [{ status: 404 }, { status: 404 }, { status: 404 }];
+    setup.responses = [{ status: 404 }, { status: 404 }, { status: 404 }, { status: 404 }];
     // Prime the cooldown with a miss and no local data available.
     // xkiro is used only by the 401 test earlier (cooldown not set there),
     // so this test owns a clean provider id.
@@ -182,12 +183,12 @@ describe("aggregator usage adapter", () => {
     const second = await getAggregatorUsage({ provider: "xkiro", apiKey: "xk-test-key", connectionId: "conn-cold" });
     expect(second.message).toBeUndefined();
     expect(second.quotas["Requests · local history (30d)"]).toMatchObject({ used: 3 });
-    expect(setup.calls.length).toBe(3); // no extra upstream probing during cooldown
+    expect(setup.calls.length).toBe(4); // no extra upstream probing during cooldown
   });
 
   it("remote full miss + no local history → unchanged graceful message", async () => {
     // apmix: cleared by the headers test earlier; here it misses everything.
-    setup.responses = [{ status: 404 }, { status: 404 }, { status: 404 }];
+    setup.responses = [{ status: 404 }, { status: 404 }, { status: 404 }, { status: 404 }];
     const out = await getAggregatorUsage({ provider: "apmix", apiKey: "am-test-key", connectionId: "conn-empty" });
     expect(out.message).toMatch(/doesn't expose a usage API/i);
   });
@@ -273,5 +274,41 @@ describe("aggregator usage adapter", () => {
     expect(walletCalls.length).toBe(2);
     expect(walletCalls[0].headers.Authorization).toBe("Bearer expired-jwt");
     expect(walletCalls[1].headers.Authorization).toBe("Bearer fresh-jwt");
+  });
+
+  it("beatapi-usage flavor: /v1/usage becomes a credit balance + concurrency rows", async () => {
+    setup.responses = [
+      {
+        status: 200,
+        json: {
+          object: "usage",
+          credit_balance: 12.5,
+          total_tasks: 42,
+          credits_settled: 7.5,
+          credits_refunded: 0.25,
+          concurrency: { limit: 5, active: 2 },
+        },
+      },
+    ];
+    const out = await getAggregatorUsage({ provider: "beatapi", apiKey: "ba-test-key" });
+
+    expect(out.message).toBeUndefined();
+    expect(setup.calls[0].url).toBe("https://api.beatapi.io/v1/usage");
+    expect(setup.calls[0].headers.Authorization).toBe("Bearer ba-test-key");
+
+    expect(out.quotas["Credit balance"]).toMatchObject({
+      used: 0,
+      total: 12.5,
+      isCreditBalance: true,
+      currency: "USD",
+    });
+    expect(out.quotas["Concurrent tasks"]).toMatchObject({ used: 2, total: 5 });
+  });
+
+  it("beatapi-usage: a negative balance still renders (BeatAPI allows going below zero)", async () => {
+    setup.responses = [{ status: 200, json: { credit_balance: -3.25 } }];
+    const out = await getAggregatorUsage({ provider: "beatapi", apiKey: "ba-test-key" });
+
+    expect(out.quotas["Credit balance"]).toMatchObject({ total: -3.25, isCreditBalance: true });
   });
 });

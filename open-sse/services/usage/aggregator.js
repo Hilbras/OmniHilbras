@@ -175,6 +175,63 @@ async function tryNewApi(targets, apiKey, proxyOptions, sawAuthError) {
   };
 }
 
+// beatapi-usage: BeatAPI's /v1/usage reports the account's USD credit
+// balance (it may be negative), the task count and the concurrency limit.
+//
+// The credit balance is a balance, not a quota: there is no ceiling to
+// compare it against, so it renders as a 💰 credit row like the other
+// aggregators' wallet rows.
+async function tryBeatApiUsage(targets, apiKey, proxyOptions) {
+  const response = await fetchWithTimeout(
+    `${targets.apiBase}/usage`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey.trim()}`,
+        Accept: "application/json",
+      },
+    },
+    AGGREGATOR_USAGE_CONFIG.fetchTimeoutMs,
+    proxyOptions,
+  );
+  if (response.status === 401 || response.status === 403) return { auth: true };
+  if (response.status !== 200) return null;
+
+  const data = await response.json().catch(() => null);
+  if (!data || typeof data !== "object") return null;
+
+  const balance = toFiniteNumber(data.credit_balance, NaN);
+  if (!Number.isFinite(balance)) return null;
+
+  const quotas = {
+    "Credit balance": {
+      used: 0,
+      total: Math.round(balance * 100) / 100,
+      remainingPercentage: balance > 0 ? 100 : 0,
+      resetAt: null,
+      unlimited: false,
+      isCreditBalance: true,
+      currency: "USD",
+    },
+  };
+
+  // Concurrency capacity is a real limit the account runs into, so it is
+  // worth showing next to the balance.
+  const limit = toFiniteNumber(data.concurrency?.limit, NaN);
+  if (Number.isFinite(limit) && limit > 0) {
+    const active = toFiniteNumber(data.concurrency?.active, 0);
+    quotas["Concurrent tasks"] = {
+      used: Math.max(0, active),
+      total: limit,
+      resetAt: null,
+      unlimited: false,
+      isCreditBalance: false,
+    };
+  }
+
+  return { flavor: "beatapi-usage", plan: "beatapi-usage", quotas };
+}
+
 // headers: rate-limit info rides on every response (groq pattern).
 async function tryRateLimitHeaders(targets, apiKey, proxyOptions) {
   const checkUrl = targets.validateUrl || `${targets.apiBase}/models`;
@@ -416,6 +473,7 @@ export async function getAggregatorUsage({ provider, connectionId = null, access
       const runners = [
         ["openai-billing", () => tryOpenAIBilling(targets, apiKey, proxyOptions, sawAuthError)],
         ["new-api", () => tryNewApi(targets, apiKey, proxyOptions, sawAuthError)],
+        ["beatapi-usage", () => tryBeatApiUsage(targets, apiKey, proxyOptions)],
         ["headers", () => tryRateLimitHeaders(targets, apiKey, proxyOptions)],
       ];
 

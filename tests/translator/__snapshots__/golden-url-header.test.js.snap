@@ -278,6 +278,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > bazaarlink → heade
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > beatapi → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > bedrock → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": "THROW: Cannot read properties of undefined (reading 'header')",
@@ -1834,6 +1853,13 @@ exports[`GOLDEN buildUrl (default executor providers) > bazaarlink → url (stre
 {
   "nonStream": "https://bazaarlink.ai/api/v1/chat/completions",
   "stream": "https://bazaarlink.ai/api/v1/chat/completions",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > beatapi → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://api.beatapi.io/v1/chat/completions",
+  "stream": "https://api.beatapi.io/v1/chat/completions",
 }
 `;
 

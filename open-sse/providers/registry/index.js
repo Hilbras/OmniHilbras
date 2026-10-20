@@ -143,6 +143,7 @@ import p140 from "./apmix.js";
 import p141 from "./apinex.js";
 import p142 from "./tiarina.js";
 import p143 from "./xkiro.js";
+import p144 from "./beatapi.js";
 export default [
   p0,
   p1,
@@ -286,4 +287,5 @@ export default [
   p141,
   p142,
   p143,
+  p144,
 ];

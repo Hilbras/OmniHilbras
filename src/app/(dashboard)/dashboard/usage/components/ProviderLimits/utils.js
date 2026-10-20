@@ -794,6 +794,7 @@ export function parseQuotaData(provider, data) {
       case "apinex":
       case "tiarina":
       case "xkiro":
+      case "beatapi":
         // Aggregator hosts share one adapter (open-sse/services/usage/aggregator.js);
         // its rows arrive already normalized — a wallet row is a currency
         // balance, rate-limit rows carry absolute used/total, and the
