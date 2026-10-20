@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import PropTypes from "prop-types";
-import { Modal, Button, Input, OAuthModal } from "@/shared/components";
+import { Modal, Button, Input } from "@/shared/components";
 
 /**
  * Token Harbor Authentication Modal
@@ -23,7 +23,9 @@ export default function TokenHarborAuthModal({ isOpen, providerInfo, onSuccess, 
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [showOAuth, setShowOAuth] = useState(false);
+  const [pastedUrl, setPastedUrl] = useState("");
+  const [authData, setAuthData] = useState(null);
+  const popupRef = useRef(null);
 
   const reset = () => {
     setMode(null);
@@ -31,12 +33,67 @@ export default function TokenHarborAuthModal({ isOpen, providerInfo, onSuccess, 
     setPassword("");
     setError(null);
     setLoading(false);
-    setShowOAuth(false);
+    setPastedUrl("");
+    setAuthData(null);
   };
 
   const handleClose = () => {
+    try {
+      popupRef.current?.close();
+    } catch {
+      /* the popup may already be gone */
+    }
     reset();
     onClose();
+  };
+
+  // GoTrue redirects back to Token Harbor's own host (it pins the redirect
+  // target), landing on a plain-text page with the code in the address bar.
+  // We open that flow in a popup and ask the user to copy the URL back.
+  const startGoogleLogin = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const redirectUri = `${window.location.origin}/callback`;
+      const res = await fetch(
+        `/api/oauth/tokenharbor/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`,
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not start the login");
+      setAuthData(data);
+      popupRef.current = window.open(data.authUrl, "tokenharbor_login", "width=600,height=700");
+      if (!popupRef.current) {
+        setError("The login window was blocked. Allow popups for this site and try again.");
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePastedUrl = async () => {
+    if (!pastedUrl.trim()) {
+      setError("Paste the URL shown in the login window");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/oauth/tokenharbor/manual-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: pastedUrl.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not complete the login");
+      onSuccess?.();
+      handleClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handlePasswordSubmit = async () => {
@@ -66,19 +123,6 @@ export default function TokenHarborAuthModal({ isOpen, providerInfo, onSuccess, 
   };
 
   if (!isOpen) return null;
-
-  // Sub-modal for the Google PKCE flow
-  if (showOAuth) {
-    return (
-      <OAuthModal
-        isOpen
-        provider="tokenharbor"
-        providerInfo={providerInfo}
-        onSuccess={() => { onSuccess?.(); handleClose(); }}
-        onClose={() => setShowOAuth(false)}
-      />
-    );
-  }
 
   return (
     <Modal isOpen={isOpen} title="Connect Token Harbor" onClose={handleClose} size="lg">
@@ -119,18 +163,30 @@ export default function TokenHarborAuthModal({ isOpen, providerInfo, onSuccess, 
         {mode === "oauth" && (
           <>
             <p className="text-xs text-text-muted">
-              A window opens on Token Harbor&apos;s login page. Sign in with Google, GitHub or
-              email, then come back here — the connection is created automatically.
+              A login window opens on Token Harbor&apos;s site. After signing in with Google,
+              GitHub or email, the page shows a plain address — copy that whole URL and paste it
+              below to finish connecting.
             </p>
-            {error && <p className="text-sm text-red-500">{error}</p>}
             <div className="flex gap-2">
-              <Button onClick={() => setShowOAuth(true)} fullWidth>
-                Continue
+              <Button onClick={startGoogleLogin} fullWidth disabled={loading} loading={loading}>
+                {authData ? "Open login again" : "Sign in with Google"}
               </Button>
               <Button onClick={() => { setMode(null); setError(null); }} variant="ghost" fullWidth>
                 Back
               </Button>
             </div>
+            <Input
+              label="Paste the URL from the login window"
+              value={pastedUrl}
+              onChange={(e) => setPastedUrl(e.target.value)}
+              placeholder="https://tokenharbor.ai/robots.txt?code=..."
+              hint="The address bar of the login window — copy the whole thing, including ?code=..."
+              inputClassName="font-mono text-xs"
+            />
+            {error && <p className="text-sm text-red-500">{error}</p>}
+            <Button onClick={handlePastedUrl} fullWidth disabled={!pastedUrl.trim() || loading} loading={loading}>
+              Connect
+            </Button>
           </>
         )}
 

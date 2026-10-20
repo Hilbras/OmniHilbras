@@ -667,6 +667,59 @@ export async function POST(request, { params }) {
     }
 
     if (action === "manual-code") {
+      // Token Harbor: GoTrue pins the authorization redirect to its own host,
+      // so the code lands on a plain-text page there instead of on our
+      // callback. The user copies that URL back to us and we finish the
+      // exchange with the PKCE verifier we kept server-side.
+      if (provider === "tokenharbor") {
+        const { parseReturnedCode } = await import("@/lib/oauth/providers/tokenharbor.js");
+        const parsed = parseReturnedCode(body?.url || body?.code);
+        if (!parsed?.code) {
+          return NextResponse.json({ error: "Paste the full URL you were shown" }, { status: 400 });
+        }
+        // The state travels with the pasted URL; fall back to the body.
+        const returnedState = parsed.state || body?.state;
+        const session = getTokenharborSession(returnedState);
+        if (!session) {
+          return NextResponse.json(
+            { error: "Token Harbor login session expired or not found. Please start the login again." },
+            { status: 400 },
+          );
+        }
+        try {
+          const tokenData = await exchangeTokens(
+            "tokenharbor",
+            parsed.code,
+            session.redirectUri,
+            session.codeVerifier,
+            returnedState,
+            { authMethod: session.authMethod },
+          );
+          const connection = await createProviderConnection({
+            provider: "tokenharbor",
+            authType: "oauth",
+            ...tokenData,
+            expiresAt: tokenData.expiresIn
+              ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString()
+              : null,
+            testStatus: "active",
+          });
+          clearTokenharborSession(returnedState);
+          return NextResponse.json({
+            success: true,
+            connection: {
+              id: connection.id,
+              provider: connection.provider,
+              email: connection.email,
+              displayName: connection.displayName,
+            },
+          });
+        } catch (err) {
+          clearTokenharborSession(returnedState);
+          return NextResponse.json({ error: err.message }, { status: 500 });
+        }
+      }
+
       if (provider !== "xai") {
         return NextResponse.json({ error: "Manual code only supported for xai" }, { status: 400 });
       }

@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import { generatePKCE } from "@/lib/oauth/utils/pkce.js";
-import tokenharbor from "@/lib/oauth/providers/tokenharbor.js";
+import tokenharbor, { parseReturnedCode } from "@/lib/oauth/providers/tokenharbor.js";
 
 const setup = { fetchResponses: [], calls: [] };
 
@@ -30,7 +30,7 @@ beforeEach(() => {
 const REDIRECT = "http://localhost:20138/callback";
 
 describe("tokenharbor oauth provider", () => {
-  it("builds a PKCE authorize URL that carries our state in redirect_to", () => {
+  it("builds a PKCE authorize URL that lands on the provider's plain-text path", () => {
     const { codeVerifier, codeChallenge, state } = generatePKCE();
     const url = new URL(
       tokenharbor.buildAuthUrl(tokenharbor.config, REDIRECT, state, codeChallenge, { authMethod: "google" }),
@@ -41,11 +41,23 @@ describe("tokenharbor oauth provider", () => {
     expect(url.searchParams.get("code_challenge")).toBe(codeChallenge);
     expect(url.searchParams.get("code_challenge_method")).toBe("s256");
 
-    // GoTrue mints its own `state`, so ours rides inside redirect_to and
-    // comes back on the callback — that is what binds the exchange.
+    // GoTrue pins the redirect to the provider's own host, so the code lands
+    // on a plain-text path there (their JS never runs) with our state on it.
     const redirectTo = new URL(url.searchParams.get("redirect_to"));
-    expect(redirectTo.origin + redirectTo.pathname).toBe(REDIRECT);
+    expect(redirectTo.origin).toBe("https://tokenharbor.ai");
+    expect(redirectTo.pathname).toBe("/robots.txt");
     expect(redirectTo.searchParams.get("th_state")).toBe(state);
+  });
+
+  it("parses a pasted landing URL back into code + state", () => {
+    const parsed = parseReturnedCode(
+      "https://tokenharbor.ai/robots.txt?code=abc-123&th_state=state-9",
+    );
+    expect(parsed).toEqual({ code: "abc-123", state: "state-9" });
+
+    // A bare code works too (no state → the caller falls back to its own).
+    expect(parseReturnedCode("abc-123")).toEqual({ code: "abc-123", state: null });
+    expect(parseReturnedCode("")).toBeNull();
   });
 
   it("exchanges the callback code with the same redirect_to it was authorized with", async () => {
@@ -75,8 +87,12 @@ describe("tokenharbor oauth provider", () => {
     const body = JSON.parse(call.opts.body);
     expect(body.auth_code).toBe("the-code");
     expect(body.code_verifier).toBe(codeVerifier);
-    // redirect_to must match the authorize request exactly, state included.
-    expect(new URL(body.redirect_to).searchParams.get("th_state")).toBe(state);
+    // redirect_to must match the authorize request exactly — the landing pad
+    // on the provider's host, with our state on it.
+    const redirectTo = new URL(body.redirect_to);
+    expect(redirectTo.origin).toBe("https://tokenharbor.ai");
+    expect(redirectTo.pathname).toBe("/robots.txt");
+    expect(redirectTo.searchParams.get("th_state")).toBe(state);
     expect(call.opts.headers.apikey).toBe(tokenharbor.config.anonKey);
   });
 

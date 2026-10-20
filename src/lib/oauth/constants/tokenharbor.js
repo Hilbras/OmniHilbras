@@ -26,6 +26,12 @@ export const TOKENHARBOR_CONFIG = {
   supabaseUrl: AGGREGATOR_WALLET_CONFIG.supabaseUrl,
   anonKey: ANON_KEY,
 
+  // GoTrue only accepts redirect targets on the provider's own host, so the
+  // authorization code lands here. The path serves plain text, so the
+  // provider's JavaScript never runs and the code stays readable.
+  landingHost: "https://tokenharbor.ai",
+  landingPath: "/robots.txt",
+
   // Wallet table + columns (the only table the Token Harbor frontend reads)
   walletTable: AGGREGATOR_WALLET_CONFIG.walletTable,
   walletColumns: AGGREGATOR_WALLET_CONFIG.walletColumns,

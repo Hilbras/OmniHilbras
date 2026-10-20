@@ -52,12 +52,56 @@ function appendState(redirectUri, state) {
   }
 }
 
+// Where the authorization code lands.
+//
+// GoTrue only accepts redirect targets on Token Harbor's own host — any other
+// host is silently rewritten to `https://tokenharbor.ai`, which is why the
+// code used to end up on their landing page and fail to exchange (their JS
+// holds a different PKCE verifier than ours).
+//
+// So the flow lands on a path on their host that serves plain text: the
+// browser shows it verbatim instead of running their app, so the `code` stays
+// readable in the address bar and the user can hand it back to us. Our state
+// rides along as `th_state` so the exchange stays bound to this attempt.
+const LANDING_PATH = "/robots.txt";
+
+
+// The URL GoTrue will actually redirect to: the provider's own host, on a
+// path that serves plain text (so their JS never runs and the code stays in
+// the address bar).
+function landingUrl(config, redirectUri) {
+  try {
+    const base = new URL(redirectUri);
+    const host = config.landingHost || base.origin;
+    const path = config.landingPath || LANDING_PATH;
+    return new URL(path, host).toString();
+  } catch {
+    return redirectUri;
+  }
+}
+
+// Extract the authorization code from a URL the user pasted back — the
+// landing page URL, or just the bare code.
+export function parseReturnedCode(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    const code = url.searchParams.get("code");
+    if (code) {
+      return { code, state: url.searchParams.get("th_state") || null };
+    }
+  } catch {
+    // Not a URL — maybe the bare code.
+  }
+  return { code: raw, state: null };
+}
+
 const tokenharbor = {
   config: TOKENHARBOR_CONFIG,
   flowType: "authorization_code_pkce",
 
-  // The dashboard's own callback page receives the code and relays it back to
-  // the opener window. GoTrue echoes `redirect_to` through its provider chain.
+  // The landing pad is on the provider's host, not ours.
   prepareConfig: async (config, meta = {}) => ({
     ...config,
     redirectUri: meta.redirectUri || config.redirectUri,
@@ -70,7 +114,7 @@ const tokenharbor = {
       // GoTrue replaces any `state` we send with its own UUID, so our state
       // rides inside `redirect_to` — it survives the provider round-trip and
       // comes back on the callback, which binds the exchange to this attempt.
-      redirect_to: appendState(redirectUri, state),
+      redirect_to: appendState(landingUrl(config, redirectUri), state),
     });
     if (codeChallenge) {
       params.set("code_challenge", codeChallenge);
@@ -81,7 +125,7 @@ const tokenharbor = {
 
   exchangeToken: async (config, code, redirectUri, codeVerifier, state, meta = {}) => {
     // GoTrue checks that `redirect_to` matches the one it saw at /authorize —
-    // including the `th_state` we appended there.
+    // which was the landing pad on the provider's host, state included.
     const tokens = await gotrueJson(
       `${config.authBaseUrl}${config.tokenUrlPath}?grant_type=pkce`,
       {
@@ -90,7 +134,7 @@ const tokenharbor = {
         body: {
           auth_code: code,
           code_verifier: codeVerifier,
-          redirect_to: appendState(redirectUri, state),
+          redirect_to: appendState(landingUrl(config, redirectUri), state),
         },
       },
     );
