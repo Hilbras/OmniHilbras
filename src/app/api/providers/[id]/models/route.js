@@ -324,6 +324,13 @@ const PROVIDER_MODELS_CONFIG = {
   // OpenAI-compatible aggregators.
   tokenharbor: createOpenAIModelsConfig("https://tokenharbor.ai/v1/models"),
   beatapi: createOpenAIModelsConfig("https://api.beatapi.io/v1/models"),
+  // Free-tier aggregators (added together: each answers a plain OpenAI
+  // /v1/models catalogue, some with extra context/pricing fields).
+  "nara-router": createOpenAIModelsConfig("https://router.bynara.id/v1/models"),
+  apmix: createOpenAIModelsConfig("https://api.apmix.ai/v1/models"),
+  apinex: createOpenAIModelsConfig("https://api.apinex.bond/v1/models"),
+  tiarina: createOpenAIModelsConfig("https://ai.tiarina.cloud/v1/models"),
+  xkiro: createOpenAIModelsConfig("https://api.xkiro.com/v1/models"),
   dahl: createOpenAIModelsConfig("https://inference.dahl.global/v1/models"),
   atria: createOpenAIModelsConfig("https://api.atria-asi.ai/v1/models"),
   agnes: createOpenAIModelsConfig("https://apihub.agnes-ai.com/v1/models"),

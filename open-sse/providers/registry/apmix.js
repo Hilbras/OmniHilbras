@@ -27,6 +27,10 @@ export default {
     },
     retry: { 429: 2 },
     usage: {
+      // /v1/usage reports the account's USD credit balance and the
+      // concurrency limit. The response shape matches BeatAPI's (same
+      // gateway family), but it is not pinned: a mismatch only means the
+      // balance row is skipped, and the local-history rows still show.
       apiBase: "https://api.apmix.ai/v1",
     },
   },

@@ -29,6 +29,8 @@ export default {
     retry: { 429: 2 },
     usage: {
       apiBase: "https://api.xkiro.com/v1",
+      flavor: "xkiro-usage",
+      // /v1/usage reports the free daily token allowance (used_today/limit_per_day) and the wallet.
     },
   },
   models: [

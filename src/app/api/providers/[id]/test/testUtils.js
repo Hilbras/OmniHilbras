@@ -762,6 +762,11 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
       }
       case "tokenharbor":
       case "beatapi":
+      case "nara-router":
+      case "apmix":
+      case "apinex":
+      case "tiarina":
+      case "xkiro":
       case "dahl":
       case "atria":
       case "agnes":

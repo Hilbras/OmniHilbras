@@ -28,6 +28,8 @@ export default {
     retry: { 429: 2 },
     usage: {
       apiBase: "https://api.apinex.bond/v1",
+      flavor: "apinex-balance",
+      // /v1/balance reports the account wallet (balance_usd) and the key's rpm limit.
     },
   },
   models: [

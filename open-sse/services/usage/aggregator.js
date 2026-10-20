@@ -175,6 +175,111 @@ async function tryNewApi(targets, apiKey, proxyOptions, sawAuthError) {
   };
 }
 
+// apinex-balance: /v1/balance reports the account's USD wallet plus the
+// key's requests-per-minute limit.
+async function tryApinexBalance(targets, apiKey, proxyOptions) {
+  const response = await fetchWithTimeout(
+    `${targets.apiBase}/balance`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey.trim()}`,
+        Accept: "application/json",
+      },
+    },
+    AGGREGATOR_USAGE_CONFIG.fetchTimeoutMs,
+    proxyOptions,
+  );
+  if (response.status === 401 || response.status === 403) return { auth: true };
+  if (response.status !== 200) return null;
+
+  const data = await response.json().catch(() => null);
+  if (!data || typeof data !== "object") return null;
+
+  const balance = toFiniteNumber(data.balance_usd, NaN);
+  if (!Number.isFinite(balance)) return null;
+
+  const quotas = {
+    "Wallet balance": {
+      used: 0,
+      total: Math.round(balance * 100) / 100,
+      remainingPercentage: balance > 0 ? 100 : 0,
+      resetAt: null,
+      unlimited: false,
+      isCreditBalance: true,
+      currency: "USD",
+    },
+  };
+
+  // The free plan caps requests per minute — a real limit the account hits.
+  const rpm = toFiniteNumber(data.rpm, NaN);
+  if (Number.isFinite(rpm) && rpm > 0) {
+    quotas["Requests / minute"] = {
+      used: 0,
+      total: rpm,
+      resetAt: null,
+      unlimited: false,
+      isCreditBalance: false,
+    };
+  }
+
+  return { flavor: "apinex-balance", plan: "apinex-balance", quotas };
+}
+
+// xkiro-usage: /v1/usage reports the free daily token allowance (used vs
+// limit) and the wallet balance. The daily allowance is a true quota with a
+// real ceiling, so it renders as a normal progress row.
+async function tryXkiroUsage(targets, apiKey, proxyOptions) {
+  const response = await fetchWithTimeout(
+    `${targets.apiBase}/usage`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey.trim()}`,
+        Accept: "application/json",
+      },
+    },
+    AGGREGATOR_USAGE_CONFIG.fetchTimeoutMs,
+    proxyOptions,
+  );
+  if (response.status === 401 || response.status === 403) return { auth: true };
+  if (response.status !== 200) return null;
+
+  const data = await response.json().catch(() => null);
+  if (!data || typeof data !== "object") return null;
+
+  const quotas = {};
+
+  const used = toFiniteNumber(data.free_tokens?.used_today, NaN);
+  const limit = toFiniteNumber(data.free_tokens?.limit_per_day, NaN);
+  if (Number.isFinite(used) && Number.isFinite(limit) && limit > 0) {
+    quotas["Free tokens (today)"] = {
+      used,
+      total: limit,
+      remainingPercentage: remainingPercentage(Math.max(0, limit - used), limit),
+      resetAt: null,
+      unlimited: false,
+      isCreditBalance: false,
+    };
+  }
+
+  const balance = toFiniteNumber(data.wallet?.balance_usd, NaN);
+  if (Number.isFinite(balance)) {
+    quotas["Wallet balance"] = {
+      used: 0,
+      total: Math.round(balance * 100) / 100,
+      remainingPercentage: balance > 0 ? 100 : 0,
+      resetAt: null,
+      unlimited: false,
+      isCreditBalance: true,
+      currency: "USD",
+    };
+  }
+
+  if (!Object.keys(quotas).length) return null;
+  return { flavor: "xkiro-usage", plan: "xkiro-usage", quotas };
+}
+
 // beatapi-usage: BeatAPI's /v1/usage reports the account's USD credit
 // balance (it may be negative), the task count and the concurrency limit.
 //
@@ -200,7 +305,13 @@ async function tryBeatApiUsage(targets, apiKey, proxyOptions) {
   const data = await response.json().catch(() => null);
   if (!data || typeof data !== "object") return null;
 
-  const balance = toFiniteNumber(data.credit_balance, NaN);
+  // BeatAPI and apmix share this gateway family; the balance field is
+  // credit_balance on both, but accept the common aliases so a sibling
+  // host with a slightly different name still resolves.
+  const balance = toFiniteNumber(
+    data.credit_balance ?? data.balance_usd ?? data.balance ?? data.remaining_balance,
+    NaN,
+  );
   if (!Number.isFinite(balance)) return null;
 
   const quotas = {
@@ -474,6 +585,8 @@ export async function getAggregatorUsage({ provider, connectionId = null, access
         ["openai-billing", () => tryOpenAIBilling(targets, apiKey, proxyOptions, sawAuthError)],
         ["new-api", () => tryNewApi(targets, apiKey, proxyOptions, sawAuthError)],
         ["beatapi-usage", () => tryBeatApiUsage(targets, apiKey, proxyOptions)],
+        ["apinex-balance", () => tryApinexBalance(targets, apiKey, proxyOptions)],
+        ["xkiro-usage", () => tryXkiroUsage(targets, apiKey, proxyOptions)],
         ["headers", () => tryRateLimitHeaders(targets, apiKey, proxyOptions)],
       ];
 

@@ -98,6 +98,8 @@ describe("aggregator usage adapter", () => {
       { status: 404 },             // billing/subscription (usage URL never reached)
       { status: 404 },             // /api/user/self
       { status: 404 },             // /usage (beatapi-usage lane)
+      { status: 404 },             // /balance (apinex-balance lane)
+      { status: 404 },             // /usage (xkiro-usage lane)
       {
         status: 200,
         json: { data: [] },
@@ -117,18 +119,24 @@ describe("aggregator usage adapter", () => {
   });
 
   it("401 on every candidate → auth-failed message, never a throw", async () => {
-    setup.responses = [{ status: 401 }, { status: 403 }, { status: 401 }, { status: 401 }];
-    const out = await getAggregatorUsage({ provider: "xkiro", apiKey: "xk-test-key" });
+    setup.responses = [
+      { status: 401 }, { status: 403 }, { status: 401 },
+      { status: 401 }, { status: 401 }, { status: 401 },
+    ];
+    const out = await getAggregatorUsage({ provider: "tiarina", apiKey: "ti-test-key" });
 
     expect(out.quotas).toBeUndefined();
     expect(out.message).toMatch(/authentication failed/i);
   });
 
   it("full miss → graceful message + negative cache stops re-probing immediately", async () => {
-    setup.responses = [{ status: 404 }, { status: 404 }, { status: 404 }, { status: 404 }];
+    setup.responses = [
+      { status: 404 }, { status: 404 }, { status: 404 },
+      { status: 404 }, { status: 404 }, { status: 404 },
+    ];
     const first = await getAggregatorUsage({ provider: "tiarina", apiKey: "ti-test-key" });
     expect(first.message).toMatch(/doesn't expose a usage API/i);
-    expect(setup.calls.length).toBe(4); // one probe per flavor
+    expect(setup.calls.length).toBe(6); // one probe per flavor
 
     const callsAfterFirst = setup.calls.length;
     const second = await getAggregatorUsage({ provider: "tiarina", apiKey: "ti-test-key" });
@@ -143,18 +151,17 @@ describe("aggregator usage adapter", () => {
     expect(out.message).toMatch(/API key not available/i);
   });
 
-  it("registry flavor pin restricts the candidates tried", async () => {
-    // apinex registry pins nothing → both lanes tried; simulate new-api success
-    // on a provider whose usage block pins a flavor by monkey-friendly routing:
-    // use a flavor order that skips heavy lanes via pin is covered by config;
-    // here assert that the openai-billing lane is tried first for every provider.
+  it("a pinned flavor restricts the candidates tried", async () => {
+    // xkiro pins xkiro-usage, so the adapter probes only /usage — the
+    // billing lanes of the other providers are never called.
     setup.responses = [
-      { status: 200, json: { system_hard_limit_usd: 50 } },
-      { status: 200, json: { total_usage: 1000 } },
+      { status: 200, json: { free_tokens: { used_today: 10, limit_per_day: 100 } } },
     ];
-    const out = await getAggregatorUsage({ provider: "apinex", apiKey: "ax-test-key" });
-    expect(setup.calls[0].url).toContain("/dashboard/billing/subscription");
-    expect(out.quotas["Wallet (USD)"]).toMatchObject({ used: 10, total: 50, remainingPercentage: 80 });
+    const out = await getAggregatorUsage({ provider: "xkiro", apiKey: "xk-test-key" });
+
+    expect(setup.calls.length).toBe(1);
+    expect(setup.calls[0].url).toBe("https://api.xkiro.com/v1/usage");
+    expect(out.quotas["Free tokens (today)"]).toMatchObject({ used: 10, total: 100 });
   });
 
   it("remote full miss + local history → 'local history' unlimited rows", async () => {
@@ -175,20 +182,23 @@ describe("aggregator usage adapter", () => {
     // Prime the cooldown with a miss and no local data available.
     // xkiro is used only by the 401 test earlier (cooldown not set there),
     // so this test owns a clean provider id.
-    const first = await getAggregatorUsage({ provider: "xkiro", apiKey: "xk-test-key", connectionId: "conn-cold" });
+    const first = await getAggregatorUsage({ provider: "nara-router", apiKey: "nr-test-key", connectionId: "conn-cold" });
     expect(first.message).toMatch(/doesn't expose a usage API/i);
 
     // Now history arrives — a cooldown hit must show the rows instead of the message.
     setup.totals = { windowMs: 2592000000, requests: 3, tokens: 120, cost: 0 };
-    const second = await getAggregatorUsage({ provider: "xkiro", apiKey: "xk-test-key", connectionId: "conn-cold" });
+    const second = await getAggregatorUsage({ provider: "nara-router", apiKey: "nr-test-key", connectionId: "conn-cold" });
     expect(second.message).toBeUndefined();
     expect(second.quotas["Requests · local history (30d)"]).toMatchObject({ used: 3 });
-    expect(setup.calls.length).toBe(4); // no extra upstream probing during cooldown
+    expect(setup.calls.length).toBe(6); // no extra upstream probing during cooldown
   });
 
   it("remote full miss + no local history → unchanged graceful message", async () => {
     // apmix: cleared by the headers test earlier; here it misses everything.
-    setup.responses = [{ status: 404 }, { status: 404 }, { status: 404 }, { status: 404 }];
+    setup.responses = [
+      { status: 404 }, { status: 404 }, { status: 404 },
+      { status: 404 }, { status: 404 }, { status: 404 },
+    ];
     const out = await getAggregatorUsage({ provider: "apmix", apiKey: "am-test-key", connectionId: "conn-empty" });
     expect(out.message).toMatch(/doesn't expose a usage API/i);
   });
@@ -310,5 +320,66 @@ describe("aggregator usage adapter", () => {
     const out = await getAggregatorUsage({ provider: "beatapi", apiKey: "ba-test-key" });
 
     expect(out.quotas["Credit balance"]).toMatchObject({ total: -3.25, isCreditBalance: true });
+  });
+
+  it("apinex-balance flavor: wallet + rpm limit", async () => {
+    // Live response: { object:"balance", balance_usd:0.098949, reserved_usd:0, rpm:5, rpm_plan:"free" }
+    setup.responses = [
+      {
+        status: 200,
+        json: { object: "balance", balance_usd: 0.098949, reserved_usd: 0, rpm: 5, rpm_plan: "free" },
+      },
+    ];
+    const out = await getAggregatorUsage({ provider: "apinex", apiKey: "ax-test-key" });
+
+    expect(setup.calls[0].url).toBe("https://api.apinex.bond/v1/balance");
+    expect(out.quotas["Wallet balance"]).toMatchObject({
+      used: 0,
+      total: 0.1, // rounded to cents
+      isCreditBalance: true,
+      currency: "USD",
+    });
+    expect(out.quotas["Requests / minute"]).toMatchObject({ used: 0, total: 5 });
+  });
+
+  it("xkiro-usage flavor: daily free-token allowance + wallet", async () => {
+    // Live response: free_tokens {used_today, limit_per_day, remaining} + wallet {balance_usd}
+    setup.responses = [
+      {
+        status: 200,
+        json: {
+          object: "usage",
+          plan: null,
+          free_tokens: { used_today: 1067798, limit_per_day: 1000000, remaining: 0 },
+          wallet: { balance_usd: "0.000000", held_usd: "0.000000" },
+        },
+      },
+    ];
+    const out = await getAggregatorUsage({ provider: "xkiro", apiKey: "xk-test-key" });
+
+    expect(setup.calls[0].url).toBe("https://api.xkiro.com/v1/usage");
+    // The daily allowance is over the limit — it reads 0% remaining.
+    expect(out.quotas["Free tokens (today)"]).toMatchObject({
+      used: 1067798,
+      total: 1000000,
+      remainingPercentage: 0,
+      isCreditBalance: false,
+    });
+    expect(out.quotas["Wallet balance"]).toMatchObject({ total: 0, isCreditBalance: true });
+  });
+
+  it("a host with no usage API falls back to the local-history rows", async () => {
+    // NaraRouter and Tiarina expose no quota endpoint (all 404) — the
+    // local-history flavor is what remains.
+    setup.responses = [{ status: 404 }, { status: 404 }, { status: 404 }, { status: 404 }, { status: 404 }, { status: 404 }];
+    setup.totals = { windowMs: 2592000000, requests: 1, tokens: 10, cost: 0 };
+    const out = await getAggregatorUsage({
+      provider: "nara-router",
+      apiKey: "nr-test-key",
+      connectionId: "conn-nara",
+    });
+
+    expect(out.quotas["Tokens · local history (30d)"]).toMatchObject({ used: 10, unlimited: true });
+    expect(out.quotas["Wallet balance"]).toBeUndefined();
   });
 });
