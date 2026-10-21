@@ -8,6 +8,7 @@ import { cn } from "@/shared/utils/cn";
 import { APP_CONFIG, UPDATER_CONFIG } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { useGatewayStatus } from "@/shared/hooks/useGatewayStatus";
 import useSettingsStore from "@/store/settingsStore";
 import Button from "./Button";
 import { ConfirmModal } from "./Modal";
@@ -31,7 +32,7 @@ const insightItems = [
   { href: "/dashboard/token-saver", label: "Token Saver", icon: "savings" },
   { href: "/dashboard/console-log", label: "Logs", icon: "terminal" },
   // The request log is a tab of the usage page, not a page of its own.
-  { href: "/dashboard/usage?tab=logs", label: "Request log", icon: "scroll_text", tab: "logs" },
+  { href: "/dashboard/usage?tab=logs", label: "Request log", icon: "scroll_text" },
   { href: "/dashboard/profile", label: "Settings", icon: "settings" },
 ];
 
@@ -55,6 +56,31 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
   const shutdownTimerRef = useRef(null);
 
   const INSTALL_CMD = UPDATER_CONFIG.installCmdLatest;
+
+  // The badge asks the gateway rather than asserting it: a page whose only
+  // request already failed makes no further requests, so nothing would ever
+  // notice the gateway coming back.
+  const { reachable, problem, buildVersion } = useGatewayStatus();
+  const gatewayUp = reachable !== false;
+  // A refusal is not an outage, and the wording has to say which one it is.
+  const gatewayLabel =
+    reachable === undefined
+      ? "Checking gateway"
+      : reachable
+        ? "Gateway online"
+        : problem === "refused"
+          ? "Gateway refused this page"
+          : problem === "unauthorized"
+            ? "Gateway needs sign-in"
+            : "Gateway offline";
+  const gatewayHint =
+    reachable === false
+      ? problem === "refused"
+        ? "this page's origin is not allowed"
+        : problem === "unauthorized"
+          ? "gateway is up · dashboard token not accepted, reload the dashboard"
+          : "not answering · is the gateway running?"
+      : `${hostLabel()} · build ${buildVersion ?? "unknown"}`;
 
   // The countdown must not outlive the page: a gateway that shuts itself down
   // after the user navigated away takes the whole app with it.
@@ -127,16 +153,12 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
     setShutdownCountdown(0);
   };
 
-  // Note: legacy updater poll removed. New flow: copy install cmd + shutdown server,
-  // user runs the command manually in another terminal.
-
-
   return (
     <>
       <aside
-        className={`dashboard-sidebar flex h-full shrink-0 flex-col border-r border-border bg-bg-soft transition-[width] duration-200 min-h-full w-72 ${collapsed ? "lg:w-[76px]" : "lg:w-[252px]"}`}
+        className={`dashboard-sidebar flex h-full w-[252px] shrink-0 flex-col border-r border-line bg-bg-soft transition-[width] duration-200 ${collapsed ? "lg:w-[76px]" : "lg:w-[252px]"}`}
       >
-        {/* Logo + collapse toggle */}
+        {/* Brand + collapse toggle */}
         <div className={`flex items-center gap-1 pb-4 pt-5 ${collapsed ? "justify-center px-2" : "justify-between px-5"}`}>
           <button
             type="button"
@@ -165,7 +187,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               </span>
             )}
             {!collapsed && (
-              <span className="material-symbols-outlined h-4 w-4 shrink-0 text-[16px] text-muted" aria-hidden="true">
+              <span className="material-symbols-outlined ml-auto h-4 w-4 shrink-0 text-[16px] text-muted" aria-hidden="true">
                 left_panel_close
               </span>
             )}
@@ -181,9 +203,30 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
             </button>
           )}
         </div>
+
+        {/* The badge asks the gateway rather than asserting it. */}
+        <div
+          className={`mx-4 mb-5 rounded-xl border ${gatewayUp ? "border-success/20 bg-success/10" : "border-danger/30 bg-danger/10"} ${collapsed ? "flex justify-center p-2.5" : "p-3"}`}
+          title={collapsed ? `${gatewayLabel} · ${hostLabel()}` : undefined}
+          aria-label={gatewayLabel}
+        >
+          <div className={`flex items-center ${collapsed ? "justify-center" : "gap-2"}`}>
+            <span className="relative flex h-2 w-2">
+              {gatewayUp && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />}
+              <span className={`relative inline-flex h-2 w-2 rounded-full ${gatewayUp ? "bg-success" : "bg-danger"}`} />
+            </span>
+            {!collapsed && <span className={`text-xs font-semibold ${gatewayUp ? "text-success" : "text-danger"}`}>{gatewayLabel}</span>}
+          </div>
+          {!collapsed && (
+            <p className="mt-1.5 pl-4 font-mono text-[10px] text-muted" title={gatewayHint}>
+              {gatewayHint}
+            </p>
+          )}
+        </div>
+
         {/* Update badge — hidden when collapsed (no room for the copy affordance) */}
         {!collapsed && updateInfo && (
-          <div className="px-5 pb-4">
+          <div className="px-4 pb-5">
             <div className="flex flex-col gap-1.5 rounded-lg border border-gold/25 bg-gold-soft/60 p-2.5">
               <span className="text-xs font-semibold text-gold-text">
                 ↑ New version available: v{updateInfo.latestVersion}
@@ -210,10 +253,10 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
         )}
 
         {/* Navigation */}
-        <nav className={`dashboard-scroll flex-1 overflow-y-auto ${collapsed ? "px-2" : "px-3"} py-2 space-y-0.5`} aria-label="Dashboard navigation">
+        <nav className={`dashboard-scroll flex-1 overflow-y-auto ${collapsed ? "px-2" : "px-3"}`} aria-label="Dashboard navigation">
           {!collapsed && <p className="mono-label px-3 pb-2">Workspace</p>}
-          {collapsed && <div className="h-3" aria-hidden="true" />}
-          <div className="space-y-0.5">
+          {collapsed && <div className="h-5" aria-hidden="true" />}
+          <div className="space-y-1">
             {workspaceItems.map((item) => (
               <NavItem key={item.href} item={item} active={isActive(item)} collapsed={collapsed} onNavigate={onClose} />
             ))}
@@ -221,7 +264,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
 
           {!collapsed && <p className="mono-label px-3 pb-2 pt-7">Insights</p>}
           {collapsed && <div className="h-6" aria-hidden="true" />}
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             {insightItems.map((item) => (
               <NavItem key={item.href} item={item} active={isActive(item)} collapsed={collapsed} onNavigate={onClose} />
             ))}
@@ -229,7 +272,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
 
           {!collapsed && <p className="mono-label px-3 pb-2 pt-7">Tools</p>}
           {collapsed && <div className="h-6" aria-hidden="true" />}
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             {toolItems
               .filter((item) => !item.needsTranslator || enableTranslator)
               .map((item) => (
@@ -243,8 +286,8 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               aria-label={collapsed ? "Media Providers" : undefined}
               aria-expanded={mediaOpen}
               className={cn(
-                "w-full flex items-center rounded-lg transition-colors group",
-                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
+                "group flex w-full items-center rounded-lg transition-colors",
+                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2",
                 pathname.startsWith("/dashboard/media-providers")
                   ? "bg-gold-soft text-gold-text"
                   : "text-text-muted hover:bg-surface hover:text-text-main"
@@ -304,8 +347,8 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               title={collapsed ? "9Remote" : undefined}
               aria-label={collapsed ? "9Remote" : undefined}
               className={cn(
-                "flex items-center rounded-lg transition-colors group w-full",
-                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
+                "group flex w-full items-center rounded-lg transition-colors",
+                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2",
                 "text-text-muted hover:bg-surface hover:text-text-main"
               )}
             >
@@ -331,8 +374,8 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               title={collapsed ? "9English" : undefined}
               aria-label={collapsed ? "9English" : undefined}
               className={cn(
-                "flex items-center rounded-lg transition-colors group w-full",
-                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
+                "group flex w-full items-center rounded-lg transition-colors",
+                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2",
                 "text-text-muted hover:bg-surface hover:text-text-main"
               )}
             >
@@ -355,7 +398,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               title={collapsed ? "Connect a provider" : undefined}
               aria-label={collapsed ? "Connect a provider" : undefined}
             >
-              <div className={`items-center gap-2 text-xs font-semibold text-gold-text ${collapsed ? "flex justify-center" : "flex"}`}>
+              <div className={cn("items-center gap-2 text-xs font-semibold text-gold-text", collapsed ? "flex justify-center" : "flex")}>
                 <span className="material-symbols-outlined text-[14px]" aria-hidden="true">deployed_code</span>
                 {!collapsed && "Connect a provider"}
               </div>
@@ -366,7 +409,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
                   </p>
                   <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-gold-text">
                     Quick setup
-                    <span className="material-symbols-outlined text-[12px]" aria-hidden="true">chevron_right</span>
+                    <span className="material-symbols-outlined text-[12px] transition-transform group-hover:translate-x-0.5" aria-hidden="true">chevron_right</span>
                   </span>
                 </>
               )}
@@ -384,10 +427,14 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
                 <p className="muted truncate text-[10px]">No account required</p>
               </div>
             )}
+            {!collapsed && (
+              <span className="material-symbols-outlined ml-auto h-4 w-4 shrink-0 text-muted" aria-label="Local mode help">
+                help
+              </span>
+            )}
           </div>
         </div>
       </aside>
-
 
       {/* Update Confirmation Modal */}
       <ConfirmModal
@@ -436,8 +483,8 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
  * One entry of the rail.
  *
  * The label is hidden when the rail is collapsed, and the icon carries the
- * name then — as a title and as the accessible name, so the entry is never
- * an unlabelled button.
+ * name then — as a title and as the accessible name, so the entry is never an
+ * unlabelled button. The active entry keeps the chevron the old project had.
  */
 function NavItem({ item, active, collapsed, onNavigate }) {
   return (
@@ -447,8 +494,8 @@ function NavItem({ item, active, collapsed, onNavigate }) {
       title={collapsed ? item.label : undefined}
       aria-label={collapsed ? item.label : undefined}
       className={cn(
-        "flex items-center rounded-lg transition-colors group",
-        collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
+        "group flex w-full items-center rounded-lg transition-colors",
+        collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2",
         active
           ? "bg-gold-soft text-gold-text"
           : "text-text-muted hover:bg-surface hover:text-text-main"
@@ -463,7 +510,12 @@ function NavItem({ item, active, collapsed, onNavigate }) {
       >
         {item.icon}
       </span>
-      {!collapsed && <span className="text-[13px] font-medium flex-1">{item.label}</span>}
+      {!collapsed && <span className="text-[13px] font-medium flex-1 text-left">{item.label}</span>}
+      {!collapsed && active && (
+        <span className="material-symbols-outlined h-3.5 w-3.5 opacity-60" aria-hidden="true">
+          chevron_right
+        </span>
+      )}
     </Link>
   );
 }
@@ -478,6 +530,12 @@ NavItem.propTypes = {
   collapsed: PropTypes.bool,
   onNavigate: PropTypes.func,
 };
+
+// The host the dashboard is talking to, for the badge's hint line.
+function hostLabel() {
+  if (typeof window === "undefined") return "localhost";
+  return window.location.host;
+}
 
 Sidebar.propTypes = {
   onClose: PropTypes.func,
@@ -511,7 +569,7 @@ function ManualUpdatePanel({ latestVersion, installCmd, copied, onCopyAndShutdow
       </div>
 
       <ol className="text-xs text-white/70 space-y-1 list-decimal list-inside mb-4">
-        <li>Click <strong>Copy & Shutdown</strong> below.</li>
+        <li>Click <strong>Copy &amp; Shutdown</strong> below.</li>
         <li>Paste the command into your terminal and press Enter.</li>
         <li>Run <code className="px-1 rounded bg-white/10 text-green-400">omnihilbras</code> again after install.</li>
       </ol>
