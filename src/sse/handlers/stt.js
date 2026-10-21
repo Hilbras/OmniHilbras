@@ -10,6 +10,8 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import * as log from "../utils/logger.js";
+import { enforceRequestLimits } from "../services/rateLimit.js";
+import { consumeFanOutSlot, fanOutLimitResponse } from "open-sse/services/fanOut.js";
 
 // Providers requiring credentials for STT
 const CREDENTIALED_PROVIDERS = new Set(
@@ -36,6 +38,10 @@ async function resolveCustomModelTransport(provider, model) {
 }
 
 export async function handleStt(request) {
+  return await enforceRequestLimits(request, (ctx) => handleSttRequest(request, ctx));
+}
+
+async function handleSttRequest(request, ctx = {}) {
   let formData;
   try {
     formData = await request.formData();
@@ -72,6 +78,10 @@ export async function handleStt(request) {
 
   // noAuth providers
   if (!CREDENTIALED_PROVIDERS.has(provider)) {
+    if (!consumeFanOutSlot(ctx.fanOutBudget, `${provider}/${model}`)) {
+      log.warn("STT", `fan-out budget exhausted at ${provider}/${model}`);
+      return fanOutLimitResponse(ctx.fanOutBudget);
+    }
     const result = await handleSttCore({ provider, model, formData, sttConfig: AI_PROVIDERS[provider]?.sttConfig, transport: modelTransport });
     if (result.success) return result.response;
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "STT failed");
@@ -96,6 +106,13 @@ export async function handleStt(request) {
     }
 
     log.info("AUTH", `\x1b[32mUsing ${provider} account: ${credentials.connectionName}\x1b[0m`);
+
+    // Every upstream attempt spends one slot of this request's fan-out budget:
+    // the account loop below multiplies by the number of provider accounts.
+    if (!consumeFanOutSlot(ctx.fanOutBudget, `${provider}/${model}`)) {
+      log.warn("STT", `fan-out budget exhausted at ${provider}/${model}`);
+      return fanOutLimitResponse(ctx.fanOutBudget);
+    }
 
     const result = await handleSttCore({ provider, model, formData, credentials, sttConfig: AI_PROVIDERS[provider]?.sttConfig, transport: modelTransport });
 

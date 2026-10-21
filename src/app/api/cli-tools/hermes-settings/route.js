@@ -5,6 +5,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
 import os from "os";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 
 import {
   buildModelBlock,
@@ -193,7 +194,8 @@ const applyToAllProfiles = async ({ normalizedBaseUrl, apiKey, model }) => {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { baseUrl, apiKey, model, selections, audio } = body;
+    const { baseUrl, apiKey: requestedKey, model, selections, audio } = body;
+    const apiKey = await resolveCliApiKey(requestedKey);
     // selections: [{role, model}] — "default" plus any auxiliary/delegation slots.
     // Legacy callers (CLI quick setup) send a bare `model` → treat as default role.
     const sel = Array.isArray(selections) && selections.some((s) => s?.role && s?.model)

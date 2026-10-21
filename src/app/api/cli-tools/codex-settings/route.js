@@ -5,6 +5,7 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import { parseTOML, stringifyTOML } from "confbox";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 
 export const dynamic = "force-dynamic";
 
@@ -109,11 +110,12 @@ export async function GET() {
 // POST - Update OmniHilbras settings (merge with existing config)
 export async function POST(request) {
   try {
-    const { baseUrl, apiKey, model, subagentModel } = await request.json();
-    
-    if (!baseUrl || !apiKey || !model) {
+    const { baseUrl, apiKey: requestedKey, model, subagentModel } = await request.json();
+
+    if (!baseUrl || !requestedKey || !model) {
       return NextResponse.json({ error: "baseUrl, apiKey and model are required" }, { status: 400 });
     }
+    const apiKey = await resolveCliApiKey(requestedKey);
 
     const codexDir = getCodexDir();
     const configPath = getCodexConfigPath();

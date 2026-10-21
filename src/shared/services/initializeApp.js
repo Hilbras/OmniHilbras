@@ -2,7 +2,8 @@ import os from "os";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { existsSync } from "fs";
-import { cleanupProviderConnections, getSettings, updateSettings, getApiKeys } from "@/lib/localDb";
+import { cleanupProviderConnections, getSettings, updateSettings } from "@/lib/localDb";
+import { getInternalApiKey } from "@/lib/auth/internalKey";
 import {
   enableTunnel, enableTailscale,
   isTunnelManuallyDisabled, isTunnelReconnecting, isTailscaleReconnecting,
@@ -118,6 +119,12 @@ async function runHeavyStartup() {
   import("@/sse/services/backgroundTokenRefresh.js")
     .then(({ startBackgroundTokenRefresh }) => startBackgroundTokenRefresh())
     .catch((e) => console.log("[BackgroundTokenRefresh] scheduler start failed:", e.message));
+
+  // Usage table retention: usageHistory grows one row per request and nothing
+  // deleted one, so it is pruned on a timer (window from the settings).
+  import("@/shared/services/usageRetention")
+    .then(({ startUsageRetentionScheduler }) => startUsageRetentionScheduler())
+    .catch((e) => console.log("[UsageRetention] scheduler start failed:", e.message));
 }
 
 // Cheap local check: keeps the scheduler module (and its provider graph) unloaded
@@ -143,11 +150,10 @@ async function autoStartMitm(settings) {
       return;
     }
 
-    const keys = await getApiKeys();
-    const activeKey = keys.find(k => k.isActive !== false);
-
     console.log("[InitApp] MITM was enabled, auto-starting...");
-    await startMitm(activeKey?.key || "sk_omnihilbras", password);
+    // The proxy authenticates with the app's own key: the key table holds no
+    // usable key, only its hash.
+    await startMitm(getInternalApiKey(), password);
     console.log("[InitApp] MITM auto-started");
     try {
       await restoreToolDNS(password);

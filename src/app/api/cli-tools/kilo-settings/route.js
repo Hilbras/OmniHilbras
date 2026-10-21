@@ -6,6 +6,7 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 
 const execAsync = promisify(exec);
 
@@ -73,10 +74,11 @@ export async function GET() {
 
 export async function POST(request) {
   try {
-    const { baseUrl, apiKey, model } = await request.json();
-    if (!baseUrl || !apiKey || !model) {
+    const { baseUrl, apiKey: requestedKey, model } = await request.json();
+    if (!baseUrl || !requestedKey || !model) {
       return NextResponse.json({ error: "baseUrl, apiKey and model are required" }, { status: 400 });
     }
+    const apiKey = await resolveCliApiKey(requestedKey);
 
     await fs.mkdir(getDataDir(), { recursive: true });
 

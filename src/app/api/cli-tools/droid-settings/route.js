@@ -6,6 +6,7 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 
 const execAsync = promisify(exec);
 
@@ -84,7 +85,8 @@ export async function GET() {
 // Also accepts `activeModel` to set which model is active/primary
 export async function POST(request) {
   try {
-    const { baseUrl, apiKey, model, models, activeModel } = await request.json();
+    const { baseUrl, apiKey: requestedKey, model, models, activeModel } = await request.json();
+    const apiKey = await resolveCliApiKey(requestedKey);
     
     // Accept either `models` (array) or `model` (string, legacy)
     const modelsArray = Array.isArray(models) ? models.slice() : (typeof model === "string" ? [model] : []);

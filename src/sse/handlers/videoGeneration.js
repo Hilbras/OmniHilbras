@@ -13,6 +13,8 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import * as log from "../utils/logger.js";
+import { enforceRequestLimits } from "../services/rateLimit.js";
+import { consumeFanOutSlot, fanOutLimitResponse } from "open-sse/services/fanOut.js";
 
 // Video generation is xAI-only today; requests without a provider prefix
 // (bare model id, or multipart bodies we deliberately don't parse) land here.
@@ -108,6 +110,10 @@ function withConnectionHeader(response, connectionId) {
  * POST /v1/videos/{generations|edits|extensions} — async job creation proxy.
  */
 export async function handleVideoCreate(request, action) {
+  return await enforceRequestLimits(request, (ctx) => handleVideoCreateRequest(request, action, ctx));
+}
+
+async function handleVideoCreateRequest(request, action, ctx = {}) {
   const authError = await requireValidApiKey(request);
   if (authError) return authError;
 
@@ -156,6 +162,13 @@ export async function handleVideoCreate(request, action) {
 
     const refreshedCredentials = await checkAndRefreshToken(provider, credentials);
 
+    // Every upstream attempt spends one slot of this request's fan-out budget:
+    // the account loop below multiplies by the number of provider accounts.
+    if (!consumeFanOutSlot(ctx.fanOutBudget, `${provider}/${model || "video"}`)) {
+      log.warn("VIDEO", `fan-out budget exhausted at ${provider}/${model || "video"}`);
+      return fanOutLimitResponse(ctx.fanOutBudget);
+    }
+
     const result = await handleVideoProxyCore({
       provider,
       action,
@@ -203,6 +216,10 @@ export async function handleVideoCreate(request, action) {
  * caller pins the creating account via `x-connection-id` (returned on create).
  */
 export async function handleVideoGet(request, requestId) {
+  return await enforceRequestLimits(request, (ctx) => handleVideoGetRequest(request, requestId, ctx));
+}
+
+async function handleVideoGetRequest(request, requestId, ctx = {}) {
   const authError = await requireValidApiKey(request);
   if (authError) return authError;
 
@@ -217,6 +234,13 @@ export async function handleVideoGet(request, requestId) {
   }
 
   const refreshedCredentials = await checkAndRefreshToken(provider, credentials);
+
+  // The status poll is an upstream call too — it spends one slot of this
+  // request's fan-out budget.
+  if (!consumeFanOutSlot(ctx.fanOutBudget, `${provider}/video-status`)) {
+    log.warn("VIDEO", `fan-out budget exhausted at ${provider}/video-status`);
+    return fanOutLimitResponse(ctx.fanOutBudget);
+  }
 
   const result = await handleVideoProxyCore({
     provider,

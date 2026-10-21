@@ -19,6 +19,7 @@ vi.mock("@/lib/localDb", () => ({
   getModelAliases: async () => ({}),
   getComboByName: async (name) => fx.combos.find((c) => c.name === name) || null,
   getProviderNodes: async () => [],
+  getProviderNodeByPrefix: async () => null,
   getCombos: async () => fx.combos,
   getProviderConnections: async () => [],
   getProviderConnectionById: async () => null,

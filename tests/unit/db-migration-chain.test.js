@@ -77,7 +77,11 @@ describe("Schema migrations", () => {
 
     const keys = db.all(`SELECT * FROM apiKeys`);
     expect(keys).toHaveLength(1);
-    expect(keys[0].key).toBe("abc");
+    // The imported key is hashed and masked: the plaintext is not stored.
+    expect(keys[0].key).toBe("a***");
+    expect(keys[0].keyHash).toMatch(/^[0-9a-f]{64}$/);
+    const { validateApiKey } = await import("@/lib/db/index.js");
+    expect(await validateApiKey("abc")).toBe(true);
 
     const aliases = db.all(`SELECT * FROM kv WHERE scope='modelAliases'`);
     expect(aliases).toHaveLength(1);

@@ -295,6 +295,13 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     // Use shared chatCore
     const chatSettings = await getSettings();
     const providerThinking = (chatSettings.providerThinking || {})[provider] || null;
+    // Every upstream attempt spends one slot of this request's fan-out budget:
+    // the account loop below multiplies by the number of provider accounts, and
+    // a combo multiplies by the number of models.
+    if (!consumeFanOutSlot(fanOutBudget, `${provider}/${model}`)) {
+      log.warn("CHAT", `fan-out budget exhausted at ${provider}/${model}`);
+      return fanOutLimitResponse(fanOutBudget);
+    }
     const result = await handleChatCore({
       body: { ...body, model: `${provider}/${model}` },
       // The client's own abort: a client that hangs up must cancel the

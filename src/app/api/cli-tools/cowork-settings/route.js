@@ -8,6 +8,7 @@ import crypto from "crypto";
 import { DEFAULT_PLUGINS, LOCAL_STDIO_PLUGINS, buildManagedMcpServers } from "@/shared/constants/coworkPlugins";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 
 const APP_PORT = UPDATER_CONFIG.appPort;
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
@@ -310,11 +311,12 @@ export async function GET() {
 
 export async function POST(request) {
   try {
-    const { baseUrl, apiKey, models, plugins, localPlugins, customPlugins } = await request.json();
+    const { baseUrl, apiKey: requestedKey, models, plugins, localPlugins, customPlugins } = await request.json();
 
-    if (!baseUrl || !apiKey) {
+    if (!baseUrl || !requestedKey) {
       return NextResponse.json({ error: "baseUrl and apiKey are required" }, { status: 400 });
     }
+    const apiKey = await resolveCliApiKey(requestedKey);
     const modelsArray = Array.isArray(models) ? models.filter((m) => typeof m === "string" && m.trim()) : [];
     if (modelsArray.length === 0) {
       return NextResponse.json({ error: "At least one model is required" }, { status: 400 });

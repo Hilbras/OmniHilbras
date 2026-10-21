@@ -7,6 +7,7 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import { DEFAULT_PLUGINS } from "@/shared/constants/coworkPlugins";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 
 const execAsync = promisify(exec);
 
@@ -154,6 +155,12 @@ export async function POST(request) {
       env.ANTHROPIC_BASE_URL = env.ANTHROPIC_BASE_URL.endsWith("/v1")
         ? env.ANTHROPIC_BASE_URL
         : `${env.ANTHROPIC_BASE_URL}/v1`;
+    }
+
+    // The dashboard sends the display form of a key, which cannot
+    // authenticate — the tool gets the app's own key instead.
+    if (env.ANTHROPIC_AUTH_TOKEN) {
+      env.ANTHROPIC_AUTH_TOKEN = await resolveCliApiKey(env.ANTHROPIC_AUTH_TOKEN);
     }
 
     // Keep an existing token (real key or earlier config); only add when absent — Reset clears it.

@@ -15,6 +15,8 @@ import { updateProviderCredentials, checkAndRefreshToken } from "../services/tok
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
 import { getKeyAccessContext, enforceKeyAccessProvider } from "../services/keyAccess.js";
 import { assertPublicUrlResolved } from "@/shared/utils/ssrfGuard.js";
+import { enforceRequestLimits } from "../services/rateLimit.js";
+import { consumeFanOutSlot, fanOutLimitResponse } from "open-sse/services/fanOut.js";
 
 /**
  * Handle web fetch (URL extraction) request for the SSE/Next.js server.
@@ -23,6 +25,10 @@ import { assertPublicUrlResolved } from "@/shared/utils/ssrfGuard.js";
  * @param {Request} request
  */
 export async function handleFetch(request) {
+  return await enforceRequestLimits(request, (ctx) => handleFetchRequest(request, ctx));
+}
+
+async function handleFetchRequest(request, ctx = {}) {
   let body;
   try {
     body = await request.json();
@@ -105,18 +111,19 @@ export async function handleFetch(request) {
     return handleComboChat({
       body,
       models: comboModels,
-      handleSingleModel: (b, m) => handleSingleProviderFetch(b, m, request, apiKey, settings),
+      handleSingleModel: (b, m) => handleSingleProviderFetch(b, m, request, apiKey, settings, ctx.fanOutBudget),
       log,
       comboName: providerInput,
       comboStrategy,
-      comboStickyLimit
+      comboStickyLimit,
+      fanOutBudget: ctx.fanOutBudget
     });
   }
 
-  return handleSingleProviderFetch(body, providerInput, request, apiKey, settings);
+  return handleSingleProviderFetch(body, providerInput, request, apiKey, settings, ctx.fanOutBudget);
 }
 
-async function handleSingleProviderFetch(body, providerInput, request, apiKey, settings) {
+async function handleSingleProviderFetch(body, providerInput, request, apiKey, settings, fanOutBudget = null) {
   const targetUrl = body.url;
   const format = body.format;
   const maxCharacters = body.max_characters;
@@ -143,6 +150,10 @@ async function handleSingleProviderFetch(body, providerInput, request, apiKey, s
   // No-auth fetch path (kept for parity though no current fetch provider sets noAuth)
   if (resolvedProvider.noAuth) {
     log.info("AUTH", `\x1b[32m${providerId} no-auth mode\x1b[0m`);
+    if (!consumeFanOutSlot(fanOutBudget, providerId)) {
+      log.warn("FETCH", `fan-out budget exhausted at ${providerId}`);
+      return fanOutLimitResponse(fanOutBudget);
+    }
     const result = await handleFetchCore({
       url: targetUrl,
       format,
@@ -191,6 +202,13 @@ async function handleSingleProviderFetch(body, providerInput, request, apiKey, s
     log.info("AUTH", `\x1b[32mUsing ${providerId} account: ${credentials.connectionName}\x1b[0m`);
 
     const refreshedCredentials = await checkAndRefreshToken(providerId, credentials);
+
+    // Every upstream attempt spends one slot of this request's fan-out budget:
+    // the credential loop below multiplies by the number of provider accounts.
+    if (!consumeFanOutSlot(fanOutBudget, providerId)) {
+      log.warn("FETCH", `fan-out budget exhausted at ${providerId}`);
+      return fanOutLimitResponse(fanOutBudget);
+    }
 
     const result = await handleFetchCore({
       url: targetUrl,

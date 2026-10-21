@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getApiKeys } from "@/lib/localDb";
+import { getInternalApiKey } from "@/lib/auth/internalKey";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { buildUpstreamMessages } from "@/shared/utils/providerMiniChat";
@@ -16,20 +16,14 @@ const ALLOWED_ROLES = new Set(["system", "user", "assistant"]);
 export const dynamic = "force-dynamic";
 
 async function getInternalHeaders() {
-  let apiKey = null;
-  try {
-    const keys = await getApiKeys();
-    // Prefer an unrestricted key so a dashboard chat is not refused just
-    // because the first key happens to be restricted.
-    const activeKeys = (Array.isArray(keys) ? keys : []).filter((k) => k.isActive !== false);
-    apiKey = (activeKeys.find((k) => !k.access?.restricted) || activeKeys[0])?.key || null;
-  } catch {}
-
+  // The panel calls the gateway from this machine, so it authenticates with
+  // the app's own key — derived from the local pepper, never a row in the
+  // key table (the table holds no usable key).
   const headers = {
     "Content-Type": "application/json",
     Accept: "text/event-stream",
   };
-  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  headers.Authorization = `Bearer ${getInternalApiKey()}`;
   headers["x-9r-cli-token"] = await getConsistentMachineId(CLI_TOKEN_SALT);
   return headers;
 }

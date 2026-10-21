@@ -15,6 +15,8 @@ import { updateProviderCredentials, checkAndRefreshToken } from "../services/tok
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
+import { enforceRequestLimits } from "../services/rateLimit.js";
+import { consumeFanOutSlot, fanOutLimitResponse } from "open-sse/services/fanOut.js";
 
 // Providers that don't require credentials (noAuth)
 const NO_AUTH_PROVIDERS = new Set(["sdwebui", "comfyui"]);
@@ -44,6 +46,10 @@ function recordImageRequestUsage({ provider, model, connectionId, apiKey, endpoi
  * @param {Request} request
  */
 export async function handleImageGeneration(request) {
+  return await enforceRequestLimits(request, (ctx) => handleImageGenerationRequest(request, ctx));
+}
+
+async function handleImageGenerationRequest(request, ctx = {}) {
   let body;
   try {
     body = await request.json();
@@ -82,18 +88,19 @@ export async function handleImageGeneration(request) {
     return handleComboChat({
       body,
       models: comboModels,
-      handleSingleModel: (b, m) => handleSingleModelImage(b, m, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint: url.pathname }),
+      handleSingleModel: (b, m) => handleSingleModelImage(b, m, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint: url.pathname, fanOutBudget: ctx.fanOutBudget }),
       log,
       comboName: modelStr,
       comboStrategy,
       comboStickyLimit,
+      fanOutBudget: ctx.fanOutBudget,
     });
   }
 
-  return handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint: url.pathname });
+  return handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint: url.pathname, fanOutBudget: ctx.fanOutBudget });
 }
 
-async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint } = {}) {
+async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint, fanOutBudget = null } = {}) {
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 
@@ -101,6 +108,10 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
 
   // noAuth providers — no credential needed
   if (NO_AUTH_PROVIDERS.has(provider)) {
+    if (!consumeFanOutSlot(fanOutBudget, `${provider}/${model}`)) {
+      log.warn("IMAGE", `fan-out budget exhausted at ${provider}/${model}`);
+      return fanOutLimitResponse(fanOutBudget);
+    }
     const result = await handleImageGenerationCore({
       body,
       modelInfo: { provider, model },
@@ -132,6 +143,13 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
     }
 
     const refreshedCredentials = await checkAndRefreshToken(provider, credentials);
+
+    // Every upstream attempt spends one slot of this request's fan-out budget:
+    // the account loop below multiplies by the number of provider accounts.
+    if (!consumeFanOutSlot(fanOutBudget, `${provider}/${model}`)) {
+      log.warn("IMAGE", `fan-out budget exhausted at ${provider}/${model}`);
+      return fanOutLimitResponse(fanOutBudget);
+    }
 
     const result = await handleImageGenerationCore({
       body,

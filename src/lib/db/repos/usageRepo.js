@@ -1,16 +1,14 @@
 import { EventEmitter } from "events";
-import { getAdapter } from "../driver.js";
+import { getAdapter, getAdapterSync } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
 import { chargeTokens, keyIdentity } from "@/shared/utils/rateLimitBucket.js";
+import { maskApiKey } from "../helpers/maskApiKey.js";
+import { getInternalApiKey } from "@/lib/auth/internalKey.js";
 
-function maskApiKey(key) {
-  if (!key || typeof key !== "string") return null;
-  const trimmed = key.trim();
-  if (trimmed.length <= 12) return trimmed.charAt(0) + "***";
-  // Keep the tail: keys sharing a machine-id prefix (team keys) must not collide.
-  return trimmed.slice(0, 8) + "***" + trimmed.slice(-4);
-}
+// One masking rule for the whole app: the key table, the usage tables, the
+// dashboard and the CLI all show a key through this function.
+export { maskApiKey };
 
 const PENDING_TIMEOUT_MS = 60 * 1000;
 // Safety net for a client slot that is never released (client vanished
@@ -20,6 +18,21 @@ const CLIENT_PENDING_TIMEOUT_MS = 35 * 60 * 1000;
 const RING_CAP = 50;
 const CONN_CACHE_TTL_MS = 30 * 1000;
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
+
+// The write buffer: a completed request is recorded in memory and written
+// with the next batch. Writing per request re-serialised the whole daily
+// roll-up blob every time (measured: 4 ms for a 180 KiB day, 43 ms for a
+// 1.2 MiB day) — the price of a gateway with a busy day.
+const DEFAULT_FLUSH_INTERVAL_MS = 250;
+const DEFAULT_FLUSH_MAX_ROWS = 200;
+
+function envInt(name, fallback) {
+  const n = parseInt(process.env[name] || "", 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+const USAGE_FLUSH_INTERVAL_MS = envInt("USAGE_FLUSH_INTERVAL_MS", DEFAULT_FLUSH_INTERVAL_MS);
+const USAGE_FLUSH_MAX_ROWS = envInt("USAGE_FLUSH_MAX_ROWS", DEFAULT_FLUSH_MAX_ROWS);
 
 // In-memory state shared across Next.js modules
 if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {} };
@@ -36,6 +49,9 @@ if (!global._clientPendingTimers) global._clientPendingTimers = {};
 if (!global._recentRing) global._recentRing = { items: [], initialized: false };
 if (!global._connectionMapCache) global._connectionMapCache = { map: {}, ts: 0 };
 if (!global._statsEmitTimers) global._statsEmitTimers = { pending: null, update: null };
+if (!global._usageWriteBuffer) {
+  global._usageWriteBuffer = { items: [], timer: null, flushing: null };
+}
 
 const pendingRequests = global._pendingRequests;
 const lastErrorProvider = global._lastErrorProvider;
@@ -44,6 +60,7 @@ const clientPendingTimers = global._clientPendingTimers;
 const recentRing = global._recentRing;
 const connCache = global._connectionMapCache;
 const statsEmitTimers = global._statsEmitTimers;
+const usageBuffer = global._usageWriteBuffer;
 
 export const statsEmitter = global._statsEmitter;
 
@@ -120,6 +137,78 @@ function pushToRing(entry) {
   }
 }
 
+// A day with nothing in it — the shape the daily roll-up starts from.
+function emptyDayAggregate() {
+  return {
+    requests: 0, promptTokens: 0, completionTokens: 0, cost: 0,
+    byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
+  };
+}
+
+// A buffered request in the shape of a usageHistory row, so the readers can
+// treat it like one.
+function usageEntryToRow(entry) {
+  const tokens = entry.tokens || {};
+  return {
+    timestamp: entry.timestamp,
+    provider: entry.provider || null,
+    model: entry.model || null,
+    connectionId: entry.connectionId || null,
+    apiKey: entry.apiKey || null,
+    endpoint: entry.endpoint || null,
+    promptTokens: tokens.prompt_tokens || tokens.input_tokens || 0,
+    completionTokens: tokens.completion_tokens || tokens.output_tokens || 0,
+    cost: entry.cost || 0,
+    status: entry.status || "ok",
+    tokens,
+  };
+}
+
+// Add the days of the requests that are not written yet to the days the
+// chart reads.
+function mergePendingDays(dayMap, pendingDays) {
+  for (const [dateKey, day] of pendingDays) {
+    const existing = dayMap[dateKey];
+    if (!existing) {
+      dayMap[dateKey] = day;
+      continue;
+    }
+    existing.requests = (existing.requests || 0) + (day.requests || 0);
+    existing.promptTokens = (existing.promptTokens || 0) + (day.promptTokens || 0);
+    existing.completionTokens = (existing.completionTokens || 0) + (day.completionTokens || 0);
+    existing.cachedTokens = (existing.cachedTokens || 0) + (day.cachedTokens || 0);
+    existing.cost = (existing.cost || 0) + (day.cost || 0);
+  }
+}
+
+// The requests that are recorded but not written yet. The readers merge them,
+// so the dashboard sees a request the moment it completes and not when the
+// next batch lands.
+function pendingUsageSnapshot() {
+  return usageBuffer.items.slice();
+}
+
+function pendingRowsFrom(items) {
+  return items.map((item) => usageEntryToRow(item.entry));
+}
+
+// The same aggregation the flush writes to usageDaily, so the numbers a
+// reader sees before the flush are the numbers the flush will store.
+function pendingDaysFrom(items) {
+  const days = new Map();
+  for (const item of items) {
+    const entry = item.entry;
+    const dateKey = getLocalDateKey(entry.timestamp);
+    let day = days.get(dateKey);
+    if (!day) {
+      day = emptyDayAggregate();
+      days.set(dateKey, day);
+    }
+    aggregateEntryToDay(day, entry);
+  }
+  return days;
+}
+
 async function getConnectionMapCached() {
   if (Date.now() - connCache.ts < CONN_CACHE_TTL_MS) return connCache.map;
   try {
@@ -181,12 +270,23 @@ export async function getUsageTotalsForConnection(connectionId, durationMs = 30 
        FROM usageHistory WHERE connectionId = ? AND timestamp >= ?`,
       [connectionId, since],
     );
-    if (!row || !(row.requests > 0)) return null;
+    let requests = row?.requests || 0;
+    let tokens = (row?.promptTokens || 0) + (row?.completionTokens || 0);
+    let cost = row?.cost || 0;
+    // The requests that are recorded but not written yet count as well.
+    for (const r of pendingRowsFrom(pendingUsageSnapshot())) {
+      if (r.connectionId !== connectionId) continue;
+      if (r.timestamp < since) continue;
+      requests += 1;
+      tokens += (r.promptTokens || 0) + (r.completionTokens || 0);
+      cost += r.cost || 0;
+    }
+    if (!(requests > 0)) return null;
     return {
       windowMs: durationMs,
-      requests: row.requests,
-      tokens: row.promptTokens + row.completionTokens,
-      cost: row.cost,
+      requests,
+      tokens,
+      cost,
     };
   } catch (e) {
     console.error("getUsageTotalsForConnection failed:", e.message);
@@ -336,13 +436,10 @@ export async function getActiveRequests() {
 
 export async function saveRequestUsage(entry) {
   try {
-    const db = await getAdapter();
-
     if (!entry.timestamp) entry.timestamp = new Date().toISOString();
     entry.cost = await calculateCost(entry.provider, entry.model, entry.tokens);
 
     const tokens = entry.tokens || {};
-    const promptTokens = tokens.prompt_tokens || tokens.input_tokens || 0;
     const completionTokens = tokens.completion_tokens || tokens.output_tokens || 0;
 
     // Charge the generated tokens to the client's rate-limit token bucket.
@@ -358,11 +455,76 @@ export async function saveRequestUsage(entry) {
       }
     }
 
-    let inserted = false;
+    // From here on the key is stored as its display form: the usage tables
+    // must not hand out a working credential either. The charge above used
+    // the raw key, so the rate-limit bucket still belongs to that key.
+    if (entry.apiKey) entry.apiKey = maskApiKey(entry.apiKey);
 
-    // All 3 writes (history insert, daily upsert, lifetime counter) in ONE transaction.
-    // better-sqlite3 is sync → no JS yield mid-transaction → no race in same process.
-    db.transaction(() => {
+    // The row goes into the buffer and is written with the next batch. The
+    // call resolves as soon as the row is recorded: the request path fires and
+    // forgets, and a caller that awaits must not wait a whole flush interval
+    // per row. The row is not lost — the readers merge the pending rows, and
+    // the prune flushes before it deletes anything.
+    usageBuffer.items.push({ entry, resolve: () => {} });
+
+    // The in-memory path stays immediate: the ring and the readers show the
+    // request before the batch lands.
+    pushToRing(entry);
+    scheduleStatsEvent("update", 250);
+
+    scheduleUsageFlush();
+    if (usageBuffer.items.length >= USAGE_FLUSH_MAX_ROWS) {
+      clearUsageFlushTimer();
+      flushUsage().catch((e) => console.error("[usageRepo] usage flush failed:", e));
+    }
+  } catch (e) {
+    console.error("Failed to save usage stats:", e);
+  }
+}
+
+// ─── The write batch ───────────────────────────────────────────────────────
+
+function clearUsageFlushTimer() {
+  if (!usageBuffer.timer) return;
+  clearTimeout(usageBuffer.timer);
+  usageBuffer.timer = null;
+}
+
+function scheduleUsageFlush() {
+  if (usageBuffer.timer) return;
+  usageBuffer.timer = setTimeout(() => {
+    usageBuffer.timer = null;
+    flushUsage().catch((e) => console.error("[usageRepo] usage flush failed:", e));
+  }, USAGE_FLUSH_INTERVAL_MS);
+  usageBuffer.timer.unref?.();
+}
+
+/**
+ * Write one batch: the history rows, the daily roll-up and the lifetime
+ * counter, all in ONE transaction.
+ *
+ * The daily roll-up is a read-modify-write per day the batch touched, so the
+ * day blob is parsed and serialised once per batch instead of once per
+ * request. Only the buckets of these rows change; the rest of the day is
+ * left as it is.
+ *
+ * @param {object} db - the database adapter
+ * @param {object[]} entries - the recorded requests
+ * @returns {number} how many rows were stored
+ */
+function writeUsageBatch(db, entries) {
+  let inserted = 0;
+  const duplicates = [];
+
+  db.transaction(() => {
+    const days = new Map();
+
+    for (const entry of entries) {
+      const tokens = entry.tokens || {};
+      const promptTokens = tokens.prompt_tokens || tokens.input_tokens || 0;
+      const completionTokens = tokens.completion_tokens || tokens.output_tokens || 0;
+
+      // Idempotency guard: the same request recorded twice is stored once.
       const existing = db.get(
         `SELECT id, endpoint FROM usageHistory
          WHERE timestamp = ?
@@ -384,7 +546,8 @@ export async function saveRequestUsage(entry) {
         if (!existing.endpoint && entry.endpoint) {
           db.run(`UPDATE usageHistory SET endpoint = ? WHERE id = ?`, [entry.endpoint, existing.id]);
         }
-        return;
+        duplicates.push(entry);
+        continue;
       }
 
       db.run(
@@ -396,30 +559,118 @@ export async function saveRequestUsage(entry) {
           stringifyJson(tokens), stringifyJson({}),
         ]
       );
+      inserted++;
 
       const dateKey = getLocalDateKey(entry.timestamp);
-      const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
-      const day = row ? parseJson(row.data, {}) : {
-        requests: 0, promptTokens: 0, completionTokens: 0, cost: 0,
-        byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
-      };
-      aggregateEntryToDay(day, entry);
-      db.run(`INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`, [dateKey, stringifyJson(day)]);
-
-      // Atomic counter increment in same transaction
-      const cur = db.get(`SELECT value FROM _meta WHERE key = 'totalRequestsLifetime'`);
-      const next = (cur ? parseInt(cur.value, 10) : 0) + 1;
-      db.run(`INSERT INTO _meta(key, value) VALUES('totalRequestsLifetime', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(next)]);
-      inserted = true;
-    });
-
-    if (inserted) {
-      pushToRing(entry);
-      scheduleStatsEvent("update", 250);
+      const dayEntries = days.get(dateKey);
+      if (dayEntries) dayEntries.push(entry);
+      else days.set(dateKey, [entry]);
     }
-  } catch (e) {
-    console.error("Failed to save usage stats:", e);
+
+    for (const [dateKey, dayEntries] of days) {
+      const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
+      const day = row ? parseJson(row.data, {}) : emptyDayAggregate();
+      for (const entry of dayEntries) aggregateEntryToDay(day, entry);
+      db.run(`INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`, [dateKey, stringifyJson(day)]);
+    }
+
+    // Atomic counter increment in same transaction
+    if (inserted > 0) {
+      const cur = db.get(`SELECT value FROM _meta WHERE key = 'totalRequestsLifetime'`);
+      const next = (cur ? parseInt(cur.value, 10) : 0) + inserted;
+      db.run(`INSERT INTO _meta(key, value) VALUES('totalRequestsLifetime', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(next)]);
+    }
+  });
+
+  // A request that turned out to be a duplicate is not a new one: it does not
+  // belong in the recent-requests ring.
+  for (const entry of duplicates) {
+    const idx = recentRing.items.indexOf(entry);
+    if (idx >= 0) recentRing.items.splice(idx, 1);
   }
+
+  return inserted;
+}
+
+/**
+ * Write the buffered rows.
+ *
+ * A failed write is loud and the rows go back into the buffer: a usage row
+ * is never dropped. The promise of a recorded request resolves when its row
+ * is durable.
+ *
+ * @returns {Promise<number>} how many rows were written
+ */
+export async function flushUsage() {
+  if (usageBuffer.flushing) {
+    // One batch at a time — wait for the running one.
+    await usageBuffer.flushing;
+  }
+
+  const run = (async () => {
+    let items = [];
+    try {
+      if (!usageBuffer.items.length) return 0;
+      const db = await getAdapter();
+      // The rows leave the buffer and enter the table in one go: a reader
+      // never sees a request in neither place.
+      items = usageBuffer.items.splice(0, usageBuffer.items.length);
+      if (!items.length) return 0;
+      const inserted = writeUsageBatch(db, items.map((item) => item.entry));
+      for (const item of items) item.resolve(inserted);
+      return items.length;
+    } catch (e) {
+      console.error("[usageRepo] usage flush failed, retrying on the next tick:", e);
+      // The rows go back into the buffer: a usage row is never dropped.
+      usageBuffer.items = items.concat(usageBuffer.items);
+      return 0;
+    }
+  })();
+
+  usageBuffer.flushing = run;
+  try {
+    return await run;
+  } finally {
+    if (usageBuffer.flushing === run) usageBuffer.flushing = null;
+    if (usageBuffer.items.length) scheduleUsageFlush();
+  }
+}
+
+// The exit handler cannot await, so the last write is done synchronously.
+function flushUsageSync() {
+  clearUsageFlushTimer();
+  if (!usageBuffer.items.length) return 0;
+
+  const items = usageBuffer.items.splice(0, usageBuffer.items.length);
+  try {
+    const db = getAdapterSync();
+    const inserted = writeUsageBatch(db, items.map((item) => item.entry));
+    for (const item of items) item.resolve(inserted);
+    return items.length;
+  } catch (e) {
+    console.error("[usageRepo] usage flush on shutdown failed:", e);
+    // Put the rows back — a later hook may still write them.
+    usageBuffer.items = items.concat(usageBuffer.items);
+    return 0;
+  }
+}
+
+// The synchronous flush is what the shutdown hooks call.
+export const __test__ = { flushUsageSync };
+
+// The buffer must not outlive the process. The hooks are registered once:
+// the signal handlers go first, because the database adapter closes itself
+// on SIGTERM and exits right after. Every hook writes synchronously — the
+// exit handlers cannot await, and the adapter is a synchronous driver.
+if (!global._usageFlushShutdownHook) {
+  const hook = () => {
+    if (usageBuffer.items.length) flushUsageSync();
+  };
+  global._usageFlushShutdownHook = hook;
+  process.prependListener("SIGINT", hook);
+  process.prependListener("SIGTERM", hook);
+  process.on("beforeExit", hook);
+  process.on("exit", hook);
 }
 
 export async function getUsageHistory(filter = {}) {
@@ -434,6 +685,18 @@ export async function getUsageHistory(filter = {}) {
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
   const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens FROM usageHistory ${where} ORDER BY id ASC`, params);
+
+  // The requests that are recorded but not written yet — the dashboard must
+  // see them without waiting for the next batch.
+  const startDate = filter.startDate ? new Date(filter.startDate).toISOString() : null;
+  const endDate = filter.endDate ? new Date(filter.endDate).toISOString() : null;
+  for (const row of pendingRowsFrom(pendingUsageSnapshot())) {
+    if (filter.provider && row.provider !== filter.provider) continue;
+    if (filter.model && row.model !== filter.model) continue;
+    if (startDate && row.timestamp < startDate) continue;
+    if (endDate && row.timestamp > endDate) continue;
+    rows.push(row);
+  }
 
   return rows.map((r) => ({
     timestamp: r.timestamp, provider: r.provider, model: r.model,
@@ -459,6 +722,10 @@ export async function getUsageHistory(filter = {}) {
  */
 export async function pruneUsageHistory(historyDays = 90, dailyDays = 400) {
   try {
+    // The rows that are still in the buffer must land before the prune runs:
+    // a row that is written after the delete would survive the window it was
+    // recorded in.
+    await flushUsage();
     const db = await getAdapter();
     const historyCutoff = new Date(Date.now() - historyDays * 86400000).toISOString();
     const dailyCutoff = getLocalDateKey(new Date(Date.now() - dailyDays * 86400000).toISOString());
@@ -479,6 +746,111 @@ function loadDaysInRange(adapter, maxDays) {
   const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate() - maxDays + 1);
   const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
   return adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ? ORDER BY dateKey ASC`, [cutoffKey]);
+}
+
+/**
+ * Add one day of the daily roll-up to the stats.
+ *
+ * @param {object} stats - the stats being built
+ * @param {string} dateKey - the day the roll-up belongs to
+ * @param {object} day - the parsed daily roll-up row
+ * @param {object} ctx - the name maps the keys are resolved with
+ */
+function accumulateDayStats(stats, dateKey, day, ctx) {
+  const { connectionMap, providerNodeNameMap, apiKeyMap } = ctx;
+
+  stats.totalPromptTokens += day.promptTokens || 0;
+  stats.totalCompletionTokens += day.completionTokens || 0;
+  stats.totalCachedTokens += day.cachedTokens || 0;
+  stats.totalCost += day.cost || 0;
+
+  for (const [prov, p] of Object.entries(day.byProvider || {})) {
+    if (!stats.byProvider[prov]) stats.byProvider[prov] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 };
+    stats.byProvider[prov].requests += p.requests || 0;
+    stats.byProvider[prov].promptTokens += p.promptTokens || 0;
+    stats.byProvider[prov].completionTokens += p.completionTokens || 0;
+    stats.byProvider[prov].cachedTokens += p.cachedTokens || 0;
+    stats.byProvider[prov].cost += p.cost || 0;
+  }
+
+  for (const [mk, m] of Object.entries(day.byModel || {})) {
+    const rawModel = m.rawModel || mk.split("|")[0];
+    const provider = m.provider || mk.split("|")[1] || "";
+    const statsKey = provider ? `${rawModel} (${provider})` : rawModel;
+    const providerDisplayName = providerNodeNameMap[provider] || provider;
+    if (!stats.byModel[statsKey]) {
+      stats.byModel[statsKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel, provider: providerDisplayName, lastUsed: dateKey };
+    }
+    stats.byModel[statsKey].requests += m.requests || 0;
+    stats.byModel[statsKey].promptTokens += m.promptTokens || 0;
+    stats.byModel[statsKey].completionTokens += m.completionTokens || 0;
+    stats.byModel[statsKey].cachedTokens += m.cachedTokens || 0;
+    stats.byModel[statsKey].cost += m.cost || 0;
+    if (dateKey > (stats.byModel[statsKey].lastUsed || "")) stats.byModel[statsKey].lastUsed = dateKey;
+  }
+
+  for (const [entry, a] of Object.entries(day.byAccount || {})) {
+    // New keys are `${connectionId}|${model}|${provider}`; legacy rows
+    // (pre-rename DBs) stored the bare connectionId with last-write-wins
+    // meta — keep rendering them with their stored meta.
+    let connId = entry;
+    let rawModel = a.rawModel || "";
+    let provider = a.provider || "";
+    if (entry.includes("|")) {
+      const parts = entry.split("|");
+      connId = parts[0];
+      rawModel = parts[1] ?? rawModel;
+      provider = parts[2] ?? provider;
+    }
+    const accountName = connectionMap[connId] || `Account ${connId.slice(0, 8)}...`;
+    const providerDisplayName = providerNodeNameMap[provider] || provider;
+    const accountKey = `${rawModel} (${provider} - ${accountName})`;
+    if (!stats.byAccount[accountKey]) {
+      stats.byAccount[accountKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel, provider: providerDisplayName, connectionId: connId, accountName, lastUsed: dateKey };
+    }
+    stats.byAccount[accountKey].requests += a.requests || 0;
+    stats.byAccount[accountKey].promptTokens += a.promptTokens || 0;
+    stats.byAccount[accountKey].completionTokens += a.completionTokens || 0;
+    stats.byAccount[accountKey].cachedTokens += a.cachedTokens || 0;
+    stats.byAccount[accountKey].cost += a.cost || 0;
+    if (dateKey > (stats.byAccount[accountKey].lastUsed || "")) stats.byAccount[accountKey].lastUsed = dateKey;
+  }
+
+  for (const [akKey, ak] of Object.entries(day.byApiKey || {})) {
+    const rawModel = ak.rawModel || "";
+    const provider = ak.provider || "";
+    const providerDisplayName = providerNodeNameMap[provider] || provider;
+    const apiKeyVal = ak.apiKey ? ak.apiKey.trim() : null;
+    const keyInfo = apiKeyVal ? apiKeyMap[apiKeyVal] : null;
+    const apiKeyMasked = maskApiKey(apiKeyVal);
+    const keyName = keyInfo?.name || (apiKeyVal ? (apiKeyMasked || apiKeyVal.slice(0, 8) + "...") : "Local (No API Key)");
+    const apiKeyKey = apiKeyMasked || "local-no-key";
+    if (!stats.byApiKey[akKey]) {
+      stats.byApiKey[akKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel, provider: providerDisplayName, apiKeyMasked, keyName, apiKeyKey, lastUsed: dateKey };
+    }
+    stats.byApiKey[akKey].requests += ak.requests || 0;
+    stats.byApiKey[akKey].promptTokens += ak.promptTokens || 0;
+    stats.byApiKey[akKey].completionTokens += ak.completionTokens || 0;
+    stats.byApiKey[akKey].cachedTokens += ak.cachedTokens || 0;
+    stats.byApiKey[akKey].cost += ak.cost || 0;
+    if (dateKey > (stats.byApiKey[akKey].lastUsed || "")) stats.byApiKey[akKey].lastUsed = dateKey;
+  }
+
+  for (const [epKey, ep] of Object.entries(day.byEndpoint || {})) {
+    const endpoint = ep.endpoint || epKey.split("|")[0] || "Unknown";
+    const rawModel = ep.rawModel || "";
+    const provider = ep.provider || "";
+    const providerDisplayName = providerNodeNameMap[provider] || provider;
+    if (!stats.byEndpoint[epKey]) {
+      stats.byEndpoint[epKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, endpoint, rawModel, provider: providerDisplayName, lastUsed: dateKey };
+    }
+    stats.byEndpoint[epKey].requests += ep.requests || 0;
+    stats.byEndpoint[epKey].promptTokens += ep.promptTokens || 0;
+    stats.byEndpoint[epKey].completionTokens += ep.completionTokens || 0;
+    stats.byEndpoint[epKey].cachedTokens += ep.cachedTokens || 0;
+    stats.byEndpoint[epKey].cost += ep.cost || 0;
+    if (dateKey > (stats.byEndpoint[epKey].lastUsed || "")) stats.byEndpoint[epKey].lastUsed = dateKey;
+  }
 }
 
 export async function getUsageStats(period = "all") {
@@ -505,11 +877,29 @@ export async function getUsageStats(period = "all") {
   try { allApiKeys = await getApiKeys(); } catch {}
   const apiKeyMap = {};
   for (const k of allApiKeys) {
-    if (k.key) apiKeyMap[k.key.trim()] = { name: k.name, id: k.id, createdAt: k.createdAt };
+    // The usage rows hold the display form of a key, so the map is keyed by
+    // it: a map keyed by the secret would resolve no usage row to a name.
+    const id = maskApiKey(k.key);
+    if (id) apiKeyMap[id] = { name: k.name, id: k.id, createdAt: k.createdAt };
   }
+  // The app's own traffic runs on a key that is derived from the local
+  // pepper and is deliberately not a row in apiKeys — name it so the usage
+  // table does not show a bare display form.
+  const internalId = maskApiKey(getInternalApiKey());
+  if (internalId) apiKeyMap[internalId] = { name: "Local (internal)", id: null, createdAt: null };
+
+  // The requests that are recorded but not written yet. The snapshot is taken
+  // here — after the last await — so it and the rows read below are one
+  // consistent view: the flush cannot run in between.
+  const pendingItems = pendingUsageSnapshot();
+  const pendingRows = pendingRowsFrom(pendingItems);
+  const pendingDays = pendingDaysFrom(pendingItems);
 
   // recentRequests from live history (last 100 entries enough for 20 deduped)
-  const recentRows = db.all(`SELECT timestamp, provider, model, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`);
+  const recentRows = [
+    ...pendingRows,
+    ...db.all(`SELECT timestamp, provider, model, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`),
+  ];
   const seen = new Set();
   const recentRequests = recentRows
     .map((r) => {
@@ -568,10 +958,13 @@ export async function getUsageStats(period = "all") {
     bucketMap[ts] = { requests: 0, promptTokens: 0, completionTokens: 0, cost: 0 };
     stats.last10Minutes.push(bucketMap[ts]);
   }
-  const recent10 = db.all(
-    `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ? AND timestamp <= ?`,
-    [tenMinutesAgo.toISOString(), now.toISOString()]
-  );
+  const recent10 = [
+    ...pendingRows.filter((r) => r.timestamp >= tenMinutesAgo.toISOString() && r.timestamp <= now.toISOString()),
+    ...db.all(
+      `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ? AND timestamp <= ?`,
+      [tenMinutesAgo.toISOString(), now.toISOString()]
+    ),
+  ];
   for (const r of recent10) {
     const tt = new Date(r.timestamp).getTime();
     const minuteStart = Math.floor(tt / 60000) * 60000;
@@ -589,102 +982,16 @@ export async function getUsageStats(period = "all") {
     const periodDays = { "7d": 7, "30d": 30, "60d": 60 };
     const maxDays = periodDays[period] || null;
     const dayRows = loadDaysInRange(db, maxDays);
+    const ctx = { connectionMap, providerNodeNameMap, apiKeyMap };
 
     for (const dr of dayRows) {
-      const dateKey = dr.dateKey;
-      const day = parseJson(dr.data, {});
-      stats.totalPromptTokens += day.promptTokens || 0;
-      stats.totalCompletionTokens += day.completionTokens || 0;
-      stats.totalCachedTokens += day.cachedTokens || 0;
-      stats.totalCost += day.cost || 0;
+      accumulateDayStats(stats, dr.dateKey, parseJson(dr.data, {}), ctx);
+    }
 
-      for (const [prov, p] of Object.entries(day.byProvider || {})) {
-        if (!stats.byProvider[prov]) stats.byProvider[prov] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 };
-        stats.byProvider[prov].requests += p.requests || 0;
-        stats.byProvider[prov].promptTokens += p.promptTokens || 0;
-        stats.byProvider[prov].completionTokens += p.completionTokens || 0;
-        stats.byProvider[prov].cachedTokens += p.cachedTokens || 0;
-        stats.byProvider[prov].cost += p.cost || 0;
-      }
-
-      for (const [mk, m] of Object.entries(day.byModel || {})) {
-        const rawModel = m.rawModel || mk.split("|")[0];
-        const provider = m.provider || mk.split("|")[1] || "";
-        const statsKey = provider ? `${rawModel} (${provider})` : rawModel;
-        const providerDisplayName = providerNodeNameMap[provider] || provider;
-        if (!stats.byModel[statsKey]) {
-          stats.byModel[statsKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel, provider: providerDisplayName, lastUsed: dateKey };
-        }
-        stats.byModel[statsKey].requests += m.requests || 0;
-        stats.byModel[statsKey].promptTokens += m.promptTokens || 0;
-        stats.byModel[statsKey].completionTokens += m.completionTokens || 0;
-        stats.byModel[statsKey].cachedTokens += m.cachedTokens || 0;
-        stats.byModel[statsKey].cost += m.cost || 0;
-        if (dateKey > (stats.byModel[statsKey].lastUsed || "")) stats.byModel[statsKey].lastUsed = dateKey;
-      }
-
-      for (const [entry, a] of Object.entries(day.byAccount || {})) {
-        // New keys are `${connectionId}|${model}|${provider}`; legacy rows
-        // (pre-rename DBs) stored the bare connectionId with last-write-wins
-        // meta — keep rendering them with their stored meta.
-        let connId = entry;
-        let rawModel = a.rawModel || "";
-        let provider = a.provider || "";
-        if (entry.includes("|")) {
-          const parts = entry.split("|");
-          connId = parts[0];
-          rawModel = parts[1] ?? rawModel;
-          provider = parts[2] ?? provider;
-        }
-        const accountName = connectionMap[connId] || `Account ${connId.slice(0, 8)}...`;
-        const providerDisplayName = providerNodeNameMap[provider] || provider;
-        const accountKey = `${rawModel} (${provider} - ${accountName})`;
-        if (!stats.byAccount[accountKey]) {
-          stats.byAccount[accountKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel, provider: providerDisplayName, connectionId: connId, accountName, lastUsed: dateKey };
-        }
-        stats.byAccount[accountKey].requests += a.requests || 0;
-        stats.byAccount[accountKey].promptTokens += a.promptTokens || 0;
-        stats.byAccount[accountKey].completionTokens += a.completionTokens || 0;
-        stats.byAccount[accountKey].cachedTokens += a.cachedTokens || 0;
-        stats.byAccount[accountKey].cost += a.cost || 0;
-        if (dateKey > (stats.byAccount[accountKey].lastUsed || "")) stats.byAccount[accountKey].lastUsed = dateKey;
-      }
-
-      for (const [akKey, ak] of Object.entries(day.byApiKey || {})) {
-        const rawModel = ak.rawModel || "";
-        const provider = ak.provider || "";
-        const providerDisplayName = providerNodeNameMap[provider] || provider;
-        const apiKeyVal = ak.apiKey ? ak.apiKey.trim() : null;
-        const keyInfo = apiKeyVal ? apiKeyMap[apiKeyVal] : null;
-        const apiKeyMasked = maskApiKey(apiKeyVal);
-        const keyName = keyInfo?.name || (apiKeyVal ? (apiKeyMasked || apiKeyVal.slice(0, 8) + "...") : "Local (No API Key)");
-        const apiKeyKey = apiKeyMasked || "local-no-key";
-        if (!stats.byApiKey[akKey]) {
-          stats.byApiKey[akKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel, provider: providerDisplayName, apiKeyMasked, keyName, apiKeyKey, lastUsed: dateKey };
-        }
-        stats.byApiKey[akKey].requests += ak.requests || 0;
-        stats.byApiKey[akKey].promptTokens += ak.promptTokens || 0;
-        stats.byApiKey[akKey].completionTokens += ak.completionTokens || 0;
-        stats.byApiKey[akKey].cachedTokens += ak.cachedTokens || 0;
-        stats.byApiKey[akKey].cost += ak.cost || 0;
-        if (dateKey > (stats.byApiKey[akKey].lastUsed || "")) stats.byApiKey[akKey].lastUsed = dateKey;
-      }
-
-      for (const [epKey, ep] of Object.entries(day.byEndpoint || {})) {
-        const endpoint = ep.endpoint || epKey.split("|")[0] || "Unknown";
-        const rawModel = ep.rawModel || "";
-        const provider = ep.provider || "";
-        const providerDisplayName = providerNodeNameMap[provider] || provider;
-        if (!stats.byEndpoint[epKey]) {
-          stats.byEndpoint[epKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, endpoint, rawModel, provider: providerDisplayName, lastUsed: dateKey };
-        }
-        stats.byEndpoint[epKey].requests += ep.requests || 0;
-        stats.byEndpoint[epKey].promptTokens += ep.promptTokens || 0;
-        stats.byEndpoint[epKey].completionTokens += ep.completionTokens || 0;
-        stats.byEndpoint[epKey].cachedTokens += ep.cachedTokens || 0;
-        stats.byEndpoint[epKey].cost += ep.cost || 0;
-        if (dateKey > (stats.byEndpoint[epKey].lastUsed || "")) stats.byEndpoint[epKey].lastUsed = dateKey;
-      }
+    // The requests that are recorded but not written yet belong to their day
+    // as well: the numbers are the ones the flush will store.
+    for (const [dateKey, day] of pendingDays) {
+      accumulateDayStats(stats, dateKey, day, ctx);
     }
 
     // Overlay precise lastUsed timestamps from history.
@@ -696,10 +1003,13 @@ export async function getUsageStats(period = "all") {
       maxDays ? Date.now() - maxDays * 86400000 : 0,
       Date.now() - OVERLAY_WINDOW_MS
     );
-    const histRows = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint FROM usageHistory WHERE timestamp >= ?`,
-      [new Date(overlayCutoff).toISOString()]
-    );
+    const histRows = [
+      ...pendingRows.filter((r) => r.timestamp >= new Date(overlayCutoff).toISOString()),
+      ...db.all(
+        `SELECT timestamp, provider, model, connectionId, apiKey, endpoint FROM usageHistory WHERE timestamp >= ?`,
+        [new Date(overlayCutoff).toISOString()]
+      ),
+    ];
     for (const e of histRows) {
       const ts = e.timestamp;
       const modelKey = e.provider ? `${e.model} (${e.provider})` : e.model;
@@ -730,10 +1040,13 @@ export async function getUsageStats(period = "all") {
     } else {
       cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
     }
-    const filtered = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens FROM usageHistory WHERE timestamp >= ?`,
-      [cutoff]
-    );
+    const filtered = [
+      ...pendingRows.filter((r) => r.timestamp >= cutoff),
+      ...db.all(
+        `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens FROM usageHistory WHERE timestamp >= ?`,
+        [cutoff]
+      ),
+    ];
 
     for (const r of filtered) {
       const tokens = parseJson(r.tokens, {}) || {};
@@ -832,10 +1145,16 @@ export async function getChartData(period = "7d") {
     const labelFn = (ts) => new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
     const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0, requests: 0 }));
 
-    const rows = db.all(
-      `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
-      [new Date(startTime).toISOString()]
-    );
+    const rows = [
+      ...pendingRowsFrom(pendingUsageSnapshot()).filter((r) => {
+        const t = new Date(r.timestamp).getTime();
+        return t >= startTime && t < endTime;
+      }),
+      ...db.all(
+        `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
+        [new Date(startTime).toISOString()]
+      ),
+    ];
     for (const r of rows) {
       const t = new Date(r.timestamp).getTime();
       if (t < startTime || t >= endTime) continue;
@@ -856,10 +1175,16 @@ export async function getChartData(period = "7d") {
     const startTime = now - bucketCount * bucketMs;
     const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0, requests: 0 }));
 
-    const rows = db.all(
-      `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
-      [new Date(startTime).toISOString()]
-    );
+    const rows = [
+      ...pendingRowsFrom(pendingUsageSnapshot()).filter((r) => {
+        const t = new Date(r.timestamp).getTime();
+        return t >= startTime && t <= now;
+      }),
+      ...db.all(
+        `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
+        [new Date(startTime).toISOString()]
+      ),
+    ];
     for (const r of rows) {
       const t = new Date(r.timestamp).getTime();
       if (t < startTime || t > now) continue;
@@ -875,11 +1200,14 @@ export async function getChartData(period = "7d") {
 
   if (period === "all") {
     const dayRows = loadDaysInRange(db, null);
-    if (!dayRows.length) return [];
+    const pendingDays = pendingDaysFrom(pendingUsageSnapshot());
+    if (!dayRows.length && !pendingDays.size) return [];
     const dayMap = {};
     for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
+    mergePendingDays(dayMap, pendingDays);
 
-    const earliest = new Date(dayRows[0].dateKey + "T00:00:00");
+    const firstKey = dayRows.length ? dayRows[0].dateKey : [...pendingDays.keys()].sort()[0];
+    const earliest = new Date(firstKey + "T00:00:00");
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const diffDays = Math.max(1, Math.round((today - earliest) / 86400000) + 1);
@@ -905,6 +1233,7 @@ export async function getChartData(period = "7d") {
   const dayRows = loadDaysInRange(db, bucketCount);
   const dayMap = {};
   for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
+  mergePendingDays(dayMap, pendingDaysFrom(pendingUsageSnapshot()));
 
   return Array.from({ length: bucketCount }, (_, i) => {
     const d = new Date(today);
@@ -935,7 +1264,7 @@ export async function getRecentLogs(limit = 200) {
       `SELECT timestamp, provider, model, connectionId, promptTokens, completionTokens, status, tokens FROM usageHistory ORDER BY id DESC LIMIT ?`,
       [limit],
     );
-    if (!rows.length) return [];
+    if (!rows.length && !usageBuffer.items.length) return [];
 
     const connMap = {};
     try {
@@ -944,7 +1273,14 @@ export async function getRecentLogs(limit = 200) {
       for (const c of connections) connMap[c.id] = c.name || c.email || "";
     } catch {}
 
-    return rows.map((r) => {
+    // The snapshot comes after the rows above: a request that was written in
+    // between is in the rows already and must not be counted twice.
+    const rowsWithPending = [
+      ...pendingRowsFrom(pendingUsageSnapshot()),
+      ...rows,
+    ];
+
+    return rowsWithPending.map((r) => {
       const ts = formatLogDate(new Date(r.timestamp));
       const p = r.provider?.toUpperCase() || "-";
       const m = r.model || "-";

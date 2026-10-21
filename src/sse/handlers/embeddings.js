@@ -14,6 +14,8 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
+import { enforceRequestLimits } from "../services/rateLimit.js";
+import { consumeFanOutSlot, fanOutLimitResponse } from "open-sse/services/fanOut.js";
 
 function exactEmbeddingUsage(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.estimated === true) return null;
@@ -31,6 +33,10 @@ function exactEmbeddingUsage(raw) {
  * @param {Request} request
  */
 export async function handleEmbeddings(request) {
+  return await enforceRequestLimits(request, (ctx) => handleEmbeddingsRequest(request, ctx));
+}
+
+async function handleEmbeddingsRequest(request, ctx = {}) {
   let body;
   try {
     body = await request.json();
@@ -121,6 +127,13 @@ export async function handleEmbeddings(request) {
     log.info("AUTH", `\x1b[32mUsing ${provider} account: ${credentials.connectionName}\x1b[0m`);
 
     const refreshedCredentials = await checkAndRefreshToken(provider, credentials);
+
+    // Every upstream attempt spends one slot of this request's fan-out budget:
+    // the account loop below multiplies by the number of provider accounts.
+    if (!consumeFanOutSlot(ctx.fanOutBudget, `${provider}/${model}`)) {
+      log.warn("EMBEDDINGS", `fan-out budget exhausted at ${provider}/${model}`);
+      return fanOutLimitResponse(ctx.fanOutBudget);
+    }
 
     const result = await handleEmbeddingsCore({
       body: { ...body, model: `${provider}/${model}` },

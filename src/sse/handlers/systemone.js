@@ -14,6 +14,8 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
 import { checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
+import { enforceRequestLimits } from "../services/rateLimit.js";
+import { consumeFanOutSlot, fanOutLimitResponse } from "open-sse/services/fanOut.js";
 
 /**
  * Handle System One (Jev) decision requests for the Next.js server.
@@ -22,6 +24,10 @@ import { saveRequestUsage } from "@/lib/usageDb.js";
  * @param {Request} request
  */
 export async function handleSystemone(request) {
+  return await enforceRequestLimits(request, (ctx) => handleSystemoneRequest(request, ctx));
+}
+
+async function handleSystemoneRequest(request, ctx = {}) {
   let body;
   try {
     body = await request.json();
@@ -113,6 +119,13 @@ export async function handleSystemone(request) {
     log.info("AUTH", `\x1b[32mUsing ${provider} account: ${credentials.connectionName}\x1b[0m`);
 
     const refreshedCredentials = await checkAndRefreshToken(provider, credentials);
+
+    // Every upstream attempt spends one slot of this request's fan-out budget:
+    // the account loop below multiplies by the number of provider accounts.
+    if (!consumeFanOutSlot(ctx.fanOutBudget, `${provider}/${model}`)) {
+      log.warn("SYSTEMONE", `fan-out budget exhausted at ${provider}/${model}`);
+      return fanOutLimitResponse(ctx.fanOutBudget);
+    }
 
     const result = await handleSystemoneCore({
       body,

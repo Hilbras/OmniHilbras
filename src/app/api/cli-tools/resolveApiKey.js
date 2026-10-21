@@ -1,36 +1,42 @@
 /**
  * Resolves the API key to write into a CLI tool config.
  *
- * CLI tool cards send an empty string when no key is explicitly selected
- * (e.g. the existing config already has a provider block but the frontend
- * can't read the stored Authorization header back). The routes previously
- * fell back to the literal placeholder "sk_omnihilbras", which causes 401
- * "Invalid API key" for any deployment with requireApiKey=true (#4399).
- *
- * Resolution order:
- *   1. The key supplied by the caller (non-empty string).
- *   2. The first active key in the dashboard's apiKeys table.
- *   3. Empty string — the route writes no Authorization header value,
- *      which is fine for requireApiKey=false deployments.
+ * The key table holds no usable key any more — the dashboard shows the
+ * display form of a key, and that is what a client sends back. A display form
+ * cannot authenticate, so it is replaced by the app's own key, which the
+ * server can always reproduce. A real key — one the user pasted — is used as
+ * it is.
  *
  * The placeholder "sk_omnihilbras" is NEVER written; it was never a real key.
  */
 
 import { getApiKeys } from "@/lib/db";
+import { getInternalApiKey } from "@/lib/auth/internalKey";
+
+/**
+ * The display form of a key is the masked value the dashboard shows. The mask
+ * marker never appears in a real key.
+ * @param {string} value
+ * @returns {Promise<boolean>}
+ */
+async function isDisplayForm(value) {
+  if (value.includes("***")) return true;
+  try {
+    const keys = await getApiKeys();
+    return keys.some((k) => k.key && k.key === value);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * @param {string|null|undefined} callerKey  Key sent by the frontend.
  * @returns {Promise<string>}
  */
 export async function resolveCliApiKey(callerKey) {
-  if (callerKey && callerKey.trim() && callerKey.trim() !== "sk_omnihilbras") {
-    return callerKey.trim();
+  const candidate = (callerKey || "").trim();
+  if (candidate && candidate !== "sk_omnihilbras" && !(await isDisplayForm(candidate))) {
+    return candidate;
   }
-  try {
-    const keys = await getApiKeys();
-    const active = keys.find((k) => k.isActive);
-    return active?.key || "";
-  } catch {
-    return "";
-  }
+  return getInternalApiKey();
 }

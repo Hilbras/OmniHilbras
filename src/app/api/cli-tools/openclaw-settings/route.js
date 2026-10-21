@@ -6,6 +6,7 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 
 const execAsync = promisify(exec);
 
@@ -138,7 +139,8 @@ const writeAgentModels = async (agentDir, model, baseUrl, apiKey) => {
 export async function POST(request) {
   try {
     // agentModels: { [agentId]: modelId } for per-agent override
-    const { baseUrl, apiKey, model, agentModels = {} } = await request.json();
+    const { baseUrl, apiKey: requestedKey, model, agentModels = {} } = await request.json();
+    const apiKey = await resolveCliApiKey(requestedKey);
     
     if (!baseUrl || !model) {
       return NextResponse.json({ error: "baseUrl and model are required" }, { status: 400 });

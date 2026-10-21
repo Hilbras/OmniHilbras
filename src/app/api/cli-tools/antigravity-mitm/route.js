@@ -13,6 +13,7 @@ import {
   initDbHooks,
 } from "@/mitm/manager";
 import { getSettings, updateSettings } from "@/lib/localDb";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 
 initDbHooks(getSettings, updateSettings);
 
@@ -93,7 +94,8 @@ export async function GET() {
 // POST - Start MITM server (cert + server, no DNS)
 export async function POST(request) {
   try {
-    const { apiKey, sudoPassword, mitmRouterBaseUrl, forceKillPort443 } = await request.json();
+    const { apiKey: requestedKey, sudoPassword, mitmRouterBaseUrl, forceKillPort443 } = await request.json();
+    const apiKey = await resolveCliApiKey(requestedKey);
     const pwd = getPassword(sudoPassword) || await loadEncryptedPassword() || "";
 
     if (!apiKey || requiresSudoPassword(pwd)) {

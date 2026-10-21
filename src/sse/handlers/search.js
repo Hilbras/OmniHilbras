@@ -14,6 +14,8 @@ import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat, getComboModelsFromData } from "open-sse/services/combo.js";
 import { getKeyAccessContext, enforceKeyAccessProvider } from "../services/keyAccess.js";
+import { enforceRequestLimits } from "../services/rateLimit.js";
+import { consumeFanOutSlot, fanOutLimitResponse } from "open-sse/services/fanOut.js";
 
 /**
  * Handle web search request for the SSE/Next.js server.
@@ -22,6 +24,10 @@ import { getKeyAccessContext, enforceKeyAccessProvider } from "../services/keyAc
  * @param {Request} request
  */
 export async function handleSearch(request) {
+  return await enforceRequestLimits(request, (ctx) => handleSearchRequest(request, ctx));
+}
+
+async function handleSearchRequest(request, ctx = {}) {
   let body;
   try {
     body = await request.json();
@@ -85,18 +91,19 @@ export async function handleSearch(request) {
     return handleComboChat({
       body,
       models: comboModels,
-      handleSingleModel: (b, m) => handleSingleProviderSearch(b, m, request, apiKey, settings),
+      handleSingleModel: (b, m) => handleSingleProviderSearch(b, m, request, apiKey, settings, ctx.fanOutBudget),
       log,
       comboName: providerInput,
       comboStrategy,
-      comboStickyLimit
+      comboStickyLimit,
+      fanOutBudget: ctx.fanOutBudget
     });
   }
 
-  return handleSingleProviderSearch(body, providerInput, request, apiKey, settings);
+  return handleSingleProviderSearch(body, providerInput, request, apiKey, settings, ctx.fanOutBudget);
 }
 
-async function handleSingleProviderSearch(body, providerInput, request, apiKey, settings) {
+async function handleSingleProviderSearch(body, providerInput, request, apiKey, settings, fanOutBudget = null) {
   const query = body.query;
   const providerId = resolveProviderId(providerInput);
   const resolvedProvider = AI_PROVIDERS[providerId];
@@ -138,6 +145,10 @@ async function handleSingleProviderSearch(body, providerInput, request, apiKey, 
   // No-auth providers (e.g. searxng) bypass credential lookup
   if (resolvedProvider.noAuth) {
     log.info("AUTH", `\x1b[32m${providerId} no-auth mode\x1b[0m`);
+    if (!consumeFanOutSlot(fanOutBudget, providerId)) {
+      log.warn("SEARCH", `fan-out budget exhausted at ${providerId}`);
+      return fanOutLimitResponse(fanOutBudget);
+    }
     const result = await handleSearchCore({
       body: coreBody,
       provider: resolvedProvider,
@@ -200,6 +211,13 @@ async function handleSingleProviderSearch(body, providerInput, request, apiKey, 
     log.info("AUTH", `\x1b[32mUsing ${providerId} account: ${credentials.connectionName}\x1b[0m`);
 
     const refreshedCredentials = await checkAndRefreshToken(providerId, credentials);
+
+    // Every upstream attempt spends one slot of this request's fan-out budget:
+    // the credential loop below multiplies by the number of provider accounts.
+    if (!consumeFanOutSlot(fanOutBudget, providerId)) {
+      log.warn("SEARCH", `fan-out budget exhausted at ${providerId}`);
+      return fanOutLimitResponse(fanOutBudget);
+    }
 
     const result = await handleSearchCore({
       body: coreBody,

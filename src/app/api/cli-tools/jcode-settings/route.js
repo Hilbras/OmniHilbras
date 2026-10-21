@@ -7,6 +7,7 @@ import os from "os";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { parseTOML, stringifyTOML } from "confbox";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 
 const execAsync = promisify(exec);
 
@@ -130,14 +131,15 @@ export async function GET() {
 
 export async function POST(request) {
   try {
-    const { baseUrl, apiKey, models } = await request.json();
+    const { baseUrl, apiKey: requestedKey, models } = await request.json();
 
-    if (!baseUrl || !apiKey) {
+    if (!baseUrl || !requestedKey) {
       return NextResponse.json(
         { error: "baseUrl and apiKey are required" },
         { status: 400 }
       );
     }
+    const apiKey = await resolveCliApiKey(requestedKey);
 
     const normalizedBaseUrl = baseUrl.endsWith("/v1")
       ? baseUrl

@@ -3,6 +3,7 @@
  */
 
 import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
+import { fanOutLimitResponse, fanOutRemaining } from "./fanOut.js";
 import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
@@ -315,9 +316,10 @@ export function isZeroContentResponse(data) {
  * @param {string} [options.comboName] - Name of the combo (for round-robin tracking)
  * @param {string} [options.comboStrategy] - Strategy: "fallback" or "round-robin"
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
+ * @param {object} [options.fanOutBudget] - Per-request budget on upstream calls
  * @returns {Promise<Response>}
  */
-export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true }) {
+export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, fanOutBudget = null }) {
   // Apply rotation strategy if enabled
   let rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
 
@@ -343,7 +345,15 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
 
     try {
       const result = await handleSingleModel(body, modelStr);
-      
+
+      // The fan-out budget is spent by the upstream calls themselves. Once it
+      // is exhausted every further model would be refused as well, so stop
+      // here and tell the client that this request was too wide.
+      if (fanOutBudget?.exhausted) {
+        log.warn("COMBO", `fan-out budget exhausted at ${modelStr}`);
+        return fanOutLimitResponse(fanOutBudget);
+      }
+
       // Success (2xx) - return response unless empty/zero-content on a non-final seat
       if (result.ok) {
         const isLastModel = i === rotatedModels.length - 1;
@@ -600,9 +610,10 @@ function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeoutMs })
  * @param {string} [options.comboName] - Combo name (logging)
  * @param {string} [options.judgeModel] - Judge model; falls back to panel[0]
  * @param {Object} [options.tuning] - Override FUSION_DEFAULTS (minPanel, grace, timeout)
+ * @param {object} [options.fanOutBudget] - Per-request budget on upstream calls
  * @returns {Promise<Response>}
  */
-export async function handleFusionChat({ body, models, handleSingleModel, log, comboName, judgeModel, tuning }) {
+export async function handleFusionChat({ body, models, handleSingleModel, log, comboName, judgeModel, tuning, fanOutBudget = null }) {
   const panel = Array.isArray(models) ? models.filter(Boolean) : [];
   if (panel.length === 0) {
     return new Response(
@@ -614,6 +625,15 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
   // A single-model fusion has nothing to fuse — just answer directly.
   if (panel.length === 1) {
     return handleSingleModel(body, panel[0]);
+  }
+
+  // A fusion request runs every panel model and then the judge, so its upstream
+  // call count is known up front. Refuse it when the request's fan-out budget
+  // cannot cover the whole panel — running a partial panel would spend the
+  // budget and still fail the request.
+  if (fanOutBudget && fanOutRemaining(fanOutBudget) < panel.length + 1) {
+    log.warn("FUSION", `fan-out budget too small for a panel of ${panel.length}`);
+    return fanOutLimitResponse(fanOutBudget);
   }
 
   const cfg = { ...FUSION_DEFAULTS, ...(tuning || {}) };

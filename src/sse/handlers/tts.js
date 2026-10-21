@@ -11,6 +11,8 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
+import { enforceRequestLimits } from "../services/rateLimit.js";
+import { consumeFanOutSlot, fanOutLimitResponse } from "open-sse/services/fanOut.js";
 
 // Derived from providers.js: any TTS provider not noAuth requires stored credentials
 const CREDENTIALED_PROVIDERS = new Set(
@@ -20,6 +22,10 @@ const CREDENTIALED_PROVIDERS = new Set(
 );
 
 export async function handleTts(request) {
+  return await enforceRequestLimits(request, (ctx) => handleTtsRequest(request, ctx));
+}
+
+async function handleTtsRequest(request, ctx = {}) {
   let body;
   try {
     body = await request.json();
@@ -59,18 +65,19 @@ export async function handleTts(request) {
     return handleComboChat({
       body,
       models: comboModels,
-      handleSingleModel: (b, m) => handleSingleModelTts(b, m, responseFormat, language, style),
+      handleSingleModel: (b, m) => handleSingleModelTts(b, m, responseFormat, language, style, ctx.fanOutBudget),
       log,
       comboName: modelStr,
       comboStrategy,
       comboStickyLimit,
+      fanOutBudget: ctx.fanOutBudget,
     });
   }
 
-  return handleSingleModelTts(body, modelStr, responseFormat, language, style);
+  return handleSingleModelTts(body, modelStr, responseFormat, language, style, ctx.fanOutBudget);
 }
 
-async function handleSingleModelTts(body, modelStr, responseFormat, language, style) {
+async function handleSingleModelTts(body, modelStr, responseFormat, language, style, fanOutBudget = null) {
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 
@@ -79,6 +86,10 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language, st
 
   // noAuth providers — no credential needed
   if (!CREDENTIALED_PROVIDERS.has(provider)) {
+    if (!consumeFanOutSlot(fanOutBudget, `${provider}/${model}`)) {
+      log.warn("TTS", `fan-out budget exhausted at ${provider}/${model}`);
+      return fanOutLimitResponse(fanOutBudget);
+    }
     const result = await handleTtsCore({ provider, model, input: body.input, responseFormat, language, style });
     if (result.success) return result.response;
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "TTS failed");
@@ -103,6 +114,13 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language, st
     }
 
     log.info("AUTH", `\x1b[32mUsing ${provider} account: ${credentials.connectionName}\x1b[0m`);
+
+    // Every upstream attempt spends one slot of this request's fan-out budget:
+    // the account loop below multiplies by the number of provider accounts.
+    if (!consumeFanOutSlot(fanOutBudget, `${provider}/${model}`)) {
+      log.warn("TTS", `fan-out budget exhausted at ${provider}/${model}`);
+      return fanOutLimitResponse(fanOutBudget);
+    }
 
     const result = await handleTtsCore({ provider, model, input: body.input, credentials, responseFormat, language, style });
 

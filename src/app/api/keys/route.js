@@ -29,6 +29,8 @@ export async function POST(request) {
     const machineId = await getConsistentMachineId();
     const apiKey = await createApiKey(name, machineId);
 
+    // The only response that carries the plaintext: the database keeps the
+    // hash and the display form, never the key itself.
     return NextResponse.json({
       key: apiKey.key,
       name: apiKey.name,
