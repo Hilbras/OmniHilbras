@@ -297,7 +297,35 @@ function buildCliPackage() {
     copyRecursive(src, dest);
     console.log(`✅ Bundled ${pkg}`);
   }
+  // The sql.js fallback needs the wasm binary next to its loader. Without it
+  // the module cannot start, and every install has to fetch sql.js at
+  // runtime — the package is not self-contained without it.
+  function ensureSqlJsWasm() {
+    const wasmName = "sql-wasm.wasm";
+    const dest = path.join(cliAppDir, "node_modules", "sql.js", "dist", wasmName);
+    if (fs.existsSync(dest)) {
+      console.log(`✅ sql.js ${wasmName} bundled`);
+      return;
+    }
+    const candidates = [
+      path.join(appDir, "node_modules", "sql.js", "dist", wasmName),
+      path.join(rootDir, "node_modules", "sql.js", "dist", wasmName),
+    ];
+    const src = candidates.find((p) => fs.existsSync(p));
+    if (!src) {
+      console.warn(`⚠️  sql.js ${wasmName} not found — installs will fetch sql.js at runtime`);
+      return;
+    }
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    console.log(`✅ Bundled the sql.js ${wasmName}`);
+  }
   ensureModuleInBundle("sql.js");
+  // The sql.js fallback needs its wasm next to the loader. The file tracer
+  // copies the module but not always the binary, and without it every install
+  // has to fetch sql.js at runtime — which is exactly what the postinstall
+  // does, so the package is not self-contained.
+  ensureSqlJsWasm();
   // `open` is external (see serverExternalPackages in next.config.mjs), so it must exist in
   // the bundle's node_modules or every importer throws MODULE_NOT_FOUND at runtime. Output
   // tracing normally copies it; this is the same belt-and-braces guard used for sql.js.

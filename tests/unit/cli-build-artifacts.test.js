@@ -185,11 +185,11 @@ describe("the packaged tree carries no data directory", () => {
   });
 
   it("fails the release when the file list carries a secret", async () => {
-    const { checkPackageContents, findForbiddenFiles } = await import(
+    const { checkPackageContents, findForbiddenFiles, REQUIRED_PATHS } = await import(
       "../../cli/scripts/check-package-contents.mjs"
     );
 
-    const clean = ["cli.js", "app/server.js", "app/public/logo.svg"];
+    const clean = ["cli.js", "app/server.js", "app/public/logo.svg", ...REQUIRED_PATHS];
     assert.deepEqual(findForbiddenFiles(clean), []);
     assert.equal(checkPackageContents(clean, 1000).ok, true);
 
@@ -204,10 +204,26 @@ describe("the packaged tree carries no data directory", () => {
   });
 
   it("fails the release when the package is over the size budget", async () => {
-    const { checkPackageContents } = await import("../../cli/scripts/check-package-contents.mjs");
-    const files = ["cli.js"];
+    const { checkPackageContents, REQUIRED_PATHS } = await import(
+      "../../cli/scripts/check-package-contents.mjs"
+    );
+    const files = ["cli.js", ...REQUIRED_PATHS];
     assert.equal(checkPackageContents(files, 1000, 2000).ok, true);
     assert.equal(checkPackageContents(files, 3000, 2000).tooBig, true);
     assert.equal(checkPackageContents(files, 3000, 2000).ok, false);
+  });
+
+  it("fails the release when the package is missing the sql.js wasm", async () => {
+    const { checkPackageContents, REQUIRED_PATHS } = await import(
+      "../../cli/scripts/check-package-contents.mjs"
+    );
+    // The sql.js fallback needs the binary next to its loader; without it
+    // every install has to fetch sql.js at runtime.
+    const without = checkPackageContents(["cli.js"], 1000);
+    assert.equal(without.ok, false);
+    assert.deepEqual(without.missing, REQUIRED_PATHS);
+
+    const with_ = checkPackageContents(["cli.js", ...REQUIRED_PATHS], 1000);
+    assert.equal(with_.ok, true);
   });
 });

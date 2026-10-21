@@ -35,20 +35,35 @@ export const FORBIDDEN_PATTERNS = [
   /\.sqlite(-wal|-shm)?$/,
 ];
 
+// Files the package must carry.
+//
+// The sql.js fallback needs the wasm binary next to its loader. Without it
+// the module cannot start, and every install has to fetch sql.js at runtime
+// — the package is not self-contained.
+export const REQUIRED_PATHS = ["app/node_modules/sql.js/dist/sql-wasm.wasm"];
+
 /** The files of a package that must never be published. */
 export function findForbiddenFiles(files) {
   return files.filter((file) => FORBIDDEN_PATTERNS.some((re) => re.test(file)));
 }
 
+/** The files the package must carry. */
+export function findMissingFiles(files) {
+  const present = new Set(files);
+  return REQUIRED_PATHS.filter((file) => !present.has(file));
+}
+
 /**
  * Check a packed file list.
- * @returns {{ok: boolean, forbidden: string[], tooBig: boolean}}
+ * @returns {{ok: boolean, forbidden: string[], missing: string[], tooBig: boolean}}
  */
 export function checkPackageContents(files, size, maxBytes = DEFAULT_MAX_BYTES) {
   const forbidden = findForbiddenFiles(files);
+  const missing = findMissingFiles(files);
   return {
-    ok: forbidden.length === 0 && size <= maxBytes,
+    ok: forbidden.length === 0 && missing.length === 0 && size <= maxBytes,
     forbidden,
+    missing,
     tooBig: size > maxBytes,
   };
 }
@@ -82,6 +97,13 @@ function run() {
   if (result.forbidden.length) {
     console.error("[package-check] The package would publish the data directory:");
     for (const file of result.forbidden) console.error(`  - ${file}`);
+    console.error("[package-check] Fix cli/scripts/build-cli.js before publishing.");
+    process.exit(1);
+  }
+
+  if (result.missing.length) {
+    console.error("[package-check] The package is missing files it needs at runtime:");
+    for (const file of result.missing) console.error(`  - ${file}`);
     console.error("[package-check] Fix cli/scripts/build-cli.js before publishing.");
     process.exit(1);
   }
