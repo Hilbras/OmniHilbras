@@ -7,7 +7,7 @@ import {
   getProxyPoolById,
 } from "@/models";
 import { APIKEY_PROVIDERS } from "@/shared/constants/config";
-import { AI_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbeddingProvider } from "@/shared/constants/providers";
+import { AI_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, WEB_COOKIE_SESSION_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, isCustomEmbeddingProvider } from "@/shared/constants/providers";
 import { normalizeProviderId, normalizeProviderSpecificData } from "@/lib/providerNormalization";
 import { toProviderConnectionResponse } from "@/lib/providerConnectionResponse";
 
@@ -99,6 +99,10 @@ export async function POST(request) {
 
     // Validation
     const isWebCookieProvider = !!WEB_COOKIE_PROVIDERS[provider];
+    // A web-session provider stores a browser session, not an API key — it
+    // connects through /api/providers/web-session/[id], but the generic
+    // route must not reject it either.
+    const isWebSessionProvider = !!WEB_COOKIE_SESSION_PROVIDERS[provider];
     // Dual-auth providers (e.g. codebuddy-cn, xai) live under category "oauth" but also
     // accept an API key via authModes — they aren't in APIKEY_PROVIDERS, so allow them here.
     const supportsApiKeyMode = !!AI_PROVIDERS[provider]?.authModes?.includes("apikey");
@@ -106,6 +110,7 @@ export async function POST(request) {
       FREE_TIER_PROVIDERS[provider] ||
       supportsApiKeyMode ||
       isWebCookieProvider ||
+      isWebSessionProvider ||
       isOpenAICompatibleProvider(provider) ||
       isAnthropicCompatibleProvider(provider) ||
       isCustomEmbeddingProvider(provider);
@@ -176,7 +181,7 @@ export async function POST(request) {
 
     const newConnection = await createProviderConnection({
       provider,
-      authType: isWebCookieProvider ? "cookie" : "apikey",
+      authType: isWebCookieProvider || isWebSessionProvider ? "cookie" : "apikey",
       name: connectionName,
       apiKey: apiKey || "",
       priority: priority || 1,

@@ -637,6 +637,18 @@ export async function GET(request, { params }) {
 
     const config = PROVIDER_MODELS_CONFIG[connection.provider];
     if (!config) {
+      // A provider with no live catalogue still has the models its registry
+      // entry declares (the web-session providers do: their catalogue is a
+      // dated snapshot, and the connect dialog reports the live one). Answer
+      // with that rather than an error the page would show as a failure.
+      const seed = getModelsByProviderId(connection.provider) || [];
+      if (seed.length > 0) {
+        return NextResponse.json({
+          provider: connection.provider,
+          connectionId: connection.id,
+          models: seed.map((m) => ({ id: m.id, name: m.name || m.id })),
+        });
+      }
       return NextResponse.json(
         { error: `Provider ${connection.provider} does not support models listing` },
         { status: 400 }
