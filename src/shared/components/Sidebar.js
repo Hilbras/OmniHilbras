@@ -17,24 +17,27 @@ const VISIBLE_MEDIA_KINDS = ["embedding", "image", "video", "tts", "stt", "syste
 // Combined entry: webSearch + webFetch share one page at /dashboard/media-providers/web
 const COMBINED_WEB_ITEM = { id: "web", label: "Web Fetch & Search", icon: "travel_explore", href: "/dashboard/media-providers/web" };
 
-const navItems = [
-  { href: "/dashboard/endpoint", label: "Endpoint & Key", icon: "api" },
+// The rail is grouped the way the workspace is used: what you set up, what you
+// watch, and the tools around it.
+const workspaceItems = [
+  { href: "/dashboard/endpoint", label: "Endpoint and Keys", icon: "api" },
   { href: "/dashboard/providers", label: "Providers", icon: "dns" },
-  // { href: "/dashboard/basic-chat", label: "Basic Chat", icon: "chat" }, // Hidden
-  { href: "/dashboard/combos", label: "Combo & Vision Adapter", icon: "layers" },
+  { href: "/dashboard/combos", label: "Routing", icon: "layers" },
+];
+
+const insightItems = [
   { href: "/dashboard/usage", label: "Usage", icon: "bar_chart" },
   { href: "/dashboard/quota", label: "Quota Tracker", icon: "data_usage" },
   { href: "/dashboard/token-saver", label: "Token Saver", icon: "savings" },
-  // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: "image" },
+  { href: "/dashboard/console-log", label: "Logs", icon: "terminal" },
+  // The request log is a tab of the usage page, not a page of its own.
+  { href: "/dashboard/usage?tab=logs", label: "Request log", icon: "scroll_text", tab: "logs" },
+  { href: "/dashboard/profile", label: "Settings", icon: "settings" },
+];
+
+const toolItems = [
   { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
-];
-
-const debugItems = [
-  { href: "/dashboard/console-log", label: "Console Log", icon: "terminal" },
-  { href: "/dashboard/translator", label: "Translator", icon: "translate" },
-];
-
-const systemItems = [
+  { href: "/dashboard/translator", label: "Translator", icon: "translate", needsTranslator: true },
   { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: "lan" },
   { href: "/dashboard/skills", label: "Skills", icon: "extension" },
 ];
@@ -76,7 +79,14 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
     return () => clearTimeout(timer);
   }, []);
 
-  const isActive = (href) => {
+  // Which entry of the rail is the one on screen.
+  //
+  // The rail highlights the page, not the tab: the request log is a tab of the
+  // usage page, so "Usage" stays lit while "Request log" is open. The sidebar
+  // lives in the layout, and reading the search params there would force every
+  // dashboard page to be rendered dynamically.
+  const isActive = (item) => {
+    const href = item.href.split("?")[0];
     if (href === "/dashboard/endpoint") {
       return pathname === "/dashboard" || pathname.startsWith("/dashboard/endpoint");
     }
@@ -203,39 +213,28 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
         <nav className={`dashboard-scroll flex-1 overflow-y-auto ${collapsed ? "px-2" : "px-3"} py-2 space-y-0.5`} aria-label="Dashboard navigation">
           {!collapsed && <p className="mono-label px-3 pb-2">Workspace</p>}
           {collapsed && <div className="h-3" aria-hidden="true" />}
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onClose}
-              title={collapsed ? item.label : undefined}
-              aria-label={collapsed ? item.label : undefined}
-              className={cn(
-                "flex items-center rounded-lg transition-colors group text-[13px] font-medium",
-                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2",
-                isActive(item.href)
-                  ? "bg-gold-soft text-gold-text"
-                  : "text-text-muted hover:bg-surface hover:text-text-main"
-              )}
-              aria-current={isActive(item.href) ? "page" : undefined}
-            >
-              <span
-                className={cn(
-                  "material-symbols-outlined shrink-0",
-                  collapsed ? "text-[17px]" : "text-[17px]",
-                  isActive(item.href) ? "fill-1" : "group-hover:text-gold-text transition-colors"
-                )}
-              >
-                {item.icon}
-              </span>
-              {!collapsed && <span className="flex-1">{item.label}</span>}
-            </Link>
-          ))}
+          <div className="space-y-0.5">
+            {workspaceItems.map((item) => (
+              <NavItem key={item.href} item={item} active={isActive(item)} collapsed={collapsed} onNavigate={onClose} />
+            ))}
+          </div>
 
-          {/* System section */}
-          <div className="pt-3 mt-2 space-y-0.5">
-            {!collapsed && <p className="mono-label px-3 pb-2">System</p>}
-            {collapsed && <div className="mx-2 my-1 border-t border-line/70" aria-hidden="true" />}
+          {!collapsed && <p className="mono-label px-3 pb-2 pt-7">Insights</p>}
+          {collapsed && <div className="h-6" aria-hidden="true" />}
+          <div className="space-y-0.5">
+            {insightItems.map((item) => (
+              <NavItem key={item.href} item={item} active={isActive(item)} collapsed={collapsed} onNavigate={onClose} />
+            ))}
+          </div>
+
+          {!collapsed && <p className="mono-label px-3 pb-2 pt-7">Tools</p>}
+          {collapsed && <div className="h-6" aria-hidden="true" />}
+          <div className="space-y-0.5">
+            {toolItems
+              .filter((item) => !item.needsTranslator || enableTranslator)
+              .map((item) => (
+                <NavItem key={item.href} item={item} active={isActive(item)} collapsed={collapsed} onNavigate={onClose} />
+              ))}
 
             {/* Media Providers accordion */}
             <button
@@ -296,64 +295,6 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               </div>
             )}
 
-            {systemItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onClose}
-                title={collapsed ? item.label : undefined}
-                aria-label={collapsed ? item.label : undefined}
-                className={cn(
-                  "flex items-center rounded-lg transition-colors group",
-                  collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
-                  isActive(item.href)
-                    ? "bg-gold-soft text-gold-text"
-                    : "text-text-muted hover:bg-surface hover:text-text-main"
-                )}
-              >
-                <span
-                  className={cn(
-                    "material-symbols-outlined shrink-0 text-[17px]",
-                    isActive(item.href) ? "fill-1" : "group-hover:text-gold-text transition-colors"
-                  )}
-                >
-                  {item.icon}
-                </span>
-                {!collapsed && <span className="text-[13px] font-medium">{item.label}</span>}
-              </Link>
-            ))}
-
-            {/* Debug items (inside System section, before Settings) */}
-            {debugItems.map((item) => {
-              const show = item.href !== "/dashboard/translator" || enableTranslator;
-              return show ? (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={onClose}
-                  title={collapsed ? item.label : undefined}
-                  aria-label={collapsed ? item.label : undefined}
-                  className={cn(
-                    "flex items-center rounded-lg transition-colors group",
-                    collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
-                    isActive(item.href)
-                      ? "bg-gold-soft text-gold-text"
-                      : "text-text-muted hover:bg-surface hover:text-text-main"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "material-symbols-outlined shrink-0 text-[17px]",
-                      isActive(item.href) ? "fill-1" : "group-hover:text-gold-text transition-colors"
-                    )}
-                  >
-                    {item.icon}
-                  </span>
-                  {!collapsed && <span className="text-[13px] font-medium">{item.label}</span>}
-                </Link>
-              ) : null;
-            })}
-
             {/* Remote */}
             <a
               href="https://9remote.cc"
@@ -400,30 +341,35 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               </span>
               {!collapsed && <span className="text-[13px] font-medium">9English</span>}
             </a>
+          </div>
 
-            {/* Settings */}
+          {/* The way in: a provider is what everything else routes through. */}
+          <div className={`mt-8 border-t border-line/70 pt-5 ${collapsed ? "px-1" : ""}`}>
             <Link
-              href="/dashboard/profile"
+              href="/dashboard/providers"
               onClick={onClose}
-              title={collapsed ? "Settings" : undefined}
-              aria-label={collapsed ? "Settings" : undefined}
               className={cn(
-                "flex items-center rounded-lg transition-colors group",
-                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
-                isActive("/dashboard/profile")
-                  ? "bg-gold-soft text-gold-text"
-                  : "text-text-muted hover:bg-surface hover:text-text-main"
+                "group block rounded-xl border border-gold/25 bg-gold-soft/60 transition-colors hover:border-gold/50",
+                collapsed ? "flex justify-center p-3" : "p-3.5"
               )}
+              title={collapsed ? "Connect a provider" : undefined}
+              aria-label={collapsed ? "Connect a provider" : undefined}
             >
-              <span
-                className={cn(
-                  "material-symbols-outlined shrink-0 text-[17px]",
-                  isActive("/dashboard/profile") ? "fill-1" : "group-hover:text-gold-text transition-colors"
-                )}
-              >
-                settings
-              </span>
-              {!collapsed && <span className="text-[13px] font-medium">Settings</span>}
+              <div className={`items-center gap-2 text-xs font-semibold text-gold-text ${collapsed ? "flex justify-center" : "flex"}`}>
+                <span className="material-symbols-outlined text-[14px]" aria-hidden="true">deployed_code</span>
+                {!collapsed && "Connect a provider"}
+              </div>
+              {!collapsed && (
+                <>
+                  <p className="muted mt-1.5 text-[11px] leading-relaxed">
+                    Bring your first route online in under a minute.
+                  </p>
+                  <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-gold-text">
+                    Quick setup
+                    <span className="material-symbols-outlined text-[12px]" aria-hidden="true">chevron_right</span>
+                  </span>
+                </>
+              )}
             </Link>
           </div>
         </nav>
@@ -473,6 +419,53 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
     </>
   );
 }
+
+/**
+ * One entry of the rail.
+ *
+ * The label is hidden when the rail is collapsed, and the icon carries the
+ * name then — as a title and as the accessible name, so the entry is never
+ * an unlabelled button.
+ */
+function NavItem({ item, active, collapsed, onNavigate }) {
+  return (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      title={collapsed ? item.label : undefined}
+      aria-label={collapsed ? item.label : undefined}
+      className={cn(
+        "flex items-center rounded-lg transition-colors group",
+        collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
+        active
+          ? "bg-gold-soft text-gold-text"
+          : "text-text-muted hover:bg-surface hover:text-text-main"
+      )}
+      aria-current={active ? "page" : undefined}
+    >
+      <span
+        className={cn(
+          "material-symbols-outlined shrink-0 text-[17px]",
+          active ? "fill-1" : "group-hover:text-gold-text transition-colors"
+        )}
+      >
+        {item.icon}
+      </span>
+      {!collapsed && <span className="text-[13px] font-medium flex-1">{item.label}</span>}
+    </Link>
+  );
+}
+
+NavItem.propTypes = {
+  item: PropTypes.shape({
+    href: PropTypes.string.isRequired,
+    label: PropTypes.string.isRequired,
+    icon: PropTypes.string.isRequired,
+  }).isRequired,
+  active: PropTypes.bool,
+  collapsed: PropTypes.bool,
+  onNavigate: PropTypes.func,
+};
 
 Sidebar.propTypes = {
   onClose: PropTypes.func,
