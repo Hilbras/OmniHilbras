@@ -132,7 +132,13 @@ describe("usage write batching", () => {
 
     await waitFor(() => historyCount() >= before + 5, "the batch to be written");
     expect(historyCount()).toBe(before + 5);
-    // The daily blob is written once for the batch — not once per request.
+    // The day blob is NOT written by the row batch: it has its own cadence,
+    // because rewriting the whole day per batch is what made a trickle of
+    // requests expensive.
+    expect(dailyWrites - rollupWrites).toBe(0);
+
+    // The roll-up flush writes it once — for the whole batch.
+    await db.flushUsageRollup();
     expect(dailyWrites - rollupWrites).toBe(1);
     await Promise.all(writes);
   });
@@ -183,6 +189,9 @@ describe("usage write batching", () => {
       { provider: "mistral", model: "mistral-large", connectionId: "c-roll-2", apiKey: "sk-roll-bbbb-2222", endpoint: "/v1/chat", tokens: { prompt_tokens: 5, completion_tokens: 2 } },
     ];
 
+    // The day blob has its own cadence: what the earlier tests left in the
+    // roll-up buffer is written first, so the baseline is the stored day.
+    await db.flushUsageRollup();
     const dayBefore = readDay();
     const writes = requests.map((r) => db.saveRequestUsage(r));
 
@@ -196,8 +205,22 @@ describe("usage write batching", () => {
     // ...and what they show once the batch is written.
     await db.flushUsage();
     await Promise.all(writes);
-    const after = await db.getUsageStats("7d");
+    const afterRows = await db.getUsageStats("7d");
 
+    expect(afterRows.totalRequests).toBe(before.totalRequests);
+    expect(afterRows.totalPromptTokens).toBe(before.totalPromptTokens);
+    expect(afterRows.totalCompletionTokens).toBe(before.totalCompletionTokens);
+    expect(afterRows.totalCachedTokens).toBe(before.totalCachedTokens);
+    expect(afterRows.totalCost).toBe(before.totalCost);
+    expect(afterRows.byProvider).toEqual(before.byProvider);
+    expect(afterRows.byModel).toEqual(before.byModel);
+    expect(afterRows.byAccount).toEqual(before.byAccount);
+    expect(afterRows.byApiKey).toEqual(before.byApiKey);
+    expect(afterRows.byEndpoint).toEqual(before.byEndpoint);
+
+    // The day blob follows on its own flush — and the numbers do not move.
+    await db.flushUsageRollup();
+    const after = await db.getUsageStats("7d");
     expect(after.totalRequests).toBe(before.totalRequests);
     expect(after.totalPromptTokens).toBe(before.totalPromptTokens);
     expect(after.totalCompletionTokens).toBe(before.totalCompletionTokens);

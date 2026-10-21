@@ -176,6 +176,8 @@ describe("usage rows follow the key table", () => {
     // The row is written with the next batch; this test reads the table
     // directly, so the batch is flushed first.
     await db.flushUsage();
+    // The day blob has its own cadence: the roll-up is flushed separately.
+    await db.flushUsageRollup();
 
     const history = adapter.get(`SELECT apiKey FROM usageHistory LIMIT 1`);
     expect(history.apiKey).toBe(maskApiKey(created.key));

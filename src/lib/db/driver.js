@@ -82,6 +82,17 @@ async function initAdapter() {
 
   const { runMigrationOnce } = await import("./migrate.js");
   await runMigrationOnce(adapter);
+
+  // The in-memory usage buffers belong to the database that was open before.
+  // A new adapter means a new database file (a fresh install, a restored
+  // backup, a test that replaces the file), and rows buffered for the old one
+  // must not be written into the new one.
+  try {
+    global._usageResetBuffers?.();
+  } catch {
+    // The reset is best effort: a failure must not stop the boot.
+  }
+
   return adapter;
 }
 

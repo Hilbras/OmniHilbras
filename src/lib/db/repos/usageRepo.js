@@ -25,6 +25,19 @@ const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 
 // 1.2 MiB day) — the price of a gateway with a busy day.
 const DEFAULT_FLUSH_INTERVAL_MS = 250;
 const DEFAULT_FLUSH_MAX_ROWS = 200;
+// The daily roll-up is written on its own cadence.
+//
+// The day blob is a read-modify-write of a whole day: parsing and serialising
+// it cost 4 ms for a 180 KiB day and 43 ms for a 1.2 MiB day. A batch of rows
+// amortised that — but a slow trickle of one request every few seconds did
+// not: every request paid for the whole day.
+//
+// So the rows and the roll-up are written separately. The rows go as they
+// always did (every 250 ms); the day blob goes every ROLLUP_FLUSH_INTERVAL_MS
+// with everything that accumulated since the last time. The readers merge the
+// pending delta, so the dashboard sees no gap — and the roll-up can always be
+// rebuilt from the rows, which are written immediately.
+const DEFAULT_ROLLUP_FLUSH_INTERVAL_MS = 30_000;
 
 function envInt(name, fallback) {
   const n = parseInt(process.env[name] || "", 10);
@@ -33,6 +46,10 @@ function envInt(name, fallback) {
 
 const USAGE_FLUSH_INTERVAL_MS = envInt("USAGE_FLUSH_INTERVAL_MS", DEFAULT_FLUSH_INTERVAL_MS);
 const USAGE_FLUSH_MAX_ROWS = envInt("USAGE_FLUSH_MAX_ROWS", DEFAULT_FLUSH_MAX_ROWS);
+const USAGE_ROLLUP_FLUSH_INTERVAL_MS = envInt(
+  "USAGE_ROLLUP_FLUSH_INTERVAL_MS",
+  DEFAULT_ROLLUP_FLUSH_INTERVAL_MS,
+);
 
 // In-memory state shared across Next.js modules
 if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {} };
@@ -52,6 +69,11 @@ if (!global._statsEmitTimers) global._statsEmitTimers = { pending: null, update:
 if (!global._usageWriteBuffer) {
   global._usageWriteBuffer = { items: [], timer: null, flushing: null };
 }
+// The roll-up buffer: the day aggregates that are not written into the day
+// blob yet. It holds what the rows contributed since the last roll-up flush.
+if (!global._usageRollupBuffer) {
+  global._usageRollupBuffer = { days: new Map(), timer: null, flushing: null };
+}
 
 const pendingRequests = global._pendingRequests;
 const lastErrorProvider = global._lastErrorProvider;
@@ -61,6 +83,18 @@ const recentRing = global._recentRing;
 const connCache = global._connectionMapCache;
 const statsEmitTimers = global._statsEmitTimers;
 const usageBuffer = global._usageWriteBuffer;
+const rollupBuffer = global._usageRollupBuffer;
+
+// The in-memory buffers belong to the database that is open. A new adapter
+// means a new database file — a fresh install, a restored backup, a test that
+// replaces the file — and the rows buffered for the old one must not be
+// written into the new one. The driver calls this when it opens a database.
+global._usageResetBuffers = () => {
+  usageBuffer.items = [];
+  clearUsageFlushTimer();
+  rollupBuffer.days = new Map();
+  clearUsageRollupFlushTimer();
+};
 
 export const statsEmitter = global._statsEmitter;
 
@@ -205,6 +239,39 @@ function pendingDaysFrom(items) {
       days.set(dateKey, day);
     }
     aggregateEntryToDay(day, entry);
+  }
+  return days;
+}
+
+// A copy of a day aggregate, so a reader cannot change the buffer it reads.
+function cloneDayAggregate(day) {
+  const clone = { ...day };
+  for (const group of ["byProvider", "byModel", "byAccount", "byApiKey", "byEndpoint"]) {
+    if (!day[group]) continue;
+    clone[group] = {};
+    for (const [key, counter] of Object.entries(day[group])) {
+      clone[group][key] = { ...counter };
+    }
+  }
+  return clone;
+}
+
+/**
+ * The days a reader must add on top of the stored blobs.
+ *
+ * Two sets, and they are disjoint: the requests that are recorded but not
+ * written yet (not in the rows table either), and the day aggregates that are
+ * in the rows table but not yet merged into the day blob. They add up.
+ */
+function pendingDaysForReaders(items) {
+  const days = pendingDaysFrom(items);
+  for (const [dateKey, delta] of rollupBuffer.days) {
+    const existing = days.get(dateKey);
+    if (!existing) {
+      days.set(dateKey, cloneDayAggregate(delta));
+      continue;
+    }
+    mergeDayAggregate(existing, delta);
   }
   return days;
 }
@@ -384,6 +451,20 @@ export function trackClientRequest(scope, started) {
 }
 
 /** Current client-scoped in-flight counts (global total + per scope). */
+/**
+ * The in-flight request counters (per model and per account).
+ *
+ * Cheap: they live in memory. The dashboard shows them next to the live
+ * requests, and the usage stream pushes them — it must not have to compute
+ * the whole statistics to show that something is running.
+ */
+export function getPendingRequests() {
+  return {
+    byModel: { ...pendingRequests.byModel },
+    byAccount: { ...pendingRequests.byAccount },
+  };
+}
+
 export function getClientRequestCounts() {
   const client = pendingRequests.client;
   return { total: client.total, byScope: { ...client.byScope } };
@@ -500,13 +581,9 @@ function scheduleUsageFlush() {
 }
 
 /**
- * Write one batch: the history rows, the daily roll-up and the lifetime
- * counter, all in ONE transaction.
- *
- * The daily roll-up is a read-modify-write per day the batch touched, so the
- * day blob is parsed and serialised once per batch instead of once per
- * request. Only the buckets of these rows change; the rest of the day is
- * left as it is.
+ * Write one batch: the history rows and the lifetime counter, in ONE
+ * transaction. The daily roll-up is accumulated into the roll-up buffer and
+ * written on its own cadence (see flushUsageRollup).
  *
  * @param {object} db - the database adapter
  * @param {object[]} entries - the recorded requests
@@ -567,11 +644,15 @@ function writeUsageBatch(db, entries) {
       else days.set(dateKey, [entry]);
     }
 
+    // The day aggregates wait for the roll-up flush: the blob is a whole day,
+    // and rewriting it per batch is what made a trickle of requests expensive.
     for (const [dateKey, dayEntries] of days) {
-      const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
-      const day = row ? parseJson(row.data, {}) : emptyDayAggregate();
+      let day = rollupBuffer.days.get(dateKey);
+      if (!day) {
+        day = emptyDayAggregate();
+        rollupBuffer.days.set(dateKey, day);
+      }
       for (const entry of dayEntries) aggregateEntryToDay(day, entry);
-      db.run(`INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`, [dateKey, stringifyJson(day)]);
     }
 
     // Atomic counter increment in same transaction
@@ -617,6 +698,8 @@ export async function flushUsage() {
       items = usageBuffer.items.splice(0, usageBuffer.items.length);
       if (!items.length) return 0;
       const inserted = writeUsageBatch(db, items.map((item) => item.entry));
+      // The day aggregate waits for its own flush.
+      if (rollupBuffer.days.size) scheduleUsageRollupFlush();
       for (const item of items) item.resolve(inserted);
       return items.length;
     } catch (e) {
@@ -636,15 +719,15 @@ export async function flushUsage() {
   }
 }
 
-// The exit handler cannot await, so the last write is done synchronously.
-function flushUsageSync() {
-  clearUsageFlushTimer();
+// The rows of the buffer, written synchronously.
+function flushUsageRowsSync() {
   if (!usageBuffer.items.length) return 0;
 
   const items = usageBuffer.items.splice(0, usageBuffer.items.length);
   try {
     const db = getAdapterSync();
     const inserted = writeUsageBatch(db, items.map((item) => item.entry));
+    if (rollupBuffer.days.size) scheduleUsageRollupFlush();
     for (const item of items) item.resolve(inserted);
     return items.length;
   } catch (e) {
@@ -655,8 +738,153 @@ function flushUsageSync() {
   }
 }
 
+// The exit handler cannot await, so the last write is done synchronously.
+function flushUsageSync() {
+  clearUsageFlushTimer();
+  const written = flushUsageRowsSync();
+  // The roll-up follows the rows: writing the rows is what creates the day
+  // aggregate the roll-up merges into the blob.
+  flushUsageRollupSync();
+  return written;
+}
+
+/**
+ * Write the daily roll-up.
+ *
+ * The day blob is a read-modify-write: the stored day is read, the delta that
+ * accumulated since the last flush is merged into it, and the result is
+ * written back. The delta leaves the buffer before the write, so a request
+ * that arrives meanwhile lands in the next flush — nothing is lost and
+ * nothing is counted twice.
+ *
+ * @returns {Promise<number>} how many days were written
+ */
+export async function flushUsageRollup() {
+  if (rollupBuffer.flushing) {
+    // One roll-up at a time — wait for the running one.
+    await rollupBuffer.flushing;
+  }
+
+  const run = (async () => {
+    if (!rollupBuffer.days.size) return 0;
+    const db = await getAdapter();
+    // The delta leaves the buffer now: what arrives while the write runs goes
+    // into the next flush.
+    const days = rollupBuffer.days;
+    rollupBuffer.days = new Map();
+    try {
+      db.transaction(() => {
+        for (const [dateKey, delta] of days) {
+          const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
+          const day = row ? parseJson(row.data, {}) : emptyDayAggregate();
+          mergeDayAggregate(day, delta);
+          db.run(
+            `INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`,
+            [dateKey, stringifyJson(day)],
+          );
+        }
+      });
+      return days.size;
+    } catch (e) {
+      console.error("[usageRepo] usage roll-up flush failed, retrying on the next tick:", e);
+      // The delta goes back: the roll-up is derived data, and losing it would
+      // make the numbers smaller than the rows say.
+      for (const [dateKey, delta] of days) {
+        const pending = rollupBuffer.days.get(dateKey);
+        if (pending) mergeDayAggregate(pending, delta);
+        else rollupBuffer.days.set(dateKey, delta);
+      }
+      return 0;
+    }
+  })();
+
+  rollupBuffer.flushing = run;
+  try {
+    return await run;
+  } finally {
+    if (rollupBuffer.flushing === run) rollupBuffer.flushing = null;
+    if (rollupBuffer.days.size) scheduleUsageRollupFlush();
+  }
+}
+
+// The exit handler cannot await, so the roll-up is written synchronously.
+function flushUsageRollupSync() {
+  clearUsageRollupFlushTimer();
+  if (!rollupBuffer.days.size) return 0;
+  const days = rollupBuffer.days;
+  rollupBuffer.days = new Map();
+  try {
+    const db = getAdapterSync();
+    db.transaction(() => {
+      for (const [dateKey, delta] of days) {
+        const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
+        const day = row ? parseJson(row.data, {}) : emptyDayAggregate();
+        mergeDayAggregate(day, delta);
+        db.run(
+          `INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`,
+          [dateKey, stringifyJson(day)],
+        );
+      }
+    });
+    return days.size;
+  } catch (e) {
+    console.error("[usageRepo] usage roll-up flush on shutdown failed:", e);
+    for (const [dateKey, delta] of days) {
+      const pending = rollupBuffer.days.get(dateKey);
+      if (pending) mergeDayAggregate(pending, delta);
+      else rollupBuffer.days.set(dateKey, delta);
+    }
+    return 0;
+  }
+}
+
+// Merge one day's delta into another day aggregate: the totals and the five
+// groupings add up, and the bucket metadata is last-write-wins (as it was
+// when the day was written in one go).
+function mergeDayAggregate(target, delta) {
+  target.requests = (target.requests || 0) + (delta.requests || 0);
+  target.promptTokens = (target.promptTokens || 0) + (delta.promptTokens || 0);
+  target.completionTokens = (target.completionTokens || 0) + (delta.completionTokens || 0);
+  target.cachedTokens = (target.cachedTokens || 0) + (delta.cachedTokens || 0);
+  target.cost = (target.cost || 0) + (delta.cost || 0);
+  for (const group of ["byProvider", "byModel", "byAccount", "byApiKey", "byEndpoint"]) {
+    const source = delta[group];
+    if (!source) continue;
+    if (!target[group]) target[group] = {};
+    for (const [key, counter] of Object.entries(source)) {
+      const existing = target[group][key];
+      if (!existing) {
+        target[group][key] = { ...counter };
+        continue;
+      }
+      existing.requests = (existing.requests || 0) + (counter.requests || 0);
+      existing.promptTokens = (existing.promptTokens || 0) + (counter.promptTokens || 0);
+      existing.completionTokens = (existing.completionTokens || 0) + (counter.completionTokens || 0);
+      existing.cachedTokens = (existing.cachedTokens || 0) + (counter.cachedTokens || 0);
+      existing.cost = (existing.cost || 0) + (counter.cost || 0);
+      // The metadata (model, provider, apiKey) is the same for both — it is
+      // part of the bucket key — so the existing one stays.
+    }
+  }
+}
+
+function clearUsageRollupFlushTimer() {
+  if (!rollupBuffer.timer) return;
+  clearTimeout(rollupBuffer.timer);
+  rollupBuffer.timer = null;
+}
+
+function scheduleUsageRollupFlush() {
+  if (rollupBuffer.timer) return;
+  rollupBuffer.timer = setTimeout(() => {
+    rollupBuffer.timer = null;
+    flushUsageRollup().catch((e) => console.error("[usageRepo] usage roll-up flush failed:", e));
+  }, USAGE_ROLLUP_FLUSH_INTERVAL_MS);
+  rollupBuffer.timer.unref?.();
+}
+
 // The synchronous flush is what the shutdown hooks call.
-export const __test__ = { flushUsageSync };
+export const __test__ = { flushUsageSync, flushUsageRollupSync };
 
 // The buffer must not outlive the process. The hooks are registered once:
 // the signal handlers go first, because the database adapter closes itself
@@ -664,7 +892,9 @@ export const __test__ = { flushUsageSync };
 // exit handlers cannot await, and the adapter is a synchronous driver.
 if (!global._usageFlushShutdownHook) {
   const hook = () => {
-    if (usageBuffer.items.length) flushUsageSync();
+    // The roll-up can be behind even when no row is pending: the rows are
+    // written first, the day blob at its own cadence.
+    if (usageBuffer.items.length || rollupBuffer.days.size) flushUsageSync();
   };
   global._usageFlushShutdownHook = hook;
   process.prependListener("SIGINT", hook);
@@ -724,8 +954,10 @@ export async function pruneUsageHistory(historyDays = 90, dailyDays = 400) {
   try {
     // The rows that are still in the buffer must land before the prune runs:
     // a row that is written after the delete would survive the window it was
-    // recorded in.
+    // recorded in. The same goes for the day aggregates that are not merged
+    // into the blob yet.
     await flushUsage();
+    await flushUsageRollup();
     const db = await getAdapter();
     const historyCutoff = new Date(Date.now() - historyDays * 86400000).toISOString();
     const dailyCutoff = getLocalDateKey(new Date(Date.now() - dailyDays * 86400000).toISOString());
@@ -893,7 +1125,7 @@ export async function getUsageStats(period = "all") {
   // consistent view: the flush cannot run in between.
   const pendingItems = pendingUsageSnapshot();
   const pendingRows = pendingRowsFrom(pendingItems);
-  const pendingDays = pendingDaysFrom(pendingItems);
+  const pendingDays = pendingDaysForReaders(pendingItems);
 
   // recentRequests from live history (last 100 entries enough for 20 deduped)
   const recentRows = [
@@ -1200,7 +1432,7 @@ export async function getChartData(period = "7d") {
 
   if (period === "all") {
     const dayRows = loadDaysInRange(db, null);
-    const pendingDays = pendingDaysFrom(pendingUsageSnapshot());
+    const pendingDays = pendingDaysForReaders(pendingUsageSnapshot());
     if (!dayRows.length && !pendingDays.size) return [];
     const dayMap = {};
     for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
@@ -1233,7 +1465,7 @@ export async function getChartData(period = "7d") {
   const dayRows = loadDaysInRange(db, bucketCount);
   const dayMap = {};
   for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
-  mergePendingDays(dayMap, pendingDaysFrom(pendingUsageSnapshot()));
+  mergePendingDays(dayMap, pendingDaysForReaders(pendingUsageSnapshot()));
 
   return Array.from({ length: bucketCount }, (_, i) => {
     const d = new Date(today);
