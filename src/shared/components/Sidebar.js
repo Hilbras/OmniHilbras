@@ -374,6 +374,18 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
           </div>
         </nav>
 
+        {/* Who you are working with: the gateway runs on this machine. */}
+        <div className={`border-t border-line/70 ${collapsed ? "p-3" : "p-4"}`}>
+          <div className={`flex items-center ${collapsed ? "justify-center" : "gap-2.5"}`} title={collapsed ? "Local workspace · no account required" : undefined}>
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-gold/30 bg-gold-soft text-[10px] font-bold text-gold-text">OH</span>
+            {!collapsed && (
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold">Local workspace</p>
+                <p className="muted truncate text-[10px]">No account required</p>
+              </div>
+            )}
+          </div>
+        </div>
       </aside>
 
 
