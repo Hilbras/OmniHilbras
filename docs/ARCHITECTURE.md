@@ -531,6 +531,16 @@ Runtime visibility sources:
 - The request log and the MITM dumps mask the credential headers; the provider list reduces `providerSpecificData` to an allow-list of safe fields
 - Cloud sync endpoints rely on API key auth + machine id semantics
 
+### Known advisories that are not reachable here
+
+`npm audit` reports two in the app's dependencies that have no fix upstream.
+Both were checked against the code, and neither has a path from a request:
+
+- **`node-forge` (high, no fix)** — the advisory is in RSA signature *verification*. The MITM root CA only *signs* the certificates it issues (`src/mitm/cert/rootCA.js`); `key.verify()` is called nowhere in the repository.
+- **`braces` / `micromatch` (high, no fixed version)** — a stack-exhaustion denial of service through deeply nested glob patterns. The patterns come from the operator's own proxy configuration (`http-proxy-middleware`), never from a request.
+
+The `dompurify` advisories behind `monaco-editor` are fixed in the dependency tree (`overrides`), but the browser runs the copy the CDN serves, not the one in `node_modules` — the translator page pins that version explicitly and records the residual risk in the code.
+
 ## Environment and Runtime Matrix
 
 Environment variables actively used by code:

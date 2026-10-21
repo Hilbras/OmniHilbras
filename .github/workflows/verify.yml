@@ -1,0 +1,88 @@
+name: Verify
+
+# Everything that must hold before a change lands on main: the lint, the test
+# suite, the build, and the shape of the package that is published to npm.
+#
+# Until now nothing ran on a push — the Docker image was built from a tag and
+# the npm package was published by hand, so a regression could sit on main
+# until the next release.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: ESLint
+        run: npx eslint .
+
+  test:
+    name: Test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Install the test dependencies
+        run: npm install --no-audit --no-fund --prefix tests
+      - name: Run the suite
+        run: npm test --prefix tests
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Build
+        run: npm run build
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Install the CLI dependencies
+        run: npm install --no-audit --no-fund --prefix cli
+      - name: Build the CLI package
+        run: npm run build --prefix cli
+      - name: The package must carry no data directory and stay within its budget
+        # The tarball is published to npm: a database inside it would hand every
+        # provider credential to whoever downloads it.
+        run: node cli/scripts/check-package-contents.mjs
+      - name: The CLI package must not depend on anything with a known advisory
+        run: npm audit --omit=dev --prefix cli

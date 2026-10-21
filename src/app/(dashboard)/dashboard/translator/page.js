@@ -7,6 +7,21 @@ import dynamic from "next/dynamic";
 
 const Editor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
+// The editor is loaded from the CDN, and the version is pinned here rather
+// than left to the loader's default: an upgrade of @monaco-editor/loader must
+// not be able to move the editor — and the DOMPurify it embeds — silently to
+// another version.
+//
+// The npm package is not what the browser runs: the loader pulls the bundle
+// from jsDelivr. The residual risk is that no Monaco release with a clean
+// DOMPurify exists yet (0.57.0 still ships DOMPurify 3.4.15, inside the
+// advisory range), so the CDN bundle is what runs in the browser. The page
+// renders provider payloads as code, never as HTML, and it is behind the
+// dashboard login — but it is a third party on the dashboard's origin. The
+// npm `dompurify` override takes over the moment the editor is bundled
+// locally instead.
+const MONACO_VS_CDN = "https://cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs";
+
 // 7 steps matching requestLogger files exactly
 const STEPS = [
   { id: 1, label: "Client Request",         file: "1_req_client.json",  lang: "json", desc: "Raw request from client" },
@@ -270,6 +285,7 @@ export default function TranslatorPage() {
                       }}
                       theme="vs-dark"
                       options={EDITOR_OPTIONS}
+                      loaderConfig={{ paths: { vs: MONACO_VS_CDN } }}
                     />
                   </div>
                   <div className="flex gap-2 flex-wrap">
