@@ -7,12 +7,26 @@ const CACHE_TTL_MS = 5000;
 
 let cache = { value: null, expiresAt: 0 };
 
+// The user pricing rows, cached on their own.
+//
+// getPricingForModel() runs on every completed request (to price it) and used
+// to read the whole `pricing` scope and JSON-parse every row, every time —
+// while the merged cache right above it already existed for exactly this. The
+// rows only change when the user edits a price, and every write path calls
+// invalidate() below.
+let userPricingCache = { value: null, expiresAt: 0 };
+
 function invalidate() {
   cache = { value: null, expiresAt: 0 };
+  userPricingCache = { value: null, expiresAt: 0 };
 }
 
 async function getUserPricing() {
-  return await pricingKv.getAll();
+  const now = Date.now();
+  if (userPricingCache.value && userPricingCache.expiresAt > now) return userPricingCache.value;
+  const value = await pricingKv.getAll();
+  userPricingCache = { value, expiresAt: now + CACHE_TTL_MS };
+  return value;
 }
 
 export async function getPricing() {

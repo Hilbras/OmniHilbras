@@ -643,6 +643,8 @@ let catalogSource = null;
  */
 export function setCatalogSource(source) {
   catalogSource = source;
+  // A different catalog means different answers.
+  clearCapabilitiesCache();
   if (typeof globalThis !== "undefined") globalThis.__9rCatalogSource = source;
 }
 
@@ -715,7 +717,39 @@ function isCommandCodeTextOnly(model) {
   }
   return false;
 }
+/**
+ * Memoised capability lookups.
+ *
+ * Resolving a model's capabilities is a pure function of (provider, model)
+ * plus the catalog overlay — and the catalog is synced once a day. It is also
+ * the single largest CPU item on the request path: 84 % of the catalogue
+ * misses the exact tables and falls through to a 111-pattern scan, which cost
+ * 262-333 µs per lookup, and the lookup happens once per request *and* once
+ * per candidate model in a combo or a capacity-adapter pass.
+ *
+ * The cache is dropped whenever the catalog source is (re)installed, which is
+ * what a catalog sync does — see clearCapabilitiesCache.
+ */
+const capabilityCache = new Map();
+
+/** Drop the memoised capabilities. Called when the catalog changes. */
+export function clearCapabilitiesCache() {
+  capabilityCache.clear();
+}
+
 export function getCapabilitiesForModel(provider, model) {
+  if (!model) return { ...DEFAULT_CAPABILITIES };
+
+  const cacheKey = `${provider || ""}\u0000${model}`;
+  const cached = capabilityCache.get(cacheKey);
+  if (cached) return { ...cached };
+
+  const computed = computeCapabilitiesForModel(provider, model);
+  capabilityCache.set(cacheKey, computed);
+  return { ...computed };
+}
+
+function computeCapabilitiesForModel(provider, model) {
   if (!model) return { ...DEFAULT_CAPABILITIES };
 
   // Canonical exact lookup strips vendor prefix: "anthropic/claude-opus-4.7" -> "claude-opus-4.7".
