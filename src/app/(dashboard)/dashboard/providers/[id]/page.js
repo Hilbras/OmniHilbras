@@ -6,8 +6,8 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, TokenHarborAuthModal, WebSessionConnectModal, ProviderMiniChat, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
-import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, WEB_COOKIE_SESSION_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS, getModelsFetcher } from "@/shared/constants/providers";
+import { Card, Button, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, TokenHarborAuthModal, WebSessionConnectModal, ProviderMiniChat, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, WEB_COOKIE_SESSION_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, getModelsFetcher } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { useNotificationStore } from "@/store/notificationStore";
@@ -17,6 +17,7 @@ import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import ModelRow from "./ModelRow";
+import { modelIdFromTestModel } from "./modelTestResults";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
 import ConnectionRow from "./ConnectionRow";
@@ -98,7 +99,6 @@ export default function ProviderDetailPage() {
   const [testAllProgress, setTestAllProgress] = useState(null);
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
   const [selectedConnectionIds, setSelectedConnectionIds] = useState([]);
-  const [bulkProxyPoolId, setBulkProxyPoolId] = useState("__none__");
   const [bulkUpdatingProxy, setBulkUpdatingProxy] = useState(false);
   const [providerStrategy, setProviderStrategy] = useState(null);
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
@@ -1088,11 +1088,6 @@ export default function ProviderDetailPage() {
     setSelectedConnectionIds(connections.map((conn) => conn.id));
   };
 
-  const clearSelection = () => {
-    setSelectedConnectionIds([]);
-    setBulkProxyPoolId("__none__");
-  };
-
   useEffect(() => {
     setSelectedConnectionIds((prev) => prev.filter((id) => connections.some((conn) => conn.id === id)));
   }, [connections]);
@@ -1109,10 +1104,10 @@ export default function ProviderDetailPage() {
     return "Selected connections have mixed proxy bindings";
   })();
 
+  // The bulk proxy acts on the ticked connections only — the selection is
+  // what the user asked for, so the modal must not widen it.
   const openBulkProxyModal = () => {
     if (selectedConnections.length === 0) return;
-    const uniquePoolIds = [...new Set(selectedConnections.map((conn) => conn.providerSpecificData?.proxyPoolId || "__none__"))];
-    setBulkProxyPoolId(uniquePoolIds.length === 1 ? uniquePoolIds[0] : "__none__");
     setShowBulkProxyModal(true);
   };
 
@@ -1147,7 +1142,7 @@ export default function ProviderDetailPage() {
   };
 
   const handleApplySinglePool = (proxyPoolId) => {
-    const targets = connections.map((c) => ({ connectionId: c.id, proxyPoolId }));
+    const targets = selectedConnections.map((c) => ({ connectionId: c.id, proxyPoolId }));
     return applyProxyAssignments(targets);
   };
 
@@ -1157,7 +1152,7 @@ export default function ProviderDetailPage() {
       alert("No active proxy pools available.");
       return;
     }
-    const targets = connections.map((c, i) => ({
+    const targets = selectedConnections.map((c, i) => ({
       connectionId: c.id,
       proxyPoolId: activePools[i % activePools.length].id,
     }));
@@ -1235,7 +1230,7 @@ export default function ProviderDetailPage() {
     <Modal
       isOpen={showBulkProxyModal}
       onClose={closeBulkProxyModal}
-      title={`Apply Proxy (${connections.length} connections)`}
+      title={`Apply Proxy (${selectedConnections.length} selected)`}
     >
       <div className="flex flex-col gap-3">
         <div className="flex flex-col">
@@ -1352,7 +1347,7 @@ export default function ProviderDetailPage() {
             summary = payload.summary;
             continue;
           }
-          const modelId = String(payload.model || "").split("/").pop();
+          const modelId = modelIdFromTestModel(payload.model, providerStorageAlias);
           if (!modelId) continue;
           setModelTestResults((prev) => ({ ...prev, [modelId]: payload.ok ? "ok" : "error" }));
           setTestAllProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
@@ -1434,31 +1429,39 @@ export default function ProviderDetailPage() {
           </div>
         )}
         {/* Custom models first */}
-        {customModelRows.map((model) => (
-          <ModelRow
-            key={`${model.source}-${model.fullModel}`}
-            model={{ id: model.id, name: model.name }}
-            fullModel={`${providerDisplayAlias}/${model.id}`}
-            alias={model.alias}
-            copied={copied}
-            onCopy={copy}
-            onSetAlias={() => {}}
-            onDeleteAlias={() => {
-              if (model.source === "custom") {
-                handleDeleteCustomModel(model.id, "llm", providerStorageAlias);
-              } else {
-                handleDeleteAlias(model.alias);
-              }
-            }}
-            testStatus={modelTestResults[model.id]}
-            onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
-            isTesting={testingModelIds.has(model.id)}
-            isCustom={model.origin !== "fetch"}
-            isFree={false}
-            caps={getCaps(`${providerId}/${model.id}`)}
-            thinkingSuffix={resolveThinkingSuffix(model.id)}
-          />
-        ))}
+        {customModelRows.map((model) => {
+          // A custom model can carry an alias too — the alias map is keyed by
+          // alias, so the badge comes from there, not from the row.
+          const rowAlias = model.alias || Object.entries(modelAliases).find(
+            ([, m]) => m === `${providerStorageAlias}/${model.id}`,
+          )?.[0];
+          return (
+            <ModelRow
+              key={`${model.source}-${model.fullModel}`}
+              model={{ id: model.id, name: model.name }}
+              fullModel={`${providerDisplayAlias}/${model.id}`}
+              alias={rowAlias}
+              copied={copied}
+              onCopy={copy}
+              onSetAlias={(alias) => handleSetAlias(model.id, alias, providerStorageAlias)}
+              onClearAlias={rowAlias ? () => handleDeleteAlias(rowAlias) : undefined}
+              onDeleteAlias={() => {
+                if (model.source === "custom") {
+                  handleDeleteCustomModel(model.id, "llm", providerStorageAlias);
+                } else {
+                  handleDeleteAlias(rowAlias);
+                }
+              }}
+              testStatus={modelTestResults[model.id]}
+              onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
+              isTesting={testingModelIds.has(model.id)}
+              isCustom={model.origin !== "fetch"}
+              isFree={false}
+              caps={getCaps(`${providerId}/${model.id}`)}
+              thinkingSuffix={resolveThinkingSuffix(model.id)}
+            />
+          );
+        })}
 
         {displayModels.map((model) => {
           const fullModel = `${providerStorageAlias}/${model.id}`;
@@ -1475,6 +1478,7 @@ export default function ProviderDetailPage() {
               copied={copied}
               onCopy={copy}
               onSetAlias={(alias) => handleSetAlias(model.id, alias, providerStorageAlias)}
+              onClearAlias={existingAlias ? () => handleDeleteAlias(existingAlias) : undefined}
               onDeleteAlias={() => handleDeleteAlias(existingAlias)}
               testStatus={modelTestResults[model.id]}
               onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
@@ -1574,6 +1578,24 @@ export default function ProviderDetailPage() {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Passthrough providers accept any model id — the panel adds one
+            and lists what the provider is currently serving. */}
+        {providerInfo.passthroughModels && (
+          <div className="w-full mt-4 border-t border-line pt-4">
+            <PassthroughModelsSection
+              providerAlias={providerStorageAlias}
+              modelAliases={modelAliases}
+              customModels={customModels}
+              copied={copied}
+              onCopy={copy}
+              onSetAlias={(modelId, alias) => handleSetAlias(modelId, alias, providerStorageAlias)}
+              onDeleteAlias={handleDeleteAlias}
+              onAddCustomModel={(modelId) => handleAddCustomModel(modelId, "llm", providerStorageAlias)}
+              onDeleteCustomModel={(modelId) => handleDeleteCustomModel(modelId, "llm", providerStorageAlias)}
+            />
           </div>
         )}
       </div>
@@ -1803,7 +1825,12 @@ export default function ProviderDetailPage() {
                   size="sm"
                   variant="secondary"
                   icon="lan"
-                  onClick={() => setShowBulkProxyModal(true)}
+                  onClick={openBulkProxyModal}
+                  disabled={selectedConnectionIds.length === 0}
+                  title={
+                    selectedProxySummary ||
+                    "Tick the connections the proxy pool should apply to"
+                  }
                 >
                   Apply Proxy
                 </Button>
@@ -2272,6 +2299,9 @@ export default function ProviderDetailPage() {
         />
       )}
       <AddApiKeyModal
+        // The modal is mounted for the whole page, so a provider change must
+        // remount it — otherwise the previous provider's key stays in the form.
+        key={providerId}
         isOpen={showAddApiKeyModal}
         provider={providerId}
         providerName={providerInfo.name}
@@ -2310,7 +2340,6 @@ export default function ProviderDetailPage() {
         <AddCustomModelModal
           isOpen={showAddCustomModel}
           providerAlias={providerStorageAlias}
-          providerDisplayAlias={providerDisplayAlias}
           onSave={async (modelId, caps, transport) => {
             // caps.stt is a UI-only flag; the API accepts transports only on
             // type "stt" records, so the save derives the type from it.

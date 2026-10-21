@@ -198,10 +198,15 @@ export default function TokenSaverClient() {
   }, [refreshHeadroomStatus]);
 
   const handleHeadroomStop = useCallback(async () => {
+    setHeadroomActionError("");
     setHeadroomActionLoading(true);
     try {
-      await fetch("/api/headroom/stop", { method: "POST" });
+      const res = await fetch("/api/headroom/stop", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to stop proxy");
       await refreshHeadroomStatus();
+    } catch (e) {
+      setHeadroomActionError(e.message);
     } finally {
       setHeadroomActionLoading(false);
     }

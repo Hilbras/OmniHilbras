@@ -16,6 +16,8 @@ export default function RequestLogger() {
     let interval;
     if (autoRefresh) {
       interval = setInterval(() => {
+        // A hidden tab must not keep hitting the server every 3 seconds.
+        if (typeof document !== "undefined" && document.hidden) return;
         fetchLogs(false);
       }, 3000);
     }

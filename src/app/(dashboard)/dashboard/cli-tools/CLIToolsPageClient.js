@@ -8,7 +8,7 @@ import ToolSummaryCard from "./components/ToolSummaryCard";
 
 const ALL_STATUSES_URL = "/api/cli-tools/all-statuses";
 
-export default function CLIToolsPageClient({ machineId }) {
+export default function CLIToolsPageClient() {
   const [loading, setLoading] = useState(true);
   const [toolStatuses, setToolStatuses] = useState({});
 

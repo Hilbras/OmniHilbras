@@ -7,6 +7,7 @@ import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
 import { cn } from "@/shared/utils/cn";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
+import { resetPageForFilterChange, hasRawPayload } from "./requestDetails";
 
 let providerNameCache = null;
 let providerNodesCache = null;
@@ -108,6 +109,7 @@ export default function RequestDetailsTab() {
     totalPages: 0
   });
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [providers, setProviders] = useState([]);
@@ -143,12 +145,19 @@ export default function RequestDetailsTab() {
       if (filters.endDate) params.append("endDate", filters.endDate);
 
       const res = await fetch(`/api/usage/request-details?${params}`);
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
+      }
       const data = await res.json();
 
       setDetails(data.details || []);
       setPagination(prev => ({ ...prev, ...data.pagination }));
+      setLoadError(null);
     } catch (error) {
       console.error("Failed to fetch request details:", error);
+      setLoadError(error.message || "Failed to fetch request details");
+      setDetails([]);
     } finally {
       setLoading(false);
     }
@@ -175,8 +184,15 @@ export default function RequestDetailsTab() {
     setPagination(prev => ({ ...prev, pageSize: newPageSize, page: 1 }));
   };
 
+  // A filter change invalidates the current page: the rows that match the
+  // narrowed filter sit on page 1, so the table must not stay on page 3.
+  const handleFilterChange = (patch) => {
+    setFilters((prev) => ({ ...prev, ...patch }));
+    setPagination((prev) => resetPageForFilterChange(prev));
+  };
+
   const handleClearFilters = () => {
-    setFilters({ provider: "", startDate: "", endDate: "" });
+    handleFilterChange({ provider: "", startDate: "", endDate: "" });
   };
 
   return (
@@ -188,7 +204,7 @@ export default function RequestDetailsTab() {
             <select
               id="provider-filter"
               value={filters.provider}
-              onChange={(e) => setFilters({ ...filters, provider: e.target.value })}
+              onChange={(e) => handleFilterChange({ provider: e.target.value })}
               className={cn(
                 "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
                 "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
@@ -211,7 +227,7 @@ export default function RequestDetailsTab() {
               id="start-date-filter"
               type="datetime-local"
               value={filters.startDate}
-              onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
+              onChange={(e) => handleFilterChange({ startDate: e.target.value })}
               className={cn(
                 "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
                 "w-full min-w-0 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -225,7 +241,7 @@ export default function RequestDetailsTab() {
               id="end-date-filter"
               type="datetime-local"
               value={filters.endDate}
-              onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
+              onChange={(e) => handleFilterChange({ endDate: e.target.value })}
               className={cn(
                 "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
                 "w-full min-w-0 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -266,16 +282,22 @@ export default function RequestDetailsTab() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
+                  <td colSpan="9" className="p-8 text-center text-text-muted">
                     <div className="flex items-center justify-center gap-2">
                       <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
                       Loading...
                     </div>
                   </td>
                 </tr>
+              ) : loadError ? (
+                <tr>
+                  <td colSpan="9" className="p-8 text-center text-red-500">
+                    Could not load request details: {loadError}
+                  </td>
+                </tr>
               ) : details.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
+                  <td colSpan="9" className="p-8 text-center text-text-muted">
                     No request details found
                   </td>
                 </tr>
@@ -330,7 +352,7 @@ export default function RequestDetailsTab() {
           </table>
         </div>
 
-        {!loading && details.length > 0 && (
+        {!loading && !loadError && details.length > 0 && (
           <div className="border-t border-black/5 dark:border-white/5">
             <Pagination
               currentPage={pagination.page}
@@ -456,13 +478,15 @@ export default function RequestDetailsTab() {
             )}
 
             <div className="space-y-4">
-              <CollapsibleSection title="1. Client Request (Input)" defaultOpen={true} icon="input">
-                <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                  {JSON.stringify(selectedDetail.request, null, 2)}
-                </pre>
-              </CollapsibleSection>
+              {hasRawPayload(selectedDetail.request) && (
+                <CollapsibleSection title="1. Client Request (Input)" defaultOpen={true} icon="input">
+                  <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                    {JSON.stringify(selectedDetail.request, null, 2)}
+                  </pre>
+                </CollapsibleSection>
+              )}
 
-              {selectedDetail.providerRequest && (
+              {hasRawPayload(selectedDetail.providerRequest) && (
                 <CollapsibleSection title="2. Provider Request (Translated)" icon="translate">
                   <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
                     {JSON.stringify(selectedDetail.providerRequest, null, 2)}
@@ -470,7 +494,7 @@ export default function RequestDetailsTab() {
                 </CollapsibleSection>
               )}
 
-              {selectedDetail.providerResponse && (
+              {hasRawPayload(selectedDetail.providerResponse) && (
                 <CollapsibleSection title="3. Provider Response (Raw)" icon="data_object">
                   <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
                     {typeof selectedDetail.providerResponse === 'object'
@@ -480,27 +504,46 @@ export default function RequestDetailsTab() {
                   </pre>
                 </CollapsibleSection>
               )}
-              
-              <CollapsibleSection title="4. Client Response (Final)" defaultOpen={true} icon="output">
-                {selectedDetail.response?.thinking && (
-                  <div className="mb-4">
-                    <h4 className="font-semibold text-text-main mb-2 flex items-center gap-2 text-xs uppercase tracking-wide opacity-70">
-                      <span className="material-symbols-outlined text-[16px]">psychology</span>
-                      Thinking Process
-                    </h4>
-                    <pre className="max-h-[200px] max-w-full overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:p-4">
-                      {selectedDetail.response.thinking}
-                    </pre>
+
+              {hasRawPayload(selectedDetail.response) && (
+                <CollapsibleSection title="4. Client Response (Final)" defaultOpen={true} icon="output">
+                  {selectedDetail.response?.thinking && (
+                    <div className="mb-4">
+                      <h4 className="font-semibold text-text-main mb-2 flex items-center gap-2 text-xs uppercase tracking-wide opacity-70">
+                        <span className="material-symbols-outlined text-[16px]">psychology</span>
+                        Thinking Process
+                      </h4>
+                      <pre className="max-h-[200px] max-w-full overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:p-4">
+                        {selectedDetail.response.thinking}
+                      </pre>
+                    </div>
+                  )}
+
+                  <h4 className="font-semibold text-text-main mb-2 text-xs uppercase tracking-wide opacity-70">
+                    Content
+                  </h4>
+                  <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                    {selectedDetail.response?.content || "[No content]"}
+                  </pre>
+                </CollapsibleSection>
+              )}
+
+              {!hasRawPayload(selectedDetail.request) &&
+                !hasRawPayload(selectedDetail.providerRequest) &&
+                !hasRawPayload(selectedDetail.providerResponse) &&
+                !hasRawPayload(selectedDetail.response) && (
+                <div className="rounded-lg border border-black/5 dark:border-white/5 p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px] text-text-muted">lock</span>
+                    <span className="font-semibold text-sm text-text-main">Payloads redacted</span>
                   </div>
-                )}
-                
-                <h4 className="font-semibold text-text-main mb-2 text-xs uppercase tracking-wide opacity-70">
-                  Content
-                </h4>
-                <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                  {selectedDetail.response?.content || "[No content]"}
-                </pre>
-              </CollapsibleSection>
+                  <p className="mt-1 text-sm text-text-muted">
+                    The request and response bodies are stored but never handed to
+                    the dashboard. This record only carries its metadata — model,
+                    tokens, latency and status.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}

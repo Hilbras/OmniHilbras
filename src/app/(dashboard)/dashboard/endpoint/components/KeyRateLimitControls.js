@@ -13,6 +13,15 @@ import PropTypes from "prop-types";
 import { Input, Button } from "@/shared/components";
 import useSettingsStore from "@/store/settingsStore";
 
+// The gateway reads an empty override as "inherit the global ceiling" and a 0
+// as "no limit for this key" — the two must not be confused, so the number
+// that is really in force is resolved the same way here.
+function effectiveLimit(value, globalValue) {
+  if (value === "" || value === null || value === undefined) return globalValue ?? 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export default function KeyRateLimitControls({ apiKey }) {
   const settings = useSettingsStore((state) => state.settings);
   const rateLimit = settings?.rateLimit || {};
@@ -21,7 +30,7 @@ export default function KeyRateLimitControls({ apiKey }) {
   const [open, setOpen] = useState(false);
 
   const label = override
-    ? `Rate limit: ${override.requestsPerMinute}/min, ${override.tokensPerMinute} tokens/min`
+    ? `Rate limit: ${effectiveLimit(override.requestsPerMinute, rateLimit.requestsPerMinute)}/min, ${effectiveLimit(override.tokensPerMinute, rateLimit.tokensPerMinute)} tokens/min`
     : "Rate limit: global";
 
   return (
@@ -59,6 +68,8 @@ function KeyRateLimitUsage({ apiKeyId }) {
     let cancelled = false;
 
     const load = async () => {
+      // A hidden tab must not keep hitting the server every 15 seconds.
+      if (document.hidden) return;
       try {
         const res = await fetch("/api/usage/rate-limit", { cache: "no-store" });
         if (!res.ok) return;
@@ -71,11 +82,16 @@ function KeyRateLimitUsage({ apiKeyId }) {
       }
     };
 
+    // The read-out catches up as soon as the tab is looked at again.
+    const onVisible = () => { if (!document.hidden) load(); };
+    document.addEventListener("visibilitychange", onVisible);
+
     load();
     const timer = setInterval(load, 15_000);
     return () => {
       cancelled = true;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [apiKeyId]);
 
@@ -107,11 +123,21 @@ function KeyRateLimitForm({ apiKey }) {
     String(override?.tokensPerMinute ?? rateLimit.tokensPerMinute ?? ""),
   );
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const writeOverrides = async (nextOverrides) => {
     setSaving(true);
+    setSaveError("");
     try {
-      await patchSettings({ rateLimit: { ...rateLimit, keyOverrides: nextOverrides } });
+      // The store returns null when the server refused the change: the
+      // override would then not be in force, and the input would still show the
+      // new number. Say so instead of letting the change disappear.
+      const saved = await patchSettings({ rateLimit: { ...rateLimit, keyOverrides: nextOverrides } });
+      if (!saved) {
+        setSaveError(
+          useSettingsStore.getState().error || "The limit was not saved — the server refused the change.",
+        );
+      }
     } finally {
       setSaving(false);
     }
@@ -120,8 +146,10 @@ function KeyRateLimitForm({ apiKey }) {
   const save = () => {
     const nextOverrides = { ...(rateLimit.keyOverrides || {}) };
     nextOverrides[apiKey.id] = {
-      requestsPerMinute: Number(requestsPerMinute) || 0,
-      tokensPerMinute: Number(tokensPerMinute) || 0,
+      // An empty field means "inherit the global ceiling", which is what the
+      // gateway does with an empty override. 0 stays "unlimited for this key".
+      requestsPerMinute: requestsPerMinute.trim() === "" ? "" : (Number(requestsPerMinute) || 0),
+      tokensPerMinute: tokensPerMinute.trim() === "" ? "" : (Number(tokensPerMinute) || 0),
     };
     writeOverrides(nextOverrides);
   };
@@ -155,6 +183,11 @@ function KeyRateLimitForm({ apiKey }) {
       <p className="text-xs text-text-muted">
         0 means unlimited for this key. Leave empty to use the global ceiling.
       </p>
+      {saveError && (
+        <p className="text-xs text-red-500" data-testid="key-rate-limit-error">
+          {saveError}
+        </p>
+      )}
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={save} disabled={saving}>
           Save

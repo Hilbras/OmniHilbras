@@ -37,13 +37,12 @@ export default function ClaudeToolCard({
   hasActiveProviders,
   apiKeys,
   cloudEnabled,
-  initialStatus,
   tunnelEnabled,
   tunnelPublicUrl,
   tailscaleEnabled,
   tailscaleUrl,
 }) {
-  const [claudeStatus, setClaudeStatus] = useState(initialStatus || null);
+  const [claudeStatus, setClaudeStatus] = useState(null);
   const [checkingClaude, setCheckingClaude] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -96,13 +95,6 @@ export default function ClaudeToolCard({
       setSelectedApiKey(apiKeys[0].key);
     }
   }, [apiKeys, selectedApiKey]);
-
-  useEffect(() => {
-    if (initialStatus) {
-      setClaudeStatus(initialStatus);
-      setExaMcpEnabled(!!initialStatus.exaMcpEnabled);
-    }
-  }, [initialStatus]);
 
   useEffect(() => {
     const v = claudeStatus?.settings?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW;

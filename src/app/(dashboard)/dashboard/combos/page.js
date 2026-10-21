@@ -55,6 +55,7 @@ const STRATEGY_OPTIONS = [
 export default function CombosPage() {
   const [combos, setCombos] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingCombo, setEditingCombo] = useState(null);
   const [activeProviders, setActiveProviders] = useState([]);
@@ -165,7 +166,13 @@ export default function CombosPage() {
       const settingsData = settingsRes.ok ? await settingsRes.json() : {};
 
       // Only LLM combos here - webSearch/webFetch combos belong to media-providers/web
-      if (combosRes.ok) setCombos((combosData.combos || []).filter(c => !c.kind || c.kind === "llm"));
+      if (combosRes.ok) {
+        setCombos((combosData.combos || []).filter(c => !c.kind || c.kind === "llm"));
+        setLoadError("");
+      } else {
+        // Without this the page would render "No combos yet" for a server failure.
+        setLoadError(combosData.error || "Could not load the combos.");
+      }
       if (providersRes.ok) {
         setActiveProviders((providersData.connections || []).filter((c) => c.isActive !== false));
       }
@@ -178,21 +185,31 @@ export default function CombosPage() {
       setCapacityAdapter(normalized);
     } catch (error) {
       console.log("Error fetching data:", error);
+      setLoadError("Could not load the combos.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleSetCapacityAdapter = async (next) => {
+    const previous = capacityAdapter;
     setCapacityAdapter(next);
     try {
-      await fetch("/api/settings", {
+      const res = await fetch("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ capacityAdapter: next }),
       });
+      if (!res.ok) {
+        // The server kept the old pools, so the UI must show them again.
+        const data = await res.json().catch(() => ({}));
+        setCapacityAdapter(previous);
+        alert(data.error || "Failed to save the capacity adapter.");
+      }
     } catch (error) {
       console.log("Error updating capacity adapter:", error);
+      setCapacityAdapter(previous);
+      alert("Failed to save the capacity adapter.");
     }
   };
 
@@ -241,12 +258,30 @@ export default function CombosPage() {
   };
 
   const persistComboStrategies = async (updated) => {
-    await fetch("/api/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ comboStrategies: updated }),
-    });
-    setComboStrategies(updated);
+    // The dropdown must not show a strategy the server refused, so the local
+    // state only moves when the write succeeded.
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comboStrategies: updated }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        // Read the settings back, so the dropdown shows what the server kept
+        // instead of the value it refused.
+        await fetchData();
+        alert(data.error || "Failed to save the strategy.");
+        return false;
+      }
+      setComboStrategies(updated);
+      return true;
+    } catch (error) {
+      console.log("Error saving combo strategies:", error);
+      await fetchData();
+      alert("Failed to save the strategy.");
+      return false;
+    }
   };
 
   const handleDelete = async (id) => {
@@ -413,14 +448,16 @@ export default function CombosPage() {
       {combos.length === 0 ? (
         <Card>
           <div className="text-center py-12">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 text-primary mb-4">
-              <span className="material-symbols-outlined text-[32px]">layers</span>
+            <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full mb-4 ${loadError ? "bg-red-500/10 text-red-500" : "bg-primary/10 text-primary"}`}>
+              <span className="material-symbols-outlined text-[32px]">{loadError ? "error" : "layers"}</span>
             </div>
-            <p className="text-text-main font-medium mb-1">No combos yet</p>
-            <p className="text-sm text-text-muted mb-4">Create model combos with fallback support</p>
-            <Button icon="add" onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto">
-              Create Combo
-            </Button>
+            <p className="text-text-main font-medium mb-1">{loadError ? "Could not load the combos" : "No combos yet"}</p>
+            <p className="text-sm text-text-muted mb-4">{loadError || "Create model combos with fallback support"}</p>
+            {!loadError && (
+              <Button icon="add" onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto">
+                Create Combo
+              </Button>
+            )}
           </div>
         </Card>
       ) : (
@@ -708,7 +745,7 @@ function CapacityAdapterSection({ capacityAdapter, onChange, activeProviders, ge
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <p className="text-sm font-medium">Vision Adapter</p>
+          <p className="text-sm font-medium">Vision &amp; Audio Adapter</p>
           <p className="text-xs text-text-muted mt-0.5">
             Your model can&apos;t read image/audio? Auto-switches to a model in the pool below.
           </p>
@@ -1006,30 +1043,35 @@ function ModelItem({ id, index, model, isFirst, isLast, onEdit, onMoveUp, onMove
   );
 }
 
-function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null }) {
+// Every model row carries its own id. A row keeps that id when the list is
+// reordered, so editing a row always writes the model that is in it — an
+// index-keyed row writes the model that used to be in that slot.
+let modelUidCounter = 0;
+const nextModelUid = () => `combo-model-${(modelUidCounter += 1)}`;
+
+function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders }) {
   // Initialize state with combo values - key prop on parent handles reset on remount
   const [name, setName] = useState(combo?.name || "");
-  const [models, setModels] = useState(combo?.models || []);
+  const [rows, setRows] = useState(() => (combo?.models || []).map((model) => ({ uid: nextModelUid(), model })));
   const [showModelSelect, setShowModelSelect] = useState(false);
   const [saving, setSaving] = useState(false);
   const [nameError, setNameError] = useState("");
   const [modelAliases, setModelAliases] = useState({});
+
+  const models = rows.map((row) => row.model);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Use stable index-based IDs so duplicates and similar names are handled correctly
-  const modelItems = models.map((model, i) => ({ uid: `item-${i}`, model }));
-
   const handleDragEnd = (event) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
-      const oldIndex = modelItems.findIndex((m) => m.uid === active.id);
-      const newIndex = modelItems.findIndex((m) => m.uid === over.id);
+      const oldIndex = rows.findIndex((row) => row.uid === active.id);
+      const newIndex = rows.findIndex((row) => row.uid === over.id);
       if (oldIndex !== -1 && newIndex !== -1) {
-        setModels((prev) => arrayMove(prev, oldIndex, newIndex));
+        setRows((prev) => arrayMove(prev, oldIndex, newIndex));
       }
     }
   };
@@ -1070,31 +1112,37 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
   };
 
   const handleAddModel = (model) => {
-    if (!models.includes(model.value)) {
-      setModels([...models, model.value]);
-    }
+    setRows((prev) => (
+      prev.some((row) => row.model === model.value)
+        ? prev
+        : [...prev, { uid: nextModelUid(), model: model.value }]
+    ));
   };
 
   const handleDeselectModel = (model) => {
-    setModels(models.filter((m) => m !== model.value));
+    setRows((prev) => prev.filter((row) => row.model !== model.value));
   };
 
   const handleRemoveModel = (index) => {
-    setModels(models.filter((_, i) => i !== index));
+    setRows((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleMoveUp = (index) => {
-    if (index === 0) return;
-    const newModels = [...models];
-    [newModels[index - 1], newModels[index]] = [newModels[index], newModels[index - 1]];
-    setModels(newModels);
+    setRows((prev) => {
+      if (index === 0) return prev;
+      const next = [...prev];
+      [next[index - 1], next[index]] = [next[index], next[index - 1]];
+      return next;
+    });
   };
 
   const handleMoveDown = (index) => {
-    if (index === models.length - 1) return;
-    const newModels = [...models];
-    [newModels[index], newModels[index + 1]] = [newModels[index + 1], newModels[index]];
-    setModels(newModels);
+    setRows((prev) => {
+      if (index === prev.length - 1) return prev;
+      const next = [...prev];
+      [next[index], next[index + 1]] = [next[index + 1], next[index]];
+      return next;
+    });
   };
 
   const handleSave = async () => {
@@ -1139,20 +1187,18 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
               </div>
             ) : (
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} modifiers={[restrictToVerticalAxis, restrictToParentElement]}>
-              <SortableContext items={modelItems.map((m) => m.uid)} strategy={verticalListSortingStrategy}>
+              <SortableContext items={rows.map((row) => row.uid)} strategy={verticalListSortingStrategy}>
                 <div className="flex max-h-[55vh] min-w-0 flex-col gap-1 overflow-y-auto sm:max-h-[350px]">
-                  {modelItems.map(({ uid, model }, index) => (
+                  {rows.map((row, index) => (
                     <ModelItem
-                      key={uid}
-                      id={uid}
+                      key={row.uid}
+                      id={row.uid}
                       index={index}
-                      model={model}
+                      model={row.model}
                       isFirst={index === 0}
-                      isLast={index === modelItems.length - 1}
+                      isLast={index === rows.length - 1}
                       onEdit={(newVal) => {
-                        const updated = [...models];
-                        updated[index] = newVal;
-                        setModels(updated);
+                        setRows((prev) => prev.map((item) => (item.uid === row.uid ? { ...item, model: newVal } : item)));
                       }}
                       onMoveUp={() => handleMoveUp(index)}
                       onMoveDown={() => handleMoveDown(index)}
@@ -1201,7 +1247,6 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
           activeProviders={activeProviders}
           modelAliases={modelAliases}
           title="Add Model to Combo"
-          kindFilter={kindFilter}
           addedModelValues={models}
           closeOnSelect={false}
         />

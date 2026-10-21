@@ -3,8 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Card, Button, Input, Select, Toggle } from "@/shared/components";
+import { Card, Button, Input, Select } from "@/shared/components";
 import { AI_PROVIDERS, AUTH_METHODS } from "@/shared/constants/config";
+import {
+  AUTH_METHOD_ICONS,
+  AUTH_METHOD_LABELS,
+  credentialLabel,
+  usesCredential,
+} from "./authMethods";
 
 const providerOptions = Object.values(AI_PROVIDERS).map((p) => ({
   value: p.id,
@@ -13,7 +19,7 @@ const providerOptions = Object.values(AI_PROVIDERS).map((p) => ({
 
 const authMethodOptions = Object.values(AUTH_METHODS).map((m) => ({
   value: m.id,
-  label: m.name,
+  label: AUTH_METHOD_LABELS[m.id] || m.id,
 }));
 
 export default function NewProviderPage() {
@@ -21,10 +27,9 @@ export default function NewProviderPage() {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     provider: "",
-    authMethod: "api_key",
+    authMethod: "apikey",
     apiKey: "",
     displayName: "",
-    isActive: true,
   });
   const [errors, setErrors] = useState({});
 
@@ -38,8 +43,8 @@ export default function NewProviderPage() {
   const validate = () => {
     const newErrors = {};
     if (!formData.provider) newErrors.provider = "Please select a provider";
-    if (formData.authMethod === "api_key" && !formData.apiKey) {
-      newErrors.apiKey = "API Key is required";
+    if (usesCredential(formData.authMethod) && !formData.apiKey) {
+      newErrors.apiKey = `${credentialLabel(formData.authMethod)} is required`;
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -54,7 +59,14 @@ export default function NewProviderPage() {
       const response = await fetch("/api/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        // The API reads the credential type from the provider registry and
+        // always creates the connection active, so the form sends only what
+        // the API reads.
+        body: JSON.stringify({
+          provider: formData.provider,
+          apiKey: formData.apiKey,
+          displayName: formData.displayName,
+        }),
       });
 
       if (response.ok) {
@@ -68,6 +80,16 @@ export default function NewProviderPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // The OAuth sign-in lives on the provider page — it owns the
+  // provider-specific flow (device code, paste-token, browser popup).
+  const handleOAuthConnect = () => {
+    if (!formData.provider) {
+      setErrors((prev) => ({ ...prev, provider: "Please select a provider" }));
+      return;
+    }
+    router.push(`/dashboard/providers/${formData.provider}`);
   };
 
   const selectedProvider = AI_PROVIDERS[formData.provider];
@@ -143,7 +165,7 @@ export default function NewProviderPage() {
                   }`}
                 >
                   <span className="material-symbols-outlined">
-                    {method.value === "api_key" ? "key" : "lock"}
+                    {AUTH_METHOD_ICONS[method.value] || "lock"}
                   </span>
                   <span className="font-medium">{method.label}</span>
                 </button>
@@ -151,27 +173,32 @@ export default function NewProviderPage() {
             </div>
           </div>
 
-          {/* API Key Input */}
-          {formData.authMethod === "api_key" && (
+          {/* Credential Input */}
+          {usesCredential(formData.authMethod) && (
             <Input
-              label="API Key"
-              type="password"
-              placeholder="Enter your API key"
+              label={credentialLabel(formData.authMethod)}
+              type={formData.authMethod === "cookie" ? "text" : "password"}
+              placeholder={
+                formData.authMethod === "cookie"
+                  ? "Paste your session cookie"
+                  : "Enter your API key"
+              }
               value={formData.apiKey}
               onChange={(e) => handleChange("apiKey", e.target.value)}
               error={errors.apiKey}
-              hint="Your API key will be encrypted and stored securely."
+              hint="Your credential will be encrypted and stored securely."
               required
             />
           )}
 
           {/* OAuth2 Button */}
-          {formData.authMethod === "oauth2" && (
+          {formData.authMethod === "oauth" && (
             <Card.Section>
               <p className="text-sm text-text-muted mb-4">
-                Connect your account using OAuth2 authentication.
+                Connect your account using OAuth2 authentication. The sign-in
+                continues on the provider page.
               </p>
-              <Button type="button" variant="secondary" icon="link">
+              <Button type="button" variant="secondary" icon="link" onClick={handleOAuthConnect}>
                 Connect with OAuth2
               </Button>
             </Card.Section>
@@ -184,14 +211,6 @@ export default function NewProviderPage() {
             value={formData.displayName}
             onChange={(e) => handleChange("displayName", e.target.value)}
             hint="Optional. A friendly name to identify this configuration."
-          />
-
-          {/* Active Toggle */}
-          <Toggle
-            checked={formData.isActive}
-            onChange={(checked) => handleChange("isActive", checked)}
-            label="Active"
-            description="Enable this provider for use in your applications"
           />
 
           {/* Error Message */}
@@ -208,7 +227,18 @@ export default function NewProviderPage() {
                 Cancel
               </Button>
             </Link>
-            <Button type="submit" loading={loading} fullWidth className="flex-1">
+            <Button
+              type="submit"
+              loading={loading}
+              fullWidth
+              className="flex-1"
+              disabled={formData.authMethod === "oauth"}
+              title={
+                formData.authMethod === "oauth"
+                  ? "An OAuth connection is created by the sign-in above"
+                  : undefined
+              }
+            >
               Create Provider
             </Button>
           </div>

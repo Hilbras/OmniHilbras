@@ -1,6 +1,5 @@
 // Shared Utils - Export all
 export { cn } from "./cn";
-export * as api from "./api";
 export { getProviderIconSrc, markProviderIconMissing, resolveProviderIconId } from "./providerIcon";
 export { parseSearchQuery, matchesSearch, filterModelsByQuery } from "./modelSearchFilter";
 

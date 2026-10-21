@@ -17,13 +17,12 @@ export default function OpenClawToolCard({
   apiKeys,
   activeProviders,
   cloudEnabled,
-  initialStatus,
   tunnelEnabled,
   tunnelPublicUrl,
   tailscaleEnabled,
   tailscaleUrl,
 }) {
-  const [openclawStatus, setOpenclawStatus] = useState(initialStatus || null);
+  const [openclawStatus, setOpenclawStatus] = useState(null);
   const [checkingOpenclaw, setCheckingOpenclaw] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -55,9 +54,6 @@ export default function OpenClawToolCard({
     }
   }, [apiKeys, selectedApiKey]);
 
-  useEffect(() => {
-    if (initialStatus) setOpenclawStatus(initialStatus);
-  }, [initialStatus]);
 
   useEffect(() => {
     if (isExpanded) {

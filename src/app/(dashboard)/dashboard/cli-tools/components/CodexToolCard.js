@@ -10,8 +10,8 @@ import { matchKnownEndpoint } from "./cliEndpointMatch";
 import { rememberEndpoint } from "./cliEndpointPresets";
 import { getCurrentCodexProviderSettings, deriveProfileNameFromModel } from "./codexConfig";
 
-export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders, cloudEnabled, initialStatus, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl }) {
-  const [codexStatus, setCodexStatus] = useState(initialStatus || null);
+export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders, cloudEnabled, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl }) {
+  const [codexStatus, setCodexStatus] = useState(null);
   const [checkingCodex, setCheckingCodex] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -43,9 +43,6 @@ export default function CodexToolCard({ tool, isExpanded, onToggle, baseUrl, api
     }
   }, [apiKeys, selectedApiKey, codexStatus?.config]);
 
-  useEffect(() => {
-    if (initialStatus) setCodexStatus(initialStatus);
-  }, [initialStatus]);
 
   useEffect(() => {
     if (isExpanded) {

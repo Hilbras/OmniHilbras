@@ -181,12 +181,6 @@ export const ALIAS_TO_ID = Object.values(AI_PROVIDERS).reduce((acc, p) => {
   return acc;
 }, {});
 
-// ID to Alias mapping
-export const ID_TO_ALIAS = Object.values(AI_PROVIDERS).reduce((acc, p) => {
-  acc[p.id] = p.alias;
-  return acc;
-}, {});
-
 // Helper: Get providers by service kind (e.g. "tts", "embedding", "image")
 // Providers without serviceKinds default to ["llm"]
 export function getProvidersByKind(kind) {

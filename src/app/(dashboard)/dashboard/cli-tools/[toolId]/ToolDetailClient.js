@@ -14,7 +14,7 @@ import {
 
 const CLOUD_URL = process.env.NEXT_PUBLIC_CLOUD_URL;
 
-export default function ToolDetailClient({ toolId, machineId }) {
+export default function ToolDetailClient({ toolId }) {
   const tool = CLI_TOOLS[toolId];
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -139,6 +139,7 @@ export default function ToolDetailClient({ toolId, machineId }) {
       tunnelPublicUrl,
       tailscaleEnabled,
       tailscaleUrl,
+      cloudUrl: CLOUD_URL,
     };
 
     switch (toolId) {

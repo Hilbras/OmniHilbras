@@ -4,7 +4,8 @@ import { useState } from "react";
 import PropTypes from "prop-types";
 import { Button } from "@/shared/components";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
-function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting }) {
+import ModelAliasEditor from "../components/ModelAliasEditor";
+function CompatibleModelRow({ modelId, fullModel, alias, copied, onCopy, onSetAlias, onClearAlias, onDeleteAlias, onTest, testStatus, isTesting }) {
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
     : testStatus === "error"
@@ -26,7 +27,14 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
         {testStatus === "ok" ? "check_circle" : testStatus === "error" ? "cancel" : "smart_toy"}
       </span>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{modelId}</p>
+        <div className="flex items-center gap-2 min-w-0">
+          <p className="text-sm font-medium truncate">{modelId}</p>
+          {alias && (
+            <span className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[9px] text-muted">
+              alias: {alias}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-1 mt-1">
           <code className="text-xs text-text-muted font-mono bg-sidebar px-1.5 py-0.5 rounded">{fullModel}</code>
           <div className="relative group/btn">
@@ -60,6 +68,13 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
           )}
         </div>
       </div>
+      {onSetAlias && (
+        <ModelAliasEditor
+          alias={alias}
+          onSetAlias={onSetAlias}
+          onClearAlias={onClearAlias}
+        />
+      )}
       <button
         onClick={onDeleteAlias}
         className="p-1 hover:bg-red-50 rounded text-red-500"
@@ -71,7 +86,7 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
   );
 }
 
-export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic }) {
+export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onSetAlias, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic }) {
   const [newModel, setNewModel] = useState("");
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -195,19 +210,29 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
 
       {allModels.length > 0 && (
         <div className="flex flex-col gap-3">
-          {allModels.map(({ id, alias, source }) => (
-            <CompatibleModelRow
-              key={`${source}-${providerStorageAlias}/${id}`}
-              modelId={id}
-              fullModel={`${providerDisplayAlias}/${id}`}
-              copied={copied}
-              onCopy={onCopy}
-              onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(alias)}
-              onTest={connections.length > 0 ? () => handleTestModel(id) : undefined}
-              testStatus={modelTestResults[id]}
-              isTesting={testingModelId === id}
-            />
-          ))}
+          {allModels.map(({ id, alias, source }) => {
+            // A custom model can carry an alias too — the alias map is keyed
+            // by alias, so the badge comes from there, not from the row.
+            const rowAlias = alias || Object.entries(modelAliases).find(
+              ([, m]) => m === `${providerStorageAlias}/${id}`,
+            )?.[0];
+            return (
+              <CompatibleModelRow
+                key={`${source}-${providerStorageAlias}/${id}`}
+                modelId={id}
+                fullModel={`${providerDisplayAlias}/${id}`}
+                alias={rowAlias}
+                copied={copied}
+                onCopy={onCopy}
+                onSetAlias={onSetAlias ? (next) => onSetAlias(id, next, providerStorageAlias) : undefined}
+                onClearAlias={rowAlias ? () => onDeleteAlias(rowAlias) : undefined}
+                onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(rowAlias)}
+                onTest={connections.length > 0 ? () => handleTestModel(id) : undefined}
+                testStatus={modelTestResults[id]}
+                isTesting={testingModelId === id}
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -221,6 +246,7 @@ CompatibleModelsSection.propTypes = {
   customModels: PropTypes.arrayOf(PropTypes.object),
   copied: PropTypes.string,
   onCopy: PropTypes.func.isRequired,
+  onSetAlias: PropTypes.func,
   onDeleteAlias: PropTypes.func.isRequired,
   onAddCustomModel: PropTypes.func.isRequired,
   onDeleteCustomModel: PropTypes.func.isRequired,

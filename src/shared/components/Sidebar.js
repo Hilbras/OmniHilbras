@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -49,8 +49,15 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
   const [shutdownCountdown, setShutdownCountdown] = useState(0);
   const [enableTranslator, setEnableTranslator] = useState(false);
   const { copied, copy } = useCopyToClipboard(2000);
+  const shutdownTimerRef = useRef(null);
 
   const INSTALL_CMD = UPDATER_CONFIG.installCmdLatest;
+
+  // The countdown must not outlive the page: a gateway that shuts itself down
+  // after the user navigated away takes the whole app with it.
+  useEffect(() => () => {
+    if (shutdownTimerRef.current) clearInterval(shutdownTimerRef.current);
+  }, []);
 
   useEffect(() => {
     useSettingsStore.getState().fetchSettings().then((data) => {
@@ -88,11 +95,13 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
     copy(INSTALL_CMD);
     let remaining = UPDATER_CONFIG.shutdownCountdownSec;
     setShutdownCountdown(remaining);
-    const timer = setInterval(() => {
+    if (shutdownTimerRef.current) clearInterval(shutdownTimerRef.current);
+    shutdownTimerRef.current = setInterval(() => {
       remaining -= 1;
       setShutdownCountdown(remaining);
       if (remaining <= 0) {
-        clearInterval(timer);
+        clearInterval(shutdownTimerRef.current);
+        shutdownTimerRef.current = null;
         fetch("/api/version/shutdown", { method: "POST" }).catch(() => {});
         setIsDisconnected(true);
       }
@@ -100,6 +109,10 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
   };
 
   const handleCancelUpdate = () => {
+    if (shutdownTimerRef.current) {
+      clearInterval(shutdownTimerRef.current);
+      shutdownTimerRef.current = null;
+    }
     setIsUpdating(false);
     setShutdownCountdown(0);
   };

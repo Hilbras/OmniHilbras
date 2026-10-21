@@ -39,7 +39,10 @@ const useSettingsStore = create((set, get) => ({
     return inFlightSettingsPromise;
   },
 
-  // PATCH server + merge into local cache (no extra fetch needed)
+  // PATCH server + merge into local cache (no extra fetch needed).
+  // Resolves with the updated settings, or null when the server refused the
+  // change — the caller has to be able to tell that nothing was saved. The
+  // reason is kept in the store's `error` field.
   patchSettings: async (patch) => {
     try {
       const res = await fetch("/api/settings", {
@@ -47,12 +50,23 @@ const useSettingsStore = create((set, get) => ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        let message = `Settings update failed (${res.status})`;
+        try {
+          const body = await res.json();
+          if (body?.error) message = body.error;
+        } catch {
+          // The body is not JSON — the status is all there is.
+        }
+        set({ error: message });
+        return null;
+      }
       const updated = await res.json();
       // Merge, not replace: PATCH response omits GET-only fields (e.g. hasPassword)
-      set({ settings: { ...get().settings, ...updated }, lastFetched: Date.now() });
+      set({ settings: { ...get().settings, ...updated }, lastFetched: Date.now(), error: null });
       return updated;
     } catch {
+      set({ error: "Failed to update settings" });
       return null;
     }
   },

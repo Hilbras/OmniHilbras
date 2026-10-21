@@ -1276,9 +1276,20 @@ export default function ProfilePage() {
                         variant="outline"
                         size="sm"
                         icon="content_copy"
-                        onClick={() => {
-                          navigator.clipboard.writeText(samlAcsUrl);
-                          setSamlStatus({ type: "success", message: "ACS URL copied to clipboard!" });
+                        onClick={async () => {
+                          // The clipboard API only exists in a secure context, so
+                          // over plain HTTP the copy has to fail loudly instead
+                          // of claiming success.
+                          if (!navigator.clipboard?.writeText) {
+                            setSamlStatus({ type: "error", message: "Clipboard is unavailable here — copy the ACS URL manually." });
+                            return;
+                          }
+                          try {
+                            await navigator.clipboard.writeText(samlAcsUrl);
+                            setSamlStatus({ type: "success", message: "ACS URL copied to clipboard!" });
+                          } catch {
+                            setSamlStatus({ type: "error", message: "Could not copy the ACS URL — copy it manually." });
+                          }
                         }}
                       >
                         Copy

@@ -38,22 +38,6 @@ export const THEME_CONFIG = {
   defaultTheme: "system", // "light" | "dark" | "system"
 };
 
-// Subscription
-export const SUBSCRIPTION_CONFIG = {
-  price: 1.0,
-  currency: "USD",
-  interval: "month",
-  planName: "Pro Plan",
-};
-
-// API endpoints
-export const API_ENDPOINTS = {
-  users: "/api/users",
-  providers: "/api/providers",
-  payments: "/api/payments",
-  auth: "/api/auth",
-};
-
 export const CONSOLE_LOG_CONFIG = {
   maxLines: 200,
   pollIntervalMs: 1000,
@@ -94,16 +78,13 @@ export const QUOTA_AUTOPING_CONFIG = {
 
 // Re-export from providers.js for backward compatibility
 export {
-  FREE_PROVIDERS,
   OAUTH_PROVIDERS,
   APIKEY_PROVIDERS,
-  WEB_COOKIE_PROVIDERS,
   AI_PROVIDERS,
   AUTH_METHODS,
 } from "./providers.js";
 
 // Re-export from models.js for backward compatibility
 export {
-  PROVIDER_MODELS,
   AI_MODELS,
 } from "./models.js";

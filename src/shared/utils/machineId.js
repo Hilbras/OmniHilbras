@@ -61,15 +61,3 @@ export async function getConsistentMachineId(salt = null) {
   const extra = saltValue === CLI_AUTH_SALT ? loadCliSecret() : '';
   return crypto.createHash('sha256').update(raw + saltValue + extra).digest('hex').substring(0, 16);
 }
-
-export async function getRawMachineId() {
-  return loadRawMachineId();
-}
-
-/**
- * Check if we're running in browser or server environment
- * @returns {boolean} True if in browser, false if in server
- */
-export function isBrowser() {
-  return typeof window !== 'undefined';
-}

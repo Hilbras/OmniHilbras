@@ -10,6 +10,7 @@ import HeaderLanguage from "@/shared/components/HeaderLanguage";
 import ThemeToggle from "@/shared/components/ThemeToggle";
 import DonateModal from "@/shared/components/DonateModal";
 import { useHeaderSearchStore } from "@/store/headerSearchStore";
+import { useNotificationStore } from "@/store/notificationStore";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getProviderIconSrc } from "@/shared/utils/providerIcon";
@@ -26,6 +27,19 @@ const getPageInfo = (pathname) => {
   if (mediaDetailMatch) {
     const kindId = mediaDetailMatch[1];
     const providerId = mediaDetailMatch[2];
+    // `combo` is a media provider page as well, but the segment is a combo id
+    // and not a registry provider: the registry lookup would show the raw id
+    // and link to a route that does not exist.
+    if (kindId === "combo") {
+      return {
+        title: "Combo",
+        description: "",
+        breadcrumbs: [
+          { label: "Combos", href: "/dashboard/combos" },
+          { label: "Combo" },
+        ],
+      };
+    }
     const kindConfig = MEDIA_PROVIDER_KINDS.find((k) => k.id === kindId);
     const provider = AI_PROVIDERS[providerId];
     return {
@@ -43,6 +57,15 @@ const getPageInfo = (pathname) => {
   const mediaKindMatch = pathname.match(/\/media-providers\/([^/]+)$/);
   if (mediaKindMatch) {
     const kindId = mediaKindMatch[1];
+    // `web` is a combined page (web fetch + web search), not a registry kind.
+    if (kindId === "web") {
+      return {
+        title: "Web Fetch & Search",
+        description: "Manage your web fetch and search providers",
+        icon: "travel_explore",
+        breadcrumbs: [],
+      };
+    }
     const kindConfig = MEDIA_PROVIDER_KINDS.find((k) => k.id === kindId);
     return {
       title: kindConfig?.label || kindId,
@@ -187,6 +210,7 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
   const [displayName, setDisplayName] = useState("");
   const [loginMethod, setLoginMethod] = useState("");
   const [donateOpen, setDonateOpen] = useState(false);
+  const notify = useNotificationStore();
 
   // Memoize page info to prevent unnecessary recalculations
   const pageInfo = useMemo(() => getPageInfo(pathname), [pathname]);
@@ -223,9 +247,13 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
       const res = await fetch("/api/auth/logout", { method: "POST" });
       if (res.ok) {
         window.location.assign("/login");
+        return;
       }
+      // A failed logout must not be a silent dead end.
+      notify.error("Logout failed. Please try again.");
     } catch (err) {
       console.error("Failed to logout:", err);
+      notify.error("Logout failed. Please try again.");
     }
   };
 

@@ -261,6 +261,9 @@ export default function ProviderMiniChat({
   const transcriptRef = useRef(null);
   const stickRef = useRef(true);
   const idRef = useRef(0);
+  // The storage key of the conversation that was read back. A conversation is
+  // only written to the key it was loaded from.
+  const hydratedKeyRef = useRef(null);
 
   // The model list can arrive after the panel mounts, so the picked model is
   // only honoured while it is still on offer; otherwise the default wins.
@@ -331,6 +334,10 @@ export default function ProviderMiniChat({
     // The stored conversation is read one tick after mount instead of during
     // the first render: reading it there would hand React two different trees
     // and make it throw the server-rendered one away.
+    // A new key means a new conversation: until it has been read back nothing
+    // may be written, or the previous provider's messages would land in it.
+    hydratedKeyRef.current = null;
+
     const timer = setTimeout(() => {
       let stored = null;
       try {
@@ -354,6 +361,7 @@ export default function ProviderMiniChat({
       setDraft("");
       setEditingId(null);
       setEditDraft("");
+      hydratedKeyRef.current = storageKey;
       setHydrated(true);
     }, 0);
 
@@ -362,8 +370,10 @@ export default function ProviderMiniChat({
 
   useEffect(() => {
     // Nothing is written before the stored conversation has been read back,
-    // otherwise the first render would overwrite it with an empty one.
+    // otherwise the first render would overwrite it with an empty one — and a
+    // conversation is only ever written to the key it was read from.
     if (!hydrated) return;
+    if (hydratedKeyRef.current !== storageKey) return;
     try {
       window.localStorage.setItem(storageKey, JSON.stringify({
         messages,

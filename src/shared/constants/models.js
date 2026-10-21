@@ -3,7 +3,6 @@ export {
   PROVIDER_MODELS,
   getProviderModels,
   getDefaultModel,
-  isValidModel as isValidModelCore,
   findModelName,
   getModelTargetFormat,
   getModelStrip,

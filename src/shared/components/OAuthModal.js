@@ -742,6 +742,17 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
     }
   };
 
+  // The paste-token flow has no browser popup to reopen: the retry has to go
+  // back to the paste form instead of starting the browser flow again.
+  const handleTryAgain = () => {
+    if (authMode === "paste-token") {
+      setError(null);
+      setStep("input");
+      return;
+    }
+    startOAuthFlow();
+  };
+
   // Clear session on modal close + cleanup proxy (idempotent: the owned
   // proxy is stopped at most once across effect-close, button-close, and
   // Escape/backdrop-close — all funnel through here or the close effect).
@@ -814,7 +825,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
               </>
             )}
 
-            {authMode === "paste-token" && PASTE_TOKEN_PROVIDERS[provider] && (
+            {step === "input" && authMode === "paste-token" && PASTE_TOKEN_PROVIDERS[provider] && (
               <div className="space-y-3">
                 {ideStatus && !ideStatus.installed && (
                   <div className={`px-3 py-2 rounded-lg text-sm ${PASTE_TOKEN_PROVIDERS[provider].ideOptional ? "bg-blue-500/10 text-blue-700 dark:text-blue-300" : "bg-yellow-500/10 text-yellow-700 dark:text-yellow-300"}`}>
@@ -983,7 +994,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
             <h3 className="text-lg font-semibold mb-2">Connection Failed</h3>
             <p className="text-sm text-red-600 mb-4">{error}</p>
             <div className="flex gap-2">
-              <Button onClick={startOAuthFlow} variant="secondary" fullWidth>
+              <Button onClick={handleTryAgain} variant="secondary" fullWidth>
                 Try Again
               </Button>
               <Button onClick={handleClose} variant="ghost" fullWidth>

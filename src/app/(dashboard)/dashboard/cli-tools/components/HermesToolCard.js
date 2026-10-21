@@ -21,13 +21,12 @@ export default function HermesToolCard({
   apiKeys,
   activeProviders,
   cloudEnabled,
-  initialStatus,
   tunnelEnabled,
   tunnelPublicUrl,
   tailscaleEnabled,
   tailscaleUrl,
 }) {
-  const [hermesStatus, setHermesStatus] = useState(initialStatus || null);
+  const [hermesStatus, setHermesStatus] = useState(null);
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -86,9 +85,6 @@ export default function HermesToolCard({
     }
   }, [apiKeys, selectedApiKey]);
 
-  useEffect(() => {
-    if (initialStatus) setHermesStatus(initialStatus);
-  }, [initialStatus]);
 
   const fetchProfiles = async () => {
     try {

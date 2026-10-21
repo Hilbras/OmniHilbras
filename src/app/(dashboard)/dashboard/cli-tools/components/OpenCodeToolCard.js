@@ -8,8 +8,8 @@ import { rememberEndpoint } from "./cliEndpointPresets";
 import ApiKeySelect from "./ApiKeySelect";
 import { matchKnownEndpoint } from "./cliEndpointMatch";
 
-export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders, cloudEnabled, initialStatus, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl }) {
-  const [status, setStatus] = useState(initialStatus || null);
+export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders, cloudEnabled, tunnelEnabled, tunnelPublicUrl, tailscaleEnabled, tailscaleUrl }) {
+  const [status, setStatus] = useState(null);
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -37,9 +37,6 @@ export default function OpenCodeToolCard({ tool, isExpanded, onToggle, baseUrl, 
     }
   }, [apiKeys, selectedApiKey]);
 
-  useEffect(() => {
-    if (initialStatus) setStatus(initialStatus);
-  }, [initialStatus]);
 
   useEffect(() => {
     if (isExpanded) {

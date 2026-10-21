@@ -1,5 +1,14 @@
 "use client";
 
+/**
+ * Kinds whose declared endpoint has no route in this gateway. The card says
+ * so instead of offering a request that can only answer 404.
+ */
+export const UNAVAILABLE_ENDPOINTS = {
+  "/v1/images/understanding": "This gateway exposes no image-understanding route.",
+  "/v1/audio/music": "This gateway exposes no music-generation route.",
+};
+
 export function Row({ label, children }) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">

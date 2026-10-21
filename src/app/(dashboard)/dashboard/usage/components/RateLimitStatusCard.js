@@ -65,6 +65,10 @@ export default function RateLimitStatusCard({ refreshMs = REFRESH_MS }) {
     let cancelled = false;
 
     const load = async () => {
+      // Pause the poll while the tab is hidden: the counters are for whoever
+      // is looking at the card, and a background tab must not keep hitting
+      // the API every 10 s.
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await fetch("/api/usage/rate-limit", { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);

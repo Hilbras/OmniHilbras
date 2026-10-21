@@ -1,5 +1,6 @@
 import PropTypes from "prop-types";
 import { CapacityBadges } from "@/shared/components";
+import ModelAliasEditor from "../components/ModelAliasEditor";
 
 /**
  * Model row — old control-plane card design.
@@ -14,6 +15,8 @@ export default function ModelRow({
   alias,
   copied,
   onCopy,
+  onSetAlias,
+  onClearAlias,
   testStatus,
   isCustom,
   isFree,
@@ -82,6 +85,15 @@ export default function ModelRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
+        {/* Alias */}
+        {onSetAlias && (
+          <ModelAliasEditor
+            alias={alias}
+            onSetAlias={onSetAlias}
+            onClearAlias={onClearAlias}
+          />
+        )}
+
         {/* Copy */}
         <button
           type="button"
@@ -150,6 +162,8 @@ ModelRow.propTypes = {
   alias: PropTypes.string,
   copied: PropTypes.string,
   onCopy: PropTypes.func.isRequired,
+  onSetAlias: PropTypes.func,
+  onClearAlias: PropTypes.func,
   testStatus: PropTypes.oneOf(["ok", "error"]),
   isCustom: PropTypes.bool,
   isFree: PropTypes.bool,

@@ -7,7 +7,7 @@ import { CAPACITY_META, STT_TRANSPORT_META, STT_TRANSPORTS } from "@/shared/cons
 
 const defaultCaps = () => Object.fromEntries(Object.keys(CAPACITY_META).map((key) => [key, false]));
 
-export default function AddCustomModelModal({ isOpen, providerAlias, providerDisplayAlias, onSave, onClose }) {
+export default function AddCustomModelModal({ isOpen, providerAlias, onSave, onClose }) {
   const [modelId, setModelId] = useState("");
   const [caps, setCaps] = useState(defaultCaps);
   const [testStatus, setTestStatus] = useState(null); // null | "testing" | "ok" | "error"
@@ -169,7 +169,6 @@ export default function AddCustomModelModal({ isOpen, providerAlias, providerDis
 AddCustomModelModal.propTypes = {
   isOpen: PropTypes.bool.isRequired,
   providerAlias: PropTypes.string.isRequired,
-  providerDisplayAlias: PropTypes.string.isRequired,
   onSave: PropTypes.func.isRequired,
   onClose: PropTypes.func.isRequired,
 };

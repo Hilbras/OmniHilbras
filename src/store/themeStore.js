@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { THEME_CONFIG } from "@/shared/constants/config";
+import { resolveEffectiveTheme, nextTheme } from "./themeUtils";
 
 const useThemeStore = create(
   persist(
@@ -15,8 +16,9 @@ const useThemeStore = create(
       },
 
       toggleTheme: () => {
-        const currentTheme = get().theme;
-        const newTheme = currentTheme === "dark" ? "light" : "dark";
+        // Flip the theme that is on screen, not the stored one: on "system"
+        // the stored value says nothing about what the user sees.
+        const newTheme = nextTheme(get().theme, systemPrefersDark());
         set({ theme: newTheme });
         applyTheme(newTheme);
       },
@@ -37,17 +39,19 @@ function applyTheme(theme) {
   if (typeof window === "undefined") return;
 
   const root = document.documentElement;
-  const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-
-  const effectiveTheme = theme === "system" ? systemTheme : theme;
+  const effectiveTheme = resolveEffectiveTheme(theme, systemPrefersDark());
 
   if (effectiveTheme === "dark") {
     root.classList.add("dark");
   } else {
     root.classList.remove("dark");
   }
+}
+
+// The OS preference behind the "system" theme
+function systemPrefersDark() {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
 export default useThemeStore;

@@ -163,14 +163,6 @@ export function chargeTokens(identity, count) {
   bucket.tokens = Math.max(0, bucket.tokens - count);
 }
 
-/** Current bucket state — used by tests and by the dashboard read-out. */
-export function getBucketSnapshot(identity) {
-  const entry = buckets.get(identity);
-  if (!entry) return null;
-  const snap = (b) => (b ? { capacity: b.capacity, tokens: Math.floor(b.tokens) } : null);
-  return { requests: snap(entry.requests), tokens: snap(entry.tokens) };
-}
-
 /** Drop all bucket state (tests, and a settings change that must not leak). */
 export function resetBuckets() {
   buckets.clear();

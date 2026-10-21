@@ -30,9 +30,8 @@ export default function CoworkToolCard({
   tunnelPublicUrl,
   tailscaleEnabled,
   tailscaleUrl,
-  initialStatus,
 }) {
-  const [status, setStatus] = useState(initialStatus || null);
+  const [status, setStatus] = useState(null);
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -56,10 +55,6 @@ export default function CoworkToolCard({
       setSelectedApiKey(apiKeys[0].key);
     }
   }, [apiKeys, selectedApiKey]);
-
-  useEffect(() => {
-    if (initialStatus) setStatus(initialStatus);
-  }, [initialStatus]);
 
   useEffect(() => {
     if (isExpanded && !status) checkStatus();
@@ -349,6 +344,7 @@ export default function CoworkToolCard({
                         ))
                       )}
                     </div>
+                    <button onClick={() => setModelSelectOpen(true)} disabled={!hasActiveProviders} className={`shrink-0 px-2 py-1.5 rounded border text-xs whitespace-nowrap transition-colors ${hasActiveProviders ? "bg-primary/10 border-primary/40 text-primary hover:bg-primary/20 cursor-pointer" : "opacity-50 cursor-not-allowed border-border"}`}>+ Model</button>
                     <button onClick={() => setComboModalOpen(true)} disabled={!hasActiveProviders} className={`shrink-0 px-2 py-1.5 rounded border text-xs whitespace-nowrap transition-colors ${hasActiveProviders ? "bg-primary/10 border-primary/40 text-primary hover:bg-primary/20 cursor-pointer" : "opacity-50 cursor-not-allowed border-border"}`}>+ Combo</button>
                   </div>
                 </div>

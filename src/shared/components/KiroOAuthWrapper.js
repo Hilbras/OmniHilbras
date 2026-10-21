@@ -30,8 +30,13 @@ export default function KiroOAuthWrapper({ isOpen, providerInfo, onSuccess, onCl
     } else if (method === "import" || method === "api-key") {
       // Import / API-key handled in KiroAuthModal, just close
       onSuccess?.();
+    } else if (method === "import-cli-proxy") {
+      // The CLIProxy import already ran server-side: refresh the connections
+      // and close the modal, otherwise the import is invisible.
+      onSuccess?.();
+      onClose?.();
     }
-  }, [onSuccess]);
+  }, [onSuccess, onClose]);
 
   const handleBack = () => {
     setAuthMethod(null);

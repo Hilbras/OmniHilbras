@@ -68,7 +68,6 @@ export default function GrokBuildToolCard({
   apiKeys,
   activeProviders,
   cloudEnabled,
-  initialStatus,
   tunnelEnabled,
   tunnelPublicUrl,
   tailscaleEnabled,
@@ -76,25 +75,19 @@ export default function GrokBuildToolCard({
 }) {
   const { getCaps } = useModelCaps();
   const getContextWindow = (model) => getCaps(model)?.contextWindow || null;
-  const initialModel = initialStatus?.settings?.model?.model || "";
-  const initialSubagents = Object.fromEntries(
-    SUBAGENT_TYPES
-      .map((type) => [type.id, initialStatus?.settings?.subagentModels?.[type.id]?.model])
-      .filter(([, model]) => Boolean(model)),
-  );
-  const [grokStatus, setGrokStatus] = useState(initialStatus || null);
+  const [grokStatus, setGrokStatus] = useState(null);
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [message, setMessage] = useState(null);
   const [selectedApiKey, setSelectedApiKey] = useState(apiKeys?.[0]?.key || "");
-  const [selectedModel, setSelectedModel] = useState(initialModel);
-  const [subagentModels, setSubagentModels] = useState(initialSubagents);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [subagentModels, setSubagentModels] = useState({});
   const [modelTarget, setModelTarget] = useState(null); // "main" or subagent type
   const [modelAliases, setModelAliases] = useState({});
   const [showManualConfigModal, setShowManualConfigModal] = useState(false);
   const [customBaseUrl, setCustomBaseUrl] = useState("");
-  const hasFetchedStatus = useRef(Boolean(initialStatus));
+  const hasFetchedStatus = useRef(false);
 
   const configuredModel = grokStatus?.settings?.model;
   const currentBaseUrl = configuredModel?.base_url || "";

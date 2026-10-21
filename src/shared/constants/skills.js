@@ -8,6 +8,7 @@ const SKILL_PATH = "skills";
 export const SKILLS_REPO_URL = `https://github.com/${REPO}`;
 export const SKILLS_RAW_BASE = `https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/${SKILL_PATH}`;
 export const SKILLS_BLOB_BASE = `https://github.com/${REPO}/blob/${BRANCH}/${SKILL_PATH}`;
+export const SKILLS_TREE_URL = `${SKILLS_REPO_URL}/tree/${BRANCH}/${SKILL_PATH}`;
 
 export const SKILLS = [
   {
@@ -31,6 +32,13 @@ export const SKILLS = [
     description: "Text-to-image via DALL-E, Imagen, FLUX, MiniMax, SDWebUI…",
     endpoint: "/v1/images/generations",
     icon: "image",
+  },
+  {
+    id: "omnihilbras-video",
+    name: "Video Generation",
+    description: "Text-to-video via xAI Grok Imagine — async job: submit, poll, download.",
+    endpoint: "/v1/videos/generations",
+    icon: "movie",
   },
   {
     id: "omnihilbras-tts",

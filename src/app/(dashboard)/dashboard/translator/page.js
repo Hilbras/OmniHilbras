@@ -120,7 +120,7 @@ export default function TranslatorPage() {
       setContent(3, str);
       openNext(3);
     } catch (e) { alert(e.message); }
-    setLoad("toOpenAI", false);
+    finally { setLoad("toOpenAI", false); }
   };
 
   // Step 3 → Step 4: OpenAI → target + build URL/headers
@@ -144,7 +144,7 @@ export default function TranslatorPage() {
       setContent(4, JSON.stringify(step4Content, null, 2));
       openNext(4);
     } catch (e) { alert(e.message); }
-    setLoad("toTarget", false);
+    finally { setLoad("toTarget", false); }
   };
 
   // Step 4 → Step 5: send to provider via executor

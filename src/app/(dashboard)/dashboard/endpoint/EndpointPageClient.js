@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import PropTypes from "prop-types";
 import { Card, Button, Input, Modal, CardSkeleton, Toggle, ConfirmModal } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import {
@@ -9,8 +8,10 @@ import {
   TUNNEL_PING_INTERVAL_MS,
   TUNNEL_PING_MAX_MS,
   STATUS_POLL_FAST_MS,
+  STATUS_POLL_SLOW_MS,
   REACHABLE_MISS_THRESHOLD,
   CLIENT_PING_FAST_MS,
+  CLIENT_PING_SLOW_MS,
 } from "./endpointConstants";
 import { clientPingUrl, clientPingAny } from "./endpointPing";
 import useSettingsStore from "@/store/settingsStore";
@@ -20,9 +21,12 @@ import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
 import KeyAccessControls from "./components/KeyAccessControls";
 import KeyRateLimitControls from "./components/KeyRateLimitControls";
-export default function APIPageClient({ machineId }) {
+export default function APIPageClient() {
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [keysError, setKeysError] = useState("");
+  const [keyError, setKeyError] = useState("");
+  const [createKeyError, setCreateKeyError] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
   const [createdKey, setCreatedKey] = useState(null);
@@ -117,7 +121,8 @@ export default function APIPageClient({ machineId }) {
     loadSettings();
   }, []);
 
-  // Status poll: only while degraded (not yet reachable). Stop once healthy to avoid spam.
+  // Status poll: fast while degraded, slow while healthy — a healthy tunnel can
+  // still die, and the dashboard has to notice that without a reload.
   // Visibility re-check: refresh once when tab becomes visible.
   useEffect(() => {
     const anyEnabled = tunnelEnabled || tsEnabled;
@@ -127,8 +132,10 @@ export default function APIPageClient({ machineId }) {
     const allHealthy = tunnelHealthy && tsHealthy;
     const onVisible = () => { if (!document.hidden) syncTunnelStatus(); };
     document.addEventListener("visibilitychange", onVisible);
-    if (allHealthy) return () => document.removeEventListener("visibilitychange", onVisible);
-    const timer = setInterval(() => { if (!document.hidden) syncTunnelStatus(); }, STATUS_POLL_FAST_MS);
+    const timer = setInterval(
+      () => { if (!document.hidden) syncTunnelStatus(); },
+      allHealthy ? STATUS_POLL_SLOW_MS : STATUS_POLL_FAST_MS,
+    );
     return () => {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
@@ -163,8 +170,10 @@ export default function APIPageClient({ machineId }) {
     probeBoth();
     const tunnelHealthy = !tunnelEnabled || tunnelReachable;
     const tsHealthy = !tsEnabled || tsReachable;
-    if (tunnelHealthy && tsHealthy) return;
-    const id = setInterval(probeBoth, CLIENT_PING_FAST_MS);
+    const allHealthy = tunnelHealthy && tsHealthy;
+    // A healthy endpoint is still probed, only less often: a tunnel that dies
+    // must not keep showing as reachable until the page is reloaded.
+    const id = setInterval(probeBoth, allHealthy ? CLIENT_PING_SLOW_MS : CLIENT_PING_FAST_MS);
     return () => clearInterval(id);
   }, [tunnelEnabled, tunnelUrl, tunnelPublicUrl, tsEnabled, tsUrl, tunnelReachable, tsReachable]);
 
@@ -263,7 +272,7 @@ export default function APIPageClient({ machineId }) {
     try {
       const fetchKeys = async () => {
         const res = await fetch("/api/keys");
-        if (!res.ok) return [];
+        if (!res.ok) throw new Error(`Failed to load the API keys (HTTP ${res.status})`);
         const data = await res.json();
         return data.keys || [];
       };
@@ -271,18 +280,23 @@ export default function APIPageClient({ machineId }) {
       let existing = await fetchKeys();
       // Auto-provision a default key for first-time users so the endpoint works out of the box.
       if (existing.length === 0) {
+        let created = false;
         try {
           const createRes = await fetch("/api/keys", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name: "Default Key" }),
           });
-          if (createRes.ok) existing = await fetchKeys();
+          created = createRes.ok;
         } catch { /* fall through to empty render */ }
+        if (created) existing = await fetchKeys();
       }
       setKeys(existing);
+      setKeysError("");
     } catch (error) {
       console.log("Error fetching data:", error);
+      // Without this the page would render "No API keys yet" for a server failure.
+      setKeysError(error.message || "Failed to load the API keys.");
     } finally {
       setLoading(false);
     }
@@ -539,6 +553,9 @@ export default function APIPageClient({ machineId }) {
         setTsProgress("Login required — click \"Open Login Page\" to continue");
         for (let i = 0; i < 40; i++) {
           await new Promise((r) => setTimeout(r, 3000));
+          // The user left the page: stop polling instead of running for the
+          // full two minutes.
+          if (!mountedRef.current) return;
           try {
             const r2 = await fetch("/api/tunnel/tailscale-check");
             if (r2.ok) {
@@ -589,6 +606,9 @@ export default function APIPageClient({ machineId }) {
     setTsProgress("Click \"Open Funnel Settings\" to enable Funnel...");
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 3000));
+      // The user left the page: stop polling instead of running for the full
+      // two minutes.
+      if (!mountedRef.current) return;
       try {
         const res = await fetch("/api/tunnel/tailscale-enable", { method: "POST" });
         const data = await res.json();
@@ -647,22 +667,26 @@ export default function APIPageClient({ machineId }) {
   const handleCreateKey = async () => {
     if (!newKeyName.trim()) return;
 
+    setCreateKeyError("");
     try {
       const res = await fetch("/api/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newKeyName }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
-      if (res.ok) {
-        setCreatedKey(data.key);
-        await fetchData();
-        setNewKeyName("");
-        setShowAddModal(false);
+      if (!res.ok) {
+        setCreateKeyError(data.error || "Failed to create the key.");
+        return;
       }
+      setCreatedKey(data.key);
+      await fetchData();
+      setNewKeyName("");
+      setShowAddModal(false);
     } catch (error) {
       console.log("Error creating key:", error);
+      setCreateKeyError(error.message || "Failed to create the key.");
     }
   };
 
@@ -685,6 +709,7 @@ export default function APIPageClient({ machineId }) {
   };
 
   const handleToggleKey = async (id, isActive) => {
+    setKeyError("");
     try {
       const res = await fetch(`/api/keys/${id}`, {
         method: "PUT",
@@ -693,14 +718,19 @@ export default function APIPageClient({ machineId }) {
       });
       if (res.ok) {
         setKeys(prev => prev.map(k => k.id === id ? { ...k, isActive } : k));
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setKeyError(data.error || "Failed to update the key.");
       }
     } catch (error) {
       console.log("Error toggling key:", error);
+      setKeyError(error.message || "Failed to update the key.");
     }
   };
 
   // Save a key's access (restricted flag + allow list).
   const handleUpdateKeyAccess = async (id, access) => {
+    setKeyError("");
     try {
       const res = await fetch(`/api/keys/${id}`, {
         method: "PUT",
@@ -711,10 +741,11 @@ export default function APIPageClient({ machineId }) {
       if (res.ok && data.key) {
         setKeys(prev => prev.map(k => k.id === id ? { ...k, access: data.key.access } : k));
       } else {
-        console.log("Error updating key access:", data.error || res.status);
+        setKeyError(data.error || "Failed to update the key access.");
       }
     } catch (error) {
       console.log("Error updating key access:", error);
+      setKeyError(error.message || "Failed to update the key access.");
     }
   };
 
@@ -992,7 +1023,7 @@ export default function APIPageClient({ machineId }) {
             <span className="material-symbols-outlined text-primary">vpn_key</span>
             API Keys
           </h2>
-          <Button icon="add" onClick={() => setShowAddModal(true)}>
+          <Button icon="add" onClick={() => { setCreateKeyError(""); setShowAddModal(true); }}>
             Create Key
           </Button>
         </div>
@@ -1016,16 +1047,25 @@ export default function APIPageClient({ machineId }) {
           </div>
         )}
 
+        {keysError || keyError ? (
+          <div className="flex items-center gap-2 rounded-lg border border-red-300 dark:border-red-800 bg-red-500/5 px-3 py-2 text-sm text-red-600 dark:text-red-400">
+            <span className="material-symbols-outlined text-[18px]">error</span>
+            {keysError || keyError}
+          </div>
+        ) : null}
+
         {keys.length === 0 ? (
           <div className="text-center py-12">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 text-primary mb-4">
-              <span className="material-symbols-outlined text-[32px]">vpn_key</span>
+            <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full mb-4 ${keysError ? "bg-red-500/10 text-red-500" : "bg-primary/10 text-primary"}`}>
+              <span className="material-symbols-outlined text-[32px]">{keysError ? "error" : "vpn_key"}</span>
             </div>
-            <p className="text-text-main font-medium mb-1">No API keys yet</p>
-            <p className="text-sm text-text-muted mb-4">Create your first API key to get started</p>
-            <Button icon="add" onClick={() => setShowAddModal(true)}>
-              Create Key
-            </Button>
+            <p className="text-text-main font-medium mb-1">{keysError ? "Could not load the API keys" : "No API keys yet"}</p>
+            <p className="text-sm text-text-muted mb-4">{keysError || "Create your first API key to get started"}</p>
+            {!keysError && (
+              <Button icon="add" onClick={() => { setCreateKeyError(""); setShowAddModal(true); }}>
+                Create Key
+              </Button>
+            )}
           </div>
         ) : (
           <div className="flex flex-col">
@@ -1103,6 +1143,7 @@ export default function APIPageClient({ machineId }) {
         onClose={() => {
           setShowAddModal(false);
           setNewKeyName("");
+          setCreateKeyError("");
         }}
       >
         <div className="flex flex-col gap-4">
@@ -1112,6 +1153,9 @@ export default function APIPageClient({ machineId }) {
             onChange={(e) => setNewKeyName(e.target.value)}
             placeholder="Production Key"
           />
+          {createKeyError && (
+            <p className="text-sm text-red-600 dark:text-red-400">{createKeyError}</p>
+          )}
           <div className="flex gap-2">
             <Button onClick={handleCreateKey} fullWidth disabled={!newKeyName.trim()}>
               Create
@@ -1323,8 +1367,3 @@ export default function APIPageClient({ machineId }) {
     </div>
   );
 }
-
-
-APIPageClient.propTypes = {
-  machineId: PropTypes.string.isRequired,
-};

@@ -88,7 +88,6 @@ export default function QuotaTable({
   quotas = [],
   compact = false,
   sortMode = "default",
-  showSortLabel = false,
   onHideQuota = null,
 }) {
   const [page, setPage] = useState(1);
@@ -118,7 +117,11 @@ export default function QuotaTable({
   }, [totalPages]);
 
   if (!quotas || quotas.length === 0) {
-    return null;
+    return (
+      <div className="text-center py-5">
+        <p className="text-xs text-text-muted">No quota data available</p>
+      </div>
+    );
   }
 
   const currentPageRows = sortedQuotas.slice(
@@ -132,7 +135,6 @@ export default function QuotaTable({
   const nameText = compact ? "text-[11px]" : "text-sm";
   const resetPrimary = compact ? "text-[11px]" : "text-sm";
   const resetSecondary = compact ? "text-[10px] leading-tight" : "text-xs";
-  const sortLabel = "Sorted by account remaining";
   const hasHideAction = typeof onHideQuota === "function";
 
   return (
@@ -141,11 +143,6 @@ export default function QuotaTable({
         <div className="text-[10px] text-text-muted">
           {sortedQuotas.length} quota{sortedQuotas.length > 1 ? "s" : ""}
         </div>
-        {showSortLabel && (
-          <div className="rounded-md border border-black/10 bg-black/[0.02] px-2 py-1 text-[10px] text-text-muted dark:border-white/10 dark:bg-white/[0.03]">
-            {sortLabel}
-          </div>
-        )}
       </div>
 
       <div className="space-y-px">

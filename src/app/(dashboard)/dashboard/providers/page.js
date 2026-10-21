@@ -55,19 +55,6 @@ function getStatusDisplay(connected, error, errorCode) {
 function getConnectionErrorTag(connection) {
   if (!connection) return null;
 
-  const explicitType = connection.lastErrorType;
-  if (explicitType === "runtime_error") return "RUNTIME";
-  if (
-    explicitType === "upstream_auth_error" ||
-    explicitType === "auth_missing" ||
-    explicitType === "token_refresh_failed" ||
-    explicitType === "token_expired"
-  )
-    return "AUTH";
-  if (explicitType === "upstream_rate_limited") return "429";
-  if (explicitType === "upstream_unavailable") return "5XX";
-  if (explicitType === "network_error") return "NET";
-
   const numericCode = Number(connection.errorCode);
   if (Number.isFinite(numericCode) && numericCode >= 400)
     return String(numericCode);
@@ -154,19 +141,6 @@ export default function ProvidersPage() {
       if (pa !== pb) return pa - pb;
       const sa = getProviderStats(ka, authType);
       const sb = getProviderStats(kb, authType);
-      const ca = sa.connected > 0 ? 1 : 0;
-      const cb = sb.connected > 0 ? 1 : 0;
-      if (ca !== cb) return cb - ca;
-      return (a.name || "").localeCompare(b.name || "");
-    });
-
-  const sortItemsByPriority = (items, authType) =>
-    [...items].sort((a, b) => {
-      const pa = a.priority ?? 999;
-      const pb = b.priority ?? 999;
-      if (pa !== pb) return pa - pb;
-      const sa = getProviderStats(a.id, authType);
-      const sb = getProviderStats(b.id, authType);
       const ca = sa.connected > 0 ? 1 : 0;
       const cb = sb.connected > 0 ? 1 : 0;
       if (ca !== cb) return cb - ca;
@@ -786,19 +760,6 @@ function ProviderCard({ providerId, provider, stats, authType, onToggle }) {
   const { connected, error, errorCode, errorTime, allDisabled } = stats;
   const isNoAuth = !!provider.noAuth;
 
-  const dotColors = {
-    free: "bg-green-500",
-    oauth: "bg-blue-500",
-    apikey: "bg-amber-500",
-    compatible: "bg-orange-500",
-  };
-  const dotLabels = {
-    free: "Free",
-    oauth: "OAuth",
-    apikey: "API Key",
-    compatible: "Compatible",
-  };
-
   return (
     <Link href={`/dashboard/providers/${providerId}`} className="group min-w-0">
       <Card
@@ -904,19 +865,6 @@ function ApiKeyProviderCard({
   const isAnthropicCompatible = providerId.startsWith(
     ANTHROPIC_COMPATIBLE_PREFIX,
   );
-
-  const dotColors = {
-    free: "bg-green-500",
-    oauth: "bg-blue-500",
-    apikey: "bg-amber-500",
-    compatible: "bg-orange-500",
-  };
-  const dotLabels = {
-    free: "Free",
-    oauth: "OAuth",
-    apikey: "API Key",
-    compatible: "Compatible",
-  };
 
   const getIconPath = () => {
     if (isCompatible && provider.apiType)

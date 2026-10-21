@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button } from "@/shared/components";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { isAnthropicCompatibleProvider, isOpenAICompatibleProvider } from "@/shared/constants/providers";
+import { getModelPrefix, toRequestModel } from "./chatModels";
 
 const STORAGE_KEYS = {
   sessions: "basic-chat.sessions",
@@ -68,19 +69,14 @@ function makeSessionTitle(text = "") {
 function buildUserContent(message) {
   const text = textValue(message.content).trim();
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+  const images = attachments.filter((attachment) => attachment?.dataUrl);
+  if (images.length === 0) return text;
 
-  if (attachments.length === 0) return text;
-
-  const content = [];
-  if (text) content.push({ type: "text", text });
-
-  for (const attachment of attachments) {
-    if (attachment?.dataUrl) {
-      content.push({ type: "image_url", image_url: { url: attachment.dataUrl } });
-    }
-  }
-
-  return content.length > 0 ? content : text;
+  // The dashboard chat route forwards plain text, so a picture cannot travel
+  // with the message. Say so instead of letting the model answer as if it had
+  // seen the image.
+  const note = images.map((attachment) => `[image: ${attachment.name}]`).join(" ");
+  return text ? `${text}\n${note}` : note;
 }
 
 function readAssistantText(chunk) {
@@ -113,11 +109,14 @@ function getProviderLabel(connection) {
   return connection?.name || humanize(connection?.provider || connection?.id || "provider");
 }
 
+// The gateway routes on "<prefix>/<model>". A compatible provider is reached
+// through the prefix of its node, every other provider through its id.
 function normalizeStaticModel(model, connection) {
   if (!model?.id) return null;
+  const requestModel = toRequestModel(getModelPrefix(connection), model.id);
   return {
-    id: `${connection.provider}/${model.id}`,
-    requestModel: `${connection.provider}/${model.id}`,
+    id: requestModel,
+    requestModel,
     name: model.name || model.id,
     providerId: connection.provider,
     providerName: getProviderLabel(connection),
@@ -133,11 +132,7 @@ function normalizeLiveModel(model, connection) {
     ? model
     : model?.name || model?.displayName || rawId;
 
-  let requestModel = rawId;
-  const isCompatible = isOpenAICompatibleProvider(connection.provider) || isAnthropicCompatibleProvider(connection.provider);
-  if (isCompatible && !rawId.includes("/")) {
-    requestModel = `${connection.provider}/${rawId}`;
-  }
+  const requestModel = toRequestModel(getModelPrefix(connection), rawId);
 
   return {
     id: requestModel,
@@ -170,29 +165,11 @@ export default function BasicChatPageClient() {
   const [providerGroups, setProviderGroups] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [sessions, setSessions] = useState(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const saved = safeParse(globalThis.localStorage.getItem(STORAGE_KEYS.sessions), []);
-      return Array.isArray(saved) ? saved.map((session) => ({
-        ...session,
-        messages: Array.isArray(session.messages) ? session.messages : [],
-      })) : [];
-    } catch { return []; }
-  });
-  const [activeSessionId, setActiveSessionId] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return globalThis.localStorage.getItem(STORAGE_KEYS.activeSessionId) || "";
-  });
-  const [activeProviderId, setActiveProviderId] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return globalThis.localStorage.getItem(STORAGE_KEYS.activeProviderId) || "";
-  });
+  const [sessions, setSessions] = useState([]);
+  const [activeSessionId, setActiveSessionId] = useState("");
+  const [activeProviderId, setActiveProviderId] = useState("");
   const [activeModelId, setActiveModelId] = useState("");
-  const [draft, setDraft] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return globalThis.localStorage.getItem(STORAGE_KEYS.draft) || "";
-  });
+  const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState([]);
   const [isSending, setIsSending] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState("");
@@ -206,7 +183,24 @@ export default function BasicChatPageClient() {
   const modelMenuRef = useRef(null);
   const historyMenuRef = useRef(null);
 
+  // The stored conversation is read after the first render, never during it:
+  // reading localStorage in a state initializer would hand React a different
+  // tree than the server rendered and trigger a hydration mismatch.
   useEffect(() => {
+    try {
+      const saved = safeParse(globalThis.localStorage.getItem(STORAGE_KEYS.sessions), []);
+      if (Array.isArray(saved)) {
+        setSessions(saved.map((session) => ({
+          ...session,
+          messages: Array.isArray(session.messages) ? session.messages : [],
+        })));
+      }
+      setActiveSessionId(globalThis.localStorage.getItem(STORAGE_KEYS.activeSessionId) || "");
+      setActiveProviderId(globalThis.localStorage.getItem(STORAGE_KEYS.activeProviderId) || "");
+      setDraft(globalThis.localStorage.getItem(STORAGE_KEYS.draft) || "");
+    } catch {
+      // A blocked storage must not break the chat.
+    }
     setIsHydrated(true);
   }, []);
 
@@ -480,33 +474,6 @@ export default function BasicChatPageClient() {
     }
   };
 
-  const handleSelectProvider = (providerId) => {
-    const group = providerGroups.find((item) => item.providerId === providerId);
-    if (!group || group.models.length === 0) return;
-    const nextModel = group.models[0];
-
-    const current = sessions.find((session) => session.id === activeSessionId);
-    if (current && current.messages.length > 0) {
-      const session = ensureSessionForModel(nextModel);
-      if (!session) return;
-      setSessions((prev) => [session, ...prev]);
-      setActiveSessionId(session.id);
-    } else if (current) {
-      setSessions((prev) => prev.map((item) => (item.id === current.id ? {
-        ...item,
-        providerId: group.providerId,
-        providerName: group.providerName,
-        modelId: nextModel.id,
-        modelName: nextModel.name,
-      } : item)));
-      setActiveSessionId(current.id);
-    }
-
-    setActiveProviderId(group.providerId);
-    setActiveModelId(nextModel.id);
-    setModelMenuOpen(false);
-  };
-
   const handleSelectModel = (modelId) => {
     const model = modelIndex.get(modelId);
     if (!model) return;
@@ -642,8 +609,14 @@ export default function BasicChatPageClient() {
         content: message.role === "user" ? buildUserContent(message) : message.content,
       }));
 
+    // The text the model managed to produce, kept outside the try so a
+    // stopped turn can still hand it over.
+    let assistantText = "";
+
     try {
-      const response = await fetch("/api/dashboard/chat/completions", {
+      // The dashboard's own chat route: it authenticates with the app's key
+      // and forwards the turn to the gateway's /api/v1/chat/completions.
+      const response = await fetch("/api/models/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -652,7 +625,9 @@ export default function BasicChatPageClient() {
         body: JSON.stringify({
           model: model.requestModel || model.id,
           messages: requestMessages,
-          stream: true,
+          // The route's 1024-token default is sized for the small provider
+          // panel; a chat answer needs more room.
+          maxTokens: 4096,
         }),
         signal: abortRef.current.signal,
       });
@@ -676,7 +651,6 @@ export default function BasicChatPageClient() {
 
       const decoder = new TextDecoder();
       let buffer = "";
-      let assistantText = "";
 
       while (true) {
         const { value, done } = await reader.read();
@@ -718,7 +692,16 @@ export default function BasicChatPageClient() {
       }));
       finalizeSessionTitle(sessionId, userText);
     } catch (error) {
-      if (error.name !== "AbortError") {
+      if (error.name === "AbortError") {
+        // Stop was pressed: keep what arrived, but stop marking the bubble as
+        // streaming — an answer that never comes must not look like a stuck
+        // one.
+        updateSession(sessionId, (currentSession) => ({
+          ...currentSession,
+          messages: currentSession.messages.map((message) => (message.id === assistantMessageId ? { ...message, content: assistantText || message.content, status: "done" } : message)),
+          updatedAt: new Date().toISOString(),
+        }));
+      } else {
         const errorText = textValue(error?.message || error);
         updateSession(sessionId, (currentSession) => ({
           ...currentSession,
@@ -813,6 +796,9 @@ export default function BasicChatPageClient() {
             >
               History
             </button>
+            <Button variant="ghost" size="sm" icon="add" onClick={handleNewChat} disabled={!activeModel}>
+              New chat
+            </Button>
             <Button variant="ghost" size="sm" icon="delete" onClick={handleDeleteCurrentChat} disabled={!activeSessionId || sessions.length === 0}>
               Clear
             </Button>

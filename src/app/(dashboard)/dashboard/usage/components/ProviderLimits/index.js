@@ -15,6 +15,7 @@ import {
   getConnectionLabel,
   getConnectionQuotaRemaining,
   sortVisibleConnections,
+  selectQuotaRefreshTargets,
   buildLoadingState,
   filterQuotaStateByConnections,
   getConnectionsEmptyMessage,
@@ -26,9 +27,6 @@ import {
   getPaginationPageValue,
   getProviderOptions,
   reconcileConnectionsPage,
-  getQuotaCache,
-  setQuotaCache,
-  QUOTA_CACHE_KEY,
   REFRESH_INTERVAL_MS,
   CLAUDE_REFRESH_INTERVAL_MS,
   DEPLETED_QUOTA_THRESHOLD,
@@ -61,11 +59,6 @@ const KIRO_METHOD_LABELS = {
 const AUTO_PING_SETTINGS_KEYS = {
   claude: "claudeAutoPing",
   codex: "codexAutoPing",
-};
-
-const AUTO_PING_TOOLTIPS = {
-  claude: "When your 5h quota runs out, auto-sends a request the moment it resets so a new window starts right away.",
-  codex: "Auto-starts the next 5h Codex window after reset by sending a tiny request. Consumes a small amount of quota.",
 };
 
 function kiroMethodLabel(conn) {
@@ -165,7 +158,6 @@ export default function ProviderLimits() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [autoPingConfigs, setAutoPingConfigs] = useState({ claude: {}, codex: {} });
   const [scheduleConnection, setScheduleConnection] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(null);
   const [hasHydratedAutoRefresh, setHasHydratedAutoRefresh] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [countdown, setCountdown] = useState(60);
@@ -264,7 +256,7 @@ export default function ProviderLimits() {
         return [];
       }
     },
-    [accountFilter, expiringFirst, page, pageSize, providerFilter],
+    [accountFilter, page, pageSize, providerFilter],
   );
 
   // Fetch quota for a specific connection
@@ -306,7 +298,6 @@ export default function ProviderLimits() {
             ...prev,
             [connectionId]: quotaEntry,
           }));
-          setQuotaCache(connectionId, quotaEntry);
           return;
         }
 
@@ -330,7 +321,6 @@ export default function ProviderLimits() {
         ...prev,
         [connectionId]: quotaEntry,
       }));
-      setQuotaCache(connectionId, quotaEntry);
     } catch (error) {
       console.error(
         `[ProviderLimits] Error fetching quota for ${provider} (${connectionId}):`,
@@ -349,7 +339,6 @@ export default function ProviderLimits() {
   const refreshProvider = useCallback(
     async (connectionId, provider) => {
       await fetchQuota(connectionId, provider, { force: true });
-      setLastUpdated(new Date());
     },
     [fetchQuota],
   );
@@ -376,7 +365,6 @@ export default function ProviderLimits() {
         }
 
         await fetchQuota(connectionId, provider, { force: true });
-        setLastUpdated(new Date());
       } catch (error) {
         setErrors((prev) => ({ ...prev, [connectionId]: error.message || "Failed to reset limit" }));
       } finally {
@@ -434,21 +422,6 @@ export default function ProviderLimits() {
             return next;
           });
 
-          if (typeof window !== "undefined") {
-            try {
-              const cache = getQuotaCache();
-              if (cache[id]) {
-                delete cache[id];
-                window.localStorage.setItem(
-                  QUOTA_CACHE_KEY,
-                  JSON.stringify(cache),
-                );
-              }
-            } catch (e) {
-              console.error("Error deleting cache entry:", e);
-            }
-          }
-
           await reconcileConnectionsPage(fetchConnections, page);
         }
       } catch (error) {
@@ -470,10 +443,6 @@ export default function ProviderLimits() {
           body: JSON.stringify({ isActive }),
         });
         if (res.ok) {
-          setQuotaData((prev) => {
-            const next = { ...prev };
-            return next;
-          });
           await reconcileConnectionsPage(fetchConnections, page);
         }
       } catch (error) {
@@ -535,13 +504,18 @@ export default function ProviderLimits() {
     // Throttle Claude: poll its quota every Nth auto-tick (manual force bypasses)
     const tick = (tickCountRef.current += 1);
     const claudeEvery = Math.round(CLAUDE_REFRESH_INTERVAL_MS / REFRESH_INTERVAL_MS);
-    const shouldFetch = (conn) =>
-      force || conn.provider !== "claude" || tick % claudeEvery === 0;
 
     try {
       const visibleConnections = await fetchConnections(page);
+      const targets = selectQuotaRefreshTargets(visibleConnections, {
+        force,
+        tick,
+        claudeEvery,
+      });
 
-      setLoading(buildLoadingState(visibleConnections));
+      // Only the connections that are actually fetched may show a spinner —
+      // a throttled one would otherwise spin until its next poll.
+      setLoading(buildLoadingState(targets));
       setErrors((prev) =>
         filterQuotaStateByConnections(prev, visibleConnections),
       );
@@ -550,12 +524,8 @@ export default function ProviderLimits() {
       );
 
       await Promise.all(
-        visibleConnections
-          .filter(shouldFetch)
-          .map((conn) => fetchQuota(conn.id, conn.provider)),
+        targets.map((conn) => fetchQuota(conn.id, conn.provider)),
       );
-
-      setLastUpdated(new Date());
     } catch (error) {
       console.error("Error refreshing all providers:", error);
     } finally {
@@ -581,7 +551,6 @@ export default function ProviderLimits() {
       await Promise.all(
         visibleConnections.map((conn) => fetchQuota(conn.id, conn.provider)),
       );
-      setLastUpdated(new Date());
     };
 
     initializeData();
@@ -765,7 +734,17 @@ export default function ProviderLimits() {
           countdownRef.current = null;
         }
       } else if (autoRefresh && hasHydratedAutoRefresh) {
-        // Resume auto-refresh when tab becomes visible
+        // Resume auto-refresh when tab becomes visible. The auto-refresh
+        // effect may already have replaced the intervals in the meantime, so
+        // clear them first — otherwise two pollers and two countdowns run.
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+        if (countdownRef.current) {
+          clearInterval(countdownRef.current);
+          countdownRef.current = null;
+        }
         intervalRef.current = setInterval(() => refreshAll(), REFRESH_INTERVAL_MS);
         countdownRef.current = setInterval(() => {
           setCountdown((prev) => (prev <= 1 ? 60 : prev - 1));
@@ -1378,16 +1357,8 @@ export default function ProviderLimits() {
                     quotas={visibleQuotas}
                     compact
                     sortMode="default"
-                    showSortLabel={
-                      conn.provider === "codex" && quotaSortMode !== "default"
-                    }
                     onHideQuota={(quotaRow) => handleHideQuota(conn.provider, quotaRow)}
                   />
-                )}
-                {quota?.message && !error && !isLoading && (
-                  <p className="mt-2 px-1 text-[10px] leading-relaxed text-text-muted">
-                    {quota.message}
-                  </p>
                 )}
                 {hiddenQuotaRows.length > 0 && (
                   <div className="mt-2 flex min-w-0 items-center gap-1 border-t border-black/5 pt-2 text-[10px] text-text-muted dark:border-white/5">

@@ -1,7 +1,6 @@
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-export const QUOTA_CACHE_KEY = "quotaCacheData";
 export const REFRESH_INTERVAL_MS = 60000;
 // Claude usage/quota endpoint rate-limits; poll it less often than other providers
 export const CLAUDE_REFRESH_INTERVAL_MS = 600000;
@@ -94,6 +93,21 @@ export function sortVisibleConnections(
   });
 }
 
+// Claude's usage endpoint rate-limits, so its quota is only polled every Nth
+// auto-tick. The connections left out here are not fetched — they must not be
+// marked as loading either, or their card spins forever.
+export function selectQuotaRefreshTargets(
+  connections,
+  { force = false, tick = 1, claudeEvery = 1 } = {},
+) {
+  return connections.filter(
+    (connection) =>
+      force ||
+      connection.provider !== "claude" ||
+      tick % claudeEvery === 0,
+  );
+}
+
 export function buildLoadingState(connections) {
   const nextLoadingState = {};
   connections.forEach((connection) => {
@@ -145,10 +159,6 @@ export function getConnectionsEmptyMessage(totals, providerFilter, accountFilter
   };
 }
 
-export function sortRequestFromExpiringFirst(expiringFirst) {
-  return expiringFirst ? "expiring" : "priority";
-}
-
 export function getPageSizeLabel(pageSize, isCustomPageSize) {
   return isCustomPageSize ? `Custom: ${pageSize} / page` : `${pageSize} / page`;
 }
@@ -194,31 +204,6 @@ export async function reconcileConnectionsPage(fetchConnections, targetPage) {
   return await fetchConnections(targetPage);
 }
 
-export function getQuotaCache() {
-  if (typeof window === "undefined") return {};
-  try {
-    const cached = window.localStorage.getItem(QUOTA_CACHE_KEY);
-    return cached ? JSON.parse(cached) : {};
-  } catch (error) {
-    console.error("Error reading quota cache:", error);
-    return {};
-  }
-}
-
-export function setQuotaCache(connectionId, quotaEntry) {
-  if (typeof window === "undefined") return;
-  try {
-    const cache = getQuotaCache();
-    cache[connectionId] = {
-      ...quotaEntry,
-      cachedAt: new Date().toISOString(),
-    };
-    window.localStorage.setItem(QUOTA_CACHE_KEY, JSON.stringify(cache));
-  } catch (error) {
-    console.error("Error writing quota cache:", error);
-  }
-}
-
 /**
  * Format ISO date string to countdown format (inspired by vscode-antigravity-cockpit)
  * @param {string|Date} date - ISO date string or Date object
@@ -256,28 +241,6 @@ export function formatResetTime(date) {
   } catch (error) {
     return "-";
   }
-}
-
-/**
- * Get Tailwind color class based on percentage
- * @param {number} percentage - Remaining percentage (0-100)
- * @returns {string} Color name: "green" | "yellow" | "red"
- */
-export function getStatusColor(percentage) {
-  if (percentage > 70) return "green";
-  if (percentage >= 30) return "yellow";
-  return "red"; // 0-29% including 0% (out of quota) - show red
-}
-
-/**
- * Get status emoji based on percentage
- * @param {number} percentage - Remaining percentage (0-100)
- * @returns {string} Emoji: "🟢" | "🟡" | "🔴"
- */
-export function getStatusEmoji(percentage) {
-  if (percentage > 70) return "🟢";
-  if (percentage >= 30) return "🟡";
-  return "🔴"; // 0-29% including 0% (out of quota) - show red
 }
 
 /**
@@ -795,7 +758,6 @@ export function parseQuotaData(provider, data) {
       case "tiarina":
       case "xkiro":
       case "beatapi":
-      case "apinex":
         // Aggregator hosts share one adapter (open-sse/services/usage/aggregator.js);
         // its rows arrive already normalized — a wallet row is a currency
         // balance, rate-limit rows carry absolute used/total, and the

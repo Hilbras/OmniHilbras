@@ -7,6 +7,11 @@ import { ALIAS_TO_ID } from "@/shared/constants/providers";
 // Module cache: one /api/models fetch shared by every useModelCaps instance.
 let cache = null; // { byFull, byId } | null
 let inflight = null;
+// Bumped by every invalidation so a request that was already on the wire
+// cannot overwrite the fresher data with its stale answer.
+let generation = 0;
+// Mounted consumers wait for the next cache build.
+const subscribers = new Set();
 
 function buildMaps(models) {
   const byFull = {};
@@ -23,19 +28,35 @@ function buildMaps(models) {
 function loadModelCaps() {
   if (cache) return Promise.resolve(cache);
   if (inflight) return inflight;
-  inflight = fetch("/api/models")
+  const mine = ++generation;
+  const request = fetch("/api/models")
     .then(async (res) => {
       if (!res.ok) throw new Error(`models ${res.status}`);
       const data = await res.json();
-      cache = buildMaps(data.models);
-      return cache;
+      const maps = buildMaps(data.models);
+      // An invalidation started a newer request: its answer is the fresh one.
+      if (mine === generation) cache = maps;
+      return maps;
     })
     .catch(() => {
       // Keep null so a later mount can retry
       return { byFull: {}, byId: {} };
     })
-    .finally(() => { inflight = null; });
-  return inflight;
+    .finally(() => {
+      // Only clear our own request: an invalidation may have started a newer one.
+      if (inflight === request) inflight = null;
+    });
+  inflight = request;
+  return request;
+}
+
+// Custom models change at runtime: drop the shared cache and fetch again. The
+// in-flight request is dropped as well — it carries exactly the data the
+// invalidation is meant to replace.
+function invalidateModelCaps() {
+  cache = null;
+  inflight = null;
+  return loadModelCaps();
 }
 
 // Resolve caps from a "provider/model" string or a bare model id.
@@ -69,20 +90,15 @@ export function useModelCaps() {
     const sync = (maps) => {
       if (alive) { setByFull(maps.byFull); setById(maps.byId); }
     };
+    subscribers.add(sync);
     if (cache) {
       sync(cache);
     } else {
       loadModelCaps().then(sync);
     }
-    // Custom models change at runtime — drop the shared cache and refetch
-    const invalidate = () => {
-      cache = null;
-      loadModelCaps().then(sync);
-    };
-    window.addEventListener("customModelChanged", invalidate);
     return () => {
       alive = false;
-      window.removeEventListener("customModelChanged", invalidate);
+      subscribers.delete(sync);
     };
   }, []);
 
@@ -92,4 +108,15 @@ export function useModelCaps() {
   );
 
   return { getCaps };
+}
+
+// The cache lives as long as the session, so the invalidation listener is
+// registered at module scope: a "customModelChanged" event fired while no
+// panel is mounted must still drop the cached capabilities.
+if (typeof window !== "undefined") {
+  window.addEventListener("customModelChanged", () => {
+    invalidateModelCaps().then((maps) => {
+      for (const sync of subscribers) sync(maps);
+    });
+  });
 }

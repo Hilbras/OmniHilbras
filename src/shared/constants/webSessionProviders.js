@@ -241,11 +241,6 @@ export const WEB_SESSION_PROVIDERS = {
   },
 };
 
-/** The provider ids that connect by signing in rather than by pasting an API key. */
-export function webSessionProviderIds() {
-  return Object.keys(WEB_SESSION_PROVIDERS);
-}
-
 export function webSessionDescriptor(providerId) {
   return WEB_SESSION_PROVIDERS[providerId];
 }

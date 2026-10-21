@@ -17,13 +17,12 @@ export default function JcodeToolCard({
   apiKeys,
   activeProviders,
   cloudEnabled,
-  initialStatus,
   tunnelEnabled,
   tunnelPublicUrl,
   tailscaleEnabled,
   tailscaleUrl,
 }) {
-  const [jcodeStatus, setJcodeStatus] = useState(initialStatus || null);
+  const [jcodeStatus, setJcodeStatus] = useState(null);
   const [checkingJcode, setCheckingJcode] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -54,9 +53,6 @@ export default function JcodeToolCard({
     }
   }, [apiKeys, selectedApiKey]);
 
-  useEffect(() => {
-    if (initialStatus) setJcodeStatus(initialStatus);
-  }, [initialStatus]);
 
   useEffect(() => {
     if (isExpanded) {

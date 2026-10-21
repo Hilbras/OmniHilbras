@@ -17,31 +17,21 @@ export default function GenericCliToolCard({
   apiKeys,
   activeProviders = [],
   cloudEnabled,
-  initialStatus,
   tunnelEnabled,
   tunnelPublicUrl,
   tailscaleEnabled,
   tailscaleUrl,
+  cloudUrl,
 }) {
-  const [status, setStatus] = useState(() => initialStatus || null);
+  const [status, setStatus] = useState(null);
   const [checking, setChecking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [message, setMessage] = useState(null);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
   const [selectedApiKey, setSelectedApiKey] = useState(() => apiKeys?.[0]?.key || "");
-  const [selectedModel, setSelectedModel] = useState(() => {
-    const cfg = initialStatus?.config;
-    return cfg?.model || cfg?.openai?.model || cfg?.providers?.["omnihilbras"]?.models?.[0]?.id || "";
-  });
-  const [selectedModels, setSelectedModels] = useState(() => {
-    const cfg = initialStatus?.config;
-    const list = cfg?.providers?.["omnihilbras"]?.models;
-    if (Array.isArray(list) && list.length > 0) {
-      return list.map((m) => (typeof m === "string" ? m : m.id));
-    }
-    return [];
-  });
+  const [selectedModel, setSelectedModel] = useState("");
+  const [selectedModels, setSelectedModels] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [showManualConfigModal, setShowManualConfigModal] = useState(false);
   const [customBaseUrl, setCustomBaseUrl] = useState("");
@@ -50,7 +40,7 @@ export default function GenericCliToolCard({
 
   useEffect(() => {
     let active = true;
-    if (isExpanded && !initialStatus) {
+    if (isExpanded) {
       fetch(endpointUrl)
         .then((res) => res.json())
         .then((data) => {
@@ -76,7 +66,7 @@ export default function GenericCliToolCard({
     return () => {
       active = false;
     };
-  }, [isExpanded, initialStatus, endpointUrl, tool.id]);
+  }, [isExpanded, endpointUrl, tool.id]);
 
   const checkStatus = async () => {
     setChecking(true);
@@ -122,10 +112,11 @@ export default function GenericCliToolCard({
   const getConfigStatus = () => {
     if (!status?.installed) return null;
     if (!status.hasOmniHilbras) return "not_configured";
-    if (currentBaseUrl && matchKnownEndpoint(currentBaseUrl, { tunnelPublicUrl, tailscaleUrl })) {
+    if (currentBaseUrl && matchKnownEndpoint(currentBaseUrl, { tunnelPublicUrl, tailscaleUrl, cloudUrl })) {
       return "configured";
     }
-    return "configured";
+    // Configured, but pointing at an endpoint that is none of ours.
+    return "other";
   };
 
   const configStatus = getConfigStatus();

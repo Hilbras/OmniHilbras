@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { Badge, Button, Card, CardSkeleton, Input, Modal, Toggle, ConfirmModal } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
+import { proxyPoolDedupeKey } from "./proxyPoolKeys";
 
 function getStatusVariant(status) {
   if (status === "active") return "success";
@@ -551,7 +552,7 @@ export default function ProxyPoolsPage() {
     setImporting(true);
     try {
       const existingKeys = new Set(
-        proxyPools.map((pool) => `${(pool.proxyUrl || "").trim()}|||${(pool.noProxy || "").trim()}`)
+        proxyPools.map((pool) => proxyPoolDedupeKey(pool.proxyUrl, pool.noProxy))
       );
 
       let created = 0;
@@ -559,7 +560,7 @@ export default function ProxyPoolsPage() {
       let failed = 0;
 
       for (const entry of parsedEntries) {
-        const dedupeKey = `${entry.proxyUrl}|||`;
+        const dedupeKey = proxyPoolDedupeKey(entry.proxyUrl);
         if (existingKeys.has(dedupeKey)) {
           skipped += 1;
           continue;
@@ -948,7 +949,7 @@ export default function ProxyPoolsPage() {
             value={cloudflareForm.apiToken}
             onChange={(e) => setCloudflareForm((prev) => ({ ...prev, apiToken: e.target.value }))}
             placeholder="your-cloudflare-api-token"
-            hint={<>Requires "Workers Scripts: Edit" permission. <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Get token →</a></>}
+            hint={<>Requires &quot;Workers Scripts: Edit&quot; permission. <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Get token →</a></>}
             type="password"
           />
           <Input

@@ -5,7 +5,7 @@ import { Card } from "@/shared/components";
 import { MEDIA_PROVIDER_KINDS, getProviderAlias, resolveProviderId } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
-import { Row, KIND_EXAMPLE_CONFIG } from "./exampleShared";
+import { Row, KIND_EXAMPLE_CONFIG, UNAVAILABLE_ENDPOINTS } from "./exampleShared";
 
 const CLOUDFLARE_TEST_IMAGE_URL = "https://pub-1fb693cb11cc46b2b2f656f51e015a2c.r2.dev/dog.png";
 const CLOUDFLARE_TEST_MASK_URL = "https://pub-1fb693cb11cc46b2b2f656f51e015a2c.r2.dev/dog-mask.png";
@@ -86,8 +86,11 @@ export function GenericExampleCard({ providerId, kind }) {
       .then((r) => r.json())
       .then((d) => { if (d.publicUrl) setTunnelEndpoint(d.publicUrl); })
       .catch(() => {});
-    // Load active connections of this provider for pinning
-    fetch("/api/providers/client")
+    // Load active connections of this provider for pinning. The generic
+    // route returns every connection — /api/providers/client filters to the
+    // usage-capable ones, which left this row empty on the media pages that
+    // need it.
+    fetch("/api/providers")
       .then((r) => r.json())
       .then((d) => {
         const conns = (d.connections || []).filter((c) => c.provider === providerId && c.isActive !== false);
@@ -101,6 +104,9 @@ export function GenericExampleCard({ providerId, kind }) {
 
   const endpoint = useTunnel ? tunnelEndpoint : localEndpoint;
   const apiPath = kindConfig.endpoint.path;
+  // Some kinds declare an endpoint this gateway does not serve — the card
+  // says so rather than running a request that can only answer 404.
+  const unavailableEndpoint = UNAVAILABLE_ENDPOINTS[apiPath] || null;
   // webSearch/webFetch: use safeProviderAlias only. Other kinds: append model when present.
   const modelFull = !needsModel
     ? safeProviderAlias
@@ -147,6 +153,7 @@ export function GenericExampleCard({ providerId, kind }) {
 
   const handleRun = async () => {
     if (!input.trim() || !modelFull) return;
+    if (unavailableEndpoint) return;
     setRunning(true);
     setError("");
     setResult(null);
@@ -294,6 +301,14 @@ export function GenericExampleCard({ providerId, kind }) {
             {apiKey ? `${apiKey.slice(0, 8)}${"\u2022".repeat(Math.min(20, Math.max(0, apiKey.length - 8)))}` : <span className="text-text-muted italic">No key configured</span>}
           </span>
         </Row>
+
+        {/* Endpoint not served by this gateway */}
+        {unavailableEndpoint && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 break-words">
+            {unavailableEndpoint} <code className="font-mono">{apiPath}</code> cannot be called —
+            this example is not runnable.
+          </p>
+        )}
 
         {/* Connection picker - only show when 2+ connections (or any with email) */}
         {connections.length > 0 && (
@@ -496,7 +511,7 @@ export function GenericExampleCard({ providerId, kind }) {
               </button>
             <button
               onClick={handleRun}
-              disabled={running || !input.trim() || !modelFull}
+              disabled={running || !input.trim() || !modelFull || !!unavailableEndpoint}
               className="flex w-full sm:w-auto items-center justify-center gap-1.5 px-3 py-1 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
                 <span className="material-symbols-outlined text-[14px]" style={running ? { animation: "spin 1s linear infinite" } : undefined}>

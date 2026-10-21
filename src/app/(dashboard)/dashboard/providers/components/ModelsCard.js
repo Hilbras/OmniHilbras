@@ -6,9 +6,10 @@ import { Card, Button, Modal } from "@/shared/components";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getProviderAlias } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import ModelAliasEditor from "./ModelAliasEditor";
 
 // ── ModelRow ───────────────────────────────────────────────────
-export function ModelRow({ model, fullModel, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting }) {
+function ModelRow({ model, fullModel, alias, copied, onCopy, onSetAlias, onClearAlias, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting }) {
   const borderColor = testStatus === "ok" ? "border-green-500/40" : testStatus === "error" ? "border-red-500/40" : "border-border";
   const iconColor = testStatus === "ok" ? "#22c55e" : testStatus === "error" ? "#ef4444" : undefined;
 
@@ -21,7 +22,20 @@ export function ModelRow({ model, fullModel, copied, onCopy, testStatus, isCusto
         <div className="flex flex-col gap-1">
           <code className="text-xs text-text-muted font-mono bg-sidebar px-1.5 py-0.5 rounded">{fullModel}</code>
           {model.name && <span className="text-[9px] text-text-muted/70 italic pl-1">{model.name}</span>}
+          {alias && (
+            <span className="w-fit rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[9px] text-muted">
+              alias: {alias}
+            </span>
+          )}
         </div>
+        {onSetAlias && (
+          <ModelAliasEditor
+            alias={alias}
+            onSetAlias={onSetAlias}
+            onClearAlias={onClearAlias}
+            size="sm"
+          />
+        )}
         {onTest && (
           <div className="relative group/btn">
             <button onClick={onTest} disabled={isTesting} className={`p-0.5 hover:bg-sidebar rounded text-text-muted hover:text-primary transition-opacity ${isTesting ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
@@ -56,8 +70,11 @@ export function ModelRow({ model, fullModel, copied, onCopy, testStatus, isCusto
 ModelRow.propTypes = {
   model: PropTypes.shape({ id: PropTypes.string.isRequired }).isRequired,
   fullModel: PropTypes.string.isRequired,
+  alias: PropTypes.string,
   copied: PropTypes.string,
   onCopy: PropTypes.func.isRequired,
+  onSetAlias: PropTypes.func,
+  onClearAlias: PropTypes.func,
   testStatus: PropTypes.oneOf(["ok", "error"]),
   isCustom: PropTypes.bool,
   isFree: PropTypes.bool,
@@ -236,6 +253,7 @@ export default function ModelsCard({ providerId, kindFilter, providerAliasOverri
                 copied={copied}
                 onCopy={copy}
                 onSetAlias={(alias) => handleSetAlias(model.id, alias)}
+                onClearAlias={existingAlias ? () => handleDeleteAlias(existingAlias) : undefined}
                 onDeleteAlias={() => handleDeleteAlias(existingAlias)}
                 testStatus={modelTestResults[model.id]}
                 onTest={() => handleTestModel(model.id)}
@@ -245,21 +263,27 @@ export default function ModelsCard({ providerId, kindFilter, providerAliasOverri
             );
           })}
 
-          {myCustomModels.map((model) => (
-            <ModelRow
-              key={`${model.id}-${model.type}`}
-              model={{ id: model.id, name: model.name }}
-              fullModel={`${providerAlias}/${model.id}`}
-              copied={copied}
-              onCopy={copy}
-              onSetAlias={() => {}}
-              onDeleteAlias={() => handleDeleteCustomModel(model.id)}
-              testStatus={modelTestResults[model.id]}
-              onTest={() => handleTestModel(model.id)}
-              isTesting={testingModelId === model.id}
-              isCustom
-            />
-          ))}
+          {myCustomModels.map((model) => {
+            const fullModel = `${providerAlias}/${model.id}`;
+            const existingAlias = Object.entries(modelAliases).find(([, m]) => m === fullModel)?.[0];
+            return (
+              <ModelRow
+                key={`${model.id}-${model.type}`}
+                model={{ id: model.id, name: model.name }}
+                fullModel={fullModel}
+                alias={existingAlias}
+                copied={copied}
+                onCopy={copy}
+                onSetAlias={(alias) => handleSetAlias(model.id, alias)}
+                onClearAlias={existingAlias ? () => handleDeleteAlias(existingAlias) : undefined}
+                onDeleteAlias={() => handleDeleteCustomModel(model.id)}
+                testStatus={modelTestResults[model.id]}
+                onTest={() => handleTestModel(model.id)}
+                isTesting={testingModelId === model.id}
+                isCustom
+              />
+            );
+          })}
 
           <button
             onClick={() => setShowAddCustomModel(true)}

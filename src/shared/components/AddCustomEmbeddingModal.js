@@ -19,10 +19,12 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
   const [checkModelId, setCheckModelId] = useState("");
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!isOpen) return;
     setValidationResult(null);
+    setError(null);
     setCheckKey("");
     setCheckModelId("");
     if (isEdit) {
@@ -39,6 +41,7 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
   const handleSubmit = async () => {
     if (!formData.name.trim() || !formData.prefix.trim() || !formData.baseUrl.trim()) return;
     setSubmitting(true);
+    setError(null);
     try {
       const url = isEdit ? `/api/provider-nodes/${node.id}` : "/api/provider-nodes";
       const method = isEdit ? "PUT" : "POST";
@@ -58,9 +61,13 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
       if (res.ok) {
         if (isEdit) onSaved?.(data.node);
         else onCreated?.(data.node);
+      } else {
+        // A rejected save must not look like nothing happened.
+        setError(data?.error || "The provider was not saved.");
       }
-    } catch (error) {
-      console.log("Error saving custom embedding node:", error);
+    } catch (err) {
+      console.log("Error saving custom embedding node:", err);
+      setError("The provider was not saved. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -154,6 +161,9 @@ export default function AddCustomEmbeddingModal({ isOpen, onClose, onCreated, on
           </Button>
           {renderValidationResult()}
         </div>
+        {error && (
+          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        )}
         <div className="flex gap-2">
           <Button
             onClick={handleSubmit}
