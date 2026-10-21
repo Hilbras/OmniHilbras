@@ -4,6 +4,7 @@ import { useState } from "react";
 import PropTypes from "prop-types";
 import { Modal, Button } from "@/shared/components";
 import { WEB_SESSION_PROVIDERS } from "@/shared/constants/webSessionProviders";
+import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 
 /**
  * Web-session connect dialog.
@@ -25,6 +26,10 @@ export default function WebSessionConnectModal({ isOpen, providerId, onSuccess, 
   const [checked, setChecked] = useState(null);
 
   const descriptor = providerId ? WEB_SESSION_PROVIDERS[providerId] || null : null;
+  // The repo's own copy hook: it falls back to execCommand when the clipboard
+  // API is unavailable (an insecure origin), which is exactly the case a
+  // dashboard served over plain http on a LAN hits.
+  const { copied, copy } = useCopyToClipboard();
 
   const reset = () => {
     setCredential("");
@@ -109,9 +114,14 @@ export default function WebSessionConnectModal({ isOpen, providerId, onSuccess, 
               </p>
               <p className="text-text-muted">{step.body}</p>
               {step.snippet && (
-                <code className="block bg-sidebar px-2 py-1 rounded text-[11px] text-text-primary overflow-x-auto">
-                  {step.snippet}
-                </code>
+                <button
+                  type="button"
+                  onClick={() => copy(step.snippet, step.snippet)}
+                  title="Copy this line, then paste it in the browser console"
+                  className="block w-full overflow-x-auto rounded border border-line bg-sidebar px-2 py-1 text-left font-mono text-[11px] text-text-primary transition-colors hover:border-gold/50"
+                >
+                  {copied === step.snippet ? "Copied — paste it in the console" : step.snippet}
+                </button>
               )}
             </div>
           ))}

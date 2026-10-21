@@ -6,10 +6,11 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, TokenHarborAuthModal, WebSessionConnectModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, TokenHarborAuthModal, WebSessionConnectModal, ProviderMiniChat, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, WEB_COOKIE_SESSION_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS, getModelsFetcher } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
+import { useNotificationStore } from "@/store/notificationStore";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
@@ -91,7 +92,10 @@ export default function ProviderDetailPage() {
   const [modelsTestError, setModelsTestError] = useState("");
   const [testingModelIds, setTestingModelIds] = useState(() => new Set());
   const [modelQuery, setModelQuery] = useState("");
+  const notify = useNotificationStore();
   const [modelResultFilter, setModelResultFilter] = useState("all");
+  const [testingAllModels, setTestingAllModels] = useState(false);
+  const [testAllProgress, setTestAllProgress] = useState(null);
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
   const [selectedConnectionIds, setSelectedConnectionIds] = useState([]);
   const [bulkProxyPoolId, setBulkProxyPoolId] = useState("__none__");
@@ -203,13 +207,26 @@ export default function ProviderDetailPage() {
   const modelsFetcher = useMemo(() => getModelsFetcher(providerId), [providerId]);
   const showBuiltins = providerId === "opencode" || !modelsFetcher;
   const hasLive = (providerId === "cursor" || providerId === "zed") && liveModels.length > 0;
-  const models = hasLive ? liveModels : showBuiltins ? staticModels : [];
+  // Memoized so the lists derived from it (the testable model ids) do not
+  // change identity on every render.
+  const models = useMemo(
+    () => (hasLive ? liveModels : showBuiltins ? staticModels : []),
+    [hasLive, showBuiltins, staticModels, liveModels],
+  );
   const providerAlias = getProviderAlias(providerId);
   
   const isOpenAICompatible = isOpenAICompatibleProvider(providerId);
   const isAnthropicCompatible = isAnthropicCompatibleProvider(providerId);
   const isCompatible = isOpenAICompatible || isAnthropicCompatible;
   const isWebSessionProvider = !!WEB_COOKIE_SESSION_PROVIDERS[providerId];
+  // The provider's testable models (LLM only — the media kinds have their own
+  // pages). "Test all" works on this list.
+  const testableModelIds = useMemo(
+    () => [...models, ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id))]
+      .filter((m) => { const k = getModelKind(m); return !k || k === "llm"; })
+      .map((m) => m.id),
+    [models, kiloFreeModels],
+  );
   const hasDualAuthModes = !isCompatible && isOAuth && supportsApiKeyAuth;
   const oauthConnectionLabel =
     providerId === "xai" ? "Grok Build OAuth"
@@ -1283,6 +1300,77 @@ export default function ProviderDetailPage() {
     }
   };
 
+  /**
+   * Test every model of this provider in one run.
+   *
+   * The models answer at very different speeds — a reasoning model can take
+   * twenty seconds and a small one a second — so the results stream in and
+   * each tile is painted as it lands. A summary at the end says how many
+   * passed; the per-model error stays on the tile, because "the provider said
+   * no balance" is more useful than a count.
+   */
+  const handleTestAllModels = async () => {
+    if (testingAllModels) return;
+    const ids = testableModelIds;
+    if (ids.length === 0) return;
+    setTestingAllModels(true);
+    setTestAllProgress({ done: 0, total: ids.length });
+    setModelsTestError("");
+    try {
+      const res = await fetch("/api/models/test-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          models: ids.map((id) => `${providerStorageAlias}/${id}`),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setModelsTestError(data.error || "Batch test failed");
+        return;
+      }
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let summary = null;
+      while (reader) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          let payload;
+          try {
+            payload = JSON.parse(trimmed);
+          } catch {
+            continue;
+          }
+          if (payload.done) {
+            summary = payload.summary;
+            continue;
+          }
+          const modelId = String(payload.model || "").split("/").pop();
+          if (!modelId) continue;
+          setModelTestResults((prev) => ({ ...prev, [modelId]: payload.ok ? "ok" : "error" }));
+          setTestAllProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
+        }
+      }
+      if (summary) {
+        const { passed, failed, total } = summary;
+        if (failed === 0) notify.success(`All ${total} models passed`);
+        else notify.warning(`${passed}/${total} models passed, ${failed} failed`);
+      }
+    } catch (error) {
+      setModelsTestError(error?.message || "Batch test failed");
+    } finally {
+      setTestingAllModels(false);
+      setTestAllProgress(null);
+    }
+  };
+
   const renderModelsSection = () => {
     if (isCompatible) {
       return (
@@ -1973,6 +2061,25 @@ export default function ProviderDetailPage() {
                 {suggestedLoading ? "Fetching…" : "Fetch models"}
               </Button>
             )}
+            {!isCompatible && testableModelIds.length > 0 && (
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={testingAllModels ? "progress_activity" : "bolt"}
+                onClick={() => void handleTestAllModels()}
+                disabled={testingAllModels || (connections.length === 0 && !isFreeNoAuth)}
+                title={
+                  connections.length === 0 && !isFreeNoAuth
+                    ? "Add a connection first — a model test needs a credential"
+                    : `Send one real request to each of the ${testableModelIds.length} models`
+                }
+                className={testingAllModels ? "[&_.material-symbols-outlined]:animate-spin" : ""}
+              >
+                {testingAllModels
+                  ? `Testing ${testAllProgress ? `${testAllProgress.done}/${testAllProgress.total}` : "…"}`
+                  : "Test all"}
+              </Button>
+            )}
             {providerThinkingLevels && (
               <select
                 value={thinkingMode}
@@ -2079,6 +2186,22 @@ export default function ProviderDetailPage() {
         )}
         {renderModelsSection()}
       </Card>
+
+      {/* A conversation with one of this provider's models. Every other control
+          on the page reports *about* the provider; this one proves the thing
+          that matters — whether the model is any good for what the user is
+          about to do. */}
+      {!isCompatible && testableModelIds.length > 0 && (
+        <Card>
+          <ProviderMiniChat
+            providerId={providerId}
+            providerName={providerInfo?.name || providerId}
+            models={testableModelIds}
+            defaultModel={testableModelIds[0]}
+            connections={connections}
+          />
+        </Card>
+      )}
 
       {bulkActionModal}
 

@@ -44,6 +44,11 @@ export const WEB_SESSION_PROVIDERS = {
         label: "Or the Application panel",
         body: "F12 → Application → Storage → Cookies → https://chatgpt.com. Copy the whole value of `__Secure-next-auth.session-token`. If it is split into numbered rows, join them in order with no separator.",
       },
+      {
+        label: "Or run this in the console",
+        body: "Copies what the page can see and tells you whether you are signed in. The session cookie itself is HttpOnly, so **no** console command can read it — the line says so and points at the Network tab.",
+        snippet: "(() => { const c = document.cookie.split('; ').map(s => s.trim()).filter(Boolean); console.log(c.some(x => x.startsWith('__Secure-next-auth.callback-url=')) ? 'You are signed in. The session cookie is HttpOnly, so the console cannot copy it — use the Network tab (F12 → Network → reload → a request to chatgpt.com → Request Headers → Cookie) and copy that whole line.' : 'No sign-in cookie here — sign in at chatgpt.com first.'); copy(c.join('; ')); })()",
+      },
     ],
     paste: {
       field: "storageState",
@@ -70,7 +75,12 @@ export const WEB_SESSION_PROVIDERS = {
     extractionSteps: [
       {
         label: "Copy the auth cookie",
-        body: "Sign in at chat.qwen.ai. Then: F12 → Application → Storage → Cookies → **https://auth.qwen.ai**, and copy the cookies for that host. If you would rather use the Network tab, reload, click a request to auth.qwen.ai, and copy its **Request Headers → Cookie** value.",
+        body: "Sign in at chat.qwen.ai. Then: F12 → Application → Storage → Cookies → **https://auth.qwen.ai**, and copy the cookies for that host. If you would rather use the Network tab, reload, click a request to auth.qwen.ai, and copy its **Request Headers → Cookie** value. The session cookie is HttpOnly, so no console command can read it — the Application panel is the way.",
+      },
+      {
+        label: "Or run this on the auth page",
+        body: "Open **auth.qwen.ai** (the origin the cookie belongs to) and run this there. It copies the cookies that origin can see and says whether the session cookie is among them.",
+        snippet: "(() => { const c = document.cookie.split('; ').map(s => s.trim()).filter(Boolean); console.log(c.length ? 'Copied the cookies this origin can see. If the check still refuses them, the session cookie is HttpOnly — copy it from F12 → Application → Storage → Cookies → https://auth.qwen.ai.' : 'Nothing readable here — the session cookie is HttpOnly. Copy it from F12 → Application → Storage → Cookies → https://auth.qwen.ai.'); copy(c.join('; ')); })()",
       },
       {
         label: "What happens next",
@@ -174,6 +184,11 @@ export const WEB_SESSION_PROVIDERS = {
         body: "F12 → Network → reload → click any request to gemini.google.com → Headers → Request Headers → Cookie. Copy that entire line.",
       },
       {
+        label: "Or run this in the console",
+        body: "Copies the cookies the page can see. `__Secure-1PSID` is HttpOnly, so the console cannot read it — the line says so and points at the Application panel.",
+        snippet: "(() => { const c = document.cookie.split('; ').map(s => s.trim()).filter(Boolean); console.log(c.some(x => x.startsWith('__Secure-1PSID')) ? 'Copied. If the check still refuses them, __Secure-1PSID is HttpOnly — copy it from F12 → Application → Storage → Cookies → https://gemini.google.com.' : '__Secure-1PSID is HttpOnly — the console cannot read it. Copy it from F12 → Application → Storage → Cookies → https://gemini.google.com.'); copy(c.join('; ')); })()",
+      },
+      {
         label: "What happens next",
         body: "Check opens gemini.google.com in a browser on this machine and reports whether the session is signed in — cookie presence and expiry are local checks and neither can tell a working session from one Google has revoked. Nothing is stored unless you press Save. A turn is sent by driving the page: it is slower than an API and there is a browser in the path by design.",
       },
@@ -208,6 +223,7 @@ export const WEB_SESSION_PROVIDERS = {
       {
         label: "If you would rather send your browser session",
         body: "With duck.ai open: F12 → Network → reload → click any request to duck.ai → Headers → Request Headers → Cookie. Copy that entire line and paste it here. OmniHilbras does not read it — the service does not either — so it cannot tell you whether the cookie is valid, and Check will say so rather than claiming otherwise.",
+        snippet: "copy(document.cookie)",
       },
       {
         label: "What happens next",

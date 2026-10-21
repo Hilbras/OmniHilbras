@@ -31,6 +31,7 @@ export { default as ZedAuthModal } from "./ZedAuthModal";
 export { default as XiaomiMimoAuthModal } from "./XiaomiMimoAuthModal";
 export { default as IFlowCookieModal } from "./IFlowCookieModal";
 export { default as WebSessionConnectModal } from "./WebSessionConnectModal";
+export { default as ProviderMiniChat } from "./ProviderMiniChat";
 export { default as GitLabAuthModal } from "./GitLabAuthModal";
 export { default as TokenHarborAuthModal } from "./TokenHarborAuthModal";
 export { default as EditConnectionModal } from "./EditConnectionModal";
