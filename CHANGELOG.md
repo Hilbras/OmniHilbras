@@ -1,3 +1,24 @@
+# v2.9.0 (2026-10-21)
+
+## Security
+- **Store**: the secret store is now `0600` (and `0700` for its directories) — the SQLite file holds every provider credential in plaintext, and it used to be world-readable
+- **Logs**: the request logger and the MITM dumps mask the credential headers again (`authorization`, `x-api-key`, `cookie`, anything matching `*secret*` / `*token*`); the dump directory is no longer world-readable
+- **Providers**: the provider list no longer leaks `providerSpecificData` — it is reduced to an allow-list of safe fields (ids, endpoints, regions, flags), so a credential stored there cannot leak by default
+- **Export**: the database export validates the CLI token *value* instead of trusting the header's presence, and the well-known default password no longer unlocks the re-auth
+- **Keys**: API keys are hashed at rest (per-install pepper, dual-read window for keys created before the migration); the database keeps a display form, the usage tables keep a fingerprint, and the plaintext is never stored again
+- **Keys**: new API keys carry 144 bits of entropy from `crypto.randomBytes` instead of ~31 bits from `Math.random()`
+- **Limits**: `/v1` is rate-limited per key (requests/minute and tokens/minute) with a per-key override in the dashboard and a global kill-switch; in-flight requests are capped per key and globally; one request cannot fan out into an unbounded number of upstream calls; `usageHistory` is pruned on a schedule
+
+## Performance
+- **Request path**: the capability lookup is memoised (262–333 µs → ~18 µs) and the glob patterns are compiled once
+- **Request path**: the settings, the pricing, the API-key row, the resolved allow list, the model resolution and the connection list are cached, each with an explicit invalidation point
+- **Request path**: account selection is no longer serialized behind a process-wide mutex — the lock is per provider and covers only the pick
+- **Usage**: the usage write is batched and the daily roll-up is serialised once per batch instead of once per request (42.9 ms → 0.18 ms per request on a busy day)
+
+## Fixes
+- **Upstream**: an absolute deadline, a real time-to-first-token budget and a body-size cap now bound a provider that goes quiet or floods the gateway; the client's hang-up cancels the upstream call on the non-streaming path too
+- **Models**: the memoised capabilities follow the synced catalog instead of serving a detached reader's answer
+
 # v0.5.104 (2026-10-15)
 
 ## Features
