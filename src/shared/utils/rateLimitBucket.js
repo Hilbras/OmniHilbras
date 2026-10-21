@@ -13,7 +13,17 @@ import { createHash } from "node:crypto";
 
 const MINUTE_MS = 60_000;
 
-// identity → { requests: bucket, tokens: bucket }
+// A bucket that has not been touched for this long is dropped. A bucket that
+// has been idle for 15 minutes has refilled to full anyway (tokens accrue at
+// capacity/minute), so nothing is lost by forgetting it.
+const BUCKET_TTL_MS = 15 * 60_000;
+// How many identities the map holds at most. A client that rotates random keys
+// used to grow this map for the lifetime of the process; the cap keeps it
+// bounded. The least recently used identity goes first — an identity that was
+// evicted was idle, so its bucket was full anyway.
+const MAX_BUCKET_ENTRIES = 4096;
+
+// identity → { requests: bucket, tokens: bucket, lastSeen: number }
 const buckets = new Map();
 
 /**
@@ -43,9 +53,11 @@ function createBucket(capacity, tokens) {
 function getBucket(identity, kind, capacity) {
   let entry = buckets.get(identity);
   if (!entry) {
-    entry = { requests: null, tokens: null };
+    entry = { requests: null, tokens: null, lastSeen: Date.now() };
     buckets.set(identity, entry);
+    evictBuckets();
   }
+  entry.lastSeen = Date.now();
   const existing = entry[kind];
   if (!existing) {
     entry[kind] = createBucket(capacity, capacity);
@@ -58,6 +70,28 @@ function getBucket(identity, kind, capacity) {
     existing.lastRefill = Date.now();
   }
   return existing;
+}
+
+// Drop the buckets that were not touched for a while, and the ones that do
+// not fit any more. Called when a new identity appears: the map must not grow
+// with every key a client ever tried.
+function evictBuckets() {
+  const now = Date.now();
+  for (const [identity, entry] of buckets) {
+    if (now - (entry.lastSeen || 0) > BUCKET_TTL_MS) buckets.delete(identity);
+  }
+  while (buckets.size > MAX_BUCKET_ENTRIES) {
+    let oldestIdentity = null;
+    let oldestSeen = Infinity;
+    for (const [identity, entry] of buckets) {
+      if (entry.lastSeen < oldestSeen) {
+        oldestSeen = entry.lastSeen;
+        oldestIdentity = identity;
+      }
+    }
+    if (!oldestIdentity) break;
+    buckets.delete(oldestIdentity);
+  }
 }
 
 function refill(bucket, now) {
@@ -140,4 +174,9 @@ export function getBucketSnapshot(identity) {
 /** Drop all bucket state (tests, and a settings change that must not leak). */
 export function resetBuckets() {
   buckets.clear();
+}
+
+/** How many identities the bucket map holds (the bound, and the tests). */
+export function getBucketCount() {
+  return buckets.size;
 }

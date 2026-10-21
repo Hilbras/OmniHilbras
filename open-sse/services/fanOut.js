@@ -16,10 +16,13 @@ import { HTTP_STATUS } from "../config/runtimeConfig.js";
 /**
  * @param {number} limit - Max upstream calls allowed for one client request.
  *   A non-positive / non-finite limit means "unbounded".
+ * @param {Function} [onExhaust] - Called once when the budget runs out. The
+ *   app layer uses it to report the rejection: the budget is spent in the
+ *   handlers, so the limiter itself never sees the exhaustion.
  */
-export function createFanOutBudget(limit) {
+export function createFanOutBudget(limit, onExhaust = null) {
   const max = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : Infinity;
-  return { limit: max, used: 0, exhausted: false, labels: [] };
+  return { limit: max, used: 0, exhausted: false, labels: [], onExhaust };
 }
 
 /**
@@ -30,7 +33,15 @@ export function createFanOutBudget(limit) {
 export function consumeFanOutSlot(budget, label) {
   if (!budget) return true;
   if (budget.used >= budget.limit) {
-    budget.exhausted = true;
+    // The report fires once: several handlers can notice the exhaustion.
+    if (!budget.exhausted) {
+      budget.exhausted = true;
+      try {
+        budget.onExhaust?.();
+      } catch {
+        // Reporting must never break the request that ran out of budget.
+      }
+    }
     return false;
   }
   budget.used += 1;

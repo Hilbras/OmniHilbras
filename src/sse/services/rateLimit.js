@@ -30,6 +30,7 @@ import { getClientIp } from "@/lib/auth/loginLimiter.js";
 import { isLocalRequest } from "@/dashboardGuard.js";
 import { trackClientRequest, getClientRequestCounts } from "@/lib/usageDb.js";
 import { keyIdentity, ipIdentity, spendRequests, spendTokens } from "@/shared/utils/rateLimitBucket.js";
+import { recordSpend, recordRejection, getCounterList } from "@/shared/utils/rateLimitCounters.js";
 import { createFanOutBudget } from "open-sse/services/fanOut.js";
 import { errorResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
@@ -181,6 +182,35 @@ function concurrencyResponse(reason) {
 }
 
 /**
+ * Report what the limiter did.
+ *
+ * The counters must never affect the request: a broken counter must not turn
+ * into a rejected request. The limiter fails open, and so does the reporting.
+ */
+function safeCount(fn) {
+  try {
+    fn();
+  } catch {
+    /* the limiter fails open — and so does the reporting */
+  }
+}
+
+/**
+ * The scope of a request whose identity could not be resolved (the limiter
+ * threw before the key lookup finished): the hash of the presented key, or the
+ * peer IP. Never the key itself.
+ */
+function fallbackScope(request) {
+  try {
+    const apiKey = extractClientApiKey(request);
+    if (apiKey) return keyIdentity(apiKey);
+    return ipIdentity(getClientIp(request));
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
  * Decide whether a request may proceed, and take the resources it needs.
  * @returns {{response?: Response, ctx?: object, release?: Function}}
  */
@@ -195,11 +225,16 @@ async function admit(request) {
 
   const identity = await resolveClientIdentity(request);
   const limits = resolveLimits(rl, identity);
+  // What the limiter does is recorded, so an operator can see it: a rejection
+  // used to leave nothing but a console warning. The counters hold the scope
+  // and the key's id — never the key.
+  const counterMeta = { keyId: identity.keyId, keyName: identity.keyName };
 
   // The request bucket: one token per client request.
   const requestTokens = spendRequests(identity.bucket, limits.requestsPerMinute, 1);
   if (!requestTokens.allowed) {
     log.warn("RATELIMIT", `requests/min exceeded for ${identity.bucket}`);
+    safeCount(() => recordRejection(identity.scope, "requests", counterMeta));
     return { response: rateLimitedResponse("requests", requestTokens.retryAfterMs) };
   }
 
@@ -208,14 +243,18 @@ async function admit(request) {
   const tokenSpend = spendTokens(identity.bucket, limits.tokensPerMinute, estimatedTokens);
   if (!tokenSpend.allowed) {
     log.warn("RATELIMIT", `tokens/min exceeded for ${identity.bucket}`);
+    safeCount(() => recordRejection(identity.scope, "tokens", counterMeta));
     return { response: rateLimitedResponse("tokens", tokenSpend.retryAfterMs) };
   }
 
   const slot = acquireConcurrency(identity, limits);
   if (!slot.acquired) {
     log.warn("RATELIMIT", `concurrency cap reached (${slot.reason}) for ${identity.bucket}`);
+    safeCount(() => recordRejection(identity.scope, "concurrency", counterMeta));
     return { response: concurrencyResponse(slot.reason) };
   }
+
+  safeCount(() => recordSpend(identity.scope, { requests: 1, tokens: estimatedTokens, ...counterMeta }));
 
   return {
     ctx: {
@@ -223,9 +262,56 @@ async function admit(request) {
       limits,
       // One budget per client request: every upstream call it triggers spends
       // from it, so accounts x combo models x fusion panels stay bounded.
-      fanOutBudget: createFanOutBudget(rl.maxUpstreamCallsPerRequest),
+      // The exhaustion is reported from here: the budget is spent in the
+      // handlers, which the limiter never sees.
+      fanOutBudget: createFanOutBudget(rl.maxUpstreamCallsPerRequest, () => {
+        safeCount(() => recordRejection(identity.scope, "fanout", counterMeta));
+      }),
     },
     release: slot.release,
+  };
+}
+
+/**
+ * What the limiter has been doing, as the dashboard shows it.
+ *
+ * The counters hold what each identity spent in the last minute and how often
+ * it was turned away; the limits come from the settings and the per-key
+ * override, so the card can show "used / ceiling".
+ *
+ * @returns {Promise<object>}
+ */
+export async function getRateLimitStatus() {
+  const settings = await getSettings();
+  const rl = settings?.rateLimit || DEFAULTS;
+  const identities = getCounterList().map((counter) => {
+    const limits = resolveLimits(rl, { keyId: counter.keyId });
+    return {
+      ...counter,
+      limits: {
+        requestsPerMinute: limits.requestsPerMinute,
+        tokensPerMinute: limits.tokensPerMinute,
+        concurrencyPerKey: limits.concurrencyPerKey,
+      },
+    };
+  });
+
+  return {
+    enabled: rl.enabled !== false,
+    defaults: {
+      requestsPerMinute: limitNumber(rl?.requestsPerMinute, DEFAULTS.requestsPerMinute),
+      tokensPerMinute: limitNumber(rl?.tokensPerMinute, DEFAULTS.tokensPerMinute),
+      concurrency: {
+        global: limitNumber(rl?.concurrency?.global, DEFAULTS.concurrency.global),
+        perKey: limitNumber(rl?.concurrency?.perKey, DEFAULTS.concurrency.perKey),
+      },
+      maxUpstreamCallsPerRequest: limitNumber(
+        rl?.maxUpstreamCallsPerRequest,
+        DEFAULTS.maxUpstreamCallsPerRequest,
+      ),
+    },
+    identities,
+    inFlight: getClientRequestCounts(),
   };
 }
 
@@ -295,6 +381,9 @@ export async function enforceRequestLimits(request, handler) {
   } catch (error) {
     // Fail open: a limiter that throws must not take the gateway down.
     log.warn("RATELIMIT", `limiter error — allowing request: ${error?.message || error}`);
+    // The limiter itself failed, so the client was let through: that is worth
+    // seeing too — it means the bounds were not applied to this request.
+    safeCount(() => recordRejection(fallbackScope(request), "error", {}));
     admission = { ctx: {} };
   }
 

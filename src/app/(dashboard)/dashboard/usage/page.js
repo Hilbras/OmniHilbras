@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { RequestLogger, CardSkeleton, SegmentedControl } from "@/shared/components";
 import UsageStats from "@/shared/components/UsageStats";
 import RequestDetailsTab from "./components/RequestDetailsTab";
+import RateLimitStatusCard from "./components/RateLimitStatusCard";
 
 const PERIODS = [
   { value: "today", label: "Today" },
@@ -67,9 +68,12 @@ function UsageContent() {
       </div>
 
       {activeTab === "overview" && (
-        <Suspense fallback={<CardSkeleton />}>
-          <UsageStats period={period} setPeriod={setPeriod} hidePeriodSelector />
-        </Suspense>
+        <>
+          <RateLimitStatusCard />
+          <Suspense fallback={<CardSkeleton />}>
+            <UsageStats period={period} setPeriod={setPeriod} hidePeriodSelector />
+          </Suspense>
+        </>
       )}
       {activeTab === "logs" && <RequestLogger />}
       {activeTab === "details" && <RequestDetailsTab />}

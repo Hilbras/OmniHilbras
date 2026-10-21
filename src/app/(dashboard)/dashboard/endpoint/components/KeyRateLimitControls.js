@@ -8,7 +8,7 @@
 // the global value. The override lives in the settings
 // (rateLimit.keyOverrides, keyed by API key id) so the dashboard and the
 // gateway read the same number.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import PropTypes from "prop-types";
 import { Input, Button } from "@/shared/components";
 import useSettingsStore from "@/store/settingsStore";
@@ -41,7 +41,56 @@ export default function KeyRateLimitControls({ apiKey }) {
           apiKey={apiKey}
         />
       )}
+      {open && <KeyRateLimitUsage apiKeyId={apiKey.id} />}
     </div>
+  );
+}
+
+/**
+ * What this key spent in the last minute, and how often it was refused.
+ *
+ * Only fetched while the control is open: the Endpoint page lists every key,
+ * and a poll per key would be a request per key every few seconds.
+ */
+function KeyRateLimitUsage({ apiKeyId }) {
+  const [usage, setUsage] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const res = await fetch("/api/usage/rate-limit", { cache: "no-store" });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (cancelled) return;
+        const identity = (json.identities || []).find((i) => i.keyId === apiKeyId);
+        setUsage(identity || null);
+      } catch {
+        // The read-out is a convenience: a failure leaves it empty.
+      }
+    };
+
+    load();
+    const timer = setInterval(load, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [apiKeyId]);
+
+  if (!usage) return null;
+
+  const refused = Object.values(usage.rejections || {}).reduce(
+    (sum, n) => sum + (Number(n) || 0),
+    0,
+  );
+
+  return (
+    <p className="mt-1 text-xs text-text-muted" data-testid="key-rate-limit-usage">
+      Last minute: {usage.requestsPerMinute} requests, {usage.tokensPerMinute} tokens
+      {refused > 0 ? `, ${refused} refused` : ""}
+    </p>
   );
 }
 
