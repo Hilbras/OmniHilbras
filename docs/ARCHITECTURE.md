@@ -525,7 +525,10 @@ Runtime visibility sources:
 - JWT secret (`JWT_SECRET`) secures dashboard session cookie verification/signing
 - Initial password fallback (`INITIAL_PASSWORD`, default `123456`) must be overridden in real deployments
 - API key HMAC secret (`API_KEY_SECRET`) secures generated local API key format
-- Provider secrets (API keys/tokens) are persisted in local DB and should be protected at filesystem level
+- Provider secrets (API keys/tokens) are persisted in local DB. The store is `0600` and its directories are `0700`; a stolen database file still yields the provider credentials, so the filesystem is the last line of defence
+- Local API keys are hashed at rest (sha256 with a per-install pepper). The row holds the hash and a display form, the plaintext is returned once at creation, and the usage tables hold the fingerprint
+- `/v1` is rate-limited per key (requests and tokens per minute, overridable per key in the dashboard) and the in-flight requests are capped per key and globally. A request that goes over answers `429` / `503` with `Retry-After`
+- The request log and the MITM dumps mask the credential headers; the provider list reduces `providerSpecificData` to an allow-list of safe fields
 - Cloud sync endpoints rely on API key auth + machine id semantics
 
 ## Environment and Runtime Matrix
