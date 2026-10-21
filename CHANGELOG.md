@@ -1,3 +1,18 @@
+# v2.9.1 (2026-10-21)
+
+## Fixes
+- **Release**: the published package no longer carries the build machine's data directory. Next's file tracer followed the paths the code reads, and the CLI build ran with HOME inside the repo — so the standalone carried `.omnihilbras` (the database with every provider credential in plaintext, the machine id and the jwt secret) into the npm tarball. The build now uses a data directory outside the repository, the copy skips such a directory, a sweep removes one that another step copied in, and a guard fails the release when the file list npm would upload contains one
+- **Release**: the package ships the sql.js wasm binary, so an install no longer fetches sql.js from the registry on first use
+- **Release**: the publish builds the app once instead of twice, which halves the time a release takes
+- **Limits**: the rate limiter is now visible. A rejected request never reached a provider, so it left no usage row and only a line in the server log: the usage page shows a "Client limits" card (what each key spent in the last minute, what it was allowed, how often it was refused) and `GET /api/usage/rate-limit` names the same numbers
+- **Limits**: the bucket map grew for the lifetime of the process — a client rotating random keys filled it. It is bounded now
+- **Usage**: the daily roll-up has its own write cadence, so a trickle of requests no longer rewrites the whole day (4 ms for a 180 KiB day, 43 ms for a 1.2 MiB one) for every request
+- **Usage**: the usage stream no longer recomputes the whole statistics on every update — it parses every retained day, up to four times a second per dashboard, for numbers the client ignored
+- **Dependencies**: the CLI package has no advisories left; the DOMPurify and braces advisories in the app are fixed, and the two that have no fix (node-forge, braces) are recorded as unreachable
+
+## Features
+- **CI**: lint, the test suite, the build and the package guard now run on every push to main
+
 # v2.9.0 (2026-10-21)
 
 ## Security
