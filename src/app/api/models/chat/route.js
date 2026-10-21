@@ -2,9 +2,15 @@ import { NextResponse } from "next/server";
 import { getApiKeys } from "@/lib/localDb";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { buildUpstreamMessages } from "@/shared/utils/providerMiniChat";
 
 const CLI_TOKEN_SALT = "9r-cli-auth";
 const DEFAULT_MAX_TOKENS = 1024;
+// A dashboard chat is a small panel, not a bulk API: the token budget and the
+// system prompt are bounded so a stray client cannot ask the gateway for an
+// unbounded generation.
+const MAX_MAX_TOKENS = 32768;
+const MAX_SYSTEM_CHARS = 8000;
 const ALLOWED_ROLES = new Set(["system", "user", "assistant"]);
 
 export const dynamic = "force-dynamic";
@@ -57,7 +63,7 @@ export async function POST(request) {
     return NextResponse.json({ error: "Invalid JSON body", status: 400 }, { status: 400 });
   }
 
-  const { model, messages, maxTokens } = payload || {};
+  const { model, messages, maxTokens, system } = payload || {};
   if (typeof model !== "string" || !model.includes("/")) {
     return NextResponse.json(
       { error: 'model must look like "<providerAlias>/<modelId>"', status: 400 },
@@ -71,6 +77,26 @@ export async function POST(request) {
   if (history.length === 0) {
     return NextResponse.json({ error: "messages are required", status: 400 }, { status: 400 });
   }
+
+  if (system !== undefined && system !== null && typeof system !== "string") {
+    return NextResponse.json({ error: "system must be a string", status: 400 }, { status: 400 });
+  }
+  const systemPrompt = typeof system === "string" ? system.trim() : "";
+  if (systemPrompt.length > MAX_SYSTEM_CHARS) {
+    return NextResponse.json(
+      { error: `system is too long (max ${MAX_SYSTEM_CHARS} characters)`, status: 400 },
+      { status: 400 },
+    );
+  }
+
+  // The system prompt travels as the leading system message, the way every
+  // OpenAI-compatible provider expects it.
+  const upstreamMessages = buildUpstreamMessages(history, systemPrompt);
+
+  const requestedMaxTokens = Number(maxTokens);
+  const maxTokensOut = Number.isFinite(requestedMaxTokens) && requestedMaxTokens > 0
+    ? Math.min(Math.floor(requestedMaxTokens), MAX_MAX_TOKENS)
+    : DEFAULT_MAX_TOKENS;
 
   const baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`;
   const headers = await getInternalHeaders();
@@ -92,8 +118,8 @@ export async function POST(request) {
       headers,
       body: JSON.stringify({
         model,
-        messages: history,
-        max_tokens: Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : DEFAULT_MAX_TOKENS,
+        messages: upstreamMessages,
+        max_tokens: maxTokensOut,
         stream: true,
       }),
       signal: abortController.signal,
