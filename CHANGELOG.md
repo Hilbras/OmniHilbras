@@ -1,3 +1,11 @@
+# v2.9.2 (2026-10-21)
+
+## Fixes
+- **Dashboard**: a ten-slice audit of the frontend (`docs/FRONTEND-AUDIT.md`) found ten features that could not work and forty places where the interface showed something the server had not agreed to. All of them are fixed: Basic Chat reached a model at all, the add-provider form has labels and a working auth method, the model-alias editor and the passthrough model panel are reachable, the Kiro CLIProxy import reports back, the update countdown cannot shut the gateway down after the page is left, the add-key dialog cannot carry one provider's key into another, a drag-reordered combo cannot write the wrong model, the Claude account card cannot get stuck loading, and the Cowork card can add a model
+- **Dashboard**: the interface no longer lies — the clipboard button only says "Copied!" when the write succeeded, the theme toggle flips what is on screen, an empty per-key rate limit inherits the global ceiling instead of removing it, the usage tables' badges and the MiMo button render with their intended style, "Test all" keeps the results of every model id, "Apply Proxy" only touches the selected connections, and a server failure is shown as a failure instead of as "nothing here"
+- **Dashboard**: the background-tab polls stop, the model-capability cache cannot serve stale data, the settings store reports a refused save, and the request-details tab resets its page and no longer renders four sections the API always redacts
+- **Chore**: the code that can never run is gone (unreachable components, dead barrels, unused exports and six uncalled endpoints). The features that are hidden on purpose — PXPIPE, the media-provider combos, the Kiro social buttons, the combo presets and the Donate button — are kept
+
 # v2.9.1 (2026-10-21)
 
 ## Fixes
