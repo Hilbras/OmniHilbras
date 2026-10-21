@@ -389,6 +389,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > cerebras → headers
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > chatgpt-web → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > chutes → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
@@ -730,6 +749,44 @@ exports[`GOLDEN buildHeaders (default executor providers) > deepseek → headers
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > deepseek-web → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
+exports[`GOLDEN buildHeaders (default executor providers) > duckduckgo-web → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > featherless → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
@@ -778,6 +835,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > gemini → headers (
   "nonStream": {
     "Content-Type": "application/json",
     "x-goog-api-key": "<CRED>",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
+exports[`GOLDEN buildHeaders (default executor providers) > gemini-web → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
   },
   "oauth": {
     "Accept": "text/event-stream",
@@ -987,7 +1063,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > kimi → headers (ap
     "X-Msh-Device-Model": "Linux x64",
     "X-Msh-Device-Name": "lacrous",
     "X-Msh-Platform": "omnihilbras",
-    "X-Msh-Version": "2.4.1",
+    "X-Msh-Version": "<VER>",
     "x-api-key": "<CRED>",
   },
   "nonStream": {
@@ -998,7 +1074,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > kimi → headers (ap
     "X-Msh-Device-Model": "Linux x64",
     "X-Msh-Device-Name": "lacrous",
     "X-Msh-Platform": "omnihilbras",
-    "X-Msh-Version": "2.4.1",
+    "X-Msh-Version": "<VER>",
     "x-api-key": "<CRED>",
   },
   "oauth": {
@@ -1010,7 +1086,7 @@ exports[`GOLDEN buildHeaders (default executor providers) > kimi → headers (ap
     "X-Msh-Device-Model": "Linux x64",
     "X-Msh-Device-Name": "lacrous",
     "X-Msh-Platform": "omnihilbras",
-    "X-Msh-Version": "2.4.1",
+    "X-Msh-Version": "<VER>",
     "x-api-key": "<CRED>",
   },
 }
@@ -1489,6 +1565,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > qoder-cn → headers
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > qwen-web → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > sambanova → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
@@ -1585,6 +1680,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > together → headers
 `;
 
 exports[`GOLDEN buildHeaders (default executor providers) > tokenharbor → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
+exports[`GOLDEN buildHeaders (default executor providers) > tokenharbor-web → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
     "Accept": "text/event-stream",
@@ -1905,6 +2019,13 @@ exports[`GOLDEN buildUrl (default executor providers) > cerebras → url (stream
 }
 `;
 
+exports[`GOLDEN buildUrl (default executor providers) > chatgpt-web → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://chatgpt.com",
+  "stream": "https://chatgpt.com",
+}
+`;
+
 exports[`GOLDEN buildUrl (default executor providers) > chutes → url (stream + non-stream) 1`] = `
 {
   "nonStream": "https://llm.chutes.ai/v1/chat/completions",
@@ -1982,6 +2103,20 @@ exports[`GOLDEN buildUrl (default executor providers) > deepseek → url (stream
 }
 `;
 
+exports[`GOLDEN buildUrl (default executor providers) > deepseek-web → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://chat.deepseek.com/api/v0/chat/completion",
+  "stream": "https://chat.deepseek.com/api/v0/chat/completion",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > duckduckgo-web → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://duck.ai/duckchat/v1/chat",
+  "stream": "https://duck.ai/duckchat/v1/chat",
+}
+`;
+
 exports[`GOLDEN buildUrl (default executor providers) > featherless → url (stream + non-stream) 1`] = `
 {
   "nonStream": "https://api.featherless.ai/v1/chat/completions",
@@ -2000,6 +2135,13 @@ exports[`GOLDEN buildUrl (default executor providers) > gemini → url (stream +
 {
   "nonStream": "https://generativelanguage.googleapis.com/v1beta/models/test-model:generateContent",
   "stream": "https://generativelanguage.googleapis.com/v1beta/models/test-model:streamGenerateContent?alt=sse",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > gemini-web → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://gemini.google.com/app",
+  "stream": "https://gemini.google.com/app",
 }
 `;
 
@@ -2227,6 +2369,13 @@ exports[`GOLDEN buildUrl (default executor providers) > qoder-cn → url (stream
 }
 `;
 
+exports[`GOLDEN buildUrl (default executor providers) > qwen-web → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://chat.qwen.ai/api/v2/chat/completions",
+  "stream": "https://chat.qwen.ai/api/v2/chat/completions",
+}
+`;
+
 exports[`GOLDEN buildUrl (default executor providers) > sambanova → url (stream + non-stream) 1`] = `
 {
   "nonStream": "https://api.sambanova.ai/v1/chat/completions",
@@ -2266,6 +2415,13 @@ exports[`GOLDEN buildUrl (default executor providers) > tokenharbor → url (str
 {
   "nonStream": "https://tokenharbor.ai/v1/chat/completions",
   "stream": "https://tokenharbor.ai/v1/chat/completions",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > tokenharbor-web → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://tokenharbor.ai/api/direct-chat/stream",
+  "stream": "https://tokenharbor.ai/api/direct-chat/stream",
 }
 `;
 

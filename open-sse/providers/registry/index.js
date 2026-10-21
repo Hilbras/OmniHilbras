@@ -144,6 +144,12 @@ import p141 from "./apinex.js";
 import p142 from "./tiarina.js";
 import p143 from "./xkiro.js";
 import p144 from "./beatapi.js";
+import p145 from "./chatgpt-web.js";
+import p146 from "./deepseek-web.js";
+import p147 from "./duckduckgo-web.js";
+import p148 from "./gemini-web.js";
+import p149 from "./qwen-web.js";
+import p150 from "./tokenharbor-web.js";
 export default [
   p0,
   p1,
@@ -288,4 +294,10 @@ export default [
   p142,
   p143,
   p144,
+  p145,
+  p146,
+  p147,
+  p148,
+  p149,
+  p150,
 ];

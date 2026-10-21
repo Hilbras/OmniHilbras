@@ -6,8 +6,8 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, TokenHarborAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
-import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS, getModelsFetcher } from "@/shared/constants/providers";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, TokenHarborAuthModal, WebSessionConnectModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, WEB_COOKIE_SESSION_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS, getModelsFetcher } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -75,6 +75,7 @@ export default function ProviderDetailPage() {
   const [showOAuthModal, setShowOAuthModal] = useState(false);
   const [showXiaomiMimoModal, setShowXiaomiMimoModal] = useState(false);
   const [showIFlowCookieModal, setShowIFlowCookieModal] = useState(false);
+  const [showWebSessionModal, setShowWebSessionModal] = useState(false);
   const [showAddApiKeyModal, setShowAddApiKeyModal] = useState(false);
   const [addConnectionError, setAddConnectionError] = useState("");
   const [showBulkImportCodex, setShowBulkImportCodex] = useState(false);
@@ -149,6 +150,12 @@ export default function ProviderDetailPage() {
 
   const triggerApiKeyConnection = () => {
     setAddConnectionError("");
+    // A web-session provider is reached with a signed-in browser session, so
+    // the dialog that collects it is its own — not the API-key one.
+    if (isWebSessionProvider) {
+      setShowWebSessionModal(true);
+      return;
+    }
     setShowAddApiKeyModal(true);
   };
 
@@ -202,6 +209,7 @@ export default function ProviderDetailPage() {
   const isOpenAICompatible = isOpenAICompatibleProvider(providerId);
   const isAnthropicCompatible = isAnthropicCompatibleProvider(providerId);
   const isCompatible = isOpenAICompatible || isAnthropicCompatible;
+  const isWebSessionProvider = !!WEB_COOKIE_SESSION_PROVIDERS[providerId];
   const hasDualAuthModes = !isCompatible && isOAuth && supportsApiKeyAuth;
   const oauthConnectionLabel =
     providerId === "xai" ? "Grok Build OAuth"
@@ -1592,7 +1600,7 @@ export default function ProviderDetailPage() {
               onClick={triggerAddConnection}
               className="btn-gold !px-3 !py-2.5 !text-xs"
             >
-              {isCompatible ? "Add API Key" : "Add connection"}
+              {isWebSessionProvider ? "Connect Session" : isCompatible ? "Add API Key" : "Add connection"}
             </Button>
           </div>
         </div>
@@ -1817,7 +1825,7 @@ export default function ProviderDetailPage() {
                       icon="add"
                       onClick={triggerAddConnection}
                     >
-                      {isCompatible ? "Add API Key" : (providerId === "iflow" ? "OAuth" : "Add Connection")}
+                      {isWebSessionProvider ? "Connect Session" : isCompatible ? "Add API Key" : (providerId === "iflow" ? "OAuth" : "Add Connection")}
                     </Button>
                   </>
                 )}
@@ -2130,6 +2138,14 @@ export default function ProviderDetailPage() {
           isOpen={showIFlowCookieModal}
           onSuccess={handleIFlowCookieSuccess}
           onClose={() => setShowIFlowCookieModal(false)}
+        />
+      )}
+      {isWebSessionProvider && (
+        <WebSessionConnectModal
+          isOpen={showWebSessionModal}
+          providerId={providerId}
+          onSuccess={handleOAuthSuccess}
+          onClose={() => setShowWebSessionModal(false)}
         />
       )}
       <AddApiKeyModal

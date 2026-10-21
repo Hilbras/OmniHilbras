@@ -23,7 +23,11 @@ const nextConfig = {
   // @aws-sdk/credential-providers must stay external for the same class of reason: it reads
   // ~/.aws/config and the SSO token cache from disk at runtime and resolves its credential
   // plugins by dynamic require, neither of which survives bundling.
-  serverExternalPackages: ["better-sqlite3", "sql.js", "node:sqlite", "bun:sqlite", "open", "@aws-sdk/credential-providers"],
+  // playwright-core is a runtime-only dependency of the web-session providers
+  // (ChatGPT Web, Gemini Web drive a real browser). Kept external so the
+  // bundler does not try to trace its browser-loading internals; it is
+  // resolved from node_modules at runtime instead.
+  serverExternalPackages: ["better-sqlite3", "sql.js", "node:sqlite", "bun:sqlite", "open", "@aws-sdk/credential-providers", "playwright-core"],
   turbopack: {
     root: tracingRoot
   },

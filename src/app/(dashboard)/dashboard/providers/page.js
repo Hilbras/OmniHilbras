@@ -16,6 +16,7 @@ import {
   FREE_PROVIDERS,
   FREE_TIER_PROVIDERS,
   WEB_COOKIE_PROVIDERS,
+  WEB_COOKIE_SESSION_PROVIDERS,
   OPENAI_COMPATIBLE_PREFIX,
   ANTHROPIC_COMPATIBLE_PREFIX,
 } from "@/shared/constants/providers";
@@ -678,7 +679,7 @@ export default function ProvidersPage() {
       )}
 
       {/* Web Cookie Providers — use browser subscription cookie instead of API key */}
-      {/* <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold flex items-center gap-2">
             Web Cookie Providers{" "}
@@ -690,13 +691,34 @@ export default function ProvidersPage() {
               key={key}
               providerId={key}
               provider={info}
-              stats={getProviderStats(key, "apikey")}
-              authType="apikey"
-              onToggle={(active) => handleToggleProvider(key, "apikey", active)}
+              stats={getProviderStats(key, "cookie")}
+              authType="cookie"
+              onToggle={(active) => handleToggleProvider(key, "cookie", active)}
             />
           ))}
         </div>
-      </div> */}
+      </div>
+
+      {/* Web Cookie Sessions — a whole signed-in browser session, not a key */}
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold flex items-center gap-2">
+            Web Cookie Sessions{" "}
+          </h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {Object.entries(WEB_COOKIE_SESSION_PROVIDERS).map(([key, info]) => (
+            <ApiKeyProviderCard
+              key={key}
+              providerId={key}
+              provider={info}
+              stats={getProviderStats(key, "cookie")}
+              authType="cookie"
+              onToggle={(active) => handleToggleProvider(key, "cookie", active)}
+            />
+          ))}
+        </div>
+      </div>
 
       {/* BYOK footer — gold banner from the old design */}
       <div className="flex flex-col items-start justify-between gap-3 rounded-xl border border-gold/20 bg-gold-soft/45 px-4 py-3.5 sm:flex-row sm:items-center sm:px-5">

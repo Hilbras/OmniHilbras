@@ -23,6 +23,9 @@ const SPECIALIZED = new Set([
   "xiaomi-tokenplan", "mimo-free",
 ]);
 
+/** Headers whose value is the app version — pinned here so a release does not break the snapshot. */
+const VERSION_HEADERS = new Set(["X-CLIENT-VERSION", "X-CORE-VERSION", "X-Msh-Version"]);
+
 // Sanitize header: khử token + field thời gian động (kimi X-Msh-Device-Id) để snapshot ổn định.
 function sanitize(headers) {
   const out = {};
@@ -38,10 +41,10 @@ function sanitize(headers) {
           // test is about.
           .replace(/OmniHilbras\/\d+\.\d+\.\d+/g, "OmniHilbras/<VER>")
       : v;
-    // X-CLIENT-VERSION / X-CORE-VERSION are the bare app version. Keyed
-    // normalization (rather than a value pattern) so unrelated headers that
-    // happen to look like a version are left alone.
-    if (typeof value === "string" && (k === "X-CLIENT-VERSION" || k === "X-CORE-VERSION")) {
+    // These headers carry the bare app version. Keyed normalization (rather
+    // than a value pattern) so unrelated headers that happen to look like a
+    // version are left alone.
+    if (typeof value === "string" && VERSION_HEADERS.has(k)) {
       value = "<VER>";
     }
     out[k] = value;

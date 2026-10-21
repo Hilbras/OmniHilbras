@@ -29,6 +29,12 @@ import WindsurfExecutor from "./windsurf.js";
 import { DefaultExecutor } from "./default.js";
 import { MinimaxCodeExecutor } from "./minimax-code.js";
 import { DevinCliExecutor } from "./devin-cli.js";
+import { ChatGptWebExecutor } from "./chatgpt-web.js";
+import { DeepSeekWebExecutor } from "./deepseek-web.js";
+import { DuckDuckGoWebExecutor } from "./duckduckgo-web.js";
+import { GeminiWebExecutor } from "./gemini-web.js";
+import { QwenWebExecutor } from "./qwen-web.js";
+import { TokenHarborWebExecutor } from "./tokenharbor-web.js";
 
 const executors = {
   antigravity: new AntigravityExecutor(),
@@ -49,6 +55,12 @@ const executors = {
   "opencode-go": new OpenCodeGoExecutor(),
   "opencode-zen": new OpenCodeZenExecutor(),
   "grok-web": new GrokWebExecutor(),
+  "chatgpt-web": new ChatGptWebExecutor(),
+  "deepseek-web": new DeepSeekWebExecutor(),
+  "duckduckgo-web": new DuckDuckGoWebExecutor(),
+  "gemini-web": new GeminiWebExecutor(),
+  "qwen-web": new QwenWebExecutor(),
+  "tokenharbor-web": new TokenHarborWebExecutor(),
   "grok-cli": new GrokCliExecutor(),
   gcli: new GrokCliExecutor(), // Alias
   gb: new GrokCliExecutor(), // Alias (Grok Build)
@@ -106,6 +118,12 @@ export { OpenCodeExecutor } from "./opencode.js";
 export { OpenCodeGoExecutor } from "./opencode-go.js";
 export { OpenCodeZenExecutor } from "./opencode-zen.js";
 export { GrokWebExecutor } from "./grok-web.js";
+export { ChatGptWebExecutor } from "./chatgpt-web.js";
+export { DeepSeekWebExecutor } from "./deepseek-web.js";
+export { DuckDuckGoWebExecutor } from "./duckduckgo-web.js";
+export { GeminiWebExecutor } from "./gemini-web.js";
+export { QwenWebExecutor } from "./qwen-web.js";
+export { TokenHarborWebExecutor } from "./tokenharbor-web.js";
 export { GrokCliExecutor } from "./grok-cli.js";
 export { PerplexityWebExecutor } from "./perplexity-web.js";
 export { OllamaLocalExecutor } from "./ollama-local.js";

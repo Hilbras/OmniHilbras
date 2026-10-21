@@ -70,6 +70,12 @@ export const APIKEY_PROVIDERS = byCategory("apikey");
 // Web Cookie Providers (use browser session cookie instead of API key)
 export const WEB_COOKIE_PROVIDERS = byCategory("webCookie");
 
+// Web Cookie Sessions — providers reached with a credential a signed-in
+// browser holds (a cookie, a localStorage token) rather than an API key.
+// Distinct from WEB_COOKIE_PROVIDERS above: those two take a single session
+// cookie for a service that also has an API, these are whole web sessions.
+export const WEB_COOKIE_SESSION_PROVIDERS = byCategory("webCookieSession");
+
 // Media provider kinds — each kind maps to a route and endpoint config
 export const MEDIA_PROVIDER_KINDS = [
   { id: "embedding",   label: "Embedding",      icon: "data_array",        endpoint: { method: "POST", path: "/v1/embeddings" } },
@@ -138,7 +144,7 @@ export function isCustomEmbeddingProvider(providerId) {
 }
 
 // All providers (combined)
-export const AI_PROVIDERS = { ...FREE_PROVIDERS, ...FREE_TIER_PROVIDERS, ...OAUTH_PROVIDERS, ...APIKEY_PROVIDERS, ...WEB_COOKIE_PROVIDERS };
+export const AI_PROVIDERS = { ...FREE_PROVIDERS, ...FREE_TIER_PROVIDERS, ...OAUTH_PROVIDERS, ...APIKEY_PROVIDERS, ...WEB_COOKIE_PROVIDERS, ...WEB_COOKIE_SESSION_PROVIDERS };
 
 // Auth methods
 export const AUTH_METHODS = {

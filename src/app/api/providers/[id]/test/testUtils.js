@@ -776,6 +776,19 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         const res = await fetchWithConnectionProxy(cfg.validateUrl, { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
       }
+      case "chatgpt-web":
+      case "deepseek-web":
+      case "duckduckgo-web":
+      case "gemini-web":
+      case "qwen-web":
+      case "tokenharbor-web": {
+        // A web-session credential is checked by the provider's own logic —
+        // the same probe the connect dialog runs, so "test connection" and
+        // "check" cannot disagree about whether a session works.
+        const session = await import(`open-sse/shared/webSession/${connection.provider}.js`);
+        const result = await session.checkWebSession(connection.apiKey || connection.accessToken || "");
+        return { valid: result?.ok === true, error: result?.ok ? null : result?.detail || "Session not accepted" };
+      }
       case "ollama": {
         const res = await fetch("https://ollama.com/api/tags", { headers: { Authorization: `Bearer ${connection.apiKey}` } });
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };

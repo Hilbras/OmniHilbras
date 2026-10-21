@@ -9,6 +9,8 @@ const ICON_ALIASES = {
   // MiniMax Code rides the existing MiniMax brand mark
   "minimax-code": "minimax",
   "minimax-code-global": "minimax",
+  // Duck.ai is DuckDuckGo's assistant — the mark ships under that name.
+  "duckduckgo-web": "duckai",
 };
 
 // Providers whose bundled mark is not `{id}.png` (svg / webp under their own filename).
@@ -16,6 +18,12 @@ const ICON_FILES = {
   "nara-router": "bynara-logo-icon-light.svg",
   tiarina: "Tirina.webp",
   xkiro: "xkiro-logo.svg",
+  // The web-session providers ride their own brand's mark.
+  "chatgpt-web": "chatgpt.svg",
+  "deepseek-web": "deepseek.svg",
+  "gemini-web": "gemini.svg",
+  "qwen-web": "qwen.svg",
+  "tokenharbor-web": "tokenharbor.svg",
 };
 
 // Runtime only — first 404 remembers id for the whole session
