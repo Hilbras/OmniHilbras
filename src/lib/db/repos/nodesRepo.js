@@ -47,6 +47,26 @@ export async function getProviderNodes(filter = {}) {
   return db.all(sql, params).map(rowToNode);
 }
 
+/**
+ * The provider node that owns a model prefix, in one query.
+ *
+ * The resolution path used to ask for each of the three node types in turn —
+ * three queries, each returning every node of that type, then a linear scan
+ * for the prefix. It runs per model resolution, and a resolution happens per
+ * allow-list entry of a restricted key, so it was O(nodes) several times over
+ * for one request.
+ */
+export async function getProviderNodeByPrefix(prefix) {
+  if (!prefix) return null;
+  const db = await getAdapter();
+  const rows = db.all(
+    `SELECT * FROM providerNodes WHERE type IN (?, ?, ?)`,
+    ["openai-compatible", "anthropic-compatible", "custom-embedding"],
+  );
+  const match = rows.map(rowToNode).find((node) => node.prefix === prefix);
+  return match || null;
+}
+
 export async function getProviderNodeById(id) {
   const db = await getAdapter();
   return rowToNode(db.get(`SELECT * FROM providerNodes WHERE id = ?`, [id]));

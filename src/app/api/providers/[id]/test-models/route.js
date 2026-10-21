@@ -1,3 +1,4 @@
+import { mapWithConcurrency } from "@/lib/async/mapWithConcurrency.js";
 import { NextResponse } from "next/server";
 import { getProviderConnectionById } from "@/lib/localDb";
 import { getProviderModels, PROVIDER_ID_TO_ALIAS } from "open-sse/config/providerModels.js";
@@ -49,11 +50,15 @@ export async function POST(request, { params }) {
     const results = [{ modelId: first.id, name: first.name || first.id, ...firstResult }];
 
     if (rest.length > 0) {
-      const restResults = await Promise.all(
-        rest.map(async (model) => {
+      // Bounded: every model is a real upstream request, and a provider with
+      // a hundred models would otherwise get a hundred sockets at once.
+      const restResults = await mapWithConcurrency(
+        rest,
+        async (model) => {
           const result = await pingModelByKind(`${alias}/${model.id}`, model.kind || model.type || "llm", baseUrl);
           return { modelId: model.id, name: model.name || model.id, ...result };
-        })
+        },
+        4,
       );
       results.push(...restResults);
     }

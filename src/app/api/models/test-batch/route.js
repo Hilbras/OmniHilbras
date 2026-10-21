@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pingModelByKind } from "../test/ping";
+import { mapWithConcurrency } from "@/lib/async/mapWithConcurrency.js";
 
 // POST /api/models/test-batch - Test many models of one provider
 //
@@ -41,8 +42,7 @@ export async function POST(request) {
   }
 
   const encoder = new TextEncoder();
-  let cursor = 0;
-  let passed = 0;
+  const results = [];
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -50,26 +50,25 @@ export async function POST(request) {
         controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
       };
 
-      const worker = async () => {
-        while (cursor < models.length) {
-          const index = cursor;
-          cursor += 1;
-          const model = models[index];
+      // Bounded: a provider with a hundred models gets four pings at a time,
+      // not a hundred sockets.
+      await mapWithConcurrency(
+        models,
+        async (model) => {
           let result;
           try {
             result = await pingModelByKind(model, kind);
           } catch (err) {
             result = { ok: false, error: err?.message || "Test failed" };
           }
-          if (result?.ok) passed += 1;
           send({ model, ...result });
-        }
-      };
-
-      await Promise.all(
-        Array.from({ length: Math.min(CONCURRENCY, models.length) }, () => worker()),
+          results.push(result);
+          return result;
+        },
+        CONCURRENCY,
       );
 
+      const passed = results.filter((r) => r?.ok).length;
       send({ done: true, summary: { total: models.length, passed, failed: models.length - passed } });
       controller.close();
     },
