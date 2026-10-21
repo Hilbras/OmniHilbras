@@ -132,7 +132,7 @@ export default function RateLimitStatusCard({ refreshMs = REFRESH_MS }) {
                 return (
                   <div key={identity.scope} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="truncate text-sm font-medium text-text-primary">
+                      <span className="truncate text-sm font-medium text-text-main">
                         {identityLabel(identity)}
                       </span>
                       <span className="shrink-0 text-xs text-text-muted">
