@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -78,7 +78,14 @@ export const TABLES = {
   apiKeys: {
     columns: {
       id: "TEXT PRIMARY KEY",
-      key: "TEXT UNIQUE NOT NULL",
+      // The display form of the key, not the secret: the plaintext is shown
+      // once (in the response to the key's creation) and never stored, so
+      // this column can repeat — two keys may share a display form. The
+      // uniqueness that matters lives on keyHash.
+      key: "TEXT NOT NULL",
+      // sha256(pepper || key). The pepper is a per-install secret in its own
+      // 0600 file, so a stolen database holds no usable credential.
+      keyHash: "TEXT",
       name: "TEXT",
       machineId: "TEXT",
       isActive: "INTEGER DEFAULT 1",
@@ -88,7 +95,10 @@ export const TABLES = {
       accessRestricted: "INTEGER DEFAULT 0",
       accessAllow: "TEXT",
     },
-    indexes: ["CREATE INDEX IF NOT EXISTS idx_ak_key ON apiKeys(key)"],
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_ak_key ON apiKeys(key)",
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_ak_key_hash ON apiKeys(keyHash)",
+    ],
   },
   combos: {
     columns: {

@@ -3,15 +3,23 @@ import crypto from "crypto";
 const API_KEY_SECRET = process.env.API_KEY_SECRET || "endpoint-proxy-api-key-secret";
 
 /**
- * Generate 6-char random keyId
+ * Generate the key's random part.
+ *
+ * This used to be 6 characters from `Math.random()` — about 31 bits, drawn
+ * from a PRNG that is recoverable once a few outputs are known, and the
+ * machine id in front of it is public (every key listing returns it). That
+ * made the key guessable: 2.18e9 candidates, with nothing throttling the
+ * guesses.
+ *
+ * 24 characters of `crypto.randomBytes` is 144 bits — not guessable, and it
+ * keeps the `sk-{machineId}-{keyId}-{crc}` shape, so nothing that parses
+ * the key has to change.
  */
 function generateKeyId() {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let result = "";
-  for (let i = 0; i < 6; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
+  // base64url, minus the dash: the key is dash-separated
+  // (sk-{machineId}-{keyId}-{crc}), so a dash inside the keyId would break
+  // the parse. 18 bytes → 24 characters → 144 bits.
+  return crypto.randomBytes(18).toString("base64url").replace(/-/g, "_");
 }
 
 /**

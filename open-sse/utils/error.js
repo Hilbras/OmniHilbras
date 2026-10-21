@@ -1,3 +1,4 @@
+import { readResponseText } from "./responseBody.js";
 import { ERROR_TYPES, DEFAULT_ERROR_MESSAGES } from "../config/errorConfig.js";
 
 /**
@@ -59,7 +60,9 @@ export async function writeStreamError(writer, statusCode, message) {
 export async function parseUpstreamError(response, executor = null) {
   let bodyText = "";
   try {
-    bodyText = await response.text();
+    // Bounded: an error body is attacker- or provider-controlled too, and
+    // this one is read on every failed request.
+    bodyText = await readResponseText(response, 256 * 1024);
   } catch {
     bodyText = "";
   }

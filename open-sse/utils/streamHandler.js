@@ -1,5 +1,9 @@
 // Stream handler with disconnect detection - shared for all providers
-import { STREAM_STALL_TIMEOUT_MS } from "../config/runtimeConfig.js";
+import {
+  STREAM_STALL_TIMEOUT_MS,
+  STREAM_FIRST_CHUNK_TIMEOUT_MS,
+  UPSTREAM_TOTAL_TIMEOUT_MS,
+} from "../config/runtimeConfig.js";
 import { dbg, isDebugEnabled } from "./debugLog.js";
 
 // Get HH:MM:SS timestamp
@@ -192,8 +196,18 @@ export function createDisconnectAwareStream(transformStream, streamController, o
  * @param {TransformStream} transformStream - Transform stream for SSE
  * @param {object} streamController - Stream controller from createStreamController
  */
-export function pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal = null, stallTimeoutMs = STREAM_STALL_TIMEOUT_MS) {
+export function pipeWithDisconnect(
+  providerResponse,
+  transformStream,
+  streamController,
+  onAbortTerminal = null,
+  stallTimeoutMs = STREAM_STALL_TIMEOUT_MS,
+  firstChunkTimeoutMs = STREAM_FIRST_CHUNK_TIMEOUT_MS,
+  totalTimeoutMs = UPSTREAM_TOTAL_TIMEOUT_MS,
+) {
   let stallTimer = null;
+  let firstChunkTimer = null;
+  let totalTimer = null;
   let chunkCount = 0;
   let totalBytes = 0;
   let lastChunkAt = Date.now();
@@ -203,15 +217,61 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
   const clearStall = () => {
     if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
   };
+
+  /**
+   * The three budgets, and why there are three.
+   *
+   *  - **First chunk**: the time to the first upstream byte. A provider that
+   *    never sends one is broken or crawling, and the request would sit here
+   *    for the whole stall timeout before saying anything.
+   *  - **Stall**: the gap between upstream bytes. This is the existing
+   *    behaviour and it is the important one — it watches *raw* bytes, not
+   *    transform output, because a reasoning model legitimately emits no SSE
+   *    for minutes while its bytes keep arriving.
+   *  - **Total**: the absolute ceiling. The stall budget alone cannot end a
+   *    request whose provider sends one byte every few minutes.
+   *
+   * All three end the request the same way — through the stream controller,
+   * never a raw abort — so the cleanup that synthesises a terminal frame for
+   * the client still runs.
+   */
+  const clearTimers = () => {
+    clearStall();
+    if (firstChunkTimer) { clearTimeout(firstChunkTimer); firstChunkTimer = null; }
+    if (totalTimer) { clearTimeout(totalTimer); totalTimer = null; }
+  };
+
+  const fail = (message, detail) => {
+    abortMessage = message;
+    dbg(tag, `${detail} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`);
+    clearTimers();
+    streamController.handleError?.(new Error(message));
+    streamController.abort?.();
+  };
+
   const armStall = () => {
     clearStall();
     stallTimer = setTimeout(() => {
       stallTimer = null;
-      abortMessage = "stream stall timeout";
-      dbg(tag, `STALL TIMEOUT ${stallTimeoutMs}ms | chunks=${chunkCount} | bytes=${totalBytes} | sinceLast=${Date.now() - lastChunkAt}ms`);
-      streamController.handleError?.(new Error("stream stall timeout"));
-      streamController.abort?.();
+      fail("stream stall timeout", `STALL TIMEOUT ${stallTimeoutMs}ms | sinceLast=${Date.now() - lastChunkAt}ms`);
     }, stallTimeoutMs);
+  };
+
+  const armFirstChunk = () => {
+    if (chunkCount > 0) return;
+    if (firstChunkTimer) clearTimeout(firstChunkTimer);
+    firstChunkTimer = setTimeout(() => {
+      firstChunkTimer = null;
+      fail("upstream produced no data", `FIRST CHUNK TIMEOUT ${firstChunkTimeoutMs}ms`);
+    }, firstChunkTimeoutMs);
+  };
+
+  const armTotal = () => {
+    if (totalTimer) return;
+    totalTimer = setTimeout(() => {
+      totalTimer = null;
+      fail("upstream request deadline exceeded", `TOTAL TIMEOUT ${totalTimeoutMs}ms`);
+    }, totalTimeoutMs);
   };
 
   // Wrap controller so every termination path clears the stall timer.
@@ -221,14 +281,16 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
     signal: streamController.signal,
     startTime: streamController.startTime,
     isConnected: () => streamController.isConnected(),
-    handleComplete: () => { dbg(tag, `complete | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); streamController.handleComplete(); },
-    handleError: (e) => { dbg(tag, `error: ${e?.message} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); streamController.handleError(e); },
-    handleDisconnect: (r) => { dbg(tag, `disconnect: ${r} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); streamController.handleDisconnect(r); },
-    abort: () => { clearStall(); streamController.abort(); }
+    handleComplete: () => { dbg(tag, `complete | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearTimers(); streamController.handleComplete(); },
+    handleError: (e) => { dbg(tag, `error: ${e?.message} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearTimers(); streamController.handleError(e); },
+    handleDisconnect: (r) => { dbg(tag, `disconnect: ${r} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearTimers(); streamController.handleDisconnect(r); },
+    abort: () => { clearTimers(); streamController.abort(); }
   };
 
   armStall();
-  dbg(tag, `pipe start | stallTimeout=${stallTimeoutMs}ms`);
+  armFirstChunk();
+  armTotal();
+  dbg(tag, `pipe start | stallTimeout=${stallTimeoutMs}ms | firstChunk=${firstChunkTimeoutMs}ms | total=${totalTimeoutMs}ms`);
 
   const upstreamTap = new TransformStream({
     transform(chunk, controller) {
@@ -242,9 +304,10 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
         dbg(tag, `chunk #${chunkCount} | size=${sz}B | gap=${gap}ms | total=${totalBytes}B`);
       }
       armStall();
+      if (chunkCount === 1 && firstChunkTimer) { clearTimeout(firstChunkTimer); firstChunkTimer = null; }
       controller.enqueue(chunk);
     },
-    flush() { dbg(tag, `upstream EOF | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); }
+    flush() { dbg(tag, `upstream EOF | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearTimers(); }
   });
 
   const transformedBody = providerResponse.body

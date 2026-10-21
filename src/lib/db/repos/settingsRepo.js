@@ -4,7 +4,7 @@ import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 const DEFAULT_MITM_ROUTER_BASE = "http://localhost:20128";
 const DEFAULT_HEADROOM_URL = process.env.HEADROOM_URL || "http://localhost:8787";
 
-const DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS = {
   cloudEnabled: false,
   tunnelEnabled: false,
   tunnelUrl: "",
@@ -64,7 +64,34 @@ const DEFAULT_SETTINGS = {
   pxpipeTimeoutMs: 15000,
   // Per-provider user header overrides applied at dispatch: { [providerId]: { headers: {..} } }
   providerOverrides: {},
+  // Client-facing request bounds for the /v1 inference API.
+  // Generous on purpose: a heavy agent, the mini chat, "Test all" and a fusion
+  // combo must never be blocked by them — but a leaked key must not be able to
+  // spend without bound either. A single 0 in requestsPerMinute / tokensPerMinute
+  // disables that one dimension for everyone.
+  rateLimit: {
+    enabled: true, // global kill-switch for every bound below
+    requestsPerMinute: 120, // per key, or per peer IP when no key is presented
+    tokensPerMinute: 5000000, // estimated prompt tokens + generated tokens
+    maxInputTokensPerRequest: 1000000, // ceiling for one request's prompt estimate
+    concurrency: { global: 32, perKey: 8 }, // in-flight client requests
+    maxUpstreamCallsPerRequest: 32, // accounts x combo models x fusion panels
+    // Per-key ceilings, keyed by API key id: { [id]: { requestsPerMinute, tokensPerMinute, concurrency } }
+    keyOverrides: {},
+  },
+  // Retention for the usage tables. usageHistory grows one row per request and
+  // nothing deleted one, so it was pruned only by the operator emptying the DB.
+  usageRetention: {
+    enabled: true,
+    historyDays: 90, // per-request rows
+    dailyDays: 400, // daily rollup rows
+    intervalMs: 3600000, // how often the prune runs
+  },
 };
+
+// Nested settings groups are merged one level deep, so a partial update (say
+// only `rateLimit.keyOverrides`) does not wipe the sibling defaults.
+const NESTED_SETTING_GROUPS = ["rateLimit", "usageRetention"];
 
 async function readRaw() {
   const db = await getAdapter();
@@ -85,6 +112,12 @@ export function mergeWithDefaults(raw) {
         merged[key] = true;
       } else {
         merged[key] = defVal;
+      }
+    }
+    if (NESTED_SETTING_GROUPS.includes(key) && merged[key] && typeof merged[key] === "object" && !Array.isArray(merged[key])) {
+      merged[key] = { ...defVal, ...merged[key] };
+      if (key === "rateLimit" && merged[key].concurrency && typeof merged[key].concurrency === "object") {
+        merged[key].concurrency = { ...defVal.concurrency, ...merged[key].concurrency };
       }
     }
   }

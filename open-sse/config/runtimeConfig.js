@@ -55,6 +55,26 @@ export const STREAM_STALL_TIMEOUT_MS = envMs("STREAM_STALL_TIMEOUT_MS", 360 * 10
 // Time-to-first-token timeout (prompt prefill). Env: STREAM_FIRST_CHUNK_TIMEOUT_MS.
 export const STREAM_FIRST_CHUNK_TIMEOUT_MS = envMs("STREAM_FIRST_CHUNK_TIMEOUT_MS", 200 * 1000);
 
+// The largest upstream response body the gateway will buffer.
+//
+// A provider that answers with a huge body must not be able to exhaust the
+// gateway's memory: the response was already accepted (the connect timeout is
+// long past by then) and the body is buffered whole. Generous enough for a
+// large tool-call payload or a long completion.
+// Env: UPSTREAM_MAX_BODY_BYTES.
+export const UPSTREAM_MAX_BODY_BYTES = envMs("UPSTREAM_MAX_BODY_BYTES", 32 * 1024 * 1024);
+
+// Absolute ceiling for one upstream request, measured to the last byte.
+//
+// The stall timeout only fires when the upstream goes *silent*; a provider that
+// drips one byte every few minutes keeps a request (and the account's
+// concurrency slot) alive indefinitely. This is the backstop for that, and it
+// is deliberately generous — a long reasoning run is legitimate, an endless
+// one is not. It is *additional* to the connect and stall timeouts, never a
+// replacement for them.
+// Env: UPSTREAM_TOTAL_TIMEOUT_MS.
+export const UPSTREAM_TOTAL_TIMEOUT_MS = envMs("UPSTREAM_TOTAL_TIMEOUT_MS", 30 * 60 * 1000);
+
 // Fetch connect timeout: abort if upstream doesn't return response headers within this duration
 export const FETCH_CONNECT_TIMEOUT_MS = envMs("FETCH_CONNECT_TIMEOUT_MS", 60 * 1000);
 

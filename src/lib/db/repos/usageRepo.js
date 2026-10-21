@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
+import { chargeTokens, keyIdentity } from "@/shared/utils/rateLimitBucket.js";
 
 function maskApiKey(key) {
   if (!key || typeof key !== "string") return null;
@@ -12,18 +13,26 @@ function maskApiKey(key) {
 }
 
 const PENDING_TIMEOUT_MS = 60 * 1000;
+// Safety net for a client slot that is never released (client vanished
+// mid-stream). Longer than the upstream total timeout (30 min) so a legitimate
+// long stream keeps its slot for the whole run.
+const CLIENT_PENDING_TIMEOUT_MS = 35 * 60 * 1000;
 const RING_CAP = 50;
 const CONN_CACHE_TTL_MS = 30 * 1000;
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
 
 // In-memory state shared across Next.js modules
 if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {} };
+// Client-scoped in-flight counters live next to the upstream ones so both
+// survive a hot reload together.
+if (!global._pendingRequests.client) global._pendingRequests.client = { total: 0, byScope: {} };
 if (!global._lastErrorProvider) global._lastErrorProvider = { provider: "", ts: 0 };
 if (!global._statsEmitter) {
   global._statsEmitter = new EventEmitter();
   global._statsEmitter.setMaxListeners(50);
 }
 if (!global._pendingTimers) global._pendingTimers = {};
+if (!global._clientPendingTimers) global._clientPendingTimers = {};
 if (!global._recentRing) global._recentRing = { items: [], initialized: false };
 if (!global._connectionMapCache) global._connectionMapCache = { map: {}, ts: 0 };
 if (!global._statsEmitTimers) global._statsEmitTimers = { pending: null, update: null };
@@ -31,6 +40,7 @@ if (!global._statsEmitTimers) global._statsEmitTimers = { pending: null, update:
 const pendingRequests = global._pendingRequests;
 const lastErrorProvider = global._lastErrorProvider;
 const pendingTimers = global._pendingTimers;
+const clientPendingTimers = global._clientPendingTimers;
 const recentRing = global._recentRing;
 const connCache = global._connectionMapCache;
 const statsEmitTimers = global._statsEmitTimers;
@@ -228,6 +238,57 @@ export function trackPendingRequest(model, provider, connectionId, started, erro
   scheduleStatsEvent("pending");
 }
 
+/**
+ * Client-scoped in-flight counter — the granularity the gateway's concurrency
+ * cap needs.
+ *
+ * trackPendingRequest() above counts UPSTREAM calls per model/account, which
+ * is the wrong unit for a client bound: one client request can fan out into
+ * many upstream calls, and each of them holds a buffered request body (up to
+ * 128 MB). This counts CLIENT requests in flight, globally and per scope
+ * (the API key id, or the peer-IP bucket when no key was presented).
+ *
+ * Same in-memory pattern and same global as the upstream counter, so both
+ * survive a hot reload together and the dashboard can show both.
+ */
+export function trackClientRequest(scope, started) {
+  const client = pendingRequests.client;
+  const key = scope || "unknown";
+
+  if (started) {
+    client.total += 1;
+    client.byScope[key] = (client.byScope[key] || 0) + 1;
+    clearTimeout(clientPendingTimers[key]);
+    clientPendingTimers[key] = setTimeout(() => {
+      delete clientPendingTimers[key];
+      // Safety net: a client that vanished mid-stream must not hold its slot
+      // forever. Release every slot of this scope (same shape as the upstream
+      // counter's auto-reset).
+      const leaked = client.byScope[key] || 0;
+      if (leaked > 0) {
+        client.byScope[key] = 0;
+        client.total = Math.max(0, client.total - leaked);
+      }
+      scheduleStatsEvent("pending");
+    }, CLIENT_PENDING_TIMEOUT_MS);
+    clientPendingTimers[key]?.unref?.();
+  } else {
+    client.total = Math.max(0, client.total - 1);
+    client.byScope[key] = Math.max(0, (client.byScope[key] || 0) - 1);
+    if (client.byScope[key] === 0) delete client.byScope[key];
+    clearTimeout(clientPendingTimers[key]);
+    delete clientPendingTimers[key];
+  }
+
+  scheduleStatsEvent("pending");
+}
+
+/** Current client-scoped in-flight counts (global total + per scope). */
+export function getClientRequestCounts() {
+  const client = pendingRequests.client;
+  return { total: client.total, byScope: { ...client.byScope } };
+}
+
 export async function getActiveRequests() {
   const activeRequests = [];
   const connectionMap = await getConnectionMapCached();
@@ -283,6 +344,19 @@ export async function saveRequestUsage(entry) {
     const tokens = entry.tokens || {};
     const promptTokens = tokens.prompt_tokens || tokens.input_tokens || 0;
     const completionTokens = tokens.completion_tokens || tokens.output_tokens || 0;
+
+    // Charge the generated tokens to the client's rate-limit token bucket.
+    // The prompt size was only an estimate when the request was admitted; the
+    // completion is only known now. A request that never went through the
+    // limiter (local CLI traffic, limiter switched off) has no bucket, so this
+    // is a no-op for it.
+    if (entry.apiKey && completionTokens > 0) {
+      try {
+        chargeTokens(keyIdentity(entry.apiKey), completionTokens);
+      } catch {
+        // Rate accounting must never break usage recording.
+      }
+    }
 
     let inserted = false;
 
@@ -366,6 +440,35 @@ export async function getUsageHistory(filter = {}) {
     connectionId: r.connectionId, apiKeyMasked: maskApiKey(r.apiKey), endpoint: r.endpoint,
     cost: r.cost, status: r.status, tokens: parseJson(r.tokens, {}),
   }));
+}
+
+/**
+ * Delete usage rows that fell out of the retention window.
+ *
+ * usageHistory grows one row per request and nothing ever deleted one, so a
+ * long-running gateway accumulated rows without bound; the daily rollup
+ * (usageDaily) grew one row per day forever. Both are pruned here, driven by
+ * the retention settings (src/lib/db/repos/settingsRepo.js →
+ * DEFAULT_SETTINGS.usageRetention).
+ *
+ * Fails open: a failed prune is logged and the caller carries on.
+ *
+ * @param {number} historyDays - Keep this many days of per-request rows.
+ * @param {number} dailyDays - Keep this many days of the daily rollup.
+ * @returns {Promise<{history: number, daily: number}|null>}
+ */
+export async function pruneUsageHistory(historyDays = 90, dailyDays = 400) {
+  try {
+    const db = await getAdapter();
+    const historyCutoff = new Date(Date.now() - historyDays * 86400000).toISOString();
+    const dailyCutoff = getLocalDateKey(new Date(Date.now() - dailyDays * 86400000).toISOString());
+    const removedHistory = db.run(`DELETE FROM usageHistory WHERE timestamp < ?`, [historyCutoff]);
+    const removedDaily = db.run(`DELETE FROM usageDaily WHERE dateKey < ?`, [dailyCutoff]);
+    return { history: removedHistory?.changes ?? 0, daily: removedDaily?.changes ?? 0 };
+  } catch (e) {
+    console.error("pruneUsageHistory failed:", e);
+    return null;
+  }
 }
 
 function loadDaysInRange(adapter, maxDays) {

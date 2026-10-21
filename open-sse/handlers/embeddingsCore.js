@@ -1,5 +1,5 @@
 import { createErrorResult, parseUpstreamError, formatProviderError } from "../utils/error.js";
-import { HTTP_STATUS, FETCH_CONNECT_TIMEOUT_MS } from "../config/runtimeConfig.js";
+import { FETCH_CONNECT_TIMEOUT_MS, HTTP_STATUS } from "../config/runtimeConfig.js";
 import { getExecutor } from "../executors/index.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
 import { getEmbeddingAdapter } from "./embeddingProviders/index.js";
@@ -100,6 +100,10 @@ export async function handleEmbeddingsCore({
           method: "POST",
           headers: retryHeaders,
           body: JSON.stringify(requestBody),
+          // The first attempt is bounded; the retry after a token refresh
+          // was not, so a provider that stalled on the retry held a worker
+          // with no way out.
+          signal: AbortSignal.timeout(FETCH_CONNECT_TIMEOUT_MS),
         });
       } catch {
         log?.warn?.("TOKEN", `${provider.toUpperCase()} | retry after refresh failed`);
