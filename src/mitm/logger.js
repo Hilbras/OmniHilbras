@@ -17,6 +17,9 @@ if (!fs.existsSync(DUMP_DIR)) fs.mkdirSync(DUMP_DIR, { recursive: true, mode: 0o
 // so only the owner may list this directory — even one created earlier with a
 // looser mode gets tightened here.
 try { fs.chmodSync(DUMP_DIR, 0o700); } catch { /* best effort */ }
+// The directory above it is tightened as well: it lists the dump folders, and
+// a directory that another process created earlier keeps its old mode.
+try { fs.chmodSync(path.join(DATA_DIR, "logs"), 0o700); } catch { /* best effort */ }
 
 // Header names whose values carry a credential. A credential written to disk in
 // plaintext is a credential stolen by anyone who can read the dump directory,

@@ -184,4 +184,18 @@ describe.skipIf(!canChdir)("request log directory permissions", () => {
       vi.resetModules();
     }
   });
+
+  it("tightens the MITM dump directory", () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omnihilbras-mitm-mode-"));
+    // A directory left over from an older build keeps its old mode.
+    fs.mkdirSync(path.join(dataDir, "logs", "mitm"), { recursive: true, mode: 0o755 });
+    fs.chmodSync(path.join(dataDir, "logs"), 0o755);
+    fs.chmodSync(path.join(dataDir, "logs", "mitm"), 0o755);
+
+    loadMitmLogger(dataDir);
+
+    expect(fs.statSync(path.join(dataDir, "logs")).mode & 0o077).toBe(0);
+    expect(fs.statSync(path.join(dataDir, "logs", "mitm")).mode & 0o077).toBe(0);
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
 });
