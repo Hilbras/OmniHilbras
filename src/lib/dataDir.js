@@ -23,7 +23,14 @@ export function getDataDir() {
   }
 
   try {
-    fs.mkdirSync(configured, { recursive: true });
+    // 0700: this directory holds the database with every provider credential
+    // in plaintext, so it must not be readable by other local users.
+    fs.mkdirSync(configured, { recursive: true, mode: 0o700 });
+    try {
+      fs.chmodSync(configured, 0o700);
+    } catch {
+      // A volume this process does not own — the mode stays as the operator set it.
+    }
     return configured;
   } catch (e) {
     if (e?.code === "EACCES" || e?.code === "EPERM") {

@@ -1,3 +1,4 @@
+import { PUBLIC_LLM_REWRITES } from "./src/shared/constants/publicRoutes.js";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -65,44 +66,10 @@ const nextConfig = {
     return config;
   },
   async rewrites() {
-    return [
-      {
-        source: "/v1/v1/:path*",
-        destination: "/api/v1/:path*"
-      },
-      {
-        source: "/v1/v1",
-        destination: "/api/v1"
-      },
-      {
-        source: "/codex/:path*",
-        destination: "/api/v1/responses"
-      },
-      {
-        source: "/responses",
-        destination: "/api/v1/responses"
-      },
-      {
-        source: "/systemone",
-        destination: "/api/v1/systemone"
-      },
-      {
-        source: "/v1beta/:path*",
-        destination: "/api/v1beta/:path*"
-      },
-      {
-        source: "/v1beta",
-        destination: "/api/v1beta"
-      },
-      {
-        source: "/v1/:path*",
-        destination: "/api/v1/:path*"
-      },
-      {
-        source: "/v1",
-        destination: "/api/v1"
-      }
-    ];
+    // The public LLM paths live in one table (src/shared/constants/publicRoutes.js)
+    // because the dashboard guard has to recognise the same set — it used to
+    // miss /systemone, which fell through the middleware unchecked.
+    return PUBLIC_LLM_REWRITES;
   }
 };
 

@@ -6,7 +6,6 @@ import crypto from "node:crypto";
 import { DATA_DIR } from "@/lib/dataDir";
 import { getSettings } from "@/lib/localDb";
 
-const DEFAULT_PASSWORD = "123456";
 const SESSION_MAX_AGE_SEC = 24 * 60 * 60;
 
 function loadJwtSecret() {
@@ -15,7 +14,7 @@ function loadJwtSecret() {
   try {
     return fs.readFileSync(file, "utf8").trim();
   } catch {}
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   const generated = crypto.randomBytes(32).toString("hex");
   fs.writeFileSync(file, generated, { mode: 0o600 });
   return generated;
@@ -79,6 +78,12 @@ export async function verifyDashboardPassword(password) {
   const settings = await getSettings();
   const storedHash = settings?.password;
   if (storedHash) return bcrypt.compare(password, storedHash);
-  const initialPassword = process.env.INITIAL_PASSWORD || DEFAULT_PASSWORD;
+  // No password has been set. The *configured* INITIAL_PASSWORD still works
+  // (the operator chose it), but the built-in default no longer does: it is
+  // published in the source, so accepting it here would make this re-auth
+  // worthless for a full plaintext secret dump. With no password set, the
+  // local CLI token is the way in.
+  const initialPassword = process.env.INITIAL_PASSWORD;
+  if (!initialPassword) return false;
   return password === initialPassword;
 }

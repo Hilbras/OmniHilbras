@@ -1,4 +1,5 @@
 import { ensureDirs, DATA_FILE } from "./paths.js";
+import { ensureSecureFile } from "@/lib/secureFs.js";
 
 // Use global to survive Next.js dev hot-reload (module state resets on reload)
 if (!global._dbAdapter) global._dbAdapter = { instance: null, initPromise: null, logged: false };
@@ -58,6 +59,13 @@ async function trySqlJs() {
 
 async function initAdapter() {
   ensureDirs();
+  // The database holds every provider credential in plaintext, so it must not
+  // be readable by anyone but this user. SQLite creates the -wal/-shm sidecars
+  // itself, so they are chmod'ed too — and re-checked on every boot, because a
+  // file created by an older build keeps its old mode.
+  ensureSecureFile(DATA_FILE);
+  ensureSecureFile(`${DATA_FILE}-wal`);
+  ensureSecureFile(`${DATA_FILE}-shm`);
   // Order per runtime:
   //   Bun:  bun:sqlite → sql.js
   //   Node: better-sqlite3 → node:sqlite (≥22.5) → sql.js

@@ -2,13 +2,20 @@ import { NextResponse } from "next/server";
 import { exportDb, getSettings, importDb } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { verifyDashboardPassword } from "@/lib/auth/dashboardSession";
+import { hasValidCliToken } from "@/lib/auth/cliToken";
 
-const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const PASSWORD_HEADER = "x-9r-password";
 
-// CLI token requests are already trusted (local machine); skip password re-auth.
+// A CLI-token request is already trusted (local machine); skip password
+// re-auth.
+//
+// The token's *value* is checked, not the presence of the header. Checking
+// only the presence meant any dashboard session could add
+// `x-9r-cli-token: x` and download a full plaintext secret dump without
+// knowing the dashboard password — which is exactly what the re-auth exists
+// to prevent.
 function isCliRequest(request) {
-  return Boolean(request.headers.get(CLI_TOKEN_HEADER));
+  return hasValidCliToken(request);
 }
 
 export async function GET(request) {
