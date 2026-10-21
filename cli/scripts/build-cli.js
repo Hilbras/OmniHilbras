@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { execSync } = require("child_process");
 
 const cliDir = path.resolve(__dirname, "..");
@@ -23,6 +24,13 @@ const EXCLUDE_PATTERNS = [
   "*.log",          // Log files
   "tmp",            // Temp files
   ".DS_Store",      // macOS files
+  // The data directory: the database holds every provider credential in
+  // plaintext, so it must never be copied into the package. Next's tracer
+  // follows the paths the code reads, and a build that runs with HOME inside
+  // the repo used to trace the build home's `.omnihilbras` into the
+  // standalone — publishing it to npm.
+  ".omnihilbras",
+  ".build-home",
 ];
 
 function shouldExclude(name) {
@@ -33,6 +41,36 @@ function shouldExclude(name) {
     }
     return name === pattern;
   });
+}
+
+// Remove any data directory that ended up inside the packaged tree.
+//
+// The copy already skips them by name; this is the second line of defence, for
+// the paths the copy does not walk (a file copied straight into the tree by
+// another step). A published package must never carry a database: it holds
+// every provider credential in plaintext.
+function purgeDataDirs(root) {
+  const removed = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
+      if (!entry.isDirectory()) continue;
+      if (entry.name === ".omnihilbras" || entry.name === ".build-home") {
+        fs.rmSync(entryPath, { recursive: true, force: true });
+        removed.push(entryPath);
+        continue;
+      }
+      walk(entryPath);
+    }
+  };
+  walk(root);
+  return removed;
 }
 
 function copyRecursive(src, dest) {
@@ -170,6 +208,17 @@ function buildCliPackage() {
 
   // Step 1: Build app with Next.js (workspace tracing root → traced node_modules in standalone).
   console.log("1️⃣  Building Next.js app...");
+  // The build gets its own data directory, outside the repository.
+  //
+  // Next's file tracer follows the paths the code reads at build time, and the
+  // data directory is read (the database, the machine id, the catalog). With
+  // HOME inside the repo, that resolved to the build home's `.omnihilbras` —
+  // and the tracer copied the whole directory, database included, into the
+  // standalone. That is what put a data.sqlite into the published package.
+  //
+  // A temp directory outside the tracing root gives the tracer nothing to
+  // copy, and keeps the operator's own ~/.omnihilbras out of the build.
+  const buildDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omnihilbras-build-data-"));
   try {
     execSync("npm run build", {
       stdio: "inherit",
@@ -180,6 +229,7 @@ function buildCliPackage() {
         USERPROFILE: buildHomeDir,
         APPDATA: path.join(buildHomeDir, "AppData", "Roaming"),
         LOCALAPPDATA: path.join(buildHomeDir, "AppData", "Local"),
+        DATA_DIR: buildDataDir,
         NEXT_DIST_DIR: buildDistDirName,
         NEXT_TRACING_ROOT_MODE: "workspace",
       }
@@ -188,6 +238,8 @@ function buildCliPackage() {
   } catch (error) {
     console.error("❌ Next.js build failed");
     process.exit(1);
+  } finally {
+    fs.rmSync(buildDataDir, { recursive: true, force: true });
   }
 
   // Step 2: Clean old app/cli/app if exists
@@ -331,6 +383,19 @@ function buildCliPackage() {
     process.exit(1);
   }
 
+  // Step 9: Sweep the packaged tree for a data directory.
+  //
+  // The package is published to npm: a database inside it would hand every
+  // provider credential to whoever downloads it. This runs last, so it sees
+  // everything every step copied.
+  const purged = purgeDataDirs(cliAppDir);
+  if (purged.length) {
+    console.log(`🧹 Removed ${purged.length} data director${purged.length === 1 ? "y" : "ies"} from the package`);
+    for (const dir of purged) console.log(`   - ${path.relative(cliAppDir, dir)}`);
+  } else {
+    console.log("✅ No data directory in the package\n");
+  }
+
   console.log("✨ CLI package build completed!");
   console.log(`📁 Output: ${cliAppDir}`);
 
@@ -347,6 +412,7 @@ module.exports = {
   assertRequiredApiArtifacts,
   copyStandaloneBuild,
   mergeServerArtifacts,
+  purgeDataDirs,
 };
 
 if (require.main === module) {

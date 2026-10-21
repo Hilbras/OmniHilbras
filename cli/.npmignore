@@ -7,3 +7,11 @@
 !README.md
 !LICENSE
 
+# The data directory must never reach the registry: the database holds every
+# provider credential in plaintext, and the build home also holds the machine
+# id and the jwt secret of the machine that built the package.
+#
+# Note that npm's "files" field wins over this file, so a rule here cannot
+# exclude anything under app/. The real guard is in the build:
+# cli/scripts/build-cli.js skips and then purges those directories, and
+# tests/unit/cli-build-artifacts.test.js fails the build if one survives.

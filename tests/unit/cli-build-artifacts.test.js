@@ -18,6 +18,7 @@ const {
   assertRequiredApiArtifacts,
   copyStandaloneBuild,
   mergeServerArtifacts,
+  purgeDataDirs,
 } = require("../../cli/scripts/build-cli.js");
 
 const tempDirs = [];
@@ -137,5 +138,76 @@ describe("CLI build server artifacts", () => {
         ".next-cli-build/server/app/api/v1/messages/route.js",
       )),
     );
+  });
+});
+
+describe("the packaged tree carries no data directory", () => {
+  it("skips the data directory while copying the standalone build", () => {
+    const root = createTempDir();
+    const appDir = path.join(root, "omnihilbras");
+    const buildDistDir = path.join(appDir, ".next-cli-build");
+    const cliAppDir = path.join(root, "cli-app");
+    const standaloneDir = path.join(buildDistDir, "standalone", path.basename(appDir));
+
+    writeFixture(standaloneDir, "server.js", "standalone server");
+    // The tracer followed the data directory into the standalone: the
+    // database holds every provider credential in plaintext.
+    writeFixture(standaloneDir, "cli/.build-home/.omnihilbras/db/data.sqlite", "credentials");
+    writeFixture(standaloneDir, "cli/.build-home/.omnihilbras/jwt-secret", "secret");
+    writeFixture(standaloneDir, "cli/.build-home/.omnihilbras/machine-id", "machine");
+
+    copyStandaloneBuild(appDir, buildDistDir, cliAppDir);
+
+    const forbidden = [
+      path.join(cliAppDir, "cli/.build-home/.omnihilbras/db/data.sqlite"),
+      path.join(cliAppDir, "cli/.build-home/.omnihilbras/jwt-secret"),
+      path.join(cliAppDir, "cli/.build-home/.omnihilbras/machine-id"),
+    ];
+    for (const file of forbidden) {
+      assert.equal(fs.existsSync(file), false, `${file} must not be packaged`);
+    }
+    assert.equal(fs.existsSync(path.join(cliAppDir, "server.js")), true);
+  });
+
+  it("purges a data directory that another step copied in", () => {
+    const root = createTempDir();
+    const cliAppDir = path.join(root, "cli-app");
+
+    writeFixture(cliAppDir, "cli/.build-home/.omnihilbras/db/data.sqlite", "credentials");
+    writeFixture(cliAppDir, "cli/.build-home/.omnihilbras/jwt-secret", "secret");
+    writeFixture(cliAppDir, "app/server.js", "server");
+
+    const removed = purgeDataDirs(cliAppDir);
+
+    assert.equal(removed.length, 1);
+    assert.equal(fs.existsSync(path.join(cliAppDir, "cli/.build-home")), false);
+    assert.equal(fs.existsSync(path.join(cliAppDir, "app/server.js")), true);
+  });
+
+  it("fails the release when the file list carries a secret", async () => {
+    const { checkPackageContents, findForbiddenFiles } = await import(
+      "../../cli/scripts/check-package-contents.mjs"
+    );
+
+    const clean = ["cli.js", "app/server.js", "app/public/logo.svg"];
+    assert.deepEqual(findForbiddenFiles(clean), []);
+    assert.equal(checkPackageContents(clean, 1000).ok, true);
+
+    const leaky = [
+      ...clean,
+      "app/cli/.build-home/.omnihilbras/db/data.sqlite",
+      "app/cli/.build-home/.omnihilbras/jwt-secret",
+    ];
+    const result = checkPackageContents(leaky, 1000);
+    assert.equal(result.ok, false);
+    assert.equal(result.forbidden.length, 2);
+  });
+
+  it("fails the release when the package is over the size budget", async () => {
+    const { checkPackageContents } = await import("../../cli/scripts/check-package-contents.mjs");
+    const files = ["cli.js"];
+    assert.equal(checkPackageContents(files, 1000, 2000).ok, true);
+    assert.equal(checkPackageContents(files, 3000, 2000).tooBig, true);
+    assert.equal(checkPackageContents(files, 3000, 2000).ok, false);
   });
 });
