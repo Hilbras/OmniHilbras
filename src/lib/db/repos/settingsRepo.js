@@ -134,13 +134,51 @@ export function mergeWithDefaults(raw) {
   return merged;
 }
 
+/**
+ * The settings, cached.
+ *
+ * getSettings() ran a `SELECT` and a JSON parse on every call, and the
+ * request path calls it three times per request — plus three more for every
+ * combo member and every account-fallback iteration.
+ *
+ * The cache is dropped on every write (updateSettings is the single choke
+ * point all writers go through), and it also expires on its own, so a write
+ * that somehow bypassed updateSettings cannot leave a stale setting behind
+ * for long.
+ */
+const SETTINGS_CACHE_TTL_MS = 2000;
+let settingsCache = { value: null, expiresAt: 0 };
+
+// A copy that also copies the nested groups, so a caller that mutates what it
+// got (say `settings.rateLimit.keyOverrides`) cannot poison the cached copy.
+function copySettings(value) {
+  const copy = { ...value };
+  for (const key of NESTED_SETTING_GROUPS) {
+    if (copy[key] && typeof copy[key] === "object" && !Array.isArray(copy[key])) {
+      copy[key] = { ...copy[key] };
+    }
+  }
+  if (copy.rateLimit?.concurrency && typeof copy.rateLimit.concurrency === "object") {
+    copy.rateLimit.concurrency = { ...copy.rateLimit.concurrency };
+  }
+  return copy;
+}
+
 export async function getSettings() {
+  const now = Date.now();
+  if (settingsCache.value && settingsCache.expiresAt > now) {
+    return copySettings(settingsCache.value);
+  }
   const raw = await readRaw();
-  return mergeWithDefaults(raw);
+  const merged = mergeWithDefaults(raw);
+  settingsCache = { value: merged, expiresAt: now + SETTINGS_CACHE_TTL_MS };
+  return copySettings(merged);
 }
 
 // Atomic read-merge-write inside transaction (prevents losing concurrent updates)
 export async function updateSettings(updates) {
+  // The cached copy is stale the moment the write lands.
+  settingsCache = { value: null, expiresAt: 0 };
   const db = await getAdapter();
   let next;
   db.transaction(function () {

@@ -14,17 +14,22 @@ export function usesAwsCredentialForm(provider) {
  * that stores a credential in here would leak by default.
  *
  * Adding a field to this set is a deliberate act: check first that the value
- * is not a secret.
+ * is not a secret. Everything in here is an id, an endpoint, a flag, a region
+ * or a timestamp — never a token, a secret, a cookie or a password.
  */
 const SAFE_PROVIDER_SPECIFIC_FIELDS = new Set([
   // Connection shape
   "baseUrl",
+  "base",
   "azureEndpoint",
   "apiVersion",
+  "apiType",
   "deployment",
   "organization",
   "accountId",
   "region",
+  "aiRegion",
+  "userRegion",
   "projectId",
   "profileArn",
   "nodeName",
@@ -32,15 +37,56 @@ const SAFE_PROVIDER_SPECIFIC_FIELDS = new Set([
   "uid",
   "username",
   "authMethod",
+  "authKind",
+  "resolvedAuthMethod",
   "scope",
   "scopes",
   "client_id",
   "clientId",
   "jwtExp",
+  // Endpoints used by the provider-specific executors
+  "inferenceBaseUrl",
+  "effectiveBaseUrl",
+  "apiServerUrl",
+  "authBaseUrl",
+  "startUrl",
+  "tokenEndpoint",
+  "kimchiEndpoint",
+  "vercelRelayUrl",
+  "thAuthBaseUrl",
+  // Account / tenant identity
+  "orgId",
+  "organizationId",
+  "workspaceId",
+  "principalId",
+  "userId",
+  "userIdentity",
+  "userUniqueId",
+  "webId",
+  "bizUserId",
+  "tenant",
+  "systemId",
+  "deviceId",
+  "machineId",
+  "thUserId",
+  "agentId",
+  "agentKeyId",
+  "location",
+  // Display identity (never a credential)
+  "email",
+  "thEmail",
+  "firstName",
+  "lastName",
+  "login",
+  "name",
+  "provider",
+  "providerLabel",
+  "modelCount",
   // GitHub Copilot
   "githubLogin",
   "githubName",
   "githubEmail",
+  "githubUserId",
   "chatgptAccountId",
   "chatgptPlanType",
   "copilotTokenExpiresAt",
@@ -57,6 +103,20 @@ const SAFE_PROVIDER_SPECIFIC_FIELDS = new Set([
   "connectionProxyEnabled",
   "connectionProxyUrl",
   "connectionNoProxy",
+  "connectionProxyPoolId",
+  "strictProxy",
+  // Feature flags and provider quirks
+  "ghostMode",
+  "kiroToolCallRepair",
+  "hasGrokCodeAccess",
+  "subscriptionTier",
+  "appLanguage",
+  "appVersion",
+  "defaultAppVersion",
+  // Timestamps
+  "expiresAt",
+  "expireTime",
+  "lastRefreshAt",
 ]);
 
 /**

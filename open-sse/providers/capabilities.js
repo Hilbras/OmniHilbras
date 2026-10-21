@@ -729,23 +729,38 @@ function isCommandCodeTextOnly(model) {
  *
  * The cache is dropped whenever the catalog source is (re)installed, which is
  * what a catalog sync does — see clearCapabilitiesCache.
+ *
+ * The cache lives on globalThis for the same reason the catalog slot does: the
+ * server bundles this module into more than one chunk, each copy with its own
+ * module state. A per-copy cache would keep serving an answer that was
+ * resolved through a catalog source another copy has already detached.
  */
-const capabilityCache = new Map();
+const localCapabilityCache = new Map();
+
+function getCapabilityCache() {
+  if (typeof globalThis === "undefined") return localCapabilityCache;
+  if (!globalThis.__9rCapabilityCache) globalThis.__9rCapabilityCache = new Map();
+  return globalThis.__9rCapabilityCache;
+}
 
 /** Drop the memoised capabilities. Called when the catalog changes. */
 export function clearCapabilitiesCache() {
-  capabilityCache.clear();
+  localCapabilityCache.clear();
+  if (typeof globalThis !== "undefined" && globalThis.__9rCapabilityCache) {
+    globalThis.__9rCapabilityCache.clear();
+  }
 }
 
 export function getCapabilitiesForModel(provider, model) {
   if (!model) return { ...DEFAULT_CAPABILITIES };
 
+  const cache = getCapabilityCache();
   const cacheKey = `${provider || ""}\u0000${model}`;
-  const cached = capabilityCache.get(cacheKey);
+  const cached = cache.get(cacheKey);
   if (cached) return { ...cached };
 
   const computed = computeCapabilitiesForModel(provider, model);
-  capabilityCache.set(cacheKey, computed);
+  cache.set(cacheKey, computed);
   return { ...computed };
 }
 

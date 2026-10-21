@@ -24,6 +24,12 @@
 // touches a provider account.
 import { getApiKeyByKey } from "@/lib/db/repos/apiKeysRepo.js";
 import { getCombos } from "@/lib/db/repos/combosRepo.js";
+import {
+  lookupAllowEntry,
+  lookupComboNames,
+  storeAllowEntry,
+  storeComboNames,
+} from "@/lib/auth/allowCache.js";
 import { getModelInfo, getComboModels } from "./model.js";
 import { resolveProviderId } from "@/shared/constants/providers.js";
 import {
@@ -82,24 +88,70 @@ export async function getKeyAccessContext(request) {
 
 // Resolve the allow list once per request: combo names, resolved model ids,
 // and resolved provider ids (for provider-as-model kinds).
+//
+// The resolution of an entry does not change between requests, so it is
+// cached (src/lib/auth/allowCache.js): the entries are resolved once and the
+// set of combo names is read once. The list itself is not cached — it comes
+// from the key row, which is re-read when the key changes.
 async function getAllowSets(ctx) {
   if (ctx._sets) return ctx._sets;
-  const comboNames = new Set((await getCombos()).map((c) => lower(c.name)));
+  const comboNames = await getComboNames();
   const combos = new Set();
   const models = new Set();
   const providers = new Set();
   for (const entry of ctx.allow) {
-    const key = lower(entry);
-    if (comboNames.has(key)) {
-      combos.add(key);
+    const resolved = await resolveAllowEntry(entry, comboNames);
+    if (resolved.combo) {
+      combos.add(lower(entry));
       continue;
     }
-    const info = await getModelInfo(entry);
-    if (info?.provider && info.model) models.add(canonicalModel(info.provider, info.model));
-    if (!entry.includes("/")) providers.add(lower(resolveProviderId(entry)));
+    if (resolved.model) models.add(resolved.model);
+    if (resolved.provider) providers.add(resolved.provider);
   }
   ctx._sets = { combos, models, providers };
   return ctx._sets;
+}
+
+// The name of every combo, read from the database once and kept until a combo
+// changes.
+async function getComboNames() {
+  const cached = lookupComboNames();
+  if (cached) return cached;
+  const names = new Set((await getCombos()).map((c) => lower(c.name)));
+  storeComboNames(names);
+  return names;
+}
+
+// What one allow-list entry resolves to: a combo name, a provider/model, a
+// provider (search/fetch) — or nothing, when the entry routes nowhere.
+//
+// The entry is keyed by its exact spelling: the resolution is case-sensitive
+// ("CX/gpt-5" and "cx/gpt-5" are different providers), while the combo name
+// it may name is matched case-insensitively, as before.
+async function resolveAllowEntry(entry, comboNames) {
+  const cached = lookupAllowEntry(entry);
+  if (cached) return cached;
+  let value;
+  if (comboNames.has(lower(entry))) {
+    value = { combo: true, model: null, provider: null };
+  } else {
+    const info = await getModelInfo(entry);
+    if (info?.provider === null) {
+      // The entry names a combo the cached names do not know yet (it was
+      // created since they were read). The model lookup says so, and the
+      // answer must be the one a fresh name set would give: the entry is a
+      // combo, not a model and not a provider.
+      value = { combo: true, model: null, provider: null };
+    } else {
+      value = {
+        combo: false,
+        model: info?.provider && info.model ? canonicalModel(info.provider, info.model) : null,
+        provider: entry.includes("/") ? null : lower(resolveProviderId(entry)),
+      };
+    }
+  }
+  storeAllowEntry(entry, value);
+  return value;
 }
 
 async function isModelStringAllowed(ctx, requested) {

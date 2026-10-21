@@ -19,6 +19,7 @@ let userPricingCache = { value: null, expiresAt: 0 };
 function invalidate() {
   cache = { value: null, expiresAt: 0 };
   userPricingCache = { value: null, expiresAt: 0 };
+  pricingMemo.clear();
 }
 
 async function getUserPricing() {
@@ -62,12 +63,51 @@ export async function getPricing() {
   return merged;
 }
 
+/**
+ * The constant pricing resolver, loaded once.
+ *
+ * It used to be a dynamic `await import(...)` on every call — and this
+ * function runs on every completed request, to price it. The import is
+ * cached by the module system, but the promise still costs tens of
+ * microseconds each time, which was the bulk of the per-request pricing
+ * cost.
+ */
+let constPricingResolver = null;
+async function resolveConstPricing(provider, model) {
+  if (!constPricingResolver) {
+    const { getPricingForModel } = await import("open-sse/providers/pricing.js");
+    constPricingResolver = getPricingForModel;
+  }
+  return constPricingResolver(provider, model);
+}
+
+/**
+ * The resolved price, per provider + model.
+ *
+ * Every completed request prices its model, and the same model is priced over
+ * and over. An unknown model is the expensive case: the fallback chain ends in
+ * a scan of all 51 pricing patterns, which costs ~50 µs. The memo turns the
+ * repeat into a map lookup, and it is dropped together with the user pricing
+ * cache (every pricing write goes through invalidate()).
+ */
+const PRICING_MEMO_LIMIT = 2000;
+const pricingMemo = new Map();
+
 export async function getPricingForModel(provider, model) {
   if (!model) return null;
+  const key = `${provider || ""}\u0000${model}`;
+  const memoized = pricingMemo.get(key);
+  if (memoized !== undefined) return memoized;
+
   const userPricing = await getUserPricing();
-  if (provider && userPricing[provider]?.[model]) return userPricing[provider][model];
-  const { getPricingForModel: resolveConst } = await import("open-sse/providers/pricing.js");
-  return resolveConst(provider, model);
+  const value =
+    provider && userPricing[provider]?.[model]
+      ? userPricing[provider][model]
+      : await resolveConstPricing(provider, model);
+
+  if (pricingMemo.size >= PRICING_MEMO_LIMIT) pricingMemo.clear();
+  pricingMemo.set(key, value);
+  return value;
 }
 
 // Atomic merge inside transaction (per-provider read-modify-write)

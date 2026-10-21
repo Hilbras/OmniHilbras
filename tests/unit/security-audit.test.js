@@ -6,12 +6,21 @@ import path from "path";
 // AUDIT-002 (#1962): API key masking in usage stats
 // ============================================================
 describe("AUDIT-002: API key masking", () => {
-  it("source should contain maskApiKey function", () => {
+  it("keeps one masking rule, and the usage repo uses it", () => {
+    // The rule lives in one shared helper — the dashboard, the CLI and the
+    // usage tables all mask through it, so there is a single definition to
+    // audit and a single place to change.
+    const helper = fs.readFileSync(
+      path.resolve(import.meta.dirname, "../../src/lib/db/helpers/maskApiKey.js"),
+      "utf-8"
+    );
+    expect(helper).toContain("function maskApiKey");
+
     const source = fs.readFileSync(
       path.resolve(import.meta.dirname, "../../src/lib/db/repos/usageRepo.js"),
       "utf-8"
     );
-    expect(source).toContain("function maskApiKey");
+    expect(source).toMatch(/import \{ maskApiKey \} from "\.\.\/helpers\/maskApiKey\.js"/);
   });
 
   it("getUsageHistory should use apiKeyMasked instead of apiKey", () => {

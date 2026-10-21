@@ -7,9 +7,16 @@ import { getMetaSync, setMetaSync } from "./helpers/metaStore.js";
 import { makeBackupDir, backupFile, backupDbLite, pruneOldBackups } from "./backup.js";
 import { getAppVersion } from "./version.js";
 import { stringifyJson } from "./helpers/jsonCol.js";
+import { maskApiKey } from "./helpers/maskApiKey.js";
+import { rewriteDayApiKeys } from "./helpers/usageKeyRows.js";
+import { hashApiKey } from "@/lib/auth/keyPepper.js";
+import { invalidateAllProviderConnections } from "./repos/providerConnectionCache.js";
 
 // Marker file: prevents re-importing legacy JSON when user wipes data.sqlite.
 const MIGRATED_MARKER = path.join(DB_DIR, ".migrated-from-json");
+
+// The migration that moved the API keys out of the database in the clear.
+const KEY_HASH_MIGRATION_VERSION = 2;
 
 // Track per-adapter so reusing same adapter skips re-run, but new adapter (after reset) re-runs.
 const _migratedAdapters = new WeakSet();
@@ -141,9 +148,12 @@ function importLegacyMain(adapter, data) {
   }, (p) => ({ id: p.id ?? null }));
 
   importWithAssertion(adapter, "apiKeys", data.apiKeys || [], (k) => {
+    // The legacy file holds the plaintext; the row takes the hash and the
+    // display form, so the imported keys work and no secret lands in the
+    // database.
     adapter.run(
-      `INSERT OR REPLACE INTO apiKeys(id, key, name, machineId, isActive, createdAt) VALUES(?, ?, ?, ?, ?, ?)`,
-      [k.id, k.key, k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.createdAt || new Date().toISOString()]
+      `INSERT OR REPLACE INTO apiKeys(id, key, keyHash, name, machineId, isActive, createdAt) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+      [k.id, maskApiKey(k.key), hashApiKey(k.key), k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.createdAt || new Date().toISOString()]
     );
   }, (k) => ({ id: k.id ?? null, name: k.name ?? null }));
 
@@ -167,6 +177,9 @@ function importLegacyMain(adapter, data) {
   for (const [provider, models] of Object.entries(data.pricing || {})) {
     adapter.run(`INSERT OR REPLACE INTO kv(scope, key, value) VALUES('pricing', ?, ?)`, [provider, stringifyJson(models || {})]);
   }
+
+  // The import wrote the connection table directly.
+  invalidateAllProviderConnections();
 }
 
 function importLegacyUsage(adapter, data) {
@@ -177,7 +190,7 @@ function importLegacyUsage(adapter, data) {
       `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         e.timestamp || new Date().toISOString(),
-        e.provider || null, e.model || null, e.connectionId || null, e.apiKey || null, e.endpoint || null,
+        e.provider || null, e.model || null, e.connectionId || null, maskApiKey(e.apiKey), e.endpoint || null,
         t.prompt_tokens || t.input_tokens || 0,
         t.completion_tokens || t.output_tokens || 0,
         e.cost || 0,
@@ -188,6 +201,9 @@ function importLegacyUsage(adapter, data) {
     );
   }
   for (const [dateKey, day] of Object.entries(data.dailySummary || {})) {
+    // The rollup holds the raw key in its bucket keys — rewrite it to the
+    // display form, so the row groups with the ones written after the change.
+    rewriteDayApiKeys(day);
     adapter.run(`INSERT OR REPLACE INTO usageDaily(dateKey, data) VALUES(?, ?)`, [dateKey, stringifyJson(day)]);
   }
   if (typeof data.totalRequestsLifetime === "number") {
@@ -248,6 +264,25 @@ export async function runMigrationOnce(adapter) {
 
   // 2. Additive sync (auto add missing columns/indexes declared in TABLES)
   syncSchemaFromTables(adapter);
+
+  // 2b. The key-hash migration rewrote the rows that held the secrets.
+  // SQLite does not erase the pages it frees, so the file (and its WAL)
+  // would still carry the keys in its free space — a stolen copy could be
+  // carved. Compact the database once, right after the rewrite (and after a
+  // key was healed at runtime, which asks for the same).
+  const needsCompaction = getMetaSync(adapter, "needsCompaction", null) === "1";
+  if (needsCompaction || (migInfo.from < KEY_HASH_MIGRATION_VERSION && migInfo.to >= KEY_HASH_MIGRATION_VERSION)) {
+    try {
+      adapter.exec("VACUUM");
+      // The WAL holds the old page images — fold them into the database and
+      // drop the log, or the keys stay in the sidecar file.
+      if (typeof adapter.checkpoint === "function") adapter.checkpoint();
+      if (needsCompaction) adapter.run(`DELETE FROM _meta WHERE key = 'needsCompaction'`);
+      console.log("[DB][migrate] compacted the database after the key migration");
+    } catch (e) {
+      console.warn(`[DB][migrate] VACUUM after the key migration failed (the file keeps the old pages): ${e.message}`);
+    }
+  }
 
   // Stamp the schema version we just reached so future boots skip re-backup.
   setMetaSync(adapter, "backupSchemaVersion", SCHEMA_VERSION);

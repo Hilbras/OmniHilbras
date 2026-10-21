@@ -6,8 +6,27 @@ import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.
 import { getAntigravityQuotaCache, getAntigravityModelQuota } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
 
-// Mutex to prevent race conditions during account selection
-let selectionMutex = Promise.resolve();
+// One selection lock per provider.
+//
+// The lock only guards the state that has to stay consistent while an account
+// is picked: the connection snapshot and the round-robin/sticky bookkeeping.
+// The connection list read, the settings read and the proxy resolution run
+// outside of it, so a slow lookup no longer holds up every other request —
+// and accounts of different providers no longer queue behind each other.
+const selectionLocks = new Map();
+
+function withSelectionLock(providerId, fn) {
+  const previous = selectionLocks.get(providerId) || Promise.resolve();
+  const result = previous.then(fn);
+  // The tail never rejects, so a failed selection does not poison the queue
+  // for the next one.
+  const tail = result.then(() => {}, () => {});
+  selectionLocks.set(providerId, tail);
+  tail.then(() => {
+    if (selectionLocks.get(providerId) === tail) selectionLocks.delete(providerId);
+  });
+  return result;
+}
 
 const GITHUB_MONTHLY_USAGE_LIMIT = "you've reached your additional usage limit for your plan";
 
@@ -32,51 +51,65 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     : (excludeConnectionIds ? new Set([excludeConnectionIds]) : new Set());
   const preferredConnectionId = options?.preferredConnectionId || null;
   const requestedModel = options?.requestedModel || model;
-  // Acquire mutex to prevent race conditions
-  const currentMutex = selectionMutex;
-  let resolveMutex;
-  selectionMutex = new Promise(resolve => { resolveMutex = resolve; });
 
-  try {
-    await currentMutex;
+  // Resolve alias to provider ID (e.g., "kc" -> "kilocode")
+  const providerId = resolveProviderId(provider);
 
-    // Resolve alias to provider ID (e.g., "kc" -> "kilocode")
-    const providerId = resolveProviderId(provider);
-
-    // Inject a virtual connection for no-auth free providers (with optional proxy pool from settings)
-    if (FREE_PROVIDERS[providerId]?.noAuth) {
-      const settings = await getSettings();
-      const override = (settings.providerStrategies || {})[providerId] || {};
-      const strategy = override.rotateStrategy || "none";
-      let pickedId = override.proxyPoolId || null;
-      if (strategy !== "none") {
-        const allPools = await getProxyPools({ isActive: true });
-        const poolIds = allPools.filter(p => p.proxyUrl).map(p => p.id);
-        pickedId = pickProxyPoolId(poolIds, strategy, providerId);
-      }
-      const resolvedProxy = await resolveConnectionProxyConfig({ proxyPoolId: pickedId || "" });
-      return {
-        id: "noauth",
-        connectionName: "Public",
-        isActive: true,
-        accessToken: "public",
-        providerSpecificData: {
-          connectionProxyEnabled: resolvedProxy.connectionProxyEnabled,
-          connectionProxyUrl: resolvedProxy.connectionProxyUrl,
-          connectionNoProxy: resolvedProxy.connectionNoProxy,
-          connectionProxyPoolId: resolvedProxy.proxyPoolId || null,
-          vercelRelayUrl: resolvedProxy.vercelRelayUrl || "",
-          strictProxy: resolvedProxy.strictProxy === true,
-        },
-      };
+  // Inject a virtual connection for no-auth free providers (with optional proxy pool from settings).
+  // There is no account pool to pick from, so this needs no lock at all.
+  if (FREE_PROVIDERS[providerId]?.noAuth) {
+    const settings = await getSettings();
+    const override = (settings.providerStrategies || {})[providerId] || {};
+    const strategy = override.rotateStrategy || "none";
+    let pickedId = override.proxyPoolId || null;
+    if (strategy !== "none") {
+      const allPools = await getProxyPools({ isActive: true });
+      const poolIds = allPools.filter(p => p.proxyUrl).map(p => p.id);
+      pickedId = pickProxyPoolId(poolIds, strategy, providerId);
     }
+    const resolvedProxy = await resolveConnectionProxyConfig({ proxyPoolId: pickedId || "" });
+    return {
+      id: "noauth",
+      connectionName: "Public",
+      isActive: true,
+      accessToken: "public",
+      providerSpecificData: {
+        connectionProxyEnabled: resolvedProxy.connectionProxyEnabled,
+        connectionProxyUrl: resolvedProxy.connectionProxyUrl,
+        connectionNoProxy: resolvedProxy.connectionNoProxy,
+        connectionProxyPoolId: resolvedProxy.proxyPoolId || null,
+        vercelRelayUrl: resolvedProxy.vercelRelayUrl || "",
+        strictProxy: resolvedProxy.strictProxy === true,
+      },
+    };
+  }
 
+  // ── Unlocked: gather everything the selection needs ──────────────────────
+  // The connection list is served from the in-process cache, so the database
+  // is only read when that cache is cold — and that read happens here,
+  // outside the lock. The list is read again inside the lock below, where it
+  // has to be current.
+  await getProviderConnections({ provider: providerId, isActive: true });
+  const settings = await getSettings();
+  // Per-provider strategy overrides global setting
+  const providerOverride = (settings.providerStrategies || {})[providerId] || {};
+  const strategy = providerOverride.fallbackStrategy || settings.fallbackStrategy || "fill-first";
+  const stickyLimit = providerOverride.stickyRoundRobinLimit || settings.stickyRoundRobinLimit || 3;
+
+  // ── Locked: pick the account and update the round-robin bookkeeping ─────
+  const selection = await withSelectionLock(providerId, async () => {
+    // Read the list inside the lock: a selection that ran while this request
+    // was waiting for the lock has already written its bookkeeping, and the
+    // decision has to see it. The list comes from the cache, so this is a
+    // memory lookup and not a database read — every write to a connection
+    // updates the cached list in the same tick as its database write.
     const connections = await getProviderConnections({ provider: providerId, isActive: true });
+
     log.debug("AUTH", `${provider} | total connections: ${connections.length}, excludeIds: ${excludeSet.size > 0 ? [...excludeSet].join(",") : "none"}, model: ${model || "any"}`);
 
     if (connections.length === 0) {
       log.warn("AUTH", `No credentials for ${provider}`);
-      return null;
+      return { type: "none" };
     }
 
     // Antigravity quota cache is lazy: only populated after that account returns 409/429.
@@ -129,21 +162,16 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         const earliestConn = lockedConns[0];
         log.warn("AUTH", `${provider} | all ${connections.length} accounts locked for ${model || "all"} (${formatRetryAfter(earliest)}) | lastError=${earliestConn?.lastError?.slice(0, 50)}`);
         return {
-          allRateLimited: true,
+          type: "rateLimited",
           retryAfter: earliest,
           retryAfterHuman: formatRetryAfter(earliest),
           lastError: earliestConn?.lastError || null,
-          lastErrorCode: earliestConn?.errorCode || null
+          lastErrorCode: earliestConn?.errorCode || null,
         };
       }
       log.warn("AUTH", `${provider} | all ${connections.length} accounts unavailable`);
-      return null;
+      return { type: "none" };
     }
-
-    const settings = await getSettings();
-    // Per-provider strategy overrides global setting
-    const providerOverride = (settings.providerStrategies || {})[providerId] || {};
-    const strategy = providerOverride.fallbackStrategy || settings.fallbackStrategy || "fill-first";
 
     let connection;
     // Pin to preferred connection if specified and available
@@ -156,8 +184,6 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     if (connection) {
       // skip strategy
     } else if (strategy === "round-robin") {
-      const stickyLimit = providerOverride.stickyRoundRobinLimit || settings.stickyRoundRobinLimit || 3;
-
       // Sort by lastUsed (most recent first) to find current candidate
       const byRecency = [...availableConnections].sort((a, b) => {
         if (!a.lastUsedAt && !b.lastUsedAt) return (a.priority || 999) - (b.priority || 999);
@@ -199,39 +225,53 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       connection = availableConnections[0];
     }
 
-    const resolvedProxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
+    return { type: "selected", connection };
+  });
 
+  if (selection.type === "none") return null;
+  if (selection.type === "rateLimited") {
     return {
-      authType: connection.authType,
-      apiKey: connection.apiKey,
-      accessToken: connection.accessToken,
-      refreshToken: connection.refreshToken,
-      idToken: connection.idToken,
-      expiresAt: connection.expiresAt,
-      expiresIn: connection.expiresIn,
-      lastRefreshAt: connection.lastRefreshAt,
-      projectId: connection.projectId,
-      connectionName: connection.displayName || connection.name || connection.email || connection.id,
-      copilotToken: connection.providerSpecificData?.copilotToken,
-      providerSpecificData: {
-        ...(connection.providerSpecificData || {}),
-        connectionProxyEnabled: resolvedProxy.connectionProxyEnabled,
-        connectionProxyUrl: resolvedProxy.connectionProxyUrl,
-        connectionNoProxy: resolvedProxy.connectionNoProxy,
-        connectionProxyPoolId: resolvedProxy.proxyPoolId || null,
-        vercelRelayUrl: resolvedProxy.vercelRelayUrl || "",
-        strictProxy: resolvedProxy.strictProxy === true,
-      },
-      connectionId: connection.id,
-      // Include current status for optimization check
-      testStatus: connection.testStatus,
-      lastError: connection.lastError,
-      // Pass full connection for clearAccountError to read modelLock_* keys
-      _connection: connection
+      allRateLimited: true,
+      retryAfter: selection.retryAfter,
+      retryAfterHuman: selection.retryAfterHuman,
+      lastError: selection.lastError,
+      lastErrorCode: selection.lastErrorCode
     };
-  } finally {
-    if (resolveMutex) resolveMutex();
   }
+
+  const connection = selection.connection;
+
+  // ── Unlocked: resolve the proxy config and build the credential payload ──
+  const resolvedProxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
+
+  return {
+    authType: connection.authType,
+    apiKey: connection.apiKey,
+    accessToken: connection.accessToken,
+    refreshToken: connection.refreshToken,
+    idToken: connection.idToken,
+    expiresAt: connection.expiresAt,
+    expiresIn: connection.expiresIn,
+    lastRefreshAt: connection.lastRefreshAt,
+    projectId: connection.projectId,
+    connectionName: connection.displayName || connection.name || connection.email || connection.id,
+    copilotToken: connection.providerSpecificData?.copilotToken,
+    providerSpecificData: {
+      ...(connection.providerSpecificData || {}),
+      connectionProxyEnabled: resolvedProxy.connectionProxyEnabled,
+      connectionProxyUrl: resolvedProxy.connectionProxyUrl,
+      connectionNoProxy: resolvedProxy.connectionNoProxy,
+      connectionProxyPoolId: resolvedProxy.proxyPoolId || null,
+      vercelRelayUrl: resolvedProxy.vercelRelayUrl || "",
+      strictProxy: resolvedProxy.strictProxy === true,
+    },
+    connectionId: connection.id,
+    // Include current status for optimization check
+    testStatus: connection.testStatus,
+    lastError: connection.lastError,
+    // Pass full connection for clearAccountError to read modelLock_* keys
+    _connection: connection
+  };
 }
 
 /**

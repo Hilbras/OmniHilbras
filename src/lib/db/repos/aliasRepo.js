@@ -1,6 +1,8 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { makeKv } from "../helpers/kvStore.js";
+import { invalidateAllowEntries } from "@/lib/auth/allowCache.js";
+import { clearModelResolutionCache } from "@/lib/modelResolutionCache.js";
 
 const aliasKv = makeKv("modelAliases");
 const customKv = makeKv("customModels");
@@ -13,10 +15,16 @@ export async function getModelAliases() {
 
 export async function setModelAlias(alias, model) {
   await aliasKv.set(alias, model);
+  // An alias resolves to a model, so repointing one changes what an
+  // allow-list entry resolves to — and what the model string routes to.
+  invalidateAllowEntries();
+  clearModelResolutionCache();
 }
 
 export async function deleteModelAlias(alias) {
   await aliasKv.remove(alias);
+  invalidateAllowEntries();
+  clearModelResolutionCache();
 }
 
 // customModels: key=`${providerAlias}|${id}|${type}`, value=full model object

@@ -1,6 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { invalidateAllowEntries } from "@/lib/auth/allowCache.js";
+import { clearModelResolutionCache } from "@/lib/modelResolutionCache.js";
 
 function rowToNode(row) {
   if (!row) return null;
@@ -86,6 +88,10 @@ export async function createProviderNode(data) {
     updatedAt: now,
   };
   upsert(db, node);
+  // A node owns a model prefix, so a new or changed node changes what an
+  // allow-list entry resolves to.
+  invalidateAllowEntries();
+  clearModelResolutionCache();
   return node;
 }
 
@@ -99,6 +105,8 @@ export async function updateProviderNode(id, data) {
     upsert(db, merged);
     result = merged;
   });
+  invalidateAllowEntries();
+  clearModelResolutionCache();
   return result;
 }
 
@@ -112,5 +120,7 @@ export async function deleteProviderNode(id) {
     db.run(`DELETE FROM providerNodes WHERE id = ?`, [id]);
     db.run(`DELETE FROM kv WHERE scope = 'customModels' AND key LIKE ?`, [`${id}|%`]);
   });
+  invalidateAllowEntries();
+  clearModelResolutionCache();
   return removed;
 }

@@ -1,6 +1,14 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import {
+  cloneConnection,
+  getCachedProviderConnections,
+  setCachedProviderConnections,
+  invalidateProviderConnections,
+  invalidateAllProviderConnections,
+  patchCachedProviderConnection,
+} from "./providerConnectionCache.js";
 
 const OPTIONAL_FIELDS = [
   "displayName", "email", "globalPriority", "defaultModel",
@@ -89,17 +97,37 @@ function deriveConnectionName(data, fallbackName) {
   return fallbackName;
 }
 
-export async function getProviderConnections(filter = {}) {
-  const db = await getAdapter();
-  const where = [];
-  const params = [];
-  if (filter.provider) { where.push("provider = ?"); params.push(filter.provider); }
-  if (filter.isActive !== undefined) { where.push("isActive = ?"); params.push(filter.isActive ? 1 : 0); }
-  const sql = `SELECT * FROM providerConnections${where.length ? ` WHERE ${where.join(" AND ")}` : ""}`;
-  const rows = db.all(sql, params);
+function loadProviderConnections(db, provider) {
+  const rows = provider
+    ? db.all(`SELECT * FROM providerConnections WHERE provider = ?`, [provider])
+    : db.all(`SELECT * FROM providerConnections`);
   const list = rows.map(rowToConn);
   list.sort((a, b) => (a.priority || 999) - (b.priority || 999));
   return list;
+}
+
+function filterByActive(list, isActive) {
+  const wantActive = isActive ? true : false;
+  return list.filter(c => c.isActive === wantActive);
+}
+
+// The connection list of a provider, read from the in-process cache.
+//
+// The rows of a provider are cached as a whole (active and inactive ones) and
+// the isActive filter is applied in JS, so enabling or disabling a connection
+// only has to rewrite that one row in the cached list.
+export async function getProviderConnections(filter = {}) {
+  const provider = filter.provider || null;
+  let list = getCachedProviderConnections(provider);
+  if (!list) {
+    const db = await getAdapter();
+    list = loadProviderConnections(db, provider);
+    setCachedProviderConnections(provider, list);
+  }
+  if (filter.isActive !== undefined) {
+    list = filterByActive(list, filter.isActive);
+  }
+  return list.map(cloneConnection);
 }
 
 export async function getProviderConnectionById(id) {
@@ -256,6 +284,10 @@ export async function createProviderConnection(data) {
     result = conn;
   });
 
+  // A new row, a replaced row or a re-prioritised pool: the cached list is
+  // stale now, drop it and let the next read reload it.
+  invalidateProviderConnections(result?.provider || data.provider);
+
   return result;
 }
 
@@ -273,19 +305,34 @@ export async function updateProviderConnection(id, data) {
     if (data.priority !== undefined) reorderInTx(db, existing.provider);
     result = merged;
   });
+
+  if (result) {
+    if (data.priority !== undefined) {
+      // A priority change rewrites the priorities of the whole provider pool.
+      invalidateProviderConnections(result.provider);
+    } else {
+      // Rewrite the row in the cached list instead of dropping it: the
+      // round-robin bookkeeping writes on every selection and must not make
+      // the next request read the table again.
+      patchCachedProviderConnection(result);
+    }
+  }
   return result;
 }
 
 export async function deleteProviderConnection(id) {
   const db = await getAdapter();
   let ok = false;
+  let provider = null;
   db.transaction(() => {
     const row = db.get(`SELECT provider FROM providerConnections WHERE id = ?`, [id]);
     if (!row) return;
+    provider = row.provider;
     db.run(`DELETE FROM providerConnections WHERE id = ?`, [id]);
     reorderInTx(db, row.provider);
     ok = true;
   });
+  if (ok) invalidateProviderConnections(provider);
   return ok;
 }
 
@@ -293,12 +340,14 @@ export async function deleteProviderConnectionsByProvider(providerId) {
   const db = await getAdapter();
   const before = db.get(`SELECT COUNT(*) AS n FROM providerConnections WHERE provider = ?`, [providerId]);
   db.run(`DELETE FROM providerConnections WHERE provider = ?`, [providerId]);
+  invalidateProviderConnections(providerId);
   return before?.n || 0;
 }
 
 export async function reorderProviderConnections(providerId) {
   const db = await getAdapter();
   db.transaction(() => reorderInTx(db, providerId));
+  invalidateProviderConnections(providerId);
 }
 
 export async function cleanupProviderConnections() {
@@ -329,5 +378,6 @@ export async function cleanupProviderConnections() {
       if (dirty) upsert(db, conn);
     }
   });
+  invalidateAllProviderConnections();
   return cleaned;
 }

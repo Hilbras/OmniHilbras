@@ -1,6 +1,17 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { invalidateAllowEntries, invalidateComboNames } from "@/lib/auth/allowCache.js";
+import { clearModelResolutionCache } from "@/lib/modelResolutionCache.js";
+
+// A combo is named by an allow list and shadows a model alias of the same
+// name, so a change to one changes what the allow lists resolve to — and what
+// a bare model string routes to.
+function invalidateComboCaches() {
+  invalidateComboNames();
+  invalidateAllowEntries();
+  clearModelResolutionCache();
+}
 
 function rowToCombo(row) {
   if (!row) return null;
@@ -47,6 +58,7 @@ export async function createCombo(data) {
     `INSERT INTO combos(id, name, kind, models, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)`,
     [combo.id, combo.name, combo.kind, stringifyJson(combo.models), combo.createdAt, combo.updatedAt]
   );
+  invalidateComboCaches();
   return combo;
 }
 
@@ -63,11 +75,13 @@ export async function updateCombo(id, data) {
     );
     result = merged;
   });
+  invalidateComboCaches();
   return result;
 }
 
 export async function deleteCombo(id) {
   const db = await getAdapter();
   const res = db.run(`DELETE FROM combos WHERE id = ?`, [id]);
+  invalidateComboCaches();
   return (res?.changes ?? 0) > 0;
 }

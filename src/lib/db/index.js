@@ -1,9 +1,13 @@
 // Public API barrel — all DB functions
 import { getAdapter } from "./driver.js";
 import { stringifyJson, parseJson } from "./helpers/jsonCol.js";
+import { invalidateAllProviderConnections } from "./repos/providerConnectionCache.js";
 import { keyAccessFromColumns, keyAccessToColumns, validateKeyAccessInput } from "@/shared/utils/keyAccess.js";
 import { KEY_ACCESS_UNRESTRICTED } from "@/shared/constants/keyAccess.js";
 import { hashApiKey } from "@/lib/auth/keyPepper.js";
+import { invalidateKeyRows } from "@/lib/auth/apiKeyCache.js";
+import { invalidateAllowEntries, invalidateComboNames } from "@/lib/auth/allowCache.js";
+import { clearModelResolutionCache } from "@/lib/modelResolutionCache.js";
 import { maskApiKey } from "./helpers/maskApiKey.js";
 
 // Settings
@@ -63,7 +67,7 @@ export {
 export {
   statsEmitter, trackPendingRequest, getActiveRequests,
   trackClientRequest, getClientRequestCounts, pruneUsageHistory,
-  saveRequestUsage, getUsageHistory, getUsageStats, getChartData,
+  saveRequestUsage, flushUsage, getUsageHistory, getUsageStats, getChartData,
   appendRequestLog, getRecentLogs,
 } from "./repos/usageRepo.js";
 
@@ -182,6 +186,15 @@ export async function importDb(payload) {
       db.run(`INSERT OR REPLACE INTO kv(scope, key, value) VALUES('pricing', ?, ?)`, [provider, stringifyJson(models || {})]);
     }
   });
+
+  // The import replaced the whole table behind the cache's back.
+  invalidateAllProviderConnections();
+  // The keys, the combos, the provider nodes and the model aliases changed:
+  // everything cached from them is stale.
+  invalidateKeyRows();
+  invalidateComboNames();
+  invalidateAllowEntries();
+  clearModelResolutionCache();
 
   return await exportDb();
 }

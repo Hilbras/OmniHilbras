@@ -1,6 +1,10 @@
 // Re-export from open-sse with localDb integration
 import { getModelAliases, getComboByName, getProviderNodeByPrefix } from "@/lib/localDb";
 import { parseModel as parseModelCore, resolveModelAliasFromMap, getModelInfoCore } from "open-sse/services/model.js";
+import {
+  readModelResolution,
+  writeModelResolution,
+} from "@/lib/modelResolutionCache.js";
 import REGISTRY from "open-sse/providers/registry/index.js";
 
 // Local provider alias overrides (HMR-friendly, applied on top of open-sse map)
@@ -33,9 +37,24 @@ export async function resolveModelAlias(alias) {
 }
 
 /**
+ * The model resolution, memoised.
+ *
+ * See src/lib/modelResolutionCache.js — the cache itself lives there so the
+ * repositories that invalidate it do not have to import this module back.
+ */
+export { clearModelResolutionCache } from "@/lib/modelResolutionCache.js";
+
+/**
  * Get full model info (parse or resolve)
  */
 export async function getModelInfo(modelStr) {
+  const key = `model:${modelStr}`;
+  const cached = readModelResolution(key);
+  if (cached) return { ...cached };
+  return { ...(await writeModelResolution(key, await resolveModelInfo(modelStr))) };
+}
+
+async function resolveModelInfo(modelStr) {
   const parsed = parseModel(modelStr);
 
   if (!parsed.isAlias) {
@@ -76,9 +95,12 @@ export async function getComboModels(modelStr) {
   // Only check if it's not in provider/model format
   if (modelStr.includes("/")) return null;
 
+  const key = `combo:${modelStr}`;
+  const cached = readModelResolution(key);
+  if (cached !== undefined) return cached ? [...cached] : cached;
+
   const combo = await getComboByName(modelStr);
-  if (combo && combo.models && combo.models.length > 0) {
-    return combo.models;
-  }
-  return null;
+  const models = combo && combo.models && combo.models.length > 0 ? combo.models : null;
+  writeModelResolution(key, models);
+  return models ? [...models] : null;
 }
