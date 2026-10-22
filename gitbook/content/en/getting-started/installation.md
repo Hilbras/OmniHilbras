@@ -104,8 +104,8 @@ omnihilbras
 
 ### Dashboard Login
 
-**Default credentials:**
-- Password: `123456`
+**Credentials:**
+- Password: the one printed in the terminal when the gateway started (also kept in `~/.omnihilbras/initial-password`)
 
 **⚠️ Change password immediately:**
 1. Login to dashboard

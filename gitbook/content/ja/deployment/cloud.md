@@ -48,7 +48,7 @@ export NODE_ENV="production"
 | 変数 | デフォルト | 説明 |
 |----------|---------|-------------|
 | `JWT_SECRET` | 自動生成 | **本番環境では必ず変更!** JWTトークンの署名に使用 |
-| `INITIAL_PASSWORD` | `123456` | ダッシュボードログインパスワード |
+| `INITIAL_PASSWORD` | 起動ごとに生成 | ダッシュボードログインパスワード (起動時に表示される) |
 | `DATA_DIR` | `~/.omnihilbras` | データベースとデータの保存パス |
 | `NODE_ENV` | `development` | デプロイ時は `production` に設定 |
 | `ENABLE_REQUEST_LOGS` | `false` | デバッグリクエスト/レスポンスログを有効化 |

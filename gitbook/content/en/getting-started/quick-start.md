@@ -22,7 +22,7 @@ omnihilbras
 
 🎉 **Dashboard opens automatically** at `http://localhost:20128`
 
-- Default password: `123456` (change in dashboard)
+- Password: the one printed when the gateway started (change it in the dashboard)
 - API key generated automatically
 - Ready to connect providers
 

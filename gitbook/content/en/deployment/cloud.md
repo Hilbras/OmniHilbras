@@ -48,7 +48,7 @@ export NODE_ENV="production"
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `JWT_SECRET` | Auto-generated | **MUST change in production!** Used for JWT token signing |
-| `INITIAL_PASSWORD` | `123456` | Dashboard login password |
+| `INITIAL_PASSWORD` | generated per install | Dashboard login password (printed at startup) |
 | `DATA_DIR` | `~/.omnihilbras` | Database and data storage path |
 | `NODE_ENV` | `development` | Set to `production` for deployment |
 | `ENABLE_REQUEST_LOGS` | `false` | Enable debug request/response logs |

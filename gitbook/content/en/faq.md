@@ -236,7 +236,7 @@ npm run deploy:cloudflare
 **Environment variables:**
 - `JWT_SECRET` - **MUST change in production!**
 - `DATA_DIR` - Database storage path (default: `~/.omnihilbras`)
-- `INITIAL_PASSWORD` - Dashboard login (default: `123456`)
+- `INITIAL_PASSWORD` - Dashboard login (generated per install and printed at startup, unless it is set)
 - `NODE_ENV` - Set to `production` for deploy
 
 See [deployment guide](getting-started/installation.md#deployment) for details.

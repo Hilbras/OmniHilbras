@@ -236,7 +236,7 @@ npm run deploy:cloudflare
 **環境変数:**
 - `JWT_SECRET` - **本番環境で必ず変更!**
 - `DATA_DIR` - データベース保存パス(デフォルト: `~/.omnihilbras`)
-- `INITIAL_PASSWORD` - ダッシュボードログイン(デフォルト: `123456`)
+- `INITIAL_PASSWORD` - ダッシュボードログイン(未設定なら起動ごとに生成され、起動時に表示される)
 - `NODE_ENV` - デプロイ時は`production`に設定
 
 詳細は[デプロイメントガイド](getting-started/installation.md#deployment)を参照。
