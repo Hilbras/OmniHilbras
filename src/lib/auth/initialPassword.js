@@ -18,7 +18,7 @@ import { DATA_DIR } from "@/lib/dataDir";
 
 // No look-alike characters (0/O, 1/l/I, 5/S): the password is read off a
 // terminal and typed back, so it has to survive that.
-const ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+const ALPHABET = "abcdefghjkmnpqrstuvwxyz2346789";
 const GROUPS = 4;
 const GROUP_LENGTH = 5;
 
