@@ -776,6 +776,22 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         const res = await fetchWithConnectionProxy(cfg.validateUrl, { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
       }
+      case "kiraai": {
+        // KiraAI serves /models publicly (200 even for a bad key), so a plain
+        // GET there would always pass. Probe a zero-cost completion instead:
+        // an invalid key answers 401, a valid one gets any non-auth answer.
+        const cfg = PROVIDERS[connection.provider];
+        const res = await fetchWithConnectionProxy(
+          cfg.baseUrl,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${connection.apiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ model: "kira-mini-1.0", messages: [{ role: "user", content: "ping" }], max_tokens: 1 }),
+          },
+          effectiveProxy,
+        );
+        return { valid: res.status !== 401 && res.status !== 403, error: res.status === 401 || res.status === 403 ? "Invalid API key" : null };
+      }
       case "chatgpt-web":
       case "deepseek-web":
       case "duckduckgo-web":

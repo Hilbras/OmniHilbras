@@ -145,6 +145,7 @@ import p147 from "./duckduckgo-web.js";
 import p148 from "./gemini-web.js";
 import p149 from "./qwen-web.js";
 import p150 from "./tokenharbor-web.js";
+import p151 from "./kiraai.js";
 export default [
   p0,
   p1,
@@ -292,4 +293,5 @@ export default [
   p148,
   p149,
   p150,
+  p151,
 ];

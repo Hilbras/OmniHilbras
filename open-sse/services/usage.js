@@ -78,6 +78,7 @@ const USAGE_HANDLERS = {
   tiarina: (c) => getAggregatorUsage(c),
   xkiro: (c) => getAggregatorUsage(c),
   beatapi: (c) => getAggregatorUsage(c),
+  kiraai: (c) => getAggregatorUsage(c),
 };
 
 // Qoder intl/CN share one usage path: PATs must be exchanged to a job token

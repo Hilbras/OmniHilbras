@@ -33,7 +33,7 @@
     },
     "retry": {
       "429": {
-        "attempts": 3
+        "attempts": 6
       },
       "500": {
         "attempts": 3
@@ -239,7 +239,12 @@
       "Content-Type": "application/connect+proto",
       "User-Agent": "connect-es/1.6.1"
     },
-    "clientVersion": "3.12.17"
+    "clientVersion": "3.12.17",
+    "usage": {
+      "url": "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
+      "planInfoUrl": "https://api2.cursor.sh/aiserver.v1.DashboardService/GetPlanInfo",
+      "authUsageUrl": "https://api2.cursor.sh/auth/usage"
+    }
   },
   "deepgram": {
     "baseUrl": "https://api.deepgram.com/v1/listen",
@@ -832,6 +837,9 @@
     },
     "forceStream": true,
     "noAuth": true,
+    "reasoningInject": {
+      "scope": "all"
+    },
     "quirks": {
       "forceAutoToolChoiceModels": [
         "muse-spark-1.3-contributor-free"
@@ -1107,6 +1115,10 @@
     "retry": {
       "429": 2
     },
+    "usage": {
+      "apiBase": "https://tokenharbor.ai/v1",
+      "wallet": true
+    },
     "format": "openai"
   },
   "dahl": {
@@ -1237,5 +1249,147 @@
     },
     "clientId": "hermes-cli",
     "tokenUrl": "https://portal.nousresearch.com/api/oauth/token"
+  },
+  "nara-router": {
+    "baseUrl": "https://router.bynara.id/v1/chat/completions",
+    "format": "openai",
+    "validateUrl": "https://router.bynara.id/v1/models",
+    "auth": {
+      "combined": true,
+      "header": "Authorization",
+      "scheme": "bearer"
+    },
+    "retry": {
+      "429": 2
+    },
+    "usage": {
+      "apiBase": "https://router.bynara.id/v1"
+    }
+  },
+  "apmix": {
+    "baseUrl": "https://api.apmix.ai/v1/chat/completions",
+    "format": "openai",
+    "validateUrl": "https://api.apmix.ai/v1/models",
+    "auth": {
+      "combined": true,
+      "header": "Authorization",
+      "scheme": "bearer"
+    },
+    "retry": {
+      "429": 2
+    },
+    "usage": {
+      "apiBase": "https://api.apmix.ai/v1"
+    }
+  },
+  "apinex": {
+    "baseUrl": "https://api.apinex.bond/v1/chat/completions",
+    "format": "openai",
+    "validateUrl": "https://api.apinex.bond/v1/models",
+    "auth": {
+      "combined": true,
+      "header": "Authorization",
+      "scheme": "bearer"
+    },
+    "retry": {
+      "429": 2
+    },
+    "usage": {
+      "apiBase": "https://api.apinex.bond/v1",
+      "flavor": "apinex-balance"
+    }
+  },
+  "tiarina": {
+    "baseUrl": "https://ai.tiarina.cloud/v1/chat/completions",
+    "format": "openai",
+    "validateUrl": "https://ai.tiarina.cloud/v1/models",
+    "auth": {
+      "combined": true,
+      "header": "Authorization",
+      "scheme": "bearer"
+    },
+    "retry": {
+      "429": 2
+    },
+    "usage": {
+      "apiBase": "https://ai.tiarina.cloud/v1"
+    }
+  },
+  "xkiro": {
+    "baseUrl": "https://api.xkiro.com/v1/chat/completions",
+    "format": "openai",
+    "validateUrl": "https://api.xkiro.com/v1/models",
+    "auth": {
+      "combined": true,
+      "header": "Authorization",
+      "scheme": "bearer"
+    },
+    "retry": {
+      "429": 2
+    },
+    "usage": {
+      "apiBase": "https://api.xkiro.com/v1",
+      "flavor": "xkiro-usage"
+    }
+  },
+  "beatapi": {
+    "baseUrl": "https://api.beatapi.io/v1/chat/completions",
+    "format": "openai",
+    "validateUrl": "https://api.beatapi.io/v1/models",
+    "retry": {
+      "429": 2
+    },
+    "usage": {
+      "apiBase": "https://api.beatapi.io/v1",
+      "flavor": "beatapi-usage"
+    }
+  },
+  "chatgpt-web": {
+    "baseUrl": "https://chatgpt.com",
+    "format": "chatgpt-web",
+    "authType": "cookie"
+  },
+  "deepseek-web": {
+    "baseUrl": "https://chat.deepseek.com/api/v0/chat/completion",
+    "format": "deepseek-web",
+    "authType": "cookie"
+  },
+  "duckduckgo-web": {
+    "baseUrl": "https://duck.ai/duckchat/v1/chat",
+    "homeUrl": "https://duck.ai/",
+    "statusUrl": "https://duck.ai/duckchat/v1/status",
+    "modelsUrl": "https://duck.ai/duckchat/v1/models",
+    "format": "duckduckgo-web",
+    "authType": "cookie"
+  },
+  "gemini-web": {
+    "baseUrl": "https://gemini.google.com/app",
+    "format": "gemini-web",
+    "authType": "cookie"
+  },
+  "qwen-web": {
+    "baseUrl": "https://chat.qwen.ai/api/v2/chat/completions",
+    "format": "qwen-web",
+    "authType": "cookie"
+  },
+  "tokenharbor-web": {
+    "baseUrl": "https://tokenharbor.ai/api/direct-chat/stream",
+    "format": "tokenharbor-web",
+    "authType": "cookie",
+    "origin": "https://tokenharbor.ai",
+    "profileUrl": "https://tokenharbor.ai/api/me/profile",
+    "sessionsUrl": "https://tokenharbor.ai/api/direct-chat/sessions",
+    "streamUrl": "https://tokenharbor.ai/api/direct-chat/stream"
+  },
+  "kiraai": {
+    "baseUrl": "https://kiraai.vn/api/v1/chat/completions",
+    "validateUrl": "https://kiraai.vn/api/v1/models",
+    "retry": {
+      "429": 2
+    },
+    "usage": {
+      "apiBase": "https://kiraai.vn/api/v1"
+    },
+    "format": "openai"
   }
 }

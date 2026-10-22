@@ -24,6 +24,7 @@ const ICON_FILES = {
   "gemini-web": "gemini.svg",
   "qwen-web": "qwen.svg",
   "tokenharbor-web": "tokenharbor.svg",
+  kiraai: "kiraai.svg",
 };
 
 // Runtime only — first 404 remembers id for the whole session
