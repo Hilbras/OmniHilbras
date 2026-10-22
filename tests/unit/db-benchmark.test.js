@@ -72,6 +72,7 @@ describe("DB Benchmark — SQLite vs Lowdb", () => {
         await sqliteDb.createProviderConnection({
           provider: `bench-p${i % 5}`, authType: "apikey",
           name: `name-${i}`, apiKey: `k-${i}`,
+          allowOverwrite: true,
         });
       }
     });

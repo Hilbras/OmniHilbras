@@ -2,7 +2,7 @@
  * Aggregator usage adapter tests (tokenharbor group — open-sse/services/usage/aggregator.js).
  * All upstream calls are mocked through proxyAwareFetch; the adapter itself is real.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi, beforeAll, afterAll } from "vitest";
 
 // Queue of canned upstream responses, one per proxyAwareFetch call (FIFO).
 // Shape: { status, json, text, headers: { "x-ratelimit-limit-requests": ".." } }
@@ -42,7 +42,25 @@ vi.mock("open-sse/utils/proxyFetch.js", () => ({
   },
 }));
 
-const { getAggregatorUsage } = await import("open-sse/services/usage/aggregator.js");
+// Env must be set before the aggregator module is loaded: AGGREGATOR_WALLET_CONFIG
+// reads process.env at import time, and ESM hoists static imports above any
+// module-body code, so we load aggregator dynamically here (same pattern as
+// tokenharbor-oauth.test.js).
+let getAggregatorUsage;
+
+beforeAll(async () => {
+  process.env.AGGREGATOR_WALLET_SUPABASE_URL = "https://isbnzmwjmtiuipesgmmg.supabase.co";
+  process.env.AGGREGATOR_WALLET_ANON_KEY = "test-anon-key";
+  process.env.AGGREGATOR_WALLET_AUTH_BASE_URL = "https://auth.tokenharbor.ai/auth/v1";
+  const mod = await import("open-sse/services/usage/aggregator.js");
+  getAggregatorUsage = mod.getAggregatorUsage;
+});
+
+afterAll(() => {
+  delete process.env.AGGREGATOR_WALLET_SUPABASE_URL;
+  delete process.env.AGGREGATOR_WALLET_ANON_KEY;
+  delete process.env.AGGREGATOR_WALLET_AUTH_BASE_URL;
+});
 
 beforeEach(() => {
   setup.calls.length = 0;

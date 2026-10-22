@@ -155,6 +155,7 @@ describe("DB SQLite layer — public API parity", () => {
       email: "resave@example.com",
       accessToken: "new-token",
       testStatus: "active",
+      allowOverwrite: true,
     });
 
     expect(resaved.id).toBe(existing.id);

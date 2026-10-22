@@ -5,10 +5,27 @@
  * in PostgREST. The provider builds the authorize URL (PKCE) and exchanges the
  * callback code; these tests cover the URL/state wiring and the token mapping.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi, beforeAll, afterAll } from "vitest";
 
 import { generatePKCE } from "@/lib/oauth/utils/pkce.js";
-import tokenharbor, { parseReturnedCode } from "@/lib/oauth/providers/tokenharbor.js";
+
+let tokenharbor, parseReturnedCode;
+
+// Env must be set before the module is loaded: AGGREGATOR_WALLET_CONFIG reads
+// process.env at import time, and ESM hoists static imports above any
+// module-body code, so we load tokenharbor dynamically here.
+beforeAll(async () => {
+  process.env.AGGREGATOR_WALLET_AUTH_BASE_URL = "https://auth.tokenharbor.ai/auth/v1";
+  process.env.AGGREGATOR_WALLET_ANON_KEY = "test-anon-key";
+  const mod = await import("@/lib/oauth/providers/tokenharbor.js");
+  tokenharbor = mod.default;
+  parseReturnedCode = mod.parseReturnedCode;
+});
+
+afterAll(() => {
+  delete process.env.AGGREGATOR_WALLET_AUTH_BASE_URL;
+  delete process.env.AGGREGATOR_WALLET_ANON_KEY;
+});
 
 const setup = { fetchResponses: [], calls: [] };
 

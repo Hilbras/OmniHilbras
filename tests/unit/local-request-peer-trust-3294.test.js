@@ -164,12 +164,12 @@ describe("peer header trust", () => {
     expect(response.body.error).toBe("Local only: CLI token required");
   });
 
-  it("accepts the legacy Host fallback only in development", async () => {
+  it("rejects the legacy Host fallback even in development", async () => {
     process.env.NODE_ENV = "development";
 
     const response = await proxy(request("/api/v1/models", { host: "localhost:20127" }));
 
-    expect(response).toBe(mocks.nextResponse);
+    expect(response.status).toBe(401);
   });
 });
 
