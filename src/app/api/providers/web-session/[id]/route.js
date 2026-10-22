@@ -18,6 +18,14 @@ import { webSessionDescriptor } from "@/shared/constants/webSessionProviders";
 export async function POST(request, { params }) {
   try {
     const { id } = await params;
+
+    // Allowlist guard: only known provider ids may be dynamically imported.
+    // Rejects path-traversal attempts (../, absolute paths, etc.) before
+    // they reach the import() call.
+    if (!/^[a-z0-9-]+$/.test(id)) {
+      return NextResponse.json({ error: "Invalid provider id" }, { status: 400 });
+    }
+
     const descriptor = webSessionDescriptor(id);
     if (!descriptor) {
       return NextResponse.json({ error: `Unknown web-session provider: ${id}` }, { status: 404 });

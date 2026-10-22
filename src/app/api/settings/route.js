@@ -4,6 +4,8 @@ import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import bcrypt from "bcryptjs";
 import { ensureInitialPassword, clearInitialPasswordFile } from "@/lib/auth/initialPassword";
+import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
+import { hasValidCliToken } from "@/lib/auth/cliToken";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -15,7 +17,15 @@ const SETTINGS_RESPONSE_HEADERS = {
 // Secrets must never be mass-assigned from request body (CWE-915)
 const PROTECTED_SETTING_KEYS = ["password", "mitmSudoEncrypted"];
 
-export async function GET() {
+async function requireSettingsAuth(request) {
+  const token = request.cookies.get("auth_token")?.value;
+  return await hasValidCliToken(request) || (token && await verifyDashboardAuthToken(token));
+}
+
+export async function GET(request) {
+  if (!(await requireSettingsAuth(request))) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const settings = await getSettings();
     const { password, oidcClientSecret, mitmSudoEncrypted, ...safeSettings } = settings;
@@ -38,6 +48,9 @@ export async function GET() {
 }
 
 export async function PATCH(request) {
+  if (!(await requireSettingsAuth(request))) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const body = await request.json();
 

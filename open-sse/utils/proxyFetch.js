@@ -5,98 +5,6 @@ import { dbg } from "./debugLog.js";
 const originalFetch = globalThis.fetch;
 const proxyDispatchers = new Map();
 
-// ─── TLS fingerprinting via got-scraping (browser-like JA3) ───────────────
-// Disabled: not in use. Kept commented for future re-enable.
-// Restore the original block to re-enable per-host JA3 spoofing.
-/*
-let _gotScraping = null;
-let _gotScrapingChecked = false;
-const _gotScrapingLoggedHosts = new Set();
-
-async function getGotScraping() {
-  if (_gotScrapingChecked) return _gotScraping;
-  _gotScrapingChecked = true;
-  try {
-    const mod = await import("got-scraping");
-    _gotScraping = typeof mod.gotScraping === "function" ? mod.gotScraping : null;
-    if (_gotScraping) dbg("TLS", "got-scraping loaded (browser-like JA3 enabled)");
-  } catch (e) {
-    console.warn(`[ProxyFetch] got-scraping unavailable, falling back to native fetch: ${e.message}`);
-    _gotScraping = null;
-  }
-  return _gotScraping;
-}
-
-async function gotScrapingFetch(url, options) {
-  const gs = await getGotScraping();
-  if (!gs) return null;
-
-  const method = (options.method || "GET").toUpperCase();
-  const headersInit = options.headers || {};
-  const headers = headersInit instanceof Headers
-    ? Object.fromEntries(headersInit.entries())
-    : { ...headersInit };
-
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const stream = gs.stream({
-      url,
-      method,
-      headers,
-      body: method === "GET" || method === "HEAD" ? undefined : options.body,
-      throwHttpErrors: false,
-      retry: { limit: 0 },
-      timeout: { request: undefined },
-      followRedirect: false,
-      decompress: true,
-    });
-
-    if (options.signal) {
-      const onAbort = () => { try { stream.destroy(new Error("aborted")); } catch { } };
-      if (options.signal.aborted) onAbort();
-      else options.signal.addEventListener("abort", onAbort, { once: true });
-    }
-
-    stream.once("response", (res) => {
-      if (settled) return;
-      settled = true;
-      const resHeaders = new Headers();
-      for (const [k, v] of Object.entries(res.headers || {})) {
-        if (Array.isArray(v)) v.forEach((x) => resHeaders.append(k, String(x)));
-        else if (v != null) resHeaders.set(k, String(v));
-      }
-      const body = Readable.toWeb(stream);
-      resolve(new Response(body, { status: res.statusCode, statusText: res.statusMessage || "", headers: resHeaders }));
-    });
-
-    stream.once("error", (err) => {
-      if (settled) return;
-      settled = true;
-      reject(err);
-    });
-  });
-}
-
-async function tryGotScrapingFetch(url, options) {
-  try {
-    const res = await gotScrapingFetch(url, options);
-    if (res) {
-      try {
-        const host = new URL(typeof url === "string" ? url : url.toString()).hostname;
-        if (!_gotScrapingLoggedHosts.has(host)) {
-          _gotScrapingLoggedHosts.add(host);
-          dbg("TLS", `using got-scraping for ${host}`);
-        }
-      } catch { }
-    }
-    return res;
-  } catch (e) {
-    console.warn(`[ProxyFetch] got-scraping request failed, fallback to native fetch: ${e.message}`);
-    return null;
-  }
-}
-*/
-
 // DNS cache — use Map to avoid prototype pollution via malformed hostnames
 const DNS_CACHE = new Map();
 const TLS_CERT_ERRORS = new Set([
@@ -251,18 +159,27 @@ async function getDispatcher(proxyUrl, insecure = false) {
   return proxyDispatchers.get(key);
 }
 
+/**
+ * Insecure TLS fallback is opt-in only. Default is strict TLS: certificate
+ * verification failures are surfaced to the caller, never silently downgraded.
+ * Set ALLOW_INSECURE_TLS=true to permit the self-signed/MITM corporate cert
+ * retry (exposes traffic to MITM — intended for trusted local/proxy only).
+ */
+function isInsecureTlsAllowed() {
+  return process.env.ALLOW_INSECURE_TLS === "true" || process.env.ALLOW_INSECURE_TLS === "1";
+}
+
 async function fetchWithTlsFallback(url, options, proxyUrl) {
   try {
     const dispatcher = proxyUrl ? await getDispatcher(proxyUrl) : undefined;
     return await originalFetch(url, dispatcher ? { ...options, dispatcher } : options);
   } catch (err) {
-    const isStrictSsl = process.env.STRICT_SSL === "true" || process.env.STRICT_SSL === "1";
-    if (!isStrictSsl && isTlsCertError(err)) {
+    if (isTlsCertError(err) && isInsecureTlsAllowed()) {
       if (options.body && typeof options.body.getReader === "function" && options.body.locked) {
         throw err;
       }
-      // ponytail: in-memory insecure agent fallback for self-signed MITM corporate/antivirus certs
       console.warn(`[ProxyFetch] TLS cert verification failed (${err.cause?.code || err.code}), retrying with insecure TLS: ${url}`);
+      console.warn("[ProxyFetch] INSECURE TLS fallback is active (ALLOW_INSECURE_TLS=true) — traffic is exposed to MITM");
       const insecureDispatcher = await getDispatcher(proxyUrl, true);
       return await originalFetch(url, { ...options, dispatcher: insecureDispatcher });
     }

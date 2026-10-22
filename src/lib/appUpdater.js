@@ -27,11 +27,10 @@ function killMitmByPidFile() {
         try { execSync(`powershell -NonInteractive -WindowStyle Hidden -Command "Stop-Process -Id ${pid} -Force"`, { stdio: "ignore", windowsHide: true, timeout: 3000 }); } catch { /* best effort */ }
       }
     } else {
-      try {
-        execSync(`sudo -n kill -9 ${pid} 2>/dev/null`, { stdio: "ignore", timeout: 3000 });
-      } catch {
-        try { process.kill(pid, "SIGKILL"); } catch { /* best effort */ }
-      }
+      // Graceful termination first, then SIGKILL as fallback. No sudo: the
+      // MITM server runs under the same user, so a direct signal is enough.
+      try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
+      try { process.kill(pid, "SIGKILL"); } catch { /* best effort */ }
     }
     try { fs.unlinkSync(mitmPidFile); } catch { /* best effort */ }
   } catch { /* best effort */ }
