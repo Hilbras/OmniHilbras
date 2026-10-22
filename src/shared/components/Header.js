@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import PropTypes from "prop-types";
-import { Menu } from "lucide-react";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import HeaderMenu from "@/shared/components/HeaderMenu";
 import HeaderLanguage from "@/shared/components/HeaderLanguage";
@@ -265,10 +264,9 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
         {showMenuButton && (
           <button
             onClick={onMenuClick}
-            aria-label="Open navigation"
             className="text-text-main hover:text-primary transition-colors"
           >
-            <Menu className="h-5 w-5" aria-hidden="true" />
+            <span className="material-symbols-outlined">menu</span>
           </button>
         )}
       </div>
