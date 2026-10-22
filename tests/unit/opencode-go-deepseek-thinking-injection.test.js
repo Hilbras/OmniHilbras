@@ -92,11 +92,4 @@ describe("prepareClaudeRequest — opencode-go DeepSeek thinking pass-back", () 
     expect(block.type).toBe("thinking");
     expect(block.signature).toBeUndefined();
   });
-
-  it.todo(
-    "inject a reasoning placeholder into Responses `input` items for DeepSeek models — " +
-      "injectReasoningContent only rewrites body.messages, so responses-format clients " +
-      "replaying reasoning-bearing sessions on the openai-responses transport are " +
-      "uncovered (#3332 restore gate: Codex-shaped payload must stay 200)",
-  );
 });
