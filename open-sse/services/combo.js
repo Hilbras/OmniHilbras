@@ -87,6 +87,7 @@ export function reorderByCapabilities(models, required) {
  * @type {Map<string, { index: number, consecutiveUseCount: number }>}
  */
 const comboRotationState = new Map();
+const MAX_ROTATION_STATES = 500;
 
 // Trailing run of items after the last assistant/model turn = the current user
 // turn. It may span several messages (e.g. text + image split across blocks),
@@ -179,8 +180,6 @@ export function detectRequiredCapabilities(body) {
   const contents = body.contents || body.request?.contents;                      // gemini / antigravity
   for (const c of trailingUserItems(contents)) scanContent(c.parts);
 
-  // search: temporarily disabled in auto-switch (feature not wired yet).
-
   return required;
 }
 
@@ -232,6 +231,13 @@ export function getRotatedModels(models, comboName, strategy, stickyLimit = 1) {
       index: currentIndex,
       consecutiveUseCount: nextUseCount,
     });
+  }
+
+  // Cap state size to prevent unbounded growth (memory leak on long-running
+  // processes with many distinct combos). Evict oldest entry when over cap.
+  if (comboRotationState.size > MAX_ROTATION_STATES) {
+    const oldest = comboRotationState.keys().next().value;
+    comboRotationState.delete(oldest);
   }
 
   return rotatedModels;

@@ -1486,8 +1486,35 @@ function formatLogDate(date = new Date()) {
   return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-// No-op: request log is now derived from usageHistory table on read.
-export async function appendRequestLog() {}
+// Record a minimal request log row when no usage was captured (e.g. a stream
+// that completed without a usage trailer). The row lands in usageHistory so
+// getRecentLogs() sees it on read — previously this was a no-op and the
+// request silently vanished from the log.
+export async function appendRequestLog(entry = {}) {
+  try {
+    const db = await getAdapter();
+    const tokens = entry.tokens || {};
+    db.run(
+      `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        entry.timestamp || new Date().toISOString(),
+        entry.provider || null,
+        entry.model || null,
+        entry.connectionId || null,
+        null,
+        null,
+        tokens.prompt_tokens || tokens.input_tokens || 0,
+        tokens.completion_tokens || tokens.output_tokens || 0,
+        0,
+        entry.status || "200 OK",
+        stringifyJson(tokens),
+        stringifyJson({}),
+      ],
+    );
+  } catch (e) {
+    console.error("Failed to append request log:", e);
+  }
+}
 
 export async function getRecentLogs(limit = 200) {
   try {
