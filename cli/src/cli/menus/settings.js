@@ -193,13 +193,18 @@ async function resetPassword() {
     return;
   }
 
-  const result = await api.resetPassword();
-  if (result.success) {
+  try {
+    // setInitialPassword generates a real password, hashes and stores it, writes
+    // it to the operator-readable file once, and returns the plaintext so the
+    // CLI can show it. (The old api.resetPassword() returned { success } with no
+    // password, so result.password was always undefined here.)
+    const { setInitialPassword } = await import("../../../../src/lib/auth/initialPassword.js");
+    const password = await setInitialPassword();
     showStatus("Password reset.", "success");
-    console.log(`\n  🔑 New dashboard password: ${result.password}`);
+    console.log(`\n  🔑 New dashboard password: ${password}`);
     console.log("     Change it in the dashboard (Profile → Security).\n");
-  } else {
-    showStatus(`Failed to reset password: ${result.error}`, "error");
+  } catch (err) {
+    showStatus(`Failed to reset password: ${err.message}`, "error");
   }
   await pause();
 }

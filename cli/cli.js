@@ -116,7 +116,9 @@ function getDataDir() {
 }
 
 const DEFAULT_PORT = 20128;
-const DEFAULT_HOST = "0.0.0.0";
+// Bind to loopback by default so the CLI server is not reachable from the network.
+// Override with --host 0.0.0.0 (or any interface) to expose intentionally.
+const DEFAULT_HOST = "127.0.0.1";
 
 // First non-internal IPv4 — the address remote peers actually reach when bound to 0.0.0.0.
 function getLanIp() {

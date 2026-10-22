@@ -13,6 +13,11 @@ import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
 
 // Runtime storage: Key = connectionId, Value = { sessionId, lastUsed }
 const runtimeSessionStore = new Map();
+
+// Conversation-stable session store: Key = hash(scope+assistant text), Value = { sessionId, lastUsed }
+// Declared before clearSessionStore() so it is never in the temporal dead zone when
+// clearSessionStore() references it (A13).
+const assistantSessionStore = new Map();
 const continuationStore = new Map();
 
 // Periodically evict entries that haven't been used within TTL
@@ -83,9 +88,6 @@ export function clearSessionStore() {
     assistantSessionStore.clear();
     continuationStore.clear();
 }
-
-// Conversation-stable session store: Key = hash(scope+assistant text), Value = { sessionId, lastUsed }
-const assistantSessionStore = new Map();
 const ASSISTANT_MIN_LEN = 50;
 const ASSISTANT_CAP_LEN = 50;
 const MAX_ASSISTANT_SESSIONS = 5000;
