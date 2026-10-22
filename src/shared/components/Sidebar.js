@@ -39,7 +39,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/shared/utils/cn";
-import { APP_CONFIG, UPDATER_CONFIG } from "@/shared/constants/config";
+import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useGatewayStatus } from "@/shared/hooks/useGatewayStatus";
@@ -221,11 +221,8 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               )}
             </span>
             {!collapsed && (
-              <span className="flex min-w-0 flex-1 flex-col items-start">
-                <span className="text-[15px] font-semibold tracking-tight">
-                  Omni<span className="muted font-normal">Hilbras</span>
-                </span>
-                <span className="mono-label">v{APP_CONFIG.version}</span>
+              <span className="min-w-0 flex-1 text-[15px] font-semibold tracking-tight">
+                Omni<span className="muted font-normal">Hilbras</span>
               </span>
             )}
             {!collapsed && <PanelLeftClose className="ml-auto h-4 w-4 shrink-0 text-muted" aria-hidden="true" />}
