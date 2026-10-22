@@ -7,8 +7,9 @@ import { isOidcConfigured } from "@/lib/auth/oidc";
 import { isSamlConfigured } from "@/lib/auth/saml.js";
 import { checkLock, recordFail, recordSuccess, getClientIp } from "@/lib/auth/loginLimiter";
 import { isLocalRequest } from "@/dashboardGuard";
+import { ensureInitialPassword } from "@/lib/auth/initialPassword";
 
-const RESET_HINT = "Forgot password? Reset to default via OmniHilbras CLI → Settings → Reset Password to Default.";
+const RESET_HINT = "Forgot password? Reset it via the OmniHilbras CLI on the host → Settings → Reset Password.";
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
 
 function isTunnelRequest(request, settings) {
@@ -30,6 +31,12 @@ export async function POST(request) {
     }
 
     const { password } = await request.json();
+
+    // A fresh install has no password yet: make one now, so there is never a
+    // public default to guess. The boot does the same, so this is only the
+    // path where the boot did not run.
+    await ensureInitialPassword();
+
     const settings = await getSettings();
 
     // Block login via tunnel/tailscale if dashboard access is disabled
@@ -37,7 +44,6 @@ export async function POST(request) {
       return NextResponse.json({ error: "Dashboard access via tunnel is disabled" }, { status: 403 });
     }
 
-    // Default password is '123456' if not set
     const storedHash = settings.password;
 
     if (settings.authMode === "sso" || settings.authMode === "saml" || settings.authMode === "oidc") {
@@ -53,36 +59,30 @@ export async function POST(request) {
     let isValid = false;
     if (storedHash) {
       isValid = await bcrypt.compare(password, storedHash);
-    } else {
-      // Use env var or default
-      const initialPassword = process.env.INITIAL_PASSWORD || "123456";
-      isValid = password === initialPassword;
+    } else if (process.env.INITIAL_PASSWORD) {
+      // The operator's own password, still in the environment: it is used
+      // until they set one of their own.
+      isValid = password === process.env.INITIAL_PASSWORD;
     }
 
     if (isValid) {
       recordSuccess(ip);
 
-      // Default password still in use on a remote client → force a password
-      // change before the dashboard is exposed remotely (keeps local UX intact).
+      // The initial password still in use on a remote client → ask for a new
+      // one before the dashboard is exposed remotely.
+      //
+      // The password is not public any more — a fresh install gets one that
+      // only the operator can read — so this is about the operator choosing
+      // their own, not about a guessable default. The local UX is untouched.
       const mustChangePassword =
         !storedHash && !process.env.INITIAL_PASSWORD && !isLocalRequest(request);
 
       if (mustChangePassword) {
-        // Do NOT issue a session token: a fresh install's default password is
-        // public knowledge ("123456"), so handing out a valid JWT would let any
-        // remote attacker authenticate and (e.g.) PATCH /api/settings to disable
-        // authentication entirely (CVE-2026-56679 class). Require the password
-        // to be changed first.
-        //
-        // NOTE: this intentionally leaves no remote self-service password-change
-        // path — the change-password flow (PATCH /api/settings) requires a JWT,
-        // which we deliberately withhold. A remote fresh-install user must either
-        // change the password from the local machine or set INITIAL_PASSWORD
-        // before first launch. This is a deliberate security trade-off, not an
-        // oversight: issuing any credential before the default password is
-        // rotated re-opens the exact attack chain this branch closes.
+        // Do NOT issue a session token yet: the change-password flow needs
+        // the current password, and the dashboard should not be reachable with
+        // a password that was only ever printed to a terminal.
         return NextResponse.json(
-          { success: false, error: "Default password must be changed before remote access. Change it from the local machine (or set INITIAL_PASSWORD).", mustChangePassword },
+          { success: false, error: "Set a new password before using the dashboard remotely.", mustChangePassword },
           { status: 403, headers: NO_STORE_HEADERS }
         );
       }

@@ -4,6 +4,7 @@ import { dirname, join } from "path";
 import { existsSync } from "fs";
 import { cleanupProviderConnections, getSettings, updateSettings } from "@/lib/localDb";
 import { getInternalApiKey } from "@/lib/auth/internalKey";
+import { ensureInitialPassword, initialPasswordPath } from "@/lib/auth/initialPassword";
 import {
   enableTunnel, enableTailscale,
   isTunnelManuallyDisabled, isTunnelReconnecting, isTailscaleReconnecting,
@@ -83,6 +84,22 @@ export async function initializeApp() {
 async function runHeavyStartup() {
   await cleanupProviderConnections();
   const settings = await getSettings();
+
+  // A fresh install gets a password nobody else knows. It is printed here,
+  // once, and written next to the other secrets (0600) so the CLI can show
+  // it and the operator can read it if they missed the terminal.
+  try {
+    const { password, created } = await ensureInitialPassword();
+    if (created && password) {
+      console.log("");
+      console.log(`  Dashboard password: ${password}`);
+      console.log("  Change it in the dashboard (Profile → Security).");
+      console.log(`  Saved for the CLI at: ${initialPasswordPath()}`);
+      console.log("");
+    }
+  } catch (e) {
+    console.log("[InitApp] could not set the initial password:", e.message);
+  }
 
   // Auto-resume tunnel (once per process)
   if (settings.tunnelEnabled && !g.tunnelAutoResumed) {

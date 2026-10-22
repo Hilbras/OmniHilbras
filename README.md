@@ -1325,7 +1325,7 @@ docker pull hilbras/omnihilbras:latest   # update to latest
 | Variable                                             | Default                                  | Description                                                                         |
 | ---------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------- |
 | `JWT_SECRET`                                         | Auto-generated (`~/.omnihilbras/jwt-secret`) | JWT signing secret for dashboard auth cookie (override to share across instances)   |
-| `INITIAL_PASSWORD`                                   | `123456`                                 | First login password when no saved hash exists                                      |
+| `INITIAL_PASSWORD`                                   | generated per install                   | First login password when no saved hash exists (printed at startup)                |
 | `DATA_DIR`                                           | `~/.omnihilbras`                             | Main app data location (SQLite at `$DATA_DIR/db/data.sqlite`)                       |
 | `PORT`                                               | framework default                        | Service port (`20128` in examples)                                                  |
 | `HOSTNAME`                                           | framework default                        | Bind host (Docker defaults to `0.0.0.0`)                                            |
@@ -1468,7 +1468,7 @@ Notes:
 **First login not working**
 
 - Check `INITIAL_PASSWORD` in `.env`
-- If unset, fallback password is `123456`
+- If unset, the gateway prints a generated password on startup and keeps it in `~/.omnihilbras/initial-password`
 
 **No request logs under `logs/`**
 

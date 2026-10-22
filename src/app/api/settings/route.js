@@ -3,6 +3,7 @@ import { getSettings, updateSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import bcrypt from "bcryptjs";
+import { ensureInitialPassword, clearInitialPasswordFile } from "@/lib/auth/initialPassword";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -58,10 +59,13 @@ export async function PATCH(request) {
           return NextResponse.json({ error: "Invalid current password" }, { status: 401 });
         }
       } else {
-        // First time setting password, no current password needed
-        // Allow empty currentPassword or default "123456"
-        if (body.currentPassword && body.currentPassword !== "123456") {
-           return NextResponse.json({ error: "Invalid current password" }, { status: 401 });
+        // No password has ever been stored: the first one needs no current
+        // password. If one is given it still has to be right, so make sure a
+        // password exists and compare against that.
+        await ensureInitialPassword();
+        const current = (await getSettings()).password;
+        if (body.currentPassword && !(await bcrypt.compare(body.currentPassword, current))) {
+          return NextResponse.json({ error: "Invalid current password" }, { status: 401 });
         }
       }
 
@@ -69,6 +73,9 @@ export async function PATCH(request) {
       body.password = await bcrypt.hash(body.newPassword, salt);
       delete body.newPassword;
       delete body.currentPassword;
+      // The operator has a password of their own now: the generated one is
+      // dead, so the file that holds it goes with it.
+      clearInitialPasswordFile();
     }
 
     if (Object.prototype.hasOwnProperty.call(body, "oidcClientSecret")) {

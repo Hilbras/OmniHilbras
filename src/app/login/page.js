@@ -235,7 +235,7 @@ export default function LoginPage() {
                   )}
                   {resetHint && (
                     <p className="text-xs text-text-muted">
-                      Forgot password? Open <code className="bg-sidebar px-1 rounded">omnihilbras</code> CLI on the host → <b>Settings</b> → <b>Reset Password to Default</b>.
+                      Forgot password? Open <code className="bg-sidebar px-1 rounded">omnihilbras</code> CLI on the host → <b>Settings</b> → <b>Reset Password</b>.
                     </p>
                   )}
                 </div>
@@ -251,11 +251,12 @@ export default function LoginPage() {
                 </Button>
 
                 <p className="text-xs text-center text-text-muted mt-2">
-                  Default password is <code className="bg-sidebar px-1 rounded">123456</code>
+                  The initial password is printed in the terminal where the gateway started, and kept in{" "}
+                  <code className="bg-sidebar px-1 rounded">~/.omnihilbras/initial-password</code>
                 </p>
                 {hasPassword === false && (
                   <p className="text-xs text-center text-amber-600 dark:text-amber-400">
-                    Security risk: no password set. You will be asked to set one when logging in remotely.
+                    No password has been set yet. The gateway generates one the first time it starts.
                   </p>
                 )}
               </form>

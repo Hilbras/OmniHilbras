@@ -749,6 +749,18 @@ function startServer(updatePromise) {
 
   // Wait for server to be ready, then show interface menu loop + tray
   waitServerReady(port).then(async () => {
+    // A fresh install gets a password that only the operator can read. The
+    // gateway writes it next to its other secrets; show it here, once, so
+    // nobody has to go looking for the file.
+    try {
+      const { readInitialPassword } = require("./src/cli/utils/initialPassword");
+      const initialPassword = readInitialPassword();
+      if (initialPassword) {
+        console.log(`\n🔑 Dashboard password: ${initialPassword}`);
+        console.log("   Change it in the dashboard (Profile → Security).\n");
+      }
+    } catch { /* the file is optional */ }
+
     // Resolve parallel update check (already running); don't block server start on it.
     const latestVersion = await latestVersionPromise;
     // Start tray icon alongside TUI

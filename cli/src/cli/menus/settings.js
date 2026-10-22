@@ -13,8 +13,6 @@ const COLORS = {
   cyan: "\x1b[36m"
 };
 
-const DEFAULT_PASSWORD = "123456";
-
 /**
  * Show settings menu (tunnel + RTK + reset password)
  * @param {Array<string>} breadcrumb - Breadcrumb path
@@ -83,7 +81,7 @@ async function showSettingsMenu(breadcrumb = []) {
         action: async (d) => { await toggleHeadroom(d?.settings?.headroomEnabled === true); return true; }
       },
       {
-        label: "🔑 Reset Password to Default",
+        label: "🔑 Reset Password",
         action: async () => { await resetPassword(); return true; }
       },
       {
@@ -181,11 +179,14 @@ async function toggleHeadroom(currentlyOn) {
 }
 
 /**
- * Reset dashboard password to default via server API (writes the live SQLite DB).
- * After reset, user can log in with the default password "123456".
+ * Reset the dashboard password.
+ *
+ * It used to clear the stored hash, which put the install back on the public
+ * default — a password that is in every screenshot of this project. It now
+ * generates a new one and shows it, once.
  */
 async function resetPassword() {
-  const ok = await confirm(`Reset dashboard password to default "${DEFAULT_PASSWORD}"?`);
+  const ok = await confirm("Reset the dashboard password? A new one is generated and shown once.");
   if (!ok) {
     showStatus("Cancelled", "info");
     await pause();
@@ -194,7 +195,9 @@ async function resetPassword() {
 
   const result = await api.resetPassword();
   if (result.success) {
-    showStatus(`Password reset. Default: ${DEFAULT_PASSWORD}`, "success");
+    showStatus("Password reset.", "success");
+    console.log(`\n  🔑 New dashboard password: ${result.password}`);
+    console.log("     Change it in the dashboard (Profile → Security).\n");
   } else {
     showStatus(`Failed to reset password: ${result.error}`, "error");
   }
