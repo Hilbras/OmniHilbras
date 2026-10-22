@@ -4,6 +4,40 @@ import { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  ArrowLeftRight,
+  BarChart3,
+  Binary,
+  Box,
+  Boxes,
+  Braces,
+  Copy,
+  ChevronDown,
+  ChevronRight,
+  CircleHelp,
+  Cpu,
+  Gauge,
+  Globe,
+  Image,
+  KeyRound,
+  Languages,
+  Mic,
+  Monitor,
+  Network,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PiggyBank,
+  Power,
+  Route,
+  ScrollText,
+  Settings2,
+  Sparkles,
+  Terminal,
+  Video,
+  Volume2,
+  Waypoints,
+  X,
+} from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { APP_CONFIG, UPDATER_CONFIG } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS } from "@/shared/constants/providers";
@@ -16,31 +50,41 @@ import { ConfirmModal } from "./Modal";
 // const VISIBLE_MEDIA_KINDS = ["embedding", "image", "imageToText", "tts", "stt", "webSearch", "webFetch", "video", "music"];
 const VISIBLE_MEDIA_KINDS = ["embedding", "image", "video", "tts", "stt", "systemone"];
 // Combined entry: webSearch + webFetch share one page at /dashboard/media-providers/web
-const COMBINED_WEB_ITEM = { id: "web", label: "Web Fetch & Search", icon: "travel_explore", href: "/dashboard/media-providers/web" };
+const COMBINED_WEB_ITEM = { id: "web", label: "Web Fetch & Search", icon: Globe, href: "/dashboard/media-providers/web" };
+// The media kinds carry a Material icon of their own; the rail draws them in
+// the same hand as everything else in it.
+const MEDIA_KIND_ICONS = {
+  embedding: Braces,
+  image: Image,
+  video: Video,
+  tts: Volume2,
+  stt: Mic,
+  systemone: Cpu,
+};
 
 // The rail is grouped the way the workspace is used: what you set up, what you
 // watch, and the tools around it.
 const workspaceItems = [
-  { href: "/dashboard/endpoint", label: "Endpoint and Keys", icon: "api" },
-  { href: "/dashboard/providers", label: "Providers", icon: "dns" },
-  { href: "/dashboard/combos", label: "Routing", icon: "layers" },
+  { href: "/dashboard/endpoint", label: "Endpoint and Keys", icon: KeyRound },
+  { href: "/dashboard/providers", label: "Providers", icon: Network },
+  { href: "/dashboard/combos", label: "Routing", icon: Route },
 ];
 
 const insightItems = [
-  { href: "/dashboard/usage", label: "Usage", icon: "bar_chart" },
-  { href: "/dashboard/quota", label: "Quota Tracker", icon: "data_usage" },
-  { href: "/dashboard/token-saver", label: "Token Saver", icon: "savings" },
-  { href: "/dashboard/console-log", label: "Logs", icon: "terminal" },
+  { href: "/dashboard/usage", label: "Usage", icon: BarChart3 },
+  { href: "/dashboard/quota", label: "Quota Tracker", icon: Gauge },
+  { href: "/dashboard/token-saver", label: "Token Saver", icon: PiggyBank },
+  { href: "/dashboard/console-log", label: "Logs", icon: BarChart3 },
   // The request log is a tab of the usage page, not a page of its own.
-  { href: "/dashboard/usage?tab=logs", label: "Request log", icon: "scroll_text" },
-  { href: "/dashboard/profile", label: "Settings", icon: "settings" },
+  { href: "/dashboard/usage?tab=logs", label: "Request log", icon: ScrollText },
+  { href: "/dashboard/profile", label: "Settings", icon: Settings2 },
 ];
 
 const toolItems = [
-  { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
-  { href: "/dashboard/translator", label: "Translator", icon: "translate", needsTranslator: true },
-  { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: "lan" },
-  { href: "/dashboard/skills", label: "Skills", icon: "extension" },
+  { href: "/dashboard/cli-tools", label: "CLI Tools", icon: Terminal },
+  { href: "/dashboard/translator", label: "Translator", icon: ArrowLeftRight, needsTranslator: true },
+  { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: Waypoints },
+  { href: "/dashboard/skills", label: "Skills", icon: Sparkles },
 ];
 
 export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }) {
@@ -173,9 +217,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
             <span className="relative grid h-8 w-8 shrink-0 place-items-center rounded-[10px] border border-gold/25 bg-gold-soft text-lg text-gold-text" aria-hidden="true">
               <span className={collapsed ? "transition-opacity group-hover:opacity-0" : ""}>◈</span>
               {collapsed && (
-                <span className="material-symbols-outlined absolute h-4 w-4 text-[16px] opacity-0 transition-opacity group-hover:opacity-100">
-                  left_panel_open
-                </span>
+                <PanelLeftOpen className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
               )}
             </span>
             {!collapsed && (
@@ -186,11 +228,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
                 <span className="mono-label">v{APP_CONFIG.version}</span>
               </span>
             )}
-            {!collapsed && (
-              <span className="material-symbols-outlined ml-auto h-4 w-4 shrink-0 text-[16px] text-muted" aria-hidden="true">
-                left_panel_close
-              </span>
-            )}
+            {!collapsed && <PanelLeftClose className="ml-auto h-4 w-4 shrink-0 text-muted" aria-hidden="true" />}
           </button>
           {!collapsed && (
             <button
@@ -199,7 +237,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               aria-label="Close navigation"
               className="muted grid h-8 w-8 place-items-center rounded-lg hover:bg-surface hover:text-gold-text lg:hidden"
             >
-              <span className="material-symbols-outlined text-[18px]">close</span>
+              <X className="h-4 w-4" aria-hidden="true" />
             </button>
           )}
         </div>
@@ -293,13 +331,15 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
                   : "text-text-muted hover:bg-surface hover:text-text-main"
               )}
             >
-              <span className="material-symbols-outlined shrink-0 text-[17px]">perm_media</span>
+              <Box className="h-[17px] w-[17px] shrink-0" aria-hidden="true" />
               {!collapsed && (
                 <>
                   <span className="text-[13px] font-medium flex-1 text-left">Media Providers</span>
-                  <span className="material-symbols-outlined text-[14px] transition-transform" style={{ transform: mediaOpen ? "rotate(180deg)" : "rotate(0deg)" }}>
-                    expand_more
-                  </span>
+                  <ChevronDown
+                    className="h-3.5 w-3.5 transition-transform"
+                    style={{ transform: mediaOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+                    aria-hidden="true"
+                  />
                 </>
               )}
             </button>
@@ -317,7 +357,10 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
                         : "text-text-muted hover:bg-surface hover:text-text-main"
                     )}
                   >
-                    <span className="material-symbols-outlined text-[16px]">{kind.icon}</span>
+                    {(() => {
+                      const KindIcon = MEDIA_KIND_ICONS[kind.id] || Binary;
+                      return <KindIcon className="h-4 w-4 shrink-0" aria-hidden="true" />;
+                    })()}
                     <span className="text-sm">{kind.label}</span>
                   </Link>
                 ))}
@@ -332,7 +375,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
                       : "text-text-muted hover:bg-surface hover:text-text-main"
                   )}
                 >
-                  <span className="material-symbols-outlined text-[16px]">{COMBINED_WEB_ITEM.icon}</span>
+                  <Globe className="h-4 w-4 shrink-0" aria-hidden="true" />
                   <span className="text-sm">{COMBINED_WEB_ITEM.label}</span>
                 </Link>
               </div>
@@ -352,9 +395,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
                 "text-text-muted hover:bg-surface hover:text-text-main"
               )}
             >
-              <span className="material-symbols-outlined shrink-0 text-[17px] group-hover:text-gold-text transition-colors">
-                computer
-              </span>
+              <Monitor className="h-[17px] w-[17px] shrink-0 group-hover:text-gold-text transition-colors" aria-hidden="true" />
               {!collapsed && (
                 <>
                   <span className="text-[13px] font-medium">9Remote</span>
@@ -379,9 +420,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
                 "text-text-muted hover:bg-surface hover:text-text-main"
               )}
             >
-              <span className="material-symbols-outlined shrink-0 text-[17px] group-hover:text-gold-text transition-colors">
-                translate
-              </span>
+              <Languages className="h-[17px] w-[17px] shrink-0 group-hover:text-gold-text transition-colors" aria-hidden="true" />
               {!collapsed && <span className="text-[13px] font-medium">9English</span>}
             </a>
           </div>
@@ -399,7 +438,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               aria-label={collapsed ? "Connect a provider" : undefined}
             >
               <div className={cn("items-center gap-2 text-xs font-semibold text-gold-text", collapsed ? "flex justify-center" : "flex")}>
-                <span className="material-symbols-outlined text-[14px]" aria-hidden="true">deployed_code</span>
+                <Boxes className="h-3.5 w-3.5" aria-hidden="true" />
                 {!collapsed && "Connect a provider"}
               </div>
               {!collapsed && (
@@ -409,7 +448,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
                   </p>
                   <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-gold-text">
                     Quick setup
-                    <span className="material-symbols-outlined text-[12px] transition-transform group-hover:translate-x-0.5" aria-hidden="true">chevron_right</span>
+                    <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
                   </span>
                 </>
               )}
@@ -427,11 +466,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
                 <p className="muted truncate text-[10px]">No account required</p>
               </div>
             )}
-            {!collapsed && (
-              <span className="material-symbols-outlined ml-auto h-4 w-4 shrink-0 text-muted" aria-label="Local mode help">
-                help
-              </span>
-            )}
+            {!collapsed && <CircleHelp className="ml-auto h-4 w-4 shrink-0 text-muted" aria-label="Local mode help" />}
           </div>
         </div>
       </aside>
@@ -464,7 +499,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
           ) : (
             <div className="text-center p-8">
               <div className="flex items-center justify-center size-16 rounded-full bg-red-500/20 text-red-500 mx-auto mb-4">
-                <span className="material-symbols-outlined text-[32px]">power_off</span>
+                <Power className="h-6 w-6" aria-hidden="true" />
               </div>
               <h2 className="text-xl font-semibold text-white mb-2">Server Disconnected</h2>
               <p className="text-text-muted mb-6">The proxy server has been stopped.</p>
@@ -487,6 +522,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
  * unlabelled button. The active entry keeps the chevron the old project had.
  */
 function NavItem({ item, active, collapsed, onNavigate }) {
+  const Icon = item.icon;
   return (
     <Link
       href={item.href}
@@ -502,20 +538,15 @@ function NavItem({ item, active, collapsed, onNavigate }) {
       )}
       aria-current={active ? "page" : undefined}
     >
-      <span
+      <Icon
         className={cn(
-          "material-symbols-outlined shrink-0 text-[17px]",
-          active ? "fill-1" : "group-hover:text-gold-text transition-colors"
+          "h-[17px] w-[17px] shrink-0",
+          active ? "text-gold-text" : "group-hover:text-gold-text transition-colors"
         )}
-      >
-        {item.icon}
-      </span>
+        aria-hidden="true"
+      />
       {!collapsed && <span className="text-[13px] font-medium flex-1 text-left">{item.label}</span>}
-      {!collapsed && active && (
-        <span className="material-symbols-outlined h-3.5 w-3.5 opacity-60" aria-hidden="true">
-          chevron_right
-        </span>
-      )}
+      {!collapsed && active && <ChevronRight className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />}
     </Link>
   );
 }
@@ -524,7 +555,7 @@ NavItem.propTypes = {
   item: PropTypes.shape({
     href: PropTypes.string.isRequired,
     label: PropTypes.string.isRequired,
-    icon: PropTypes.string.isRequired,
+    icon: PropTypes.elementType.isRequired,
   }).isRequired,
   active: PropTypes.bool,
   collapsed: PropTypes.bool,
@@ -549,7 +580,7 @@ function ManualUpdatePanel({ latestVersion, installCmd, copied, onCopyAndShutdow
     <div className="w-full max-w-lg rounded-xl bg-neutral-900/95 border border-white/10 p-6 text-white">
       <div className="flex items-center gap-3 mb-4">
         <div className="flex items-center justify-center size-11 rounded-full bg-amber-500/20 text-amber-400">
-          <span className="material-symbols-outlined text-[24px]">content_copy</span>
+          <Copy className="h-4 w-4" aria-hidden="true" />
         </div>
         <div>
           <h2 className="text-lg font-semibold">Update OmniHilbras{latestVersion ? ` to v${latestVersion}` : ""}</h2>
