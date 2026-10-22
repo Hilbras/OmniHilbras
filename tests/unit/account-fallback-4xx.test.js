@@ -29,6 +29,13 @@ describe("checkFallbackError — request-scoped vs account-scoped failures", () 
     expect(checkFallbackError(422, "quota exceeded").shouldFallback).toBe(true);
   });
 
+  it("falls back on exhausted-credit wording an aggregator returns on a plain 4xx", () => {
+    expect(checkFallbackError(422, JSON.stringify({ error: { code: "insufficient_quota" } })).shouldFallback).toBe(true);
+    expect(checkFallbackError(400, "Your credit balance is too low").shouldFallback).toBe(true);
+    expect(checkFallbackError(400, "Insufficient balance in account").shouldFallback).toBe(true);
+    expect(checkFallbackError(500, "billing hard limit has been reached").shouldFallback).toBe(true);
+  });
+
   it("keeps the transient cooldown for unmatched server errors", () => {
     const result = checkFallbackError(503, "upstream exploded");
 

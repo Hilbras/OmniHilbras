@@ -65,6 +65,17 @@ export const ERROR_RULES = [
   { text: "rate limit",               backoff: true },
   { text: "too many requests",        backoff: true },
   { text: "quota exceeded",           backoff: true },
+  // Exhausted-credit wording from aggregator providers, which often surface it
+  // on a 4xx (422/400) that the status rules below don't cover same as on 402.
+  { text: "insufficient_quota",       backoff: true },
+  { text: "insufficient quota",       backoff: true },
+  { text: "exceeded your current quota", backoff: true },
+  { text: "exceeded your quota",      backoff: true },
+  { text: "credit balance",           cooldownMs: COOLDOWN.long },
+  { text: "insufficient credit",      cooldownMs: COOLDOWN.long },
+  { text: "insufficient balance",     cooldownMs: COOLDOWN.long },
+  { text: "insufficient_balance",     cooldownMs: COOLDOWN.long },
+  { text: "billing",                  cooldownMs: COOLDOWN.long },
   { text: "capacity",                 backoff: true },
   { text: "overloaded",               backoff: true },
 
