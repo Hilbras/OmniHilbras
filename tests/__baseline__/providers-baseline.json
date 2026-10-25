@@ -1391,5 +1391,16 @@
       "apiBase": "https://kiraai.vn/api/v1"
     },
     "format": "openai"
+  },
+  "zcode": {
+    "baseUrl": "https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages",
+    "format": "claude",
+    "noAuth": true,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "usage": {
+      "url": "https://zcode.z.ai/api/v1/zcode-plan/billing/balance"
+    }
   }
 }

@@ -194,15 +194,22 @@ async function resetPassword() {
   }
 
   try {
-    // setInitialPassword generates a real password, hashes and stores it, writes
-    // it to the operator-readable file once, and returns the plaintext so the
-    // CLI can show it. (The old api.resetPassword() returned { success } with no
-    // password, so result.password was always undefined here.)
-    const { setInitialPassword } = await import("../../../../src/lib/auth/initialPassword.js");
-    const password = await setInitialPassword();
-    showStatus("Password reset.", "success");
-    console.log(`\n  🔑 New dashboard password: ${password}`);
-    console.log("     Change it in the dashboard (Profile → Security).\n");
+    // Reset server-side via the local-only API endpoint (authenticated with
+    // the CLI token): the server writes the new hash and the operator-readable
+    // initial-password file together. The previous version imported the
+    // server's initialPassword.js module directly into the CLI process, which
+    // cannot resolve its "@/" path aliases outside the Next build
+    // (ERR_MODULE_NOT_FOUND) — so the reset always failed before reaching the
+    // database.
+    const result = await api.resetPassword();
+    const password = result?.success ? result.data?.password : null;
+    if (password) {
+      showStatus("Password reset.", "success");
+      console.log(`\n  🔑 New dashboard password: ${password}`);
+      console.log("     Change it in the dashboard (Profile → Security).\n");
+    } else {
+      showStatus(`Failed to reset password: ${result?.error || "unexpected server response"}`, "error");
+    }
   } catch (err) {
     showStatus(`Failed to reset password: ${err.message}`, "error");
   }

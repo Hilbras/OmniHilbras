@@ -28,6 +28,8 @@ product
 *.pem
 
 # debug
+# packed CLI release artifacts (npm pack output, 18 MB build bundles)
+*.tgz
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

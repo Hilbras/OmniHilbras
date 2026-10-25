@@ -280,6 +280,7 @@
     "xkiro": "xkiro",
     "xquik": "xquik",
     "youcom": "youcom",
+    "zcode": "zcode",
     "zed": "zd"
   },
   "modelKeys": [
@@ -407,6 +408,7 @@
     "xiaomi-mimo-tts-models",
     "xiaomi-tokenplan",
     "xkiro",
+    "zcode",
     "zd"
   ]
 }

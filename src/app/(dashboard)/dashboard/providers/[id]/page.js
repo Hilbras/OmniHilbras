@@ -197,7 +197,7 @@ export default function ProviderDetailPage() {
   const authModes = providerInfo?.authModes || [];
   const isOAuth = !!OAUTH_PROVIDERS[providerId] || !!FREE_PROVIDERS[providerId] || authModes.includes("oauth");
   const supportsApiKeyAuth = !!APIKEY_PROVIDERS[providerId] || authModes.includes("apikey");
-  const isFreeNoAuth = !!FREE_PROVIDERS[providerId]?.noAuth;
+  const isFreeNoAuth = !!(FREE_PROVIDERS[providerId] || FREE_TIER_PROVIDERS[providerId])?.noAuth;
   const staticModels = getModelsByProviderId(providerId);
   // Built-in seed models are hidden wherever a fetch path exists: the card
   // starts empty, the catalogue arrives when a key is saved (auto-fetch),

@@ -4,6 +4,7 @@ import { testProxyUrl } from "@/lib/network/proxyTest";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getDefaultModel } from "open-sse/config/providerModels.js";
 import { probeBedrockCredentials } from "open-sse/executors/bedrock.js";
+import { fetchZcodeBalance } from "open-sse/executors/zcode.js";
 import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js";
 import { CODEX_CLI_VERSION } from "open-sse/config/appConstants.js";
 import { GROK_CLI_PAGER_USER_AGENT, GROK_CLI_VERSION } from "open-sse/config/grokCli.js";
@@ -775,6 +776,20 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         const cfg = PROVIDERS[connection.provider];
         const res = await fetchWithConnectionProxy(cfg.validateUrl, { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
+      }
+      case "zcode": {
+        // ZCode needs no dashboard key: auth resolves from the local desktop
+        // credential store (or the pasted Start Plan JWT on the connection).
+        // The read-only balance endpoint proves both credential and entitlement.
+        try {
+          await fetchZcodeBalance(
+            { apiKey: connection.apiKey || connection.accessToken },
+            { signal: AbortSignal.timeout(10000) },
+          );
+          return { valid: true, error: null };
+        } catch (error) {
+          return { valid: false, error: String(error?.message || error) };
+        }
       }
       case "kiraai": {
         // KiraAI serves /models publicly (200 even for a bad key), so a plain

@@ -56,7 +56,7 @@ flowchart LR
         API[V1 Compatibility API\n/v1/*]
         DASH[Dashboard + Management API\n/api/*]
         CORE[SSE + Translation Core\nopen-sse + src/sse]
-        DB[(db.json)]
+        DB[(data.sqlite)]
         UDB[(usage.json + log.txt)]
     end
 
@@ -137,9 +137,10 @@ Main flow modules:
 
 Primary state DB:
 
-- `src/lib/localDb.js`
-- file: `${DATA_DIR}/db.json` (or `~/.omnihilbras/db.json` when `DATA_DIR` is unset)
-- entities: providerConnections, providerNodes, modelAliases, combos, apiKeys, settings, pricing
+- `src/lib/db/` (driver chain: `bun:sqlite` → `better-sqlite3` → `node:sqlite` → pure-JS fallback `sql.js`); legacy import shim: `src/lib/localDb.js`
+- file: `${DATA_DIR}/db/data.sqlite` (or `~/.omnihilbras/db/data.sqlite` when `DATA_DIR` is unset); migrations in `src/lib/db/migrations/`
+- entities (tables): provider_connections, provider_nodes, model_aliases, combos, api_keys, settings, pricing
+- legacy `db.json` / `usage.json` / `disabledModels.json` / `request-details.json` are migrated into SQLite on first open
 
 Usage DB:
 
@@ -156,9 +157,7 @@ Usage DB:
 
 ## 5) Cloud Sync
 
-- Scheduler init: `src/lib/initCloudSync.js`, `src/shared/services/initializeCloudSync.js`
-- Periodic task: `src/shared/services/cloudSyncScheduler.js`
-- Control route: `src/app/api/sync/cloud/route.js`
+No dedicated cloud-sync implementation files exist in this repo (`initCloudSync.js`, `cloudSyncScheduler.js`, `initializeCloudSync.js`, and `app/api/sync/cloud/route.js` are all absent). Cloud sync is not wired in — the `CLOUD_URL` / `NEXT_PUBLIC_CLOUD_URL` env vars are only read by the dashboard CLI-tools UI (tool cards, `ToolDetailClient.js`) to offer a cloud base-URL option; the `cloudEnabled` setting in `settingsRepo.js` is still present but has no scheduler behind it.
 
 ## Request Lifecycle (`/v1/chat/completions`)
 
@@ -377,7 +376,7 @@ erDiagram
 
 Physical storage files:
 
-- main state: `${DATA_DIR}/db.json` (or `~/.omnihilbras/db.json`)
+- main state: `${DATA_DIR}/db/data.sqlite` (or `~/.omnihilbras/db/data.sqlite`)
 - usage stats: `~/.omnihilbras/usage.json`
 - request log lines: `~/.omnihilbras/log.txt`
 - optional translator/request debug sessions: `<repo>/logs/...`
@@ -394,7 +393,7 @@ flowchart LR
     subgraph ContainerOrProcess[OmniHilbras Runtime]
         Next[Next.js Server\nPORT=20128]
         Core[SSE Core + Executors]
-        MainDB[(db.json)]
+        MainDB[(data.sqlite)]
         UsageDB[(usage.json/log.txt)]
     end
 

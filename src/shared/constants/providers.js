@@ -104,6 +104,9 @@ export function isOpenAICompatibleProvider(providerId) {
  * fetch the catalogue" works without every registry file declaring one.
  *
  * Derivation rules (first match):
+ *   0. `modelsFetcher: null` — explicit opt-out for providers with a fixed
+ *      catalog and no models endpoint (zcode's gateway 404s on …/models);
+ *      keeps the derivation from inventing a fetcher that can never succeed
  *   1. registry `modelsFetcher` (already built into the UI entry)
  *   2. `transport.validateUrl` ending in /models (deepseek, groq, mistral, xai…)
  *   3. `transport.baseUrl` …/chat/completions → …/models
@@ -115,6 +118,7 @@ export function getModelsFetcher(providerId) {
   const entry = REGISTRY.find(
     (r) => r.id === providerId || r.alias === providerId || (r.aliases || []).includes(providerId),
   );
+  if (entry?.modelsFetcher === null) return undefined;
   if (!entry) return undefined;
   if (entry.modelsFetcher) return entry.modelsFetcher;
   const base = entry.transport?.baseUrl;

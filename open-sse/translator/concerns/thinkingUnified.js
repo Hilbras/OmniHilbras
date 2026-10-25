@@ -357,6 +357,18 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
       body.reasoning_effort = want === "max" && supportedLevels && !supportedLevels.includes("max") ? "high" : want;
       break;
     }
+    case "zcode": {
+      // ZCode Start Plan reads effort from output_config.effort and only accepts
+      // exactly low|high|max. thinking.type "disabled" is not on the wire (the
+      // stock request template always enables thinking — canDisable:false).
+      body.thinking = { type: "enabled" };
+      const level = toLevel(eff);
+      body.output_config = {
+        effort: (level === "low" || level === "minimal") ? "low"
+          : (level === "high" || level === "medium") ? "high" : "max",
+      };
+      break;
+    }
     case "kimi": {
       if (none && canDisable) { body.thinking = { type: "disabled" }; break; }
       const effort = toKimiReasoningEffort(eff);

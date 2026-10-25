@@ -1,3 +1,27 @@
+# v2.9.5 (2026-10-25)
+
+## Features
+- **Providers**: ZCode Start Plan (free-tier GLM). The gateway serves GLM 5.3 / 5.3-Flash through the locally signed-in ZCode desktop client (wire reverse-engineered, verified live against ZCode 3.14.4). Auth comes from the machine's own credential store (~/.zcode/v2/credentials.json, AES-256-GCM, machine-derived key) — no dashboard key needed; a pasted Start Plan JWT works as the connection key so accounts can be rotated like any provider
+- **Providers**: the `zc` alias is now a real routing alias (engine resolves prefixes from id/alias/aliases — `uiAlias` never routes); without it `zc/glm-5.3` fell through to the DefaultExecutor with no transport
+- **Providers**: fixed-catalog providers can opt out of the models-endpoint auto-derivation (`modelsFetcher: null`) — zcode's gateway 404s on `…/models`, so the seed models always show
+- **Providers**: thinking format "zcode" added to the unified thinking concern — `thinking.type: "enabled"` + `output_config.effort` low|high|max, thinking cannot be disabled (stock ZCode request template is enforced upstream)
+- **Usage**: zcode quota rows (model × entitlement bucket) parse through the dashboard limits, and "Test connection" validates a zcode credential via the read-only balance endpoint
+
+## Fixes
+- **CLI**: password reset no longer imports the server's `initialPassword.js` directly into the CLI process (its `@/` path aliases cannot resolve outside the Next build — the reset always failed with ERR_MODULE_NOT_FOUND before reaching the database). It now calls the local-only API endpoint and shows a real error status on failure
+- **Providers API**: saving a connection no longer requires an API key for no-auth free-tier providers (`noAuth` / free-tier flag) — the endpoint accepted any `apiKeyOptionalWith` substitute, but a bare `noAuth` provider was still rejected with "API Key is required"
+- **Tests**: zcode added to the golden-url-header specialized set; the glm-oauth suite now expects a zcode transport (noAuth + claude format) instead of none
+
+# v2.9.4 (2026-10-23)
+
+## Features
+- **Providers**: KiraAI (kiraai) — chat, image generation and TTS
+
+# v2.9.3 (2026-10-22)
+
+## Fixes
+- **Fallback**: accounts rotate on exhausted-credit errors that upstreams return as plain 4xx instead of 429
+
 # v2.9.2 (2026-10-21)
 
 ## Fixes

@@ -6,6 +6,7 @@ import { resolveOllamaLocalHost, resolveXiaomiTokenplanBaseUrl, PROVIDERS } from
 import { openaiToCommandCodeRequest } from "open-sse/translator/request/openai-to-commandcode.js";
 import { resolveQoderCredentials, resolveQoderModels } from "open-sse/services/qoderModels.js";
 import { probeBedrockCredentials } from "open-sse/executors/bedrock.js";
+import { fetchZcodeBalance } from "open-sse/executors/zcode.js";
 import {
   createNousApiKeyProbe,
   getNousApiKeyValidationError,
@@ -248,6 +249,24 @@ export async function POST(request) {
       // would reject bedrock outright and send bedrock-xai to a literal "{region}" host.
       if (AI_PROVIDERS[provider]?.credentialForm === "aws") {
         return NextResponse.json(await probeBedrockCredentials({ apiKey, providerSpecificData }, fetch));
+      }
+
+      // ZCode authenticates from the local desktop credential store (or a pasted
+      // Start Plan JWT as the connection key) — validate via the read-only
+      // balance endpoint, which also proves the account is entitled.
+      if (provider === "zcode") {
+        try {
+          await fetchZcodeBalance({ apiKey }, { signal: AbortSignal.timeout(10000) });
+          return NextResponse.json({ valid: true, error: null });
+        } catch (error) {
+          const message = String(error?.message || error);
+          const friendly = message.includes("credentials not found")
+            ? "ZCode desktop client is not signed in on this machine. Install ZCode, sign in once, or paste a Start Plan JWT as the key."
+            : message.includes("balance check failed")
+              ? "ZCode rejected this credential. If you pasted a key, make sure it is a valid Start Plan JWT."
+              : message;
+          return NextResponse.json({ valid: false, error: friendly });
+        }
       }
 
       // Generic probe for webSearch/webFetch providers (config-driven)

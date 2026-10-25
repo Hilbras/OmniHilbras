@@ -751,6 +751,23 @@ export function parseQuotaData(provider, data) {
         }
         break;
 
+      case "zcode":
+        // ZCode quota rows (model × entitlement bucket) arrive already
+        // normalized from services/usage/zcode.js — pass through unchanged.
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name,
+              used: quota.used || 0,
+              total: quota.total || 0,
+              remainingPercentage: quota.remainingPercentage,
+              resetAt: quota.resetAt || null,
+              unlimited: quota.unlimited === true,
+            });
+          });
+        }
+        break;
+
       case "tokenharbor":
       case "nara-router":
       case "apmix":
