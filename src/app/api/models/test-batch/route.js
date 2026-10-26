@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { pingModelByKind } from "../test/ping";
 import { mapWithConcurrency } from "@/lib/async/mapWithConcurrency.js";
+import { setCachedTestResults } from "../testCache.js";
+import { modelIdFromTestModel } from "@/shared/utils/modelIdFromTestModel.js";
 
 // POST /api/models/test-batch - Test many models of one provider
 //
@@ -70,6 +72,17 @@ export async function POST(request) {
 
       const passed = results.filter((r) => r?.ok).length;
       send({ done: true, summary: { total: models.length, passed, failed: models.length - passed } });
+      // Cache the results keyed by the first model's provider alias so the
+      // dashboard can surface "last tested" without a live run.
+      if (models.length > 0) {
+        const firstAlias = models[0].split("/")[0];
+        const resultMap = {};
+        results.forEach((r, i) => {
+          const mid = modelIdFromTestModel(models[i], firstAlias);
+          if (mid) resultMap[mid] = r.ok ? "ok" : "error";
+        });
+        try { setCachedTestResults(firstAlias, resultMap); } catch { /* non-fatal */ }
+      }
       controller.close();
     },
   });

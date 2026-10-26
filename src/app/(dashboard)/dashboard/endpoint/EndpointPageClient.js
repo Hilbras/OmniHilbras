@@ -307,6 +307,15 @@ export default function APIPageClient() {
     }
   };
 
+  const handleRequireLogin = async (value) => {
+    try {
+      const updated = await useSettingsStore.getState().patchSettings({ requireLogin: value });
+      if (updated) setRequireLogin(value);
+    } catch (error) {
+      console.log("Error updating requireLogin:", error);
+    }
+  };
+
   const fetchData = async () => {
     try {
       const fetchKeys = async () => {
@@ -850,361 +859,325 @@ export default function APIPageClient() {
         </div>
       </div>
 
-      {/* Two-column grid: keys + endpoints (left) and right rail (old layout) */}
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        {/* Left column */}
-        <div className="flex flex-col gap-5">
-          {/* API Keys card */}
-          <Card id="require-api-key" className="overflow-hidden !p-0">
-            <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-              <div>
-                <h2 className="flex items-center gap-2 text-sm font-semibold">
-                  <KeyRound className="h-4 w-4 text-gold-text" aria-hidden="true" />
-                  API keys
-                </h2>
-                <p className="muted mt-1 text-xs">
-                  {loading ? "Loading keys…" : `${activeKeyCount} active of ${keys.length} ${keys.length === 1 ? "key" : "keys"}`}
-                </p>
-              </div>
-              <Button variant="secondary" size="sm" onClick={() => { setCreateKeyError(""); setShowAddModal(true); }}>
-                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                New key
-              </Button>
+      {/* Single-column layout: keys + endpoints */}
+      <div className="flex flex-col gap-5">
+        {/* API Keys card */}
+        <Card id="require-api-key" className="overflow-hidden !p-0">
+          <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+            <div>
+              <h2 className="flex items-center gap-2 text-sm font-semibold">
+                <KeyRound className="h-4 w-4 text-gold-text" aria-hidden="true" />
+                API keys
+              </h2>
+              <p className="muted mt-1 text-xs">
+                {loading ? "Loading keys…" : `${activeKeyCount} active of ${keys.length} ${keys.length === 1 ? "key" : "keys"}`}
+              </p>
             </div>
+            <Button variant="secondary" size="sm" onClick={() => { setCreateKeyError(""); setShowAddModal(true); }}>
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              New key
+            </Button>
+          </div>
 
-            {/* Require API key toggle */}
-            <div className="flex items-center justify-between border-b border-line px-4 py-3 sm:px-5">
+          {/* Access controls */}
+          <div className="border-b border-line px-4 py-3 sm:px-5">
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium">Require API key</p>
                 <p className="muted text-xs">Requests without a valid key will be rejected</p>
               </div>
               <Toggle checked={requireApiKey} onChange={() => handleRequireApiKey(!requireApiKey)} />
             </div>
-
-            {isRemoteHost && !requireApiKey && (
-              <div className="px-4 pt-3 sm:px-5">
-                <SecurityWarning message="Endpoint is exposed without an API key." />
+            <div className="mt-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Require login</p>
+                <p className="muted text-xs">Dashboard access requires authentication</p>
               </div>
-            )}
-
-            {keysError || keyError ? (
-              <div className="flex items-center gap-2 p-4 sm:p-5">
-                <div className="flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-                  <CircleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  {keysError || keyError}
-                </div>
-              </div>
-            ) : null}
-
-            {keys.length === 0 ? (
-              <div className="px-5 py-12 text-center">
-                <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-gold/25 bg-gold-soft text-gold-text">
-                  <KeyRound className="h-6 w-6" aria-hidden="true" />
-                </span>
-                <p className="mt-4 text-sm font-semibold">No API keys yet</p>
-                <p className="muted mt-1 text-xs">Create your first key so CLI tools and IDE extensions can call the gateway.</p>
-                <Button variant="primary" size="sm" className="mt-4" onClick={() => { setCreateKeyError(""); setShowAddModal(true); }}>
-                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                  Create key
-                </Button>
-              </div>
-            ) : (
-              <ul className="divide-y divide-line">
-                {keys.map((apiKey) => (
-                  <li key={apiKey.id} className={`p-4 sm:p-5 ${apiKey.isActive === false ? "opacity-70" : ""}`}>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-semibold">{apiKey.name}</p>
-                          <span className={`rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wide ${apiKey.isActive !== false ? "border-success/25 bg-success/10 text-success" : "border-line-strong bg-surface-2 text-muted"}`}>
-                            {apiKey.isActive !== false ? "active" : "paused"}
-                          </span>
-                        </div>
-                        <div className="mt-1.5 flex items-center gap-1.5 min-w-0">
-                          <code className="break-all font-mono text-[11px] text-muted">{apiKey.key}</code>
-                          <CopyButton value={apiKey.key} label={`key_${apiKey.id}`} />
-                        </div>
-                        <p className="muted mt-1.5 text-[11px]">
-                          Created {new Date(apiKey.createdAt).toLocaleDateString()}
-                        </p>
-                        {/* Our extras: restrict access + rate limits (not in old version) */}
-                        <KeyAccessControls
-                          apiKey={apiKey}
-                          onChange={(access) => handleUpdateKeyAccess(apiKey.id, access)}
-                          onRequestRestrict={() => setConfirmState({
-                            title: "Restrict API Key",
-                            message: `Restrict API key "${apiKey.name}"?\n\nIt will only be able to call the combos and models you add. Until you add one, it can call nothing.`,
-                            onConfirm: async () => {
-                              setConfirmState(null);
-                              handleUpdateKeyAccess(apiKey.id, { restricted: true, allow: apiKey.access?.allow || [] });
-                            }
-                          })}
-                        />
-                        <KeyRateLimitControls apiKey={apiKey} />
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <Toggle
-                          size="sm"
-                          checked={apiKey.isActive !== false}
-                          onChange={(checked) => {
-                            if (apiKey.isActive !== false && !checked) {
-                              setConfirmState({
-                                title: "Pause API Key",
-                                message: `Pause API key "${apiKey.name}"?\n\nThis key will stop working immediately but can be resumed later.`,
-                                onConfirm: async () => {
-                                  setConfirmState(null);
-                                  handleToggleKey(apiKey.id, checked);
-                                }
-                              });
-                            } else {
-                              handleToggleKey(apiKey.id, checked);
-                            }
-                          }}
-                          title={apiKey.isActive !== false ? "Pause key" : "Resume key"}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteKey(apiKey.id)}
-                          aria-label={`Delete ${apiKey.name}`}
-                          className="muted grid h-8 w-8 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          {/* Endpoint card — Local + Tunnel + Tailscale rows (our extras) */}
-          <Card>
-            <div className="flex items-center gap-2 mb-4">
-              <Globe className="h-4 w-4 text-gold-text" aria-hidden="true" />
-              <h2 className="text-sm font-semibold">Endpoints</h2>
+              <Toggle checked={requireLogin} onChange={() => handleRequireLogin(!requireLogin)} />
             </div>
-            <div className="flex flex-col gap-2">
-              <CodeRow label="Local" value={currentEndpoint} copyId="local_url" copied={copied} onCopy={copy} />
+          </div>
 
-              {/* Cloudflare Tunnel row */}
-              <div className="flex items-center gap-2 rounded-lg border border-line bg-bg-soft/60 px-3 py-2">
-                <span className={`mono-label shrink-0 min-w-[88px] text-center rounded px-1.5 py-0.5 ${tunnelEnabled ? "bg-gold-soft text-gold-text" : ""}`}>Tunnel</span>
-                {tunnelEnabled && !tunnelLoading && tunnelReachable ? (
-                  <>
-                    <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-main">{`${tunnelPublicUrl || tunnelUrl}/v1`}</code>
-                    <CopyButton value={`${tunnelPublicUrl || tunnelUrl}/v1`} label="tunnel_url" />
-                    <button
-                      type="button"
-                      onClick={() => setShowDisableTunnelModal(true)}
-                      className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
-                      title="Disable Tunnel"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </>
-                ) : tunnelEnabled && !tunnelLoading && !tunnelReachable ? (
-                  <>
-                    <span className="flex flex-1 items-center gap-2 text-xs text-warning">
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                      {tunnelEverReachable ? "Tunnel reconnecting…" : "Tunnel checking…"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowDisableTunnelModal(true)}
-                      className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
-                      title="Disable Tunnel"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </>
-                ) : tunnelLoading ? (
-                  <>
-                    <span className="flex flex-1 items-center gap-2 text-xs text-text-muted">
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                      {tunnelProgress || "Creating tunnel…"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => { pollControllerRef.current?.abort(); pollControllerRef.current = null; setTunnelLoading(false); setTunnelProgress(""); }}
-                      className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
-                      title="Stop"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </>
-                ) : tunnelStatus?.type === "error" ? (
-                  <>
-                    <span className="flex flex-1 items-center gap-2 text-xs text-danger">
-                      <CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                      {tunnelStatus.message}
-                    </span>
-                    <Button size="sm" variant="secondary" onClick={() => setShowEnableTunnelModal(true)}>
-                      <Cloud className="h-3.5 w-3.5" aria-hidden="true" />
-                      Enable
-                    </Button>
-                  </>
-                ) : tunnelChecking ? (
-                  <>
-                    <span className="flex flex-1 items-center gap-2 text-xs text-text-muted">
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                      Checking…
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setTunnelChecking(false)}
-                      className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
-                      title="Stop"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </>
-                ) : (
-                  <Button size="sm" variant="secondary" className="ml-auto" onClick={enableTunnel}>
-                    <Cloud className="h-3.5 w-3.5" aria-hidden="true" />
-                    Enable
-                  </Button>
-                )}
-              </div>
-
-              {/* Tailscale row */}
-              <div className="flex items-center gap-2 rounded-lg border border-line bg-bg-soft/60 px-3 py-2">
-                <span className={`mono-label shrink-0 min-w-[88px] text-center rounded px-1.5 py-0.5 ${tsEnabled ? "bg-gold-soft text-gold-text" : ""}`}>Tailscale</span>
-                {tsEnabled && !tsLoading && tsReachable ? (
-                  <>
-                    <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-main">{`${tsUrl}/v1`}</code>
-                    <CopyButton value={`${tsUrl}/v1`} label="ts_url" />
-                    <button
-                      type="button"
-                      onClick={() => setShowDisableTsModal(true)}
-                      className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
-                      title="Disable Tailscale"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </>
-                ) : tsEnabled && !tsLoading && !tsReachable ? (
-                  <>
-                    <span className="flex flex-1 items-center gap-2 text-xs text-warning">
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                      {tsEverReachable ? "Tailscale reconnecting…" : "Tailscale checking…"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowDisableTsModal(true)}
-                      className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
-                      title="Disable Tailscale"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </>
-                ) : (tsLoading || tsConnecting) ? (
-                  <>
-                    <span className="flex flex-1 items-center gap-2 text-xs text-text-muted">
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                      {tsProgress || "Connecting…"}
-                    </span>
-                    {tsAuthUrl && (
-                      <Button size="sm" variant="secondary" onClick={() => window.open(tsAuthUrl, "tailscale_auth", "width=600,height=700,noopener,noreferrer")}>
-                        {tsAuthLabel || "Open"}
-                      </Button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => { setTsLoading(false); setTsConnecting(false); setTsProgress(""); clearUserAuth(); }}
-                      className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
-                      title="Stop"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </>
-                ) : tsStatus?.type === "error" ? (
-                  <>
-                    <span className="flex flex-1 items-center gap-2 text-xs text-danger">
-                      <CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                      {tsStatus.message}
-                    </span>
-                    <Button size="sm" variant="secondary" onClick={enableTailscale}>
-                      <Globe className="h-3.5 w-3.5" aria-hidden="true" />
-                      Enable
-                    </Button>
-                  </>
-                ) : (
-                  <Button size="sm" variant="secondary" className="ml-auto" onClick={enableTailscale}>
-                    <Globe className="h-3.5 w-3.5" aria-hidden="true" />
-                    Enable
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            {/* Security warnings (our extras) */}
-            {(isLoginUnsafe && !tunnelEnabled && !tsEnabled) || (tunnelEnabled || tsEnabled) ? (
-              <div className="mt-4 flex flex-col gap-2">
-                {isLoginUnsafe && !tunnelEnabled && !tsEnabled && (
-                  <SecurityWarning message={unsafeReason} action={{ label: "Open settings", href: "/dashboard/profile" }} />
-                )}
-                {(tunnelEnabled || tsEnabled) && !requireApiKey && (
-                  <SecurityWarning
-                    message="Require API key is disabled — your endpoint is publicly accessible without authentication."
-                    action={{ label: "Enable", href: "#require-api-key" }}
-                  />
-                )}
-                {(tunnelEnabled || tsEnabled) && (!requireLogin || !hasPassword) && (
-                  <SecurityWarning
-                    message={
-                      !requireLogin
-                        ? "Require login is disabled — anyone can access your dashboard via tunnel."
-                        : "Dashboard uses the default password — change it in Profile settings."
-                    }
-                    action={{ label: !requireLogin ? "Enable" : "Change password", href: "/dashboard/profile" }}
-                  />
-                )}
-              </div>
-            ) : null}
-
-            {/* Tunnel dashboard access toggle (our extra) */}
-            {(tunnelEnabled || tsEnabled) && (
-              <div className="mt-4 flex items-center gap-3 border-t border-line pt-4">
-                <Toggle checked={tunnelDashboardAccess} onChange={() => handleTunnelDashboardAccess(!tunnelDashboardAccess)} />
-                <div className="flex items-center gap-1.5">
-                  <p className="text-sm font-medium">Allow dashboard access via tunnel</p>
-                  <Tooltip text="When enabled, the dashboard can be accessed through your tunnel or Tailscale URL (login still required). When disabled, dashboard access via tunnel/Tailscale is completely blocked." />
-                </div>
-              </div>
-            )}
-          </Card>
-        </div>
-
-        {/* Right rail — old layout: enforcement card + client setup card + our tunnel dashboard toggle */}
-        <div className="space-y-5">
-          {/* Require API key card */}
-          <Card>
-            <h2 className="text-sm font-semibold">Require API key</h2>
-            <div className="mt-3 flex items-start justify-between gap-4">
-              <p className="muted text-xs leading-relaxed">When enforcement is on, clients must send a valid key. The dashboard stays exempt so it can keep testing models.</p>
-              <Toggle checked={requireApiKey} onChange={() => handleRequireApiKey(!requireApiKey)} />
-            </div>
-            {requireApiKey && keys.length === 0 && !loading && (
-              <p className="mt-3 flex items-start gap-2 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-[11px] text-danger">
+          {/* Enforcement warnings */}
+          {requireApiKey && keys.length === 0 && !loading && (
+            <div className="px-4 pt-3 sm:px-5">
+              <p className="flex items-start gap-2 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-[11px] text-danger">
                 <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 Enforcement is on and no keys exist, so every client is rejected.
               </p>
-            )}
-            {requireApiKey && keys.length > 0 && (
-              <p className="mt-3 flex items-start gap-2 rounded-lg border border-gold/25 bg-gold-soft px-3 py-2 text-[11px] text-gold-text">
+            </div>
+          )}
+          {requireApiKey && keys.length > 0 && (
+            <div className="px-4 pt-3 sm:px-5">
+              <p className="flex items-start gap-2 rounded-lg border border-gold/25 bg-gold-soft px-3 py-2 text-[11px] text-gold-text">
                 <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 {activeKeyCount === 0 ? "All keys are paused, so no client can authenticate." : "Clients authenticate with a bearer token on every request."}
               </p>
-            )}
-          </Card>
+            </div>
+          )}
 
-          {/* Client setup card — old layout */}
-          <Card>
-            <h2 className="flex items-center gap-2 text-sm font-semibold">
+          {isRemoteHost && !requireApiKey && (
+            <div className="px-4 pt-3 sm:px-5">
+              <SecurityWarning message="Endpoint is exposed without an API key." />
+            </div>
+          )}
+
+          {keysError || keyError ? (
+            <div className="flex items-center gap-2 p-4 sm:p-5">
+              <div className="flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+                <CircleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+                {keysError || keyError}
+              </div>
+            </div>
+          ) : null}
+
+          {keys.length === 0 ? (
+            <div className="px-5 py-12 text-center">
+              <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-gold/25 bg-gold-soft text-gold-text">
+                <KeyRound className="h-6 w-6" aria-hidden="true" />
+              </span>
+              <p className="mt-4 text-sm font-semibold">No API keys yet</p>
+              <p className="muted mt-1 text-xs">Create your first key so CLI tools and IDE extensions can call the gateway.</p>
+              <Button variant="primary" size="sm" className="mt-4" onClick={() => { setCreateKeyError(""); setShowAddModal(true); }}>
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                Create key
+              </Button>
+            </div>
+          ) : (
+            <ul className="divide-y divide-line">
+              {keys.map((apiKey) => (
+                <li key={apiKey.id} className={`p-4 sm:p-5 ${apiKey.isActive === false ? "opacity-70" : ""}`}>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold">{apiKey.name}</p>
+                        <span className={`rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wide ${apiKey.isActive !== false ? "border-success/25 bg-success/10 text-success" : "border-line-strong bg-surface-2 text-muted"}`}>
+                          {apiKey.isActive !== false ? "active" : "paused"}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 flex items-center gap-1.5 min-w-0">
+                        <code className="break-all font-mono text-[11px] text-muted">{apiKey.key}</code>
+                        <CopyButton value={apiKey.key} label={`key_${apiKey.id}`} />
+                      </div>
+                      <p className="muted mt-1.5 text-[11px]">
+                        Created {new Date(apiKey.createdAt).toLocaleDateString()}
+                      </p>
+                      {/* Our extras: restrict access + rate limits (not in old version) */}
+                      <KeyAccessControls
+                        apiKey={apiKey}
+                        onChange={(access) => handleUpdateKeyAccess(apiKey.id, access)}
+                        onRequestRestrict={() => setConfirmState({
+                          title: "Restrict API Key",
+                          message: `Restrict API key "${apiKey.name}"?\n\nIt will only be able to call the combos and models you add. Until you add one, it can call nothing.`,
+                          onConfirm: async () => {
+                            setConfirmState(null);
+                            handleUpdateKeyAccess(apiKey.id, { restricted: true, allow: apiKey.access?.allow || [] });
+                          }
+                        })}
+                      />
+                      <KeyRateLimitControls apiKey={apiKey} />
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Toggle
+                        size="sm"
+                        checked={apiKey.isActive !== false}
+                        onChange={(checked) => {
+                          if (apiKey.isActive !== false && !checked) {
+                            setConfirmState({
+                              title: "Pause API Key",
+                              message: `Pause API key "${apiKey.name}"?\n\nThis key will stop working immediately but can be resumed later.`,
+                              onConfirm: async () => {
+                                setConfirmState(null);
+                                handleToggleKey(apiKey.id, checked);
+                              }
+                            });
+                          } else {
+                            handleToggleKey(apiKey.id, checked);
+                          }
+                        }}
+                        title={apiKey.isActive !== false ? "Pause key" : "Resume key"}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteKey(apiKey.id)}
+                        aria-label={`Delete ${apiKey.name}`}
+                        className="muted grid h-8 w-8 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        {/* Endpoint card — Local + Tunnel + Tailscale rows + client setup */}
+        <Card>
+          <div className="flex items-center gap-2 mb-4">
+            <Globe className="h-4 w-4 text-gold-text" aria-hidden="true" />
+            <h2 className="text-sm font-semibold">Endpoints</h2>
+          </div>
+          <div className="flex flex-col gap-2">
+            <CodeRow label="Local" value={currentEndpoint} copyId="local_url" copied={copied} onCopy={copy} />
+
+            {/* Cloudflare Tunnel row */}
+            <div className="flex items-center gap-2 rounded-lg border border-line bg-bg-soft/60 px-3 py-2">
+              <span className={`mono-label shrink-0 min-w-[88px] text-center rounded px-1.5 py-0.5 ${tunnelEnabled ? "bg-gold-soft text-gold-text" : ""}`}>Tunnel</span>
+              {tunnelEnabled && !tunnelLoading && tunnelReachable ? (
+                <>
+                  <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-main">{`${tunnelPublicUrl || tunnelUrl}/v1`}</code>
+                  <CopyButton value={`${tunnelPublicUrl || tunnelUrl}/v1`} label="tunnel_url" />
+                  <button
+                    type="button"
+                    onClick={() => setShowDisableTunnelModal(true)}
+                    className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
+                    title="Disable Tunnel"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </>
+              ) : tunnelEnabled && !tunnelLoading && !tunnelReachable ? (
+                <>
+                  <span className="flex flex-1 items-center gap-2 text-xs text-warning">
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    {tunnelEverReachable ? "Tunnel reconnecting…" : "Tunnel checking…"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowDisableTunnelModal(true)}
+                    className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
+                    title="Disable Tunnel"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </>
+              ) : tunnelLoading ? (
+                <>
+                  <span className="flex flex-1 items-center gap-2 text-xs text-text-muted">
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    {tunnelProgress || "Creating tunnel…"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { pollControllerRef.current?.abort(); pollControllerRef.current = null; setTunnelLoading(false); setTunnelProgress(""); }}
+                    className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
+                    title="Stop"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </>
+              ) : tunnelStatus?.type === "error" ? (
+                <>
+                  <span className="flex flex-1 items-center gap-2 text-xs text-danger">
+                    <CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    {tunnelStatus.message}
+                  </span>
+                  <Button size="sm" variant="secondary" onClick={() => setShowEnableTunnelModal(true)}>
+                    <Cloud className="h-3.5 w-3.5" aria-hidden="true" />
+                    Enable
+                  </Button>
+                </>
+              ) : tunnelChecking ? (
+                <>
+                  <span className="flex flex-1 items-center gap-2 text-xs text-text-muted">
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    Checking…
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setTunnelChecking(false)}
+                    className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
+                    title="Stop"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </>
+              ) : (
+                <Button size="sm" variant="secondary" className="ml-auto" onClick={enableTunnel}>
+                  <Cloud className="h-3.5 w-3.5" aria-hidden="true" />
+                  Enable
+                </Button>
+              )}
+            </div>
+
+            {/* Tailscale row */}
+            <div className="flex items-center gap-2 rounded-lg border border-line bg-bg-soft/60 px-3 py-2">
+              <span className={`mono-label shrink-0 min-w-[88px] text-center rounded px-1.5 py-0.5 ${tsEnabled ? "bg-gold-soft text-gold-text" : ""}`}>Tailscale</span>
+              {tsEnabled && !tsLoading && tsReachable ? (
+                <>
+                  <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-main">{`${tsUrl}/v1`}</code>
+                  <CopyButton value={`${tsUrl}/v1`} label="ts_url" />
+                  <button
+                    type="button"
+                    onClick={() => setShowDisableTsModal(true)}
+                    className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
+                    title="Disable Tailscale"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </>
+              ) : tsEnabled && !tsLoading && !tsReachable ? (
+                <>
+                  <span className="flex flex-1 items-center gap-2 text-xs text-warning">
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    {tsEverReachable ? "Tailscale reconnecting…" : "Tailscale checking…"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowDisableTsModal(true)}
+                    className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
+                    title="Disable Tailscale"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </>
+              ) : (tsLoading || tsConnecting) ? (
+                <>
+                  <span className="flex flex-1 items-center gap-2 text-xs text-text-muted">
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    {tsProgress || "Connecting…"}
+                  </span>
+                  {tsAuthUrl && (
+                    <Button size="sm" variant="secondary" onClick={() => window.open(tsAuthUrl, "tailscale_auth", "width=600,height=700,noopener,noreferrer")}>
+                      {tsAuthLabel || "Open"}
+                    </Button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setTsLoading(false); setTsConnecting(false); setTsProgress(""); clearUserAuth(); }}
+                    className="muted grid h-7 w-7 place-items-center rounded-lg hover:bg-danger/10 hover:text-danger"
+                    title="Stop"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </>
+              ) : tsStatus?.type === "error" ? (
+                <>
+                  <span className="flex flex-1 items-center gap-2 text-xs text-danger">
+                    <CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    {tsStatus.message}
+                  </span>
+                  <Button size="sm" variant="secondary" onClick={enableTailscale}>
+                    <Globe className="h-3.5 w-3.5" aria-hidden="true" />
+                    Enable
+                  </Button>
+                </>
+              ) : (
+                <Button size="sm" variant="secondary" className="ml-auto" onClick={enableTailscale}>
+                  <Globe className="h-3.5 w-3.5" aria-hidden="true" />
+                  Enable
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Client setup — merged from right rail */}
+          <div className="mt-5 border-t border-line pt-4">
+            <div className="flex items-center gap-2">
               <Terminal className="h-4 w-4 text-gold-text" aria-hidden="true" />
-              Client setup
-            </h2>
+              <h3 className="text-sm font-semibold">Client setup</h3>
+            </div>
             <p className="muted mt-1 text-xs">Point any OpenAI-compatible client at the local gateway.</p>
             <div className="mt-3 space-y-2">
               <CodeRow label="Base URL" value={`${currentEndpoint}`} copyId="client_base" copied={copied} onCopy={copy} />
@@ -1214,8 +1187,44 @@ export default function APIPageClient() {
             <p className="muted mt-3 text-[11px] leading-relaxed">
               Keys are never accepted in the query string, and a paused or deleted key stops working immediately.
             </p>
-          </Card>
-        </div>
+          </div>
+
+          {/* Security warnings */}
+          {(isLoginUnsafe && !tunnelEnabled && !tsEnabled) || (tunnelEnabled || tsEnabled) ? (
+            <div className="mt-4 flex flex-col gap-2">
+              {isLoginUnsafe && !tunnelEnabled && !tsEnabled && (
+                <SecurityWarning message={unsafeReason} action={{ label: "Open settings", href: "/dashboard/profile" }} />
+              )}
+              {(tunnelEnabled || tsEnabled) && !requireApiKey && (
+                <SecurityWarning
+                  message="Require API key is disabled — your endpoint is publicly accessible without authentication."
+                  action={{ label: "Enable", href: "#require-api-key" }}
+                />
+              )}
+              {(tunnelEnabled || tsEnabled) && (!requireLogin || !hasPassword) && (
+                <SecurityWarning
+                  message={
+                    !requireLogin
+                      ? "Require login is disabled — anyone can access your dashboard via tunnel."
+                      : "Dashboard uses the default password — change it in Profile settings."
+                  }
+                  action={{ label: !requireLogin ? "Enable" : "Change password", href: "/dashboard/profile" }}
+                />
+              )}
+            </div>
+          ) : null}
+
+          {/* Tunnel dashboard access toggle */}
+          {(tunnelEnabled || tsEnabled) && (
+            <div className="mt-4 flex items-center gap-3 border-t border-line pt-4">
+              <Toggle checked={tunnelDashboardAccess} onChange={() => handleTunnelDashboardAccess(!tunnelDashboardAccess)} />
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm font-medium">Allow dashboard access via tunnel</p>
+                <Tooltip text="When enabled, the dashboard can be accessed through your tunnel or Tailscale URL (login still required). When disabled, dashboard access via tunnel/Tailscale is completely blocked." />
+              </div>
+            </div>
+          )}
+        </Card>
       </div>
 
       {/* Footer — old layout: secrets notice bar */}

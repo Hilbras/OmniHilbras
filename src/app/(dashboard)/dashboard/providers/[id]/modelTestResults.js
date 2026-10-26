@@ -4,10 +4,4 @@
  * ("anthropic/claude-opus-4.7"), so the id is what is left after the known
  * provider prefix, not what follows the last slash.
  */
-export function modelIdFromTestModel(sentModel, providerAlias) {
-  const value = typeof sentModel === "string" ? sentModel : "";
-  if (!value) return "";
-  const prefix = providerAlias ? `${providerAlias}/` : "";
-  if (!prefix || !value.startsWith(prefix)) return value;
-  return value.slice(prefix.length);
-}
+export { modelIdFromTestModel } from "@/shared/utils/modelIdFromTestModel";

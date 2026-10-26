@@ -18,6 +18,7 @@ import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import ModelRow from "./ModelRow";
 import { modelIdFromTestModel } from "./modelTestResults";
+import { getCachedTestResults, clearCachedTestResults, getCacheAge } from "@/app/api/models/testCache.js";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
 import ConnectionRow from "./ConnectionRow";
@@ -101,6 +102,7 @@ function ProviderDetailPageInner() {
   const [customModels, setCustomModels] = useState([]);
   const [headerImgError, setHeaderImgError] = useState(false);
   const [modelTestResults, setModelTestResults] = useState({});
+  const [modelTestCacheAge, setModelTestCacheAge] = useState(null); // ms since last cached test
   const [modelsTestError, setModelsTestError] = useState("");
   const [testingModelIds, setTestingModelIds] = useState(() => new Set());
   const [modelQuery, setModelQuery] = useState("");
@@ -134,6 +136,7 @@ function ProviderDetailPageInner() {
   const stopOneByOneRef = useRef(false);
   const [importingQoderModels, setImportingQoderModels] = useState(false);
   const [importingClineModels, setImportingClineModels] = useState(false);
+  const [refreshingAll, setRefreshingAll] = useState(false);
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -549,6 +552,18 @@ function ProviderDetailPageInner() {
     fetchDisabledModels();
   }, [fetchConnections, fetchAliases, fetchCustomModels, fetchDisabledModels]);
 
+  // Load cached model test results (if fresh) so the UI shows "last tested"
+  // without running a live batch.
+  useEffect(() => {
+    let cancelled = false;
+    const cached = getCachedTestResults(providerStorageAlias);
+    if (cached) {
+      setModelTestResults((prev) => ({ ...cached, ...prev }));
+      setModelTestCacheAge(getCacheAge(providerStorageAlias));
+    }
+    return () => { cancelled = true; };
+  }, [providerStorageAlias]);
+
   // Live per-connection catalogs (cursor, zed): the static registry carries
   // no usable list, so resolve from the active connection. Fires only when
   // the provider id or connection list changes — no polling, no loop.
@@ -937,6 +952,40 @@ function ProviderDetailPageInner() {
     setOneByOneStopping(true);
   };
 
+  const handleRefreshAll = async () => {
+    if (refreshingAll || connections.length === 0) return;
+    setRefreshingAll(true);
+    try {
+      let successCount = 0;
+      let failCount = 0;
+      for (const conn of connections) {
+        try {
+          const res = await fetch(`/api/providers/${conn.id}/refresh`, { method: "POST" });
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.refreshed !== "none") {
+            successCount += 1;
+          } else if (!res.ok) {
+            failCount += 1;
+            notify.error(`Refresh failed for ${conn.name || conn.id}: ${data?.error || `HTTP ${res.status}`}`);
+          }
+        } catch (error) {
+          failCount += 1;
+          notify.error(`Refresh failed for ${conn.name || conn.id}: ${error?.message || error}`);
+        }
+      }
+      await fetchConnections();
+      if (failCount === 0) {
+        notify.success(`Refreshed ${successCount} connection${successCount !== 1 ? "s" : ""}.`);
+      } else if (successCount > 0) {
+        notify.warning(`Refreshed ${successCount}, failed ${failCount}.`);
+      } else {
+        notify.info("Nothing to refresh.");
+      }
+    } finally {
+      setRefreshingAll(false);
+    }
+  };
+
   const handleDelete = async (id) => {
     setConfirmState({
       title: "Delete Connection",
@@ -984,6 +1033,8 @@ function ProviderDetailPageInner() {
   const handleOAuthSuccess = () => {
     fetchConnections();
     setShowOAuthModal(false);
+    // OAuth connected — fetch the catalogue and add every new model directly.
+    void loadSuggestedModels(true, { autoAdd: true });
   };
 
   const handleIFlowCookieSuccess = () => {
@@ -1339,6 +1390,9 @@ function ProviderDetailPageInner() {
     setTestingAllModels(true);
     setTestAllProgress({ done: 0, total: ids.length });
     setModelsTestError("");
+    // Clear stale cache before a fresh run — the new results will overwrite.
+    clearCachedTestResults(providerStorageAlias);
+    setModelTestCacheAge(null);
     try {
       const res = await fetch("/api/models/test-batch", {
         method: "POST",
@@ -1928,6 +1982,15 @@ function ProviderDetailPageInner() {
                       {oneByOneStopping ? "Stopping..." : "Stop"}
                     </Button>
                   )}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon="refresh"
+                    onClick={handleRefreshAll}
+                    disabled={refreshingAll}
+                  >
+                    {refreshingAll ? "Refreshing..." : "Refresh All"}
+                  </Button>
                 </>
               )}
               {/* Round Robin toggle */}
@@ -2168,6 +2231,22 @@ function ProviderDetailPageInner() {
                   : "Test all"}
               </Button>
             )}
+            {/* Cached test results indicator */}
+            {modelTestCacheAge !== null && (
+              <span className="text-[11px] text-text-muted" title="Cached test results (1 hour TTL)">
+                Last tested {Math.round(modelTestCacheAge / 60000)}m ago
+              </span>
+            )}
+            {modelTestCacheAge !== null && (
+              <button
+                type="button"
+                onClick={() => { clearCachedTestResults(providerStorageAlias); setModelTestResults({}); setModelTestCacheAge(null); }}
+                className="text-[11px] text-text-muted hover:text-danger transition-colors"
+                title="Clear cached test results"
+              >
+                Clear cache
+              </button>
+            )}
             {providerThinkingLevels && (
               <select
                 value={thinkingMode}
@@ -2271,6 +2350,12 @@ function ProviderDetailPageInner() {
         )}
         {providerId === "zed" && !!liveModelsError && (
           <p className="text-xs text-red-500 mb-3 break-words">{liveModelsError}</p>
+        )}
+        {suggestedLoading && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2">
+            <span className="material-symbols-outlined text-[16px] text-blue-500 animate-spin">progress_activity</span>
+            <p className="text-xs text-blue-600 dark:text-blue-400">Fetching models from provider catalogue…</p>
+          </div>
         )}
         {renderModelsSection()}
       </Card>
