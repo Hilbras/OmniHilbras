@@ -139,6 +139,31 @@ exports[`GOLDEN buildHeaders (default executor providers) > anthropic → header
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > anyrouter → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+    "HTTP-Referer": "https://endpoint-proxy.local",
+    "X-Title": "Endpoint Proxy",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+    "HTTP-Referer": "https://endpoint-proxy.local",
+    "X-Title": "Endpoint Proxy",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+    "HTTP-Referer": "https://endpoint-proxy.local",
+    "X-Title": "Endpoint Proxy",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > api-airforce → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
@@ -624,32 +649,50 @@ exports[`GOLDEN buildHeaders (default executor providers) > codebuddy-cn → hea
     "Accept": "text/event-stream",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "CLI/2.108.1 CodeBuddy/2.108.1",
+    "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
     "X-IDE-Name": "CLI",
     "X-IDE-Type": "CLI",
+    "X-IDE-Version": "2.177.0",
     "X-Product": "SaaS",
+    "x-agent-intent": "craft",
+    "x-agent-purpose": "conversation",
+    "x-agent-runtime": "other",
+    "x-agent-type": "main",
     "x-codebuddy-request": "1",
+    "x-private-data": "false",
     "x-requested-with": "XMLHttpRequest",
   },
   "nonStream": {
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "CLI/2.108.1 CodeBuddy/2.108.1",
+    "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
     "X-IDE-Name": "CLI",
     "X-IDE-Type": "CLI",
+    "X-IDE-Version": "2.177.0",
     "X-Product": "SaaS",
+    "x-agent-intent": "craft",
+    "x-agent-purpose": "conversation",
+    "x-agent-runtime": "other",
+    "x-agent-type": "main",
     "x-codebuddy-request": "1",
+    "x-private-data": "false",
     "x-requested-with": "XMLHttpRequest",
   },
   "oauth": {
     "Accept": "text/event-stream",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "CLI/2.108.1 CodeBuddy/2.108.1",
+    "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
     "X-IDE-Name": "CLI",
     "X-IDE-Type": "CLI",
+    "X-IDE-Version": "2.177.0",
     "X-Product": "SaaS",
+    "x-agent-intent": "craft",
+    "x-agent-purpose": "conversation",
+    "x-agent-runtime": "other",
+    "x-agent-type": "main",
     "x-codebuddy-request": "1",
+    "x-private-data": "false",
     "x-requested-with": "XMLHttpRequest",
   },
 }
@@ -661,32 +704,50 @@ exports[`GOLDEN buildHeaders (default executor providers) > codebuddy-intl → h
     "Accept": "text/event-stream",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "IDE/2.108.1 CodeBuddy/2.108.1",
-    "X-IDE-Name": "IDE",
-    "X-IDE-Type": "IDE",
+    "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
+    "X-IDE-Name": "CLI",
+    "X-IDE-Type": "CLI",
+    "X-IDE-Version": "2.177.0",
     "X-Product": "SaaS",
+    "x-agent-intent": "craft",
+    "x-agent-purpose": "conversation",
+    "x-agent-runtime": "other",
+    "x-agent-type": "main",
     "x-codebuddy-request": "1",
+    "x-private-data": "false",
     "x-requested-with": "XMLHttpRequest",
   },
   "nonStream": {
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "IDE/2.108.1 CodeBuddy/2.108.1",
-    "X-IDE-Name": "IDE",
-    "X-IDE-Type": "IDE",
+    "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
+    "X-IDE-Name": "CLI",
+    "X-IDE-Type": "CLI",
+    "X-IDE-Version": "2.177.0",
     "X-Product": "SaaS",
+    "x-agent-intent": "craft",
+    "x-agent-purpose": "conversation",
+    "x-agent-runtime": "other",
+    "x-agent-type": "main",
     "x-codebuddy-request": "1",
+    "x-private-data": "false",
     "x-requested-with": "XMLHttpRequest",
   },
   "oauth": {
     "Accept": "text/event-stream",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
-    "User-Agent": "IDE/2.108.1 CodeBuddy/2.108.1",
-    "X-IDE-Name": "IDE",
-    "X-IDE-Type": "IDE",
+    "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
+    "X-IDE-Name": "CLI",
+    "X-IDE-Type": "CLI",
+    "X-IDE-Version": "2.177.0",
     "X-Product": "SaaS",
+    "x-agent-intent": "craft",
+    "x-agent-purpose": "conversation",
+    "x-agent-runtime": "other",
+    "x-agent-type": "main",
     "x-codebuddy-request": "1",
+    "x-private-data": "false",
     "x-requested-with": "XMLHttpRequest",
   },
 }
@@ -1774,6 +1835,31 @@ exports[`GOLDEN buildHeaders (default executor providers) > tokenrouter → head
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > vengetic → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+    "HTTP-Referer": "https://endpoint-proxy.local",
+    "X-Title": "Endpoint Proxy",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+    "HTTP-Referer": "https://endpoint-proxy.local",
+    "X-Title": "Endpoint Proxy",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+    "HTTP-Referer": "https://endpoint-proxy.local",
+    "X-Title": "Endpoint Proxy",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > venice → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
@@ -1975,6 +2061,13 @@ exports[`GOLDEN buildUrl (default executor providers) > anthropic → url (strea
 {
   "nonStream": "https://api.anthropic.com/v1/messages",
   "stream": "https://api.anthropic.com/v1/messages",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > anyrouter → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://anyrouter.dev/v1/chat/completions",
+  "stream": "https://anyrouter.dev/v1/chat/completions",
 }
 `;
 
@@ -2500,6 +2593,13 @@ exports[`GOLDEN buildUrl (default executor providers) > tokenrouter → url (str
 {
   "nonStream": "https://api.tokenrouter.com/v1/chat/completions",
   "stream": "https://api.tokenrouter.com/v1/chat/completions",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > vengetic → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://api.vengetic.biz.id/v1/chat/completions",
+  "stream": "https://api.vengetic.biz.id/v1/chat/completions",
 }
 `;
 

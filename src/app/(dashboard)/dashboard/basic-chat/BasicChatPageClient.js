@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button } from "@/shared/components";
 import { getModelsByProviderId } from "@/shared/constants/models";
-import { isAnthropicCompatibleProvider, isOpenAICompatibleProvider } from "@/shared/constants/providers";
+import { isAnthropicCompatibleProvider, isOpenAICompatibleProvider, WEB_COOKIE_PROVIDERS, WEB_COOKIE_SESSION_PROVIDERS } from "@/shared/constants/providers";
 import { getModelPrefix, toRequestModel } from "./chatModels";
 
 const STORAGE_KEYS = {
@@ -87,6 +87,30 @@ function readAssistantText(chunk) {
     .map(textValue)
     .filter(Boolean);
   return pieces[0] || "";
+}
+
+function readChunkToolCalls(chunk) {
+  if (!chunk || typeof chunk !== "object") return undefined;
+  const choice = chunk.choices?.[0];
+  const delta = choice?.delta || {};
+  const msg = choice?.message || {};
+  const calls = Array.isArray(delta.tool_calls)
+    ? delta.tool_calls
+    : Array.isArray(msg.tool_calls)
+      ? msg.tool_calls
+      : undefined;
+  if (!Array.isArray(calls) || calls.length === 0) return undefined;
+  return calls.map((tc, i) => {
+    const fn = tc.function || {};
+    return {
+      id: tc.id || `call_${i}_${Date.now()}`,
+      type: tc.type || "function",
+      function: {
+        name: fn.name || "tool",
+        arguments: typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments || {}),
+      },
+    };
+  });
 }
 
 async function fileToDataUrl(file) {
@@ -295,6 +319,43 @@ export default function BasicChatPageClient() {
           }))
           .filter((group) => group.models.length > 0)
           .sort((a, b) => a.providerName.localeCompare(b.providerName));
+
+        // Add a virtual "Web-Cookie Agent" group when web-cookie sessions are
+        // connected. This lets the basic chat use the agent tool loop without
+        // leaving the dashboard.
+        const webCookieConnections = connections.filter(
+          (c) => c.authType === "cookie" && c.isActive !== false,
+        );
+        if (webCookieConnections.length > 0) {
+          const allCookieProviders = new Set(
+            webCookieConnections.map((c) => c.provider),
+          );
+          const agentGroup = {
+            providerId: "webcookie-agent",
+            providerName: "Web-Cookie Agent",
+            providerType: "agent",
+            connections: webCookieConnections,
+            models: [
+              {
+                id: "webcookie-agent/any",
+                requestModel: "webcookie-agent/any",
+                name: "Auto (any)",
+                providerId: "webcookie-agent",
+                providerName: "Web-Cookie Agent",
+                source: "agent",
+              },
+              ...Array.from(allCookieProviders).map((providerId) => ({
+                id: `webcookie-agent/${providerId}`,
+                requestModel: `webcookie-agent/${providerId}`,
+                name: humanize(providerId),
+                providerId: "webcookie-agent",
+                providerName: "Web-Cookie Agent",
+                source: "agent",
+              })),
+            ],
+          };
+          normalized.unshift(agentGroup);
+        }
 
         if (!cancelled) {
           setProviderGroups(normalized);
@@ -640,10 +701,17 @@ export default function BasicChatPageClient() {
       const reader = response.body?.getReader();
       if (!reader) {
         const data = await response.json().catch(() => ({}));
-        const fallbackText = textValue(data?.choices?.[0]?.message?.content || data?.output_text || data?.error || data?.message || "");
+        const msg = data?.choices?.[0]?.message || {};
+        const fallbackText = textValue(msg?.content || data?.output_text || data?.error || data?.message || "");
+        const fallbackToolCalls = Array.isArray(msg?.tool_calls) ? msg.tool_calls : undefined;
         updateSession(sessionId, (currentSession) => ({
           ...currentSession,
-          messages: currentSession.messages.map((message) => (message.id === assistantMessageId ? { ...message, content: fallbackText, status: "done" } : message)),
+          messages: currentSession.messages.map((message) => (message.id === assistantMessageId ? {
+            ...message,
+            content: fallbackText,
+            ...(fallbackToolCalls ? { tool_calls: fallbackToolCalls } : {}),
+            status: "done",
+          } : message)),
           updatedAt: new Date().toISOString(),
         }));
         return;
@@ -670,13 +738,21 @@ export default function BasicChatPageClient() {
           try {
             const chunk = JSON.parse(payload);
             const text = readAssistantText(chunk);
-            if (!text) continue;
+            const chunkToolCalls = readChunkToolCalls(chunk);
+            if (!text && !chunkToolCalls) continue;
 
-            assistantText += text;
-            setStreamingText(assistantText);
+            if (text) {
+              assistantText += text;
+              setStreamingText(assistantText);
+            }
             updateSession(sessionId, (currentSession) => ({
               ...currentSession,
-              messages: currentSession.messages.map((message) => (message.id === assistantMessageId ? { ...message, content: assistantText, status: "streaming" } : message)),
+              messages: currentSession.messages.map((message) => (message.id === assistantMessageId ? {
+                ...message,
+                content: assistantText,
+                ...(chunkToolCalls ? { tool_calls: chunkToolCalls } : {}),
+                status: "streaming",
+              } : message)),
               updatedAt: new Date().toISOString(),
             }));
           } catch {
@@ -872,6 +948,7 @@ export default function BasicChatPageClient() {
                 const isAssistant = message.role === "assistant";
                 const isStreaming = isAssistant && message.id === streamingMessageId && message.status === "streaming";
                 const content = textValue(message.content) || (isAssistant ? streamingText : "");
+                const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
 
                 return (
                   <div key={message.id} className={`flex w-full ${isUser ? "justify-end" : "justify-start"} mb-6`}>
@@ -887,6 +964,32 @@ export default function BasicChatPageClient() {
                               <img src={attachment.dataUrl} alt={attachment.name} className="h-28 w-full object-cover" loading="lazy" decoding="async" />
                             </a>
                           ))}
+                        </div>
+                      ) : null}
+
+                      {/* Tool calls (agent mode) */}
+                      {toolCalls.length > 0 ? (
+                        <div className="mb-3 flex flex-col gap-2">
+                          {toolCalls.map((tc, i) => {
+                            const name = tc.function?.name || tc.name || `tool_${i + 1}`;
+                            let args = {};
+                            try { args = JSON.parse(tc.function?.arguments || "{}"); } catch { args = { _raw: tc.function?.arguments }; }
+                            const isSearch = name === "web_search";
+                            const isFetch = name === "web_fetch";
+                            const icon = isSearch ? "search" : isFetch ? "language" : "build";
+                            const label = isSearch ? "Searching" : isFetch ? "Fetching" : name;
+                            return (
+                              <div key={tc.id || i} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="material-symbols-outlined text-[16px] text-blue-300">{icon}</span>
+                                  <span className="text-xs font-medium text-white/80">{label}</span>
+                                  {args.query ? <span className="text-[11px] text-white/40 truncate">"{args.query}"</span> : null}
+                                  {args.url ? <span className="text-[11px] text-white/40 truncate">{args.url}</span> : null}
+                                  {args.prompt ? <span className="text-[11px] text-white/40 truncate">"{args.prompt.slice(0, 60)}"</span> : null}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : null}
 

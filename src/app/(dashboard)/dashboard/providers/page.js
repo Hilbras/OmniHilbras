@@ -865,6 +865,8 @@ function ApiKeyProviderCard({
   const isAnthropicCompatible = providerId.startsWith(
     ANTHROPIC_COMPATIBLE_PREFIX,
   );
+  const isWebCookie = authType === "cookie" &&
+    (WEB_COOKIE_PROVIDERS[providerId] || WEB_COOKIE_SESSION_PROVIDERS[providerId]);
 
   const getIconPath = () => {
     if (isCompatible && provider.apiType)
@@ -915,6 +917,14 @@ function ApiKeyProviderCard({
                 ) : (
                   <>
                     {getStatusDisplay(connected, error, errorCode)}
+                    {isWebCookie && (
+                      <Badge variant="default" size="sm">
+                        <span className="flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[12px]">auto_awesome</span>
+                          Agent
+                        </span>
+                      </Badge>
+                    )}
                     {isCompatible && (
                       <Badge variant="default" size="sm">
                         {provider.apiType === "responses"

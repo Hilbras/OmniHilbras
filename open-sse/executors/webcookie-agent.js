@@ -176,13 +176,30 @@ export class WebCookieAgentExecutor extends BaseExecutor {
     const created = Math.floor(Date.now() / 1000);
     const finishReason = agentResult.finished === "cap" ? "length" : "stop";
 
+    // Collect the actual tool-call objects from the conversation so the UI
+    // can render what the agent did (name, args, result snippets).
+    const agentToolCalls = [];
+    for (const msg of agentResult.messages || []) {
+      if (msg.role === "assistant" && Array.isArray(msg.tool_calls)) {
+        for (const tc of msg.tool_calls) {
+          agentToolCalls.push({
+            id: tc.id || `call_${agentToolCalls.length + 1}`,
+            type: "function",
+            function: {
+              name: tc.function?.name || tc.name || "tool",
+              arguments: typeof tc.function?.arguments === "string"
+                ? tc.function.arguments
+                : JSON.stringify(tc.function?.arguments || {}),
+            },
+          });
+        }
+      }
+    }
+
     const finalMessage = {
       role: "assistant",
       content,
-      // Expose the tools the agent used so a client can render intermediate steps.
-      ...(agentResult.toolCalls > 0
-        ? { _agent: { toolCalls: agentResult.toolCalls, rounds: agentResult.rounds, finished: agentResult.finished } }
-        : {}),
+      ...(agentToolCalls.length > 0 ? { tool_calls: agentToolCalls } : {}),
     };
 
     const baseModel = model || "webcookie-agent";
@@ -195,10 +212,24 @@ export class WebCookieAgentExecutor extends BaseExecutor {
             id: cid, object: "chat.completion.chunk", created, model: baseModel,
             choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null, logprobs: null }],
           })));
+
+          // Emit the final content + tool_calls in one chunk. The agent loop
+          // runs to completion before streaming starts, so all tool calls are
+          // known at this point.
+          const delta = { content };
+          if (finalMessage.tool_calls?.length) {
+            delta.tool_calls = finalMessage.tool_calls.map((tc, i) => ({
+              index: i,
+              id: tc.id,
+              type: tc.type,
+              function: tc.function,
+            }));
+          }
           controller.enqueue(encoder.encode(sseChunk({
             id: cid, object: "chat.completion.chunk", created, model: baseModel,
-            choices: [{ index: 0, delta: { content }, finish_reason: null, logprobs: null }],
+            choices: [{ index: 0, delta, finish_reason: null, logprobs: null }],
           })));
+
           controller.enqueue(encoder.encode(sseChunk({
             id: cid, object: "chat.completion.chunk", created, model: baseModel,
             choices: [{ index: 0, delta: {}, finish_reason: finishReason, logprobs: null }],
