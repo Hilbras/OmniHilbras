@@ -26,7 +26,7 @@ export default {
     textIcon: "ZC",
     website: "https://zcode.z.ai",
     notice: {
-      text: "Free-tier GLM via your signed-in ZCode desktop client — no key needed (ZCode 3.14.4+ installed and signed in). Or paste a Start Plan JWT as the key to add more accounts.",
+      text: "Free-tier GLM via ZCode Start Plan. Auth options: (1) paste a Start Plan JWT directly into the connection key, (2) set ZCODE_START_PLAN_TOKEN env var, or (3) install and sign into the ZCode desktop client once (the app does NOT need to be running).",
     },
   },
   category: "freeTier",

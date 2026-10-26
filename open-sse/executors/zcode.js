@@ -239,7 +239,7 @@ const localAuthCache = { token: null, accountUuid: null, mtimeMs: 0 };
 function readLocalAuth() {
   const path = credentialsPath();
   if (!existsSync(path)) {
-    throw new Error(`ZCode credentials not found at ${path}. Install and sign into the ZCode desktop client, or set ZCODE_START_PLAN_TOKEN.`);
+    throw new Error(`ZCode credentials not found at ${path}. Either install and sign into the ZCode desktop client once, set the ZCODE_START_PLAN_TOKEN environment variable, or paste a Start Plan JWT directly into the connection's API key field.`);
   }
   let mtimeMs = 0;
   try { mtimeMs = statSync(path).mtimeMs; } catch { /* best-effort freshness key */ }
