@@ -14,7 +14,8 @@
     "build:bun": "bun --bun next build --webpack",
     "start:bun": "bun ./.next/standalone/custom-server.js",
     "cli:pack": "npm --prefix cli run pack:cli",
-    "cli:publish": "npm --prefix cli run publish:cli"
+    "cli:publish": "npm --prefix cli run publish:cli",
+    "postinstall": "node scripts/apply-node-forge-patch.cjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -70,6 +71,7 @@
   },
   "overrides": {
     "dompurify": "^3.4.17",
-    "braces": "^3.0.3"
+    "braces": "^3.0.3",
+    "body-parser": "^2.4.0"
   }
 }
