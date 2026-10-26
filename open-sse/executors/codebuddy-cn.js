@@ -3,6 +3,7 @@ import { gzip } from "zlib";
 import { dbg } from "../utils/debugLog.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
+import { randomUUID } from "node:crypto";
 
 /**
  * CodeBuddyExecutor — talks to https://copilot.tencent.com/v2/chat/completions
@@ -35,6 +36,11 @@ export class CodeBuddyExecutor extends DefaultExecutor {
       const transformedBody = this.transformRequest(model, body, stream, credentials);
       const headers = this.buildHeaders(credentials, stream, url, model, transformedBody);
       if (providerOverrides?.headers) Object.assign(headers, providerOverrides.headers);
+
+      // CodeBuddy gateway requires X-Request-ID (matches CLI behavior)
+      if (!headers["X-Request-ID"]) {
+        headers["X-Request-ID"] = randomUUID().replace(/-/g, "");
+      }
 
       if (!retryAttemptsByUrl[urlIndex]) retryAttemptsByUrl[urlIndex] = 0;
 
