@@ -1,3 +1,11 @@
+# v2.9.7 (2026-10-26)
+
+## Packaging
+- The node-forge CVE-2026-85393 security patch now ships inside the published CLI package. The patch script is bundled at `app/scripts/apply-node-forge-patch.cjs`, and `hooks/postinstall.js` runs it on every install so the signature-forgery fix is applied to the bundled `node-forge` on end-user machines — not just the developer's dev tree. The script also honours a `NODE_FORGE_ASN1_JS` env override for non-standard layouts.
+
+## Security
+- (same as 2.9.6) body-parser pinned to 2.4.0 via override; node-forge locally patched for CVE-2026-85393 / GHSA-86w9. Now applied automatically on install.
+
 # v2.9.6 (2026-10-26)
 
 ## Features

@@ -14,7 +14,14 @@
 const fs = require("fs");
 const path = require("path");
 
-const ASN1_JS = path.join(__dirname, "..", "node_modules", "node-forge", "lib", "asn1.js");
+// Target resolution order:
+//  1. NODE_FORGE_ASN1_JS env override (set by the CLI's postinstall to point
+//     at the package's own node_modules, where node-forge is hoisted).
+//  2. ../node_modules relative to this script — works both in the repo
+//     (scripts/ → root node_modules) and in the installed CLI package
+//     (app/scripts/ → <pkg>/node_modules) layout.
+const ASN1_JS = process.env.NODE_FORGE_ASN1_JS ||
+  path.join(__dirname, "..", "node_modules", "node-forge", "lib", "asn1.js");
 const MARKER = "GHSA-86w9-cpqp-85rv";
 
 const OLD = [
@@ -49,11 +56,21 @@ const NEW = [
 ].join("\n");
 
 function main() {
-  if (!fs.existsSync(ASN1_JS)) {
-    console.warn("[node-forge patch] node-forge not installed; skipping.");
+  // In the installed CLI package, node-forge may live at <pkg>/node_modules
+  // (top-level, installed by npm) rather than <pkg>/app/node_modules. The
+  // default path above resolves relative to this script's own location,
+  // which is <pkg>/app/scripts/ — so also try one level up as a fallback.
+  const fallbackPaths = [
+    ASN1_JS,
+    path.join(__dirname, "..", "..", "node_modules", "node-forge", "lib", "asn1.js"),
+    path.join(process.cwd(), "node_modules", "node-forge", "lib", "asn1.js"),
+  ];
+  const target = fallbackPaths.find((p) => fs.existsSync(p));
+  if (!target) {
+    console.warn("[node-forge patch] node-forge not found in any known location; skipping.");
     return;
   }
-  let src = fs.readFileSync(ASN1_JS, "utf8");
+  let src = fs.readFileSync(target, "utf8");
   if (src.includes(MARKER)) {
     console.log("[node-forge patch] already patched.");
     return;
@@ -65,8 +82,8 @@ function main() {
     );
   }
   src = src.replace(OLD, NEW);
-  fs.writeFileSync(ASN1_JS, src, "utf8");
-  console.log("[node-forge patch] applied GHSA-86w9-cpqp-85rv fix to lib/asn1.js.");
+  fs.writeFileSync(target, src, "utf8");
+  console.log("[node-forge patch] applied GHSA-86w9-cpqp-85rv fix to lib/asn1.js (" + target + ").");
 }
 
 main();

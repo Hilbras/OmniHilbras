@@ -330,6 +330,24 @@ function buildCliPackage() {
   // the bundle's node_modules or every importer throws MODULE_NOT_FOUND at runtime. Output
   // tracing normally copies it; this is the same belt-and-braces guard used for sql.js.
   ensureModuleInBundle("open");
+  // node-forge (MITM cert generation) must be resolvable from the standalone
+  // tree at runtime. It is a direct dependency of the app, so it is installed
+  // under <app>/node_modules. The standalone build's traced node_modules may
+  // not include it (Next.js only traces what the server code imports at
+  // require-time, and mitm/cert/rootCA.js is a plain CJS require that Node
+  // resolves from its own location — not the Next trace). Bundle it explicitly.
+  ensureModuleInBundle("node-forge");
+  // Ship the security-patch script so the CLI's postinstall hook can re-apply
+  // it after every fresh npm install (node-forge ships unpatched from the
+  // registry; our local patch in scripts/apply-node-forge-patch.cjs is the
+  // only protection while upstream has not released a fix for GHSA-86w9).
+  const forgePatchSrc = path.join(rootDir, "scripts", "apply-node-forge-patch.cjs");
+  const forgePatchDest = path.join(cliAppDir, "scripts", "apply-node-forge-patch.cjs");
+  if (fs.existsSync(forgePatchSrc)) {
+    fs.mkdirSync(path.dirname(forgePatchDest), { recursive: true });
+    fs.copyFileSync(forgePatchSrc, forgePatchDest);
+    console.log("✅ Bundled node-forge security patch script");
+  }
   const betterDir = path.join(cliAppDir, "node_modules", "better-sqlite3");
   if (fs.existsSync(betterDir)) {
     fs.rmSync(betterDir, { recursive: true, force: true });
