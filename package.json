@@ -1,6 +1,6 @@
 {
   "name": "omnihilbras-app",
-  "version": "2.9.8",
+  "version": "2.9.9",
   "description": "OmniHilbras web dashboard",
   "scripts": {
     "dev": "next dev --port 20127",
