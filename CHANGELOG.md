@@ -1,3 +1,18 @@
+# v2.9.6 (2026-10-26)
+
+## Features
+- **Agent**: `webcookie-agent` — the Web Cookie Sessions + Web Cookie Providers groups act as one autonomous agent. Target `webcookie-agent` (auto-picks the active member) or `webcookie-agent/<provider>`; the model drives the built-in tools (`web_search`, `web_fetch`, `image_gen`, `tts`, `stt`, `embeddings`, `video_gen`) through the agent loop, which re-enters the gateway's `/api/v1/*` routes with operator credentials. Missing session or a failed turn answers as a friendly OpenAI-format completion instead of erroring
+- **Dashboard**: the sidebar now carries a live gateway-status badge (polls `/api/health`, shows build/version), a compact update-available pill (visible even when collapsed) with the install command, a "Connect a provider" quick-setup card, and a workspace footer
+- **Dashboard**: sidebar icons moved from Material Symbols to lucide-react (same icon set the marketing shell uses) — the nav, media accordion, update panel and disconnected overlay all render lucide
+
+## Security
+- **body-parser** pinned to 2.4.0 via a dependency override — fixes the compressed-request-body DoS (GHSA-27r3)
+- **node-forge** is locally patched for the RSA PKCS#1 v1.5 signature-forgery bypass (CVE-2026-85393, GHSA-86w9 — no upstream release yet). `scripts/apply-node-forge-patch.cjs` re-applies the `asn1.validate` fix on every `postinstall`, so a fresh `npm install` can never silently restore the vulnerable code. Until upstream ships 1.4.1 the audit will keep listing node-forge; it is patched, not vulnerable
+
+## Fixes
+- `webcookie-agent.js` imported `SSE_DONE` from `sse.js`, which does not export it — the import now comes from `sseConstants.js` (the Turbopack build failed on the missing export before)
+- Provider pages: per-provider refresh button performs a full reconnect for API, auth-cookie, and desktop-app (zcode/adcode) providers
+
 # v2.9.5 (2026-10-25)
 
 ## Features

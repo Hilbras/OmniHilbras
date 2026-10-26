@@ -1,6 +1,6 @@
 {
   "name": "omnihilbras-app",
-  "version": "2.9.5",
+  "version": "2.9.6",
   "description": "OmniHilbras web dashboard",
   "private": true,
   "scripts": {
