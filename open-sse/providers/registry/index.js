@@ -149,6 +149,8 @@ import p151 from "./kiraai.js";
 import p152 from "./zcode.js";
 import p153 from "./adcode.js";
 import p154 from "./webcookie-agent.js";
+import p155 from "./anyrouter.js";
+import p156 from "./vengetic.js";
 export default [
   p0,
   p1,
@@ -300,4 +302,6 @@ export default [
   p152,
   p153,
   p154,
+  p155,
+  p156,
 ];
