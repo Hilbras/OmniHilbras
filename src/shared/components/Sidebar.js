@@ -149,7 +149,8 @@ function NavRow({
     );
   }
 
-  if (typeof title === "object" && "href" in title) {
+  // External links (https://…) open in a new tab
+  if (typeof title === "object" && title.href && /^https?:\/\//.test(title.href)) {
     return (
       <a
         href={title.href}
@@ -165,9 +166,10 @@ function NavRow({
     );
   }
 
+  // Internal links use next/link so they navigate within the SPA
   return (
     <Link
-      href={title?.href ?? null}
+      href={title?.href ?? "#"}
       onClick={title?.onClick}
       className={cn(
         baseClass,
@@ -177,7 +179,7 @@ function NavRow({
       aria-label={collapsed ? label : undefined}
       title={collapsed ? label : undefined}
     >
-      {children !== undefined ? children : content}
+      {content}
     </Link>
   );
 }

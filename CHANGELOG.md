@@ -1,3 +1,12 @@
+# v2.9.8 (2026-10-26)
+
+## Features
+- **Endpoint page**: restyled to match the old dashboard's ApiKeys layout — an "Access control" eyebrow + title header with Refresh / Create key buttons, a two-column grid (keys list left, enforcement + "Client setup" copy-card right rail), and a gold "Secrets are hashed, not stored" footer bar. All existing controls are kept: the Local / Cloudflare Tunnel / Tailscale endpoint rows, per-key access restriction, per-key rate limits, security warnings, and the dashboard-access toggle
+- Removed the now-unused `EndpointRow` component (replaced by the old-style code rows)
+
+## Fixes
+- Sidebar nav links no longer open in a new tab — internal `/dashboard/*` routes use `next/link` (SPA navigation); only external links (9Remote, 9English) open in a new tab. A previous refactor rendered every nav row as a plain `<a target="_blank">`
+
 # v2.9.7 (2026-10-26)
 
 ## Packaging
