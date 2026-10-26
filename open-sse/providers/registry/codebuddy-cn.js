@@ -26,12 +26,18 @@ export default {
     // not its vendor-native thinking shape. Force the openai thinking format.
     thinkingFormat: "openai",
     headers: {
-      "User-Agent": "CLI/2.108.1 CodeBuddy/2.108.1",
+      "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
       "X-Product": "SaaS",
       "X-IDE-Type": "CLI",
       "X-IDE-Name": "CLI",
+      "X-IDE-Version": "2.177.0",
       "x-requested-with": "XMLHttpRequest",
       "x-codebuddy-request": "1",
+      "x-agent-purpose": "conversation",
+      "x-agent-intent": "craft",
+      "x-agent-runtime": "other",
+      "x-private-data": "false",
+      "x-agent-type": "main",
     },
     auth: {
       combined: true,
@@ -70,6 +76,9 @@ export default {
     { id: "deepseek-v4-pro", name: "DeepSeek-V4-Pro" },
     { id: "deepseek-v4.1-flash", name: "DeepSeek-V4.1-Flash" },
   ],
+  // Fixed gateway catalog — no /models endpoint (404s), so opt out of fetcher
+  // auto-derivation and always show the seed models.
+  modelsFetcher: null,
   oauth: {
     baseUrl: "https://copilot.tencent.com",
     stateUrl: "https://copilot.tencent.com/v2/plugin/auth/state",

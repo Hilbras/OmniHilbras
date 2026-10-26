@@ -26,12 +26,18 @@ export default {
     // CodeBuddy intl speaks the same unified OpenAI reasoning_effort shape as CN.
     thinkingFormat: "openai",
     headers: {
-      "User-Agent": "IDE/2.108.1 CodeBuddy/2.108.1",
+      "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
       "X-Product": "SaaS",
-      "X-IDE-Type": "IDE",
-      "X-IDE-Name": "IDE",
+      "X-IDE-Type": "CLI",
+      "X-IDE-Name": "CLI",
+      "X-IDE-Version": "2.177.0",
       "x-requested-with": "XMLHttpRequest",
       "x-codebuddy-request": "1",
+      "x-agent-purpose": "conversation",
+      "x-agent-intent": "craft",
+      "x-agent-runtime": "other",
+      "x-private-data": "false",
+      "x-agent-type": "main",
     },
     auth: {
       combined: true,
@@ -63,6 +69,9 @@ export default {
     { id: "deepseek-v4.1-flash", name: "DeepSeek-V4.1-Flash" },
     { id: "deepseek-v3-2-volc", name: "DeepSeek-V3.2" },
   ],
+  // Fixed gateway catalog — no /models endpoint (404s), so opt out of fetcher
+  // auto-derivation and always show the seed models.
+  modelsFetcher: null,
   oauth: {
     baseUrl: "https://www.codebuddy.ai",
     stateUrl: "https://www.codebuddy.ai/v2/plugin/auth/state",

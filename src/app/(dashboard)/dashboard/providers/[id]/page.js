@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import PropTypes from "prop-types";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
@@ -28,6 +28,7 @@ import BulkImportCodexModal from "./BulkImportCodexModal";
 import BulkImportGrokCliModal from "./BulkImportGrokCliModal";
 import CustomConfigCard from "./CustomConfigCard";
 import AutoPingScheduleModal from "./AutoPingScheduleModal";
+import ProviderUsageTab from "./ProviderUsageTab";
 import { getScheduleSlotLabels } from "@/shared/services/quotaPingSchedule";
 
 const ONE_BY_ONE_DELAY_MS = 1000;
@@ -65,11 +66,21 @@ DetailStat.propTypes = {
   tone: PropTypes.string,
 };
 
-export default function ProviderDetailPage() {
+function ProviderDetailPageInner() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const providerId = params.id;
   const { getCaps } = useModelCaps();
+  // Tab: "main" (default) or "usage". Driven by the ?tab= URL param so it
+  // survives reload and can be deep-linked; "main" is the fallback.
+  const activeTab = searchParams.get("tab") === "usage" ? "usage" : "main";
+  const setActiveTab = (tab) => {
+    const sp = new URLSearchParams(searchParams.toString());
+    if (tab === "main") sp.delete("tab");
+    else sp.set("tab", tab);
+    router.replace(`?${sp.toString()}`, { scroll: false });
+  };
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [providerNode, setProviderNode] = useState(null);
@@ -1741,6 +1752,39 @@ export default function ProviderDetailPage() {
         <DetailStat label="Endpoint" value={providerInfo.website ? new URL(providerInfo.website).hostname : providerId} icon="dns" tone="text-gold-text" />
       </section>
 
+      {/* Tab bar — Main / Usage */}
+      <div className="flex gap-1 border-b border-line">
+        {[
+          { id: "main", label: "Main", icon: "settings" },
+          { id: "usage", label: "Usage", icon: "monitoring" },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={
+              `relative flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors ` +
+              (activeTab === tab.id ? "text-gold-text" : "text-text-muted hover:text-text-main")
+            }
+          >
+            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{tab.icon}</span>
+            {tab.label}
+            {activeTab === tab.id && (
+              <span className="absolute inset-x-0 -bottom-px h-0.5 bg-gold" aria-hidden="true" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "usage" ? (
+        <ProviderUsageTab
+          providerId={providerId}
+          providerStorageAlias={providerStorageAlias}
+          connections={connections}
+          providerNode={providerNode}
+        />
+      ) : (
+      <>
       {providerInfo.deprecated && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
           <span className="material-symbols-outlined text-[16px] text-yellow-500 mt-0.5 shrink-0">warning</span>
@@ -2248,6 +2292,8 @@ export default function ProviderDetailPage() {
       )}
 
       {bulkActionModal}
+      </>
+      )}
 
       {/* Modals */}
       {providerId === "kiro" ? (
@@ -2416,5 +2462,13 @@ export default function ProviderDetailPage() {
         variant="danger"
       />
     </div>
+  );
+}
+
+export default function ProviderDetailPage() {
+  return (
+    <Suspense fallback={<div className="flex flex-col gap-8"><CardSkeleton /></div>}>
+      <ProviderDetailPageInner />
+    </Suspense>
   );
 }
