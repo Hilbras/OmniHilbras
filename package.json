@@ -1,6 +1,6 @@
 {
   "name": "@hilbras/omnihilbras",
-  "version": "2.9.10",
+  "version": "2.9.11",
   "description": "OmniHilbras web dashboard",
   "scripts": {
     "dev": "next dev --port 20127",
