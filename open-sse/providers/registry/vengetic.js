@@ -11,10 +11,11 @@ export default {
     textIcon: "VG",
     website: "https://vengetic.biz.id",
     notice: {
+      text: "Indonesian LLM gateway with free models (e.g. Claude Haiku 5.5 Free). Sign up at vengetic.biz.id for an API key, or use the OpenAI-compatible endpoint.",
       apiKeyUrl: "https://vengetic.biz.id",
     },
   },
-  category: "apikey",
+  category: "freeTier",
   authType: "apikey",
   authModes: ["apikey"],
   transport: {

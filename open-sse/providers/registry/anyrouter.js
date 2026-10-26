@@ -11,10 +11,11 @@ export default {
     textIcon: "AR",
     website: "https://anyrouter.dev",
     notice: {
+      text: "Free-tier gateway with 72+ models. Sign up at anyrouter.dev for an API key — free models include Hermes, Qwen3.5 Plus, DeepSeek-V4-Flash, Gemini 2.5 Flash, and more.",
       apiKeyUrl: "https://anyrouter.dev",
     },
   },
-  category: "apikey",
+  category: "freeTier",
   authType: "apikey",
   authModes: ["apikey"],
   transport: {
