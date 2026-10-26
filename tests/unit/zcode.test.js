@@ -1,6 +1,6 @@
 // ZCode Start Plan provider — unit tests for credential KDF, request building,
 // registry integration, and the "zcode" thinking format.
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,11 +11,25 @@ import {
   ZCodeExecutor,
   backendModelId,
   buildRequestBody,
+  classifyZcodeError,
   credentialSecret,
   decryptCredential,
   mapMessages,
   resolveToken,
 } from "../../open-sse/executors/zcode.js";
+import {
+  buildToolContract,
+  flattenToolBlocks,
+  normalizeToolCalls,
+  parseToolBridge,
+  rewriteAnthropicMessage,
+  rewriteAnthropicStream,
+} from "../../open-sse/executors/zcode/toolBridge.js";
+import {
+  parseZcodeEnvelope,
+  zcodeBusinessCode,
+} from "../../open-sse/executors/zcode/envelope.js";
+import { proxyAwareFetch } from "../../open-sse/utils/proxyFetch.js";
 import { getExecutor } from "../../open-sse/executors/index.js";
 import registryEntry from "../../open-sse/providers/registry/zcode.js";
 import { getCapabilitiesForModel } from "../../open-sse/providers/capabilities.js";
@@ -25,6 +39,13 @@ import { getModelsByProviderId } from "../../src/shared/constants/models.js";
 import { applyThinking } from "../../open-sse/translator/concerns/thinkingUnified.js";
 import { parseModel, resolveProviderAlias } from "../../open-sse/services/model.js";
 import { ZCODE_REQUEST_TEMPLATE } from "../../open-sse/config/zcodeRequestTemplate.js";
+
+// The upstream call is mocked so the executor's request/response bridge can be
+// exercised without network access.
+vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
+  proxyAwareFetch: vi.fn(),
+  default: vi.fn(),
+}));
 
 const ENV_KEYS = ["ZCODE_CREDENTIAL_SECRET", "ZCODE_START_PLAN_TOKEN", "ZCODE_JWT_TOKEN", "ZCODE_CREDENTIALS_FILE"];
 const savedEnv = {};
@@ -153,12 +174,20 @@ describe("zcode request building (stock template discipline)", () => {
     expect(none.max_tokens).toBe(128000);
   });
 
-  it("strips client tools and honors the client's stream flag", () => {
+  it("bridges client tools through the transcript and honors the client's stream flag", () => {
     const body = buildRequestBody(
       { ...baseBody, tools: [{ name: "client-tool" }], tool_choice: "auto" },
       "glm-5.3-flash", "s", "u",
     );
+    // The stock catalog stays untouched — the client's schema never becomes a
+    // real Anthropic tool, because upstream validates the catalog.
     expect(JSON.stringify(body.tools)).not.toContain("client-tool");
+    expect(body.tools).toHaveLength(ZCODE_REQUEST_TEMPLATE.tools.length);
+    expect(body.tool_choice).toEqual({ type: "auto" });
+    // …it rides along as a text contract instead.
+    const transcript = JSON.stringify(body.messages);
+    expect(transcript).toContain("[AVAILABLE TOOLS]");
+    expect(transcript).toContain("client-tool");
     expect(body.stream).toBe(true);
     expect(buildRequestBody(baseBody, "glm-5.3-flash", "s", "u", false).stream).toBe(false);
   });
@@ -259,12 +288,12 @@ describe("zcode registry + capabilities integration", () => {
     expect(parseModel("zcode/glm-5.3").provider).toBe("zcode");
   });
 
-  it("exposes zcode thinking capabilities: always-on low/high/max, no client tools", () => {
+  it("exposes zcode thinking capabilities: always-on low/high/max, with client tools", () => {
     for (const model of ["glm-5.3", "glm-5.3-flash"]) {
       const caps = getCapabilitiesForModel("zcode", model);
       expect(caps.thinkingFormat).toBe("zcode");
       expect(caps.thinkingCanDisable).toBe(false);
-      expect(caps.tools).toBe(false);
+      expect(caps.tools).toBe(true);
       expect(getThinkingLevels("zcode", model)).toEqual(["low", "high", "max"]);
     }
   });
@@ -283,5 +312,313 @@ describe("zcode registry + capabilities integration", () => {
     expect(think({ messages: [], reasoning_effort: "xhigh" })).toMatchObject({ output_config: { effort: "max" } });
     // cannot disable: "none" clamps to the minimal accepted level
     expect(think({ messages: [], reasoning_effort: "none" })).toMatchObject({ output_config: { effort: "low" } });
+  });
+});
+
+describe("zcode client-tool bridge", () => {
+  const clientTools = [
+    {
+      name: "read_file",
+      description: "Read a file from disk",
+      input_schema: {
+        type: "object",
+        properties: { path: { type: "string" }, limit: { type: "number" } },
+        required: ["path"],
+      },
+    },
+  ];
+
+  // A minimal Anthropic SSE turn carrying one text block.
+  function upstreamSse(text) {
+    return [
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_up","model":"GLM-5.3-Flash","content":[],"usage":{"input_tokens":10,"output_tokens":0}}}\n\n',
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+      `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text } })}\n\n`,
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}\n\n',
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ].join("");
+  }
+
+  it("serializes the client's schemas into the text contract", () => {
+    const contract = buildToolContract(clientTools);
+    expect(contract).toContain("[AVAILABLE TOOLS]");
+    expect(contract).toContain("[END AVAILABLE TOOLS]");
+    expect(contract).toContain('"name": "read_file"');
+    expect(contract).toContain('"path"');
+    expect(contract).toContain('{"tool_calls":[{"name":"tool_name","input":{}}]}');
+    expect(contract).toContain('{"final":"your final answer"}');
+    expect(buildToolContract([])).toBe("");
+  });
+
+  it("leaves a tool-less request untouched", () => {
+    const messages = [{ role: "user", content: [{ type: "text", text: "hi" }] }];
+    expect(mapMessages({ messages })).toEqual(messages);
+  });
+
+  it("keeps the stock template intact while the contract rides in the transcript", () => {
+    const body = buildRequestBody(
+      { messages: [{ role: "user", content: [{ type: "text", text: "list files" }] }], tools: clientTools },
+      "glm-5.3-flash", "s", "u",
+    );
+    expect(body.system).toHaveLength(3);
+    expect(body.tools).toHaveLength(ZCODE_REQUEST_TEMPLATE.tools.length);
+    expect(body.tool_choice).toEqual({ type: "auto" });
+    expect(JSON.stringify(body.tools)).not.toContain("read_file");
+    const transcript = JSON.stringify(body.messages);
+    expect(transcript).toContain("[AVAILABLE TOOLS]");
+    expect(transcript).toContain("read_file");
+    expect(transcript).toContain("Return exactly one JSON object now.");
+  });
+
+  it("replays earlier tool_use / tool_result turns as marked text", () => {
+    const turns = flattenToolBlocks([
+      { role: "user", content: [{ type: "text", text: "go" }] },
+      { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.txt" } }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "hello" }] },
+    ]);
+    const flat = JSON.stringify(turns);
+    expect(flat).toContain("[PREVIOUS TOOL USE]");
+    expect(flat).toContain("read_file");
+    expect(flat).toContain("[TOOL RESULT] id=toolu_1");
+    expect(flat).toContain("hello");
+    // no tool_use / tool_result block survives — the stock catalog cannot resolve them
+    expect(flat).not.toContain('"type":"tool_use"');
+    expect(flat).not.toContain('"type":"tool_result"');
+  });
+
+  it("drops client thinking blocks (their signatures are foreign to zcode)", () => {
+    const turns = flattenToolBlocks([
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "hidden-reasoning", signature: "sig-abc" },
+          { type: "redacted_thinking", data: "redacted-payload" },
+          { type: "text", text: "visible" },
+        ],
+      },
+    ]);
+    expect(turns).toHaveLength(1);
+    const flat = JSON.stringify(turns);
+    expect(flat).not.toContain("sig-abc");
+    expect(flat).not.toContain("hidden-reasoning");
+    expect(flat).not.toContain("redacted-payload");
+    expect(flat).toContain("visible");
+  });
+
+  it("accepts every answer shape the model may produce", () => {
+    expect(parseToolBridge('{"tool_calls":[{"name":"read_file","input":{"path":"a"}}]}').calls)
+      .toEqual([{ name: "read_file", input: { path: "a" } }]);
+    expect(parseToolBridge('```json\n{"toolCalls":[{"name":"read_file","arguments":{"path":"a"}}]}\n```').calls)
+      .toEqual([{ name: "read_file", input: { path: "a" } }]);
+    expect(parseToolBridge('Sure! {"tool_calls":[{"name":"read_file","input":{"path":"a"}}]} done').calls)
+      .toEqual([{ name: "read_file", input: { path: "a" } }]);
+    expect(parseToolBridge('{"final":"all done"}').finalText).toBe("all done");
+    expect(parseToolBridge('{"final":"all done"}').calls).toEqual([]);
+    expect(parseToolBridge('{"name":"read_file","input":{"path":"a"}}').calls)
+      .toEqual([{ name: "read_file", input: { path: "a" } }]);
+    // malformed output degrades to text instead of throwing
+    const broken = parseToolBridge("not json at all");
+    expect(broken.calls).toEqual([]);
+    expect(broken.finalText).toBe("not json at all");
+  });
+
+  it("keeps only calls that name one of the client's tools", () => {
+    const calls = [
+      { name: "read_file", input: {} },
+      { name: "Bash", input: { command: "ls" } },
+      { name: "unknown", input: {} },
+    ];
+    expect(normalizeToolCalls(calls, clientTools)).toEqual([{ name: "read_file", input: {} }]);
+    expect(normalizeToolCalls(calls, [])).toEqual([]);
+  });
+
+  it("turns a bridge answer into real tool_use blocks", () => {
+    const message = rewriteAnthropicMessage(
+      {
+        id: "msg_up",
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: '{"tool_calls":[{"name":"read_file","input":{"path":"a.txt"}}]}' }],
+      },
+      clientTools,
+    );
+    expect(message.stop_reason).toBe("tool_use");
+    const use = message.content.find((block) => block.type === "tool_use");
+    expect(use.name).toBe("read_file");
+    expect(use.input).toEqual({ path: "a.txt" });
+    expect(use.id.startsWith("toolu_")).toBe(true);
+    expect(use.id).toMatch(/^[a-zA-Z0-9_-]+$/);
+  });
+
+  it("turns a final answer into plain text", () => {
+    const message = rewriteAnthropicMessage(
+      { id: "msg_up", stop_reason: "end_turn", content: [{ type: "text", text: '{"final":"the answer"}' }] },
+      clientTools,
+    );
+    expect(message.stop_reason).toBe("end_turn");
+    expect(message.content).toEqual([{ type: "text", text: "the answer" }]);
+  });
+
+  it("never leaks the stock catalog's own tool_use blocks", () => {
+    const message = rewriteAnthropicMessage(
+      {
+        id: "msg_up",
+        stop_reason: "tool_use",
+        content: [{ type: "tool_use", id: "toolu_stock", name: "Bash", input: { command: "rm -rf /" } }],
+      },
+      clientTools,
+    );
+    expect(JSON.stringify(message.content)).not.toContain("Bash");
+    expect(message.content.filter((block) => block.type === "tool_use")).toHaveLength(0);
+  });
+
+  it("forwards a native tool_use that names one of the client's tools untouched", () => {
+    const native = { type: "tool_use", id: "toolu_native", name: "read_file", input: { path: "b.txt" } };
+    const message = rewriteAnthropicMessage(
+      { id: "msg_up", stop_reason: "tool_use", content: [native] },
+      clientTools,
+    );
+    expect(message.stop_reason).toBe("tool_use");
+    expect(message.content).toEqual([native]);
+  });
+
+  it("re-emits a buffered SSE stream with a real tool_use block", () => {
+    const out = rewriteAnthropicStream(
+      upstreamSse('{"tool_calls":[{"name":"read_file","input":{"path":"c.txt"}}]}'),
+      clientTools,
+    );
+    expect(out).toContain('"type":"content_block_start"');
+    expect(out).toContain('"type":"tool_use"');
+    expect(out).toContain('"name":"read_file"');
+    expect(out).toContain('"type":"input_json_delta"');
+    expect(out).toContain('"partial_json":"{\\"path\\":\\"c.txt\\"}"');
+    expect(out).toContain('"stop_reason":"tool_use"');
+    expect(out).toContain('"type":"message_stop"');
+  });
+
+  it("bridges a full upstream turn through execute()", async () => {
+    process.env.ZCODE_START_PLAN_TOKEN = "start-plan-token";
+    proxyAwareFetch.mockReset();
+    proxyAwareFetch.mockResolvedValue(new Response(
+      upstreamSse('{"tool_calls":[{"name":"read_file","input":{"path":"c.txt"}}]}'),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    ));
+
+    const executor = new ZCodeExecutor();
+    const result = await executor.execute({
+      model: "glm-5.3-flash",
+      body: {
+        messages: [{ role: "user", content: [{ type: "text", text: "read c.txt" }] }],
+        tools: clientTools,
+      },
+      stream: true,
+      credentials: {},
+      log: { debug() {}, warn() {}, error() {} },
+    });
+
+    // The request kept the stock catalog and carried the contract in the transcript.
+    const sent = JSON.parse(proxyAwareFetch.mock.calls[0][1].body);
+    expect(sent.tools).toHaveLength(ZCODE_REQUEST_TEMPLATE.tools.length);
+    expect(JSON.stringify(sent.tools)).not.toContain("read_file");
+    expect(JSON.stringify(sent.messages)).toContain("[AVAILABLE TOOLS]");
+
+    // The answer came back to the client as a real Anthropic tool_use.
+    const text = await result.response.text();
+    expect(text).toContain('"type":"tool_use"');
+    expect(text).toContain('"name":"read_file"');
+    expect(text).toContain('"stop_reason":"tool_use"');
+  });
+});
+
+describe("zcode business-error envelope", () => {
+  // The gateway answers a quota failure with HTTP 200 and a bare JSON
+  // envelope — inside an SSE response it arrives unframed, ahead of the
+  // `data: [DONE]` marker.
+  const quotaEnvelope = JSON.stringify({
+    code: 1005,
+    msg: "exceed quota limit",
+    id: "msg_bc393fa3ff5e405a9f63c7d265aafc4f",
+    type: "message",
+    role: "assistant",
+    content: [{ type: "text", text: "" }],
+    stop_reason: "end_turn",
+  });
+
+  const silentLog = { debug() {}, warn() {}, error() {} };
+
+  it("classifies the free-tier quota code as a terminal billing error", () => {
+    const classified = classifyZcodeError(200, quotaEnvelope);
+    expect(classified.status).toBe(402);
+    expect(classified.message).toContain("exceed quota limit");
+  });
+
+  it("reads the envelope out of a bare JSON body and out of an unframed SSE body", () => {
+    expect(parseZcodeEnvelope(quotaEnvelope).code).toBe(1005);
+    expect(parseZcodeEnvelope(`${quotaEnvelope}data: [DONE]`).code).toBe(1005);
+    expect(zcodeBusinessCode(parseZcodeEnvelope(quotaEnvelope))).toBe(1005);
+    // A normal Anthropic answer carries no business code.
+    expect(zcodeBusinessCode(parseZcodeEnvelope('{"id":"msg_1","content":[]}'))).toBeNull();
+    expect(zcodeBusinessCode(parseZcodeEnvelope('{"code":0,"msg":"ok"}'))).toBeNull();
+  });
+
+  it("fails the turn when a quota envelope rides on HTTP 200 (no client tools)", async () => {
+    process.env.ZCODE_START_PLAN_TOKEN = "start-plan-token";
+    proxyAwareFetch.mockReset();
+    proxyAwareFetch.mockResolvedValue(new Response(quotaEnvelope, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+
+    const executor = new ZCodeExecutor();
+    await expect(executor.execute({
+      model: "glm-5.3-flash",
+      body: { messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }] },
+      stream: false,
+      credentials: {},
+      log: silentLog,
+    })).rejects.toThrow(/exceed quota limit/);
+  });
+
+  it("fails the turn when the quota envelope arrives inside the tool-bridge stream", async () => {
+    process.env.ZCODE_START_PLAN_TOKEN = "start-plan-token";
+    proxyAwareFetch.mockReset();
+    proxyAwareFetch.mockResolvedValue(new Response(`${quotaEnvelope}data: [DONE]`, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }));
+
+    const executor = new ZCodeExecutor();
+    await expect(executor.execute({
+      model: "glm-5.3-flash",
+      body: {
+        messages: [{ role: "user", content: [{ type: "text", text: "read c.txt" }] }],
+        tools: [{ name: "read_file", description: "Read a file", input_schema: { type: "object", properties: {} } }],
+      },
+      stream: true,
+      credentials: {},
+      log: silentLog,
+    })).rejects.toThrow(/exceed quota limit/);
+  });
+
+  it("still forwards a healthy stream untouched", async () => {
+    process.env.ZCODE_START_PLAN_TOKEN = "start-plan-token";
+    proxyAwareFetch.mockReset();
+    proxyAwareFetch.mockResolvedValue(new Response(
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_ok"}}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    ));
+
+    const executor = new ZCodeExecutor();
+    const result = await executor.execute({
+      model: "glm-5.3-flash",
+      body: { messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }] },
+      stream: true,
+      credentials: {},
+      log: silentLog,
+    });
+
+    const text = await result.response.text();
+    expect(text).toContain('"type":"message_start"');
+    expect(text).toContain("[DONE]");
   });
 });

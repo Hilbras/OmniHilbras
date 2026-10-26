@@ -41,6 +41,17 @@ export async function handleChat(request, clientRawRequest = null) {
   return await enforceRequestLimits(request, (ctx) => handleChatRequest(request, clientRawRequest, ctx));
 }
 
+// The Web-Cookie Agent resolves its target differently from a normal
+// provider/model pair — it must not go through combo expansion, capability
+// auto-switching or alias resolution. So the target is passed through
+// verbatim to handleWebCookieAgent.
+const IS_WEB_COOKIE_AGENT = (modelStr) =>
+  typeof modelStr === "string" &&
+  (modelStr === "webcookie-agent" ||
+    modelStr.startsWith("webcookie-agent/") ||
+    modelStr === "wca" ||
+    modelStr.startsWith("wca/"));
+
 async function handleChatRequest(request, clientRawRequest = null, ctx = {}) {
   const fanOutBudget = ctx.fanOutBudget || null;
   let body;
@@ -97,6 +108,26 @@ async function handleChatRequest(request, clientRawRequest = null, ctx = {}) {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
   }
 
+  // The Web-Cookie Agent is a router, not a model: its target ("any", a
+  // member provider, or "provider/model") must not go through combo
+  // expansion, capability auto-switching or alias resolution. When it is
+  // requested, dispatch directly; handleWebCookieAgent picks the active
+  // member and runs the tool loop. It needs the user-agent later, so read
+  // it up here (the non-agent path reads it again, harmlessly).
+  const userAgent = request?.headers?.get("user-agent") || "";
+  if (IS_WEB_COOKIE_AGENT(modelStr)) {
+    return await handleWebCookieAgent({
+      body,
+      target: modelStr,
+      request,
+      clientRawRequest,
+      userAgent,
+      apiKey,
+      fanOutBudget,
+      log,
+    });
+  }
+
   // Per-key access control: a restricted key may call only its listed combos and
   // models. Checked once on the requested target, before bypass, combo expansion
   // and any credential lookup; an allowed combo grants the members it routes to.
@@ -105,7 +136,6 @@ async function handleChatRequest(request, clientRawRequest = null, ctx = {}) {
   if (keyAccessDenied) return keyAccessDenied;
 
   // Bypass naming/warmup requests before combo rotation to avoid wasting rotation slots
-  const userAgent = request?.headers?.get("user-agent") || "";
   const bypassResponse = handleBypassRequest(body, modelStr, userAgent, !!settings.ccFilterNaming);
   if (bypassResponse) return bypassResponse.response || bypassResponse;
 
@@ -379,4 +409,82 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
     return result.response;
   }
+}
+
+/**
+ * The Web-Cookie Agent path: pick a member web-cookie provider that has a
+ * stored session (round-robin when the target is "any"), resolve its
+ * credentials, and hand the whole turn to the agent executor — which runs
+ * the tool loop and returns an OpenAI-shaped response. The fallback/lock
+ * machinery applies to the *member* provider, not the agent, so a failed
+ * member just means "no session connected", not a broken request.
+ */
+async function handleWebCookieAgent({ body, target, request, clientRawRequest, userAgent, apiKey, fanOutBudget, log }) {
+  const { parseAgentTarget } = await import("open-sse/executors/webcookie-agent.js");
+  const { getExecutor } = await import("open-sse/executors/index.js");
+  const executor = getExecutor("webcookie-agent");
+
+  // Which member provider does this target name? "any"/blank rotates across
+  // the active web-cookie connections; a named member is pinned.
+  const targetInfo = parseAgentTarget(target);
+  const memberProvider = targetInfo.provider || await pickActiveWebCookieMember(log);
+
+  let credentials = null;
+  if (memberProvider) {
+    // Each member round spends one fan-out slot (the agent runs many turns).
+    if (consumeFanOutSlot(fanOutBudget, `webcookie-agent/${memberProvider}`)) {
+      credentials = await getProviderCredentials(memberProvider, new Set(), null, {
+        requestedModel: targetInfo.modelId || undefined,
+      });
+    } else {
+      log.warn("CHAT", `[webcookie-agent] fan-out budget exhausted at ${memberProvider}`);
+      return (await import("open-sse/services/fanOut.js")).fanOutLimitResponse(fanOutBudget);
+    }
+  }
+
+  const result = await executor.execute({
+    model: target,
+    body,
+    stream: body.stream === true,
+    credentials: credentials ?? null,
+    signal: request?.signal,
+    log,
+    proxyOptions: null,
+    memberProvider,
+  });
+
+  if (result.response && !result.response.ok && memberProvider) {
+    // A real member failure — attribute the lock to that provider.
+    log.warn("CHAT", `[webcookie-agent] ${memberProvider} failed (${result.response.status})`);
+  }
+  return result.response;
+}
+
+// Rotating member picker: the first web-cookie provider that has at least
+// one stored, active connection. Falls back to null (the executor answers
+// with the "no session connected" note).
+let webCookieMemberIndex = 0;
+const webCookieMemberOrder = [
+  "chatgpt-web", "deepseek-web", "duckduckgo-web", "gemini-web",
+  "qwen-web", "tokenharbor-web", "grok-web", "perplexity-web",
+];
+async function pickActiveWebCookieMember(log) {
+  const { getProviderConnections } = await import("@/lib/localDb");
+  // Keep the rotation stable across requests: start where we left off.
+  for (let i = 0; i < webCookieMemberOrder.length; i++) {
+    const idx = (webCookieMemberIndex + i) % webCookieMemberOrder.length;
+    const member = webCookieMemberOrder[idx];
+    try {
+      const conns = await getProviderConnections({ provider: member, isActive: true });
+      if (Array.isArray(conns) && conns.length > 0) {
+        webCookieMemberIndex = (idx + 1) % webCookieMemberOrder.length;
+        return member;
+      }
+    } catch {
+      // A missing provider just means no connections — try the next member.
+    }
+  }
+  // Nothing connected: report the first member so the user knows which to add.
+  log?.info?.("CHAT", "[webcookie-agent] no active web-cookie connections; target=any");
+  return webCookieMemberOrder[0];
 }

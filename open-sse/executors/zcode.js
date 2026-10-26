@@ -9,6 +9,11 @@
 //   - Thinking: thinking.type "enabled" + output_config.effort low|high|max
 //     (applied centrally by thinkingUnified.applyFormat "zcode").
 //   - The endpoint always streams real Anthropic SSE.
+//   - Client tools: the gateway validates the stock 34-tool catalog, so a
+//     client's own schemas are bridged through the conversation as a text
+//     contract (see executors/zcode/toolBridge.js) and the model's JSON
+//     answer is converted back into real Anthropic tool_use blocks. The
+//     request template itself is never modified.
 //
 // Token resolution order (first hit wins):
 //   1. connection apiKey — a pasted Start Plan JWT (enables multi-account
@@ -25,6 +30,16 @@ import { homedir, release, userInfo } from "node:os";
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
 import { ZCODE_REQUEST_TEMPLATE } from "../config/zcodeRequestTemplate.js";
+import { TOOL_BRIDGE } from "../config/zcodeToolBridge.js";
+import { ZCODE_ENVELOPE } from "../config/zcodeEnvelope.js";
+import { ROLE, CLAUDE_BLOCK } from "../translator/schema/index.js";
+import {
+  buildToolContract,
+  flattenToolBlocks,
+  rewriteAnthropicMessage,
+  rewriteAnthropicStream,
+} from "./zcode/toolBridge.js";
+import { parseZcodeEnvelope, zcodeBusinessCode } from "./zcode/envelope.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 
 const APP_VERSION = "3.14.4";
@@ -63,7 +78,7 @@ const CLIENT_LOCALE = (() => {
 // rotation would otherwise ignore, so classify and coerce the status.
 const ZCODE_BUSINESS_CODES = {
   // Terminal quota/credit: needs recharge or plan change → account-scoped billing error.
-  1314: 402, 1315: 402,
+  1005: 402, 1314: 402, 1315: 402,
   // Terminal rate-limit windows (daily buckets / one-time grants) → rotate account.
   1316: 429, 1317: 429, 1318: 429, 1319: 429, 1320: 429, 1321: 429,
   // Retryable rate limits → backoff.
@@ -92,6 +107,95 @@ export function classifyZcodeError(status, bodyText) {
   } catch {
     return { status, message: bodyText || `HTTP ${status}` };
   }
+}
+
+/**
+ * A ZCode business failure can ride on HTTP 200 as a bare JSON envelope, so
+ * the body is inspected before it reaches the client. Without this an
+ * exhausted account answers with an empty message — indistinguishable from a
+ * broken tool bridge. Returns null when the body is a normal answer.
+ */
+function zcodeBusinessError(status, text) {
+  const envelope = parseZcodeEnvelope(text);
+  if (zcodeBusinessCode(envelope) === null) return null;
+  const classified = classifyZcodeError(status, JSON.stringify(envelope));
+  // An unmapped business code must still fail the turn — a 2xx status would
+  // be reported to the client as a successful, empty answer.
+  const errorStatus = classified.status >= 400 ? classified.status : 502;
+  const error = new Error(`ZCode API error ${errorStatus}: ${classified.message.slice(0, 200)}`);
+  error.status = errorStatus;
+  return error;
+}
+
+/**
+ * Inspect an upstream body for a business failure without giving up the
+ * stream: the leading chunks are buffered, checked, and replayed downstream
+ * when the turn is healthy.
+ */
+async function inspectUpstreamBody(response) {
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  const isSse = contentType.includes("text/event-stream");
+
+  if (!isSse) {
+    const text = await response.text();
+    const error = zcodeBusinessError(response.status, text);
+    if (error) return { error, response };
+    return {
+      error: null,
+      response: new Response(text, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      }),
+    };
+  }
+
+  if (!response.body) return { error: null, response };
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks = [];
+  let text = "";
+  while (text.length < ZCODE_ENVELOPE.peekLimitBytes) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    text += decoder.decode(value, { stream: true });
+    if (parseZcodeEnvelope(text)) break;
+  }
+
+  const error = zcodeBusinessError(response.status, text);
+  if (error) return { error, response };
+
+  const body = new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      (async () => {
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            controller.enqueue(value);
+          }
+          controller.close();
+        } catch (error) {
+          controller.error(error);
+        }
+      })();
+    },
+    cancel(reason) {
+      reader.cancel(reason);
+    },
+  });
+
+  return {
+    error: null,
+    response: new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    }),
+  };
 }
 
 const MODEL_MAP = {
@@ -252,22 +356,90 @@ function backendModelId(model) {
 // The upstream system prompt must stay stock, so a client system (already
 // translated to Claude `system` by the framework) rides along as a marked text
 // block on the first user turn instead of replacing it.
-function mapMessages(body) {
-  const messages = Array.isArray(body.messages) ? body.messages : [];
-  const systemText = typeof body.system === "string" ? body.system.trim()
+function clientTools(body) {
+  return Array.isArray(body?.tools) ? body.tools : [];
+}
+
+function systemTextOf(body) {
+  return typeof body.system === "string" ? body.system.trim()
     : Array.isArray(body.system)
       ? body.system.map(b => (typeof b === "string" ? b : b?.text) || "").join("\n").trim()
       : "";
-  if (!systemText) return messages;
-  const preamble = `[SESSION INSTRUCTIONS — the operational contract for this conversation]\n${systemText}`;
-  const first = messages[0];
-  if (first && first.role === "user" && Array.isArray(first.content)) {
-    return [{ ...first, content: [{ type: "text", text: preamble }, ...first.content] }, ...messages.slice(1)];
+}
+
+function textBlock(text) {
+  return { type: CLAUDE_BLOCK.TEXT, text };
+}
+
+// Prepend a marked block to a user turn (block content keeps its own blocks).
+function withLeadingBlock(message, text) {
+  if (Array.isArray(message.content)) {
+    return { ...message, content: [textBlock(text), ...message.content] };
   }
-  if (first && first.role === "user" && typeof first.content === "string") {
-    return [{ ...first, content: [{ type: "text", text: `${preamble}\n\n${first.content}` }] }, ...messages.slice(1)];
+  if (typeof message.content === "string") {
+    return { ...message, content: [textBlock(`${text}\n\n${message.content}`)] };
   }
-  return [{ role: "user", content: [{ type: "text", text: preamble }] }, ...messages];
+  return { ...message, content: [textBlock(text)] };
+}
+
+// Append the tool contract at the tail of a user turn — the model reads it
+// last, right before it answers.
+function withTrailingText(message, text) {
+  if (Array.isArray(message.content)) {
+    return { ...message, content: [...message.content, textBlock(text)] };
+  }
+  if (typeof message.content === "string") {
+    return { ...message, content: [textBlock(`${message.content}\n\n${text}`)] };
+  }
+  return { ...message, content: [textBlock(text)] };
+}
+
+function lastUserIndex(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === ROLE.USER) return i;
+  }
+  return -1;
+}
+
+function mapMessages(body) {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const systemText = systemTextOf(body);
+  const tools = clientTools(body);
+
+  // Without client tools the request stays byte-identical to the plain path.
+  if (!tools.length) {
+    if (!systemText) return messages;
+    const preamble = `[SESSION INSTRUCTIONS — the operational contract for this conversation]\n${systemText}`;
+    const first = messages[0];
+    if (first && first.role === ROLE.USER) {
+      return [withLeadingBlock(first, preamble), ...messages.slice(1)];
+    }
+    return [{ role: ROLE.USER, content: [textBlock(preamble)] }, ...messages];
+  }
+
+  // Client-tool path: the stock catalog cannot resolve the client's tool ids,
+  // so earlier tool_use / tool_result turns are replayed as marked plain text.
+  const turns = flattenToolBlocks(messages);
+
+  if (systemText) {
+    const preamble = `[SESSION INSTRUCTIONS — the operational contract for this conversation]\n${systemText}`;
+    const firstUser = turns.findIndex((turn) => turn.role === ROLE.USER);
+    if (firstUser === -1) {
+      turns.unshift({ role: ROLE.USER, content: [textBlock(preamble)] });
+    } else {
+      turns[firstUser] = withLeadingBlock(turns[firstUser], preamble);
+    }
+  }
+
+  const contract = buildToolContract(tools);
+  const closing = `${contract}\n\n${TOOL_BRIDGE.responseInstruction}`;
+  const target = lastUserIndex(turns);
+  if (target === -1) {
+    turns.push({ role: ROLE.USER, content: [textBlock(closing)] });
+  } else {
+    turns[target] = withTrailingText(turns[target], closing);
+  }
+  return turns;
 }
 
 function buildRequestBody(body, model, sessionId, accountUuid, stream = true) {
@@ -289,10 +461,51 @@ function buildRequestBody(body, model, sessionId, accountUuid, stream = true) {
   template.max_tokens = Number.isFinite(clientMax) && clientMax > 0
     ? Math.min(clientMax, MAX_TOKENS_CEILING)
     : MAX_TOKENS_CEILING;
-  // Client tools are not bridged in v1: upstream validates the stock ZCode tool
-  // catalog, so client tool schemas would either be rejected or answered with
-  // tool_use blocks the client cannot resolve. capabilities.js marks tools:false.
+  // Client tool schemas are bridged through the conversation (mapMessages), not
+  // through template.tools: upstream validates the stock ZCode tool catalog, so
+  // anything else here is rejected. The template catalog stays untouched.
   return template;
+}
+
+// Rewrite an upstream answer into the client's view: the stock catalog's own
+// tool_use blocks are dropped, and a bridge JSON answer becomes real tool_use
+// blocks the client can resolve. The upstream body is buffered — the text
+// cannot be classified as text or tool call before the turn ends.
+async function bridgeUpstreamResponse(response, tools, stream, log) {
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  const isSse = contentType.includes("text/event-stream")
+    || (!contentType && stream !== false);
+  const text = await response.text();
+  // A business failure can ride on HTTP 200 as a bare JSON envelope — it must
+  // fail the turn here, not become an empty "successful" answer.
+  const businessError = zcodeBusinessError(response.status, text);
+  if (businessError) throw businessError;
+  const headers = {
+    "content-type": isSse ? "text/event-stream" : "application/json",
+  };
+  try {
+    if (isSse) {
+      return new Response(rewriteAnthropicStream(text, tools), {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    }
+    const parsed = JSON.parse(text);
+    return new Response(JSON.stringify(rewriteAnthropicMessage(parsed, tools)), {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  } catch (error) {
+    // A malformed upstream body must not break the turn — pass it through.
+    log?.warn?.("ZCODE", `Tool bridge rewrite failed: ${error.message}`);
+    return new Response(text, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
 }
 
 export class ZCodeExecutor extends BaseExecutor {
@@ -349,7 +562,22 @@ export class ZCodeExecutor extends BaseExecutor {
       throw error;
     }
 
-    return { response, url: MODEL_URL, headers: response.headers, transformedBody: requestBody };
+    const tools = clientTools(body);
+    if (tools.length) {
+      const bridged = await bridgeUpstreamResponse(response, tools, stream, log);
+      return { response: bridged, url: MODEL_URL, headers: bridged.headers, transformedBody: requestBody };
+    }
+
+    // No client tools: the body is still inspected, because a business failure
+    // can ride on HTTP 200 as a bare JSON envelope.
+    const inspected = await inspectUpstreamBody(response);
+    if (inspected.error) throw inspected.error;
+    return {
+      response: inspected.response,
+      url: MODEL_URL,
+      headers: inspected.response.headers,
+      transformedBody: requestBody,
+    };
   }
 
   buildUrl() {
@@ -390,8 +618,10 @@ export async function fetchZcodeBalance(credentials, { signal, proxyOptions } = 
 export {
   backendModelId,
   buildRequestBody,
+  clientTools,
   credentialSecret,
   decryptCredential,
+  invalidateLocalAuthCache,
   mapMessages,
   modelHeaders,
   resolveToken,

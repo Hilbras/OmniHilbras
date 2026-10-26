@@ -7,6 +7,7 @@ import { openaiToCommandCodeRequest } from "open-sse/translator/request/openai-t
 import { resolveQoderCredentials, resolveQoderModels } from "open-sse/services/qoderModels.js";
 import { probeBedrockCredentials } from "open-sse/executors/bedrock.js";
 import { fetchZcodeBalance } from "open-sse/executors/zcode.js";
+import { fetchAdcodeUsage } from "open-sse/executors/adcode.js";
 import {
   createNousApiKeyProbe,
   getNousApiKeyValidationError,
@@ -265,6 +266,25 @@ export async function POST(request) {
             : message.includes("balance check failed")
               ? "ZCode rejected this credential. If you pasted a key, make sure it is a valid Start Plan JWT."
               : message;
+          return NextResponse.json({ valid: false, error: friendly });
+        }
+      }
+
+      // ADCode authenticates from the ADCode desktop client's Firebase identity
+      // store (or a pasted id_token as the connection key) — validate via the
+      // read-only /usage endpoint, which proves the token mints and the account
+      // is entitled to the Included-AI pools.
+      if (provider === "adcode") {
+        try {
+          await fetchAdcodeUsage({ apiKey, accessToken: apiKey }, { signal: AbortSignal.timeout(10000) });
+          return NextResponse.json({ valid: true, error: null });
+        } catch (error) {
+          const message = String(error?.message || error);
+          const friendly = message.includes("not signed in")
+            ? "ADCode desktop client is not signed in on this machine. Install ADCode, sign in once, or paste an ADCode id_token as the key."
+            : message.includes("rejected")
+              ? "ADCode rejected this credential. If you pasted a key, make sure it is a valid ADCode id_token."
+              : `ADCode validation failed: ${message}`;
           return NextResponse.json({ valid: false, error: friendly });
         }
       }

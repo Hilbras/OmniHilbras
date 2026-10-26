@@ -4,6 +4,31 @@ import { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  Cable,
+  ChevronDown,
+  ChevronRight,
+  Cpu,
+  Copy,
+  Database,
+  FileText,
+  Gauge,
+  Globe,
+  Languages,
+  Layers,
+  Network,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PiggyBank,
+  Power,
+  Puzzle,
+  Search,
+  Settings,
+  SquareTerminal,
+  Video,
+  X,
+  Zap,
+} from "lucide-react";
 import { cn } from "@/shared/utils/cn";
 import { APP_CONFIG, UPDATER_CONFIG } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS } from "@/shared/constants/providers";
@@ -14,30 +39,148 @@ import { ConfirmModal } from "./Modal";
 
 // const VISIBLE_MEDIA_KINDS = ["embedding", "image", "imageToText", "tts", "stt", "webSearch", "webFetch", "video", "music"];
 const VISIBLE_MEDIA_KINDS = ["embedding", "image", "video", "tts", "stt", "systemone"];
+// Maps the legacy material-icon strings used by MEDIA_PROVIDER_KINDS to lucide components
+const MEDIA_ICON_MAP = {
+  data_array: Database,
+  brush: Cpu,
+  image_search: Search,
+  record_voice_over: Zap,
+  mic: Cpu,
+  travel_explore: Globe,
+  language: Languages,
+  movie: Video,
+  music_note: FileText,
+  psychology: Puzzle,
+};
 // Combined entry: webSearch + webFetch share one page at /dashboard/media-providers/web
-const COMBINED_WEB_ITEM = { id: "web", label: "Web Fetch & Search", icon: "travel_explore", href: "/dashboard/media-providers/web" };
+const COMBINED_WEB_ITEM = { id: "web", label: "Web Fetch & Search", icon: Globe, href: "/dashboard/media-providers/web" };
 
 const navItems = [
-  { href: "/dashboard/endpoint", label: "Endpoint & Key", icon: "api" },
-  { href: "/dashboard/providers", label: "Providers", icon: "dns" },
-  // { href: "/dashboard/basic-chat", label: "Basic Chat", icon: "chat" }, // Hidden
-  { href: "/dashboard/combos", label: "Combo & Vision Adapter", icon: "layers" },
-  { href: "/dashboard/usage", label: "Usage", icon: "bar_chart" },
-  { href: "/dashboard/quota", label: "Quota Tracker", icon: "data_usage" },
-  { href: "/dashboard/token-saver", label: "Token Saver", icon: "savings" },
-  // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: "image" },
-  { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
-];
-
-const debugItems = [
-  { href: "/dashboard/console-log", label: "Console Log", icon: "terminal" },
-  { href: "/dashboard/translator", label: "Translator", icon: "translate" },
+  { href: "/dashboard/endpoint", label: "Endpoint & Key", icon: Cpu },
+  { href: "/dashboard/providers", label: "Providers", icon: Network },
+  // { href: "/dashboard/basic-chat", label: "Basic Chat", icon: chat }, // Hidden
+  { href: "/dashboard/combos", label: "Combo & Vision Adapter", icon: Layers },
+  { href: "/dashboard/usage", label: "Usage", icon: Gauge },
+  { href: "/dashboard/quota", label: "Quota Tracker", icon: PiggyBank },
+  { href: "/dashboard/token-saver", label: "Token Saver", icon: PiggyBank },
+  // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: image },
+  { href: "/dashboard/cli-tools", label: "CLI Tools", icon: SquareTerminal },
 ];
 
 const systemItems = [
-  { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: "lan" },
-  { href: "/dashboard/skills", label: "Skills", icon: "extension" },
+  { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: Cable },
+  { href: "/dashboard/skills", label: "Skills", icon: Puzzle },
 ];
+
+const debugItems = [
+  { href: "/dashboard/console-log", label: "Console Log", icon: FileText },
+  { href: "/dashboard/translator", label: "Translator", icon: Languages },
+];
+
+function useGatewayStatus() {
+  // Polls the health endpoint so the badge reports what the server is actually
+  // doing — a hardcoded "online" string would have said the one thing that was
+  // false for exactly as long as the outage lasted.
+  const [status, setStatus] = useState({ reachable: undefined, hint: "Checking gateway" });
+  useEffect(() => {
+    let alive = true;
+    const probe = async () => {
+      try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        if (!alive) return;
+        setStatus({ reachable: true, hint: `gateway online · build ${APP_CONFIG.version}` });
+      } catch {
+        if (!alive) return;
+        setStatus({ reachable: false, hint: "gateway not answering · restart the server" });
+      }
+    };
+    probe();
+    const timer = setInterval(probe, 5000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+  return status;
+}
+
+function NavRow({
+  icon: Icon,
+  label,
+  active = false,
+  collapsed = false,
+  pending = false,
+  badge,
+  title,
+}) {
+  const iconEl = Icon ? <Icon className="h-[17px] w-[17px] shrink-0" aria-hidden="true" /> : null;
+
+  const content = (
+    <>
+      {iconEl && (
+        <span className={cn("shrink-0", active ? "text-gold-text" : "text-text-muted")}>
+          {iconEl}
+        </span>
+      )}
+      {!collapsed && <span className="flex-1 text-left truncate">{label}</span>}
+      {badge && !collapsed && (
+        <span className="rounded-full border border-line-strong px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-text-muted">
+          {badge}
+        </span>
+      )}
+    </>
+  );
+
+  const baseClass = collapsed
+    ? "group flex w-full items-center justify-center rounded-lg px-2 py-2.5 transition-colors"
+    : "group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors";
+
+  if (pending) {
+    return (
+      <button
+        type="button"
+        disabled
+        className={`${baseClass} cursor-not-allowed text-text-subtle`}
+        title={collapsed ? `${label} · coming soon` : "Coming soon"}
+        aria-label={`${label}, coming soon`}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  if (typeof title === "object" && "href" in title) {
+    return (
+      <a
+        href={title.href}
+        target="_blank"
+        rel="noreferrer"
+        onClick={title.onClick}
+        className={cn(baseClass, "text-text-muted hover:bg-surface hover:text-text-main")}
+        aria-label={collapsed ? label : undefined}
+        title={collapsed ? label : undefined}
+      >
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <Link
+      href={title?.href ?? null}
+      onClick={title?.onClick}
+      className={cn(
+        baseClass,
+        active ? "bg-gold-soft text-gold-text" : "text-text-muted hover:bg-surface hover:text-text-main"
+      )}
+      aria-current={active ? "page" : undefined}
+      aria-label={collapsed ? label : undefined}
+      title={collapsed ? label : undefined}
+    >
+      {children !== undefined ? children : content}
+    </Link>
+  );
+}
 
 export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }) {
   const pathname = usePathname();
@@ -50,6 +193,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
   const [enableTranslator, setEnableTranslator] = useState(false);
   const { copied, copy } = useCopyToClipboard(2000);
   const shutdownTimerRef = useRef(null);
+  const { reachable, hint } = useGatewayStatus();
 
   const INSTALL_CMD = UPDATER_CONFIG.installCmdLatest;
 
@@ -120,11 +264,15 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
   // Note: legacy updater poll removed. New flow: copy install cmd + shutdown server,
   // user runs the command manually in another terminal.
 
+  const linkProps = (item) => ({ href: item.href, onClick: onClose });
 
   return (
     <>
       <aside
-        className={`dashboard-sidebar flex h-full shrink-0 flex-col border-r border-border bg-bg-soft transition-[width] duration-200 min-h-full w-72 ${collapsed ? "lg:w-[76px]" : "lg:w-[252px]"}`}
+        className={cn(
+          "dashboard-sidebar flex h-full flex-col border-r border-line bg-bg-soft transition-[width] duration-200",
+          collapsed ? "w-[76px] lg:w-[76px]" : "w-[252px] lg:w-[252px]"
+        )}
       >
         {/* Logo + collapse toggle */}
         <div className={`flex items-center gap-1 pb-4 pt-5 ${collapsed ? "justify-center px-2" : "justify-between px-5"}`}>
@@ -141,9 +289,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
             <span className="relative grid h-8 w-8 shrink-0 place-items-center rounded-[10px] border border-gold/25 bg-gold-soft text-lg text-gold-text" aria-hidden="true">
               <span className={collapsed ? "transition-opacity group-hover:opacity-0" : ""}>◈</span>
               {collapsed && (
-                <span className="material-symbols-outlined absolute h-4 w-4 text-[16px] opacity-0 transition-opacity group-hover:opacity-100">
-                  left_panel_open
-                </span>
+                <PanelLeftOpen className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
               )}
             </span>
             {!collapsed && (
@@ -155,9 +301,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               </span>
             )}
             {!collapsed && (
-              <span className="material-symbols-outlined h-4 w-4 shrink-0 text-[16px] text-muted" aria-hidden="true">
-                left_panel_close
-              </span>
+              <PanelLeftClose className="ml-auto h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
             )}
           </button>
           {!collapsed && (
@@ -167,76 +311,93 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               aria-label="Close navigation"
               className="muted grid h-8 w-8 place-items-center rounded-lg hover:bg-surface hover:text-gold-text lg:hidden"
             >
-              <span className="material-symbols-outlined text-[18px]">close</span>
+              <X className="h-4 w-4" aria-hidden="true" />
             </button>
           )}
         </div>
-        {/* Update badge — hidden when collapsed (no room for the copy affordance) */}
-        {!collapsed && updateInfo && (
-          <div className="px-5 pb-4">
-            <div className="flex flex-col gap-1.5 rounded-lg border border-gold/25 bg-gold-soft/60 p-2.5">
-              <span className="text-xs font-semibold text-gold-text">
-                ↑ New version available: v{updateInfo.latestVersion}
+
+        {/* Gateway status badge — polls /api/health rather than asserting a static string */}
+        <div
+          className={cn(
+            "mx-4 mb-5 rounded-xl border",
+            reachable !== false ? "border-success/20 bg-success/10" : "border-danger/30 bg-danger/10",
+            collapsed ? "flex justify-center p-2.5" : "p-3"
+          )}
+          title={collapsed ? hint : undefined}
+          aria-label={hint}
+        >
+          <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-2")}>
+            <span className="relative flex h-2 w-2">
+              {reachable === true && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />}
+              <span className={`relative inline-flex h-2 w-2 rounded-full ${reachable !== false ? "bg-success" : "bg-danger"}`} />
+            </span>
+            {!collapsed && <span className={`text-xs font-semibold ${reachable !== false ? "text-success" : "text-danger"}`}>
+              {reachable === undefined ? "Checking gateway" : reachable ? "Gateway online" : "Gateway offline"}
+            </span>}
+          </div>
+          {!collapsed && (
+            <p className="mt-1.5 pl-4 font-mono text-[10px] text-text-muted" title={hint}>
+              {hint}
+            </p>
+          )}
+        </div>
+
+        {/* Update badge — same pill style as the gateway badge, compact enough to stay visible when collapsed */}
+        {updateInfo && (
+          <div
+            className={cn(
+              "mx-4 mb-4 rounded-xl border border-warning/30 bg-warning/10",
+              collapsed ? "flex justify-center p-2.5" : "p-3"
+            )}
+            title={collapsed ? `New version v${updateInfo.latestVersion}` : undefined}
+            aria-label={`New version available: ${updateInfo.latestVersion}`}
+          >
+            <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-2")}>
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
               </span>
-              <div className="flex items-center gap-2">
+              {!collapsed && <span className="text-xs font-semibold text-warning">New version: v{updateInfo.latestVersion}</span>}
+            </div>
+            {!collapsed && (
+              <p className="mt-1.5 pl-4 font-mono text-[10px] text-text-muted">
+                {copied ? "✓ copied" : INSTALL_CMD}
+              </p>
+            )}
+            {!collapsed && (
+              <div className="mt-2 pl-4">
                 <button
                   onClick={() => setShowUpdateModal(true)}
                   className="btn-gold !px-2.5 !py-1.5 !text-[11px]"
                 >
                   Update now
                 </button>
-                <button
-                  onClick={() => copy(INSTALL_CMD)}
-                  title="Copy install command"
-                  className="flex-1 text-left hover:opacity-80 transition-opacity cursor-pointer min-w-0"
-                >
-                  <code className="block text-[10px] text-gold-text/70 font-mono truncate">
-                    {copied ? "✓ copied!" : INSTALL_CMD}
-                  </code>
-                </button>
               </div>
-            </div>
+            )}
           </div>
         )}
 
         {/* Navigation */}
-        <nav className={`dashboard-scroll flex-1 overflow-y-auto ${collapsed ? "px-2" : "px-3"} py-2 space-y-0.5`} aria-label="Dashboard navigation">
+        <nav className={cn("dashboard-scroll flex-1 overflow-y-auto", collapsed ? "px-2" : "px-3")} aria-label="Dashboard navigation">
           {!collapsed && <p className="mono-label px-3 pb-2">Workspace</p>}
-          {collapsed && <div className="h-3" aria-hidden="true" />}
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onClose}
-              title={collapsed ? item.label : undefined}
-              aria-label={collapsed ? item.label : undefined}
-              className={cn(
-                "flex items-center rounded-lg transition-colors group text-[13px] font-medium",
-                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2",
-                isActive(item.href)
-                  ? "bg-gold-soft text-gold-text"
-                  : "text-text-muted hover:bg-surface hover:text-text-main"
-              )}
-              aria-current={isActive(item.href) ? "page" : undefined}
-            >
-              <span
-                className={cn(
-                  "material-symbols-outlined shrink-0",
-                  collapsed ? "text-[17px]" : "text-[17px]",
-                  isActive(item.href) ? "fill-1" : "group-hover:text-gold-text transition-colors"
-                )}
-              >
-                {item.icon}
-              </span>
-              {!collapsed && <span className="flex-1">{item.label}</span>}
-            </Link>
-          ))}
+          {collapsed && <div className="h-4" aria-hidden="true" />}
+          <div className="space-y-0.5">
+            {navItems.map((item) => (
+              <NavRow
+                key={item.href}
+                icon={item.icon}
+                label={item.label}
+                active={isActive(item.href)}
+                collapsed={collapsed}
+                title={linkProps(item)}
+              />
+            ))}
+          </div>
 
           {/* System section */}
-          <div className="pt-3 mt-2 space-y-0.5">
-            {!collapsed && <p className="mono-label px-3 pb-2">System</p>}
-            {collapsed && <div className="mx-2 my-1 border-t border-line/70" aria-hidden="true" />}
-
+          {!collapsed && <p className="mono-label px-3 pb-2 pt-7">System</p>}
+          {collapsed && <div className="mx-2 my-2 border-t border-line/70" aria-hidden="true" />}
+          <div className="space-y-0.5">
             {/* Media Providers accordion */}
             <button
               onClick={() => setMediaOpen((v) => !v)}
@@ -244,20 +405,22 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
               aria-label={collapsed ? "Media Providers" : undefined}
               aria-expanded={mediaOpen}
               className={cn(
-                "w-full flex items-center rounded-lg transition-colors group",
-                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
+                "group flex w-full items-center rounded-lg transition-colors",
+                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2 text-left text-[13px] font-medium",
                 pathname.startsWith("/dashboard/media-providers")
                   ? "bg-gold-soft text-gold-text"
                   : "text-text-muted hover:bg-surface hover:text-text-main"
               )}
             >
-              <span className="material-symbols-outlined shrink-0 text-[17px]">perm_media</span>
+              <span className="shrink-0 text-text-muted" aria-hidden="true"><Cpu className="h-[17px] w-[17px]" /></span>
               {!collapsed && (
                 <>
-                  <span className="text-[13px] font-medium flex-1 text-left">Media Providers</span>
-                  <span className="material-symbols-outlined text-[14px] transition-transform" style={{ transform: mediaOpen ? "rotate(180deg)" : "rotate(0deg)" }}>
-                    expand_more
-                  </span>
+                  <span className="flex-1">Media Providers</span>
+                  <ChevronDown
+                    className="h-4 w-4 transition-transform"
+                    style={{ transform: mediaOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+                    aria-hidden="true"
+                  />
                 </>
               )}
             </button>
@@ -275,7 +438,10 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
                         : "text-text-muted hover:bg-surface hover:text-text-main"
                     )}
                   >
-                    <span className="material-symbols-outlined text-[16px]">{kind.icon}</span>
+                    {(() => {
+                      const MIcon = MEDIA_ICON_MAP[kind.icon] || Cpu;
+                      return <MIcon className="h-4 w-4 shrink-0" aria-hidden="true" />;
+                    })()}
                     <span className="text-sm">{kind.label}</span>
                   </Link>
                 ))}
@@ -290,146 +456,110 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
                       : "text-text-muted hover:bg-surface hover:text-text-main"
                   )}
                 >
-                  <span className="material-symbols-outlined text-[16px]">{COMBINED_WEB_ITEM.icon}</span>
+                  {(() => {
+                    const WIcon = COMBINED_WEB_ITEM.icon;
+                    return <WIcon className="h-4 w-4 shrink-0" aria-hidden="true" />;
+                  })()}
                   <span className="text-sm">{COMBINED_WEB_ITEM.label}</span>
                 </Link>
               </div>
             )}
 
             {systemItems.map((item) => (
-              <Link
+              <NavRow
                 key={item.href}
-                href={item.href}
-                onClick={onClose}
-                title={collapsed ? item.label : undefined}
-                aria-label={collapsed ? item.label : undefined}
-                className={cn(
-                  "flex items-center rounded-lg transition-colors group",
-                  collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
-                  isActive(item.href)
-                    ? "bg-gold-soft text-gold-text"
-                    : "text-text-muted hover:bg-surface hover:text-text-main"
-                )}
-              >
-                <span
-                  className={cn(
-                    "material-symbols-outlined shrink-0 text-[17px]",
-                    isActive(item.href) ? "fill-1" : "group-hover:text-gold-text transition-colors"
-                  )}
-                >
-                  {item.icon}
-                </span>
-                {!collapsed && <span className="text-[13px] font-medium">{item.label}</span>}
-              </Link>
+                icon={item.icon}
+                label={item.label}
+                active={isActive(item.href)}
+                collapsed={collapsed}
+                title={linkProps(item)}
+              />
             ))}
 
-            {/* Debug items (inside System section, before Settings) */}
+            {/* Debug items */}
             {debugItems.map((item) => {
               const show = item.href !== "/dashboard/translator" || enableTranslator;
               return show ? (
-                <Link
+                <NavRow
                   key={item.href}
-                  href={item.href}
-                  onClick={onClose}
-                  title={collapsed ? item.label : undefined}
-                  aria-label={collapsed ? item.label : undefined}
-                  className={cn(
-                    "flex items-center rounded-lg transition-colors group",
-                    collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
-                    isActive(item.href)
-                      ? "bg-gold-soft text-gold-text"
-                      : "text-text-muted hover:bg-surface hover:text-text-main"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "material-symbols-outlined shrink-0 text-[17px]",
-                      isActive(item.href) ? "fill-1" : "group-hover:text-gold-text transition-colors"
-                    )}
-                  >
-                    {item.icon}
-                  </span>
-                  {!collapsed && <span className="text-[13px] font-medium">{item.label}</span>}
-                </Link>
+                  icon={item.icon}
+                  label={item.label}
+                  active={isActive(item.href)}
+                  collapsed={collapsed}
+                  title={linkProps(item)}
+                />
               ) : null;
             })}
 
-            {/* Remote */}
-            <a
-              href="https://9remote.cc"
-              target="_blank"
-              rel="noreferrer"
-              onClick={onClose}
-              title={collapsed ? "9Remote" : undefined}
-              aria-label={collapsed ? "9Remote" : undefined}
-              className={cn(
-                "flex items-center rounded-lg transition-colors group w-full",
-                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
-                "text-text-muted hover:bg-surface hover:text-text-main"
-              )}
-            >
-              <span className="material-symbols-outlined shrink-0 text-[17px] group-hover:text-gold-text transition-colors">
-                computer
-              </span>
-              {!collapsed && (
-                <>
-                  <span className="text-[13px] font-medium">9Remote</span>
-                  <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-[3px] bg-gold-soft text-gold-text">
-                    HOT
-                  </span>
-                </>
-              )}
-            </a>
+            {/* 9Remote */}
+            <NavRow
+              icon={Cpu}
+              label="9Remote"
+              collapsed={collapsed}
+              badge="HOT"
+              title={{ href: "https://9remote.cc", onClick: onClose }}
+            />
 
             {/* 9English */}
-            <a
-              href="https://9english.net/"
-              target="_blank"
-              rel="noreferrer"
-              onClick={onClose}
-              title={collapsed ? "9English" : undefined}
-              aria-label={collapsed ? "9English" : undefined}
-              className={cn(
-                "flex items-center rounded-lg transition-colors group w-full",
-                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
-                "text-text-muted hover:bg-surface hover:text-text-main"
-              )}
-            >
-              <span className="material-symbols-outlined shrink-0 text-[17px] group-hover:text-gold-text transition-colors">
-                translate
-              </span>
-              {!collapsed && <span className="text-[13px] font-medium">9English</span>}
-            </a>
+            <NavRow
+              icon={Languages}
+              label="9English"
+              collapsed={collapsed}
+              title={{ href: "https://9english.net/", onClick: onClose }}
+            />
 
             {/* Settings */}
+            <NavRow
+              icon={Settings}
+              label="Settings"
+              active={isActive("/dashboard/profile")}
+              collapsed={collapsed}
+              title={linkProps({ href: "/dashboard/profile" })}
+            />
+          </div>
+
+          <div className={cn("mt-8 border-t border-line/70 pt-5", collapsed ? "px-1" : "")}>
             <Link
-              href="/dashboard/profile"
+              href="/dashboard/providers"
               onClick={onClose}
-              title={collapsed ? "Settings" : undefined}
-              aria-label={collapsed ? "Settings" : undefined}
               className={cn(
-                "flex items-center rounded-lg transition-colors group",
-                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-1",
-                isActive("/dashboard/profile")
-                  ? "bg-gold-soft text-gold-text"
-                  : "text-text-muted hover:bg-surface hover:text-text-main"
+                "group block rounded-xl border border-gold/25 bg-gold-soft/60 transition-colors hover:border-gold/50",
+                collapsed ? "flex justify-center p-3" : "p-3.5"
               )}
+              title={collapsed ? "Connect a provider" : undefined}
+              aria-label={collapsed ? "Connect a provider" : undefined}
             >
-              <span
-                className={cn(
-                  "material-symbols-outlined shrink-0 text-[17px]",
-                  isActive("/dashboard/profile") ? "fill-1" : "group-hover:text-gold-text transition-colors"
-                )}
-              >
-                settings
-              </span>
-              {!collapsed && <span className="text-[13px] font-medium">Settings</span>}
+              <div className={cn("items-center gap-2 text-xs font-semibold text-gold-text", collapsed ? "flex justify-center" : "flex")}>
+                <Network className="h-4 w-4 shrink-0" aria-hidden="true" />
+                {!collapsed && "Connect a provider"}
+              </div>
+              {!collapsed && <p className="muted mt-1.5 text-[11px] leading-relaxed">Bring your first route online in under a minute.</p>}
+              {!collapsed && (
+                <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-gold-text">
+                  Quick setup
+                  <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+                </span>
+              )}
             </Link>
           </div>
         </nav>
 
+        {/* Footer — workspace identity */}
+        <div className={cn("border-t border-line/70", collapsed ? "p-3" : "p-4")}>
+          <div
+            className={cn("flex items-center", collapsed ? "justify-center" : "gap-2.5")}
+            title={collapsed ? "Local workspace · no account required" : undefined}
+          >
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-gold/30 bg-gold-soft text-[10px] font-bold text-gold-text">OH</span>
+            {!collapsed && (
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold">Local workspace</p>
+                <p className="muted truncate text-[10px]">No account required</p>
+              </div>
+            )}
+          </div>
+        </div>
       </aside>
-
 
       {/* Update Confirmation Modal */}
       <ConfirmModal
@@ -459,7 +589,7 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
           ) : (
             <div className="text-center p-8">
               <div className="flex items-center justify-center size-16 rounded-full bg-red-500/20 text-red-500 mx-auto mb-4">
-                <span className="material-symbols-outlined text-[32px]">power_off</span>
+                <Power className="h-8 w-8" />
               </div>
               <h2 className="text-xl font-semibold text-white mb-2">Server Disconnected</h2>
               <p className="text-text-muted mb-6">The proxy server has been stopped.</p>
@@ -486,7 +616,7 @@ function ManualUpdatePanel({ latestVersion, installCmd, copied, onCopyAndShutdow
     <div className="w-full max-w-lg rounded-xl bg-neutral-900/95 border border-white/10 p-6 text-white">
       <div className="flex items-center gap-3 mb-4">
         <div className="flex items-center justify-center size-11 rounded-full bg-amber-500/20 text-amber-400">
-          <span className="material-symbols-outlined text-[24px]">content_copy</span>
+          <Copy className="h-6 w-6" />
         </div>
         <div>
           <h2 className="text-lg font-semibold">Update OmniHilbras{latestVersion ? ` to v${latestVersion}` : ""}</h2>

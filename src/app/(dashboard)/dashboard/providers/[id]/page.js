@@ -1211,6 +1211,23 @@ export default function ProviderDetailPage() {
                     console.log("Error updating proxy:", error);
                   }
                 }}
+                onRefresh={async (target) => {
+                  try {
+                    const res = await fetch(`/api/providers/${target.id}/refresh`, { method: "POST" });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok && !data.detail) {
+                      notify.error(data?.error || "Refresh failed");
+                    } else if (data.refreshed === "none") {
+                      notify.info(data.detail || "Nothing to refresh.");
+                    } else {
+                      notify.success(data.detail || "Credentials refreshed.");
+                    }
+                    // Re-read the connection list so refreshed tokens/status show.
+                    await fetchConnections();
+                  } catch (error) {
+                    notify.error(`Refresh failed: ${error?.message || error}`);
+                  }
+                }}
                 onEdit={() => {
                   setSelectedConnection(conn);
                   setShowEditModal(true);

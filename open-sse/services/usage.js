@@ -26,6 +26,7 @@ import { resolveQoderCredentials } from "./qoderModels.js";
 import { getGlmUsage } from "./usage/glm.js";
 import { getCommandCodeUsage } from "./usage/commandcode.js";
 import { getAggregatorUsage } from "./usage/aggregator.js";
+import { getAdcodeUsage } from "./usage/adcode.js";
 import {
   getIflowUsage,
   getOllamaUsage,
@@ -81,6 +82,7 @@ const USAGE_HANDLERS = {
   xkiro: (c) => getAggregatorUsage(c),
   beatapi: (c) => getAggregatorUsage(c),
   kiraai: (c) => getAggregatorUsage(c),
+  adcode: (c) => getAdcodeUsage(c),
 };
 
 // Qoder intl/CN share one usage path: PATs must be exchanged to a job token

@@ -211,11 +211,22 @@ const DEVIN_CLI_GPT_CAPS = { vision: true, reasoning: true, search: true, thinki
  */
 export const PROVIDER_CAPABILITIES = {
   // ZCode Start Plan serves GLM through a validated stock-template gateway:
-  // client tool schemas are not bridged (stock tool catalog only), thinking is
-  // always on with output_config.effort low|high|max (thinkingUnified "zcode").
+  // the stock tool catalog stays untouched and client tool schemas are bridged
+  // through the conversation (executors/zcode/toolBridge.js), thinking is always
+  // on with output_config.effort low|high|max (thinkingUnified "zcode").
   "zcode": {
-    "glm-5.3":       { reasoning: true, thinkingFormat: "zcode", thinkingCanDisable: false, tools: false, contextWindow: 1000000, maxOutput: 128000 },
-    "glm-5.3-flash": { reasoning: true, thinkingFormat: "zcode", thinkingCanDisable: false, tools: false, contextWindow: 1000000, maxOutput: 128000 },
+    "glm-5.3":       { reasoning: true, thinkingFormat: "zcode", thinkingCanDisable: false, tools: true, contextWindow: 1000000, maxOutput: 128000 },
+    "glm-5.3-flash": { reasoning: true, thinkingFormat: "zcode", thinkingCanDisable: false, tools: true, contextWindow: 1000000, maxOutput: 128000 },
+  },
+  // ADCode "Included AI" (tagflow) — OpenAI-compatible relay; each model's
+  // context window / output limit comes from the live /config catalogue
+  // (tagflow-code-27b 262k ctx / 50k out; heabsy-* 131k ctx / 50k out).
+  // The relay enforces the account's credit allowance, so no thinking knobs.
+  "adcode": {
+    "tagflow-code-27b":        { tools: true, reasoning: false, contextWindow: 262144, maxOutput: 50000 },
+    "heabsy-qwen38":           { tools: true, reasoning: false, contextWindow: 131072, maxOutput: 50000 },
+    "heabsy-glm53-flash-unc":  { tools: true, reasoning: false, contextWindow: 131072, maxOutput: 50000 },
+    "heabsy-mimo-v26-flash":   { tools: true, reasoning: false, contextWindow: 131072, maxOutput: 50000 },
   },
   // NVIDIA NIM is OpenAI-compatible → rejects MiniMax/GLM native `thinking` field.
   // Force openai reasoning_effort format for its reasoning models. #issue

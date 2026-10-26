@@ -58,6 +58,19 @@ export const FILTERS = {
 
   "nous-free": normalizeNousFreeModels,
 
+  // ADCode desktop Included-AI live catalogue: /config returns
+  // { available, defaultModel, models: [{ id, name, contextWindow, maxOutput, … }] }
+  // — route unwraps json.models so this receives the models array directly.
+  "adcode-config": (models) =>
+    (Array.isArray(models) ? models : [])
+      .filter((m) => typeof m?.id === "string" && m.id.trim() !== "")
+      .map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        contextLength: Number(m.contextWindow) || undefined,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+
   // Generic OpenAI-compatible /v1/models catalogues (free-tier aggregators).
   // Returns every model with the real context window the provider publishes —
   // context_length / context_window / max_context_tokens / max_tokens, in that order.

@@ -791,6 +791,22 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
           return { valid: false, error: String(error?.message || error) };
         }
       }
+      case "adcode": {
+        // ADCode needs no dashboard key: auth resolves from the ADCode desktop
+        // client's Firebase identity store (or a pasted id_token on the
+        // connection). The read-only /usage endpoint proves the minted token
+        // works and the account is entitled to the Included-AI pools.
+        try {
+          const { fetchAdcodeUsage } = await import("open-sse/executors/adcode.js");
+          await fetchAdcodeUsage(
+            { apiKey: connection.apiKey || connection.accessToken, accessToken: connection.accessToken || connection.apiKey },
+            { signal: AbortSignal.timeout(10000) },
+          );
+          return { valid: true, error: null };
+        } catch (error) {
+          return { valid: false, error: String(error?.message || error) };
+        }
+      }
       case "kiraai": {
         // KiraAI serves /models publicly (200 even for a bad key), so a plain
         // GET there would always pass. Probe a zero-cost completion instead:

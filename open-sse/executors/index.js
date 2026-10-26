@@ -27,6 +27,7 @@ import TraeExecutor from "./trae.js";
 import ZedExecutor from "./zed.js";
 import WindsurfExecutor from "./windsurf.js";
 import { ZCodeExecutor } from "./zcode.js";
+import { AdcodeExecutor } from "./adcode.js";
 import { DefaultExecutor } from "./default.js";
 import { MinimaxCodeExecutor } from "./minimax-code.js";
 import { DevinCliExecutor } from "./devin-cli.js";
@@ -36,6 +37,7 @@ import { DuckDuckGoWebExecutor } from "./duckduckgo-web.js";
 import { GeminiWebExecutor } from "./gemini-web.js";
 import { QwenWebExecutor } from "./qwen-web.js";
 import { TokenHarborWebExecutor } from "./tokenharbor-web.js";
+import { WebCookieAgentExecutor } from "./webcookie-agent.js";
 
 const executors = {
   antigravity: new AntigravityExecutor(),
@@ -78,6 +80,10 @@ const executors = {
   zed: new ZedExecutor(),
   windsurf: new WindsurfExecutor(),
   zcode: new ZCodeExecutor(),
+  adcode: new AdcodeExecutor(),
+  dc: new AdcodeExecutor(), // Alias for adcode
+  "webcookie-agent": new WebCookieAgentExecutor(),
+  wca: new WebCookieAgentExecutor(), // Alias for webcookie-agent
   "minimax-code": new MinimaxCodeExecutor("minimax-code"),
   "minimax-code-global": new MinimaxCodeExecutor("minimax-code-global"),
   "devin-cli": new DevinCliExecutor(),
@@ -139,4 +145,7 @@ export { default as TraeExecutor } from "./trae.js";
 export { default as ZedExecutor } from "./zed.js";
 export { default as WindsurfExecutor } from "./windsurf.js";
 export { ZCodeExecutor } from "./zcode.js";
+export { AdcodeExecutor } from "./adcode.js";
+export { fetchAdcodeConfig, fetchAdcodeUsage } from "./adcode.js";
+export { WebCookieAgentExecutor } from "./webcookie-agent.js";
 export { DevinCliExecutor } from "./devin-cli.js";

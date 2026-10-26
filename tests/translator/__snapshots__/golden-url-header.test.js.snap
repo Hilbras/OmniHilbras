@@ -1,5 +1,24 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`GOLDEN buildHeaders (default executor providers) > adcode → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > agnes → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
@@ -1812,6 +1831,25 @@ exports[`GOLDEN buildHeaders (default executor providers) > volcengine-ark → h
 }
 `;
 
+exports[`GOLDEN buildHeaders (default executor providers) > webcookie-agent → headers (apiKey / oauth) 1`] = `
+{
+  "apiKey": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "nonStream": {
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+  "oauth": {
+    "Accept": "text/event-stream",
+    "Authorization": "Bearer <TOK>",
+    "Content-Type": "application/json",
+  },
+}
+`;
+
 exports[`GOLDEN buildHeaders (default executor providers) > xai → headers (apiKey / oauth) 1`] = `
 {
   "apiKey": {
@@ -1888,6 +1926,13 @@ exports[`GOLDEN buildHeaders (default executor providers) > zed → headers (api
     "Content-Type": "application/json",
     "content-type": "application/json",
   },
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > adcode → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "https://adcode.bluethenics.com/v1/ai/tagflow/chat/completions",
+  "stream": "https://adcode.bluethenics.com/v1/ai/tagflow/chat/completions",
 }
 `;
 
@@ -2476,6 +2521,13 @@ exports[`GOLDEN buildUrl (default executor providers) > volcengine-ark → url (
 {
   "nonStream": "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions",
   "stream": "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions",
+}
+`;
+
+exports[`GOLDEN buildUrl (default executor providers) > webcookie-agent → url (stream + non-stream) 1`] = `
+{
+  "nonStream": "webcookie-agent",
+  "stream": "webcookie-agent",
 }
 `;
 
