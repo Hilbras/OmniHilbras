@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { updateSettings } from "@/lib/localDb";
-import { getObservabilityConfig, invalidateObservabilityConfig } from "@/lib/requestDetailsDb";
+import { getObservabilityConfig, invalidateObservabilityConfig, isObservabilityForcedOff } from "@/lib/requestDetailsDb";
 
 export const dynamic = "force-dynamic";
 
@@ -20,9 +20,9 @@ async function readConfig() {
     batchSize: config.batchSize,
     flushIntervalMs: config.flushIntervalMs,
     maxJsonSize: Math.round(config.maxJsonSize / 1024),
-    // ENABLE_REQUEST_LOGS overrides the UI toggle; the dashboard says so
+    // OBSERVABILITY_ENABLED=false forces recording off; the dashboard says so
     // instead of showing a toggle that silently does nothing.
-    envOverride: process.env.ENABLE_REQUEST_LOGS !== undefined,
+    envOverride: isObservabilityForcedOff(),
   };
 }
 

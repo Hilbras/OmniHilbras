@@ -77,7 +77,7 @@ export {
   getRequestDetailById, getRequestLogDetailById, deleteRequestLogById,
   deleteRequestLogBatch, deleteRequestLogsBefore, clearAllRequestLogs,
   getDistinctProviders, getDistinctModels, getDistinctConnections,
-  getObservabilityConfig, invalidateObservabilityConfig, getObservabilityStats,
+  getObservabilityConfig, invalidateObservabilityConfig, isObservabilityForcedOff, getObservabilityStats,
 } from "./repos/observabilityRepo.js";
 
 // Export/import full DB

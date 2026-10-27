@@ -68,7 +68,7 @@ export default function SettingsTab() {
             <p className="font-medium text-sm sm:text-base">Record requests</p>
             <p className="text-xs sm:text-sm text-text-muted">
               {config.envOverride
-                ? "Controlled by the ENABLE_REQUEST_LOGS environment variable; unset it to use this toggle."
+                ? "Turned off by OBSERVABILITY_ENABLED=false in the server environment; remove it to use this toggle."
                 : "Store metadata for each gateway request so it shows up in Logs and Metrics"}
             </p>
           </div>

@@ -5,5 +5,5 @@ export {
   getRequestDetailById, getRequestLogDetailById,
   deleteRequestLogById, deleteRequestLogBatch, deleteRequestLogsBefore, clearAllRequestLogs,
   getDistinctProviders, getDistinctModels, getDistinctConnections,
-  getObservabilityConfig, invalidateObservabilityConfig, getObservabilityStats,
+  getObservabilityConfig, invalidateObservabilityConfig, isObservabilityForcedOff, getObservabilityStats,
 } from "@/lib/db/index.js";

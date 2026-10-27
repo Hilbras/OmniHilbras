@@ -114,3 +114,42 @@ describe("logQuery helpers", () => {
     expect(toJsonl([])).toBe("");
   });
 });
+
+describe("observability on/off precedence", () => {
+  const saved = { obs: process.env.OBSERVABILITY_ENABLED, logs: process.env.ENABLE_REQUEST_LOGS };
+  const restore = () => {
+    for (const [key, value] of [["OBSERVABILITY_ENABLED", saved.obs], ["ENABLE_REQUEST_LOGS", saved.logs]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    db.invalidateObservabilityConfig();
+  };
+
+  it("UI toggle decides; ENABLE_REQUEST_LOGS (file logs) does not affect it", async () => {
+    try {
+      process.env.ENABLE_REQUEST_LOGS = "false";
+      await db.updateSettings({ enableObservability: true });
+      db.invalidateObservabilityConfig();
+      expect((await db.getObservabilityConfig()).enabled).toBe(true);
+
+      process.env.ENABLE_REQUEST_LOGS = "true";
+      await db.updateSettings({ enableObservability: false });
+      db.invalidateObservabilityConfig();
+      expect((await db.getObservabilityConfig()).enabled).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it("OBSERVABILITY_ENABLED=false forces recording off over the UI toggle", async () => {
+    try {
+      process.env.OBSERVABILITY_ENABLED = "FALSE";
+      await db.updateSettings({ enableObservability: true });
+      db.invalidateObservabilityConfig();
+      expect(db.isObservabilityForcedOff()).toBe(true);
+      expect((await db.getObservabilityConfig()).enabled).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+});

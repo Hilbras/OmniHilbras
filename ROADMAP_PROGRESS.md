@@ -59,7 +59,7 @@
 ### Item 12 — Observability Stack
 **Goal:** Full request-level observability: logs, metrics, retention, export.
 
-**Status:** ✅ Done (uncommitted). Build passes; full unit suite passes (4388 tests).
+**Status:** ✅ Done, committed on `feat/ollama-local-observability`.
 
 **Storage:** `src/lib/db/repos/observabilityRepo.js` replaces `requestDetailsRepo.js` (deleted) and keeps the
 existing `requestDetails` table. The planned rename to `observabilityLog` was dropped: it would have needed a
@@ -91,9 +91,13 @@ Observability card links to the settings tab.
 **Tests:** `tests/unit/observability-repo.test.js`.
 
 **Not done:**
-- Not exercised against a running server yet (build + unit tests only).
-- Config precedence decision still open: `ENABLE_REQUEST_LOGS` env still overrides the UI toggle (the Settings tab
-  now says so and disables the toggle). Recommended: env = opt-out (`OBSERVABILITY_ENABLED=false`).
+- Smoke-tested on an isolated dev server: auth (401 without credentials), settings validation, filters, facets,
+  single entry, stats, CSV/JSONL export (no payload leak), every delete path, and all three tabs render.
+
+**On/off precedence (decided):** the UI toggle decides; `OBSERVABILITY_ENABLED=false` is an operator kill switch
+that forces recording off (the Settings tab says so and disables the toggle). `ENABLE_REQUEST_LOGS` no longer
+affects the dashboard log — it only controls the file logs under `logs/`, as the README documents. Note: deployments
+that set `ENABLE_REQUEST_LOGS=true` to get dashboard logs must turn the UI toggle on once.
 
 ---
 
@@ -133,16 +137,15 @@ Observability card links to the settings tab.
 | DB schema version bump | Pending (migration for Item 10; Item 12 needed none) |
 | i18n literals (EN) | Pending for new UI strings (Item 12 page is EN-only) |
 | Test snapshots (`tests/__baseline__`) | Need update if DB row shapes change |
-| npm/GitHub release | Items 1–9 and 12 ready but uncommitted; Items 10–11 pending |
+| npm/GitHub release | Items 1–9 and 12 committed on a branch; Items 10–11 pending |
 
 ---
 
 ## 🚀 Next Actions (Priority Order)
 
-1. **Smoke-test `/dashboard/observability` on a running server, then commit Items 9 + 12** (Ollama changes are also still uncommitted)
-2. **Decide observability config precedence** (see Item 12)
-3. **Item 11 (Skill Marketplace)** — independent (~2 days)
-4. **Item 10 (Team Workspace)** — depends on DB architecture changes, largest scope (~1 week)
+1. **Merge `feat/ollama-local-observability`** (Items 9 + 12)
+2. **Item 11 (Skill Marketplace)** — independent (~2 days)
+3. **Item 10 (Team Workspace)** — depends on DB architecture changes, largest scope (~1 week)
 
 ---
 
