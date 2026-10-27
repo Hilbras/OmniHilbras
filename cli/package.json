@@ -1,6 +1,6 @@
 {
   "name": "@hilbras/omnihilbras",
-  "version": "2.9.12",
+  "version": "2.9.13",
   "description": "OmniHilbras CLI - Start and manage OmniHilbras server",
   "bin": {
     "omnihilbras": "./cli.js"
