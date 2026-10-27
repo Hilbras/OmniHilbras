@@ -37,7 +37,7 @@ function agentApiBaseUrl() {
 // at import) so this module stays importable in tests without the local DB.
 async function agentApiToken() {
   try {
-    const { getCliToken } = await import("../../../../src/lib/auth/cliToken.js");
+    const { getCliToken } = await import("../../../src/lib/auth/cliToken.js");
     return await getCliToken();
   } catch {
     return process.env.OMNIHILBRAS_AGENT_API_KEY?.trim() || "dummy";
