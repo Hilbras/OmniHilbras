@@ -10,9 +10,19 @@ export const SKILLS_RAW_BASE = `https://raw.githubusercontent.com/${REPO}/refs/h
 export const SKILLS_BLOB_BASE = `https://github.com/${REPO}/blob/${BRANCH}/${SKILL_PATH}`;
 export const SKILLS_TREE_URL = `${SKILLS_REPO_URL}/tree/${BRANCH}/${SKILL_PATH}`;
 
+export const SKILL_CATEGORIES = [
+  { id: "setup", label: "Setup" },
+  { id: "text", label: "Text" },
+  { id: "media", label: "Image & Video" },
+  { id: "audio", label: "Audio" },
+  { id: "web", label: "Web" },
+  { id: "other", label: "Other" },
+];
+
 export const SKILLS = [
   {
     id: "omnihilbras",
+    category: "setup",
     name: "OmniHilbras (Entry)",
     description: "Setup + index of all capabilities. Start here — covers base URL, auth, model discovery, and links to every capability skill.",
     endpoint: null,
@@ -21,6 +31,7 @@ export const SKILLS = [
   },
   {
     id: "omnihilbras-chat",
+    category: "text",
     name: "Chat",
     description: "Chat / code-gen via OpenAI or Anthropic format with streaming.",
     endpoint: "/v1/chat/completions",
@@ -28,6 +39,7 @@ export const SKILLS = [
   },
   {
     id: "omnihilbras-image",
+    category: "media",
     name: "Image Generation",
     description: "Text-to-image via DALL-E, Imagen, FLUX, MiniMax, SDWebUI…",
     endpoint: "/v1/images/generations",
@@ -35,6 +47,7 @@ export const SKILLS = [
   },
   {
     id: "omnihilbras-video",
+    category: "media",
     name: "Video Generation",
     description: "Text-to-video via xAI Grok Imagine — async job: submit, poll, download.",
     endpoint: "/v1/videos/generations",
@@ -42,6 +55,7 @@ export const SKILLS = [
   },
   {
     id: "omnihilbras-tts",
+    category: "audio",
     name: "Text-to-Speech",
     description: "OpenAI / ElevenLabs / Edge / Google / Deepgram voices.",
     endpoint: "/v1/audio/speech",
@@ -49,6 +63,7 @@ export const SKILLS = [
   },
   {
     id: "omnihilbras-stt",
+    category: "audio",
     name: "Speech-to-Text",
     description: "Transcribe audio via OpenAI Whisper, Groq, Gemini, Deepgram, AssemblyAI…",
     endpoint: "/v1/audio/transcriptions",
@@ -56,6 +71,7 @@ export const SKILLS = [
   },
   {
     id: "omnihilbras-embeddings",
+    category: "text",
     name: "Embeddings",
     description: "Vectors for RAG / semantic search via OpenAI, Gemini, Mistral…",
     endpoint: "/v1/embeddings",
@@ -63,6 +79,7 @@ export const SKILLS = [
   },
   {
     id: "omnihilbras-web-search",
+    category: "web",
     name: "Web Search",
     description: "Web and X search via Tavily / Exa / Brave / Serper / SearXNG / Google PSE / You.com / Xquik.",
     endpoint: "/v1/search",
@@ -70,6 +87,7 @@ export const SKILLS = [
   },
   {
     id: "omnihilbras-web-fetch",
+    category: "web",
     name: "Web Fetch",
     description: "URL → markdown / text / HTML via Firecrawl, Jina, Tavily, Exa.",
     endpoint: "/v1/web/fetch",

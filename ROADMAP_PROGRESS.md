@@ -6,7 +6,7 @@
 
 ---
 
-## ✅ Completed Items (1–9, 12)
+## ✅ Completed Items (1–9, 11, 12)
 
 ### Item 1 — Provider Refresh Button
 - **Location:** Provider detail page connections card
@@ -101,7 +101,28 @@ that set `ENABLE_REQUEST_LOGS=true` to get dashboard logs must turn the UI toggl
 
 ---
 
-## 📋 Planned Items (10–11) — Not Started
+### Item 11 — Skill Marketplace
+**Status:** ✅ Done, committed on `feat/ollama-local-observability`.
+
+- **Catalog:** `skills/SKILLS_INDEX.json`, generated from `skills/<id>/SKILL.md` by `scripts/build-skills-index.mjs`
+  (runs as `prebuild` / `prebuild:bun`). Bundled into the server because the standalone build does not ship
+  `skills/`. Dashboard metadata (icon, endpoint, category, entry flag) stays in `src/shared/constants/skills.js`.
+- **Service:** `src/lib/skills/skillStore.js` — `fetchManifest`, `searchSkills(q, category)`, `getSkill`,
+  `getSkillText`, `installSkill` (also updates), `uninstallSkill`, `listInstalledSkills`.
+- **Persistence:** `DATA_DIR/skills/<id>/SKILL.md` + a `kv` row (scope `installedSkills`: sha256, installedAt,
+  updatedAt) via `installedSkillsRepo.js`. No schema change. An installed skill whose catalog version changed shows
+  "Update available".
+- **API:** `GET /api/skills?q=&category=`, `GET/DELETE /api/skills/[id]`, `POST /api/skills/install`,
+  `GET /api/skills/mine`. Ids are validated (`^[a-z0-9][a-z0-9-]{0,63}$`) and must be catalog keys.
+- **UI:** `/dashboard/skills` — Discover (search, category chips, install/update/remove) and My Skills (local path,
+  copy path/link, remove); a drawer shows the SKILL.md with copy-content / copy-prompt.
+- **Tests:** `tests/unit/skill-store.test.js`, `tests/unit/skills-index.test.js` (fails if the index is stale).
+- **Verified:** on the standalone production build (install, update detection, uninstall, traversal rejected).
+- **Scope note:** catalog is the bundled skills only; no remote/third-party skill sources.
+
+---
+
+## 📋 Planned Items (10) — Not Started
 
 ### Item 10 — Team Workspace Mode
 **Goal:** Multi-workspace isolation so a single OmniHilbras install serves several teams/projects.
@@ -118,18 +139,6 @@ that set `ENABLE_REQUEST_LOGS=true` to get dashboard logs must turn the UI toggl
 
 ---
 
-### Item 11 — Skill Marketplace
-**Goal:** Curated, installable skill store inside the dashboard.
-
-**Design:**
-- **Catalog source:** `SKILLS_INDEX.json` (manifest) + existing `skills/` folder as default local marketplace
-- **Service layer:** `SkillStore` — `fetchManifest()`, `getSkillText(id)`, `installSkill(id)`, `uninstallSkill(id)`, `searchSkills(query)`
-- **Persistence:** Installed skills as `~/.omnihilbras/skills/<id>/SKILL.md` + DB metadata row
-- **API:** `GET /api/skills?q=`, `GET /api/skills/<id>`, `POST /api/skills/install`, `DELETE /api/skills/<id>`, `GET /api/skills/mine`
-- **UI:** Two tabs — **Discover** (catalog + install button) + **My Skills** (installed, copy prompt, delete); search bar + category chips
-
----
-
 ## 🔧 Cross-Cutting Concerns
 
 | Concern | Status |
@@ -137,15 +146,14 @@ that set `ENABLE_REQUEST_LOGS=true` to get dashboard logs must turn the UI toggl
 | DB schema version bump | Pending (migration for Item 10; Item 12 needed none) |
 | i18n literals (EN) | Pending for new UI strings (Item 12 page is EN-only) |
 | Test snapshots (`tests/__baseline__`) | Need update if DB row shapes change |
-| npm/GitHub release | Items 1–9 and 12 committed on a branch; Items 10–11 pending |
+| npm/GitHub release | Items 1–9, 11, 12 committed on a branch; Item 10 pending |
 
 ---
 
 ## 🚀 Next Actions (Priority Order)
 
-1. **Merge `feat/ollama-local-observability`** (Items 9 + 12)
-2. **Item 11 (Skill Marketplace)** — independent (~2 days)
-3. **Item 10 (Team Workspace)** — depends on DB architecture changes, largest scope (~1 week)
+1. **Merge `feat/ollama-local-observability`** (Items 9, 11, 12)
+2. **Item 10 (Team Workspace)** — depends on DB architecture changes, largest scope (~1 week)
 
 ---
 

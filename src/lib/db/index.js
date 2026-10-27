@@ -71,6 +71,11 @@ export {
   appendRequestLog, getRecentLogs,
 } from "./repos/usageRepo.js";
 
+// Installed skills (Skill Marketplace)
+export {
+  getInstalledSkills, getInstalledSkill, saveInstalledSkill, deleteInstalledSkill,
+} from "./repos/installedSkillsRepo.js";
+
 // Observability logs
 export {
   saveRequestDetail, saveRequestDetails, getRequestDetails, getRequestLogEntries,
