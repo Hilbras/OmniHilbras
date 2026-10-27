@@ -53,9 +53,18 @@ export async function GET(request) {
   try {
     // Gemini: /v1beta/models takes the key as a query param, not a Bearer header.
     const isGemini = url.includes("generativelanguage.googleapis.com");
+    // Anthropic: /v1/models requires Anthropic-Version header (even for OAuth Bearer)
+    const isAnthropic = url.includes("api.anthropic.com");
     const target = isGemini && hasKey ? `${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(authHeader.slice(7))}` : url;
+    const fetchHeaders = {};
+    if (authHeader && !isGemini) {
+      fetchHeaders.Authorization = authHeader;
+    }
+    if (isAnthropic) {
+      fetchHeaders["Anthropic-Version"] = "2023-06-01";
+    }
     const res = await fetch(target, {
-      headers: authHeader && !isGemini ? { Authorization: authHeader } : undefined,
+      headers: fetchHeaders,
       cache: "no-store",
     });
     if (!res.ok) {

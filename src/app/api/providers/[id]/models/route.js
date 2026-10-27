@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getProviderConnectionById } from "@/models";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 import { GEMINI_CONFIG, ZED_HOSTED_CONFIG } from "@/lib/oauth/constants/oauth";
-import { refreshGoogleToken, refreshCodexToken, updateProviderCredentials } from "@/sse/services/tokenRefresh";
+import { refreshGoogleToken, refreshCodexToken, refreshClaudeOAuthToken, updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveOllamaLocalHost } from "open-sse/config/providers.js";
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
@@ -188,14 +188,19 @@ const PROVIDER_MODELS_CONFIG = {
     parseResponse: (data) => data.data || [],
   },
   claude: {
-    url: "https://api.anthropic.com/v1/models",
-    method: "GET",
-    headers: {
-      "Anthropic-Version": "2023-06-01",
-      "Content-Type": "application/json"
-    },
-    authHeader: "x-api-key",
-    parseResponse: (data) => data.data || []
+    customResolver: buildOAuthResolver({
+      refreshFn: (conn) => refreshClaudeOAuthToken(conn.refreshToken),
+      fetchFn: (token, conn) => fetch("https://api.anthropic.com/v1/models", {
+        method: "GET",
+        headers: {
+          "Anthropic-Version": "2023-06-01",
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+      }),
+      parseFn: (data) => data.data || [],
+      errorLabel: "Failed to fetch Claude models"
+    })
   },
   gemini: {
     url: "https://generativelanguage.googleapis.com/v1beta/models",
