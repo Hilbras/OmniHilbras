@@ -93,6 +93,24 @@ export default function ProviderUsageTab({ providerId, providerStorageAlias, con
   const connById = Object.fromEntries((connections || []).map((c) => [c.id, c]));
   const totalTokens = byProvider ? byProvider.promptTokens + byProvider.completionTokens : 0;
 
+  // Ollama Local has no upstream usage API; surface a clear message instead of
+  // an empty "No usage recorded" card.
+  if (providerId === "ollama-local") {
+    return (
+      <div className="flex flex-col gap-6">
+        <Card>
+          <div className="flex flex-col items-center gap-2 py-8 text-center">
+            <span className="material-symbols-outlined text-[24px] text-muted" aria-hidden="true">
+              monitoring
+            </span>
+            <p className="text-sm font-medium">Local instance — usage not tracked</p>
+            <p className="text-xs text-text-muted">Ollama Local does not expose a usage API. Requests routed through this provider still appear in router logs.</p>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   if (loading) {
     return <CardSkeleton />;
   }

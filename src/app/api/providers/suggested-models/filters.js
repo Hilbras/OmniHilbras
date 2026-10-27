@@ -71,6 +71,16 @@ export const FILTERS = {
       }))
       .sort((a, b) => a.id.localeCompare(b.id)),
 
+  // Ollama Local /api/tags catalog: { models: [{ name, model, modified_at, size, ... }] }
+  "ollama-local": (models) =>
+    (Array.isArray(models) ? models : [])
+      .filter((m) => typeof m?.model === "string" && m.model.trim() !== "")
+      .map((m) => ({
+        id: m.model,
+        name: m.name || m.model,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+
   // Generic OpenAI-compatible /v1/models catalogues (free-tier aggregators).
   // Returns every model with the real context window the provider publishes —
   // context_length / context_window / max_context_tokens / max_tokens, in that order.

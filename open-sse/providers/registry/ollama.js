@@ -32,6 +32,7 @@ export default {
     { id: "minimax-m3", name: "MiniMax M3" },
     { id: "deepseek-v4.1-flash:cloud", name: "DeepSeek V4.1 Flash" },
   ],
+  modelsFetcher: { url: "https://ollama.com/api/tags", type: "openai" },
   serviceKinds: ["llm", "webFetch"],
   fetchConfig: {
     baseUrl: "https://ollama.com/api/web_fetch",

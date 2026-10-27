@@ -16,4 +16,5 @@ export default {
     format: "ollama",
   },
   serviceKinds: ["llm"],
+  modelsFetcher: { url: "http://localhost:11434/api/tags", type: "ollama-local" },
 };
