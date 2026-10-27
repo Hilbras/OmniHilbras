@@ -10,7 +10,28 @@ const CONFIG_CACHE_TTL_MS = 5000;
 let cachedConfig = null;
 let cachedConfigTs = 0;
 
-async function getObservabilityConfig() {
+// Settings changes must take effect on the next write, not after the cache TTL.
+export function invalidateObservabilityConfig() {
+  cachedConfig = null;
+  cachedConfigTs = 0;
+}
+
+// Export the old functions under their legacy names so nothing else breaks.
+// Legacy names for backwards compatibility with lib/requestDetailsDb.js imports.
+export function saveRequestDetail(detail) {
+  return saveRequestDetails(detail);
+}
+export function getRequestDetails(filter) {
+  return getRequestLogEntries(filter);
+}
+export function getDistinctProviders() {
+  return getRequestLogProviders();
+}
+export function getRequestDetailById(id) {
+  return getRequestLogDetailById(id);
+}
+
+export async function getObservabilityConfig() {
   if (cachedConfig && (Date.now() - cachedConfigTs) < CONFIG_CACHE_TTL_MS) return cachedConfig;
   try {
     const { getSettings } = await import("./settingsRepo.js");
@@ -90,7 +111,6 @@ async function flushToDatabase() {
   if (writeBuffer.length === 0) return;
   isFlushing = true;
   try {
-    // Drain entire buffer (loop in case more pushed during await)
     while (writeBuffer.length > 0) {
       const items = writeBuffer.splice(0, writeBuffer.length);
       const db = await getAdapter();
@@ -104,10 +124,10 @@ async function flushToDatabase() {
 
           const record = {
             id: item.id,
+            timestamp: item.timestamp,
             provider: item.provider || null,
             model: item.model || null,
             connectionId: item.connectionId || null,
-            timestamp: item.timestamp,
             status: item.status || null,
             latency: item.latency || {},
             tokens: item.tokens || {},
@@ -134,23 +154,26 @@ async function flushToDatabase() {
       });
     }
   } catch (e) {
-    console.error("[requestDetailsRepo] Batch write failed:", e);
+    console.error("[observabilityRepo] Batch write failed:", e);
   } finally {
     isFlushing = false;
   }
 }
 
-export async function saveRequestDetail(detail) {
+export async function saveRequestDetails(detail) {
   const config = await getObservabilityConfig();
-  if (!config.enabled) {return;}
+  if (!config.enabled) {
+    return;
+  }
 
   writeBuffer.push(detail);
 
-  // Trigger immediate flush if batch threshold reached.
-  // flushToDatabase() drains entire buffer in a loop, so all pushes during await are persisted.
   if (writeBuffer.length >= config.batchSize) {
-    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-    flushToDatabase().catch((e) => console.error("[requestDetailsRepo] flush err:", e));
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    flushToDatabase().catch((e) => console.error("[observabilityRepo] flush err:", e));
   } else if (!flushTimer) {
     flushTimer = setTimeout(() => {
       flushTimer = null;
@@ -159,17 +182,35 @@ export async function saveRequestDetail(detail) {
   }
 }
 
-export async function getRequestDetails(filter = {}) {
+export async function getRequestLogEntries(filter = {}) {
   const db = await getAdapter();
   const conds = [];
   const params = [];
 
-  if (filter.provider) { conds.push("provider = ?"); params.push(filter.provider); }
-  if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
-  if (filter.connectionId) { conds.push("connectionId = ?"); params.push(filter.connectionId); }
-  if (filter.status) { conds.push("status = ?"); params.push(filter.status); }
-  if (filter.startDate) { conds.push("timestamp >= ?"); params.push(new Date(filter.startDate).toISOString()); }
-  if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
+  if (filter.provider) {
+    conds.push("provider = ?");
+    params.push(filter.provider);
+  }
+  if (filter.model) {
+    conds.push("model = ?");
+    params.push(filter.model);
+  }
+  if (filter.connectionId) {
+    conds.push("connectionId = ?");
+    params.push(filter.connectionId);
+  }
+  if (filter.status) {
+    conds.push("status = ?");
+    params.push(filter.status);
+  }
+  if (filter.startDate) {
+    conds.push("timestamp >= ?");
+    params.push(new Date(filter.startDate).toISOString());
+  }
+  if (filter.endDate) {
+    conds.push("timestamp <= ?");
+    params.push(new Date(filter.endDate).toISOString());
+  }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
   const cntRow = db.get(`SELECT COUNT(*) as c FROM requestDetails ${where}`, params);
@@ -192,21 +233,140 @@ export async function getRequestDetails(filter = {}) {
   };
 }
 
-export async function getDistinctProviders() {
+export async function getRequestLogProviders() {
   const db = await getAdapter();
   const rows = db.all(`SELECT DISTINCT provider FROM requestDetails WHERE provider IS NOT NULL ORDER BY provider ASC`);
   return rows.map((r) => r.provider);
 }
 
-export async function getRequestDetailById(id) {
+export async function getRequestLogDetailById(id) {
   const db = await getAdapter();
   const row = db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
   return row ? parseJson(row.data, null) : null;
 }
 
+export async function deleteRequestLogById(id) {
+  const db = await getAdapter();
+  const res = db.run(`DELETE FROM requestDetails WHERE id = ?`, [id]);
+  return (res?.changes ?? 0) > 0;
+}
+
+export async function deleteRequestLogBatch(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return 0;
+  }
+  const db = await getAdapter();
+  const placeholders = ids.map(() => "?").join(",");
+  const res = db.run(`DELETE FROM requestDetails WHERE id IN (${placeholders})`, ids);
+  return res?.changes ?? 0;
+}
+
+export async function clearAllRequestLogs() {
+  const db = await getAdapter();
+  const res = db.run(`DELETE FROM requestDetails`);
+  return res?.changes ?? 0;
+}
+
+export async function getDistinctModels() {
+  const db = await getAdapter();
+  const rows = db.all(`SELECT DISTINCT model FROM requestDetails WHERE model IS NOT NULL ORDER BY model ASC`);
+  return rows.map((r) => r.model);
+}
+
+export async function getDistinctConnections() {
+  const db = await getAdapter();
+  const rows = db.all(`SELECT DISTINCT connectionId FROM requestDetails WHERE connectionId IS NOT NULL ORDER BY connectionId ASC`);
+  return rows.map((r) => r.connectionId);
+}
+
+export async function deleteRequestLogsBefore(date) {
+  const db = await getAdapter();
+  const res = db.run(`DELETE FROM requestDetails WHERE timestamp < ?`, [new Date(date).toISOString()]);
+  return res?.changes ?? 0;
+}
+
+const STATS_PERIODS_MS = {
+  "24h": 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+};
+
+// Aggregates over the stored log. The log is capped at maxRecords, so these
+// describe the retained window, not lifetime traffic (that lives in usageRepo).
+export async function getObservabilityStats(period = "24h") {
+  const db = await getAdapter();
+  const windowMs = STATS_PERIODS_MS[period];
+  const since = windowMs ? new Date(Date.now() - windowMs).toISOString() : null;
+  const where = since ? "WHERE timestamp >= ?" : "";
+  const params = since ? [since] : [];
+
+  const promptExpr = "COALESCE(json_extract(data, '$.tokens.prompt_tokens'), json_extract(data, '$.tokens.input_tokens'), 0)";
+  const completionExpr = "COALESCE(json_extract(data, '$.tokens.completion_tokens'), json_extract(data, '$.tokens.output_tokens'), 0)";
+  const latencyExpr = "json_extract(data, '$.latency.total')";
+  const errorExpr = "CASE WHEN status = 'error' THEN 1 ELSE 0 END";
+
+  const totals = db.get(
+    `SELECT COUNT(*) AS requests, SUM(${errorExpr}) AS errors,
+       SUM(${promptExpr}) AS promptTokens, SUM(${completionExpr}) AS completionTokens,
+       AVG(${latencyExpr}) AS avgLatency, MIN(timestamp) AS firstAt, MAX(timestamp) AS lastAt
+     FROM requestDetails ${where}`,
+    params
+  ) || {};
+
+  const groupBy = (col) => db.all(
+    `SELECT ${col} AS key, COUNT(*) AS requests, SUM(${errorExpr}) AS errors,
+       SUM(${promptExpr}) + SUM(${completionExpr}) AS tokens, AVG(${latencyExpr}) AS avgLatency
+     FROM requestDetails ${where} GROUP BY ${col} ORDER BY requests DESC LIMIT 20`,
+    params
+  ).map((r) => ({
+    key: r.key || "unknown",
+    requests: r.requests,
+    errors: r.errors || 0,
+    tokens: r.tokens || 0,
+    avgLatency: Math.round(r.avgLatency || 0),
+  }));
+
+  const retained = db.get(`SELECT COUNT(*) AS c, MIN(timestamp) AS oldest FROM requestDetails`) || {};
+  const config = await getObservabilityConfig();
+
+  // Rates use the span actually covered by the rows, so a quiet hour inside a
+  // 24h window does not read as a traffic drop.
+  const requests = totals.requests || 0;
+  const spanMs = totals.firstAt && totals.lastAt
+    ? Math.max(new Date(totals.lastAt) - new Date(totals.firstAt), 60 * 1000)
+    : 0;
+  const minutes = spanMs / 60000;
+  const tokens = (totals.promptTokens || 0) + (totals.completionTokens || 0);
+
+  return {
+    period: windowMs ? period : "all",
+    requests,
+    errors: totals.errors || 0,
+    errorRate: requests ? (totals.errors || 0) / requests : 0,
+    promptTokens: totals.promptTokens || 0,
+    completionTokens: totals.completionTokens || 0,
+    avgLatency: Math.round(totals.avgLatency || 0),
+    requestsPerMinute: minutes ? requests / minutes : 0,
+    tokensPerMinute: minutes ? tokens / minutes : 0,
+    byProvider: groupBy("provider"),
+    byModel: groupBy("model"),
+    retention: {
+      records: retained.c || 0,
+      maxRecords: config.maxRecords,
+      oldest: retained.oldest || null,
+      enabled: config.enabled,
+    },
+  };
+}
+
 const _shutdownHandler = async () => {
-  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-  if (writeBuffer.length > 0) await flushToDatabase();
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (writeBuffer.length > 0) {
+    await flushToDatabase();
+  }
 };
 
 function ensureShutdownHandler() {

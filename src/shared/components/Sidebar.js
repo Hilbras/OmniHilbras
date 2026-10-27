@@ -5,6 +5,7 @@ import PropTypes from "prop-types";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Activity,
   Cable,
   ChevronDown,
   ChevronRight,
@@ -61,6 +62,7 @@ const navItems = [
   // { href: "/dashboard/basic-chat", label: "Basic Chat", icon: chat }, // Hidden
   { href: "/dashboard/combos", label: "Combo & Vision Adapter", icon: Layers },
   { href: "/dashboard/usage", label: "Usage", icon: Gauge },
+  { href: "/dashboard/observability", label: "Observability", icon: Activity },
   { href: "/dashboard/quota", label: "Quota Tracker", icon: PiggyBank },
   { href: "/dashboard/token-saver", label: "Token Saver", icon: PiggyBank },
   // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: image },

@@ -71,10 +71,14 @@ export {
   appendRequestLog, getRecentLogs,
 } from "./repos/usageRepo.js";
 
-// Request details
+// Observability logs
 export {
-  saveRequestDetail, getRequestDetails, getRequestDetailById, getDistinctProviders,
-} from "./repos/requestDetailsRepo.js";
+  saveRequestDetail, saveRequestDetails, getRequestDetails, getRequestLogEntries,
+  getRequestDetailById, getRequestLogDetailById, deleteRequestLogById,
+  deleteRequestLogBatch, deleteRequestLogsBefore, clearAllRequestLogs,
+  getDistinctProviders, getDistinctModels, getDistinctConnections,
+  getObservabilityConfig, invalidateObservabilityConfig, getObservabilityStats,
+} from "./repos/observabilityRepo.js";
 
 // Export/import full DB
 export async function exportDb() {

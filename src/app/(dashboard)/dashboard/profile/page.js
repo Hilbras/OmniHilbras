@@ -1608,7 +1608,10 @@ export default function ProfilePage() {
             <div className="p-2 rounded-lg bg-orange-500/10 text-orange-500 shrink-0">
               <span className="material-symbols-outlined text-[20px]">monitoring</span>
             </div>
-            <h3 className="text-base sm:text-lg font-semibold">Observability</h3>
+            <h3 className="text-base sm:text-lg font-semibold flex-1">Observability</h3>
+            <a href="/dashboard/observability?tab=settings" className="text-xs sm:text-sm text-brand-500 hover:underline">
+              Logs, metrics &amp; retention
+            </a>
           </div>
           <div className="flex items-start sm:items-center justify-between gap-4">
             <div className="flex-1 min-w-0">

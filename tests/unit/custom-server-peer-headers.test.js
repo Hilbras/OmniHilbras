@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createRequire } from "node:module";
 import http from "node:http";
-import { __test__ as requestDetails } from "@/lib/db/repos/requestDetailsRepo.js";
+import { __test__ as requestDetails } from "@/lib/db/repos/observabilityRepo.js";
 
 const require = createRequire(import.meta.url);
 
