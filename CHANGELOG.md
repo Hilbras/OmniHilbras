@@ -1,3 +1,8 @@
+# v2.9.17 (2026-10-29)
+
+## Fixes
+- **Providers**: CodeBuddy (both `codebuddy-cn` / `cbcn` and `codebuddy-intl` / `cbai`) no longer fails every chat call with `HTTP 400 — {"code":11128,"msg":"request illegal"}`. The gateway's channel verification requires the three conversation headers the official CodeBuddy CLI sends — `X-Conversation-ID`, `X-Conversation-Request-ID`, `X-Conversation-Message-ID` — and rejects the request without them ("this call failed channel verification, possibly because it was not sent from an official client"). Verified live against `www.codebuddy.ai` and `copilot.tencent.com`: the three headers are the only load-bearing part of the CLI header set (the User-Agent, the IDE/product headers and gzip encoding all pass without them)
+
 # v2.9.8 (2026-10-26)
 
 ## Features

@@ -3,7 +3,7 @@ import { gzip } from "zlib";
 import { dbg } from "../utils/debugLog.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
-import { randomUUID } from "node:crypto";
+import { buildCodeBuddyConversationHeaders } from "../config/codebuddyConstants.js";
 
 /**
  * CodeBuddyIntlExecutor — talks to https://www.codebuddy.ai/v2/chat/completions
@@ -13,10 +13,10 @@ import { randomUUID } from "node:crypto";
  * request carries the IDE's OpenAI-style reasoning params. Force stream and
  * mirror reasoning_summary exactly like CodeBuddyExecutor.
  *
- * The gateway's channel verification (code 11128) expects requests to look
- * like the official CodeBuddy CLI: gzip-compressed body + matching headers.
- * We mirror the CLI's exact header set and compress the JSON payload with
- * gzip, setting content-encoding accordingly.
+ * The gateway's channel verification (code 11128) rejects any request that
+ * does not carry the CLI's X-Conversation-* headers — see
+ * config/codebuddyConstants.js. The body is also gzip-compressed like the
+ * CLI does, though the gateway accepts plain JSON too.
  */
 export class CodeBuddyIntlExecutor extends DefaultExecutor {
   constructor() {
@@ -36,9 +36,11 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
       const headers = this.buildHeaders(credentials, stream, url, model, transformedBody);
       if (providerOverrides?.headers) Object.assign(headers, providerOverrides.headers);
 
-      // CodeBuddy gateway requires X-Request-ID (matches CLI behavior)
-      if (!headers["X-Request-ID"]) {
-        headers["X-Request-ID"] = randomUUID().replace(/-/g, "");
+      // Channel verification (code 11128) requires the CLI's conversation
+      // headers on every chat request — without them the gateway answers
+      // HTTP 400 "request illegal".
+      for (const [key, value] of Object.entries(buildCodeBuddyConversationHeaders())) {
+        if (!headers[key]) headers[key] = value;
       }
 
       if (!retryAttemptsByUrl[urlIndex]) retryAttemptsByUrl[urlIndex] = 0;
@@ -146,12 +148,12 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
         const data = JSON.parse(bodyText);
         const msg = data?.msg || data?.message || data?.error?.message || "";
         // 11128 "request illegal": the gateway's channel verification blocked the
-        // request (spoofing detection / non-official-client heuristic). Not a
-        // credential or quota problem — say so instead of a bare 400.
+        // request. The gateway requires the CLI's X-Conversation-* headers on
+        // every chat request — a request missing them lands here.
         if (data?.code === 11128) {
           return {
             status: 403,
-            message: "CodeBuddy rejected the request at channel verification (11128) — the gateway thinks this call did not come from an official client. Try again, or re-authenticate the connection (the check is intermittent).",
+            message: "CodeBuddy rejected the request at channel verification (11128) — the gateway requires the official CLI's conversation headers on every chat request. Re-authenticate the connection if this persists.",
           };
         }
         if (data?.code === 11102) {
