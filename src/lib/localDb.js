@@ -2,6 +2,9 @@
 // Kept for backward compatibility with existing imports.
 export {
   getSettings, updateSettings, isCloudEnabled, getCloudUrl,
+  getAllWorkspaces, getWorkspaceById, getWorkspaceBySlug,
+  createWorkspace, updateWorkspace, deleteWorkspace,
+  exportSettings,
   getProviderConnections, getProviderConnectionById,
   createProviderConnection, updateProviderConnection,
   deleteProviderConnection, deleteProviderConnectionsByProvider,

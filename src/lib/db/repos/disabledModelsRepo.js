@@ -1,6 +1,8 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 
+import { DEFAULT_WORKSPACE_ID } from "../constants.js";
+
 const SCOPE = "disabledModels";
 
 export async function getDisabledModels() {
@@ -26,8 +28,8 @@ export async function disableModels(providerAlias, ids) {
     const current = row ? (parseJson(row.value, []) || []) : [];
     const merged = [...new Set([...current, ...ids])];
     db.run(
-      `INSERT INTO kv(scope, key, value) VALUES(?, ?, ?) ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value`,
-      [SCOPE, providerAlias, stringifyJson(merged)]
+      `INSERT INTO kv(scope, key, workspaceId, value) VALUES(?, ?, ?, ?) ON CONFLICT(scope, key, workspaceId) DO UPDATE SET value = excluded.value`,
+      [SCOPE, providerAlias, DEFAULT_WORKSPACE_ID, stringifyJson(merged)]
     );
   });
 }
@@ -48,8 +50,8 @@ export async function enableModels(providerAlias, ids) {
       db.run(`DELETE FROM kv WHERE scope = ? AND key = ?`, [SCOPE, providerAlias]);
     } else {
       db.run(
-        `INSERT INTO kv(scope, key, value) VALUES(?, ?, ?) ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value`,
-        [SCOPE, providerAlias, stringifyJson(next)]
+        `INSERT INTO kv(scope, key, workspaceId, value) VALUES(?, ?, ?, ?) ON CONFLICT(scope, key, workspaceId) DO UPDATE SET value = excluded.value`,
+        [SCOPE, providerAlias, DEFAULT_WORKSPACE_ID, stringifyJson(next)]
       );
     }
   });

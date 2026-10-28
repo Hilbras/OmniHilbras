@@ -81,6 +81,7 @@ export async function getKeyAccessContext(request) {
   return {
     keyId: record.id,
     keyName: record.name || record.id,
+    workspaceId: record.workspaceId || "default",
     allow: record.access.allow || [],
     _sets: null,
   };
@@ -95,7 +96,7 @@ export async function getKeyAccessContext(request) {
 // from the key row, which is re-read when the key changes.
 async function getAllowSets(ctx) {
   if (ctx._sets) return ctx._sets;
-  const comboNames = await getComboNames();
+  const comboNames = await getComboNames(ctx);
   const combos = new Set();
   const models = new Set();
   const providers = new Set();
@@ -114,10 +115,11 @@ async function getAllowSets(ctx) {
 
 // The name of every combo, read from the database once and kept until a combo
 // changes.
-async function getComboNames() {
+async function getComboNames(ctx) {
   const cached = lookupComboNames();
   if (cached) return cached;
-  const names = new Set((await getCombos()).map((c) => lower(c.name)));
+  const ws = ctx?.workspaceId || "default";
+  const names = new Set((await getCombos(ws)).map((c) => lower(c.name)));
   storeComboNames(names);
   return names;
 }

@@ -1,5 +1,6 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { DEFAULT_WORKSPACE_ID } from "../constants.js";
 
 // One row per installed skill: { id, sha256, installedAt, updatedAt }.
 // The SKILL.md itself lives on disk (see src/lib/skills/skillStore.js).
@@ -20,8 +21,8 @@ export async function getInstalledSkill(id) {
 export async function saveInstalledSkill(id, record) {
   const db = await getAdapter();
   db.run(
-    `INSERT INTO kv(scope, key, value) VALUES(?, ?, ?) ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value`,
-    [SCOPE, id, stringifyJson(record)]
+    `INSERT INTO kv(scope, key, workspaceId, value) VALUES(?, ?, ?, ?) ON CONFLICT(scope, key, workspaceId) DO UPDATE SET value = excluded.value`,
+    [SCOPE, id, DEFAULT_WORKSPACE_ID, stringifyJson(record)]
   );
 }
 

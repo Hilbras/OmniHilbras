@@ -54,11 +54,12 @@ function rowToConn(row) {
     isActive: row.isActive === 1 || row.isActive === true,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    workspaceId: row.workspaceId || null,
   };
 }
 
 function connToRow(c) {
-  const { id, provider, authType, name, email, priority, isActive, createdAt, updatedAt, ...rest } = c;
+  const { id, provider, authType, name, email, priority, isActive, createdAt, updatedAt, workspaceId, ...rest } = c;
   return {
     id,
     provider,
@@ -70,19 +71,20 @@ function connToRow(c) {
     data: stringifyJson(rest),
     createdAt,
     updatedAt,
+    workspaceId: workspaceId || "default",
   };
 }
 
 function upsert(db, c) {
   const r = connToRow(c);
   db.run(
-    `INSERT INTO providerConnections(id, provider, authType, name, email, priority, isActive, data, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO providerConnections(id, provider, authType, name, email, priority, isActive, data, createdAt, updatedAt, workspaceId)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        provider=excluded.provider, authType=excluded.authType, name=excluded.name,
        email=excluded.email, priority=excluded.priority, isActive=excluded.isActive,
-       data=excluded.data, updatedAt=excluded.updatedAt`,
-    [r.id, r.provider, r.authType, r.name, r.email, r.priority, r.isActive, r.data, r.createdAt, r.updatedAt]
+       data=excluded.data, updatedAt=excluded.updatedAt, workspaceId=excluded.workspaceId`,
+    [r.id, r.provider, r.authType, r.name, r.email, r.priority, r.isActive, r.data, r.createdAt, r.updatedAt, r.workspaceId]
   );
 }
 
@@ -97,10 +99,11 @@ function deriveConnectionName(data, fallbackName) {
   return fallbackName;
 }
 
-function loadProviderConnections(db, provider) {
+function loadProviderConnections(db, provider, workspaceId = "default") {
+  const ws = workspaceId || "default";
   const rows = provider
-    ? db.all(`SELECT * FROM providerConnections WHERE provider = ?`, [provider])
-    : db.all(`SELECT * FROM providerConnections`);
+    ? db.all(`SELECT * FROM providerConnections WHERE provider = ? AND workspaceId = ?`, [provider, ws])
+    : db.all(`SELECT * FROM providerConnections WHERE workspaceId = ?`, [ws]);
   const list = rows.map(rowToConn);
   list.sort((a, b) => (a.priority || 999) - (b.priority || 999));
   return list;
@@ -118,11 +121,12 @@ function filterByActive(list, isActive) {
 // only has to rewrite that one row in the cached list.
 export async function getProviderConnections(filter = {}) {
   const provider = filter.provider || null;
-  let list = getCachedProviderConnections(provider);
+  const workspaceId = filter.workspaceId || "default";
+  let list = getCachedProviderConnections(provider, workspaceId);
   if (!list) {
     const db = await getAdapter();
-    list = loadProviderConnections(db, provider);
-    setCachedProviderConnections(provider, list);
+    list = loadProviderConnections(db, provider, workspaceId);
+    setCachedProviderConnections(provider, list, workspaceId);
   }
   if (filter.isActive !== undefined) {
     list = filterByActive(list, filter.isActive);
@@ -130,9 +134,9 @@ export async function getProviderConnections(filter = {}) {
   return list.map(cloneConnection);
 }
 
-export async function getProviderConnectionById(id) {
+export async function getProviderConnectionById(id, workspaceId = "default") {
   const db = await getAdapter();
-  const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
+  const row = db.get(`SELECT * FROM providerConnections WHERE id = ? AND workspaceId = ?`, [id, workspaceId]);
   return rowToConn(row);
 }
 
@@ -145,8 +149,8 @@ export async function getProviderConnectionById(id) {
 // MAX(priority)+1, which sorts after every existing row, so the order is
 // identical with or without the rewrite. Skipping it there is what makes
 // import O(1) per key instead of O(pool) — see createProviderConnection.
-function reorderInTx(db, providerId) {
-  const list = db.all(`SELECT * FROM providerConnections WHERE provider = ?`, [providerId]).map(rowToConn);
+function reorderInTx(db, providerId, workspaceId = "default") {
+  const list = db.all(`SELECT * FROM providerConnections WHERE provider = ? AND workspaceId = ?`, [providerId, workspaceId]).map(rowToConn);
   list.sort((a, b) => {
     const pDiff = (a.priority || 0) - (b.priority || 0);
     if (pDiff !== 0) return pDiff;
@@ -266,6 +270,7 @@ export async function createProviderConnection(data) {
       isActive: data.isActive !== undefined ? data.isActive : true,
       createdAt: now,
       updatedAt: now,
+      workspaceId: data.workspaceId || "default",
     };
     for (const f of OPTIONAL_FIELDS) {
       if (data[f] !== undefined && data[f] !== null) conn[f] = data[f];
@@ -302,7 +307,7 @@ export async function updateProviderConnection(id, data) {
     const normalized = resetHealthStateOnActivation(existing, data);
     const merged = { ...existing, ...normalized, updatedAt: new Date().toISOString() };
     upsert(db, merged);
-    if (data.priority !== undefined) reorderInTx(db, existing.provider);
+    if (data.priority !== undefined) reorderInTx(db, existing.provider, existing.workspaceId);
     result = merged;
   });
 
@@ -324,12 +329,14 @@ export async function deleteProviderConnection(id) {
   const db = await getAdapter();
   let ok = false;
   let provider = null;
+  let workspaceId = "default";
   db.transaction(() => {
-    const row = db.get(`SELECT provider FROM providerConnections WHERE id = ?`, [id]);
+    const row = db.get(`SELECT provider, workspaceId FROM providerConnections WHERE id = ?`, [id]);
     if (!row) return;
     provider = row.provider;
+    workspaceId = row.workspaceId || "default";
     db.run(`DELETE FROM providerConnections WHERE id = ?`, [id]);
-    reorderInTx(db, row.provider);
+    reorderInTx(db, row.provider, workspaceId);
     ok = true;
   });
   if (ok) invalidateProviderConnections(provider);

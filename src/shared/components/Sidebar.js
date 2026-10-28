@@ -21,6 +21,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PiggyBank,
+  Plus,
   Power,
   Puzzle,
   Search,
@@ -35,8 +36,11 @@ import { APP_CONFIG, UPDATER_CONFIG } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import useSettingsStore from "@/store/settingsStore";
+import { useWorkspaceStore } from "@/store/workspaceStore";
 import Button from "./Button";
 import { ConfirmModal } from "./Modal";
+
+const DEFAULT_WORKSPACE_ID = "default";
 
 // const VISIBLE_MEDIA_KINDS = ["embedding", "image", "imageToText", "tts", "stt", "webSearch", "webFetch", "video", "music"];
 const VISIBLE_MEDIA_KINDS = ["embedding", "image", "video", "tts", "stt", "systemone"];
@@ -72,6 +76,7 @@ const navItems = [
 const systemItems = [
   { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: Cable },
   { href: "/dashboard/skills", label: "Skills", icon: Puzzle },
+  { href: "/dashboard/settings/workspaces", label: "Workspaces", icon: Database },
 ];
 
 const debugItems = [
@@ -548,21 +553,31 @@ export default function Sidebar({ onClose, collapsed = false, onToggleCollapse }
           </div>
         </nav>
 
-        {/* Footer — workspace identity */}
-        <div className={cn("border-t border-line/70", collapsed ? "p-3" : "p-4")}>
-          <div
-            className={cn("flex items-center", collapsed ? "justify-center" : "gap-2.5")}
-            title={collapsed ? "Local workspace · no account required" : undefined}
-          >
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-gold/30 bg-gold-soft text-[10px] font-bold text-gold-text">OH</span>
-            {!collapsed && (
-              <div className="min-w-0">
-                <p className="truncate text-xs font-semibold">Local workspace</p>
-                <p className="muted truncate text-[10px]">No account required</p>
-              </div>
-            )}
+        {/* Workspace picker */}
+        {!collapsed && (
+          <div className="border-t border-line/70 p-4">
+            <WorkspacePicker />
           </div>
-        </div>
+        )}
+        {collapsed && (
+          <div className="border-t border-line/70 p-3 flex justify-center">
+            <button
+              type="button"
+              title="Switch workspace"
+              onClick={() => {
+                const ws = useWorkspaceStore.getState();
+                const current = ws.workspaces.find((w) => w.id === ws.currentWorkspace);
+                if (current) {
+                  // Brief tooltip via alert for collapsed state
+                  alert(`Current: ${current.name}`);
+                }
+              }}
+              className="grid h-8 w-8 place-items-center rounded-lg border border-gold/30 bg-gold-soft text-xs font-bold text-gold-text hover:border-gold/50"
+            >
+              OH
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* Update Confirmation Modal */}
@@ -613,6 +628,152 @@ Sidebar.propTypes = {
   collapsed: PropTypes.bool,
   onToggleCollapse: PropTypes.func,
 };
+
+function WorkspacePicker() {
+  const { currentWorkspace, workspaces, fetchWorkspaces, switchWorkspace, createWorkspace, deleteWorkspace } = useWorkspaceStore();
+  const [showMenu, setShowMenu] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [actionLoading, setActionLoading] = useState(null);
+
+  useEffect(() => {
+    if (workspaces.length === 0) fetchWorkspaces();
+  }, [workspaces.length, fetchWorkspaces]);
+
+  const current = workspaces.find((w) => w.id === currentWorkspace) || { id: currentWorkspace, name: "default", slug: "default" };
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setActionLoading("create");
+    try {
+      const ws = await createWorkspace({ name: newName.trim() });
+      switchWorkspace(ws.id);
+      setShowCreate(false);
+      setNewName("");
+      await fetchWorkspaces();
+    } catch (err) {
+      console.error("Create workspace error:", err);
+      alert(err.message);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDelete = async (id, name) => {
+    if (!confirm(`Delete workspace "${name}"? This cannot be undone.`)) return;
+    setActionLoading(id);
+    try {
+      await deleteWorkspace(id);
+      if (currentWorkspace === id) switchWorkspace("default");
+      await fetchWorkspaces();
+    } catch (err) {
+      console.error("Delete workspace error:", err);
+      alert(err.message);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  return (
+    <>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setShowMenu(!showMenu)}
+          className={cn(
+            "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors",
+            "text-text-muted hover:bg-surface hover:text-text-main"
+          )}
+        >
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-gold/30 bg-gold-soft text-[9px] font-bold text-gold-text">{current.name?.[0]?.toUpperCase() || "D"}</span>
+          <span className="min-w-0 flex-1 truncate">{current.name}</span>
+          <ChevronDown className="h-4 w-4 shrink-0 transition-transform" />
+        </button>
+
+        {showMenu && (
+          <>
+            <div
+              className="fixed inset-0 z-10"
+              onClick={() => setShowMenu(false)}
+            />
+            <div className="absolute bottom-full left-0 mb-2 w-56 rounded-xl border border-line bg-bg-soft shadow-lg shadow-black/30 z-20">
+              <div className="p-2">
+                {workspaces.map((ws) => (
+                  <button
+                    key={ws.id}
+                    onClick={async () => {
+                      if (ws.id === DEFAULT_WORKSPACE_ID) {
+                        switchWorkspace(ws.id);
+                        setShowMenu(false);
+                        return;
+                      }
+                      if (ws.id === DEFAULT_WORKSPACE_ID) return; // can't delete default
+                      await handleDelete(ws.id, ws.name);
+                    }}
+                    className={cn(
+                      "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs",
+                      "transition-colors",
+                      currentWorkspace === ws.id
+                        ? "bg-gold-soft/20 text-gold-text"
+                        : "text-text-muted hover:bg-surface hover:text-text-main"
+                    )}
+                  >
+                    <span>{ws.name}</span>
+                    {ws.id !== DEFAULT_WORKSPACE_ID && actionLoading === ws.id && (
+                      <span className="text-xs">…</span>
+                    )}
+                  </button>
+                ))}
+                <div className="border-t border-line/50 my-1"></div>
+                {showCreate ? (
+                  <form onSubmit={handleCreate} className="p-3">
+                    <input
+                      type="text"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder="Workspace name"
+                      className="w-full rounded-lg border border-line bg-bg-soft px-2 py-1.5 text-sm text-text-main outline-none focus:border-gold/50"
+                      autoFocus
+                    />
+                    <div className="mt-2 flex gap-1">
+                      <button
+                        type="submit"
+                        disabled={!newName.trim() || !!actionLoading}
+                        className="btn-gold !px-2 !py-1 !text-xs flex-1"
+                      >
+                        {actionLoading === "create" ? "…" : "Create"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowCreate(false)}
+                        className="btn-secondary !px-2 !py-1 !text-xs flex-1"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowCreate(true)}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-text-muted hover:bg-surface hover:text-text-main"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Create workspace
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+      <p className="mono-label mt-1 px-1 text-[10px] text-text-muted">
+        Switch workspace • data stays isolated per workspace
+      </p>
+    </>
+  );
+}
 
 function ManualUpdatePanel({ latestVersion, installCmd, copied, onCopyAndShutdown, onCancel, countdown, isDisconnected }) {
   const isCountingDown = countdown > 0;

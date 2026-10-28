@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import { getAdapter, getAdapterSync } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { DEFAULT_WORKSPACE_ID } from "../constants.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
 import { chargeTokens, keyIdentity } from "@/shared/utils/rateLimitBucket.js";
 import { maskApiKey } from "../helpers/maskApiKey.js";
@@ -628,12 +629,13 @@ function writeUsageBatch(db, entries) {
       }
 
       db.run(
-        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta, workspaceId) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, entry.apiKey || null, entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.status || "ok",
           stringifyJson(tokens), stringifyJson({}),
+          entry.workspaceId || "default",
         ]
       );
       inserted++;
@@ -775,12 +777,13 @@ export async function flushUsageRollup() {
     try {
       db.transaction(() => {
         for (const [dateKey, delta] of days) {
-          const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
+          const ws = delta.workspaceId || "default";
+          const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ? AND workspaceId = ?`, [dateKey, ws]);
           const day = row ? parseJson(row.data, {}) : emptyDayAggregate();
           mergeDayAggregate(day, delta);
           db.run(
-            `INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`,
-            [dateKey, stringifyJson(day)],
+            `INSERT INTO usageDaily(dateKey, data, workspaceId) VALUES(?, ?, ?) ON CONFLICT(dateKey, workspaceId) DO UPDATE SET data = excluded.data`,
+            [dateKey, stringifyJson(day), ws],
           );
         }
       });
@@ -817,12 +820,13 @@ function flushUsageRollupSync() {
     const db = getAdapterSync();
     db.transaction(() => {
       for (const [dateKey, delta] of days) {
-        const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
+        const ws = delta.workspaceId || DEFAULT_WORKSPACE_ID;
+        const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ? AND workspaceId = ?`, [dateKey, ws]);
         const day = row ? parseJson(row.data, {}) : emptyDayAggregate();
         mergeDayAggregate(day, delta);
         db.run(
-          `INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`,
-          [dateKey, stringifyJson(day)],
+          `INSERT INTO usageDaily(dateKey, data, workspaceId) VALUES(?, ?, ?) ON CONFLICT(dateKey, workspaceId) DO UPDATE SET data = excluded.data`,
+          [dateKey, stringifyJson(day), ws],
         );
       }
     });
@@ -907,6 +911,10 @@ export async function getUsageHistory(filter = {}) {
   const db = await getAdapter();
   const conds = [];
   const params = [];
+
+  const workspaceId = filter.workspaceId || "default";
+  conds.push("workspaceId = ?");
+  params.push(workspaceId);
 
   if (filter.provider) { conds.push("provider = ?"); params.push(filter.provider); }
   if (filter.model) { conds.push("model = ?"); params.push(filter.model); }

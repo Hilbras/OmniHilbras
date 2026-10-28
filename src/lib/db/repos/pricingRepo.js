@@ -1,6 +1,7 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { makeKv } from "../helpers/kvStore.js";
+import { DEFAULT_WORKSPACE_ID } from "../constants.js";
 
 const pricingKv = makeKv("pricing");
 const CACHE_TTL_MS = 5000;
@@ -122,8 +123,8 @@ export async function updatePricing(pricingData) {
         merged[model] = pricing;
       }
       db.run(
-        `INSERT INTO kv(scope, key, value) VALUES('pricing', ?, ?) ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value`,
-        [provider, stringifyJson(merged)]
+        `INSERT INTO kv(scope, key, workspaceId, value) VALUES('pricing', ?, ?, ?) ON CONFLICT(scope, key, workspaceId) DO UPDATE SET value = excluded.value`,
+        [provider, DEFAULT_WORKSPACE_ID, stringifyJson(merged)]
       );
     }
   });
@@ -131,23 +132,23 @@ export async function updatePricing(pricingData) {
   return await getUserPricing();
 }
 
-export async function resetPricing(provider, model) {
+export async function resetPricing(provider, model, workspaceId = DEFAULT_WORKSPACE_ID) {
   if (!provider) return await getUserPricing();
   const db = await getAdapter();
   db.transaction(() => {
     if (!model) {
-      db.run(`DELETE FROM kv WHERE scope = 'pricing' AND key = ?`, [provider]);
+      db.run(`DELETE FROM kv WHERE scope = 'pricing' AND key = ? AND workspaceId = ?`, [provider, workspaceId]);
       return;
     }
-    const row = db.get(`SELECT value FROM kv WHERE scope = 'pricing' AND key = ?`, [provider]);
+    const row = db.get(`SELECT value FROM kv WHERE scope = 'pricing' AND key = ? AND workspaceId = ?`, [provider, workspaceId]);
     const current = row ? (parseJson(row.value, {}) || {}) : {};
     delete current[model];
     if (Object.keys(current).length === 0) {
-      db.run(`DELETE FROM kv WHERE scope = 'pricing' AND key = ?`, [provider]);
+      db.run(`DELETE FROM kv WHERE scope = 'pricing' AND key = ? AND workspaceId = ?`, [provider, workspaceId]);
     } else {
       db.run(
-        `INSERT INTO kv(scope, key, value) VALUES('pricing', ?, ?) ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value`,
-        [provider, stringifyJson(current)]
+        `INSERT INTO kv(scope, key, workspaceId, value) VALUES('pricing', ?, ?, ?) ON CONFLICT(scope, key, workspaceId) DO UPDATE SET value = excluded.value`,
+        [provider, workspaceId, stringifyJson(current)]
       );
     }
   });

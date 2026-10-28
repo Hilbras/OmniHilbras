@@ -24,8 +24,9 @@ if (!global._providerConnectionCache) {
 }
 const cache = global._providerConnectionCache;
 
-function keyFor(providerId) {
-  return providerId || ALL_PROVIDERS_KEY;
+function keyFor(providerId, workspaceId) {
+  const ws = workspaceId || "default";
+  return providerId ? `${providerId}::${ws}` : `*::${ws}`;
 }
 
 /**
@@ -42,8 +43,8 @@ export function cloneConnection(connection) {
   return copy;
 }
 
-export function getCachedProviderConnections(providerId) {
-  const key = keyFor(providerId);
+export function getCachedProviderConnections(providerId, workspaceId = "default") {
+  const key = keyFor(providerId, workspaceId);
   const entry = cache.entries.get(key);
   if (!entry) return null;
   if (Date.now() >= entry.expiresAt) {
@@ -53,8 +54,8 @@ export function getCachedProviderConnections(providerId) {
   return entry.list;
 }
 
-export function setCachedProviderConnections(providerId, list) {
-  cache.entries.set(keyFor(providerId), {
+export function setCachedProviderConnections(providerId, list, workspaceId = "default") {
+  cache.entries.set(keyFor(providerId, workspaceId), {
     list,
     expiresAt: Date.now() + CACHE_TTL_MS,
   });
@@ -62,9 +63,9 @@ export function setCachedProviderConnections(providerId, list) {
 
 // A write to one provider changes what the all-providers list holds too, so
 // both lists are dropped.
-export function invalidateProviderConnections(providerId) {
-  cache.entries.delete(keyFor(providerId));
-  cache.entries.delete(ALL_PROVIDERS_KEY);
+export function invalidateProviderConnections(providerId, workspaceId = "default") {
+  cache.entries.delete(keyFor(providerId, workspaceId));
+  cache.entries.delete(keyFor(null, workspaceId));
 }
 
 export function invalidateAllProviderConnections() {
@@ -75,7 +76,8 @@ export function invalidateAllProviderConnections() {
 // value without a re-read. The round-robin bookkeeping writes on every
 // selection and must not throw the whole list away.
 export function patchCachedProviderConnection(row) {
-  for (const key of [keyFor(row.provider), ALL_PROVIDERS_KEY]) {
+  const ws = row.workspaceId || "default";
+  for (const key of [keyFor(row.provider, ws), keyFor(null, ws)]) {
     const entry = cache.entries.get(key);
     if (!entry) continue;
     const index = entry.list.findIndex(c => c.id === row.id);

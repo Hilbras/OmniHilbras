@@ -31,8 +31,8 @@ export function parseModel(modelStr) {
 /**
  * Resolve model alias from localDb
  */
-export async function resolveModelAlias(alias) {
-  const aliases = await getModelAliases();
+export async function resolveModelAlias(alias, workspaceId = "default") {
+  const aliases = await getModelAliases(workspaceId);
   return resolveModelAliasFromMap(alias, aliases);
 }
 
@@ -47,14 +47,14 @@ export { clearModelResolutionCache } from "@/lib/modelResolutionCache.js";
 /**
  * Get full model info (parse or resolve)
  */
-export async function getModelInfo(modelStr) {
-  const key = `model:${modelStr}`;
+export async function getModelInfo(modelStr, workspaceId = "default") {
+  const key = `model:${workspaceId}:${modelStr}`;
   const cached = readModelResolution(key);
   if (cached) return { ...cached };
-  return { ...(await writeModelResolution(key, await resolveModelInfo(modelStr))) };
+  return { ...(await writeModelResolution(key, await resolveModelInfo(modelStr, workspaceId))) };
 }
 
-async function resolveModelInfo(modelStr) {
+async function resolveModelInfo(modelStr, workspaceId = "default") {
   const parsed = parseModel(modelStr);
 
   if (!parsed.isAlias) {
@@ -64,7 +64,7 @@ async function resolveModelInfo(modelStr) {
       // One query for the three node types, then one prefix match — this ran
       // per model resolution, and a resolution happens per allow-list entry
       // of a restricted key.
-      const matchedNode = await getProviderNodeByPrefix(parsed.providerAlias);
+      const matchedNode = await getProviderNodeByPrefix(parsed.providerAlias, workspaceId);
       if (matchedNode) {
         return { provider: matchedNode.id, model: parsed.model };
       }
@@ -77,7 +77,7 @@ async function resolveModelInfo(modelStr) {
 
   // Check if this is a combo name before resolving as alias
   // This prevents combo names from being incorrectly routed to providers
-  const combo = await getComboByName(parsed.model);
+  const combo = await getComboByName(parsed.model, workspaceId);
   if (combo) {
     // Return null provider to signal this should be handled as combo
     // The caller (handleChat) will detect this and handle it as combo
@@ -91,15 +91,15 @@ async function resolveModelInfo(modelStr) {
  * Check if model is a combo and get models list
  * @returns {Promise<string[]|null>} Array of models or null if not a combo
  */
-export async function getComboModels(modelStr) {
+export async function getComboModels(modelStr, workspaceId = "default") {
   // Only check if it's not in provider/model format
   if (modelStr.includes("/")) return null;
 
-  const key = `combo:${modelStr}`;
+  const key = `combo:${workspaceId}:${modelStr}`;
   const cached = readModelResolution(key);
   if (cached !== undefined) return cached ? [...cached] : cached;
 
-  const combo = await getComboByName(modelStr);
+  const combo = await getComboByName(modelStr, workspaceId);
   const models = combo && combo.models && combo.models.length > 0 ? combo.models : null;
   writeModelResolution(key, models);
   return models ? [...models] : null;

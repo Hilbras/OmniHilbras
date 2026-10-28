@@ -20,6 +20,7 @@ function rowToKey(row) {
     isActive: row.isActive === 1 || row.isActive === true,
     createdAt: row.createdAt,
     access: keyAccessFromColumns(row.accessRestricted, row.accessAllow),
+    workspaceId: row.workspaceId || null,
   };
 }
 
@@ -83,9 +84,14 @@ async function resolveCachedRow(db, key) {
   return row;
 }
 
-export async function getApiKeys() {
+export async function getApiKeys(workspaceId = null) {
   const db = await getAdapter();
-  const rows = db.all(`SELECT * FROM apiKeys ORDER BY createdAt ASC`);
+  let rows;
+  if (workspaceId) {
+    rows = db.all(`SELECT * FROM apiKeys WHERE workspaceId = ? ORDER BY createdAt ASC`, [workspaceId]);
+  } else {
+    rows = db.all(`SELECT * FROM apiKeys ORDER BY createdAt ASC`);
+  }
   return rows.map(rowToKey);
 }
 
@@ -102,7 +108,7 @@ export async function getApiKeyByKey(key) {
   return rowToKey(await resolveCachedRow(db, key));
 }
 
-export async function createApiKey(name, machineId) {
+export async function createApiKey(name, machineId, workspaceId = null) {
   if (!machineId) throw new Error("machineId is required");
   const db = await getAdapter();
   const { generateApiKeyWithMachine } = await import("@/shared/utils/apiKey");
@@ -118,11 +124,12 @@ export async function createApiKey(name, machineId) {
     isActive: true,
     createdAt: new Date().toISOString(),
     access: { restricted: false, allow: [] },
+    workspaceId,
   };
   const cols = keyAccessToColumns(KEY_ACCESS_UNRESTRICTED);
   db.run(
-    `INSERT INTO apiKeys(id, key, keyHash, name, machineId, isActive, createdAt, accessRestricted, accessAllow) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [apiKey.id, maskApiKey(result.key), apiKey.keyHash, apiKey.name, apiKey.machineId, 1, apiKey.createdAt, cols.accessRestricted, cols.accessAllow]
+    `INSERT INTO apiKeys(id, key, keyHash, name, machineId, isActive, createdAt, accessRestricted, accessAllow, workspaceId) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [apiKey.id, maskApiKey(result.key), apiKey.keyHash, apiKey.name, apiKey.machineId, 1, apiKey.createdAt, cols.accessRestricted, cols.accessAllow, apiKey.workspaceId]
   );
   // A key that was just created must be found by the next request.
   invalidateKeyRows();
