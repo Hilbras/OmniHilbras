@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const CONVERSATION_HEADERS = [
   "X-Conversation-ID",
@@ -6,18 +6,20 @@ const CONVERSATION_HEADERS = [
   "X-Conversation-Message-ID",
 ];
 
-function stubFetch() {
-  const captured = [];
-  const stub = vi.fn(async (url, options) => {
+const captured = [];
+
+// The executors reach the network through proxyAwareFetch — mock it so the
+// test asserts on the request headers without touching the gateway.
+vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
+  proxyAwareFetch: vi.fn(async (url, options) => {
     captured.push({ url, headers: options.headers });
     return new Response("data: {}\n\n", {
       status: 200,
       headers: { "content-type": "text/event-stream" },
     });
-  });
-  vi.stubGlobal("fetch", stub);
-  return captured;
-}
+  }),
+  default: vi.fn(),
+}));
 
 async function runRequest(Executor) {
   const executor = new Executor();
@@ -32,16 +34,10 @@ async function runRequest(Executor) {
 
 describe("CodeBuddy channel verification headers", () => {
   beforeEach(() => {
-    vi.resetModules();
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.resetModules();
+    captured.length = 0;
   });
 
   it("sends the CLI conversation headers on codebuddy-intl chat requests", async () => {
-    const captured = stubFetch();
     const { default: CodeBuddyIntlExecutor } = await import("../../open-sse/executors/codebuddy-intl.js");
 
     const headers = await runRequest(CodeBuddyIntlExecutor);
@@ -56,7 +52,6 @@ describe("CodeBuddy channel verification headers", () => {
   });
 
   it("sends the CLI conversation headers on codebuddy-cn chat requests", async () => {
-    const captured = stubFetch();
     const { default: CodeBuddyExecutor } = await import("../../open-sse/executors/codebuddy-cn.js");
 
     const headers = await runRequest(CodeBuddyExecutor);
@@ -70,7 +65,6 @@ describe("CodeBuddy channel verification headers", () => {
   });
 
   it("uses fresh conversation ids for every request", async () => {
-    stubFetch();
     const { default: CodeBuddyIntlExecutor } = await import("../../open-sse/executors/codebuddy-intl.js");
 
     const first = await runRequest(CodeBuddyIntlExecutor);
