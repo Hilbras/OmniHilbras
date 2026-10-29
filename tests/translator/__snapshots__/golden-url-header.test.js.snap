@@ -647,8 +647,11 @@ exports[`GOLDEN buildHeaders (default executor providers) > codebuddy-cn → hea
 {
   "apiKey": {
     "Accept": "text/event-stream",
+    "Accept-Language": "en-US,en;q=0.9",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
+    "Origin": "https://copilot.tencent.com",
+    "Referer": "https://copilot.tencent.com/",
     "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
     "X-IDE-Name": "CLI",
     "X-IDE-Type": "CLI",
@@ -663,8 +666,11 @@ exports[`GOLDEN buildHeaders (default executor providers) > codebuddy-cn → hea
     "x-requested-with": "XMLHttpRequest",
   },
   "nonStream": {
+    "Accept-Language": "en-US,en;q=0.9",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
+    "Origin": "https://copilot.tencent.com",
+    "Referer": "https://copilot.tencent.com/",
     "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
     "X-IDE-Name": "CLI",
     "X-IDE-Type": "CLI",
@@ -680,8 +686,11 @@ exports[`GOLDEN buildHeaders (default executor providers) > codebuddy-cn → hea
   },
   "oauth": {
     "Accept": "text/event-stream",
+    "Accept-Language": "en-US,en;q=0.9",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
+    "Origin": "https://copilot.tencent.com",
+    "Referer": "https://copilot.tencent.com/",
     "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
     "X-IDE-Name": "CLI",
     "X-IDE-Type": "CLI",
@@ -702,8 +711,11 @@ exports[`GOLDEN buildHeaders (default executor providers) > codebuddy-intl → h
 {
   "apiKey": {
     "Accept": "text/event-stream",
+    "Accept-Language": "en-US,en;q=0.9",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
+    "Origin": "https://www.codebuddy.ai",
+    "Referer": "https://www.codebuddy.ai/",
     "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
     "X-IDE-Name": "CLI",
     "X-IDE-Type": "CLI",
@@ -718,8 +730,11 @@ exports[`GOLDEN buildHeaders (default executor providers) > codebuddy-intl → h
     "x-requested-with": "XMLHttpRequest",
   },
   "nonStream": {
+    "Accept-Language": "en-US,en;q=0.9",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
+    "Origin": "https://www.codebuddy.ai",
+    "Referer": "https://www.codebuddy.ai/",
     "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
     "X-IDE-Name": "CLI",
     "X-IDE-Type": "CLI",
@@ -735,8 +750,11 @@ exports[`GOLDEN buildHeaders (default executor providers) > codebuddy-intl → h
   },
   "oauth": {
     "Accept": "text/event-stream",
+    "Accept-Language": "en-US,en;q=0.9",
     "Authorization": "Bearer <TOK>",
     "Content-Type": "application/json",
+    "Origin": "https://www.codebuddy.ai",
+    "Referer": "https://www.codebuddy.ai/",
     "User-Agent": "CLI/2.177.0 CodeBuddy/2.177.0",
     "X-IDE-Name": "CLI",
     "X-IDE-Type": "CLI",
