@@ -27,10 +27,13 @@ import { injectPonytail } from "../rtk/ponytail.js";
 import { compressMessages, formatRtkLog } from "../rtk/index.js";
 import { compressWithHeadroom, formatHeadroomLog, formatHeadroomSizeLog, isHeadroomPhantomSavings } from "../rtk/headroom.js";
 import { compressWithPxpipe } from "../rtk/pxpipe.js";
+import { trimHistory } from "../rtk/historyTrim.js";
+import { createSaverTelemetry, withCacheFigures, formatTelemetryLine } from "../rtk/telemetry.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { stripUnsupportedModalities } from "../translator/concerns/modality.js";
 import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
 import { defaultClaudeToolType, shouldDefaultClaudeToolType } from "../translator/concerns/toolCall.js";
+import { withOutputCap, clampThinkingBudget } from "../translator/formats/maxTokens.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 
 /**
@@ -60,7 +63,7 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, providerOverrides, clientSignal }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, historyTrimEnabled, historyTrimThresholdTokens, historyTrimKeepTurns, maxOutputTokensCap, thinkingBudgetCap, sourceFormatOverride, providerThinking, providerOverrides, clientSignal }) {
   const { provider, model } = modelInfo;
   const requestStartTime = Date.now();
   // One credential-refresh retry per request: prevents a looping 401 when the
@@ -129,8 +132,32 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     }
   }
 
+  // Budget guard: the operator can bound one request's output and thinking
+  // spend. Applied to the client body before translation so every translator
+  // sees the clamped value, and clamped again inside adjustMaxTokens for the
+  // translators that compute their own ceiling.
+  if (Number(thinkingBudgetCap) > 0 && body.thinking?.budget_tokens) {
+    const clamped = clampThinkingBudget(body.thinking.budget_tokens);
+    if (clamped !== body.thinking.budget_tokens) {
+      body = { ...body, thinking: { ...body.thinking, budget_tokens: clamped } };
+      log?.debug?.("BUDGET", `thinking budget clamped to ${clamped}`);
+    }
+  }
+  if (Number(maxOutputTokensCap) > 0) {
+    const cap = Math.floor(Number(maxOutputTokensCap));
+    const current = body.max_tokens ?? body.max_completion_tokens;
+    if (typeof current === "number" && current > cap) {
+      body = { ...body, max_tokens: cap };
+      delete body.max_completion_tokens;
+      log?.debug?.("BUDGET", `max_tokens clamped ${current} → ${cap}`);
+    }
+  }
+
   // Per-request opt-out: client can bypass all token savers via header
   const tokenSaverEnabled = clientRawRequest?.headers?.[TOKEN_SAVER_HEADER]?.toLowerCase() !== "off";
+
+  // What the savers below actually changed, persisted with the usage row.
+  const saverTelemetry = createSaverTelemetry();
 
   // Cursor's translator rewrites tool_result into user text, so RTK must run on
   // the source body before translation. Every other pair translates the tool
@@ -215,7 +242,13 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     // Normalize newer Cowork/CC beta shapes (adaptive thinking, mid-conversation system) the API rejects
     if (clientTool === "claude") normalizeClaudePassthrough(translatedBody, translatedBody.model);
   } else {
-    translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool);
+    // The operator's budget caps ride into translation through a
+    // request-scoped override: translators are pure functions of the body and
+    // have no settings access, and translation is synchronous so the override
+    // can never leak into a concurrent request.
+    translatedBody = withOutputCap(maxOutputTokensCap, () =>
+      translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool),
+      thinkingBudgetCap);
     if (!translatedBody) {
       trackPendingRequest(model, provider, connectionId, false, true);
       return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Failed to translate request for ${sourceFormat} → ${targetFormat}`);
@@ -281,6 +314,17 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   // RTK: compress tool_result content. Skipped when already done pre-translate.
   const rtkStats = preTranslateRtk || compressMessages(translatedBody, tokenSaverEnabled && rtkEnabled);
+  if (rtkStats) {
+    saverTelemetry.record("rtk", {
+      bytesBefore: rtkStats.bytesBefore,
+      bytesAfter: rtkStats.bytesAfter,
+      units: rtkStats.hits?.length || 0,
+      detail: rtkStats.hits?.length
+        ? Array.from(new Set(rtkStats.hits.map((h) => h.filter)))
+        : null,
+      ran: true,
+    });
+  }
 
   // Headroom: optional external proxy compression; fail open if proxy is absent.
   const headroomDiagnostics = {};
@@ -293,6 +337,19 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       log?.warn?.("HEADROOM", `reported token delta, but messages and outbound JSON shrank <5% | ${formatHeadroomSizeLog(headroomDiagnostics)}`);
     }
   } else if (tokenSaverEnabled && headroomEnabled) log?.warn?.("HEADROOM", `skipped: ${headroomDiagnostics.reason || "compression unavailable"}${headroomDiagnostics.endpoint ? ` (${headroomDiagnostics.endpoint})` : ""}`);
+  if (tokenSaverEnabled && headroomEnabled) {
+    // Headroom reports tokens; the size snapshots are the wire measurement the
+    // phantom-savings guard already compares, so they are what we record.
+    const before = headroomDiagnostics.before;
+    const after = headroomDiagnostics.after;
+    saverTelemetry.record("headroom", {
+      bytesBefore: before?.messageBytes ?? 0,
+      bytesAfter: after?.messageBytes ?? 0,
+      units: headroomStats?.tokens_saved || 0,
+      detail: headroomDiagnostics.reason || null,
+      ran: true,
+    });
+  }
 
   // Token-saver flags accumulator for the single "⚙" log line below.
   const xf = [];
@@ -301,19 +358,26 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   // Caveman: inject terse-style system prompt
   if (tokenSaverEnabled && cavemanEnabled && cavemanLevel) {
+    // Caveman ADDS a system prompt; its payoff is a shorter *response*, which
+    // the provider reports back in usage. There is no input saving to record,
+    // so mark it as having run and let the output side show up in the totals.
     injectCaveman(translatedBody, finalFormat, cavemanLevel);
+    saverTelemetry.markRan("caveman", cavemanLevel);
     xf.push(`CAVEMAN:${cavemanLevel}`);
   }
 
   // Ponytail: inject lazy-senior-dev system prompt
   if (tokenSaverEnabled && ponytailEnabled && ponytailLevel) {
     injectPonytail(translatedBody, finalFormat, ponytailLevel);
+    saverTelemetry.markRan("ponytail", ponytailLevel);
     xf.push(`PONYTAIL:${ponytailLevel}`);
   }
 
-  // PXPIPE: image bulky context (Claude-format bodies only), last saver before dispatch
+  // PXPIPE: image bulky context (Claude-format bodies only), last saver before dispatch.
+  // Honours the client opt-out like every other saver — it used to run even
+  // when the caller sent `x-omnihilbras-token-saver: off`.
   let pxpipeSummary = null;
-  if (pxpipeEnabled) {
+  if (tokenSaverEnabled && pxpipeEnabled) {
     const pxpipeResult = await compressWithPxpipe(translatedBody, {
       enabled: true, format: finalFormat, model: upstreamModel,
       minChars: pxpipeMinChars, timeoutMs: pxpipeTimeoutMs, transform: pxpipeTransform,
@@ -321,10 +385,50 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     pxpipeSummary = pxpipeResult.summary;
     if (pxpipeResult.body) translatedBody = pxpipeResult.body;
     if (pxpipeSummary?.applied) xf.push(`PXPIPE:${pxpipeSummary.imageCount}img`);
+    if (pxpipeSummary) {
+      saverTelemetry.record("pxpipe", {
+        // pxpipe reports characters; JSON bytes and chars are within a few
+        // percent for this payload, and the field is labelled as an estimate.
+        bytesBefore: pxpipeSummary.originalChars ?? 0,
+        bytesAfter: pxpipeSummary.compressedBodyChars ?? 0,
+        units: pxpipeSummary.imageCount || 0,
+        detail: pxpipeSummary.applied ? "applied" : pxpipeSummary.reason || null,
+        ran: true,
+      });
+    }
     try { onPxpipeEvent?.({ provider, model, ...pxpipeSummary }); } catch { /* stats must not break requests */ }
   }
 
   if (xf.length && log?.line) log.line(reqTag, "⚙", xf.join(" · "));
+
+  // History trimming: the only saver that touches whole turns. Runs last among
+  // the body savers so it sees the final shape, and before the cache anchor so
+  // a trimmed body gets fresh breakpoints (a stale anchor costs a full prefix
+  // rewrite — see the anchorClaudeCache note below).
+  if (tokenSaverEnabled && historyTrimEnabled) {
+    const trimStats = trimHistory(translatedBody, {
+      enabled: true,
+      thresholdTokens: historyTrimThresholdTokens,
+      keepTurns: historyTrimKeepTurns,
+    });
+    if (trimStats) {
+      saverTelemetry.record("historyTrim", {
+        bytesBefore: trimStats.bytesBefore,
+        bytesAfter: trimStats.bytesAfter,
+        units: trimStats.stubbed || 0,
+        detail: trimStats.skipped || null,
+        ran: true,
+      });
+      if (trimStats.stubbed > 0) {
+        xf.push(`TRIM:${trimStats.stubbed}`);
+        log?.info?.("TRIM", `stubbed ${trimStats.stubbed} old block(s): ~${trimStats.estimatedBefore} → ~${trimStats.estimatedAfter} est. tokens`);
+      }
+    }
+  }
+
+  const saverSummary = saverTelemetry.summary();
+  const saverLine = formatTelemetryLine(saverSummary);
+  if (saverLine && log?.line) log.line(reqTag, "💾", saverLine);
 
   // Pin cache breakpoints to the final body — every saver above can reshape
   // system/tools/messages, and a stale anchor costs a full prefix rewrite.
@@ -532,7 +636,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     return createErrorResult(statusCode, errMsg, resetsAtMs, upstreamResponseHeaders(providerResponse.headers));
   }
 
-  const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log };
+  const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log, saverTelemetry };
   const appendLog = (extra) => appendRequestLog({ model, provider, connectionId, ...extra }).catch(() => { });
   const trackDone = () => trackPendingRequest(model, provider, connectionId, false);
 

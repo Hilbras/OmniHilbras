@@ -47,6 +47,17 @@ export default function TokenSaverClient() {
   const [ponytailLevel, setPonytailLevel] = useState("full");
   const [pxpipeEnabled, setPxpipeEnabled] = useState(false);
   const [pxpipeMinChars, setPxpipeMinChars] = useState(25000);
+  const [headroomCompressUserMessages, setHeadroomCompressUserMessages] =
+    useState(false);
+  const [historyTrimEnabled, setHistoryTrimEnabled] = useState(false);
+  const [historyTrimThresholdTokens, setHistoryTrimThresholdTokens] =
+    useState(60000);
+  const [historyTrimKeepTurns, setHistoryTrimKeepTurns] = useState(8);
+  const [maxOutputTokensCap, setMaxOutputTokensCap] = useState(0);
+  const [thinkingBudgetCap, setThinkingBudgetCap] = useState(0);
+  const [saverStats, setSaverStats] = useState(null);
+  const [saverStatsPeriod, setSaverStatsPeriod] = useState("7d");
+  const [settingsError, setSettingsError] = useState("");
   const [pxpipeStatus, setPxpipeStatus] = useState({
     installed: false,
     installing: false,
@@ -80,41 +91,51 @@ export default function TokenSaverClient() {
     }
   }, [isWenyanLocale, cavemanLevel]);
 
+  /**
+   * Persist settings and report whether the server took them.
+   *
+   * The old version fired and forgot: it never looked at res.ok, so a 401 or a
+   * 500 left the toggle showing a value the server never stored — and the page
+   * then disagreed with itself after a reload. Callers must now only commit
+   * their local state when this resolves true.
+   */
   const patchSetting = async (patch) => {
-    try {
-      await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-    } catch (error) {
-      console.log("Error updating setting:", error);
-    }
-  };
-
-  const handleRtkEnabled = async (value) => {
     try {
       const res = await fetch("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rtkEnabled: value }),
+        body: JSON.stringify(patch),
       });
-      if (res.ok) setRtkEnabledState(value);
+      if (!res.ok) {
+        setSettingsError(
+          `Could not save ${Object.keys(patch).join(", ")} (HTTP ${res.status}).`,
+        );
+        return false;
+      }
+      setSettingsError("");
+      return true;
     } catch (error) {
-      console.log("Error updating rtkEnabled:", error);
+      setSettingsError(
+        `Could not save ${Object.keys(patch).join(", ")}: ${error.message}`,
+      );
+      return false;
     }
   };
 
-  const handleCavemanEnabled = (value) => {
-    setCavemanEnabled(value);
-    patchSetting({ cavemanEnabled: value });
+  const handleRtkEnabled = async (value) => {
+    if (await patchSetting({ rtkEnabled: value })) setRtkEnabledState(value);
   };
 
-  const handleHeadroomEnabled = (value) => {
+  const handleCavemanEnabled = async (value) => {
+    if (await patchSetting({ cavemanEnabled: value })) setCavemanEnabled(value);
+  };
+
+  const handleHeadroomEnabled = async (value) => {
     const nextUrl = headroomUrl.trim() || "http://localhost:8787";
-    setHeadroomUrl(nextUrl);
-    setHeadroomEnabled(value);
-    patchSetting({ headroomEnabled: value, headroomUrl: nextUrl });
+    if (await patchSetting({ headroomEnabled: value, headroomUrl: nextUrl })) {
+      setHeadroomUrl(nextUrl);
+      setHeadroomEnabled(value);
+    }
   };
 
   const handleHeadroomUrlBlur = async () => {
@@ -344,19 +365,52 @@ export default function TokenSaverClient() {
     }
   }, [headroomStatus.running, refreshHeadroomStatus]);
 
-  const handleCavemanLevel = (level) => {
-    setCavemanLevel(level);
-    patchSetting({ cavemanLevel: level });
+  const handleCavemanLevel = async (level) => {
+    if (await patchSetting({ cavemanLevel: level })) setCavemanLevel(level);
   };
 
-  const handlePonytailEnabled = (value) => {
-    setPonytailEnabled(value);
-    patchSetting({ ponytailEnabled: value });
+  const handlePonytailEnabled = async (value) => {
+    if (await patchSetting({ ponytailEnabled: value })) setPonytailEnabled(value);
   };
 
-  const handlePonytailLevel = (level) => {
-    setPonytailLevel(level);
-    patchSetting({ ponytailLevel: level });
+  const handlePonytailLevel = async (level) => {
+    if (await patchSetting({ ponytailLevel: level })) setPonytailLevel(level);
+  };
+
+  const handleHeadroomCompressUserMessages = async (value) => {
+    if (await patchSetting({ headroomCompressUserMessages: value })) {
+      setHeadroomCompressUserMessages(value);
+    }
+  };
+
+  const handleHistoryTrimEnabled = async (value) => {
+    if (await patchSetting({ historyTrimEnabled: value })) {
+      setHistoryTrimEnabled(value);
+    }
+  };
+
+  const handleHistoryTrimThresholdBlur = async () => {
+    const next = Math.max(1000, Number(historyTrimThresholdTokens) || 60000);
+    setHistoryTrimThresholdTokens(next);
+    await patchSetting({ historyTrimThresholdTokens: next });
+  };
+
+  const handleHistoryTrimKeepTurnsBlur = async () => {
+    const next = Math.max(0, Number(historyTrimKeepTurns) || 8);
+    setHistoryTrimKeepTurns(next);
+    await patchSetting({ historyTrimKeepTurns: next });
+  };
+
+  const handleMaxOutputCapBlur = async () => {
+    const next = Math.max(0, Number(maxOutputTokensCap) || 0);
+    setMaxOutputTokensCap(next);
+    await patchSetting({ maxOutputTokensCap: next });
+  };
+
+  const handleThinkingBudgetCapBlur = async () => {
+    const next = Math.max(0, Number(thinkingBudgetCap) || 0);
+    setThinkingBudgetCap(next);
+    await patchSetting({ thinkingBudgetCap: next });
   };
 
   const refreshPxpipeStatus = useCallback(async () => {
@@ -401,9 +455,8 @@ export default function TokenSaverClient() {
     [refreshPxpipeStatus, runPxpipeHealth]
   );
 
-  const handlePxpipeEnabled = (value) => {
-    setPxpipeEnabled(value);
-    patchSetting({ pxpipeEnabled: value });
+  const handlePxpipeEnabled = async (value) => {
+    if (await patchSetting({ pxpipeEnabled: value })) setPxpipeEnabled(value);
   };
 
   const handlePxpipeMinCharsBlur = () => {
@@ -437,6 +490,16 @@ export default function TokenSaverClient() {
           setPonytailLevel(data.ponytailLevel || "full");
           setPxpipeEnabled(!!data.pxpipeEnabled);
           if (typeof data.pxpipeMinChars === "number") setPxpipeMinChars(data.pxpipeMinChars);
+          setHeadroomCompressUserMessages(!!data.headroomCompressUserMessages);
+          setHistoryTrimEnabled(!!data.historyTrimEnabled);
+          if (typeof data.historyTrimThresholdTokens === "number") {
+            setHistoryTrimThresholdTokens(data.historyTrimThresholdTokens);
+          }
+          if (typeof data.historyTrimKeepTurns === "number") {
+            setHistoryTrimKeepTurns(data.historyTrimKeepTurns);
+          }
+          if (typeof data.maxOutputTokensCap === "number") setMaxOutputTokensCap(data.maxOutputTokensCap);
+          if (typeof data.thinkingBudgetCap === "number") setThinkingBudgetCap(data.thinkingBudgetCap);
           refreshHeadroomStatus();
           // PRD: run the PXPIPE health check automatically when the page opens
           refreshPxpipeStatus().then(runPxpipeHealth);
@@ -445,6 +508,39 @@ export default function TokenSaverClient() {
     };
     loadSettings();
   }, [refreshHeadroomStatus, refreshPxpipeStatus, runPxpipeHealth]);
+
+  const refreshSaverStats = useCallback(async (period) => {
+    try {
+      const res = await fetch(`/api/token-saver/stats?period=${period}`, {
+        headers: { "Cache-Control": "no-store" },
+      });
+      if (res.ok) setSaverStats(await res.json());
+    } catch {
+      // Stats are informational — a failure must not break the page.
+    }
+  }, []);
+
+  useEffect(() => {
+    // Deferred one tick so the fetch's setState lands outside the effect body.
+    const id = setTimeout(() => refreshSaverStats(saverStatsPeriod), 0);
+    return () => clearTimeout(id);
+  }, [refreshSaverStats, saverStatsPeriod]);
+
+  const formatBytes = (n) => {
+    const v = Number(n) || 0;
+    if (v >= 1048576) return `${(v / 1048576).toFixed(1)} MB`;
+    if (v >= 1024) return `${(v / 1024).toFixed(1)} KB`;
+    return `${v} B`;
+  };
+
+  const formatTokens = (n) => {
+    const v = Number(n) || 0;
+    if (v >= 1000000) return `${(v / 1000000).toFixed(2)}M`;
+    if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
+    return String(v);
+  };
+
+  const statsEmpty = !saverStats || (saverStats.requestsWithTelemetry || 0) === 0;
 
   const headroomRunning = !!headroomStatus.running;
   const headroomStatusLabel = headroomStatus.loading
@@ -480,6 +576,161 @@ export default function TokenSaverClient() {
 
   return (
     <div className="space-y-6 p-6">
+      {settingsError && (
+        <div className="rounded border border-warning/40 bg-warning/10 px-4 py-2 text-sm text-warning">
+          {settingsError}
+        </div>
+      )}
+
+      <Card id="savings">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary">
+              savings
+            </span>
+            Savings
+          </h2>
+          <div className="flex items-center gap-1.5">
+            {["today", "7d", "30d", "all"].map((p) => (
+              <button
+                key={p}
+                onClick={() => setSaverStatsPeriod(p)}
+                className={`px-3 py-1.5 rounded text-xs font-medium border transition-colors ${
+                  saverStatsPeriod === p
+                    ? "bg-primary text-white border-primary"
+                    : "bg-transparent border-border text-text-muted hover:bg-surface-2"
+                }`}
+              >
+                {p === "all" ? "All" : p === "today" ? "Today" : p}
+              </button>
+            ))}
+            <button
+              onClick={() => refreshSaverStats(saverStatsPeriod)}
+              className="ml-1 text-xs text-primary underline hover:opacity-80"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {statsEmpty ? (
+          <p className="text-sm text-text-muted py-2">
+            No measurements yet. Savings are recorded per request — send a
+            request through the gateway and they appear here.
+            {saverStats?.requests > 0 && (
+              <>
+                {" "}
+                ({saverStats.requests} request
+                {saverStats.requests === 1 ? "" : "s"} in this period predate
+                measurement.)
+              </>
+            )}
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 py-2">
+              <div>
+                <p className="text-xs text-text-muted">Saved</p>
+                <p className="text-2xl font-semibold">
+                  {formatBytes(saverStats.totalBytesSaved)}
+                </p>
+                <p className="text-xs text-text-muted">
+                  ≈ {formatTokens(saverStats.totalTokensSaved)} tokens
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-text-muted">Est. cost avoided</p>
+                <p className="text-2xl font-semibold">
+                  ${(saverStats.estimatedCostAvoided || 0).toFixed(4)}
+                </p>
+                <p className="text-xs text-text-muted">at this period&apos;s mix</p>
+              </div>
+              <div>
+                <p className="text-xs text-text-muted">Requests saving</p>
+                <p className="text-2xl font-semibold">
+                  {saverStats.requestsWithSavings}
+                  <span className="text-sm text-text-muted font-normal">
+                    {" "}
+                    / {saverStats.requestsWithTelemetry}
+                  </span>
+                </p>
+                <p className="text-xs text-text-muted">measured requests</p>
+              </div>
+              <div>
+                <p className="text-xs text-text-muted">Cache hit rate</p>
+                <p className="text-2xl font-semibold">
+                  {saverStats.cacheHitRate == null
+                    ? "—"
+                    : `${(saverStats.cacheHitRate * 100).toFixed(0)}%`}
+                </p>
+                <p className="text-xs text-text-muted">
+                  {formatTokens(saverStats.cache?.read)} read ·{" "}
+                  {formatTokens(saverStats.cache?.create)} written
+                </p>
+              </div>
+            </div>
+
+            {saverStats.savers?.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-border space-y-2">
+                {saverStats.savers.map((s) => {
+                  const max = saverStats.savers[0].bytesSaved || 1;
+                  const pct = Math.max(2, Math.round((s.bytesSaved / max) * 100));
+                  return (
+                    <div key={s.id}>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium capitalize">
+                          {s.id === "historyTrim" ? "History trim" : s.id}
+                        </span>
+                        <span className="text-text-muted">
+                          {formatBytes(s.bytesSaved)} · {s.requests} req
+                          {s.requestsWithSavings === 0 && (
+                            <span className="text-warning"> · ran, no match</span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="h-1.5 rounded bg-surface-2 mt-1 overflow-hidden">
+                        <div
+                          className="h-full bg-primary"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      {Object.keys(s.details || {}).length > 0 && (
+                        <p className="text-xs text-text-muted mt-0.5">
+                          {Object.entries(s.details)
+                            .sort((a, b) => b[1] - a[1])
+                            .slice(0, 5)
+                            .map(([k, v]) => `${k}×${v}`)
+                            .join(" · ")}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {saverStats.byProvider?.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <p className="text-xs text-text-muted mb-2">By provider</p>
+                <div className="space-y-1">
+                  {saverStats.byProvider.slice(0, 8).map((p) => (
+                    <div
+                      key={p.provider}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span>{p.provider}</span>
+                      <span className="text-text-muted">
+                        {formatBytes(p.bytesSaved)} · {p.requests} req
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </Card>
+
       <Card id="rtk">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold flex items-center gap-2">
@@ -643,6 +894,23 @@ export default function TokenSaverClient() {
               enables the Kompress-v2 HF model for prose/agentic traces but
               adds ~1 GB (torch + huggingface-hub).
             </p>
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-border gap-4">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">Compress user messages</p>
+                <p className="text-xs text-text-muted">
+                  Also compress the prompts you send, not just tool output.
+                  Off by default — rewriting your own instructions is riskier
+                  than compressing tool output.
+                </p>
+              </div>
+              <Toggle
+                size="sm"
+                checked={headroomCompressUserMessages}
+                onChange={() =>
+                  handleHeadroomCompressUserMessages(!headroomCompressUserMessages)
+                }
+              />
+            </div>
           </div>
         )}
         <div className="flex items-center justify-between pt-4 border-t border-border gap-4 flex-wrap">
@@ -746,8 +1014,6 @@ export default function TokenSaverClient() {
             />
           </div>
         </div>
-        {/* PXPIPE hidden from UI — experimental, not exposed to users yet */}
-        {false && (
         <div className="flex items-center justify-between pt-4 mt-4 border-t border-border gap-4 flex-wrap">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-3 flex-wrap">
@@ -791,7 +1057,119 @@ export default function TokenSaverClient() {
             onChange={() => handlePxpipeEnabled(!pxpipeEnabled)}
           />
         </div>
+      </Card>
+
+      <Card id="history-trim">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary">
+              history
+            </span>
+            History trimming
+          </h2>
+        </div>
+        <div className="flex items-center justify-between pt-2 gap-4 flex-wrap">
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">Trim old turns</p>
+            <p className="text-sm text-text-muted">
+              Once a conversation crosses the threshold, the content of old
+              turns is replaced with a short stub. The turn structure, tool
+              pairing, system prompt and the first user message are preserved —
+              only the bulk goes. This is the only saver that changes what the
+              model can still read, so it is off by default.
+            </p>
+          </div>
+          <Toggle
+            checked={historyTrimEnabled}
+            onChange={() => handleHistoryTrimEnabled(!historyTrimEnabled)}
+          />
+        </div>
+        {historyTrimEnabled && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 pt-4 border-t border-border">
+            <div>
+              <label className="text-sm font-medium block mb-1">
+                Threshold (est. tokens)
+              </label>
+              <Input
+                type="number"
+                min={1000}
+                value={historyTrimThresholdTokens}
+                onChange={(e) => setHistoryTrimThresholdTokens(e.target.value)}
+                onBlur={handleHistoryTrimThresholdBlur}
+              />
+              <p className="text-xs text-text-muted mt-1">
+                Trim only when the prompt estimate exceeds this. Lower = more
+                aggressive.
+              </p>
+            </div>
+            <div>
+              <label className="text-sm font-medium block mb-1">
+                Keep last N turns
+              </label>
+              <Input
+                type="number"
+                min={0}
+                value={historyTrimKeepTurns}
+                onChange={(e) => setHistoryTrimKeepTurns(e.target.value)}
+                onBlur={handleHistoryTrimKeepTurnsBlur}
+              />
+              <p className="text-xs text-text-muted mt-1">
+                The working context the model needs most. 8 is a safe default
+                for agent loops.
+              </p>
+            </div>
+          </div>
         )}
+      </Card>
+
+      <Card id="budget">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary">
+              speed
+            </span>
+            Budget guard
+          </h2>
+        </div>
+        <p className="text-sm text-text-muted mb-4">
+          Hard ceilings applied to every request at dispatch. 0 means off — the
+          model&apos;s own limit applies. These are ceilings, not targets: a request
+          asking for less keeps its own value.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm font-medium block mb-1">
+              Max output tokens per request
+            </label>
+            <Input
+              type="number"
+              min={0}
+              value={maxOutputTokensCap}
+              onChange={(e) => setMaxOutputTokensCap(e.target.value)}
+              onBlur={handleMaxOutputCapBlur}
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Currently 0 (off). Default behaviour clamps to the model&apos;s
+              published output limit, up to 64000.
+            </p>
+          </div>
+          <div>
+            <label className="text-sm font-medium block mb-1">
+              Max thinking budget per request
+            </label>
+            <Input
+              type="number"
+              min={0}
+              value={thinkingBudgetCap}
+              onChange={(e) => setThinkingBudgetCap(e.target.value)}
+              onBlur={handleThinkingBudgetCapBlur}
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Caps <code>thinking.budget_tokens</code> on reasoning models.
+              0 = off.
+            </p>
+          </div>
+        </div>
       </Card>
 
       <Modal
@@ -916,7 +1294,7 @@ export default function TokenSaverClient() {
       </Modal>
 
       <Modal
-        isOpen={false}
+        isOpen={showPxpipeModal}
         title={pxpipeStatus.installed ? "PXPIPE" : "Setup PXPIPE"}
         onClose={() => setShowPxpipeModal(false)}
       >

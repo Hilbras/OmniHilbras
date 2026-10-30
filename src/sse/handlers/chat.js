@@ -357,6 +357,14 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       pxpipeEnabled: !!chatSettings.pxpipeEnabled,
       pxpipeMinChars: chatSettings.pxpipeMinChars,
       pxpipeTimeoutMs: chatSettings.pxpipeTimeoutMs,
+      // Conversation-level saver: stubs old turns once the prompt crosses the
+      // threshold. Off by default — it changes what the model can see.
+      historyTrimEnabled: !!chatSettings.historyTrimEnabled,
+      historyTrimThresholdTokens: chatSettings.historyTrimThresholdTokens,
+      historyTrimKeepTurns: chatSettings.historyTrimKeepTurns,
+      // Operator spend bounds. 0 = off.
+      maxOutputTokensCap: chatSettings.maxOutputTokensCap,
+      thinkingBudgetCap: chatSettings.thinkingBudgetCap,
       // Lazily warms the in-process module on first use; null when not installed (fail-open)
       pxpipeTransform: chatSettings.pxpipeEnabled ? await getPxpipeTransform() : null,
       onPxpipeEvent: appendPxpipeEvent,

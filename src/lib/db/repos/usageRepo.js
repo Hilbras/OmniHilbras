@@ -196,6 +196,7 @@ function usageEntryToRow(entry) {
     cost: entry.cost || 0,
     status: entry.status || "ok",
     tokens,
+    meta: entry.meta || null,
   };
 }
 
@@ -634,7 +635,7 @@ function writeUsageBatch(db, entries) {
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, entry.apiKey || null, entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.status || "ok",
-          stringifyJson(tokens), stringifyJson({}),
+          stringifyJson(tokens), stringifyJson(entry.meta || {}),
           entry.workspaceId || "default",
         ]
       );
@@ -905,6 +906,147 @@ if (!global._usageFlushShutdownHook) {
   process.prependListener("SIGTERM", hook);
   process.on("beforeExit", hook);
   process.on("exit", hook);
+}
+
+/**
+ * The ISO cutoff for a dashboard period, or null for "all".
+ *
+ * "today" means local midnight (the same boundary usageDaily buckets by), not
+ * "24 hours ago" — the two differ and the charts already use local days.
+ */
+function periodStartIso(period) {
+  if (!period || period === "all") return null;
+  if (period === "today") {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.toISOString();
+  }
+  const ms = PERIOD_MS[period];
+  if (!ms) return null;
+  return new Date(Date.now() - ms).toISOString();
+}
+
+/**
+ * Aggregate what the token savers actually did, per saver and per provider.
+ *
+ * Reads the `meta` blob the request path writes (see open-sse/rtk/telemetry.js).
+ * Rows recorded before telemetry existed carry `{}` and are counted as
+ * "no telemetry" rather than as zero savings, so an operator can tell the
+ * difference between "this saver saved nothing" and "this saver never ran".
+ *
+ * @param {string} period - today | 24h | 7d | 30d | 60d | all
+ * @returns {Promise<object>}
+ */
+export async function getTokenSaverStats(period = "7d") {
+  const db = await getAdapter();
+  const since = periodStartIso(period);
+
+  const params = [];
+  let where = "";
+  if (since) {
+    where = "WHERE timestamp >= ?";
+    params.push(since);
+  }
+  const rows = db.all(`SELECT provider, model, promptTokens, completionTokens, cost, tokens, meta FROM usageHistory ${where} ORDER BY id ASC`, params);
+
+  // Pending rows count too — the dashboard must show a saving the moment the
+  // request finishes, not when the next batch lands.
+  for (const row of pendingRowsFrom(pendingUsageSnapshot())) {
+    if (since && row.timestamp < since) continue;
+    rows.push({ ...row, meta: row.meta || null });
+  }
+
+  const savers = {};
+  const byProvider = {};
+  let requests = 0;
+  let requestsWithTelemetry = 0;
+  let requestsWithSavings = 0;
+  let totalBytesSaved = 0;
+  let totalTokensSaved = 0;
+  let cacheRead = 0;
+  let cacheCreate = 0;
+  let promptTokens = 0;
+  let cost = 0;
+
+  for (const row of rows) {
+    requests += 1;
+    promptTokens += row.promptTokens || 0;
+    cost += row.cost || 0;
+
+    const meta = parseJson(row.meta, null);
+    if (!meta || (!meta.saver && !meta.cache)) continue;
+    requestsWithTelemetry += 1;
+
+    if (meta.cache) {
+      cacheRead += meta.cache.read || 0;
+      cacheCreate += meta.cache.create || 0;
+    }
+
+    const rowBytes = meta.totalBytesSaved || 0;
+    const rowTokens = meta.totalTokensSaved || 0;
+    if (rowBytes > 0) requestsWithSavings += 1;
+    totalBytesSaved += rowBytes;
+    totalTokensSaved += rowTokens;
+
+    const providerKey = row.provider || "unknown";
+    const prov = byProvider[providerKey] || (byProvider[providerKey] = {
+      provider: providerKey, requests: 0, bytesSaved: 0, tokensSaved: 0, cost: 0,
+    });
+    prov.requests += 1;
+    prov.bytesSaved += rowBytes;
+    prov.tokensSaved += rowTokens;
+    prov.cost += row.cost || 0;
+
+    for (const [id, entry] of Object.entries(meta.saver || {})) {
+      const agg = savers[id] || (savers[id] = {
+        id,
+        bytesBefore: 0,
+        bytesAfter: 0,
+        bytesSaved: 0,
+        tokensSaved: 0,
+        units: 0,
+        requests: 0,
+        requestsWithSavings: 0,
+        details: {},
+      });
+      agg.bytesBefore += entry.bytesBefore || 0;
+      agg.bytesAfter += entry.bytesAfter || 0;
+      agg.bytesSaved += entry.bytesSaved || 0;
+      agg.tokensSaved += entry.tokensSaved || 0;
+      agg.units += entry.units || 0;
+      agg.requests += 1;
+      if ((entry.bytesSaved || 0) > 0) agg.requestsWithSavings += 1;
+      // Filter names / levels / skip reasons, so "ran but matched nothing"
+      // is distinguishable from "never enabled".
+      const detailKey = Array.isArray(entry.detail)
+        ? entry.detail.join(",")
+        : entry.detail == null ? "" : String(entry.detail);
+      if (detailKey) agg.details[detailKey] = (agg.details[detailKey] || 0) + 1;
+    }
+  }
+
+  // Estimated money avoided: price the saved tokens at the observed blend of
+  // this period's own spend, so the figure reflects the operator's real mix
+  // instead of a catalog average that may not cover every provider.
+  const tokensObserved = promptTokens || 0;
+  const blendedCostPerToken = tokensObserved > 0 ? cost / tokensObserved : 0;
+
+  return {
+    period,
+    since,
+    requests,
+    requestsWithTelemetry,
+    requestsWithSavings,
+    totalBytesSaved,
+    totalTokensSaved,
+    estimatedCostAvoided: +(totalTokensSaved * blendedCostPerToken).toFixed(6),
+    cache: { read: cacheRead, create: cacheCreate },
+    cacheHitRate: cacheRead + cacheCreate > 0
+      ? +(cacheRead / (cacheRead + cacheCreate)).toFixed(4)
+      : null,
+    savers: Object.values(savers).sort((a, b) => b.bytesSaved - a.bytesSaved),
+    byProvider: Object.values(byProvider).sort((a, b) => b.bytesSaved - a.bytesSaved),
+  };
 }
 
 export async function getUsageHistory(filter = {}) {

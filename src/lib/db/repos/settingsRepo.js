@@ -55,6 +55,10 @@ export const DEFAULT_SETTINGS = {
   headroomUrl: DEFAULT_HEADROOM_URL,
   headroomCompressUserMessages: false,
   headroomTimeoutMs: 3000,
+  // Headroom proxy launch flags. Declared here so they round-trip through
+  // GET /api/settings instead of only existing once someone toggles them.
+  headroomCodeAware: false,
+  headroomKompress: true,
   cavemanEnabled: false,
   cavemanLevel: "full",
   ponytailEnabled: false,
@@ -63,6 +67,16 @@ export const DEFAULT_SETTINGS = {
   pxpipeAutoInstall: true,
   pxpipeMinChars: 25000,
   pxpipeTimeoutMs: 15000,
+  // Conversation-level trimming: stub the content of old turns once the
+  // estimated prompt crosses the threshold. Off by default — unlike the other
+  // savers this one changes what the model can still see, so it is opt-in.
+  historyTrimEnabled: false,
+  historyTrimThresholdTokens: 60000,
+  historyTrimKeepTurns: 8,
+  // Operator spend bounds applied at dispatch. 0 disables each one; they are
+  // ceilings, never targets — a request asking for less keeps its own value.
+  maxOutputTokensCap: 0,
+  thinkingBudgetCap: 0,
   // Per-provider user header overrides applied at dispatch: { [providerId]: { headers: {..} } }
   providerOverrides: {},
   // Client-facing request bounds for the /v1 inference API.

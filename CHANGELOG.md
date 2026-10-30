@@ -1,3 +1,17 @@
+# v2.9.18 (2026-10-30)
+
+## Features
+- **Token Saver — measurement.** Every saver now records what it actually changed, per request, into the `usageHistory.meta` column (which existed but was always written as `{}`). A new `GET /api/token-saver/stats?period=7d` aggregates it: bytes and estimated tokens saved per saver, per-provider attribution, the provider's own cache read/create figures and hit rate, and an estimated cost avoided priced at the period's observed mix. The Token Saver page gains a **Savings** card (period picker, per-saver bars, per-provider table) that distinguishes "switched on but matched nothing" from "never ran" — the question that was previously unanswerable
+- **Token Saver — history trimming.** The first saver that touches whole turns rather than tool results. Once the estimated prompt crosses a threshold (default 60k), the content of old turns is replaced with a short stub while turn structure, tool_use/tool_result pairing, the system prompt, the first user message and the last N turns are preserved. Off by default — unlike the other savers it changes what the model can still read. Threshold and keep-turns are configurable. Runs before the Claude cache anchor so a trimmed body gets fresh breakpoints
+- **Token Saver — budget guard.** Operator-settable `maxOutputTokensCap` and `thinkingBudgetCap` (0 = off). Applied to the client body before translation and re-applied inside `adjustMaxTokens` for translators that compute their own ceiling, so a 128k model cannot exceed the operator's cap. The caps are request-scoped, so a concurrent request can never inherit one
+
+## Fixes
+- **PXPIPE ignored the client opt-out.** `chatCore` gated it on `pxpipeEnabled` alone while every other saver used `tokenSaverEnabled && …`, so a client sending `x-omnihilbras-token-saver: off` still had its context re-encoded as images
+- **`headroomCompressUserMessages` was unreachable.** Fully plumbed from settings through to the proxy but with no control anywhere in the UI; it now has a toggle under the Headroom card
+- **`headroomCodeAware` / `headroomKompress` were missing from `DEFAULT_SETTINGS`**, so they only existed once someone toggled them. Declared, so they round-trip through `GET /api/settings`
+- **Settings writes were fire-and-forget.** `patchSetting()` never checked `res.ok` and three handlers committed their local state before the PATCH resolved — a 401 left the toggle showing a value the server never stored, and the page disagreed with itself after a reload. Writes are now awaited, failures surface as an inline banner, and state only changes once the server has accepted the value
+- **PXPIPE panel un-hidden.** It is a working saver with a live backend; it was compiled out with `{false && …}`. Exposed (still off by default)
+
 # v2.9.17 (2026-10-29)
 
 ## Fixes
