@@ -81,6 +81,10 @@ export function qoderUserInfoUrl(region: 'intl' | 'cn'): string {
   return `${QODER_REGION_BASES[region].openApi}/api/v1/userinfo`;
 }
 
+export function qoderQuotaUsageUrl(region: 'intl' | 'cn'): string {
+  return `${QODER_REGION_BASES[region].openApi}/api/v2/quota/usage`;
+}
+
 export function qoderModelListUrl(region: 'intl' | 'cn'): string {
   return `${QODER_REGION_BASES[region].chat}${QODER_MODEL_LIST_PATH}`;
 }

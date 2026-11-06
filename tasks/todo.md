@@ -5656,3 +5656,16 @@ independently of the React app" is now measured over every provider manifest, an
   (18000s → "5-hour window", 604800s → "Weekly window", 2592000s → "Monthly window", anything else
   humanized), and `reset_at` parses Unix seconds — a number read as milliseconds lands in 1970.
   Verified live: "Monthly window — 0 of 100 left — resets 2026-11-19".
+
+## Unreleased — Qoder reads its credit pool
+
+- **`QoderAdapter.quota()` reads `GET /api/v2/quota/usage`.** The reference tree advertised the
+  endpoint (`usage: { url }`, `features.usage: true`) and never consumed it — no parser exists
+  anywhere in the old project, so the shape was dumped raw from the live endpoint before it was
+  written down: a **credit pool**, not a time window. Absolute `used`/`total`/`remaining` in the unit
+  the account is metered in (credits), beside the account's own type (`personal_standard`). The row
+  is named for the vendor's unit and carries the absolute figures as-is — a percentage here would be
+  the gateway inventing a shape the provider did not send. `isQuotaExceeded` is not a separate state:
+  a pool with nothing remaining reads as exhausted on its own. Verified live: plan
+  `personal_standard`, Credits 0 of 0. The billing-block detection (codes 110/112/10605) the
+  reference guards in its executor was already ported here; only the quota read was missing.

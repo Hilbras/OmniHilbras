@@ -14,7 +14,9 @@ import type {
   ProviderCapabilities,
   ProviderCredential,
   ProviderHealth,
+  ProviderQuota,
   ProviderRequestContext,
+  ProviderResourceQuota,
   TokenUsage,
 } from '../lib/types.js';
 
@@ -24,6 +26,7 @@ import {
   qoderDeviceTokenUrl,
   qoderLoginUrl,
   qoderModelListUrl,
+  qoderQuotaUsageUrl,
   qoderUserInfoUrl,
 } from '../lib/constants.js';
 import { qoderEncodedBytes, qoderEncodeBody } from '../lib/encoding.js';
@@ -105,6 +108,39 @@ type OpenAiChunk = {
 
 const BILLING_CODES = new Set(['110', '112', '10605']);
 const PRICING_HINT = /pricingurl/i;
+
+type QoderQuotaResponse = {
+  userType?: unknown;
+  usageType?: unknown;
+  isQuotaExceeded?: unknown;
+  userQuota?: { total?: unknown; used?: unknown; remaining?: unknown; unit?: unknown } | null;
+};
+
+function qoderFiniteNumber(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  return fallback;
+}
+
+/**
+ * The quota response, as the live endpoint answers it (dumped raw 2026-11): a credit pool with
+ * absolute figures and the account's own type — `personal_standard`, zero credits remaining, and an
+ * `isQuotaExceeded` flag that a pool with nothing remaining already states.
+ */
+function parseQoderQuota(data: QoderQuotaResponse): ProviderQuota {
+  const pool = data.userQuota ?? {};
+  const total = Math.max(0, Math.round(qoderFiniteNumber(pool.total, 0)));
+  const used = Math.max(0, Math.round(qoderFiniteNumber(pool.used, 0)));
+  // The provider's own remaining wins when it is present; falling back to `total - used` keeps a
+  // response that omits the field from reading as an exhausted one.
+  const remaining = pool.remaining == null ? Math.max(0, total - used) : Math.max(0, Math.round(qoderFiniteNumber(pool.remaining, 0)));
+  const unit = typeof pool.unit === 'string' && pool.unit.trim() ? pool.unit : 'credits';
+  const row = unit.charAt(0).toUpperCase() + unit.slice(1);
+  return {
+    plan: typeof data.userType === 'string' && data.userType ? data.userType : 'Qoder',
+    resources: { [row]: { used, limit: total, remaining } satisfies ProviderResourceQuota },
+  };
+}
 
 class QoderAdapter implements ProviderAdapter {
   readonly id = qoderProviderId;
@@ -316,6 +352,28 @@ class QoderAdapter implements ProviderAdapter {
         ...(error instanceof Error ? { message: error.message } : {}),
       };
     }
+  }
+
+  /**
+   * Qoder's allowance for the signed-in account, read from `/api/v2/quota/usage`.
+   *
+   * The response is a **credit pool**, not a time window: absolute `used`/`total`/`remaining` in the
+   * unit the account is metered in (credits), beside the account's own type. So the row is named for
+   * the unit the vendor reports and carries the absolute figures as-is — a percentage here would be
+   * the gateway inventing a shape the provider did not send. `isQuotaExceeded` is not a separate
+   * state: a pool with nothing remaining reads as exhausted on its own. Reading it is account
+   * metadata and spends no credits.
+   */
+  async quota(context: ProviderRequestContext = {}): Promise<ProviderQuota> {
+    const credential = await this.credential(context);
+    const { data } = await this.transport.request<QoderQuotaResponse>({
+      method: 'GET',
+      providerId: this.id,
+      url: qoderQuotaUsageUrl(this.region),
+      headers: { accept: 'application/json', Authorization: `Bearer ${credential.value}` },
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    return parseQoderQuota(data ?? {});
   }
 
   isCredentialExpired(credential: ProviderCredential | undefined, now?: number): boolean | undefined {
