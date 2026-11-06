@@ -346,7 +346,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'beatapi',
     name: 'BeatAPI',
-    description: 'OpenAI-compatible relay at beatapi.io. Its API surface is not publicly documented — the endpoint below is the conventional guess, and the save dialog lets you edit it if yours differs.',
+    description: 'OpenAI-compatible relay with chat, a responses lane and a /v1/usage credit report. The old project routed it at api.beatapi.io — that is the endpoint this card carries.',
     category: 'Multi-model provider',
     group: 'free-tier',
     status: 'available',
@@ -359,13 +359,13 @@ export const providerCatalog: ProviderRecord[] = [
     logo: providerLogoMap['beatapi'],
     color: '#ef4444',
     initial: 'B',
-    endpoint: 'https://beatapi.io/v1',
+    endpoint: 'https://api.beatapi.io/v1',
     modelList: [],
   },
   {
     id: 'kiraai',
     name: 'KiraAI',
-    description: 'KiraAI (Vietnam) model service. Its API surface is not publicly documented — the endpoint below is the conventional guess, and the save dialog lets you edit it if yours differs.',
+    description: 'KiraAI (Vietnam) model service: chat, image generations and audio speech over one keyed API. The old project routed it at kiraai.vn/api/v1 — that is the endpoint this card carries.',
     category: 'Multi-model provider',
     group: 'free-tier',
     status: 'available',
@@ -378,7 +378,7 @@ export const providerCatalog: ProviderRecord[] = [
     logo: providerLogoMap['kiraai'],
     color: '#22c55e',
     initial: 'K',
-    endpoint: 'https://kiraai.vn/v1',
+    endpoint: 'https://kiraai.vn/api/v1',
     modelList: [],
   },
   {
