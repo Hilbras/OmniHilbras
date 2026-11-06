@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { KeyRound, Plus, Power, Save } from 'lucide-react';
+import { KeyRound, Plus, Power, Save, Trash2 } from 'lucide-react';
 import type { GatewayConnection } from '../lib/gatewayClient';
-import { saveGatewayConnectionResponsibility } from '../lib/gatewayClient';
+import { removeGatewayConnection, saveGatewayConnectionResponsibility } from '../lib/gatewayClient';
 import { useToast } from './Toast';
 
 /**
@@ -87,6 +87,7 @@ function AccountRow({ connection, index, onSaved }: { connection: GatewayConnect
   const [owner, setOwner] = useState(connection.responsibility?.owner ?? '');
   const [purpose, setPurpose] = useState(connection.responsibility?.purpose ?? '');
   const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   const dirty = owner.trim() !== (connection.responsibility?.owner ?? '') || purpose.trim() !== (connection.responsibility?.purpose ?? '');
 
@@ -103,6 +104,25 @@ function AccountRow({ connection, index, onSaved }: { connection: GatewayConnect
       notify(error instanceof Error ? error.message : 'The note could not be saved.', 'error');
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * Retires this account. Deliberate, confirmed, and named: rows are created by "Add connection" now,
+   * so a row a user no longer wants — a replaced key, a duplicate sign-in — needs a way out that is
+   * not the gateway's API.
+   */
+  async function remove() {
+    if (!window.confirm(`Remove account ${index + 1} (${connection.responsibility?.owner || connection.name})? Its credential is deleted and its traffic stops.`)) return;
+    setRemoving(true);
+    try {
+      await removeGatewayConnection(connection.id);
+      notify(`Removed account ${index + 1}.`, 'success');
+      onSaved();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'The account could not be removed.', 'error');
+    } finally {
+      setRemoving(false);
     }
   }
 
@@ -161,6 +181,16 @@ function AccountRow({ connection, index, onSaved }: { connection: GatewayConnect
         >
           <Save className="h-3 w-3" aria-hidden="true" />
           Save
+        </button>
+        <button
+          type="button"
+          onClick={() => void remove()}
+          disabled={removing}
+          className="btn-ghost inline-flex h-8 w-full items-center justify-center gap-1.5 px-2.5 text-[11px] text-danger disabled:opacity-40 sm:h-7 sm:w-auto md:mt-auto"
+          title="Remove this account and delete its credential"
+        >
+          <Trash2 className="h-3 w-3" aria-hidden="true" />
+          Remove
         </button>
       </div>
     </div>

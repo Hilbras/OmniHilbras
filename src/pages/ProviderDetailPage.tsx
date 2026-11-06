@@ -585,9 +585,11 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   // so the tab is opened blank here and the dialog navigates it once the
   // gateway hands back the sign-in URL.
   function openAddConnection() {
-    // The ordinary connect path is a repair: it targets the provider's one connection. Only the
-    // accounts panel's Add account button opens the dialog in add-account mode.
-    setAddAccountOpen(false);
+    // "Add connection" does what it says: when the provider already holds an account, the sign-in
+    // saves a second connection beside it. With none, it is a first connect and the two are the same.
+    // The gateway decides the target when the sign-in starts, so the flag rides the start request —
+    // an empty body still repairs, which is what old clients send.
+    setAddAccountOpen(isOauth && connections.length > 0);
     if (webCookieProviders.has(provider.id)) {
       setSignInWindow(null);
       setAddOpen(true);
@@ -731,6 +733,12 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     // report success: the dialog said "connection added" while nothing was
     // written, so the card looked connected with no credential behind it.
     const savedConnection = await putGatewayConnection(newProvider.providerId, {
+      // When the provider already holds a connection, "Add connection" means **add**: a fresh id saves
+      // a second connection beside the first instead of overwriting it. The gateway accepts `id` for
+      // exactly this; omitting it reuses the existing connection, which is the repair path. An
+      // API-key account has no sign-in session, so its rows are managed here and in the accounts
+      // panel rather than through a flow.
+      ...(connections.length > 0 ? { id: `${newProvider.providerId}-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}` } : {}),
       // `credential: 'none'` rather than an empty key: the gateway refuses `''`, so sending it made every
       // keyless save a 400 dressed as a connection.
       ...(keyless ? { credential: 'none' as const } : { apiKey: apiKey! }),
@@ -1237,14 +1245,14 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
           onClose={() => { setAddOpen(false); setSignInWindow(null); }}
           onConnected={handleOauthConnected}
         />
-      )}
-      {isOauth && oauthFlowAvailable && addOpen && signInProviderId === 'kiro' && (
+      )}      {isOauth && oauthFlowAvailable && addOpen && signInProviderId === 'kiro' && (
         <KiroConnectDialog
           providerName={provider.name}
           signInWindow={signInWindow}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
-          onClose={() => { setAddOpen(false); setSignInWindow(null); }}
+          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); }}
           onConnected={handleOauthConnected}
+          addAccount={addAccountOpen}
         />
       )}
       {isOauth && oauthFlowAvailable && addOpen && signInProviderId !== 'kiro' && (

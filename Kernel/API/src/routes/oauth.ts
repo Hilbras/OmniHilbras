@@ -499,7 +499,8 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       const body = await readJsonBody(request, maxConnectionBodyBytes);
       const provider = readRequiredString(body, 'provider');
       if (provider !== 'google' && provider !== 'github') throw invalidRequest('provider must be google or github.');
-      sendJson(response, 201, await service.startKiroSocialSignInFlow(provider), origin);
+      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
+      sendJson(response, 201, await service.startKiroSocialSignInFlow(provider, addAccount), origin);
       return true;
     }
 

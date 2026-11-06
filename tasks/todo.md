@@ -5611,3 +5611,16 @@ independently of the React app" is now measured over every provider manifest, an
   add-account sign-in — and the completion saves to that target. Two Kimi accounts can now sit beside
   each other, each its own connection, routed by the same policy the accounts panel describes.
   Verified live: both start modes mint sessions, and the plain empty body keeps the old behaviour.
+
+## Unreleased — "Add connection" adds, everywhere the word fits
+
+- **The main connect button now adds when an account exists.** Signing in from a provider page whose
+  provider already holds an account saves the new one **beside** it, for the OAuth flows (device and
+  social alike) and for the API-key modal — whose PUT body now mints a connection id, a field the
+  gateway has accepted all along ("so a caller can add a second connection") without any client
+  sending. A first connect is unchanged.
+- **Kiro's dialog can finally say it.** The gateway has taken `addAccount` on both of Kiro's start
+  routes since multi-account shipped; the Builder ID and Google/GitHub flows now send it, so the
+  accounts panel's Add account button works there too.
+- **Rows have a way out.** Each account row gained Remove — confirmed, named, and toasted — because
+  rows created by "add" need a path out that is not the gateway's API.

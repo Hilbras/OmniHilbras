@@ -164,7 +164,7 @@ export async function importKiroRefreshToken(refreshToken: string): Promise<Prov
  * gateway: the user approves a code on Kiro's page and this session polls Kiro's device endpoint for the
  * result. It reuses the Builder ID session store, so the grant is claimed and released by the same rules.
  */
-export async function startKiroSocialDeviceFlow(store: KiroSessionStore, provider: KiroSocialProvider) {
+export async function startKiroSocialDeviceFlow(store: KiroSessionStore, provider: KiroSocialProvider, addAccount = false) {
   const authorization = await startKiroSocialDeviceSignIn(provider);
   const session = store.create({
     deviceCode: authorization.deviceCode,
@@ -173,6 +173,9 @@ export async function startKiroSocialDeviceFlow(store: KiroSessionStore, provide
     intervalSeconds: authorization.intervalSeconds,
     clientId: 'kiro-cli',
     clientSecret: '',
+    // The same target rule the Builder ID flow states: the connection this sign-in saves to is chosen
+    // when it starts, so an add-account grant lands beside the existing connection instead of on it.
+    connectionId: addAccount ? `${kiroProviderId}-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}` : kiroProviderId,
     ...(authorization.expiresIn === undefined ? {} : { expiresIn: authorization.expiresIn }),
     social: true,
   } as KiroDeviceAuthorization & { social: true });

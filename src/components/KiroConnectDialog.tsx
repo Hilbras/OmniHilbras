@@ -43,6 +43,12 @@ type Props = {
   signInWindow?: Window | null;
   onConnected: (connection: GatewayConnection) => void | Promise<void>;
   onClose: () => void;
+  /**
+   * Sign a **second** Kiro account in beside the existing connection instead of repairing it. Rides
+   * the start request — the device and social flows both decide their connection target when they
+   * start — and absent means the long-standing repair behaviour.
+   */
+  addAccount?: boolean;
 };
 
 const methodIcons = {
@@ -58,7 +64,7 @@ const pollIntervalMs = 1000;
 /** Matches the gateway's own session lifetime. */
 const waitTimeoutMs = 5 * 60_000;
 
-export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onConnected, onClose }: Props) {
+export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onConnected, onClose, addAccount = false }: Props) {
   const [method, setMethod] = useState<KiroAuthMethod | null>(null);
   const [phase, setPhase] = useState<Phase>('choose');
   const [message, setMessage] = useState('');
@@ -197,7 +203,7 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
       setPhase('running');
       setError('');
       try {
-        const signIn = await startKiroDeviceSignIn(url);
+        const signIn = await startKiroDeviceSignIn(url, addAccount);
         if (settledRef.current) return;
         setDeviceCode({ userCode: signIn.userCode, verificationUrl: signIn.verificationUrl });
         const sentToOpenTab = navigateTo(signIn.verificationUrl);
@@ -211,7 +217,7 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
         fail(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
       }
     },
-    [fail, navigateTo, watchDeviceSession],
+    [addAccount, fail, navigateTo, watchDeviceSession],
   );
 
   /**
@@ -224,7 +230,7 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
       setPhase('running');
       setError('');
       try {
-        const signIn = await startKiroSocialDeviceSignIn(provider);
+        const signIn = await startKiroSocialDeviceSignIn(provider, addAccount);
         if (settledRef.current) return;
         setDeviceCode({ userCode: signIn.userCode, verificationUrl: signIn.verificationUrl });
         const sentToOpenTab = navigateTo(signIn.verificationUrl);
@@ -238,7 +244,7 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
         fail(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
       }
     },
-    [fail, navigateTo, watchDeviceSession],
+    [addAccount, fail, navigateTo, watchDeviceSession],
   );
 
   const submitSecret = useCallback(async () => {

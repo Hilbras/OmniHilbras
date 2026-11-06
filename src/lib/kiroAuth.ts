@@ -99,11 +99,13 @@ export type KiroSignInStatus = {
   verificationUrl?: string;
 };
 
-export function startKiroDeviceSignIn(startUrl?: string): Promise<KiroDeviceSignIn> {
+export function startKiroDeviceSignIn(startUrl?: string, addAccount?: boolean): Promise<KiroDeviceSignIn> {
   return requestJson<KiroDeviceSignIn>('/v1/oauth/kiro/start', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(startUrl ? { startUrl } : {}),
+    // `addAccount: true` signs a second account in beside the existing connection; absent means
+    // repair the one connection, which is the gateway's default for an empty body.
+    body: JSON.stringify({ ...(startUrl ? { startUrl } : {}), ...(addAccount ? { addAccount: true } : {}) }),
   });
 }
 
@@ -119,11 +121,11 @@ export type KiroSocialSignIn = { sessionId: string; authUrl: string };
  */
 export type KiroSocialDeviceSignIn = { sessionId: string; userCode: string; verificationUrl: string };
 
-export function startKiroSocialDeviceSignIn(provider: 'google' | 'github'): Promise<KiroSocialDeviceSignIn> {
+export function startKiroSocialDeviceSignIn(provider: 'google' | 'github', addAccount?: boolean): Promise<KiroSocialDeviceSignIn> {
   return requestJson<KiroSocialDeviceSignIn>('/v1/oauth/kiro/social/start', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ provider }),
+    body: JSON.stringify({ provider, ...(addAccount ? { addAccount: true } : {}) }),
   });
 }
 

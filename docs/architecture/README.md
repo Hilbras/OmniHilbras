@@ -37,7 +37,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/connection-manager.ts` | 270 | **0** | one error mapper, one catalog merge, one lock scope |
 | `Kernel/API/src/core/service.ts` | 2370 | 20 | all nineteen `.onDemand()` registrations, in one constructor |
 | `Kernel/API/src/core/http.ts` | 296 | **0** | the vocabulary every route shares |
-| `Kernel/API/src/routes/oauth.ts` | 687 | 11 | the module a provider split would help most |
+| `Kernel/API/src/routes/oauth.ts` | 688 | 11 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 323 | 1 | one OpenRouter save shortcut, the generic quota route, and the build stamp |
 | `Kernel/API/src/routes/inference.ts` | 942 | **0** | `/v1/models`, `/v1/chat/completions`, and the auth gate |
 | `Kernel/API/src/routes/api-keys.ts` | 74 | **0** | |

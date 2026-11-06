@@ -255,6 +255,12 @@ export function checkConnectionCredential(providerId: string, input: { apiKey: s
  * `credential: 'none'` out loud, and `pnpm typecheck` is what makes it do so.
  */
 export type GatewayConnectionInput = {
+  /**
+   * The connection to save to. The gateway accepts it "so a caller can add a second connection for a
+   * provider that already has one" — omitting it reuses that provider's existing connection, which is
+   * the repair behaviour. A caller that wants a second account mints one.
+   */
+  id?: string;
   name?: string;
   endpoint: string;
   priority?: number;

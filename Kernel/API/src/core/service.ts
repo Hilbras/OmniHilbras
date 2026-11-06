@@ -1883,8 +1883,8 @@ export class GatewayService {
    * handles, so the browser cannot come back here on its own. The user pastes the code
    * instead, and the exchange happens below.
    */
-  async startKiroSocialSignInFlow(provider: 'google' | 'github') {
-    return startKiroSocialDeviceFlow(this.kiroSessions, provider);
+  async startKiroSocialSignInFlow(provider: 'google' | 'github', addAccount = false) {
+    return startKiroSocialDeviceFlow(this.kiroSessions, provider, addAccount);
   }
 
   /**
