@@ -238,8 +238,29 @@ export class CodexAdapter implements ProviderAdapter {
     return { status: 'valid' as const, checkedAt: new Date(this.now()).toISOString() };
   }
 
-  async health(): Promise<ProviderHealth> {
-    return { status: 'healthy', verified: 'credential', checkedAt: new Date(this.now()).toISOString() };
+  /**
+   * A real, free, authenticated read: the catalog endpoint is served to every account and bills
+   * nothing, so "healthy" means the token was accepted just now rather than a guess.
+   *
+   * This method spent its life named `health` — a member the adapter contract does not know — so the
+   * gateway saw no health check at all and every sweep reported "Health checks are not supported",
+   * while the one check that existed answered healthy without asking anyone anything. Both halves
+   * were wrong; the name is what made the check invisible and the guess what made it cheap.
+   */
+  async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
+    const startedAt = this.now();
+    try {
+      await this.listModels(context);
+      return { status: 'healthy', verified: 'credential', checkedAt: new Date(this.now()).toISOString(), latencyMs: Math.max(0, this.now() - startedAt) };
+    } catch (error) {
+      return {
+        status: 'unavailable',
+        verified: 'credential',
+        checkedAt: new Date(this.now()).toISOString(),
+        latencyMs: Math.max(0, this.now() - startedAt),
+        message: error instanceof Error ? error.message : 'The Codex session could not be checked.',
+      };
+    }
   }
 
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {

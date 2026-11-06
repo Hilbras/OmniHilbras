@@ -5635,3 +5635,13 @@ independently of the React app" is now measured over every provider manifest, an
   and deliberately renders none of the other meters the endpoint carries (a code-review window, a
   Spark window, rate-limit reset credits): a percentage against 100, ratios clamped not trusted, an
   absent window absent from the card, an unnamed plan falling back to "Codex" rather than "unknown".
+
+## Unreleased — Codex gets a real health check
+
+- **The check was invisible because it was misnamed.** The adapter defined `health()` — a member the
+  adapter contract does not know — so the gateway saw no `healthCheck` at all and every sweep
+  reported "Health checks are not supported", while the one check that existed answered healthy
+  without asking anyone anything. Renamed to `healthCheck` and made honest: it is the free catalog
+  read, so "healthy" means the token was accepted just now, and a failure keeps the provider's own
+  reason. Verified live: `healthy, verified: credential, 2.0s` — and the Usage tab's quota card
+  renders on the provider page (plan, 5-hour window, 0 of 100 left).

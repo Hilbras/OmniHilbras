@@ -333,3 +333,19 @@ test('a quota ratio is clamped and an absent window is absent from the card', as
   assert.deepEqual(empty.resources, {}, 'no windows reported means no rows, never zeros');
   assert.equal(empty.plan, 'Codex', 'an unnamed plan falls back to the provider\u2019s name, not to "unknown"');
 });
+
+test('a health check is a real free read, and a failure keeps the reason', async () => {
+  const healthy = transportFor();
+  healthy.request = async function (input) { this.calls.push(input); return { status: 200, headers: new Headers(), data: { data: [{ id: 'gpt-5.4' }] } }; };
+  const ok = await new CodexAdapter({ transport: healthy }).healthCheck({ credential: { type: 'oauth', value: 'access' } });
+  assert.equal(ok.status, 'healthy');
+  assert.equal(ok.verified, 'credential', 'a credential verdict from a request that was actually made');
+  assert.match(healthy.calls[0].url, /\/models/, 'the check is the free catalog read, not a guess');
+
+  const broken = transportFor();
+  broken.request = async function (input) { this.calls.push(input); throw new (await import('../codex/dist/lib/errors.js')).ProviderError('AUTHENTICATION_FAILED', 'the session expired', { providerId: 'codex' }); };
+  const bad = await new CodexAdapter({ transport: broken }).healthCheck({ credential: { type: 'oauth', value: 'access' } });
+  assert.equal(bad.status, 'unavailable');
+  assert.equal(bad.verified, 'credential');
+  assert.match(bad.message, /session expired/, 'the reason a user can act on survives the check');
+});
