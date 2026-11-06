@@ -81,6 +81,24 @@ const UsageTopology = lazy(() => import('../components/UsageTopology').then((mod
  *   allowance and is never rendered as one; `NOT_SUPPORTED` means the question was never answerable.
  * - **A reading** — the provider's own figures, with its own reset time when it gives one.
  */
+
+/**
+ * A reset time as the countdown the operator actually asks about — `d`d `hh`h `mm`m — rather than a
+ * bare date that still needs mental arithmetic. The absolute moment is not dropped: the row's title
+ * carries it, so a hover states the exact date and the countdown needs no timezone of its own.
+ * Rendered per panel read, not ticked live; the Refresh button is what re-asks.
+ */
+function countdownFrom(iso: string, now = Date.now()): string {
+  const remaining = new Date(iso).getTime() - now;
+  if (!Number.isFinite(remaining)) return 'an unknown moment';
+  if (remaining <= 0) return 'now';
+  const minutes = Math.floor(remaining / 60_000);
+  const days = Math.floor(minutes / 1_440);
+  const hours = Math.floor((minutes % 1_440) / 60);
+  const mins = minutes % 60;
+  return `${days}d ${String(hours).padStart(2, '0')}h ${String(mins).padStart(2, '0')}m`;
+}
+
 function QuotaPanel({ connectionId, providerName }: { connectionId: string; providerName: string }) {
   const [quota, setQuota] = useState<GatewayProviderQuota | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'unsupported' | 'failed'>('loading');
@@ -167,9 +185,9 @@ function QuotaPanel({ connectionId, providerName }: { connectionId: string; prov
               <li key={name}>
                 <div className="flex items-baseline justify-between gap-3 text-xs">
                   <span className="font-medium">{name}</span>
-                  <span className="muted tabular-nums">
+                  <span className="muted tabular-nums" title={resource.resetsAt ? new Date(resource.resetsAt).toLocaleString() : undefined}>
                     {resource.remaining} of {resource.limit} left
-                    {resource.resetsAt ? ` · resets ${new Date(resource.resetsAt).toLocaleDateString()}` : ''}
+                    {resource.resetsAt ? ` · resets in ${countdownFrom(resource.resetsAt)}` : ''}
                   </span>
                 </div>
                 {share === null ? null : (
