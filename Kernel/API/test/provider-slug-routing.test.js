@@ -32,3 +32,18 @@ test('a bare model id is unchanged, and a slug for an unconnected provider is no
   assert.deepEqual(splitProviderPrefix('big-pickle', connections), { model: 'big-pickle' });
   assert.deepEqual(splitProviderPrefix('qwen/qwen3.8-27b:free', connections), { model: 'qwen/qwen3.8-27b:free' });
 });
+
+test('cline and clinepass hand out short slugs, and the long ids they replaced still route', () => {
+  assert.equal(providerSlug('cline'), 'cl');
+  assert.equal(providerSlug('clinepass'), 'clp');
+  assert.equal(qualifiedModelId('cline', 'claude-sonnet-5.5'), 'cl/claude-sonnet-5.5');
+  assert.equal(qualifiedModelId('clinepass', 'qwen3.7-max'), 'clp/qwen3.7-max');
+});
+
+test('an id saved under the old prefixes keeps resolving, so no saved client breaks', () => {
+  const clineConnections = [{ providerId: 'cline' }, { providerId: 'clinepass' }];
+  assert.deepEqual(splitProviderPrefix('cline/claude-sonnet-5.5', clineConnections), { model: 'claude-sonnet-5.5', providerId: 'cline' });
+  assert.deepEqual(splitProviderPrefix('clinepass/cline-pass/qwen3.7-max', clineConnections), { model: 'cline-pass/qwen3.7-max', providerId: 'clinepass' });
+  assert.deepEqual(splitProviderPrefix('cl/claude-sonnet-5.5', clineConnections), { model: 'claude-sonnet-5.5', providerId: 'cline' });
+  assert.deepEqual(splitProviderPrefix('clp/qwen3.7-max', clineConnections), { model: 'qwen3.7-max', providerId: 'clinepass' });
+});

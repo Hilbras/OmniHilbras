@@ -16,8 +16,11 @@ const PROVIDER_SLUGS: Readonly<Record<string, string>> = {
   // Routing accepts both — `routing.ts` matches on the id *or* the slug — so an id already saved in a
   // client as `kiro/claude-sonnet-5` keeps resolving. Only the ids the gateway *hands out* change.
   kiro: 'kr',
-  cline: 'cline',
-  clinepass: 'clinepass',
+  // `cl/` and `clp/`, same rule as `kr/`: shorter to type, and the two stay distinct at a glance where
+  // `cline` and `clinepass` read as one word. Ids already saved as `cline/…` or `clinepass/…` keep
+  // resolving by id; only the ids the gateway *hands out* change.
+  cline: 'cl',
+  clinepass: 'clp',
   opencode: 'opencode-zen',
   ollama: 'ollama',
   mistral: 'mistral',

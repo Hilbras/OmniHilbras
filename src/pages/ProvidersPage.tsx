@@ -24,6 +24,7 @@ import {
   type GatewayHealth
 } from '../lib/gatewayClient';
 import { ProviderMark } from '../components/ProviderMark';
+import { useToast } from '../components/Toast';
 import { providerRoute } from '../lib/routes';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 import { webSessionProviderIds } from '../lib/webSessionProviders';
@@ -116,6 +117,7 @@ function connectionBadge(provider: ProviderRecord, saved: boolean) {
 
 export function ProvidersContent() {
   const navigate = useNavigate();
+  const { notify } = useToast();
   const [providers, setProviders] = useState(providerCatalog);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -163,13 +165,24 @@ export function ProvidersContent() {
             setHealthReport(health);
             setProviders((current) => mergeGatewayConnections(current, connections, health));
           })
-          .catch(() => undefined);
+          .catch(() => {
+            if (!active) return;
+            // The connections came back; only the health pass failed. The cards still show the
+            // connected-or-attention intermediate, and the operator is told the second half is
+            // missing rather than left to read placeholders as measurements.
+            notify('Provider health could not be read from the local gateway.', 'error');
+          });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!active) return;
+        // Every card below renders catalog state when the gateway is unreachable — correct, but
+        // silent. The notification is what says the placeholders are placeholders.
+        notify('The local gateway did not answer. Cards show catalog state until it does.', 'error');
+      });
     return () => {
       active = false;
     };
-  }, []);
+  }, [notify]);
 
   useEffect(() => load(), [load]);
 

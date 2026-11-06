@@ -1,5 +1,5 @@
 import { CLINE_OAUTH, ClineAdapter, clineHeaders, type ClineAdapterOptions } from '../lib/cline.js';
-import type { Model, ProviderRequestContext } from '../lib/types.js';
+import type { ChatRequest, ChatResponse, ChatChunk, Model, ProviderRequestContext } from '../lib/types.js';
 
 /**
  * ClinePass is Cline's paid model tier, and it is **the same account as Cline** — not a second
@@ -46,6 +46,22 @@ import type { Model, ProviderRequestContext } from '../lib/types.js';
 /** The model prefix that is ClinePass. Everything else on this host is the free tier. */
 export const CLINE_PASS_MODEL_PREFIX = 'cline-pass/';
 
+/**
+ * The id as Cline's catalog names it: `cline-pass/<model>`. Accepted verbatim from a client that
+ * saved the older, doubly-prefixed form, so an id already on a client keeps working.
+ */
+function withClinePassPrefix(modelId: string): string {
+  return modelId.startsWith(CLINE_PASS_MODEL_PREFIX) ? modelId : `${CLINE_PASS_MODEL_PREFIX}${modelId}`;
+}
+
+/**
+ * The id as clients address it: the gateway's slug already names the tier, so the vendor's own prefix
+ * would say it twice — `clp/cline-pass/…` — and a model id a user copies should read once.
+ */
+function withoutClinePassPrefix(modelId: string): string {
+  return modelId.startsWith(CLINE_PASS_MODEL_PREFIX) ? modelId.slice(CLINE_PASS_MODEL_PREFIX.length) : modelId;
+}
+
 export class ClinePassAdapter extends ClineAdapter {
   constructor(options: ClineAdapterOptions = {}) {
     super({ ...options, id: 'clinepass', name: 'ClinePass' });
@@ -59,6 +75,9 @@ export class ClinePassAdapter extends ClineAdapter {
    * show. The recommended feed carries the tier explicitly, so it is read directly. A model can still be
    * refused at request time if the subscription does not cover it; the list is what Cline offers, not a
    * promise that the account can run each entry.
+   *
+   * Cline names the tier inside every id; that is upstream spelling, and it is stripped here so a
+   * client sees one prefix (the gateway's `clp/`), not two.
    */
   override async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
     const credential = context.credential;
@@ -72,7 +91,20 @@ export class ClinePassAdapter extends ClineAdapter {
     // The tiers are at the top level of the body, with no `data` envelope — read live, not assumed.
     const tier = response.data?.clinePass ?? [];
     const ids = tier.flatMap((entry) => (typeof entry?.id === 'string' && entry.id.startsWith(CLINE_PASS_MODEL_PREFIX) ? [entry.id] : []));
-    return [...new Set(ids)].map((id) => ({ id, providerId: this.id }));
+    return [...new Set(ids)].map((id) => ({ id: withoutClinePassPrefix(id), providerId: this.id }));
+  }
+
+  /** Cline's catalog names the tier on every id, so the prefix goes back on before a request leaves. */
+  private upstream(request: ChatRequest): ChatRequest {
+    return { ...request, model: withClinePassPrefix(request.model) };
+  }
+
+  override async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
+    return super.chat(this.upstream(request), context);
+  }
+
+  override async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
+    yield* super.streamChat(this.upstream(request), context);
   }
 }
 

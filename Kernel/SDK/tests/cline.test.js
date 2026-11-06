@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CLINE_OAUTH, ClineAdapter, buildClineAuthorizeUrl, clineExpiryToIso, clineHeaders, clineStateCallbackUrl, clineStateMatchesCallback, decodeClineCode, providerErrorDetail, toClineAccessToken, unwrapClineEnvelope } from '@hilbras/omnihilbras';
+import { CLINE_OAUTH, ClineAdapter, buildClineAuthorizeUrl, clineExpiryToIso, clineHeaders, clineStateCallbackUrl, clineStateMatchesCallback, decodeClineCode, toClineAccessToken, unwrapClineEnvelope } from '../cline/dist/adapter/index.js';
+import { providerErrorDetail } from '../cline/dist/lib/transport.js';
+import { ProviderError } from '../cline/dist/lib/errors.js';
 
 test('WorkOS JWTs are prefixed and other tokens are left alone', () => {
   assert.equal(toClineAccessToken('eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig'), 'workos:eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiIxIn0.sig');
@@ -98,7 +100,7 @@ test('a missing token fails before any request is sent', async () => {
 });
 
 test('the account probe failure surfaces as an authentication error', async () => {
-  const { ProviderError } = await import('@hilbras/omnihilbras');
+  const { ProviderError } = await import('../cline/dist/lib/errors.js');
   const adapter = new ClineAdapter({
     transport: {
       async request() { throw new ProviderError('AUTHENTICATION_FAILED', 'Cline rejected the token', { providerId: 'cline' }); },
@@ -312,7 +314,7 @@ test('a caller-supplied header can override a default, but not the token', () =>
 });
 
 test('a health check says why it failed', async () => {
-  const { ProviderError } = await import('@hilbras/omnihilbras');
+  const { ProviderError } = await import('../cline/dist/lib/errors.js');
   const adapter = new ClineAdapter({
     transport: {
       async request() { throw new ProviderError('PROVIDER_REQUEST_FAILED', 'The provider request failed.', { providerId: 'cline', statusCode: 400 }); },
@@ -326,7 +328,7 @@ test('a health check says why it failed', async () => {
 });
 
 test('a rejected token reads as a sign-in problem, not a raw 4xx', async () => {
-  const { ProviderError } = await import('@hilbras/omnihilbras');
+  const { ProviderError } = await import('../cline/dist/lib/errors.js');
   const adapter = new ClineAdapter({
     transport: {
       async request() { throw new ProviderError('AUTHENTICATION_FAILED', 'Provider authentication failed.', { providerId: 'cline' }); },
@@ -342,7 +344,7 @@ test('a rejected token reads as a sign-in problem, not a raw 4xx', async () => {
 test('a failed renewal says the session expired', async () => {
   // The refresh endpoint refuses with a plain 4xx, which used to surface as
   // "PROVIDER_REQUEST_FAILED" for what is really an expired login.
-  const { ProviderError } = await import('@hilbras/omnihilbras');
+  const { ProviderError } = await import('../cline/dist/lib/errors.js');
   const adapter = new ClineAdapter({
     transport: {
       async request(request) {
@@ -362,7 +364,7 @@ test('a failed renewal says the session expired', async () => {
 test('a renewal that fails because Cline is down is not reported as an expired login', async () => {
   // A 503 or a network failure says nothing about the session. Reporting it as "sign in again" sends the
   // user to re-authenticate for an outage that will pass, so the outage keeps its own code and retryability.
-  const { ProviderError } = await import('@hilbras/omnihilbras');
+  const { ProviderError } = await import('../cline/dist/lib/errors.js');
   const adapter = new ClineAdapter({
     transport: {
       async request() {

@@ -5528,3 +5528,26 @@ keys. Three things made it real:
 `Kernel/SDK/package.json` and `Kernel/SDK/core/types.ts`, both dissolved by the restructure. "Builds
 independently of the React app" is now measured over every provider manifest, and the normalized
 `ChatChunk` over every provider's `lib/types.ts`.
+
+## Unreleased — shorter model slugs for the Cline pair, and failures that announce themselves
+
+- **Model ids are `cl/…` and `clp/…`.** `provider-slugs.ts` follows the `kr/` precedent it already
+  documented: `cline` hands out `cl/`, `clinepass` hands out `clp/`. Routing still matches the id
+  *or* the slug, so a client saved with `cline/…` or `clinepass/…` keeps resolving; only handed-out
+  ids changed. ClinePass also stopped saying the tier twice: the vendor's own `cline-pass/` prefix is
+  stripped from listed ids and re-added at the upstream request, so a client sees `clp/qwen3.7-max`,
+  not `clp/cline-pass/qwen3.7-max` — while an id saved with the old double prefix still routes.
+  Verified live: `/v1/models` serves `cl/…` and `clp/…`, and a `models/refresh` on `clinepass`
+  re-listed bare ids with none double-prefixed.
+- **The shared-refresh memo survives the per-provider split.** Fixing the two SDK tests that still
+  imported the dead `@hilbras/omnihilbras` barrel exposed a real defect: Cline and ClinePass load
+  **two copies** of the adapter since the restructure, and the module-level in-flight refresh map
+  gave each copy its own memo — two concurrent requests over one shared login would spend the
+  refresh grant twice, and WorkOS rotation would invalidate the first token. The memo now lives on a
+  `Symbol.for` registry entry, one per runtime, identical in both vendored copies.
+- **Failed requests announce themselves.** `FailureNotifications` subscribes to the log stream the
+  Logs page already reads and toasts every failed request — provider, error code, attempt count —
+  collapsing same-provider same-code bursts inside a short window. A credential that can no longer
+  be renewed surfaces here too, because renewal in this gateway is per request. Cancellations never
+  toast. The two silent load-failure catches in `ProvidersPage` now say what happened instead of
+  rendering placeholders that read as measurements.

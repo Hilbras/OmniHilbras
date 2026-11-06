@@ -73,8 +73,18 @@ export type ClineAdapterOptions = {
 
 const defaultRefreshSkewMs = 60_000;
 
-/** Refreshes in flight, keyed by the login they renew, so adapters that share a login share one renewal. */
-const inFlightRefreshes = new Map<string, Promise<Exclude<ProviderCredential, { type: 'none' }>>>();
+/**
+ * Refreshes in flight, keyed by the login they renew, so adapters that share a login share one renewal.
+ *
+ * Held on a registry symbol rather than as bare module state: the SDK is one package per provider, so
+ * Cline and ClinePass load **two copies** of this module, and module state would give each copy its own
+ * memo — two concurrent requests over one shared login would then spend the refresh grant twice, and
+ * WorkOS rotation would invalidate the first token. `Symbol.for` yields one registry entry per runtime,
+ * however many module copies reach for it.
+ */
+const inFlightRefreshesKey = Symbol.for('omnihilbras.cline.in-flight-refreshes');
+const inFlightRefreshesRegistry = globalThis as unknown as Record<symbol, Map<string, Promise<Exclude<ProviderCredential, { type: 'none' }>>>>;
+const inFlightRefreshes = (inFlightRefreshesRegistry[inFlightRefreshesKey] ??= new Map());
 
 /** Reported to Cline as this client's version. */
 const omnihilbrasVersion = '1.90.0';

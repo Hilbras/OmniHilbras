@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CLINE_PASS_MODEL_PREFIX, ClineAdapter, ClinePassAdapter, ProviderError } from '@hilbras/omnihilbras';
+import { CLINE_PASS_MODEL_PREFIX, ClinePassAdapter } from '../clinepass/dist/adapter/index.js';
+import { ClineAdapter } from '../cline/dist/adapter/index.js';
+import { ProviderError } from '../clinepass/dist/lib/errors.js';
 
 /**
  * A transport that records what was sent and answers from a routing table.
@@ -88,10 +90,28 @@ test('the ClinePass list is the recommended feed’s clinePass tier, so the free
 
   const models = await adapter.listModels({ credential: token });
 
-  assert.deepEqual(models.map((model) => model.id), ['cline-pass/qwen3.7-max', 'cline-pass/glm-5.3']);
-  assert.ok(models.every((model) => model.id.startsWith(CLINE_PASS_MODEL_PREFIX)));
+  // The vendor's own `cline-pass/` prefix is stripped: the gateway's slug already names the tier, so a
+  // client sees `clp/qwen3.7-max`, not `clp/cline-pass/qwen3.7-max`.
+  assert.deepEqual(models.map((model) => model.id), ['qwen3.7-max', 'glm-5.3']);
+  assert.ok(models.every((model) => !model.id.startsWith(CLINE_PASS_MODEL_PREFIX)));
   assert.ok(models.every((model) => model.providerId === 'clinepass'));
   assert.equal(transport.requests[0].url, 'https://api.cline.bot/api/v1/ai/cline/recommended-models');
+});
+
+test('a chat sends the tier prefix Cline expects, whatever form the client used', async () => {
+  const transport = stubTransport({
+    'https://api.cline.bot/api/v1/chat/completions': { data: { id: 'c1', choices: [{ message: { role: 'assistant', content: 'ok' } }] } },
+  });
+  const adapter = new ClinePassAdapter({ transport });
+
+  // The bare form is what the gateway dispatches after stripping the `clp/` slug.
+  await adapter.chat({ model: 'qwen3.7-max', messages: [{ role: 'user', content: 'hi' }] }, { credential: token });
+  assert.equal(JSON.parse(transport.requests[0].body).model, 'cline-pass/qwen3.7-max');
+
+  // The legacy form — saved in a client before the slug changed, still carrying the vendor prefix —
+  // must not be doubled.
+  await adapter.chat({ model: 'cline-pass/qwen3.7-max', messages: [{ role: 'user', content: 'hi' }] }, { credential: token });
+  assert.equal(JSON.parse(transport.requests[1].body).model, 'cline-pass/qwen3.7-max');
 });
 
 test('an account with no ClinePass tier gets an empty list, not the general catalog', async () => {
