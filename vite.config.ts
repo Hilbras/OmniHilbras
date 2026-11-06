@@ -200,7 +200,13 @@ function gatewayProxy(): Plugin {
     configureServer(server) {
       server.middlewares.use(async (request, response, next) => {
         const path = request.url ?? '';
-        if (!path.startsWith('/v1/')) return next();
+        // `/health` is forwarded beside the `/v1/` API: the dashboard's health pass reads it, and in
+        // dev the dashboard's origin is this server, not the gateway. Without this the read landed on
+        // the SPA fallback — `index.html` with a 200 — and every dev load failed the health pass
+        // silently, which is the failure the providers page now reports instead of swallowing. The
+        // route is a read-only, unauthenticated status report; the token logic below exists for the
+        // `/v1/` management routes and is untouched.
+        if (!path.startsWith('/v1/') && path !== '/health') return next();
         const token = readDashboardTokenFile();
         const headers: Record<string, string> = {};
         for (const [name, value] of Object.entries(request.headers)) {
