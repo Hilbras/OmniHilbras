@@ -3,7 +3,7 @@ import { parseSseJson, parseSseStream } from '../lib/streaming.js';
 import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
 import { assertSafeProviderHeaderValue } from '../lib/url.js';
 import { boundedMap } from '../lib/bounded-map.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage } from '../lib/types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderQuota, ProviderRequestContext, ProviderResourceQuota, TokenUsage } from '../lib/types.js';
 
 /**
  * The Codex CLI version this adapter presents.
@@ -28,6 +28,11 @@ export const CODEX = {
   refreshGrantType: 'refresh_token',
   apiUrl: 'https://chatgpt.com/backend-api/codex/responses',
   /**
+   * The account's own usage report — the same one the Codex CLI shows as its 5-hour and weekly
+   * meters. Account metadata, not an inference request: reading it spends no tokens.
+   */
+  usageUrl: 'https://chatgpt.com/backend-api/wham/usage',
+  /**
    * The catalog the account can actually use, asked rather than written down.
    *
    * `client_version` is not decorative: the endpoint gates each entry by `minimal_client_version`
@@ -49,6 +54,45 @@ export const CODEX = {
 export const codexProviderId = 'codex';
 const maxRenewalMemoEntries = 64;
 const renewalWindowMs = 60_000;
+
+/**
+ * One rate-limit window, as the usage report states it: a percentage used, never an absolute count.
+ *
+ * Expressed against 100 — the panel's "N of M left" then reads as the percentage the provider stated.
+ * A ratio outside 0–100 is clamped, not trusted, so a strange upstream figure cannot produce a
+ * strange bar.
+ */
+function codexWindow(window: unknown): ProviderResourceQuota | undefined {
+  if (!window || typeof window !== 'object') return undefined;
+  const record = window as { used_percent?: unknown; percent_used?: unknown; reset_at?: unknown };
+  const stated = Number(record.used_percent ?? record.percent_used ?? 0);
+  const usedPct = Math.round(Math.min(100, Math.max(0, Number.isFinite(stated) ? stated : 0)));
+  const reset = typeof record.reset_at === 'string' && record.reset_at.trim() ? new Date(record.reset_at) : undefined;
+  return { used: usedPct, limit: 100, remaining: 100 - usedPct, ...(reset && !Number.isNaN(reset.getTime()) ? { resetsAt: reset.toISOString() } : {}) };
+}
+
+type CodexUsageResponse = {
+  plan_type?: unknown;
+  rate_limit?: { primary_window?: unknown; secondary_window?: unknown } | null;
+};
+
+/**
+ * The two windows the plan is sold with: the rolling 5-hour session and the weekly allowance.
+ *
+ * The endpoint reports more meters than that — a code-review window, a Spark window, and rate-limit
+ * reset credits — and the card deliberately renders none of them, the same rule Kimi's card states:
+ * the operator reads the two numbers the subscription is bound by. A window the response omits is
+ * simply absent from the card, never rendered as zero.
+ */
+function parseCodexUsage(data: CodexUsageResponse): ProviderQuota {
+  const resources: Record<string, ProviderResourceQuota> = {};
+  const rateLimit = data.rate_limit ?? {};
+  const fiveHour = codexWindow((rateLimit as { primary_window?: unknown }).primary_window);
+  if (fiveHour) resources['5-hour window'] = fiveHour;
+  const weekly = codexWindow((rateLimit as { secondary_window?: unknown }).secondary_window);
+  if (weekly) resources['Weekly'] = weekly;
+  return { plan: typeof data.plan_type === 'string' && data.plan_type ? data.plan_type : 'Codex', resources };
+}
 
 export type CodexAdapterOptions = {
   /** Overrides the public Codex CLI client. An operator's own client needs its own redirect URI too. */
@@ -164,6 +208,29 @@ export class CodexAdapter implements ProviderAdapter {
       throw new ProviderError('NOT_SUPPORTED', 'Codex returned no models for this account. The catalog is filtered by client version, so an out-of-date OmniHilbras can be told the account has none.', { providerId: this.id });
     }
     return entries.map(toModel(this.id, credential.email));
+  }
+
+  /**
+   * Codex's allowance for the signed-in account, read from `/backend-api/wham/usage` — the same
+   * meters the Codex CLI shows. The read is account metadata, not an inference request: it spends no
+   * tokens. Authenticated exactly as chat is, including the `ChatGPT-Account-ID` header when the
+   * credential carries one, because a multi-seat plan reads the account's windows, not the key's.
+   */
+  async quota(context: ProviderRequestContext = {}): Promise<ProviderQuota> {
+    const credential = await this.credential(context);
+    const headers: Record<string, string> = { accept: 'application/json', authorization: `Bearer ${credential.value}`, originator: CODEX.originator };
+    if (credential.accountId) {
+      assertSafeProviderHeaderValue('ChatGPT-Account-ID', credential.accountId, this.id);
+      headers['ChatGPT-Account-ID'] = credential.accountId;
+    }
+    const { data } = await this.transport.request<CodexUsageResponse>({
+      method: 'GET',
+      providerId: this.id,
+      url: CODEX.usageUrl,
+      headers,
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    return parseCodexUsage(data ?? {});
   }
 
   async validateCredential(credential: ProviderCredential | undefined) {

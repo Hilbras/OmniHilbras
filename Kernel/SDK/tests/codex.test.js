@@ -286,3 +286,50 @@ test('Codex ships a public client, no secret, and keeps every default overridabl
   assert.equal(overridden.searchParams.get('client_id'), 'operator-client');
   assert.equal(overridden.searchParams.get('redirect_uri'), 'http://127.0.0.1:8787/v1/oauth/codex/callback');
 });
+
+// ——— quota: GET /backend-api/wham/usage ———
+
+// The shape the live usage endpoint returns, per the reference client's parse: two rate-limit windows
+// stated as percentages, a plan type, and further meters (review, spark, reset credits) the card
+// deliberately does not render.
+const LIVE_USAGE = {
+  plan_type: 'pro',
+  rate_limit: {
+    primary_window: { used_percent: 42.6, reset_at: '2026-11-06T22:00:00Z', limit_reached: false },
+    secondary_window: { used_percent: '8', reset_at: '2026-11-09T00:00:00Z' },
+  },
+  code_review_rate_limit: { primary_window: { used_percent: 90 } },
+  rate_limit_reset_credits: { available_count: 2 },
+};
+
+test('quota reads /backend-api/wham/usage and reports the two windows the plan is sold with', async () => {
+  const transport = transportFor();
+  transport.request = async function (input) { this.calls.push(input); return { status: 200, headers: new Headers(), data: LIVE_USAGE }; };
+  const adapter = new CodexAdapter({ transport });
+
+  const quota = await adapter.quota({ credential: { type: 'oauth', value: 'access', accountId: 'acct_1' } });
+
+  assert.equal(transport.calls[0].url, 'https://chatgpt.com/backend-api/wham/usage');
+  assert.equal(transport.calls[0].headers.authorization, 'Bearer access');
+  assert.equal(transport.calls[0].headers['ChatGPT-Account-ID'], 'acct_1', 'a multi-seat plan reads the account\u2019s windows, not the key\u2019s');
+  // A percentage against 100 — the panel's "N of M left" reads as the percentage the provider stated.
+  assert.deepEqual(quota.resources['5-hour window'], { used: 43, limit: 100, remaining: 57, resetsAt: '2026-11-06T22:00:00.000Z' });
+  assert.deepEqual(quota.resources.Weekly, { used: 8, limit: 100, remaining: 92, resetsAt: '2026-11-09T00:00:00.000Z' });
+  assert.equal(quota.plan, 'pro');
+  // The review window and the reset credits are on the wire and deliberately not rendered.
+  assert.deepEqual(Object.keys(quota.resources), ['5-hour window', 'Weekly']);
+});
+
+test('a quota ratio is clamped and an absent window is absent from the card', async () => {
+  const clamped = transportFor();
+  clamped.request = async function (input) { this.calls.push(input); return { status: 200, headers: new Headers(), data: { rate_limit: { primary_window: { used_percent: 140 }, secondary_window: { used_percent: -5 } } } }; };
+  const quota = await new CodexAdapter({ transport: clamped }).quota({ credential: { type: 'oauth', value: 'a' } });
+  assert.deepEqual(quota.resources['5-hour window'], { used: 100, limit: 100, remaining: 0 });
+  assert.deepEqual(quota.resources.Weekly, { used: 0, limit: 100, remaining: 100 });
+
+  const bare = transportFor();
+  bare.request = async function (input) { this.calls.push(input); return { status: 200, headers: new Headers(), data: {} }; };
+  const empty = await new CodexAdapter({ transport: bare }).quota({ credential: { type: 'oauth', value: 'a' } });
+  assert.deepEqual(empty.resources, {}, 'no windows reported means no rows, never zeros');
+  assert.equal(empty.plan, 'Codex', 'an unnamed plan falls back to the provider\u2019s name, not to "unknown"');
+});

@@ -5624,3 +5624,14 @@ independently of the React app" is now measured over every provider manifest, an
   accounts panel's Add account button works there too.
 - **Rows have a way out.** Each account row gained Remove — confirmed, named, and toasted — because
   rows created by "add" need a path out that is not the gateway's API.
+
+## Unreleased — Codex reads its allowance
+
+- **`CodexAdapter.quota()` reads `GET /backend-api/wham/usage`.** The task log said Codex had a quota
+  endpoint in the reference registry "that nothing here references"; it is now referenced. The port
+  was written against the reference client's parse (`open-sse/services/usage/codex.js`), checked live
+  against the signed-in account: plan `free`, the 5-hour window exhausted, no weekly window reported
+  for this plan. The card shows the two windows the plan is sold with — the rule Kimi's card states —
+  and deliberately renders none of the other meters the endpoint carries (a code-review window, a
+  Spark window, rate-limit reset credits): a percentage against 100, ratios clamped not trusted, an
+  absent window absent from the card, an unnamed plan falling back to "Codex" rather than "unknown".
