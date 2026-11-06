@@ -123,27 +123,74 @@ function kimiResource(used: unknown, limit: unknown, remaining: unknown, resetTi
   return { used: spent, limit: total, remaining: left, ...(resetsAt ? { resetsAt } : {}) };
 }
 
+/**
+ * Kimi's usage-window keys, named as the subscription's own pages talk about them.
+ *
+ * The API keys are machine shapes (`limit_5h`, `limit_month_total`, `limit_month_code`); the names a
+ * row shows should be the windows the user is actually bound by. An unknown key is shown with its
+ * underscores spaced rather than dropped — a window the gateway has never seen is still a window the
+ * account is on.
+ */
+const KIMI_USAGE_WINDOW_NAMES: Record<string, string> = {
+  '5h': '5-hour window',
+  month_total: 'Monthly total',
+  month_code: 'Monthly code',
+};
+
+function kimiUsageWindowName(key: string): string {
+  const short = key.replace(/^limit_/, '');
+  return KIMI_USAGE_WINDOW_NAMES[short] ?? short.replace(/_/g, ' ');
+}
+
+/** A rate-limit window's duration, humanized: `300` minutes reads as `5h`, anything else as `N min`. */
+function kimiWindowDuration(duration: unknown, timeUnit: unknown): string | null {
+  const minutes = kimiFiniteNumber(duration, 0);
+  if (minutes <= 0) return null;
+  const unit = typeof timeUnit === 'string' && timeUnit ? timeUnit.replace(/^TIME_UNIT_/, '').toLowerCase() : 'minute';
+  if (unit === 'minute') return minutes % 60 === 0 ? `${minutes / 60}h` : `${minutes} min`;
+  return `${minutes} ${unit}`;
+}
+
 type KimiUsageResponse = {
-  usage?: { limit?: unknown; used?: unknown; remaining?: unknown; resetTime?: unknown };
-  limits?: Array<{ detail?: { limit?: unknown; remaining?: unknown; resetTime?: unknown } }>;
+  usages?: Record<string, { used_ratio?: unknown; reset_time?: unknown }>;
+  limits?: Array<{ window?: { duration?: unknown; timeUnit?: unknown }; detail?: { limit?: unknown; remaining?: unknown; resetTime?: unknown } }>;
   user?: { membership?: { level?: unknown } };
 };
 
+/**
+ * The allowance as the endpoint reports it today (read live, 2026-11): `usages` windows carry a
+ * `used_ratio` and no absolute numbers, and `limits` carries absolute per-window figures beside each
+ * window's duration. An older shape this file once parsed — a singular `usage` object — is gone from
+ * the wire, so nothing reads it.
+ *
+ * A ratio window is expressed against 100, because that is what a ratio is: the panel's
+ * "N of M left" then reads as the percentage the provider stated. `used_ratio: 1` therefore renders
+ * as 0 of 100 left with a reset date — exhausted, which is the truth, not a healthy empty window.
+ */
 function parseKimiUsage(data: KimiUsageResponse): ProviderQuota {
   const resources: Record<string, ProviderResourceQuota> = {};
-  const usage = data.usage ?? {};
-  if (kimiFiniteNumber(usage.limit, 0) > 0) {
-    // Kimi's own CLI calls this the weekly window; the name is the vendor's, kept so the row reads
-    // the way the subscription page does.
-    resources.Weekly = kimiResource(usage.used, usage.limit, usage.remaining, usage.resetTime);
+  for (const [key, window] of Object.entries(data.usages ?? {})) {
+    if (!window || typeof window !== 'object') continue;
+    const ratio = Math.min(1, Math.max(0, kimiFiniteNumber(window.used_ratio, 0)));
+    const usedPct = Math.round(ratio * 100);
+    const resetsAt = kimiResetTime(window.reset_time);
+    resources[kimiUsageWindowName(key)] = {
+      used: usedPct,
+      limit: 100,
+      remaining: 100 - usedPct,
+      ...(resetsAt ? { resetsAt } : {}),
+    };
   }
   for (const item of Array.isArray(data.limits) ? data.limits : []) {
     const detail = item?.detail ?? {};
-    if (kimiFiniteNumber(detail.limit, 0) > 0) {
-      const total = kimiFiniteNumber(detail.limit, 0);
-      const left = detail.remaining == null ? total : Math.max(0, kimiFiniteNumber(detail.remaining, 0));
-      resources.Ratelimit = kimiResource(Math.max(0, total - left), total, left, detail.resetTime);
-    }
+    if (kimiFiniteNumber(detail.limit, 0) <= 0) continue;
+    const duration = kimiWindowDuration(item.window?.duration, item.window?.timeUnit);
+    resources[duration ? `Rate limit · ${duration}` : 'Rate limit'] = kimiResource(
+      null,
+      detail.limit,
+      detail.remaining,
+      detail.resetTime,
+    );
   }
   return { plan: kimiPlanName(data.user?.membership?.level), resources };
 }

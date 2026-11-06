@@ -5573,3 +5573,19 @@ independently of the React app" is now measured over every provider manifest, an
   `issueDashboardToken` runs at every start — including a start that then dies on `EADDRINUSE` — so
   the surviving gateway held token N while the proxy read token N+1, and every management route began
   refusing until a clean restart reissued both sides.
+
+## Unreleased — corrected: the usages shape was newer than the reference client
+
+- **The first kimi quota port parsed a shape the API no longer returns.** The reference client reads a
+  singular `usage` object with absolute numbers; the live endpoint answers with a `usages` map of
+  ratio-only windows (`limit_5h`, `limit_month_total`, `limit_month_code`, each a `used_ratio` plus a
+  reset) and `limits[]` entries carrying absolute figures beside a window duration. Parsing the old
+  shape found nothing and left one misleading "Ratelimit 0/100" row — a healthy-looking empty rate
+  window on an account whose monthly allowance was exhausted. The operator was right to call the
+  reading not real.
+- **The parser now reads the live shape**, dumped raw through the gateway's own credential machinery
+  before it was written down: each `usages` window renders against 100 (a ratio is a percentage), so
+  `used_ratio: 1` reads as exhausted with its reset date; `limits[]` windows keep their absolute
+  figures with the duration humanized (`300` minutes → "Rate limit · 5h"); an unknown window key is
+  shown with its underscores spaced, never dropped. Verified live: 5-hour window 0/100, Monthly total
+  100/100 resetting 2026-12-02, Monthly code 100/100, Rate limit · 5h 0/100.

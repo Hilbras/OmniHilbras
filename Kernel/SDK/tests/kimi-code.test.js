@@ -405,35 +405,61 @@ test('a tool result reaches Kimi with the id that ties it to the assistant\'s ca
 
 // ——— quota: GET /coding/v1/usages ———
 
-const ACTIVE_USAGE = {
-  user: { membership: { level: 'LEVEL_ADVANCED' } },
-  usage: { limit: '100', used: '35', remaining: '65', resetTime: '2026-08-01T00:00:00Z' },
-  limits: [{ window: { type: 'rate' }, detail: { limit: '60', remaining: '40', resetTime: '2026-07-29T12:00:00Z' } }],
+// The body exactly as the live endpoint returned it for a real account (2026-11): three `usages`
+// windows that carry only a ratio, and one rate limit with absolute figures beside a 300-minute
+// window. The shape this file first parsed — a singular `usage` object — no longer exists on the wire.
+const LIVE_USAGE = {
+  limits: [
+    {
+      window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+      detail: { limit: '100', remaining: '100', resetTime: '2026-11-06T20:56:27.798705Z' },
+    },
+  ],
+  usages: {
+    limit_5h: { used_ratio: 0, reset_time: '2026-11-06T20:56:27Z' },
+    limit_month_total: { used_ratio: 1, reset_time: '2026-12-02T00:00:00Z' },
+    limit_month_code: { used_ratio: 1, reset_time: '2026-12-02T00:00:00Z' },
+  },
 };
 
-test('quota reads /coding/v1/usages and names the plan as Kimi names it', async () => {
-  const transport = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: ACTIVE_USAGE }) });
+test('quota reads /coding/v1/usages and reports every window the account is bound by', async () => {
+  const transport = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: LIVE_USAGE }) });
   const adapter = new KimiCodeAdapter({ transport });
 
   const quota = await adapter.quota({ credential: OAUTH });
 
   assert.equal(transport.calls[0].url, 'https://api.kimi.com/coding/v1/usages');
   assert.equal(transport.calls[0].headers.Authorization, 'Bearer access-token', 'the OAuth token rides Bearer on the usage read, as on chat');
-  assert.equal(quota.plan, 'Allegro');
-  assert.deepEqual(quota.resources.Weekly, { used: 35, limit: 100, remaining: 65, resetsAt: '2026-08-01T00:00:00.000Z' });
-  assert.deepEqual(quota.resources.Ratelimit, { used: 20, limit: 60, remaining: 40, resetsAt: '2026-07-29T12:00:00.000Z' });
+  // A ratio window is expressed against 100 — that is what a ratio is — so `used_ratio: 1` reads as
+  // exhausted with its reset date, never as a healthy empty window.
+  assert.deepEqual(quota.resources['5-hour window'], { used: 0, limit: 100, remaining: 100, resetsAt: '2026-11-06T20:56:27.000Z' });
+  assert.deepEqual(quota.resources['Monthly total'], { used: 100, limit: 100, remaining: 0, resetsAt: '2026-12-02T00:00:00.000Z' });
+  assert.deepEqual(quota.resources['Monthly code'], { used: 100, limit: 100, remaining: 0, resetsAt: '2026-12-02T00:00:00.000Z' });
+  // The rate limit keeps its absolute figures, and its duration is humanized: 300 minutes is 5h.
+  assert.deepEqual(quota.resources['Rate limit · 5h'], { used: 0, limit: 100, remaining: 100, resetsAt: '2026-11-06T20:56:27.798Z' });
 });
 
-test('an API-key account gets the same reading over x-api-key, and a missing remaining is derived', async () => {
-  const transport = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: { usage: { limit: 50, used: 20 }, user: { membership: { level: 'LEVEL_BASIC' } } } }) });
+test('an API-key account gets the same reading over x-api-key', async () => {
+  const transport = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: LIVE_USAGE }) });
   const adapter = new KimiCodeAdapter({ transport });
 
-  const quota = await adapter.quota({ credential: { type: 'api-key', value: 'sk-key' } });
+  await adapter.quota({ credential: { type: 'api-key', value: 'sk-key' } });
 
   assert.equal(transport.calls[0].headers['x-api-key'], 'sk-key');
-  assert.equal(quota.plan, 'Moderato');
-  // `remaining` absent upstream falls back to limit - used; a bare 0 would read as exhausted.
-  assert.deepEqual(quota.resources.Weekly, { used: 20, limit: 50, remaining: 30 });
+});
+
+test('a ratio is clamped, not trusted: a negative or over-one reading cannot become a strange bar', async () => {
+  const clamped = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: { usages: { limit_5h: { used_ratio: 1.4 } } } }) });
+  assert.deepEqual((await new KimiCodeAdapter({ transport: clamped }).quota({ credential: OAUTH })).resources['5-hour window'], { used: 100, limit: 100, remaining: 0 });
+
+  const negative = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: { usages: { limit_5h: { used_ratio: -0.2 } } } }) });
+  assert.deepEqual((await new KimiCodeAdapter({ transport: negative }).quota({ credential: OAUTH })).resources['5-hour window'], { used: 0, limit: 100, remaining: 100 });
+});
+
+test('an unknown usage-window key is shown with its underscores spaced, not dropped', async () => {
+  const transport = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: { usages: { limit_weekend_bonus: { used_ratio: 0.5 } } } }) });
+  const quota = await new KimiCodeAdapter({ transport }).quota({ credential: OAUTH });
+  assert.deepEqual(quota.resources['weekend bonus'], { used: 50, limit: 100, remaining: 50 });
 });
 
 test('membership levels are named as Kimi names them, and an unknown level is not swallowed', async () => {
