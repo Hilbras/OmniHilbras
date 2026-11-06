@@ -5645,3 +5645,14 @@ independently of the React app" is now measured over every provider manifest, an
   read, so "healthy" means the token was accepted just now, and a failure keeps the provider's own
   reason. Verified live: `healthy, verified: credential, 2.0s` — and the Usage tab's quota card
   renders on the provider page (plan, 5-hour window, 0 of 100 left).
+
+## Unreleased — corrected: Codex's windows are named by their own duration
+
+- **"What about monthly?" was right.** The raw usage response carries `limit_window_seconds` on every
+  window, and the plans differ: a paid plan rolls a 5-hour session beside a weekly allowance, while
+  the free plan's primary window is **monthly** (2592000 seconds) with no secondary at all. The
+  reference client's hardcoded "session"/"weekly" labels — which the first port carried — told this
+  user their monthly cap was a 5-hour one. Each window is now named from its own stated duration
+  (18000s → "5-hour window", 604800s → "Weekly window", 2592000s → "Monthly window", anything else
+  humanized), and `reset_at` parses Unix seconds — a number read as milliseconds lands in 1970.
+  Verified live: "Monthly window — 0 of 100 left — resets 2026-11-19".

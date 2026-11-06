@@ -289,20 +289,20 @@ test('Codex ships a public client, no secret, and keeps every default overridabl
 
 // ——— quota: GET /backend-api/wham/usage ———
 
-// The shape the live usage endpoint returns, per the reference client's parse: two rate-limit windows
-// stated as percentages, a plan type, and further meters (review, spark, reset credits) the card
-// deliberately does not render.
+// The shape the live usage endpoint returns, dumped raw for a signed-in account (2026-11): windows
+// stated as percentages beside their own duration in seconds, reset times as Unix seconds, a plan
+// type, and further meters (review, spark, reset credits) the card deliberately does not render.
 const LIVE_USAGE = {
   plan_type: 'pro',
   rate_limit: {
-    primary_window: { used_percent: 42.6, reset_at: '2026-11-06T22:00:00Z', limit_reached: false },
-    secondary_window: { used_percent: '8', reset_at: '2026-11-09T00:00:00Z' },
+    primary_window: { used_percent: 42.6, reset_at: 1794386400, limit_window_seconds: 18000, limit_reached: false },
+    secondary_window: { used_percent: '8', reset_at: '2026-11-09T00:00:00Z', limit_window_seconds: 604800 },
   },
   code_review_rate_limit: { primary_window: { used_percent: 90 } },
   rate_limit_reset_credits: { available_count: 2 },
 };
 
-test('quota reads /backend-api/wham/usage and reports the two windows the plan is sold with', async () => {
+test('quota reads /backend-api/wham/usage and names each window from its own duration', async () => {
   const transport = transportFor();
   transport.request = async function (input) { this.calls.push(input); return { status: 200, headers: new Headers(), data: LIVE_USAGE }; };
   const adapter = new CodexAdapter({ transport });
@@ -313,19 +313,35 @@ test('quota reads /backend-api/wham/usage and reports the two windows the plan i
   assert.equal(transport.calls[0].headers.authorization, 'Bearer access');
   assert.equal(transport.calls[0].headers['ChatGPT-Account-ID'], 'acct_1', 'a multi-seat plan reads the account\u2019s windows, not the key\u2019s');
   // A percentage against 100 — the panel's "N of M left" reads as the percentage the provider stated.
-  assert.deepEqual(quota.resources['5-hour window'], { used: 43, limit: 100, remaining: 57, resetsAt: '2026-11-06T22:00:00.000Z' });
-  assert.deepEqual(quota.resources.Weekly, { used: 8, limit: 100, remaining: 92, resetsAt: '2026-11-09T00:00:00.000Z' });
+  // The names come from each window's stated duration: 18000s is the 5-hour session, 604800s the week.
+  assert.deepEqual(quota.resources['5-hour window'], { used: 43, limit: 100, remaining: 57, resetsAt: '2026-11-11T08:40:00.000Z' });
+  assert.deepEqual(quota.resources['Weekly window'], { used: 8, limit: 100, remaining: 92, resetsAt: '2026-11-09T00:00:00.000Z' });
   assert.equal(quota.plan, 'pro');
   // The review window and the reset credits are on the wire and deliberately not rendered.
-  assert.deepEqual(Object.keys(quota.resources), ['5-hour window', 'Weekly']);
+  assert.deepEqual(Object.keys(quota.resources), ['5-hour window', 'Weekly window']);
+});
+
+test('the free plan\u2019s primary window is monthly, and the card says so', async () => {
+  // Dumped raw for a signed-in free account: one window, 2592000 seconds — thirty days — and no
+  // secondary. The reference client labeled the primary window "session" and the secondary "weekly",
+  // which told this user their monthly cap was a 5-hour one.
+  const free = transportFor();
+  free.request = async function (input) { this.calls.push(input); return { status: 200, headers: new Headers(), data: { plan_type: 'free', rate_limit: { primary_window: { used_percent: 100, reset_at: 1795124679, limit_window_seconds: 2592000 }, secondary_window: null } } }; };
+
+  const quota = await new CodexAdapter({ transport: free }).quota({ credential: { type: 'oauth', value: 'a' } });
+
+  assert.deepEqual(Object.keys(quota.resources), ['Monthly window']);
+  // Unix seconds, not milliseconds: 1795124679 read as ms lands in 1970.
+  assert.equal(quota.resources['Monthly window'].resetsAt, new Date(1795124679 * 1000).toISOString());
+  assert.deepEqual(quota.resources['Monthly window'], { used: 100, limit: 100, remaining: 0, resetsAt: new Date(1795124679 * 1000).toISOString() });
 });
 
 test('a quota ratio is clamped and an absent window is absent from the card', async () => {
   const clamped = transportFor();
-  clamped.request = async function (input) { this.calls.push(input); return { status: 200, headers: new Headers(), data: { rate_limit: { primary_window: { used_percent: 140 }, secondary_window: { used_percent: -5 } } } }; };
+  clamped.request = async function (input) { this.calls.push(input); return { status: 200, headers: new Headers(), data: { rate_limit: { primary_window: { used_percent: 140, limit_window_seconds: 18000 }, secondary_window: { used_percent: -5, limit_window_seconds: 604800 } } } }; };
   const quota = await new CodexAdapter({ transport: clamped }).quota({ credential: { type: 'oauth', value: 'a' } });
   assert.deepEqual(quota.resources['5-hour window'], { used: 100, limit: 100, remaining: 0 });
-  assert.deepEqual(quota.resources.Weekly, { used: 0, limit: 100, remaining: 100 });
+  assert.deepEqual(quota.resources['Weekly window'], { used: 0, limit: 100, remaining: 100 });
 
   const bare = transportFor();
   bare.request = async function (input) { this.calls.push(input); return { status: 200, headers: new Headers(), data: {} }; };

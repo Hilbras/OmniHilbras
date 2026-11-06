@@ -56,19 +56,56 @@ const maxRenewalMemoEntries = 64;
 const renewalWindowMs = 60_000;
 
 /**
- * One rate-limit window, as the usage report states it: a percentage used, never an absolute count.
+ * The reset time, in the shapes the endpoint has been seen to use: Unix seconds (the live response),
+ * Unix milliseconds, or an ISO string. A number read as milliseconds lands in 1970, so the epoch is
+ * decided by magnitude, the same rule the Kimi adapter states.
+ */
+function codexResetTime(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return new Date(value < 1e12 ? value * 1000 : value).toISOString();
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+  }
+  return undefined;
+}
+
+/**
+ * The window's own name, from the duration the endpoint states about it.
+ *
+ * `limit_window_seconds` is on every window, and the plans differ: a paid plan rolls a 5-hour session
+ * beside a weekly allowance, while the free plan's primary window is **monthly** and has no secondary
+ * at all. Labeling the primary "5-hour" — what the reference client hardcoded — told a free-plan user
+ * their monthly cap was a 5-hour one. The duration is the truth the card shows; a duration the
+ * gateway has never seen is humanized rather than dropped.
+ */
+function codexWindowName(seconds: unknown): string {
+  const s = Number(seconds);
+  if (!Number.isFinite(s) || s <= 0) return 'Usage window';
+  if (s === 2_592_000) return 'Monthly window';
+  if (s === 604_800) return 'Weekly window';
+  if (s % 86_400 === 0) return `${s / 86_400}-day window`;
+  if (s % 3_600 === 0) return `${s / 3_600}-hour window`;
+  return `${Math.round(s / 60)} min window`;
+}
+
+/**
+ * One rate-limit window, as the usage report states it: a percentage used, never an absolute count,
+ * beside the duration the window covers.
  *
  * Expressed against 100 — the panel's "N of M left" then reads as the percentage the provider stated.
  * A ratio outside 0–100 is clamped, not trusted, so a strange upstream figure cannot produce a
  * strange bar.
  */
-function codexWindow(window: unknown): ProviderResourceQuota | undefined {
+function codexWindow(window: unknown): { name: string; quota: ProviderResourceQuota } | undefined {
   if (!window || typeof window !== 'object') return undefined;
-  const record = window as { used_percent?: unknown; percent_used?: unknown; reset_at?: unknown };
+  const record = window as { used_percent?: unknown; percent_used?: unknown; reset_at?: unknown; limit_window_seconds?: unknown };
   const stated = Number(record.used_percent ?? record.percent_used ?? 0);
   const usedPct = Math.round(Math.min(100, Math.max(0, Number.isFinite(stated) ? stated : 0)));
-  const reset = typeof record.reset_at === 'string' && record.reset_at.trim() ? new Date(record.reset_at) : undefined;
-  return { used: usedPct, limit: 100, remaining: 100 - usedPct, ...(reset && !Number.isNaN(reset.getTime()) ? { resetsAt: reset.toISOString() } : {}) };
+  const resetsAt = codexResetTime(record.reset_at);
+  return {
+    name: codexWindowName(record.limit_window_seconds),
+    quota: { used: usedPct, limit: 100, remaining: 100 - usedPct, ...(resetsAt ? { resetsAt } : {}) },
+  };
 }
 
 type CodexUsageResponse = {
@@ -77,20 +114,19 @@ type CodexUsageResponse = {
 };
 
 /**
- * The two windows the plan is sold with: the rolling 5-hour session and the weekly allowance.
+ * The windows the account is bound by, named from each window's own stated duration.
  *
  * The endpoint reports more meters than that — a code-review window, a Spark window, and rate-limit
  * reset credits — and the card deliberately renders none of them, the same rule Kimi's card states:
- * the operator reads the two numbers the subscription is bound by. A window the response omits is
- * simply absent from the card, never rendered as zero.
+ * the operator reads the numbers the subscription is bound by. A window the response omits is simply
+ * absent from the card, never rendered as zero.
  */
 function parseCodexUsage(data: CodexUsageResponse): ProviderQuota {
   const resources: Record<string, ProviderResourceQuota> = {};
   const rateLimit = data.rate_limit ?? {};
-  const fiveHour = codexWindow((rateLimit as { primary_window?: unknown }).primary_window);
-  if (fiveHour) resources['5-hour window'] = fiveHour;
-  const weekly = codexWindow((rateLimit as { secondary_window?: unknown }).secondary_window);
-  if (weekly) resources['Weekly'] = weekly;
+  for (const window of [codexWindow((rateLimit as { primary_window?: unknown }).primary_window), codexWindow((rateLimit as { secondary_window?: unknown }).secondary_window)]) {
+    if (window) resources[window.name] = window.quota;
+  }
   return { plan: typeof data.plan_type === 'string' && data.plan_type ? data.plan_type : 'Codex', resources };
 }
 
