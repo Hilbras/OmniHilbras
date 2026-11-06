@@ -14,7 +14,7 @@ export type ProviderStatus = 'connected' | 'attention' | 'available' | 'planned'
 export type ProviderGroup = 'oauth' | 'api-key' | 'web-cookie' | 'free-tier' | 'hosted' | 'local' | 'custom';
 export type ProviderCardMode = 'simple' | 'advanced';
 
-export const providerGroupOrder: ProviderGroup[] = ['oauth', 'api-key', 'web-cookie', 'hosted', 'free-tier', 'local', 'custom'];
+export const providerGroupOrder: ProviderGroup[] = ['oauth', 'free-tier', 'api-key', 'web-cookie', 'hosted', 'local', 'custom'];
 
 export const providerGroupLabels: Record<ProviderGroup, string> = {
   oauth: 'OAuth Providers',
