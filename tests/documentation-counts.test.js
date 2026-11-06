@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { providerIds } from '../apps/gateway/test/support/providerIds.js';
+import { providerIds } from '../Kernel/API/test/support/providerIds.js';
 
 // A number in prose is a claim, and a claim in prose rots.
 //
@@ -25,12 +25,25 @@ const ROOT = new URL('..', import.meta.url);
 const ROOT_URL = fileURLToPath(ROOT);
 const read = (file) => readFileSync(new URL(file, ROOT), 'utf8');
 
+/**
+ * The directories under `Kernel/SDK/` that hold an adapter.
+ *
+ * The SDK is now one folder per provider at its root, beside the scaffolding (`dist`, `node_modules`,
+ * `test`) and the brand assets. A raw directory listing counts all of those, which inflated the adapter
+ * count by five the first time this ran. The list here is "every directory that is not scaffolding", so a
+ * new provider still appears without editing it.
+ */
+const SDK_SCAFFOLDING = new Set(['core', 'dist', 'node_modules', 'test', 'tests', 'brand', 'docs']);
+function adapterDirs() {
+  return readdirSync(new URL('Kernel/SDK/', ROOT), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !SDK_SCAFFOLDING.has(entry.name))
+    .map((entry) => entry.name);
+}
+
 /** Adapters the capture guard considers, measured from the provider directory. */
 function consideredAdapters() {
-  const dir = new URL('packages/omnihilbras-sdk/src/providers/', ROOT);
-  return readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name !== 'openai-compatible')
-    .map((entry) => entry.name)
+  return adapterDirs()
+    .filter((id) => id !== 'openai-compatible')
     .filter((id) => !['deepseek-pow', 'chatgpt-first-party', 'qwen-web'].includes(id));
 }
 
@@ -45,7 +58,7 @@ function consideredAdapters() {
  * The other guard still asserts `pinned === accounted`, so the two sets cannot drift apart.
  */
 function captureCounts() {
-  const fixtures = readdirSync(new URL('packages/omnihilbras-sdk/test/fixtures/', ROOT))
+  const fixtures = readdirSync(new URL('Kernel/SDK/tests/fixtures/', ROOT))
     .filter((file) => !file.startsWith('.') && !file.endsWith('.md'));
   return { pinned: fixtures.length, considered: consideredAdapters().length };
 }
@@ -56,11 +69,14 @@ const readme = read('README.md');
 const architecture = read('docs/architecture/README.md');
 
 test('the adapter count in the SPEC is the real file count', () => {
-  const dir = new URL('packages/omnihilbras-sdk/src/providers/', ROOT);
-  const files = readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .reduce((count, entry) => count + readdirSync(new URL(`${entry.name}/`, dir)).filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts')).length, 0);
-  const claimed = spec.match(/\*\*(\d+) files\*\* in `packages\/omnihilbras-sdk\/src\/providers\/`/);
+  const dir = new URL('Kernel/SDK/', ROOT);
+  const files = adapterDirs()
+    .reduce((count, name) => count
+    + ['adapter', 'lib'].reduce((inner, sub) => inner
+      + (existsSync(new URL(`${name}/${sub}/`, dir))
+        ? readdirSync(new URL(`${name}/${sub}/`, dir)).filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts')).length
+        : 0), 0), 0);
+  const claimed = spec.match(/\*\*(\d+) files\*\* in `Kernel\/SDK\/`/);
 
   assert.ok(claimed, 'the SPEC must state the adapter file count, and name the directory it counted');
   assert.equal(
@@ -74,13 +90,19 @@ test('the adapter count in the SPEC is the real file count', () => {
 test('the SPEC reconciles its file count with the capture guard\'s count', () => {
   // The SDK file count and capture-guard adapter count refer to different sets; both values are verified
   // below against the directories that define them, then reconciled in the SPEC.
-  const providersDir = new URL('packages/omnihilbras-sdk/src/providers/', ROOT);
-  const files = readdirSync(providersDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .reduce((count, entry) => count + readdirSync(new URL(`${entry.name}/`, providersDir)).filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts')).length, 0);
+  const providersDir = new URL('Kernel/SDK/', ROOT);
+  const files = adapterDirs()
+    .reduce((count, name) => count
+    + ['adapter', 'lib'].reduce((inner, sub) => inner
+      + (existsSync(new URL(`${name}/${sub}/`, providersDir))
+        ? readdirSync(new URL(`${name}/${sub}/`, providersDir)).filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts')).length
+        : 0), 0), 0);
   const considered = consideredAdapters().length;
   const excluded = files - considered;
 
+  // The original premise — one package where a handful of helper files are not adapters — no longer holds:
+  // each provider is now self-contained, so its `lib/` copies inflate the file count far above the adapter
+  // count by design. The guard is therefore about the *ratio being explainable*, not about a small excess.
   assert.ok(
     excluded > 0,
     'the guard must exclude something, or "the capture guard counts N" is the same number as the file count ' +
@@ -261,7 +283,7 @@ test('every path the Layers diagram names is where the diagram says it is', () =
   // The diagram kept drawing the SDK as a flat `src/` with an `adapters/` directory for nine releases
   // after the restructure made it `core/` + `providers/`, listed a gateway `transport.ts` that has
   // never existed — the gateway takes the SDK's `HttpTransport` interface rather than keeping a second
-  // one — and filed the SDK's own `zen/zen-free-tier.ts` under `apps/gateway/src/`. Nothing compared
+  // one — and filed the SDK's own `zen/zen-free-tier.ts` under `Kernel/API/src/`. Nothing compared
   // the map to the tree, and this file is where a reader starts.
   //
   // It checks placement, not completeness: a diagram is allowed to be selective, which is why the
@@ -276,7 +298,7 @@ test('every path the Layers diagram names is where the diagram says it is', () =
   let checked = 0;
 
   for (const line of block.split('\n')) {
-    const header = line.match(/^(apps\/gateway\/src\/|packages\/omnihilbras-sdk\/src\/|src\/)(?:\s|$)/);
+    const header = line.match(/^(Kernel\/API\/src\/|Kernel\/SDK\/|src\/)(?:\s|$)/);
     if (header) {
       base = header[1];
       subdir = '';
@@ -295,9 +317,12 @@ test('every path the Layers diagram names is where the diagram says it is', () =
       const dir = indent === 2 ? base + token : base + subdir + token;
       checked += 1;
       if (!existsSync(join(ROOT_URL, dir))) missing.push(dir);
-      // `core/` and `providers/` nest the entries that follow them; `routes/` does not, because the
-      // gateway section is flat and `routes/` sits in the middle of it.
-      if (indent === 2 && base === 'packages/omnihilbras-sdk/src/') subdir = token;
+      // A directory line nests the entries that follow it. `core/` in the gateway section and `core/`
+      // in the SDK both nest their children; `routes/` does not, because the modules after it in the
+      // diagram are siblings rather than children.
+      if (indent === 2 && (base === 'Kernel/SDK/' || base === 'Kernel/API/src/')) {
+        subdir = token === 'routes/' ? '' : token;
+      }
       continue;
     }
     if (!/^[\w./-]+$/.test(token)) continue;

@@ -99,7 +99,7 @@ const FALSE_CLAIMS = {
   'listening': 'a liveness badge is a claim about a feed, and nothing polls. The animated dot on the route panel was this claim in a component the guard could not see.',
   'req/min': 'the gateway keeps no request counter, so no throughput figure exists to print.',
   // 1.46.0. The router sorts on `left.priority - right.priority || left.name.localeCompare(...)`
-  // (`apps/gateway/src/routing.ts`) and then filters on health, credential and rate limit. There is no
+  // (`Kernel/API/src/core/routing.ts`) and then filters on health, credential and rate limit. There is no
   // cost, no quality, no privacy and no spend budget — every `budget` in the gateway is a *retry* budget,
   // which is a different word meaning a different thing. `RoutingPage.tsx` already said so in its own
   // header ("a feature that does not exist anywhere in the gateway"), so the product had told the truth
@@ -151,7 +151,7 @@ test('the claims that replaced them are the ones the product can back', () => {
   // Recursive: the request-id line is in `src/routes/inference.ts`, and a scan that only reads the
   // top level would have reported the marketing page as wrong when the gateway is the one that is
   // right. A check that cannot see the code it is checking is worse than no check.
-  const gateway = readAll(join(ROOT, 'apps', 'gateway', 'src')).join('\n');
+  const gateway = readAll(join(ROOT, 'Kernel', 'API', 'src')).join('\n');
   for (const [what, evidence] of [
     ['the request id on every response', /gateway:\s*\{\s*requestId:/],
     ['the named skip reasons', /type RouteSkipReason =/],

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { providerCatalog } from '../src/data/providers.ts';
@@ -64,11 +64,18 @@ function registeredProviderIds() {
   // Scanning only `service.ts` — my first two attempts — resolves two ids and marks the other four
   // unresolved, which is a check that looks for collisions while being unable to see most of the
   // registered providers.
-  const providerDir = join(ROOT, 'packages/omnihilbras-sdk/src/providers');
+  const providerDir = join(ROOT, 'Kernel/SDK');
+  // Provider ids are declared in `adapter/` (and occasionally `lib/`); the folder root holds no `.ts` any
+  // more, so scanning it found nothing and every registration constant came back UNRESOLVED.
+  const SCAFFOLDING = new Set(['dist', 'node_modules', 'tests', 'log']);
   const modules = readdirSync(providerDir, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .flatMap((e) => readdirSync(join(providerDir, e.name)).filter((f) => f.endsWith('.ts')).map((f) => readFileSync(join(providerDir, e.name, f), 'utf8')));
-  const service = readFileSync(join(ROOT, 'apps/gateway/src/service.ts'), 'utf8');
+    .filter((e) => e.isDirectory() && !SCAFFOLDING.has(e.name))
+    .flatMap((e) => ['adapter', 'lib'].flatMap((sub) => {
+      const dir = join(providerDir, e.name, sub);
+      if (!existsSync(dir)) return [];
+      return readdirSync(dir).filter((f) => f.endsWith('.ts')).map((f) => readFileSync(join(dir, f), 'utf8'));
+    }));
+  const service = readFileSync(join(ROOT, 'Kernel/API/src/core/service.ts'), 'utf8');
   const searchable = [...modules, service];
 
   for (const match of service.matchAll(/\.(?:onDemand|register)\(\s*([A-Za-z0-9_]+|'[a-z0-9-]+')/g)) {
@@ -154,7 +161,7 @@ test('a new provider id is one edit away from a web-session id, and stays distin
    */
   const oauthIds = new Set(providerCatalog.filter((card) => card.auth === 'OAuth').map((card) => card.id));
   const oauthRoutes = new Set(
-    [...readFileSync(join(ROOT, 'apps/gateway/src/routes/oauth.ts'), 'utf8')
+    [...readFileSync(join(ROOT, 'Kernel/API/src/routes/oauth.ts'), 'utf8')
       .matchAll(/url\.pathname === '\/v1\/oauth\/([\w-]+)\/start'/g)].map((m) => m[1]),
   );
   const cardById = new Map(providerCatalog.map((card) => [card.id, card]));
@@ -171,7 +178,7 @@ test('a new provider id is one edit away from a web-session id, and stays distin
   }
   assert.deepEqual(
     pairs.map(([, derived]) => derived).sort(),
-    ['clinepass', 'deepseek-web', 'gemini-web', 'kimi-code', 'opencode-console', 'qwen-web', 'tokenharbor-web'],
+    ['clinepass', 'deepseek-web', 'gemini-web', 'kimi-code', 'minimax-code-global', 'opencode-console', 'qwen-web', 'tokenharbor-web'],
     'the near-miss ids are exactly the ones expected, so this stays a measurement and not a tautology',
   );
 });

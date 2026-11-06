@@ -5,12 +5,12 @@ import { fileURLToPath } from 'node:url';
 /**
  * The SDK's provider sources, read from its provider folders.
  *
- * Each provider is a folder under `packages/omnihilbras-sdk/src/providers/`, and its code is the
+ * Each provider is a folder under `Kernel/SDK/`, and its code is the
  * folder's `index.ts`. The shared base `openai-compatible` is a folder too, but providers extend it,
  * so it is not itself a provider and is left out.
  */
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
-const PROVIDERS = join(ROOT, 'packages/omnihilbras-sdk/src/providers');
+const PROVIDERS = join(ROOT, 'Kernel/SDK');
 const SHARED_BASES = new Set(['openai-compatible']);
 
 /** `[{ id, file }]` for each provider, where `file` is its `index.ts`. */
@@ -27,7 +27,7 @@ export function providerSources(read = (file) => readFileSync(file, 'utf8')) {
 
 /** The source of one file inside the SDK's `src/`, by its path relative to `src/`. */
 export function sdkSource(relative, read = (file) => readFileSync(file, 'utf8')) {
-  return read(join(ROOT, 'packages/omnihilbras-sdk/src', relative));
+  return read(join(ROOT, 'Kernel/SDK', relative));
 }
 
 export { PROVIDERS, ROOT };

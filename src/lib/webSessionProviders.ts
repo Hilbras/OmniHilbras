@@ -1,4 +1,4 @@
-import { CHATGPT_WEB_SESSION_COOKIE } from '@hilbras/omnihilbras';
+import { CHATGPT_WEB_SESSION_COOKIE } from '@omnihilbras/kernel-api/public';
 import type { WebSessionDescriptor } from '../components/WebCookieConnectDialog';
 
 /**

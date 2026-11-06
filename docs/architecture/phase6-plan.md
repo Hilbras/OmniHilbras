@@ -111,7 +111,7 @@ redaction guard bites.
 
 ## Phase 6.3 — Pricing wired to usage
 
-`packages/omnihilbras-sdk/src/pricing.ts` exists (88 lines) and is currently unused for reporting. Joining
+`Kernel/SDK/*/lib/pricing.ts` exists (88 lines) and is currently unused for reporting. Joining
 it to the Phase 6.2 records turns "tokens saved" into a number the dashboard can show and a claim the
 release notes can make.
 

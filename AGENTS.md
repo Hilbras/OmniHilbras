@@ -16,10 +16,14 @@ size of the change, not by the number of files touched:
 
 `x`, `x`, and `x` are the last digit of the major, minor, and patch position.
 
-The workspace version is kept in step across `package.json`,
-`packages/omnihilbras-sdk/package.json`, and `apps/gateway/package.json`. The
-published artifact is `@hilbras/omnihilbras`; its version is the release
-version.
+The workspace version is kept in step across `package.json` and
+`Kernel/API/package.json`. The SDK is one private package per provider under
+`Kernel/SDK/`, each versioned `0.1.0` and none of them published.
+**Publishing is suspended during the Kernel restructure:** there is no
+publishable manifest — the single SDK manifest was dissolved into the
+per-provider packages, and `Kernel/API` is private. Until a new publishing
+story is chosen, a release ends at the tag; `pnpm release:audit` will name
+the npm gap, and that is the honest state rather than one to paper over.
 
 ## Definition of done for a change
 
@@ -45,15 +49,16 @@ version.
 4. Committed, tagged `v<version>`, and pushed to `origin/main`.
 5. A GitHub release exists for the tag with notes that say what changed and how
    to verify it.
-6. `npm publish --access public` from `packages/omnihilbras-sdk`, then confirm
-   the version resolves from the registry.
+6. `npm publish --access public`, then confirm the version resolves from the
+   registry. **Suspended while publishing is suspended** (see Versioning):
+   until there is a publishable manifest, the definition of done ends at step 5.
 
-**Steps 4–6 are required after every phase, every checkpoint, and every task
-group that changes behaviour.** A phase is not done when its code is merged; it
-is done when the tag is on `main`, the release exists, and the version resolves
-from the registry. Leaving any of the three for later is how a tag ends up
-pointing at something nobody published, and a published version ends up with no
-release explaining it.
+**Steps 4–5 are required after every phase, every checkpoint, and every task
+group that changes behaviour** — 4–6 once publishing resumes. A phase is not
+done when its code is merged; it is done when the tag is on `main` and the
+release exists. Leaving any of them for later is how a tag ends up pointing at
+something nobody published, and a published version ends up with no release
+explaining it.
 
 **`npm publish` reporting success is not evidence the version exists.** It has
 twice printed `+ @hilbras/omnihilbras@<version>` while the version was absent
@@ -118,10 +123,12 @@ that is not on `main`.
 
 ## Boundaries
 
-- Provider-specific wire formats stay inside `packages/omnihilbras-sdk/src/providers/<name>/`;
-  shared machinery lives in `packages/omnihilbras-sdk/src/core/`. The gateway service and SDK index
-  must stay provider-neutral. **This line named `src/adapters/` for releases after that directory was
-  renamed**, so a contributor following it wrote into a path that does not exist — which is what a
+- Provider-specific wire formats stay inside `Kernel/SDK/<name>/adapter/`; the shared machinery each
+  package needs is vendored into `Kernel/SDK/<name>/lib/` — the Kernel restructure dissolved the shared
+  `src/core/` into the per-provider packages, so a fix to a vendored file is a fix to every copy or it
+  is drift. The gateway service must stay provider-neutral. **This line named `src/adapters/` for
+  releases after that directory was renamed, and `Kernel/SDK/src/` for releases after that tree was
+  dissolved**, so a contributor following it wrote into a path that does not exist — which is what a
   path written in prose does when nothing reads it.
 - Real requests only. A test, health check, or simulated result must not be presented as a live one.
   A new provider request costs money, so say so. **Asserted where it is easiest to get wrong:**
@@ -130,7 +137,7 @@ that is not on `main`.
   for every provider except OpenRouter, so a key that was any string at all produced a green
   "Key looks valid" — and only one provider's key was really checked. It now asks the gateway, for
   every provider. If a check cannot be performed, say so; do not simulate the result.
-- New gateway routes need tests in `apps/gateway/test/` and a line in
+- New gateway routes need tests in `Kernel/API/test/` and a line in
   `docs/SPEC-SDK.md`. **Both are now checked, not requested:**
   `tests/gateway-routes.test.js` fails if a served path has no spec line, if the spec
   advertises a path the gateway does not serve, or if a route path is built from
@@ -232,13 +239,13 @@ that is not on `main`.
   reported *"N connections added."* with nothing saved, in the same file whose single-save path documents
   that defect as fixed.
 - **Whatever the vault writes, the vault must read.** `storedCredential()` in
-  `apps/gateway/src/connections.ts` is the one decision about a credential's shape, used by the writer and
+  `Kernel/API/src/connections.ts` is the one decision about a credential's shape, used by the writer and
   the reader alike; two copies of it had drifted twice, both silently. `{ type: 'none' }` was written and
   then refused on read — and because `parseCredentials` *is* the loader, one such credential made every
   connection in the vault unreadable rather than one. And an OAuth credential kept three of its nine
   declared fields, so `oauthClientId`/`oauthClientSecret` were dropped **at save time** and Kiro's renewal
   — which refuses to send a guess when the registered client pair is missing — broke from the moment a
-  session was saved. **Asserted:** `apps/gateway/test/connection-credential-round-trip.test.js` writes each
+  session was saved. **Asserted:** `Kernel/API/test/connection-credential-round-trip.test.js` writes each
   variant and reads it back after a restart, with every declared field populated, so a tenth field cannot
   be added without that test failing.
 
@@ -257,10 +264,9 @@ pnpm verify         # the release gate: version, typecheck, test, build, bundle 
 pnpm release:audit  # every tag: pushed, released on GitHub, published to npm
 ```
 
-`omnihilbras` is `bin/omnihilbras.js`, registered as a `bin` on the **private root** package — not on
-`@hilbras/omnihilbras`, because that one is the published library and a consumer who installed it must not
-acquire a command that starts a development server. `npm link` puts it on your `PATH`, pointed at this
-checkout.
+`omnihilbras` is `bin/omnihilbras.js`, registered as a `bin` on the **private root** package — not on a
+publishable package, because a consumer who installed one must not acquire a command that starts a
+development server. `npm link` puts it on your `PATH`, pointed at this checkout.
 
 It adopts three things from the reference launcher (`9router`'s `cli.js`), each learned the hard way there:
 readiness is a **TCP connect, not a sleep**, so the page never loads before the gateway answers; the spinner

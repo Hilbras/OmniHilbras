@@ -5,18 +5,25 @@ with `@hilbras/sdk`, which is a separate, unrelated project.
 
 ## Status
 
-`@hilbras/omnihilbras@0.2.0` is published (GitHub tag `v0.2.0`).
+**Publishing is suspended.** The Kernel restructure dissolved the single SDK
+manifest: the SDK is now one private package per provider under `Kernel/SDK/`,
+each versioned `0.1.0`, and `Kernel/API` — the gateway — is private too. There
+is no manifest to publish until a new publishing story is chosen, and until
+then a release ends at the tag and the GitHub release. The last published
+version is `@hilbras/omnihilbras@0.2.0` (GitHub tag `v0.2.0`); the steps below
+describe the process before the restructure and are kept for when that story
+exists — their paths name the tree as it was.
 
 ## Version bumps
 
 Pick the bump by the size of the change: breaking → `x.0.0`, new capability →
 `0.x.0`, fix or docs → `0.0.x`. Bump the version in `package.json`,
-`packages/omnihilbras-sdk/package.json`, and `apps/gateway/package.json`
+`Kernel/SDK/package.json`, and `Kernel/API/gateway/package.json`
 together, then tag `v<version>` and publish.
 
 ## Publish a new version
 
-1. Bump the version in `packages/omnihilbras-sdk/package.json`.
+1. Bump the version in `Kernel/SDK/package.json`.
 2. Build and verify:
 
    ```bash
@@ -30,7 +37,7 @@ together, then tag `v<version>` and publish.
 4. Publish:
 
    ```bash
-   cd packages/omnihilbras-sdk
+   cd Kernel/SDK
    npm publish --access public
    ```
 

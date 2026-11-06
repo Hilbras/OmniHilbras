@@ -23,7 +23,7 @@ that holds is one a machine re-derives.
 
 - **Lines** — the file's line count.
 - **Provider ids named** — how many of the provider ids the SDK ships (one directory each under
-  `packages/omnihilbras-sdk/src/providers/`, so a new provider extends the check without editing it)
+  `Kernel/SDK/`, so a new provider extends the check without editing it)
   occur as a whole word inside a string literal in the file's executable code, comments stripped. That
   is the definition `shared-execution-has-no-provider-names.test.js` applies to the shared algorithm,
   generalised from "is this zero" to "how many". **Zero is the claim this column exists to make**; a
@@ -31,19 +31,19 @@ that holds is one a machine re-derives.
 
 | Surface | Lines | Provider ids named | Note |
 | --- | --- | --- | --- |
-| `apps/gateway/src/routing.ts` | 379 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
-| `apps/gateway/src/provider-resolver.ts` | 237 | **0** | enforced by a test that greps the file |
-| `apps/gateway/src/request-executor.ts` | 705 | **0** | the failover loop, the attempt ledger, the ordering |
-| `apps/gateway/src/connection-manager.ts` | 250 | **0** | one error mapper, one catalog merge, one lock scope |
-| `apps/gateway/src/service.ts` | 1959 | 6 | all thirteen `.onDemand()` registrations, in one constructor |
-| `apps/gateway/src/http.ts` | 297 | **0** | the vocabulary every route shares |
-| `apps/gateway/src/routes/oauth.ts` | 490 | 7 | the module a provider split would help most |
-| `apps/gateway/src/routes/connections.ts` | 286 | 1 | one OpenRouter save shortcut, and the generic quota route |
-| `apps/gateway/src/routes/inference.ts` | 942 | **0** | `/v1/models`, `/v1/chat/completions`, and the auth gate |
-| `apps/gateway/src/routes/api-keys.ts` | 74 | **0** | |
-| `apps/gateway/src/routes/status.ts` | 43 | **0** | `/health`, `/v1/routing` |
-| `apps/gateway/src/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
-| `apps/gateway/src/server.ts` | 312 | 1 | refuses a half-configured Codex OAuth override at startup |
+| `Kernel/API/src/core/routing.ts` | 379 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
+| `Kernel/API/src/core/provider-resolver.ts` | 238 | 1 | enforced by a test that greps the file |
+| `Kernel/API/src/core/request-executor.ts` | 705 | **0** | the failover loop, the attempt ledger, the ordering |
+| `Kernel/API/src/core/connection-manager.ts` | 270 | **0** | one error mapper, one catalog merge, one lock scope |
+| `Kernel/API/src/core/service.ts` | 2357 | 20 | all nineteen `.onDemand()` registrations, in one constructor |
+| `Kernel/API/src/core/http.ts` | 296 | **0** | the vocabulary every route shares |
+| `Kernel/API/src/routes/oauth.ts` | 682 | 11 | the module a provider split would help most |
+| `Kernel/API/src/routes/connections.ts` | 323 | 1 | one OpenRouter save shortcut, the generic quota route, and the build stamp |
+| `Kernel/API/src/routes/inference.ts` | 942 | **0** | `/v1/models`, `/v1/chat/completions`, and the auth gate |
+| `Kernel/API/src/routes/api-keys.ts` | 74 | **0** | |
+| `Kernel/API/src/routes/status.ts` | 47 | **0** | `/health`, `/v1/routing`, and the build stamp |
+| `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
+| `Kernel/API/src/server.ts` | 312 | 1 | refuses a half-configured Codex OAuth override at startup |
 
 **The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
 provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a
@@ -115,52 +115,45 @@ the name available.
 ## Layers
 
 ```text
-apps/gateway/src/
+Kernel/API/src/
   server.ts          CORS, body limits, and a five-line route dispatcher. No provider logic.
-  http.ts            Read a request, write a response, turn a failure into an envelope.
-  routes/            One module per resource: status, connections, oauth, api-keys, inference.
-  service.ts         Composition root. Wires the managers below to its own effects.
-  provider-resolver  Which adapter serves a provider id. Zero provider ids; a test enforces it.
-  request-executor   The failover chain: hedge, retry, next route, attempt ledger. Zero ids.
-  connection-manager  Storing connections: one error mapper, one catalog merge, one lock scope.
-  sign-in-sessions   The one OAuth session lifecycle. A grant is spent once, in one function.
-  sign-in-coordinator  Claim, poll, save, publish — and one description of why a sign-in failed.
-  credential-manager  Which connection serves a provider, and the context a request is made in.
-  routing-engine      Which routes a request may take, given health and limits. Zero ids.
-  model-catalog       What this gateway serves, and which provider serves what. Zero ids.
-  retry-policy        Retry this route, next route, or stop. One decision, two callers. Zero ids.
-  timeout-policy      What a timeout value means, and the deadline that enforces it. Owns the default.
-  rate-limit-policy   What a request limit means, when it is spent, and what it is *now*.
-                       `currentWait` is a query; `enforce` records the verdict. A plan asks
-                       `currentWait`, never the recorded map — 1.39.0, where reading the record
-                       latched a limited connection off for the life of the process.
-  hedge-policy        Whether a second request is worth sending, and which route. Every refusal is named.
-  request-context     One request's id, from the edge to whichever provider answered it.
-  credential-lifecycle  Whether a stored credential still works, asked without a request.
-  runtime.ts            The outer runtime: auth context, tenant, credential store, deployment.
-  capability          A named "this adapter does not do that", for two consumers that needed it.
-  health.ts          Probing, ejection and recovery, asked two questions only.
-  api-key-manager    API keys and the two user-facing messages about them.
-  routing.ts         Provider-agnostic selection, ejection and recovery. Zero provider ids.
+  routes/            One module per resource: status, connections, oauth, api-keys, inference, usage.
+  core/              The rest of the gateway: composition, policy, and the contract layer.
+    http.ts          Read a request, write a response, turn a failure into an envelope.
+    service.ts       Composition root. Wires the managers below to its own effects.
+    provider-resolver  Which adapter serves a provider id. Zero provider ids; a test enforces it.
+    request-executor  The failover chain: hedge, retry, next route, attempt ledger. Zero ids.
+    connection-manager  Storing connections: one error mapper, one catalog merge, one lock scope.
+    sign-in-sessions  The one OAuth session lifecycle. A grant is spent once, in one function.
+    sign-in-coordinator  Claim, poll, save, publish — and one description of why a sign-in failed.
+    credential-manager  Which connection serves a provider, and the context a request is made in.
+    routing-engine    Which routes a request may take, given health and limits. Zero ids.
+    model-catalog     What this gateway serves, and which provider serves what. Zero ids.
+    retry-policy      Retry this route, next route, or stop. One decision, two callers. Zero ids.
+    timeout-policy    What a timeout value means, and the deadline that enforces it.
+    rate-limit-policy  What a request limit means, when it is spent, and what it is *now*.
+    hedge-policy      Whether a second request is worth sending, and which route.
+    request-context   One request's id, from the edge to whichever provider answered it.
+    credential-lifecycle  Whether a stored credential still works, asked without a request.
+    registry.ts       The ProviderAdapter contract and registration — the one shared contract.
+    types.ts          The interface every adapter satisfies.
+    runtime.ts        The outer runtime: auth context, tenant, credential store, deployment.
+    capability        A named "this adapter does not do that", for two consumers that needed it.
+    health.ts         Probing, ejection and recovery, asked two questions only.
+    api-key-manager   API keys and the two user-facing messages about them.
+    routing.ts        Provider-agnostic selection, ejection and recovery. Zero provider ids.
 
-packages/omnihilbras-sdk/src/
-  core/              Shared machinery. No provider-specific wire format lives in here.
-    registry.ts      ProviderAdapter contract and registration.
-    types.ts         The contract every adapter satisfies.
-    transport.ts     HttpTransport: one configured client, bounded bodies, URL validation. The
-                     gateway takes this interface rather than keeping a second one of its own.
-    errors.ts        ProviderError and the normalised error codes routing reasons about.
-    url.ts           The SSRF boundary — which destinations a user-supplied endpoint may reach.
-    streaming.ts     SSE frames, read the same way by every streaming adapter.
-  providers/         One directory per provider. All provider-specific wire formats live here.
-    zen/zen-free-tier.ts  OpenCode Zen's free tier: the four conditions its request must meet, in
-                     one place. A rule about a request rather than a provider, so `zen` applies it
-                     to any `-free` model, and the two parts that drift are read from the environment.
+Kernel/SDK/
+  (one directory per provider: openai/, anthropic/, codebuddy/, kiro/, … and nothing else — there is
+   no shared core, because each provider carries the machinery it needs so it can be removed alone.
+   Every provider folder has the same shape: adapter/index.ts holds its logic, lib/ holds its own
+   types, transport, streaming, errors, url and bounded-map, and it owns its package.json and log/.
+   Deleting any one folder leaves the other twenty-one able to build.)
 
 src/                 Dashboard. Presentation and gateway management only.
 ```
 
-The boundary that matters: **`apps/gateway/src/routing.ts` must never learn a provider's name.**
+The boundary that matters: **`Kernel/API/src/routing.ts` must never learn a provider's name.**
 It decides between candidates using health, priority and error class. If a provider id ever
 appears there, the abstraction has leaked.
 
@@ -189,7 +182,7 @@ it — which is exactly what happened to Qwen, and why its card says what it mea
 ## Adding a provider
 
 ```text
-1. Write the adapter in packages/omnihilbras-sdk/src/providers/<name>/
+1. Write the adapter in Kernel/SDK/<name>/
 2. Satisfy ProviderAdapter: chat, listModels, validateCredential, healthCheck, capabilities
 3. Export it from the SDK index
 4. Register it in the gateway registry
@@ -252,7 +245,7 @@ thirty methods. Threading a value nothing reads would be decoration shaped like 
 
 ## The provider contract
 
-`packages/omnihilbras-sdk/test/provider-contract.js` holds the invariants the Core is entitled to
+`Kernel/SDK/test/provider-contract.js` holds the invariants the Core is entitled to
 assume, and `provider-contract.test.js` runs them against every adapter that can be driven offline
 — **all sixteen**, which is the point of the coverage guard below: every directory under
 `src/providers/` is either contracted or listed with a reason why not, and adding a seventeenth fails

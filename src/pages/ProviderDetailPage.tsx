@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useToast } from '../components/Toast';
+import { ProviderAccountsPanel } from '../components/ProviderAccountsPanel';
 import { Link } from 'react-router-dom';
 import {
   Activity,
@@ -31,7 +33,7 @@ import { WebCookieConnectDialog } from '../components/WebCookieConnectDialog';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 import { webSessionDescriptor, webSessionProviderIds } from '../lib/webSessionProviders';
 import { OauthConnectDialog } from '../components/OauthConnectDialog';
-import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, filterAvailability, modelFacets, priceLabel, providerSlug, type ModelFacets, type ModelFilterState, type ModelMetaMap } from '@hilbras/omnihilbras';
+import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, filterAvailability, modelFacets, priceLabel, providerSlug, type ModelFacets, type ModelFilterState, type ModelMetaMap } from '@omnihilbras/kernel-api/public';
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { ProviderPlayground } from '../components/ProviderPlayground';
@@ -234,7 +236,7 @@ const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, req
  * does not serve: the request 404s, the tab opened for it is never navigated, and the button looks dead
  * with a blank page. The dialog is sent to the connection owner instead (see `signInProviderId`).
  */
-const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro', 'claude-code', 'codex']);
+const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro', 'claude-code', 'codex', 'kimi-code', 'kilocode', 'minimax-code', 'minimax-code-global', 'qoder', 'codebuddy-cn', 'codebuddy-intl']);
 
 /** Providers whose flow is a pasted credential rather than a browser sign-in. */
 const webCookieProviders = new Set(webSessionProviderIds());
@@ -292,7 +294,7 @@ function ResiliencePanel({ connection, routingState, onSave, strategy, onStrateg
             ? `If this connection has not answered in ${draft.hedgeAfterMs} ms, the next eligible connection is raced against it and the first reply wins. The loser is cancelled, so its tokens are usually not billed.`
             : 'Set a hedge delay to race a second connection when this one is slow. With a single connection nothing is sent, so there is no extra cost.'}</p>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={() => { void onSave(draft); }} disabled={!isValidResilience(draft)} className="btn-gold !px-3 !py-2 !text-xs disabled:opacity-60">Save reliability</button>
+            <button type="button" onClick={() => { void onSave(draft); }} disabled={!isValidResilience(draft)} className="btn-gold ml-1 !px-3 !py-2 !text-xs disabled:opacity-60">Save reliability</button>
             <button type="button" onClick={() => setDraft(resilience)} className="btn-quiet !px-2 !py-2 !text-xs">Reset</button>
             {live && <span className="muted ml-auto font-mono text-[10px]">{live.failures ? `${live.failures} recent failures` : `${live.successes ?? 0} successes`}</span>}
           </div>
@@ -355,7 +357,13 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
         // (`clinepass` → `cline`), so the lookup follows that. Without it this page would say "No
         // connection yet" about an account that is already signed in on the sibling card.
         const owner = provider.connectionProviderId ?? provider.catalogId ?? provider.id;
-        const savedConnection = connections.find((item) => item.providerId === owner && item.hasCredential);
+        // **Every** connection for this provider, not just the first. `find` picked one and the page
+        // rendered as though that were the only account, so a second connection (allowed since the
+        // `addAccount` sign-in) existed on the gateway and was invisible here. The first is kept as `connection`
+        // for the panels written against a single account; the list is what the accounts table shows.
+        const saved = connections.filter((item) => item.providerId === owner && item.hasCredential);
+        setConnections(saved);
+        const savedConnection = saved[0];
         setConnection(savedConnection);
         setConnectionAdded(Boolean(savedConnection));
         setConnectionState('ready');
@@ -402,6 +410,8 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   const [connectionVerified, setConnectionVerified] = useState<'credential' | 'inference' | undefined>(undefined);
   const [connectionPingMs, setConnectionPingMs] = useState<number | undefined>();
   const [connectionAdded, setConnectionAdded] = useState(provider.status !== 'available');
+  /** Every signed-in account for this provider, in gateway order. The first is also `connection`. */
+  const [connections, setConnections] = useState<GatewayConnection[]>([]);
   /**
    * Whether the connection list has been read at all.
    *
@@ -427,8 +437,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   const scrollAnchorRef = useRef<number | null>(null);
   const [customModels, setCustomModels] = useState<string[]>([]);
   const [filters, setFilters] = useState<ModelFilterState>(defaultModelFilters);
-  const [notice, setNotice] = useState('');
-  const [noticeError, setNoticeError] = useState(false);
+  const { notify } = useToast();
   const [copiedModel, setCopiedModel] = useState<string | null>(null);
   const [routingState, setRoutingState] = useState<GatewayRoutingState | undefined>();
   // Before the read lands, the badge must not assert a credential state it has not checked.
@@ -492,7 +501,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     // every update would fight the user, so the browser anchors normally there.
     if (bulkRunRef.current) return;
     if (scrollAnchorRef.current !== null) window.scrollTo(0, scrollAnchorRef.current);
-  }, [connectionPingMs, modelTestErrors, modelTestLatencies, modelTestNotes, modelTests, notice, testingModels]);
+  }, [connectionPingMs, modelTestErrors, modelTestLatencies, modelTestNotes, modelTests, testingModels]);
 
   const importedModels = connection?.modelIds ?? provider.modelList;
   const allModels = useMemo(() => [...new Set([...importedModels, ...customModels])], [customModels, importedModels]);
@@ -597,11 +606,14 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
 
   const testingSet = useMemo(() => new Set(testingModels), [testingModels]);
 
+  /**
+   * Every outcome of an action is a notification, not a strip in the page.
+   *
+   * Kept as a named function rather than replacing 20 call sites: the *shape* of the call is right —
+   * message plus tone — and only the destination changed, from local state to the app's toast viewport.
+   */
   function flash(message: string, tone: 'success' | 'error' = 'success') {
-    scrollAnchorRef.current = window.scrollY;
-    setNotice(message);
-    setNoticeError(tone === 'error');
-    window.setTimeout(() => setNotice(''), 3200);
+    notify(message, tone);
   }
 
   /**
@@ -934,8 +946,6 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
         </div>
       )}
 
-      {notice && <div role={noticeError ? 'alert' : 'status'} className={`mb-5 flex items-center gap-2 rounded-xl border px-3.5 py-3 text-xs ${noticeError ? 'border-danger/25 bg-danger/10 text-danger' : 'border-success/25 bg-success/10 text-success'}`}>{noticeError ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}{notice}</div>}
-
       {/*
         The tab strip. Both tabs are real routes, so the Usage tab can be linked to and survives a reload;
         the active one is marked with `aria-current` and both read their path from `routes.ts`.
@@ -971,8 +981,19 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
         <UsageContent providerId={provider.connectionProviderId ?? provider.id} connectionId={connection?.id} />
       ) : (
         <>
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <DetailStat label="Connections" value={connectionState === 'ready' ? (connectionAdded ? '1 active' : '0') : '—'} icon={KeyRound} tone={connectionAdded && connectionState === 'ready' ? 'green' : 'muted'} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+        <DetailStat label="Connections" value={
+          connectionState !== 'ready'
+            ? '—'
+            // The count, not a hard-coded 1. A provider may hold several accounts since the
+            // `addAccount` sign-in, and this card said "1 active" while the accounts panel below
+            // listed three — the same page disagreeing with itself.
+            : connections.length === 0
+              ? '0'
+              : connections.length === 1
+                ? '1 active'
+                : `${connections.length} active`
+        } icon={KeyRound} tone={connectionAdded && connectionState === 'ready' ? 'green' : 'muted'} />
         <DetailStat label="Models" value={allModels.length > 0 ? String(allModels.length) : '—'} icon={Cpu} tone="blue" />
         <DetailStat label="Latency" value={connectionPingMs === undefined ? (connectionHealthy ? 'Checked just now' : provider.latency) : `${connectionPingMs} ms`} icon={Clock3} tone="gold" />
         {/*
@@ -989,23 +1010,37 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       </div>
 
       <section className="card mt-5 overflow-hidden" aria-labelledby="connections-title">
-        <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:p-5"><div><h2 id="connections-title" className="text-sm font-semibold">Connections</h2><p className="muted mt-1 text-xs">Credentials and endpoints used by this provider.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{connectionState === 'ready' ? (connectionAdded ? '1 connection' : 'No connection') : 'Unknown'}</span></div>
+        <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:p-5"><div><h2 id="connections-title" className="text-sm font-semibold">Connections</h2><p className="muted mt-1 text-xs">Credentials and endpoints used by this provider.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{connectionState !== 'ready'
+            ? 'Unknown'
+            : connections.length === 0
+              ? 'No connection'
+              : connections.length === 1
+                ? '1 connection'
+                : `${connections.length} connections`}</span></div>
         <div className="p-4 sm:p-5">
           {connectionAdded ? <ConnectionRow provider={provider} connection={connection} healthy={connectionHealthy} pingMs={connectionPingMs} testing={testingConnection || testing} onTest={testConnection} onEdit={openAddConnection} /> : connectionState === 'ready' ? <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">{planned ? provider.unavailableReason : isOauth ? (oauthFlowAvailable ? 'Sign in to finish connecting this provider.' : 'Sign-in for this provider is not available yet.') : 'Add an API key or point OmniHilbras at a local endpoint.'}</p></div></div><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable || planned} title={planned ? provider.unavailableReason : !oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2 !text-xs disabled:cursor-not-allowed disabled:opacity-40">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text ${connectionState === 'loading' ? 'animate-pulse' : ''}`}><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">{connectionState === 'loading' ? 'Checking the gateway' : "Couldn't read the gateway"}</p><p className="muted mt-1 text-xs">{connectionState === 'loading' ? 'Asking which connections are saved. This is usually instant.' : `OmniHilbras asked the local gateway which connections are saved and did not get an answer, so it does not yet know whether ${provider.name} is connected. Nothing has been changed.`}</p></div></div>{connectionState === 'failed' && <button type="button" onClick={loadConnection} className="btn-gold !px-3 !py-2 !text-xs">Try again <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /></button>}</div>}
         </div>
       </section>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
-        <section className="card min-w-0 p-4 sm:p-5" aria-labelledby="models-title">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-            <div>
+        <section className="card flex min-w-0 flex-col p-4 sm:p-5" aria-labelledby="models-title">
+          {/*
+            The controls are a toolbar on the right, not a sibling of the title.
+            They were `sm:items-start` inside the same flex row as the heading and its two-line
+            description, so the group was top-aligned against the first line of text and shrank to its
+            content — which put "Test all" wherever the text happened to end rather than at the card's
+            edge. `sm:items-end` aligns the group to the baseline of the block, and `sm:shrink-0` stops it
+            being squeezed by a long description at intermediate widths.
+          */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div className="min-w-0">
               <h2 id="models-title" className="text-sm font-semibold">Available models</h2>
               <p className="muted mt-1 text-xs">
                 Models currently exposed by this provider route. Test sends one real minimal request.
                 {visibleModels.length !== allModels.length && <> Showing {visibleModels.length} of {allModels.length}.</>}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-3 sm:justify-end">
               {bulkProgress && (
                 <span className="flex items-center gap-1.5 rounded-full border border-gold/25 bg-gold-soft px-2.5 py-1 font-mono text-[10px] text-gold-text" role="status">
                   <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden="true" />
@@ -1018,7 +1053,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
                   value={concurrency}
                   onChange={(event) => setConcurrency(Number(event.target.value))}
                   disabled={testing}
-                  className="input !h-8 !w-[4.5rem] !py-1 !text-[11px]"
+                  className="input !h-8 !w-auto min-w-[7.25rem] !py-1 !text-[11px]"
                 >
                   {concurrencyOptions.map((option) => <option key={option} value={option}>{option} at a time</option>)}
                 </select>
@@ -1036,8 +1071,13 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
               )}
             </div>
           </div>
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <label className="relative block flex-1">
+          {/*
+            The filter bar. Search on its own row, filters on the next — they were one flex row, so at
+            any middling width the five selects wrapped into a ragged column beside the search box and the
+            whole block read as broken. A rule separates the controls from the table they filter.
+          */}
+          <div className="mt-4 rounded-xl border border-line bg-bg-soft/40 p-2.5 sm:p-3">
+            <label className="relative block">
               <span className="sr-only">Search {provider.name} models</span>
               <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-muted" aria-hidden="true" />
               <input
@@ -1055,7 +1095,8 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
                 </button>
               )}
             </label>
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-line pt-2.5">
+              <span className="muted mr-0.5 hidden shrink-0 text-[10px] font-medium uppercase tracking-wide sm:inline">Filter</span>
               {/* A filter is only offered when the provider published the field it
                   filters on. Offering one that can never match reads as a broken page. */}
               {availability.pricing && (
@@ -1125,8 +1166,16 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
               </label>
             </div>
           </div>
-          <div className="mt-3 space-y-2">{visibleModels.length > 0 ? visibleModels.map((entry) => <ModelRow key={entry.model} model={entry.model} prefix={providerSlug(provider.id)} facets={entry.facets} onCopy={() => void copyModel(entry.model)} onTest={() => void testModel(entry.model)} testing={testingSet.has(entry.model)} disabled={testing || testingConnection} testState={modelTests[entry.model] ?? 'idle'} testError={modelTestErrors[entry.model]} testLatencyMs={modelTestLatencies[entry.model]} testNote={modelTestNotes[entry.model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{filters.query ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{filters.query ? <>Nothing in {allModels.length} models matches &ldquo;{filters.query.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}</div>
-          <div className="mt-5 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>
+          {/*
+            Bounded on purpose. `cline` serves 479 models and `kilocode` 381; rendered as one unbounded
+            column the card became thousands of pixels tall, so the heading and "Test all" sat far above
+            the list you were reading and the page jump-scrolled on every test. A fixed-height scroll
+            region keeps the controls in place and the section a predictable size.
+          */}
+          <div className="mt-3 max-h-[min(60vh,32rem)] space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+            {visibleModels.length > 0 ? visibleModels.map((entry) => <ModelRow key={entry.model} model={entry.model} prefix={providerSlug(provider.id)} facets={entry.facets} onCopy={() => void copyModel(entry.model)} onTest={() => void testModel(entry.model)} testing={testingSet.has(entry.model)} disabled={testing || testingConnection} testState={modelTests[entry.model] ?? 'idle'} testError={modelTestErrors[entry.model]} testLatencyMs={modelTestLatencies[entry.model]} testNote={modelTestNotes[entry.model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{filters.query ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{filters.query ? <>Nothing in {allModels.length} models matches &ldquo;{filters.query.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}
+          </div>
+          <div className="mt-4 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>
           {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {copiedModel}</p>}
         </section>
 
@@ -1142,13 +1191,16 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
 
   What routing actually does is set the priority on a connection, and that control exists and works.
   */}
-          <div className="mt-5 space-y-3 border-t border-line pt-5"><div className="flex items-center justify-between text-xs"><span className="muted">Endpoint</span><button type="button" onClick={() => document.getElementById('endpoint')?.scrollIntoView({ behavior: 'smooth' })} className="max-w-[180px] truncate text-left font-mono text-[10px] text-gold-text hover:underline">{connection?.endpoint ?? provider.endpoint}</button></div><div className="flex items-center justify-between text-xs"><span className="muted">Priority</span><span className="font-mono text-[10px]">#{connection?.priority ?? 1}</span></div><div className="flex items-center justify-between text-xs"><span className="muted">Credentials</span><span className="flex items-center gap-1.5 font-mono text-[10px] text-success"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />local only</span></div></div>
+          <div className="mt-5 space-y-3 border-t border-line pt-5"><div className="flex flex-col gap-0.5 text-xs sm:flex-row sm:items-center sm:justify-between"><span className="muted">Endpoint</span><button type="button" onClick={() => document.getElementById('endpoint')?.scrollIntoView({ behavior: 'smooth' })} className="min-w-0 max-w-full truncate text-left font-mono text-[10px] text-gold-text hover:underline sm:max-w-[180px]">{connection?.endpoint ?? provider.endpoint}</button></div><div className="flex items-center justify-between text-xs"><span className="muted">Priority</span><span className="font-mono text-[10px]">#{connection?.priority ?? 1}</span></div><div className="flex items-center justify-between text-xs"><span className="muted">Credentials</span><span className="flex items-center gap-1.5 font-mono text-[10px] text-success"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />local only</span></div></div>
           {connection && <ResiliencePanel connection={connection} routingState={routingState} onSave={saveResilience} strategy={routingState?.strategies?.[connection.providerId] ?? 'priority'} onStrategy={(next) => saveStrategy(connection.providerId, next)} />}
           <div className="mt-5 rounded-lg border border-gold/20 bg-gold-soft/45 p-3 text-[11px] leading-relaxed text-muted"><Sparkles className="mr-1 inline h-3.5 w-3.5 text-gold-text" aria-hidden="true" />{provider.id === 'openrouter' ? 'OpenRouter credentials are managed by the local gateway.' : 'Policy changes are preview-only until a provider management API is connected.'}</div>
         </section>
       </div>
 
-      <section id="endpoint" className="card mt-5 p-4 sm:p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-sm font-semibold">Endpoint details</h2><p className="muted mt-1 text-xs">The base URL OmniHilbras will use for this provider.</p></div><code className="max-w-full overflow-x-auto rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-muted sm:max-w-[420px]">{connection?.endpoint ?? provider.endpoint}</code></div></section>
+      <ProviderAccountsPanel connections={connections} providerName={provider.name} onSaved={loadConnection} />
+
+
+      <section id="endpoint" className="card mt-4 p-3.5 sm:mt-5 sm:p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-sm font-semibold">Endpoint details</h2><p className="muted mt-1 text-xs">The base URL OmniHilbras will use for this provider.</p></div><code className="max-w-full overflow-x-auto rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-muted sm:max-w-[420px]">{connection?.endpoint ?? provider.endpoint}</code></div></section>
         </>
       )}
 

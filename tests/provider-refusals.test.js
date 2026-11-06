@@ -25,7 +25,7 @@ import { dirname, join } from 'node:path';
  * Enumerating adapters would let a new one appear unreviewed, so this scans the directory.
  */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const ADAPTERS = join(ROOT, 'packages/omnihilbras-sdk/src/providers');
+const ADAPTERS = join(ROOT, 'Kernel/SDK');
 
 /** Strips comments, because a doc comment quoting a bad message is not code sending one. */
 const code = (source) => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
@@ -47,7 +47,7 @@ test('the Zen gated path catches the transport refusal, or the cause is lost one
   // version used a 400-character window, and deleting the `gatedRefusal(...)` call from the middle of
   // the catch still passed — the window ran on and found the word in the *next* method's name. That is
   // the same guard bug as `health-surfaces`, and it means a window is not a place to look.
-  const source = code(readFileSync(join(ADAPTERS, 'zen', 'index.ts'), 'utf8'));
+  const source = code(readFileSync(join(ADAPTERS, 'zen', 'adapter', 'index.ts'), 'utf8'));
   assert.match(source, /captureGateRefusal/, 'the gated stream is wrapped');
 
   const body = /private async \*captureGateRefusal\([^)]*\)[^{]*\{([\s\S]*?)\n  \}/.exec(source);
@@ -61,9 +61,18 @@ test('a gated refusal clears the credential, because the key was accepted', () =
   // Measured: the upstream answers 403 FreeTierError *after* the contract is satisfied. A message that
   // did not say so would send the user to rotate a working key, which is the mistake this release exists
   // to stop — and the mistake I made earlier in this session, from the other direction.
-  const source = code(readFileSync(join(ADAPTERS, 'zen', 'index.ts'), 'utf8'));
-  assert.match(source, /not a credential problem/i, 'the credential is explicitly cleared');
-  assert.match(source, /datacenter networks/i, 'and the likely cause is named');
+  //
+  // The wording moved out of `zen/index.ts` and into the contract module, because OpenCode Console
+  // reaches the same models through the same gate and was answering with the provider's own marketing
+  // text instead. The guard follows it there, and now also asserts that **both** adapters use it —
+  // one sentence, two providers, no chance of them describing the same refusal differently.
+  const contract = code(readFileSync(join(ADAPTERS, 'zen', 'lib', 'zen-free-tier.ts'), 'utf8'));
+  assert.match(contract, /not a credential problem/i, 'the credential is explicitly cleared');
+  assert.match(contract, /datacenter networks/i, 'and the likely cause is named');
+  for (const adapter of ['zen', 'opencode-console']) {
+    const source = code(readFileSync(join(ADAPTERS, adapter, 'adapter', 'index.ts'), 'utf8'));
+    assert.match(source, /zenFreeTierRefusal\(\{/, `${adapter} builds its own sentence instead of the shared one`);
+  }
 });
 
 test('the gate is recognised by the provider\'s own wording, not by an assumed status', () => {
@@ -71,14 +80,14 @@ test('the gate is recognised by the provider\'s own wording, not by an assumed s
   // `statusCode`, so recognising the gate by status alone is impossible here. Matching the provider's
   // `FreeTierError` text is what keeps a 429 as `RATE_LIMITED` instead of collapsing every gated
   // refusal into one code that means nothing to the retry policy.
-  const source = code(readFileSync(join(ADAPTERS, 'zen', 'index.ts'), 'utf8'));
+  const source = code(readFileSync(join(ADAPTERS, 'zen', 'adapter', 'index.ts'), 'utf8'));
   assert.match(source, /freetiererror\|free tier/i, 'the gate is matched on the upstream wording');
 });
 
 test('the free-tier gate is decided by suffix, not by a list that goes stale', () => {
   // The upstream rotates its free lineup; OmniRoute records six models delisted and replaced inside a
   // week. A hardcoded list would serve models that no longer exist and refuse ones that do.
-  const source = code(readFileSync(join(ADAPTERS, 'zen', 'index.ts'), 'utf8'));
+  const source = code(readFileSync(join(ADAPTERS, 'zen', 'adapter', 'index.ts'), 'utf8'));
   assert.match(source, /\/-free\$\//, 'the suffix decides, so a new free model needs no release');
 });
 
@@ -86,13 +95,13 @@ test('a caller\'s real tools are never displaced by the placeholder', () => {
   // The contract requires a non-empty `tools` array. Satisfying it by replacing a tool the caller
   // declared would trade a working request for a permitted one — and the tool would be missing from a
   // conversation that needs it.
-  const source = code(readFileSync(join(ADAPTERS, 'zen', 'index.ts'), 'utf8'));
+  const source = code(readFileSync(join(ADAPTERS, 'zen', 'adapter', 'index.ts'), 'utf8'));
   assert.match(source, /tools: gatedTools\(request\.tools\)/,
     'the caller\'s tools go through gatedTools, which keeps them and appends the quartet');
 });
 
 test('the free-tier quartet is the contract, and the client version stays configurable', () => {
-  const source = readFileSync(join(ADAPTERS, 'zen', 'zen-free-tier.ts'), 'utf8');
+  const source = readFileSync(join(ADAPTERS, 'zen', 'lib', 'zen-free-tier.ts'), 'utf8');
   assert.match(source, /ZEN_FINGERPRINT_TOOL_NAMES = \['bash', 'glob', 'grep', 'read'\]/,
     'the quartet is measured against the live gate, so it is a constant, not configuration');
   assert.match(source, /OMNIHILBRAS_ZEN_USER_AGENT/, 'the client version is still overridable');

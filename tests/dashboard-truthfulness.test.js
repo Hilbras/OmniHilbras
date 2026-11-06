@@ -134,7 +134,7 @@ test('every provider the client names in a path is a real card, on a route the g
   const cards = new Set(
     [...stripComments(readFileSync(join(DASHBOARD, 'data', 'providers.ts'), 'utf8')).matchAll(/^\s{4}id: '([\w-]+)'/gm)].map((match) => match[1]),
   );
-  const gateway = join(ROOT, 'apps', 'gateway', 'src');
+  const gateway = join(ROOT, 'Kernel', 'API', 'src');
   const served = new Set();
   for (const file of [join(gateway, 'server.ts'), ...readdirSync(join(gateway, 'routes')).map((name) => join(gateway, 'routes', name))]) {
     const source = stripComments(readFileSync(file, 'utf8'));

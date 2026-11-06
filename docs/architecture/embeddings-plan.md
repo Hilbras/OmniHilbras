@@ -8,7 +8,7 @@ inherited from earlier notes.
 The comparison turned up the standing temptation and dismissed it: 9router declares **125** registry
 entries and we declare **22** cards. Provider-count parity is marketing. The property actually worth
 having is *"add a provider without editing core"*, and our runtime already satisfies it —
-`apps/gateway/test/runtime.test.js` asserts `THE INVARIANT: the runtime names no provider`, and all 14
+`Kernel/API/test/runtime.test.js` asserts `THE INVARIANT: the runtime names no provider`, and all 14
 protocol adapters register through `ProviderResolver` without the service knowing any of their names.
 
 The measurable gap is **capability surface**, and it is stark:
@@ -30,11 +30,11 @@ shape we already have all the machinery for, exposed on the existing authenticat
 Measured, not assumed:
 
 - `ProviderCapability` in the SDK **already includes** `'embeddings' | 'images' | 'audio' | 'search'`
-  (`packages/omnihilbras-sdk/src/types.ts`). The capability names exist; nothing declares them.
+  (`Kernel/SDK/*/lib/types.ts`). The capability names exist; nothing declares them.
 - **No adapter implements an embeddings call.** Methods across all 14 adapters are
   `chat` / `streamChat` / `listModels` / `healthCheck` / `validateCredential` / `discoverModels`.
   Zero declare `embeddings`.
-- `RequestExecutor` exposes exactly `chat` and `stream` (`apps/gateway/src/request-executor.ts`),
+- `RequestExecutor` exposes exactly `chat` and `stream` (`Kernel/API/src/request-executor.ts`),
   and `RoutingEngine.plan()` takes `{ connections, model, explicitProviderId }` — model-shaped,
   not request-kind-shaped. **The failover machinery is chat-shaped.**
 - `isPublicLlmRoute()` in `routes/inference.ts:546` names `/v1/models` and `/v1/chat/completions`
@@ -60,7 +60,7 @@ change that is not a fork:
 
 1. SDK: add `EmbeddingRequest` / `EmbeddingResponse` / `EmbeddingVector` types, and an optional
    `embed?:` method on `ProviderAdapter`. Optional, so it is not a breaking change to a published
-   interface — and `notSupported()` from `apps/gateway/src/capability.ts` already produces the correct
+   interface — and `notSupported()` from `Kernel/API/src/capability.ts` already produces the correct
    `NOT_SUPPORTED` error naming the adapter, which is the message a user needs.
 2. SDK: `OpenAICompatibleAdapter` implements `embed` against `{baseUrl}/embeddings`, with an
    `embeddingsPath` config field beside the existing `modelsPath`/`chatPath`.
@@ -97,7 +97,7 @@ change that is not a fork:
 
     pnpm verify
 
-`pnpm test:gateway` runs as part of it. New tests go in `apps/gateway/test/embeddings-route.test.js`
+`pnpm test:gateway` runs as part of it. New tests go in `Kernel/API/test/embeddings-route.test.js`
 and SDK tests beside the other adapter tests. The route-spec guard means a green run also proves
 `docs/SPEC-SDK.md` documents the new route.
 

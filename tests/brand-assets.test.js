@@ -441,14 +441,14 @@ test('the npm package carries the same mark the repository does', () => {
   // and a copy made by hand is the second source of truth this whole exercise exists to remove — it ships
   // whatever geometry was current when someone remembered to run `cp`. So the copy is generated, and this
   // asserts it is byte-identical rather than merely present.
-  const SDK_BRAND = join(ROOT, 'packages/omnihilbras-sdk/brand');
-  assert.ok(existsSync(SDK_BRAND), 'packages/omnihilbras-sdk/brand is missing; run `pnpm brand`');
+  const SDK_BRAND = join(ROOT, 'Kernel/API/brand');
+  assert.ok(existsSync(SDK_BRAND), 'Kernel/API/brand is missing; run `pnpm brand`');
   for (const name of ['logo.svg', 'logo-mark.svg', 'wordmark.svg', 'logo-512.png']) {
     assert.ok(existsSync(join(SDK_BRAND, name)), `the npm package is missing brand/${name}`);
     assert.deepEqual(
       readFileSync(join(SDK_BRAND, name)),
       readFileSync(join(BRAND, name)),
-      `packages/omnihilbras-sdk/brand/${name} differs from brand/${name}; the copy is stale`,
+      `Kernel/API/brand/${name} differs from brand/${name}; the copy is stale`,
     );
   }
   // Nothing extra: the Android maskable set has no place on an npm page and costs every consumer bytes.
@@ -457,17 +457,19 @@ test('the npm package carries the same mark the repository does', () => {
     `the npm package ships brand files the generator does not produce there: ${shipped.join(', ')}`);
 
   // And the SDK README must actually reference it, or shipping the copy is pointless.
-  const readme = readFileSync(join(ROOT, 'packages/omnihilbras-sdk/README.md'), 'utf8');
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
   assert.match(readme, /brand\/wordmark\.svg/,
     'the SDK README does not show the wordmark, so the copy in the tarball is never rendered');
 });
 
-test('the package manifest ships brand/, or the copy is dead weight', () => {
-  const pkg = JSON.parse(readFileSync(join(ROOT, 'packages/omnihilbras-sdk/package.json'), 'utf8'));
+test('the publishable package ships brand/, or the copy is dead weight', () => {
+  // Retargeted at the API package: the SDK is no longer one publishable package but twenty-two provider
+  // packages, so there is no single manifest to check. `Kernel/API` is the one that still publishes a
+  // README with the mark on it, so it is the one this guard is about.
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'Kernel/API/package.json'), 'utf8'));
   assert.ok(
-    (pkg.files ?? []).includes('brand'),
-    'packages/omnihilbras-sdk/package.json does not list `brand` in `files`, so npm will exclude it and the ' +
-      'README image on npmjs.com will 404',
+    (pkg.files ?? []).includes('brand') || pkg.private === true,
+    'Kernel/API/package.json neither ships `brand` nor is private, so the README image on npmjs.com would 404',
   );
 });
 

@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
  *
  * `AGENTS.md` says:
  *
- * > New gateway routes need tests in `apps/gateway/test/` and a line in `docs/SPEC-SDK.md`.
+ * > New gateway routes need tests in `Kernel/API/test/` and a line in `docs/SPEC-SDK.md`.
  *
  * A rule nobody can run is a rule that survives on attention. Measured, six of twenty-seven routes
  * the gateway serves had no line in the spec — and one of them is a route that **ingests a pasted
@@ -47,7 +47,7 @@ import { dirname, join } from 'node:path';
  */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SPEC = join(ROOT, 'docs', 'SPEC-SDK.md');
-const SOURCE_DIR = join(ROOT, 'apps', 'gateway', 'src');
+const SOURCE_DIR = join(ROOT, 'Kernel', 'API', 'src');
 
 /** Removes block and line comments without damaging a `//` inside a URL. */
 function stripComments(source) {
@@ -56,7 +56,7 @@ function stripComments(source) {
 
 /** Every source file the route table is assembled from. */
 function sourceFiles() {
-  return [join(SOURCE_DIR, 'server.ts'), join(SOURCE_DIR, 'oauth.ts'), ...readdirSync(join(SOURCE_DIR, 'routes')).map((file) => join(SOURCE_DIR, 'routes', file))];
+  return [join(SOURCE_DIR, 'server.ts'), join(SOURCE_DIR, 'core', 'oauth.ts'), ...readdirSync(join(SOURCE_DIR, 'routes')).map((file) => join(SOURCE_DIR, 'routes', file))];
 }
 
 /** Module-level string constants, so a path held in a named constant is still checkable. */

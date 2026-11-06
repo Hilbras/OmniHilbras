@@ -306,7 +306,7 @@ tests    788 → 789
 
 `AGENTS.md` says:
 
-> New gateway routes need tests in `apps/gateway/test/` and a line in `docs/SPEC-SDK.md`.
+> New gateway routes need tests in `Kernel/API/test/` and a line in `docs/SPEC-SDK.md`.
 
 A rule nobody can run is a rule that survives on attention. Measured against the code:
 
@@ -983,7 +983,7 @@ fake feed needs a fake heartbeat whatever it calls itself.
 
 ## A check that could not see the code it was checking
 
-The evidence test looked for `gateway: { requestId:` in `apps/gateway/src/*.ts` and did not find it,
+The evidence test looked for `gateway: { requestId:` in `Kernel/API/src/*.ts` and did not find it,
 because the line is in **`src/routes/inference.ts`** and the scan read only the top level. It reported the
 marketing page as wrong when the gateway was right. Now recursive — a check that cannot see the code it is
 checking is worse than no check, because it produces a confident wrong answer.
@@ -1090,7 +1090,7 @@ notice that the endpoint it now renders **omitted the one field that decides eli
 `RoutingEngine.waits()` existed to expose exactly that. Measured:
 
 ```
-grep -rn "\.waits()" apps/gateway/src src   # excluding the tests
+grep -rn "\.waits()" Kernel/API/src src   # excluding the tests
 (no matches)
 ```
 
@@ -1169,9 +1169,9 @@ failure and not a verdict on the route.
   which is the property; the four rules are an implementation detail free to move. Plus: the rule lives
   in `lib`, the page calls it, no hand-written eligibility chain survives in the `.tsx`, and the payload
   type declares the wait.
-- `apps/gateway/test/routing-engine.test.js` — the latch itself: refused, then a candidate again after
+- `Kernel/API/test/routing-engine.test.js` — the latch itself: refused, then a candidate again after
   the window slides, and `plan()` does not corrupt the reported waits.
-- `apps/gateway/test/routing.test.js` — end to end through the service and `describeRouting()`:
+- `Kernel/API/test/routing.test.js` — end to end through the service and `describeRouting()`:
   absent → `0` → refusal naming its cause → recovery.
 
 ```
@@ -1708,7 +1708,7 @@ genuinely routable; the bypass is a real one.
 
 ### The suite, and the proof it can fail
 
-`packages/omnihilbras-sdk/test/url.test.js`, 9 tests on the compiled `dist`. It asserts the blocked set
+`Kernel/SDK/tests/url.test.js`, 9 tests on the compiled `dist`. It asserts the blocked set
 *and* the public set, because a guard that refuses everything passes the first. `::ffff:0808:0808` (mapped
 8.8.8.8) must stay **public** — the case that catches an over-broad fix. `isLoopbackHostname` must *not*
 accept the mapped form, or cleartext HTTP opens to arbitrary private hosts.
@@ -1905,7 +1905,7 @@ green by ordering luck. Reordered to `build:sdk && build:frontend && build:gatew
 
 ### `playwright-core` was a devDependency that runtime code imports
 
-`apps/gateway/src/chatgptWeb.ts:97` does `await import('playwright-core')` from **shipped runtime code**.
+`Kernel/API/src/chatgptWeb.ts:97` does `await import('playwright-core')` from **shipped runtime code**.
 A `pnpm install --prod` gateway cannot load it, and the error message told users to run
 `pnpm add -D playwright-core` — reproducing the wrong classification. Moved to `dependencies`; the two
 install hints corrected.
@@ -1922,7 +1922,7 @@ wrong, and reading the cited evidence is what caught it.
 `NodeJS.Platform` and writes the inference straight into the emitted declaration:
 
 ```ts
-// packages/omnihilbras-sdk/dist/adapters/cline.d.ts
+// Kernel/SDK/dist/adapters/cline.d.ts
 'X-PLATFORM': NodeJS.Platform;      // a type that does not exist without @types/node
 ```
 
@@ -2245,7 +2245,7 @@ Recorded in the SPEC as such rather than presented as a property the product has
 
 ### A fixture that failed six ways
 
-`apps/gateway/test/spec-success-criteria.mjs` originally stood up its own gateway and adapter to prove
+`Kernel/API/test/spec-success-criteria.mjs` originally stood up its own gateway and adapter to prove
 the streaming criterion. It failed six rounds, each time because the **fixture** was wrong and the
 gateway was right: it read `context.headers` when the credential arrives as `context.credential`; gave
 the connection `id: 'fixture'` while the adapter's id was `openai`; and pointed the endpoint at a dead
@@ -2321,7 +2321,7 @@ and poisoned a provider's health. The signal, not the error shape, is the discri
 
 ### What the roadmap got wrong, and why it matters
 
-- **Phase 3 (streaming idle timeout) already exists** — `streamIdleTimeoutMs` in `packages/omnihilbras-sdk/src/transport.ts:78`, defaulting to the request timeout. Twelve phases of work described as needed, on a mechanism already shipped.
+- **Phase 3 (streaming idle timeout) already exists** — `streamIdleTimeoutMs` in `Kernel/SDK/src/transport.ts:78`, defaulting to the request timeout. Twelve phases of work described as needed, on a mechanism already shipped.
 - **Phase 4 (dashboard auth) is half done** — the management gate landed in 1.46.0. The `Origin` weakness it describes is real and is recorded in `docs/SPEC-SDK.md` as a known limitation with the reason closing it needs a design change, not a patch.
 - **Phase 11 recommends v1.51.0**, which shipped today as the documentation-honesty release.
 
@@ -2458,7 +2458,7 @@ Two live claims, both wrong:
 
 | where | claimed | real |
 | --- | --- | --- |
-| `docs/SPEC-SDK.md:2415` | "**12 adapters** in `packages/omnihilbras-sdk/src/adapters/`" | **14 files** |
+| `docs/SPEC-SDK.md:2415` | "**12 adapters** in `Kernel/SDK/src/adapters/`" | **14 files** |
 | `docs/architecture/README.md:316` | "keeps **419 tests** green throughout" | **939** (113 + 408 + 418) |
 
 The first is worse than a stale number, because the SPEC's own sentence said `12 adapters in <directory>` and
@@ -2604,7 +2604,7 @@ guard.
 
 Every Phase 10 measurement **passed on the first run**. That is the reason this entry exists: the invariants
 below were only ever checked one request at a time, and a concurrency defect is by definition invisible to a
-sequential test. `apps/gateway/test/load.test.js` locks in what was measured.
+sequential test. `Kernel/API/test/load.test.js` locks in what was measured.
 
 | scenario | measured |
 | --- | --- |
@@ -2689,7 +2689,7 @@ past 4 s, and asserts the constant the timing test uses still exceeds the real l
 
 ### The signal tests, and what they got wrong first
 
-`apps/gateway/test/signal.test.js` spawns the real binary rather than calling a function, because every
+`Kernel/API/test/signal.test.js` spawns the real binary rather than calling a function, because every
 property here is a property of the process.
 
 - **`ROOT` was `../..`**, which lands on `apps/`, so `ENTRY` became `apps/dist/main.js` — a path that does
@@ -2732,7 +2732,7 @@ never-idle + maxDuration 600   outcome=PROVIDER_TIMEOUT  after 658ms
 ```
 
 All four correct. An inherited claim is exactly the kind that rots silently, because nothing fails when it
-does — so `packages/omnihilbras-sdk/test/stream-bounds.test.js` now covers both bounds and the interaction.
+does — so `Kernel/SDK/tests/stream-bounds.test.js` now covers both bounds and the interaction.
 
 ### Three probe errors, all mine, and the middle one is the lesson
 
@@ -2889,7 +2889,7 @@ that had nothing to do with what they claimed to test.
 
 ## Task 107: pricing wired to usage — and a bug that had been dropping every price silently
 
-Phase 6.3 of `docs/architecture/phase6-plan.md`. `packages/omnihilbras-sdk/src/pricing.ts` existed (89 lines)
+Phase 6.3 of `docs/architecture/phase6-plan.md`. `Kernel/SDK/src/pricing.ts` existed (89 lines)
 and normalized every provider quote to per-1M tokens. Nothing computed a cost from it.
 
 ### The design rule, which is the whole point
@@ -3142,7 +3142,7 @@ pass vacuously again.
 ### A process failure worth recording
 
 My first mutation loop rebuilt `dist/` for each mutation, exceeded the 300 s cell timeout, and was killed
-mid-loop — **after** it had already written a mutation into `apps/gateway/src/`. I spent several steps
+mid-loop — **after** it had already written a mutation into `Kernel/API/src/`. I spent several steps
 chasing a failing test against source I believed was clean (`git diff --stat` showed insertions only, because
 the mutation was an edit inside a block I had added in the same session).
 
@@ -3222,7 +3222,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 - [x] Task 1: Create the SDK package and normalized contracts.
   - Acceptance: strict TypeScript types exist for chat, streaming, models, capabilities, errors, and secret lookup.
   - Verify: package typecheck passes and public exports are documented by types.
-  - Files: `packages/omnihilbras-sdk/package.json`, `tsconfig.json`, `src/types.ts`, `src/errors.ts`, `src/secret-store.ts`, `src/index.ts`.
+  - Files: `Kernel/SDK/package.json`, `tsconfig.json`, `src/types.ts`, `src/errors.ts`, `src/secret-store.ts`, `src/index.ts`.
   - Scope: Small.
 
 - [x] Task 2: Add transport, streaming, and provider registry.
@@ -3264,14 +3264,14 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 - [x] Task 7: Add gateway service and configuration.
   - Acceptance: local configuration loads provider credentials/endpoints through `SecretStore` and builds a provider registry without provider conditionals in the service.
   - Verify: configuration and service unit tests pass with fake adapters.
-  - Files: `apps/gateway/src/config.ts`, `src/service.ts`, tests.
+  - Files: `Kernel/API/src/config.ts`, `src/service.ts`, tests.
   - Depends on: Tasks 3–6.
   - Scope: Medium.
 
 - [x] Task 8: Add local HTTP routes and streaming responses.
   - Acceptance: `/health`, `/v1/models`, and `/v1/chat/completions` support JSON and SSE with consistent error envelopes.
   - Verify: integration tests use fake adapters and never contact real providers.
-  - Files: `apps/gateway/src/server.ts`, routes, tests, package scripts.
+  - Files: `Kernel/API/src/server.ts`, routes, tests, package scripts.
   - Depends on: Task 7.
   - Scope: Medium.
 
@@ -3285,14 +3285,14 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 - [x] Task 9a: Add a secure local connection store.
   - Acceptance: connection metadata is stored separately from encrypted credentials; files use restrictive permissions and an injectable in-memory implementation supports tests.
   - Verify: focused storage tests cover encryption-at-rest, round trips, atomic writes, and no plaintext secret in the metadata file.
-  - Files: `apps/gateway/src/connections.ts`, gateway tests.
+  - Files: `Kernel/API/src/connections.ts`, gateway tests.
   - Depends on: Task 7.
   - Scope: Medium.
 
 - [x] Task 9b: Add OpenRouter validation and save routes.
   - Acceptance: the gateway validates credentials against OpenRouter on both Check and Save, stores only a valid key, and returns metadata without secrets.
   - Verify: gateway integration tests use a fake provider transport and assert validation-before-save, status codes, and redaction.
-  - Files: `apps/gateway/src/config.ts`, `src/service.ts`, `src/server.ts`, gateway tests.
+  - Files: `Kernel/API/src/config.ts`, `src/service.ts`, `src/server.ts`, gateway tests.
   - Depends on: Tasks 9a and 8.
   - Scope: Medium.
 
@@ -3306,7 +3306,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 - [x] Task 9d: Add model discovery and import policy to OpenRouter connections.
   - Acceptance: Save accepts a free-only/all-models policy, fetches models server-side with the saved credential, filters free models by provider pricing, validates IDs, persists the selected model list, and preserves manually added IDs across re-imports.
   - Verify: adapter/service/gateway tests cover pricing parsing, both policies, malformed provider responses, metadata limits, concurrent mutations, and no-secret responses.
-  - Files: `packages/omnihilbras-sdk/src/adapters/openrouter.ts`, `apps/gateway/src/service.ts`, `apps/gateway/src/server.ts`, tests.
+  - Files: `Kernel/SDK/src/adapters/openrouter.ts`, `Kernel/API/src/service.ts`, `Kernel/API/src/server.ts`, tests.
   - Depends on: Tasks 9a–9c.
   - Scope: Medium.
 
@@ -3320,28 +3320,28 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 - [x] Task 9f: Replace preview model tests with real gateway chat checks.
   - Acceptance: provider tests use live adapter health, model tests send a bounded real chat completion with the saved credential, and latency/success/error states come from the gateway response.
   - Verify: gateway contract test covers provider selection and max-token budget; typecheck/build and browser smoke test cover the real request path.
-  - Files: `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, `apps/gateway/test/server.test.js`, docs.
+  - Files: `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, `Kernel/API/test/server.test.js`, docs.
   - Depends on: Task 9e.
   - Scope: Small/medium.
 
 - [x] Task 9g: Add gateway API keys and the dashboard keys page.
   - Acceptance: the gateway mints, pauses, revokes, and authenticates client keys; only SHA-256 hashes are stored; enforcement guards `/v1/models` and `/v1/chat/completions` by default with an allowlisted-dashboard exemption; the dashboard page manages keys without browser secret storage.
   - Verify: gateway store/route tests cover hash-at-rest, one-time reveal, constant-time authentication, paused-key rejection, enforcement toggling, and origin exemption; typecheck/build and browser smoke test cover create, pause, resume, and delete.
-  - Files: `apps/gateway/src/api-keys.ts`, `src/secure-store.ts`, `src/service.ts`, `src/server.ts`, `src/config.ts`, `test/api-keys.test.js`, `src/pages/ApiKeysPage.tsx`, `src/lib/gatewayClient.ts`, `src/components/DashboardShell.tsx`, `src/dashboardApp.tsx`, docs.
+  - Files: `Kernel/API/src/api-keys.ts`, `src/secure-store.ts`, `src/service.ts`, `src/server.ts`, `src/config.ts`, `test/api-keys.test.js`, `src/pages/ApiKeysPage.tsx`, `src/lib/gatewayClient.ts`, `src/components/DashboardShell.tsx`, `src/dashboardApp.tsx`, docs.
   - Depends on: Task 9f.
   - Scope: Medium.
 
 - [x] Task 9h: Add per-connection retry, timeout, rate limits, and health-based failover.
   - Acceptance: each connection stores a validated resilience budget; retryable failures retry then fail over by priority; terminal failures never retry; deadlines and rate limits are enforced by the gateway; failing connections are ejected and recover automatically; the dashboard exposes the controls and live state.
   - Verify: routing tests cover retry-then-failover, terminal-error short-circuiting, timeout and rate-limit handoff, ejection with cooldown recovery, streaming failover before the first chunk, and background health polling; HTTP tests cover the attempt trace and resilience route; browser smoke test covers the Reliability panel.
-  - Files: `apps/gateway/src/routing.ts`, `src/service.ts`, `src/connections.ts`, `src/server.ts`, `src/config.ts`, `test/routing.test.js`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, docs.
+  - Files: `Kernel/API/src/routing.ts`, `src/service.ts`, `src/connections.ts`, `src/server.ts`, `src/config.ts`, `test/routing.test.js`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, docs.
   - Depends on: Task 9g.
   - Scope: Medium.
 
 - [x] Task 9i: Add hedged requests and on-demand provider adapters.
   - Acceptance: a slow leading connection is raced against the next eligible one and the first reply wins with the loser cancelled; no hedge is sent when a fast leader answers or no second candidate exists; any provider can be added with a caller-supplied endpoint and served through an on-demand OpenAI-compatible adapter.
   - Verify: routing tests cover hedge-wins, fast-leader-not-hedged, single-candidate skip, leader-wins, failed-race fallback, and on-demand adapter resolution; live check against a deliberately slow endpoint measures the latency difference and the attempt trace.
-  - Files: `apps/gateway/src/service.ts`, `src/connections.ts`, `src/server.ts`, `test/routing.test.js`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, docs.
+  - Files: `Kernel/API/src/service.ts`, `src/connections.ts`, `src/server.ts`, `test/routing.test.js`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, docs.
   - Depends on: Task 9h.
   - Scope: Medium.
 
@@ -3362,7 +3362,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 - [x] Task 9l: Implement the Cline OAuth sign-in flow.
   - Acceptance: the Cline card's Add connection opens the sign-in in the browser and finishes on its own — `POST /v1/oauth/cline/start` mints a single-use `state` and a session, Cline redirects the browser to `GET /v1/oauth/cline/callback`, the gateway claims the state, proves the token with a real account request, imports the model catalog, and saves an encrypted `oauth` credential. The dashboard learns the outcome by polling `GET /v1/oauth/cline/session/:id`. `POST /v1/oauth/cline/exchange` stays as the fallback for a provider that does not hand the code to a browser redirect. An expired token is renewed before use and written back to the vault.
   - Verify: 38 gateway tests cover the session lifecycle, single-use state, replay and forged-state refusal, the full browser round trip, a provider error with markup, a rejected code reaching the dashboard instead of a timeout, and the cross-site exemption staying narrow. 6 SDK tests cover `workos:` prefixing that leaves non-JWT keys verbatim, one-shot refresh with persistence, and missing-token handling. Browser check confirms the tab opens on Cline's real sign-in page, the dialog centres, and a real rejected code reports `Cline did not accept that sign-in. Try again.` with no connection stored.
-  - Files: `packages/omnihilbras-sdk/src/adapters/cline.ts`, `src/types.ts`, `src/index.ts`, `test/cline.test.js`, `apps/gateway/src/oauth.ts`, `src/service.ts`, `src/server.ts`, `src/connections.ts`, `test/oauth.test.js`, `test/oauth-routes.test.js`, `test/cline-sessions.test.js`, `src/components/OauthConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, `src/data/providers.ts`, docs.
+  - Files: `Kernel/SDK/src/adapters/cline.ts`, `src/types.ts`, `src/index.ts`, `test/cline.test.js`, `Kernel/API/src/oauth.ts`, `src/service.ts`, `src/server.ts`, `src/connections.ts`, `test/oauth.test.js`, `test/oauth-routes.test.js`, `test/cline-sessions.test.js`, `src/components/OauthConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, `src/data/providers.ts`, docs.
   - Depends on: Task 9g.
   - Scope: Medium.
 
@@ -3376,7 +3376,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **The SDK contract caught `isCredentialExpired` throwing on the very first adapter it was run against.** `chatGptWebSessionFromCredential` throws for a credential that is not a ChatGPT session, which is right on the request path and wrong in a *pre*-check: a pre-check that throws can take down whatever asked it. Now read defensively.
   - **The contract deliberately does not assert "a past expiry is expired"**, because a contract cannot know each provider's credential shape. A ChatGPT Web credential is a JSON storage state, not an OAuth record, and feeding one adapter the other's shape is exactly the plausible-looking fixture that proves a test rather than a fact — my first draft did precisely that and failed. The contract now pins what holds for *any* shape (does not throw; one of three answers; unreadable is `undefined`), and the shape-specific assertions live where the shape is owned.
   - **It is a pre-check and not a replacement.** A credential that is not expired may still have been revoked, so the network check still runs whenever the answer is not already known — asserted, because skipping it would report revoked sessions as healthy, which is the confidence-without-evidence this project refuses elsewhere.
-  - Files: `apps/gateway/src/credential-lifecycle.ts` (new), `apps/gateway/src/health.ts`, `apps/gateway/src/service.ts`, `packages/omnihilbras-sdk/src/types.ts`, `packages/omnihilbras-sdk/src/adapters/{chatgpt-web,cline}.ts`, `apps/gateway/test/credential-lifecycle.test.js` (new), `packages/omnihilbras-sdk/test/provider-contract.test.js`.
+  - Files: `Kernel/API/src/credential-lifecycle.ts` (new), `Kernel/API/src/health.ts`, `Kernel/API/src/service.ts`, `Kernel/SDK/src/types.ts`, `Kernel/SDK/src/adapters/{chatgpt-web,cline}.ts`, `Kernel/API/test/credential-lifecycle.test.js` (new), `Kernel/SDK/tests/provider-contract.test.js`.
   - Depends on: Task 63.
   - Scope: Medium.
 
@@ -3390,7 +3390,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - The other: `attachRequestId` **replaced** an id that was already attached by a different scope. Silently pointing an error at a request that was never in flight is worse than no id, so the first id wins and a second attachment is a no-op.
   - **My end-to-end probe printed `undefined` on both sides and I nearly read it as a wiring failure.** It was the probe: without an `Origin` header the request is not dashboard traffic, so the LLM surface's API-key gate refused it before it reached a provider. **The gate behaving correctly looked exactly like the feature being broken** — and had I trusted the probe I would have "fixed" working code. Now pinned as a test with that reasoning attached.
   - The id rides on the context field that already existed, so a published adapter type gains nothing and an adapter that ignores it is unaffected.
-  - Files: `apps/gateway/src/request-context.ts` (new), `apps/gateway/src/credential-manager.ts`, `apps/gateway/src/request-executor.ts`, `apps/gateway/src/service.ts`, `apps/gateway/src/routes/inference.ts`, `apps/gateway/src/http.ts`, `apps/gateway/test/request-context.test.js` (new), `docs/SPEC-SDK.md`.
+  - Files: `Kernel/API/src/request-context.ts` (new), `Kernel/API/src/credential-manager.ts`, `Kernel/API/src/request-executor.ts`, `Kernel/API/src/service.ts`, `Kernel/API/src/routes/inference.ts`, `Kernel/API/src/http.ts`, `Kernel/API/test/request-context.test.js` (new), `docs/SPEC-SDK.md`.
   - Depends on: Task 62.
   - Scope: Medium.
 
@@ -3411,7 +3411,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **Every refusal names a reason, and that is the point of the extraction.** *"No hedge fired"* and *"a hedge fired and lost"* are completely different outcomes for a client reading the ledger. The old code had three bare `return`s in a timer callback, so the only way to learn why a configured `hedgeAfterMs` did nothing was to read the loop.
   - **I wrote a variable that was written and never read**, caught by the compiler, and removed it. I had been about to add a public field to surface the reason, which would have been a behaviour change to make a diagnostic available — the wrong trade for a release about extraction. The comment now says why the reason is *not* recorded, rather than claiming it was.
   - The hedge delay is taken from the **leader**, not from the candidate being hedged: the delay is a property of the request being slow, and taking it from a candidate would let a second request's settings silently retime the first.
-  - Files: `apps/gateway/src/hedge-policy.ts` (new), `apps/gateway/src/request-executor.ts`, `apps/gateway/test/hedge-policy.test.js` (new).
+  - Files: `Kernel/API/src/hedge-policy.ts` (new), `Kernel/API/src/request-executor.ts`, `Kernel/API/test/hedge-policy.test.js` (new).
   - Depends on: Task 60.
   - Scope: Medium.
 
@@ -3423,7 +3423,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **A test I wrote found a hole in my own code.** I typed `observed()` as `ReadonlyMap` and returned the real `Map` behind it — and `ReadonlyMap` is only a *type*, so the value was still mutable. A caller that could `set` a wait could make a throttled connection look ready, which is the exact confusion the waits exist to prevent. It is now a genuine read-only view rather than a copy, because `plan()` reads it on every request and copying a map per request to defend against a caller that does not exist is the wrong trade.
   - **A test of mine asserted a timeout's `publicMessage` equalled its `message`, and failed — and the code was right.** A client gets the provider-neutral wording and the dashboard gets the detail separately, so leaving `publicMessage` unset is deliberate: the generic sentence is accurate, and it is the one that should not name a provider's internals to a caller holding only a key. The test now asserts the real property — the code is classified, and the public message is safe to show.
   - Another test of mine called `enforce` twice expecting two records and got an exception for the second. Correct: the refusal *and* the wait are both expected, and the wait is recorded before the throw — which is the whole point of recording it.
-  - Files: `apps/gateway/src/timeout-policy.ts` (new), `apps/gateway/src/rate-limit-policy.ts` (new), `apps/gateway/src/connections.ts`, `apps/gateway/src/routing-engine.ts`, `apps/gateway/src/service.ts`, `apps/gateway/test/timeout-policy.test.js` (new), `apps/gateway/test/rate-limit-policy.test.js` (new).
+  - Files: `Kernel/API/src/timeout-policy.ts` (new), `Kernel/API/src/rate-limit-policy.ts` (new), `Kernel/API/src/connections.ts`, `Kernel/API/src/routing-engine.ts`, `Kernel/API/src/service.ts`, `Kernel/API/test/timeout-policy.test.js` (new), `Kernel/API/test/rate-limit-policy.test.js` (new).
   - Depends on: Task 59.
   - Scope: Medium.
 
@@ -3441,7 +3441,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **The totality test is the one that matters here** — every code the SDK can raise, in both retryable states, asserting the two paths differ in exactly one way (a stream never retries) and agree everywhere else. A policy that is merely correct on the cases you thought of is not a policy.
   - **My "no provider ids" guard was weak, and I only found out because it failed for the wrong reason.** It matched any hyphenated word, so it passed only because no such word happened to appear — and the moment `RetryPolicy` introduced `'next-route'` it failed on a name that is not a provider. It now reads the SDK's adapter directory, so it is self-maintaining: a new provider cannot be added without it noticing, and nothing else in the file can trip it. Rewritten in four files, and **verified by planting a real provider id**, which it caught: *"the model-catalog must name no provider, found: openrouter"*.
   - **I nearly concluded the rewritten guard was broken**, because my first planting attempt appeared to pass. The build had failed — I had piped `tsc` to `/dev/null`, so I could not see it — and I was reading a stale `dist`. Suppressing a command's output and then trusting its result is the same mistake as writing a test that asserts nothing.
-  - Files: `apps/gateway/src/retry-policy.ts` (new), `apps/gateway/src/request-executor.ts`, `apps/gateway/test/retry-policy.test.js` (new), four invariant guards, `docs/SPEC-SDK.md`.
+  - Files: `Kernel/API/src/retry-policy.ts` (new), `Kernel/API/src/request-executor.ts`, `Kernel/API/test/retry-policy.test.js` (new), four invariant guards, `docs/SPEC-SDK.md`.
   - Depends on: Task 58.
   - Scope: Medium.
 
@@ -3454,7 +3454,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - A disabled connection does not claim a model, or switching one off would leave its models routed to it.
   - One of my own tests had a fixture that contradicted its own assertion — the first connection was enabled *and* credentialed while the test asserted an empty list. The code was right.
   - **Phase 2 as the roadmap specifies it is now complete:** `ProviderResolver`, `RequestExecutor`, `ConnectionManager`, `CredentialManager`, `SignInManager`'s sessions, `SignInCoordinator`, `RoutingEngine`, `ModelCatalog`, and the `routes/` split.
-  - Files: `apps/gateway/src/model-catalog.ts` (new), `apps/gateway/src/capability.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/test/model-catalog.test.js` (new).
+  - Files: `Kernel/API/src/model-catalog.ts` (new), `Kernel/API/src/capability.ts` (new), `Kernel/API/src/service.ts`, `Kernel/API/test/model-catalog.test.js` (new).
   - Depends on: Task 57.
   - Scope: Medium.
 
@@ -3466,7 +3466,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **A rate limit of 60 per minute allowed 30.** `check()` pushed the timestamp into the window when it allowed a request, *and* the request path then called `record()`, which pushes again. Every request counted twice. It also over-counted in a second way: a request the limit *refused* consumed budget for a call that was never made. `check` is now a pure query; `record` is the commit and is called when a request is **dispatched**, not when it succeeds — because a request that was sent and failed still cost the provider a call. Measured, not assumed: 30 through before, 60 after.
   - **The sliding-window test was written against the buggy behaviour.** It drove `check` alone, because `check` used to record — which is precisely why the double count survived. Rewritten to drive both the way the request path does, with the window property now measured the way it is used, plus two new tests: *asking does not spend, and a request that is refused spends nothing* and *a request that was sent and failed still counts*.
   - Three of my own tests were wrong before the code was. I stubbed health as a set of healthy ids when `resolveRoute` asks `isUnhealthy(providerId, threshold)` — a double for the component the engine exists to consult is a double for the thing under test, and the mismatch surfaced as eight failures about a method I had invented. I asserted that an unowned model is skipped, when routing deliberately falls back to any usable connection so a manually added model works. And I asserted the default resilience had a timeout, which it did not.
-  - Files: `apps/gateway/src/routing-engine.ts` (new), `apps/gateway/src/routing.ts`, `apps/gateway/src/request-executor.ts`, `apps/gateway/src/connections.ts`, `apps/gateway/src/service.ts`, `apps/gateway/test/routing-engine.test.js` (new), `apps/gateway/test/routing.test.js`, `docs/SPEC-SDK.md`.
+  - Files: `Kernel/API/src/routing-engine.ts` (new), `Kernel/API/src/routing.ts`, `Kernel/API/src/request-executor.ts`, `Kernel/API/src/connections.ts`, `Kernel/API/src/service.ts`, `Kernel/API/test/routing-engine.test.js` (new), `Kernel/API/test/routing.test.js`, `docs/SPEC-SDK.md`.
   - Depends on: Task 56.
   - Scope: Medium.
 
@@ -3478,7 +3478,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **The failure is invisible when the two strings are equal, which they are for every connection the sign-in flows create.** A test that seeds the store under *both* `connection-1` and `p` with different secrets pins it: the provider id is never used as a storage key.
   - A connection with no model policy is asked for with **none rather than a default**. Inventing one here would silently widen or narrow somebody's catalog depending on which code path asked.
   - An unconnected provider is still polled, with the provider id standing in for the connection id. Failing instead would make *"not connected"* look like *"broken"*, which is the distinction the dashboard exists to draw.
-  - Files: `apps/gateway/src/credential-manager.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/test/credential-manager.test.js` (new).
+  - Files: `Kernel/API/src/credential-manager.ts` (new), `Kernel/API/src/service.ts`, `Kernel/API/test/credential-manager.test.js` (new).
   - Depends on: Task 55.
   - Scope: Medium.
 
@@ -3491,7 +3491,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - A provider with no static configuration is only probed once it has a credential, because probing without one spends a request that cannot succeed. That rule is now `ProviderResolver.active()` and is the whole of the method.
   - Two of my own resolver tests asserted the *old* factory contract and failed — correctly, since the contract had changed for a reason. Rewritten to assert the new one, including that an uncredentialed provider's factory is **never called** rather than called with a provider id it could mistake for a connection.
   - I also found `dynamicAdapters` left behind in the service by the `ProviderResolver` extraction in 1.16.0 — dead state from three releases ago, removed here rather than left to look load-bearing.
-  - Files: `apps/gateway/src/provider-resolver.ts`, `apps/gateway/src/service.ts`, `apps/gateway/test/provider-resolver.test.js`.
+  - Files: `Kernel/API/src/provider-resolver.ts`, `Kernel/API/src/service.ts`, `Kernel/API/test/provider-resolver.test.js`.
   - Depends on: Task 54.
   - Scope: Medium.
 
@@ -3504,7 +3504,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - The coordinator takes the session store **structurally** rather than as a concrete class, because the two flows hold differently shaped sessions — Kiro nests its device authorization and Console flattens it — and the coordinator has no business knowing which. That is also what makes `SignInSessionStore` usable here without a change.
   - I declared a `tolerateDiscoveryFailure` option and then found it was **never read** — the tolerance actually lives in the `save` callback, which is where it belongs. A dead option is worse than no option, so it is gone rather than left to look meaningful.
   - One of my own tests ran the coordinator against a session that did not exist yet, so it returned at the first line and asserted nothing: a test that passes for no reason. The helper now opens the session and hands its id over.
-  - Files: `apps/gateway/src/sign-in-coordinator.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/test/sign-in-coordinator.test.js` (new).
+  - Files: `Kernel/API/src/sign-in-coordinator.ts` (new), `Kernel/API/src/service.ts`, `Kernel/API/test/sign-in-coordinator.test.js` (new).
   - Depends on: Task 53.
   - Scope: Medium.
 
@@ -3530,7 +3530,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **A units bug, inherited faithfully from both copies and then found by a test I wrote to check something else.** The fallback when a provider omits its expiry was `(ttlMs / 60000) * 1000` — which is `ttlMs / 60`. A 15-minute ceiling silently became a **15-second** session. It hid because every provider that works sends `expires_in`, and the broken conversion only runs on the path where one does not, so a browser sign-in would die in 15 seconds for any provider that went quiet. My sweep test failed for a reason I could not explain, which is what sent me to the arithmetic. Fixed by using the ceiling as the fallback, which deletes the conversion entirely, and by spelling out that `expiresInSeconds` is seconds and `ttlMs` is milliseconds so the same mistake cannot be made quietly again.
   - **Two of my own tests were wrong about behaviour that is correct.** I asserted a session is swept one ceiling after expiring; it is retained for one ceiling *past* expiry so a late poll reads *"expired"* rather than *"not found"* — two different problems a user would chase differently. And I counted implementations in a file that *quotes* the rule in its own header, so it reported two implementations when there is one. Comments in a test's subject have to be stripped before counting.
   - One test of mine had to be corrected for a units reason too: I read `defaultExpiryMinutes` as minutes when it was being used as seconds, which is the same confusion the production code had.
-  - Files: `apps/gateway/src/sign-in-sessions.ts` (new), `apps/gateway/src/kiro.ts`, `apps/gateway/src/opencodeConsole.ts`, `apps/gateway/src/oauth.ts`, `apps/gateway/test/sign-in-sessions.test.js` (new).
+  - Files: `Kernel/API/src/sign-in-sessions.ts` (new), `Kernel/API/src/kiro.ts`, `Kernel/API/src/opencodeConsole.ts`, `Kernel/API/src/oauth.ts`, `Kernel/API/test/sign-in-sessions.test.js` (new).
   - Depends on: Task 51.
   - Scope: Medium.
 
@@ -3542,7 +3542,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **A capability I inferred, and should have declared.** The Core used to ask "can this credential be proven before it is stored?" by naming Cline — Cline is absent from the registry, so `registry.get(id)?.validateCredential` was false for it and a literal was the only way through. I replaced it with "any on-demand provider can be validated". **Every on-demand provider has a `validateCredential`, so saving a ChatGPT Web credential started opening a real browser** — the two affected tests went from instant to 14 seconds each and failed. The fix is `onDemand(id, factory, { validateOnSave })`, **defaulting to false**: a factory cannot be inspected without building the adapter, and building it to answer a question is how a save button ends up launching a browser. Cline declares it; nothing else does.
   - **I rewrote `modelMetaFor` from memory instead of moving it**, and it was wrong on sight — the real one stores `n`/`c`/`i`/`o`/`p` single letters and reads pricing through `modelMetaPriceOrder`. Re-deriving a function from its *shape* rather than its text silently changes a stored format. This is the third time this session a plausible-looking fixture or a from-memory reimplementation has been the bug.
   - Three of my own tests were wrong before the code was: I made the store refuse when the claim was about the *validator*; I asserted "no calls recorded" when a `list` legitimately happens during a save; and I nested the store's recording state, so three tests passed the wrapper where the store was wanted. All three failed for reasons that had nothing to do with what they were testing.
-  - Files: `apps/gateway/src/connection-manager.ts` (new), `apps/gateway/src/provider-resolver.ts`, `apps/gateway/src/service.ts`, `apps/gateway/test/connection-manager.test.js` (new), `apps/gateway/test/provider-resolver.test.js`.
+  - Files: `Kernel/API/src/connection-manager.ts` (new), `Kernel/API/src/provider-resolver.ts`, `Kernel/API/src/service.ts`, `Kernel/API/test/connection-manager.test.js` (new), `Kernel/API/test/provider-resolver.test.js`.
   - Depends on: Task 50.
   - Scope: Medium.
 
@@ -3557,7 +3557,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **A pre-existing test was network-dependent, and my own gate reporting hid it.** `pnpm verify` showed one failure — *"a check with no browser available is refused rather than passed"*, at 27.8 seconds — and then printed `verify exit: 0`. That zero was `echo`'s exit code, not `pnpm`'s: I had piped `pnpm verify` into `grep` and read `$?` afterwards. **A gate that reports green while a test fails is worse than no gate**, because it is believed. Fixed the capture and fixed the test.
   - The test called `checkChatGptWeb` with no driver injected, so the real driver launched a browser and reached for chatgpt.com — in a file whose own header says *"The DeepSeek connect flow, without a network"*. A test whose entire claim is *"with no browser, refuse rather than pass"* was depending on whether this machine happened to have one. The sibling file already injected a stub; this one now injects **the absence of one**, which is what it was always describing: `available()` answering `ok: false`. 28s → 1.2s, deterministic over three runs.
   - It now also asserts the driver's reason reaches the client (`/No browser is available/`). `PROVIDER_UNAVAILABLE` alone is the generic message this project does not ship, and a user cannot act on *"unavailable"* — they can act on *"install a browser"*.
-  - Files: `apps/gateway/src/http.ts` (new), `apps/gateway/src/routes/{route-context,status,connections,oauth,api-keys,inference}.ts` (new), `apps/gateway/src/server.ts`, `apps/gateway/test/routes.test.js` (new).
+  - Files: `Kernel/API/src/http.ts` (new), `Kernel/API/src/routes/{route-context,status,connections,oauth,api-keys,inference}.ts` (new), `Kernel/API/src/server.ts`, `Kernel/API/test/routes.test.js` (new).
   - Depends on: Task 49.
   - Scope: Medium.
 
@@ -3569,7 +3569,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **A defect the extraction exposed, and it was a real one.** `isRetryableFailure` treated `INVALID_RESPONSE` as non-retryable, so the loop stopped. But the loop *also* called `recordFailure` with that code, marking the connection unhealthy — so the system contradicted itself: it judged a provider broken, ejected nothing, and then declined to try a connection it had just judged capable. The four genuinely terminal codes are raised at 85 sites and every one describes **this request or this credential** (wrong model, refused key, no such lane), which is why another provider refuses them identically. `INVALID_RESPONSE` is raised at 23 sites and every one describes **an answer nobody could read** — a provider accepted the request and returned an unparseable body, which says nothing about whether the next provider can answer. One provider returning an empty stream was taking down requests a healthy second provider would have served. Fixed in the one place that decides, with the reasoning in the comment.
   - Three of my own tests were wrong before the code was, and each is worth naming: I asserted `PROVIDER_UNAVAILABLE` for a bare `Error` (a failure we cannot attribute to a provider must not blame one); I asserted both routes were tried when a non-retryable error correctly stops the chain; and I asserted one attempt per route when the default resilience legitimately retries once. The code was right in all three.
   - **The first hedge test was load-flaky and I nearly shipped it.** It passed at 43ms, then failed at 115ms on a machine at load 30 — a 1ms hedge timer racing an 80ms leader. Rewritten so the leader never settles on its own, which *guarantees* the timer fires while it is in flight, and the test waits for the hedge to actually be asked. Verified over 5 consecutive runs. A test that fails in CI for no reason is worse than no test, and "it passed when I ran it" is not evidence.
-  - Files: `apps/gateway/src/request-executor.ts` (new), `apps/gateway/src/routing.ts`, `apps/gateway/src/service.ts`, `apps/gateway/test/request-executor.test.js` (new), `apps/gateway/test/routing.test.js`.
+  - Files: `Kernel/API/src/request-executor.ts` (new), `Kernel/API/src/routing.ts`, `Kernel/API/src/service.ts`, `Kernel/API/test/request-executor.test.js` (new), `Kernel/API/test/routing.test.js`.
   - Depends on: Task 48.
   - Scope: Medium.
 
@@ -3580,7 +3580,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **What this does and does not achieve, stated plainly.** The resolution algorithm now contains zero provider ids, and a test enforces that. But the service still names each on-demand provider *once*, in the constructor. The remaining step towards "a provider adds itself" is for adapter modules to carry their own registration — worth doing, but pretending this file has already solved it would be the kind of claim that reads as progress and is not.
   - Order is load-bearing and now tested twice: a deliberate `.onDemand()` registration beats a registry entry, and **a registered adapter is never shadowed by the synthesised OpenAI-compatible one**. The second matters more — a saved endpoint exists for plenty of providers that also have a registered adapter, and serving those generically would be *wrong* rather than merely imprecise.
   - I wrote the first version of the on-demand-ordering test asserting the opposite of what the code should do, and it failed. I had a passing-looking test written against my own wrong belief; the code was right and the test was the error, which is the only good outcome and still worth noticing.
-  - Files: `apps/gateway/src/provider-resolver.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/test/provider-resolver.test.js` (new).
+  - Files: `Kernel/API/src/provider-resolver.ts` (new), `Kernel/API/src/service.ts`, `Kernel/API/test/provider-resolver.test.js` (new).
   - Depends on: Task 47.
   - Scope: Medium.
 
@@ -3601,7 +3601,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Findings: **I reworded two user-facing messages while moving the code, and a test caught it.** The original was `The API key is invalid or paused.` and I had written *"That API key was not recognised, or it has been disabled."* Both read better; both are also a behaviour change, and this phase exists explicitly not to make one. Restored verbatim, with a note saying why they were left alone. The lesson generalises: a refactor that quietly rewords what a user reads is the same failure as one that quietly changes what it returns, and only here did a test happen to notice.
   - The store keeps the security properties — random keys, SHA-256, one-time reveal, constant-time comparison. This adds only the two a store cannot decide: **whether enforcement is on at all** (no store means "not configured", not "accept everything", and the distinction is visible in `list()`), and **that a mutation is a unit** — a create racing a remove is a lost update on a file-backed store, and the store has no way to know two operations were meant to be sequential.
   - One test that encodes a fault that has not happened yet: **a lock whose promise chain dies on rejection turns one error into a permanently broken gateway**, because every later key operation then waits on a promise that will never settle. The chain catches.
-  - Files: `apps/gateway/src/api-key-manager.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/test/api-key-manager.test.js` (new).
+  - Files: `Kernel/API/src/api-key-manager.ts` (new), `Kernel/API/src/service.ts`, `Kernel/API/test/api-key-manager.test.js` (new).
   - Depends on: Task 45.
   - Scope: Medium.
 
@@ -3612,7 +3612,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - The boundary is two questions and nothing else — *which adapters exist*, and *what context should this adapter be asked in* — supplied as closures. Passing the service itself would have made the extraction cosmetic; passing these two makes the manager testable in isolation and makes the coupling visible. If health ever needs a third thing from the gateway, that is the signal a boundary is wrong, not a reason to widen the interface.
   - `HealthRegistry` stays in `routing.ts` and is reached through one accessor. Routing *reads* failure counts to decide ejection and should not know where the counters live, and exposing the registry rather than new counting methods keeps `resolveRoute`'s provider-agnostic signature — which is well tested — untouched. Health keeps sole ownership of writing them, so a failure recorded by a request and one recorded by a sweep cannot disagree.
   - Tests that were impossible before, because health was only reachable through the service: three `report()` calls probe once; three concurrent `refresh()` calls are one sweep; asking about one provider probes one provider; an aborted or missing provider is *named* rather than reported unhealthy; a thrown check keeps the real cause instead of a generic failure. Each of those encodes a fault that shipped.
-  - Files: `apps/gateway/src/health.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/test/health-manager.test.js` (new).
+  - Files: `Kernel/API/src/health.ts` (new), `Kernel/API/src/service.ts`, `Kernel/API/test/health-manager.test.js` (new).
   - Depends on: Task 44.
   - Scope: Medium.
 
@@ -3625,7 +3625,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **Three harness bugs, each of which looked like provider bugs.** (1) The wrapper delegated `request` but stubbed `stream` as an empty generator, so all five providers "failed" streaming. (2) `refuseWith: 401` is the obvious thing to write, and reading only `.status` off a **number** yields `undefined` and then `200` — a refusal test that silently asserted a refusal works, and the provider passed. (3) `/models` also matches Gemini's `:generateContent` URLs, so a chat was answered with a model list and Gemini reported "missing a candidate". A test double that does not implement the interface it stands in for produces failures indistinguishable from real ones, which is worse than no double.
   - Also fixed in the harness, and both are fidelity bugs a harness cannot have: it now implements `HttpTransport` (`{status, headers, data}`, already parsed) rather than returning a `Response`, and it duplicates the transport's status-to-code mapping on purpose, because a double that shares the implementation it stands in for cannot catch a bug in it — and that mapping decides whether a connection gets ejected.
   - **Three injection styles exist**, which is the next architectural seam: most adapters take `{ transport }`, `deepseek-web` takes `{ fetch }`, and `chatgpt-web` takes `{ driver }`. That is why the contract needs a harness per style, and it is worth one seam later — see `docs/architecture/`.
-  - Files: `packages/omnihilbras-sdk/test/provider-contract.js` (new), `test/provider-contract.test.js` (new), `test/harness/scripted-transport.js` (new), `packages/omnihilbras-sdk/src/adapters/{anthropic,gemini,openai-compatible,openrouter}.ts` (health reasons), `docs/architecture/README.md`.
+  - Files: `Kernel/SDK/tests/provider-contract.js` (new), `test/provider-contract.test.js` (new), `test/harness/scripted-transport.js` (new), `Kernel/SDK/src/adapters/{anthropic,gemini,openai-compatible,openrouter}.ts` (health reasons), `docs/architecture/README.md`.
   - Depends on: Task 43.
   - Scope: Medium.
 
@@ -3634,9 +3634,9 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Verify: `pnpm version:check` fails on a real mismatch and passes when fixed; `pnpm version:fix` rewrites the derived copies; `.github/workflows/verify.yml` runs version → typecheck → test → build on Node 24 with pnpm 12.5.1 pinned. 419 tests pass.
   - Findings: **there was no CI at all.** `.github/workflows/` was empty, so 419 tests only ever ran when I happened to run them. That is not a safety net, it is a habit — and a habit does not run on someone else's machine, or on a machine too loaded to be paying attention. That is the largest single gap in the release process, and it is invisible until it is named.
   - **Version drift was one line, not a systemic problem.** I reported "six stale versions" and was wrong: five were `127.0.0.1` inside URLs and legitimate history. The real drift is `README.md` line 6, which advertised **0.2.0** while the project was at **1.12.2** — a hundred minor versions, unnoticed. `scripts/check-version.mjs` now checks the three manifests, the README line, the `X-CLIENT-VERSION` constant, and the latest tag, and it **fails** rather than generating: a generator is itself something that can go wrong silently, whereas a failing check cannot. The README match is anchored to the line's own shape, because a loose regex "fixes" the bump table's `0.2.0 → 1.0.0` examples and the URLs.
-  - Removed the committed `apps/gateway/qwen_probe3.mjs` and added `tools/` for experiments. A throwaway probe in the gateway's source tree is how production and throwaway stop being distinguishable.
+  - Removed the committed `Kernel/API/qwen_probe3.mjs` and added `tools/` for experiments. A throwaway probe in the gateway's source tree is how production and throwaway stop being distinguishable.
   - `docs/architecture/README.md` documents the architecture **as measured**, and two of its findings contradict what an outsider would assume. `routing.ts` is 186 lines with **zero** provider ids — routing is already provider-agnostic. `service.ts` is 1500 lines with **12**, and they are not scattered: six of them are one factory, `resolveAdapter`. So the Core is far cleaner than the "Core is full of provider conditionals" framing suggests, and the real gap is narrower and sharper: the Core has **no lifecycle concept at all** (`lifecycle`, `revoke`, `onboard`, `provision` — zero occurrences). Stateless providers already need no Core changes, because nine connections are live and the OpenAI-compatible ones take the generic branch untouched. What does not fit is a credential that must be created, refreshed and revoked — a Cline session, an OAuth grant — because there is nowhere for that to live. One `CredentialLifecycle` contract would absorb every hand-wired branch, which is a refactor's size rather than a rewrite's.
-  - Files: `scripts/check-version.mjs` (new), `.github/workflows/verify.yml` (new), `docs/architecture/README.md` (new), `package.json`, `README.md`, removed `apps/gateway/qwen_probe3.mjs`.
+  - Files: `scripts/check-version.mjs` (new), `.github/workflows/verify.yml` (new), `docs/architecture/README.md` (new), `package.json`, `README.md`, removed `Kernel/API/qwen_probe3.mjs`.
   - Depends on: Task 42.
   - Scope: Medium.
 
@@ -3646,7 +3646,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Findings: **a gate that could not be opened.** The textarea was `disabled={!acknowledged}`, while the checkbox that sets `acknowledged` renders **only when `riskNotice` is set**. Qwen had no notice, so it got a permanently disabled field and no visible way to unlock it — which reads as a broken dialog, not as a lock. The gate and the thing that can open it have to be the same condition: `disabled={mustAcknowledge && !acknowledged}`. This was latent for every provider without a notice, not something I introduced with Qwen.
   - Qwen also **needed** the notice. A Qwen session cookie is a whole-account session, and the dialog's own footer already says *"treat this like a password: it may access your signed-in web account"* — it was promising a warning it had no way to show.
   - **Then the probe reported seven models where it had reported three.** Repeated requests from here returned the same three every time; cookies were ruled out (none, `cna`, `isg`, and a pasted pair all agreed), and the gateway probe agreed with the direct one. So Qwen's guest catalog **varies**, and the "it answers three" I shipped in v1.12.0 was an overclaim. That is the second overclaim in a row on the same fact — first ten invented ids, then a hard "three" — and both came from treating an observed value as a constant. `QWEN_WEB_MODELS` is now a **dated snapshot** with `QWEN_WEB_MODELS_OBSERVED_AT`, and the dialog is the authority because it always shows the live list.
-  - Files: `src/components/WebCookieConnectDialog.tsx`, `src/data/providers.ts`, `packages/omnihilbras-sdk/src/adapters/qwen-web.ts`, docs.
+  - Files: `src/components/WebCookieConnectDialog.tsx`, `src/data/providers.ts`, `Kernel/SDK/src/adapters/qwen-web.ts`, docs.
   - Depends on: Task 41.
   - Scope: Small.
 
@@ -3656,7 +3656,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Findings: **it worked, and looked broken.** The probe answers in about a second, and the dialog did eventually show the result — but "Ask Qwen" sat there with nothing to say, so a wait reads exactly like a dead button. Measured, not assumed: the gateway answers in 0.7–1.8 s by curl and the browser's own fetch took 1.2–1.5 s, so the network was never the problem. The delay was the **browser's main thread being starved** on a machine at load 17–42, which delays the promise callback rather than the request.
   - Three fixes, none of which depend on that diagnosis being right. **A 20-second budget**, so a stall becomes an answer instead of an indefinite spinner — and the answers gathered so far are returned rather than discarded, because a slow auth origin with a fast refusal on the turn is still a useful answer and throwing it away would be its own dishonesty. **The three questions now go out together** instead of in sequence, which was three round trips to another continent for no reason: the auth origin and the model catalog are independent, and only the turn waits for a model id. **The waiting state says what is being asked and how long it may take**, which is what turns a spinner into progress.
   - Also: the disabled primary button was silently greyed, which is read as a broken feature. It now carries "Paste the credential above first." And the field said `auth cookie` as both its label and its placeholder — words that do not say where the value comes from. It says `Cookie header from auth.qwen.ai` and shows what to copy.
-  - Files: `packages/omnihilbras-sdk/src/adapters/qwen-web.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, tests, docs.
+  - Files: `Kernel/SDK/src/adapters/qwen-web.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, tests, docs.
   - Depends on: Task 40.
   - Scope: Small.
 
@@ -3668,7 +3668,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - **I invented the model catalog and the probe caught it.** I wrote ten plausible ids — `qwen3.7-flash`, `qwen3.7-coder-plus`, `qwen3.7-vl-plus` and so on. The live endpoint answers **three**: `qwen3.7-plus`, `qwen3.8-max`, `qwen3.8-omni-flash`. Guessing a catalog is the same fault as guessing a capability: the card would have advertised models that do not exist and offered turns guaranteed to fail, with nothing on the page to say why. Qwen publishes no context length there, so none is claimed.
   - Also fixed: the DeepSeek dialog still said *"Or let OmniHilbras read it — a window opens"*, referring to the sign-in window removed in v1.10.0. It now explains what an empty `userToken` means instead.
   - **What is still unknown, and cannot be resolved here:** whether Alibaba's gate applies to an *authenticated* request. The card says so and the probe asks it. If the answer is no, this is a working provider; if yes, it stays a catalog entry — and either way nobody will have to take a guess on trust.
-  - Files: `packages/omnihilbras-sdk/src/adapters/qwen-web.ts` (new), `apps/gateway/src/service.ts`, `apps/gateway/src/server.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, `src/data/providers.ts`, tests, docs.
+  - Files: `Kernel/SDK/src/adapters/qwen-web.ts` (new), `Kernel/API/src/service.ts`, `Kernel/API/src/server.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, `src/data/providers.ts`, tests, docs.
   - Depends on: Task 39.
   - Scope: Medium — a new surface and a new route.
 
@@ -3678,7 +3678,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Findings: **`copy(document.cookie)` cannot work, for anyone, ever.** NextAuth sets `__Secure-next-auth.session-token` `HttpOnly`, and `document.cookie` cannot read an HttpOnly cookie. I put it in v1.10.1 as the "fastest" path and it was the *only* path offered. What made it worse than simply not working is the shape of the failure: the header it returns is a plausible-looking set of chatgpt cookies with no session token, which reads exactly like being signed out — so it sent a signed-in user to sign in again. `__Secure-next-auth.callback-url` is *not* HttpOnly, so a signed-in browser still leaks part of the family, and that is now the discriminator: a sibling means signed in and copied from the wrong place, no sibling means signed out. The two need opposite instructions, and "sign in" is the wrong one half the time. Tracked from the raw cookie names, because the allowlist drops `callback-url` before the check runs.
   - **Qwen: the gate is real, unconditional for a guest, and not a clearance flow.** Re-tested against the live site (app v0.4.4, model list now `qwen3.7-plus`). The turn endpoint answers **HTTP 200** with `{"ret":["FAIL_SYS_USER_VALIDATE","RGV587_ERROR::SM::哎哟喂,被挤爆啦,请稍后重试"],"data":{"url":"…/_____tmd_____/punish?x5secdata=…"}}`. Visiting that challenge URL returns 200, displays "Please connect them in order", **grants no cookie**, and the retry is refused with a freshly minted challenge. So it is a human puzzle, not something a client can satisfy. `/api/v1/chat/completions` is 404 — the v2 path is the only one. Also confirmed: asking the turn from inside the page **kills the renderer**, so a probe has to be made from Node with the harvested cookies and a byte cap.
   - The one untested hypothesis is the same one that unblocked DeepSeek: **a signed-in Qwen session may not be gated.** That needs a credential only the user has. The card stays `planned` with the reason updated to the measured verdict.
-  - Files: `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, `src/lib/webSessionProviders.ts`, `src/data/providers.ts`, tests, docs.
+  - Files: `Kernel/SDK/src/adapters/chatgpt-web.ts`, `src/lib/webSessionProviders.ts`, `src/data/providers.ts`, tests, docs.
   - Depends on: Task 38.
   - Scope: Small.
 
@@ -3710,7 +3710,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Findings: **the decoder was reading a frame shape DeepSeek does not send.** The real reply to "Count from 1 to 5" is: one whole-response frame carrying the first fragment, then `{"p":"response/fragments/-1/content","o":"APPEND","v":","}`, then a run of frames whose value is a **bare string** and most of which carry **no path at all** — `{"v":" "}`, `{"v":"2"}`, `{"v":","}`. The decoder matched only `p === "response/fragments"` (the live path is the indexed form) and only fragment *objects* (every continuation is a string), so it kept the opening character and discarded the rest.
   - The failure was invisible because it looked like a working model. Every answer came back one character long with `finish_reason: stop`, so "working" for a prompt that asked for the word `working` passed, and a green tick appeared. It took a real conversation to surface it: **"Count from 1 to 10" answering `1` is not a terse model.** The lesson is the same one as everywhere else in this area — a check that only proves the thing it was written to prove will happily pass while the feature is broken.
   - Two more things the stream requires, both found by capturing a live body rather than reasoning about it: **`FINISHED` is a status word with a string value.** A decoder that appends every string value writes the literal word `FINISHED` onto the end of the answer, which is what the reference implementation does. It is consumed as status here. And a body that closes **without** `response/status: "FINISHED"` was cut off mid-generation — an expired session, a dropped connection — and is now refused with that named, instead of being returned as a fragment wearing `finish_reason: stop`.
-  - Files: `packages/omnihilbras-sdk/src/adapters/deepseek-web.ts`, tests (a captured stream is kept as a fixture, because the shape is the whole point).
+  - Files: `Kernel/SDK/src/adapters/deepseek-web.ts`, tests (a captured stream is kept as a fixture, because the shape is the whole point).
   - Depends on: Task 35.
   - Scope: Small — a fix, but one that had been hiding a completely broken provider.
 
@@ -3720,7 +3720,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Findings: **`/health` was re-probing all thirteen providers on every single request**, not just on the 60 s background sweep. Two things were wrong with that, and the second one is the interesting one. It was slow — 8.45 s per call. Worse, it was a *head-of-line blocker*: the browser allows six connections per origin, the page asked for health on load, and a sweep that outlived the poll interval queued the next behind it, so health requests monopolised the pool and ordinary requests to the same gateway queued behind them. A chat turn that answers in six seconds took over a minute, which looks exactly like a model that hangs. `health()` now serves the last sweep and stores it; concurrent callers share one sweep rather than each starting their own. Four consecutive calls: 2.9 s (cold), then 3 ms, 15 ms, 4 ms. `checkedAt` is reported so the caller can see the report's age instead of being handed something that implies it was just measured.
   - Also: **not every provider can stream.** DeepSeek Web declares `streaming: false` and the gateway answers a streamed request `501 NOT_SUPPORTED`. The panel retries it as one request and reports `streamed: false`, so the answer appears and the turn is labelled **"no streaming"** — a provider that cannot stream is not a provider that cannot answer, and showing a refusal would have been wrong. Tested against a provider that streams as well as one that cannot.
   - Deliberately **not** offered when it cannot work: a provider with no connection, or one the gateway cannot serve at all, gets a sentence explaining why instead of a control that can only fail. And a failed turn is dropped from the replayed history rather than sent back as an assistant message — teaching a model to refuse by showing it its own refusal is a subtle way to corrupt every later turn.
-  - Files: `src/components/ProviderPlayground.tsx` (new), `src/lib/gatewayClient.ts` (`streamGatewayChat`), `src/pages/ProviderDetailPage.tsx`, `apps/gateway/src/service.ts` (health snapshot).
+  - Files: `src/components/ProviderPlayground.tsx` (new), `src/lib/gatewayClient.ts` (`streamGatewayChat`), `src/pages/ProviderDetailPage.tsx`, `Kernel/API/src/service.ts` (health snapshot).
   - Depends on: Task 34.
   - Scope: Medium — a new surface and a new gateway behaviour.
 
@@ -3729,7 +3729,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Verify: `GET /v1/health/deepseek-web` returns in 8 ms of gateway time (478–823 ms of real DeepSeek round trip) against 8.45 s for `GET /health`; the badge reads Checking… → Connected; "Test provider" reports `Ping 816 ms`; an unknown provider returns 404 naming it. 401 tests pass.
   - Findings: **three more layers of the same fault, all of them reporting rather than behaviour.** (1) "Test provider" called `getGatewayHealth()`, which probes every active adapter, to answer a question about one provider — thirteen probes to render one card, and on a loaded machine long enough that the button looked permanently stuck. There is now `GET /v1/health/:providerId`, and the test asserts the other adapter is *never probed* rather than merely that the response shape is right. (2) `loadConnection` had `.catch(() => undefined)` and no timeout, so a request that **hung for 60 seconds** left the page on its initial `false` and it said **"Not connected"** about a connection that existed, with an **Add connection** button inviting a second one. Three states now — loading, ready, failed — and a 10 s ceiling, because a read that stalls is not evidence of anything. (3) The health check then reported **"healthy in 0 ms"**, which was the *cached* access token: `accessToken()` caches for an hour, so the check proved nothing while looking like a check. `validateCredential` now passes `fresh: true`. This is the exact fault the area keeps making — a confident answer with nothing behind it.
   - Also: an unknown provider is `NOT_FOUND` naming itself, not `unavailable`. "This provider is down" and "you never connected it" are different problems, and the first sends the user to fix a credential that was never the issue.
-  - Files: `apps/gateway/src/service.ts` (`probeAdapter`, `healthForProvider`), `apps/gateway/src/server.ts`, `packages/omnihilbras-sdk/src/adapters/deepseek-web.ts`, `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, tests, docs.
+  - Files: `Kernel/API/src/service.ts` (`probeAdapter`, `healthForProvider`), `Kernel/API/src/server.ts`, `Kernel/SDK/src/adapters/deepseek-web.ts`, `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, tests, docs.
   - Depends on: Task 33.
   - Scope: Medium — a new route.
 
@@ -3737,8 +3737,8 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Acceptance: "Test provider" works on a DeepSeek connection, and health says healthy rather than "not connected".
   - Verify: `GET /health` reports `deepseek-web -> healthy`; a real turn through the gateway returns `'working'` in 7.9 s (proof of work solved); `GET /v1/connections` shows `deepseek-web | hasCredential: True | models: 14`. 397 tests pass.
   - Findings: **two** separate defects, both silent. `activeAdapters()` registers a real adapter for `chatgpt-web` but not for `deepseek-web`, so the DeepSeek connection fell through to a generic OpenAI-compatible adapter pointed at `chat.deepseek.com` — which is not an OpenAI endpoint — and health reported `unavailable` with an **empty message**. Routing was unaffected, because `resolveAdapter` was already correct, so the provider worked while reporting that it did not. Then, once registered, it reported `Health checks are not supported.`: `DeepSeekWebAdapter` had no `healthCheck` at all. Fixed at both levels, and the health check is a **credential check** (`users/current`) rather than a completion, so it costs one round trip and no proof of work — which is what makes it cheap enough for every poll.
-  - Also: **`apps/gateway/test/deepseek-web-check.test.js` was never committed.** It ran locally, so the numbers in several releases counted tests that were not in the repository, and four of them had gone stale when `checkChatGptWeb` started verifying against a live page. Rewritten to assert what is true offline, and now tracked. The real lesson is not the missing `git add` — it is that "397 tests pass" was never a statement about the repository.
-  - Files: `apps/gateway/src/service.ts`, `packages/omnihilbras-sdk/src/adapters/deepseek-web.ts`, `apps/gateway/test/deepseek-web-check.test.js` (now tracked), docs.
+  - Also: **`Kernel/API/test/deepseek-web-check.test.js` was never committed.** It ran locally, so the numbers in several releases counted tests that were not in the repository, and four of them had gone stale when `checkChatGptWeb` started verifying against a live page. Rewritten to assert what is true offline, and now tracked. The real lesson is not the missing `git add` — it is that "397 tests pass" was never a statement about the repository.
+  - Files: `Kernel/API/src/service.ts`, `Kernel/SDK/src/adapters/deepseek-web.ts`, `Kernel/API/test/deepseek-web-check.test.js` (now tracked), docs.
   - Depends on: Task 32.
   - Scope: Small.
 
@@ -3746,7 +3746,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Acceptance: `{"value":null}` is refused by name, and the fastest extraction step is a copyable console line.
   - Verify: `parseDeepSeekUserToken('{"value":null}')` throws `AUTHENTICATION_FAILED`; `{"value":"real"}` and a bare token still work; an object with no `value` key is still used as-is. The DeepSeek dialog offers one link, one clickable snippet — `copy(JSON.parse(localStorage.userToken).value)` — and one `Connect` button. 390 tests pass.
   - Findings: probed the live site, and **`userToken` is `{"value":null,"__version":N}` when nobody is signed in** — that is the signed-out placeholder, and it is what the page actually stores. The parser fell through to "treat the raw string as the token", so that null wrapper became a **credential**: it looked valid, was accepted, and the failure surfaced much later as DeepSeek refusing a session nobody could explain. Deciding on **presence of the `value` key** rather than its emptiness matters: `{"other":"x"}` is some other object pasted by mistake and is used as-is, while `{"value":null}` is the signed-out state and is named as such. The old sign-in window had the identical hole — it read the null wrapper and declared itself signed in immediately, which is why the window "opened the home page and nothing happened". Also: extraction is now a **console one-liner** rather than a DevTools navigation, because the navigation is where people go wrong — a mis-click yields a cookie object or the signed-out placeholder, and neither is obvious at the point of failure. `copy(document.cookie)` for ChatGPT Web, `copy(JSON.parse(localStorage.userToken).value)` for DeepSeek.
-  - Files: `packages/omnihilbras-sdk/src/adapters/deepseek-web.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, tests, docs.
+  - Files: `Kernel/SDK/src/adapters/deepseek-web.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, tests, docs.
   - Depends on: Task 31.
   - Scope: Small.
 
@@ -3754,7 +3754,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Acceptance: the connect dialog has one sign-in control, it opens the provider in a new tab in the current browser, and nothing in the gateway launches a browser.
   - Verify: the DeepSeek dialog shows one link — `Open chat.deepseek.com`, `target="_blank"` — and the only button is `Connect`. `POST /v1/oauth/chatgpt/start` and `GET /v1/oauth/deepseek/status` are now `404`; `POST /v1/web-cookie/deepseek/connect` is `400` on an empty body and `POST /v1/connections` is `200`. 388 tests pass.
   - Findings: the user reported the window "opens the home page of DeepSeek and nothing happens" — **it was broken**, not merely surprising: the flow navigated but never detected the sign-in, so it sat there indefinitely. On top of that it was a second button next to the paste path, so the dialog offered two ways to connect and one of them silently failed. Two buttons, one broken and unexplained, is worse than one honest path, so the window flow is **removed rather than demoted**: both sign-in modules, both session stores, four service methods, four routes and thirteen tests are gone. The persistent profile is still used for *turns* when it happens to be signed in — it is just no longer how a connection is made. The trade-off, stated plainly: a pasted credential is replayed into the gateway's browser on each turn rather than the browser keeping it fresh, so the Cloudflare clearance can go stale and an edge challenge is somewhat more likely than with a signed-in profile. That is the cost of the user's choice, and it is the right trade for "do not open a window I did not ask for".
-  - Files: `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, `apps/gateway/src/service.ts`, `apps/gateway/src/server.ts`, `apps/gateway/src/index.ts`, deleted `chatgptWebSignIn.ts` / `deepseekWebSignIn.ts` and their tests, docs.
+  - Files: `src/components/WebCookieConnectDialog.tsx`, `src/lib/webSessionProviders.ts`, `Kernel/API/src/service.ts`, `Kernel/API/src/server.ts`, `Kernel/API/src/index.ts`, deleted `chatgptWebSignIn.ts` / `deepseekWebSignIn.ts` and their tests, docs.
   - Depends on: Task 30.
   - Scope: Medium.
 
@@ -3802,7 +3802,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Acceptance: a DeepSeek Web card that connects by signing in or by pasting a `userToken`, and a request path with no browser in it.
   - Verify: `POST /v1/oauth/deepseek/start` returns 201; an invalid `userToken` is refused with **DeepSeek's own answer** — `PROVIDER_REQUEST_FAILED`, "DeepSeek rejected the sign-in: Authorization Failed (invalid token)" — and no connection is created; 14 models; both cards render and the DeepSeek dialog names `chat.deepseek.com`; 401 tests pass.
   - Findings: the request path is plain HTTP with a bearer credential, so **no browser is in it at all** — a browser is involved only in obtaining the credential, once. `userToken` authorises `users/current` and **nothing else**; sending it at the completion endpoint gets a 401 that looks exactly like an expired session, so the two are exchanged and the access token cached. The credential is in **localStorage, not a cookie**, so `context.cookies()` returns nothing useful and the connection looks signed out forever; it is stored sometimes as `{"value":"…"}` and sometimes bare, so both are read. The endpoint takes one flat `prompt`, so history is flattened with turns labelled — a bare join of `["You are terse.", "2+2?"]` loses which was which. The SSE append frames often arrive with **no `type`**, so `thinking_enabled` from the last whole response decides the reasoning/content split; treating every append as the answer is how a model that thinks first answers with its reasoning. **Qwen Web: the catalog is open (three models, 1M ctx, visitor access, unminified `POST /api/v2/chat/completions`) and the turn is refused by Alibaba's TMD anti-bot**, which returns a captcha that must be rendered in a browser; a guest has no XSRF cookie either. A catalog and no card. Two findings kept: calling the endpoint from inside the page **kills the renderer**, because buffering an endless SSE stream with `response.text()` does — which is why a Qwen driver must read incrementally with a cap. The generalised dialog still shipped a **hardcoded ChatGPT sentence telling DeepSeek users a chatgpt.com window was about to open**, caught by looking at the rendered dialog rather than the code; that is why every provider now supplies its own note.
-  - Files: `packages/omnihilbras-sdk/src/adapters/deepseek-web.ts`, `adapters/deepseek-pow.ts`, `apps/gateway/src/deepseekWebSignIn.ts`, `src/service.ts`, `src/server.ts`, `src/lib/webSessionProviders.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/data/providers.ts`, tests, docs.
+  - Files: `Kernel/SDK/src/adapters/deepseek-web.ts`, `adapters/deepseek-pow.ts`, `Kernel/API/src/deepseekWebSignIn.ts`, `src/service.ts`, `src/server.ts`, `src/lib/webSessionProviders.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/data/providers.ts`, tests, docs.
   - Depends on: Task 24, and the proof-of-work work in commit 8f9db84.
   - Scope: Big.
 
@@ -3810,7 +3810,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Acceptance: one button signs in and saves a working connection; the manual paste survives as a fallback; a turn afterwards still answers.
   - Verify: `POST /v1/oauth/chatgpt/start` returned `headed: true`; the first status poll returned `connected` with plan `Free` and a connection carrying 13 models; the next poll correctly reported the session already completed; two live turns then returned `'working'` (20s, 97s). 371 tests pass.
   - Findings: the profile **already held the session on disk** — a 72 KB cookie store in `~/.config/omnihilbras/chatgpt-web/` — so keeping it is not a new security model, discarding it is. The fragility is entirely in moving the credential *by hand*, and all of it goes away: which cookie, the `Cookie:` prefix, the numbered chunks, the truncated header, and an unknown plan. The session is now read out of the browser that created it, so the Cloudflare clearance the edge set is the one that gets kept. **The profile became the fast path and the vault the fallback** — injecting stored cookies on every turn would overwrite a fresher session (the clearance rotates) with a stale copy, which is how a working provider starts failing for no visible reason. A poll is **claimed before the page is read**, or two concurrent polls save two connections from one sign-in; sessions are swept because a leaked window is a signed-in session left open on a desktop. The **terms position is unchanged** and the warning stands. Also fixed: `btn-primary`/`btn-secondary` **were not real classes** — nothing in the stylesheet defines them, so the connect buttons here and every button in `KiroConnectDialog` had been rendering unstyled since they were written; and there was **no `:disabled` styling anywhere**, so an unclickable button looked identical to a clickable one.
-  - Files: `apps/gateway/src/chatgptWebSignIn.ts` (new), `src/chatgptWeb.ts`, `src/service.ts`, `src/server.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/components/KiroConnectDialog.tsx`, `src/index.css`, `apps/gateway/test/chatgpt-web-signin.test.js` (new), docs.
+  - Files: `Kernel/API/src/chatgptWebSignIn.ts` (new), `src/chatgptWeb.ts`, `src/service.ts`, `src/server.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/components/KiroConnectDialog.tsx`, `src/index.css`, `Kernel/API/test/chatgpt-web-signin.test.js` (new), docs.
   - Depends on: Task 23.
   - Scope: Big.
 
@@ -3818,7 +3818,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Acceptance: the catalog matches the reference's product surface, every card resolves, and a check catches a revoked session.
   - Verify: the connection reports 13 models; `POST /v1/web-cookie/chatgpt/check` returns `verified: true` for the real session and `AUTHENTICATION_FAILED` for a deliberately invalid one; both free models still answer `'working'`; 366 tests pass.
   - Findings: **the plan must not narrow the catalog.** `resolveChatGptWebSelection` never consults it — it maps an id onto a selection and lets the page refuse — so gating the catalog was a second, different rule, and a wrong gate is not symmetric: a model shown that cannot be used costs one visible failure, while a model hidden that can be used hides something that works. Also: **the reference's own page advertises ids its resolver refuses** (effort-suffixed ones), so the cards and the resolver are now one table with a test asserting every card resolves; **Pro must not ask for thinking** — `reason` is a hint the page does not honour there, and deriving it as `effortIndex > 0` sent it anyway, so the rule moved into the SDK; `gpt-5.5-pro-extended` is an **alias of pro**, not a distinct request, and ChatGPT exposes no wire model for it. The **parser refused the Cookie header** the guide told you to paste, while its own error said "paste the cookie header instead" — now accepted, allowlisted, with the token reassembled from its numbered chunks and a cut-short set refused by name. A **check that only parses accepts a dead session**, so it opens the page — and measured against a real and a fake session, **every DOM marker is identical**, so the only signal is the plan badge in the page text, polled for 15s. Every driver failure now carries a real cause (a challenge is `PROVIDER_UNAVAILABLE`, a sign-in wall is `AUTHENTICATION_FAILED`) because both arrived as `INTERNAL_ERROR`. And gating discovery on `policy === 'all'` made a free-only connection **unrefreshable**.
-  - Files: `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, `apps/gateway/src/chatgptWeb.ts`, `apps/gateway/src/service.ts`, `apps/gateway/src/server.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, tests, docs.
+  - Files: `Kernel/SDK/src/adapters/chatgpt-web.ts`, `Kernel/API/src/chatgptWeb.ts`, `Kernel/API/src/service.ts`, `Kernel/API/src/server.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, tests, docs.
   - Depends on: Task 22.
   - Scope: Big.
 
@@ -3826,7 +3826,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Acceptance: a real turn returns a real answer through the gateway, on a real session.
   - Verify: `POST /v1/chat/completions` with `x-omnihilbras-provider: chatgpt-web` returns 200 and `content: "working"` for "Reply with the single word: working", and `"4"` for "What is 2+2?" — three consecutive successes in 20s, 24s and 37s. 8 gateway tests on the pure half, 341 total.
   - Findings: **typing into the composer does not work.** The request is accepted, a placeholder appears, and the page sits at "Think" indefinitely — signed in, plan known, composer accepting keystrokes, the send button enabled, the message posted. The composer path is simply not how a programmatic client makes a turn. What works is the page's own path: its Sentinel requirements, its proof-of-work and Turnstile tokens, its request client, and `POST /f/conversation`. The module is found by scanning the page's assets for **semantic markers** and reading the minified names out of the trailing `export{…}` block; all four markers are in one 2.6 MB chunk today, which imports directly and yields 4 074 exports. Three things had to be found rather than assumed: the asset is imported **directly**, because a generated blob module re-exporting from it fails with a bare "Failed to fetch dynamically imported module" that names no cause; only a first-party `/cdn/assets/*.js` URL is ever fetched, since the candidate list comes off a live page and is untrusted input; and the delta stream is JSON Patch **objects** whose `append` concatenates — reading it as a replace keeps only the last fragment, and reading the value out of JSON Patch's third slot writes `undefined` at every path, both of which read as a model that answered nothing. Also: the temporary-chat URL triggers the first-use onboarding modal and failed to navigate, so the plain landing page is used. **Not perfectly reliable** — a fetch inside ChatGPT's own code can fail on the network and gets exactly one retry; anything else is raised as a real failure so a broken session is not retried into looking intermittent. Attachments are not implemented.
-  - Files: `apps/gateway/src/chatgptFirstParty.ts`, `src/chatgptWeb.ts`, `apps/gateway/test/chatgpt-first-party.test.js`, `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, docs.
+  - Files: `Kernel/API/src/chatgptFirstParty.ts`, `src/chatgptWeb.ts`, `Kernel/API/test/chatgpt-first-party.test.js`, `Kernel/SDK/src/adapters/chatgpt-web.ts`, docs.
   - Depends on: Task 21.
   - Scope: Big.
 
@@ -3834,7 +3834,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Acceptance: the catalog carries ids the web tier actually serves, and a refresh can remove a model.
   - Verify: `listModels()` for a free session returns `auto, auto-thinking` and the paid family is refused by name; a refresh on the live connection drops the stale `gpt-5.2` ids and the result survives a reload from disk. 42 ChatGPT Web tests, 329 total.
   - Findings: **every model id in the first catalog was invented** — `gpt-5.2`, `gpt-5.1`, `gpt-5-mini` — and none of them exist. The real ones are untidy, which is why tidy guesses were so easy: `gpt-5-6`, `gpt-5-6-thinking`, `gpt-5-6-pro`, `gpt-5-5`, `gpt-5-5-thinking`, `gpt-5-5-pro`, recorded upstream as "observed from first-party ChatGPT Pro and Free UIs". **And then it got it wrong a second way**: the first correction published `auto` as a model id, but `auto` is the string the *page* is given when an account is free and has no picker — not something a client can ask for. `resolveSelection` maps a client id onto a **UI selection** (a model label plus an effort index), and that is what the page is driven with; anything outside the set throws, so an unresolvable id is now refused before a browser launches while a known one is left to the page, since `resolveSelection` never consults a plan. Two more real bugs surfaced because the stale ids survived a refresh that returned 200: `updateModels` **unioned instead of replacing**, and its additive path files every addition as a *custom* model, so a withdrawn model is kept forever and becomes impossible to remove; and the persistent store's `updateModels` and the in-memory one had drifted, the latter quietly lacking `replace`. With the right model and the right access, **a turn still does not complete** — the page renders only `request-placeholder-request-WEB:…-0` and sits at "Think". Reading the answer is the remaining work, and the reference does it by driving ChatGPT's own JS module rather than selectors.
-  - Files: `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, `test/chatgpt-web.test.js`, `apps/gateway/src/connections.ts`, `apps/gateway/src/service.ts`, docs.
+  - Files: `Kernel/SDK/src/adapters/chatgpt-web.ts`, `test/chatgpt-web.test.js`, `Kernel/API/src/connections.ts`, `Kernel/API/src/service.ts`, docs.
   - Depends on: Task 20.
   - Scope: Medium.
 
@@ -3843,7 +3843,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Verify: measured on one machine, one session, one engine, varying one thing at a time — default UA gives 403 with `Just a moment...`, a real Chrome UA gives 200 with a composer present, and headed/full-Chromium make no difference. The composer accepts `pressSequentially` and the send button then reports `aria-disabled="false"`. 324 tests pass.
   - Findings: **the 403 was Playwright's default headless user agent, which substitutes `HeadlessChrome/151.0.7922.34` into the real Chrome string.** The address was never the problem, and the earlier "this is environmental, try a residential connection" note was wrong. Setting a real user agent, with a matching locale and timezone, fixes access outright. Three further things were needed to get a turn submitted, none obvious: a **persistent profile**, because the first-use "Temporary Chat" modal otherwise reappears every request holding focus and intercepting Send; **real keystrokes**, because the composer is ProseMirror and `fill()` sets the DOM without the input events React watches, leaving the send button permanently disabled; and clicking through `data-testid="modal-temporary-chat-onboarding"`, which ignores Escape. Also: `waitForFunction` must take a function, since a string is evaluated with `eval` and the page's CSP forbids `unsafe-eval`; and waiting for the stop button to disappear is the wrong completion signal, because the button stays in the DOM after a turn ends, so that wait never returns.
   - **Still not working:** no turn has produced an answer. The request posts, the page renders only `data-message-id="request-placeholder-request-WEB:…-0"` with no text, and sits at "Think" indefinitely, on a free-plan account. The reference project completes turns on this same machine by discovering ChatGPT's own JS module at runtime and performing an explicit model *selection*, never hardcoding a selector — which is the most likely place the remaining difference lies. Access is solved; completion is not. The card says so.
-  - Files: `apps/gateway/src/chatgptWeb.ts`, `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, docs.
+  - Files: `Kernel/API/src/chatgptWeb.ts`, `Kernel/SDK/src/adapters/chatgpt-web.ts`, docs.
   - Depends on: Task 19.
   - Scope: Big.
 
@@ -3851,7 +3851,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Acceptance: a model test against a blocked address reports the block, with the reason intact.
   - Verify: `POST /v1/chat/completions` for `chatgpt-web` returns `PROVIDER_UNAVAILABLE` and the full sentence, in place of `Every provider route failed`. Three tests.
   - Findings: the block **was** being detected, but too early to fire. A Cloudflare challenge is not present the instant `goto` returns — the 403 comes back in 0.8s with an empty title and the interstitial only appears a few seconds later — so the pre-flight check saw nothing, the composer wait then ran to its timeout, and the result was reported as a 60-second timeout with no cause. The page is now re-read whenever a wait fails, and a page that loaded without a composer reports its own title and body text rather than nothing. Separately, the driver's failures were plain `Error`s, so crossing the routing layer they collapsed into "Every provider route failed" and the reason was discarded: a refused request was being reported as a broken model. They are now raised as provider errors, with a block classified as an outage and an ordinary page failure left as a request failure.
-  - Files: `apps/gateway/src/chatgptWeb.ts`, `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, `test/chatgpt-web.test.js`.
+  - Files: `Kernel/API/src/chatgptWeb.ts`, `Kernel/SDK/src/adapters/chatgpt-web.ts`, `test/chatgpt-web.test.js`.
   - Depends on: Task 18.
   - Scope: Small.
 
@@ -3859,7 +3859,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Acceptance: a genuine CLI/Codex auth export connects, and a free-plan account is not offered paid models.
   - Verify: a real export is stored with its session cookie, `planType: free` and `expiresAt`, and round-trips all three; a real request reaches the browser and is refused by name as a block page. 34 SDK tests.
   - Findings: **the real export shares no keys with a Playwright storage state.** It is `{ accessToken, sessionToken, expires, account }` with no `cookies` key, so the storage-state parser rejected a genuine session with "That JSON has no `cookies` array" — the bug that was reported. `sessionToken` *is* the session cookie's value. Two fields are now carried through: `expires`, so a dead session is known before a browser launch, and `planType`, which is real entitlement and decides the catalog — a free plan gets 3 models, not the 6 that were invented, and an unrecognised plan gets the full set because a visible failure beats a hidden model. **The session token is ~5 KB and Chrome caps one cookie at 4096 bytes**, so `addCookies` failed the whole batch with `Invalid cookie fields`, which names no field and is not about the fields at all; found by varying one at a time against a real session. NextAuth already chunks oversized session cookies, and the driver now does the same, verified to reassemble byte for byte. `listModels()` also threw without a credential, which would have left a saved connection with no models. **And the answer to whether it works: no.** chatgpt.com serves `Just a moment...` — a Cloudflare interstitial with an empty body — *with a valid session loaded*, so the premise the design rests on is defeated at the edge and the selectors remain unconfirmed. The block is environmental.
-  - Files: `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, `test/chatgpt-web.test.js`, `apps/gateway/src/chatgptWeb.ts`, docs.
+  - Files: `Kernel/SDK/src/adapters/chatgpt-web.ts`, `test/chatgpt-web.test.js`, `Kernel/API/src/chatgptWeb.ts`, docs.
   - Depends on: Task 17.
   - Scope: Medium.
 
@@ -3875,7 +3875,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Acceptance: a new group holds a ChatGPT Web card that connects by pasting an exported session, and the credential warning is acknowledged before anything is stored.
   - Verify: the group renders between API Key and Local with one card; the card badge reads `ACCOUNT SESSION`, not `TERMS`; the dialog shows the warning, four export steps, and a paste field disabled until the box is ticked. `POST /v1/web-cookie/chatgpt/connect` accepts a real-shaped storage state (201, 6 models) and refuses non-JSON, an export with no OpenAI cookies, and a missing field. Only `chatgpt.com`/`openai.com` cookies survive — `notopenai.com` and `chatgpt.com.evil.example` are dropped. A bad paste shows the reason and clears the field. 23 SDK tests.
   - Findings: **the browser half has never seen the real application.** `chatgpt.com` returns its anti-bot block page from the development machine (`Unable to load site … Ray ID:…`), so `#prompt-textarea` and `[data-message-author-role="assistant"]` are ChatGPT's documented test hooks used on the assumption they are current. That is stated on the card, not buried. A stale session and a blocked request both render a real page with no composer, so they are told apart: a sign-in link means re-export, the block page's own wording means the network. The generic API-key modal was also opening underneath the right one, since `auth: 'Web cookie'` is not `isOauth` — suppressed. The reference project hardcodes no selector at all; it discovers ChatGPT's own JS module at runtime and drives their internal API. The version here is the maintainable one and the fragile one, traded knowingly.
-  - Files: `packages/omnihilbras-sdk/src/adapters/chatgpt-web.ts`, `test/chatgpt-web.test.js`, `apps/gateway/src/chatgptWeb.ts`, `service.ts`, `server.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/components/ProviderCard.tsx`, `src/data/providers.ts`, `src/pages/ProviderDetailPage.tsx`, `public/providers/chatgpt.svg`, docs.
+  - Files: `Kernel/SDK/src/adapters/chatgpt-web.ts`, `test/chatgpt-web.test.js`, `Kernel/API/src/chatgptWeb.ts`, `service.ts`, `server.ts`, `src/components/WebCookieConnectDialog.tsx`, `src/components/ProviderCard.tsx`, `src/data/providers.ts`, `src/pages/ProviderDetailPage.tsx`, `public/providers/chatgpt.svg`, docs.
   - Depends on: Task 15.
   - Scope: Big — a new group, a new auth shape, and a browser dependency in the gateway.
 
@@ -3891,14 +3891,14 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
   - Acceptance: a real Kiro request returns an answer, and the six sign-in methods are each wired to their own exchange rather than one generic paste box.
   - Verify: `POST /v1/chat/completions` with `x-omnihilbras-provider: kiro` returns real text, `finish_reason: stop`, and a `meters.credit` figure. The framing tests run against `test/fixtures/kiro-stream.bin`, a real captured 7-frame response. Device flow returns 201 with a real AWS code; an unapproved session polls as `pending`; a non-`awsapps.com` start URL is refused before any call; Google/GitHub return a real PKCE URL whose verifier never leaves the gateway; a pasted code is spent at most once. In the browser all six methods are listed and disabled until the risk is ticked, and a failed test row shows the provider's reason.
   - Findings: **v0.11.0's Kiro could not complete a single inference.** The answer is the binary AWS eventstream, not the text framing the first parser was written against — so every request returned 200 and every one failed with `INVALID_RESPONSE`, indistinguishable from a provider that answered nothing. The tests passed throughout because they were built from the same wrong assumption. Three further details, each a wrong guess first: header names carry a leading **colon** (`:event-type`), the payload is **flat** rather than nested under the event name, and there is **no `messageStopEvent` and no `usageEvent`** — a real response is `assistantResponseEvent`, `contextUsageEvent`, `meteringEvent`. `total_length` counts itself, so frames are walked by length. The transport decoded bodies as text, which mangles a binary stream into something that reads as empty, so `HttpRequest` now takes `responseAs: 'bytes'`, bounded like the text path. Kiro meters credits, so `usage` is left unset rather than reported as zero and the cost rides in its own `meters` field. Availability is per account: `400 Invalid model` becomes "Your Kiro plan does not offer X", since that is an entitlement and not a broken connection. Social sign-in cannot return to the gateway at all — the whitelisted redirect is `kiro://` — so the code is pasted back, with the PKCE verifier kept gateway-side. A company start URL is validated against `*.awsapps.com` because it becomes part of an OAuth grant. 25 Kiro tests, 283 total.
-  - Files: `packages/omnihilbras-sdk/src/adapters/kiro.ts`, `src/transport.ts`, `src/types.ts`, `test/kiro.test.js`, `test/fixtures/kiro-stream.bin`, `apps/gateway/src/kiro.ts`, `service.ts`, `server.ts`, `src/lib/kiroAuth.ts`, `src/components/KiroConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, docs.
+  - Files: `Kernel/SDK/src/adapters/kiro.ts`, `src/transport.ts`, `src/types.ts`, `test/kiro.test.js`, `test/fixtures/kiro-stream.bin`, `Kernel/API/src/kiro.ts`, `service.ts`, `server.ts`, `src/lib/kiroAuth.ts`, `src/components/KiroConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, docs.
   - Depends on: Task 13.
   - Scope: Big — the published Kiro surface is replaced, and `HttpRequest` and `ChatResponse` change shape.
 
 - [x] Task 13: Add Kiro to OAuth Providers, with a working sign-in and a non-dismissible terms warning.
   - Acceptance: the card carries a standing caution shown in both card views, on the page, and in the sign-in dialog, where nothing is sent to AWS until it is acknowledged. The sign-in is AWS's device flow and the catalog is served from CodeWhisperer's streaming service.
   - Verify: `POST /v1/oauth/kiro/start` returns 201 with a real AWS device code and `view.awsapps.com/start/#/device`; an unapproved session polls as `pending`; an unknown session is 404. In the browser the dialog shows the warning with an unticked box and no code, and only after ticking it does a real AWS code appear with a manual-link fallback. Kiro is not OpenAI-compatible — it is CodeWhisperer's streaming service, taking a `conversationState` envelope and answering with an AWS eventstream — so it needs its own adapter, with a system turn folded into the user content because the envelope has no system role, and unknown model ids refused before a request is spent. Two defects found by testing against live AWS: the device authorization needs a `startUrl` or AWS answers `400 Start URL is required`; and a pending grant arrives as HTTP 400 with the state in the body, which the provider transport had flattened to its human description, so the sign-in reported failure while the user was still approving it. OAuth token endpoints now read their bodies directly, as the Console poll already did. 15 SDK tests cover the envelope, the eventstream framing, the bare-body fallback, and the refusals.
-  - Files: `packages/omnihilbras-sdk/src/adapters/kiro.ts`, `test/kiro.test.js`, `apps/gateway/src/kiro.ts`, `service.ts`, `server.ts`, `src/data/providers.ts`, `src/components/ProviderCard.tsx`, `src/components/OauthConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, docs.
+  - Files: `Kernel/SDK/src/adapters/kiro.ts`, `test/kiro.test.js`, `Kernel/API/src/kiro.ts`, `service.ts`, `server.ts`, `src/data/providers.ts`, `src/components/ProviderCard.tsx`, `src/components/OauthConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, docs.
   - Depends on: Task 12.
   - Scope: Medium.
 
@@ -3912,7 +3912,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 - [x] Task 11: Filter models by price, modality and context, from the catalog's own metadata.
   - Acceptance: models carry the prices, context windows and modalities their provider published, normalised to one unit; every filter is offered only where the provider published the field it filters on; and an absent field is never read as a zero.
   - Verify: `Model` gains `inputModalities`, `outputModalities` and `pricing`. OpenRouter supplies `context_length`, `architecture.input_modalities` and `pricing.prompt`/`completion` — which its adapter already read for its own free and text-output checks and then discarded — and OpenCode Console supplies `limit.context`, `modalities` and `cost`. The two quote in different units, per-token strings against per-1M numbers, so both are converted to per-1M at the edge with separate converters; guessing the unit would render a price a million times out. Measured live: OpenRouter 452 of 458 priced, 458 with context and modalities, 21 free, 288 accepting image; Console 77 of 77 on all three, 8 free, 64 accepting image. Metadata is captured during discovery, so a save or a models refresh costs no extra provider request, and it is stored compactly and validated on read. In the browser the filters narrow correctly — 8 free, 43 at 1M context, 64 accepting image, all matching the independent SDK measurement — and on Cline, which publishes nothing, the price, modality and context filters are absent, no badges appear, and search, result and sort remain. Two bugs the tests caught: `Number('')` is 0, so an empty price string read as free; and the slowest-first sort put untested models at the top, which the pre-existing rule had deliberately avoided.
-  - Files: `packages/omnihilbras-sdk/src/pricing.ts`, `modelFilters.ts`, `types.ts`, `adapters/openrouter.ts`, `adapters/opencode-console.ts`, `test/pricing.test.js`, `test/model-filters.test.js`, `apps/gateway/src/connections.ts`, `service.ts`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, `package.json`, docs.
+  - Files: `Kernel/SDK/src/pricing.ts`, `modelFilters.ts`, `types.ts`, `adapters/openrouter.ts`, `adapters/opencode-console.ts`, `test/pricing.test.js`, `test/model-filters.test.js`, `Kernel/API/src/connections.ts`, `service.ts`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, `package.json`, docs.
   - Depends on: Task 10m.
   - Scope: Medium.
 
@@ -3926,42 +3926,42 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 - [x] Task 10l: Stop discarding the provider's explanation, and stop treating a 403 as an auth failure.
   - Acceptance: a refusal names the provider's reason on every provider, and a refused request cannot eject a connection that is otherwise healthy.
   - Verify: two defects with one cause visible between them. First, the transport cancelled the error body unread and passed `undefined` to the classifier, so `providerErrorDetail` never had anything to work with and every refusal on every provider arrived with no reason — the body is now read on both the request and stream paths, bounded to 64 KB and JSON-parsed when it is JSON. Second, a 403 mapped to `AUTHENTICATION_FAILED`, which is a terminal route code, so one refused free model ejected the connection and took seventy working models with it; only a 401 is an auth failure on status alone, and Cline and OpenRouter already raise it deliberately. Measured live on `/inference/openai/v1` with a Console session: refused model now reports "OpenCode's free tier can only be used from within OpenCode", the following request on the same connection answers 200, and the pattern repeats. The dashboard tooltip carries the provider's words, taken from `providerMessage`, which is only sent to a trusted local dashboard origin. Seven tests cover the status mapping, and the body-extraction case fails against the old behaviour.
-  - Files: `packages/omnihilbras-sdk/src/transport.ts`, `test/status-mapping.test.js`, `src/lib/gatewayClient.ts`, docs.
+  - Files: `Kernel/SDK/src/transport.ts`, `test/status-mapping.test.js`, `src/lib/gatewayClient.ts`, docs.
   - Depends on: Task 10k.
   - Scope: Medium.
 
 - [x] Task 10k: Send `x-org-id` to the config endpoint, un-double the Anthropic lane, and add a model re-scan.
   - Acceptance: the Console config is read with the header it demands, a credential without an org recovers on its own, the Claude lane reaches the endpoint, and a connection saved with no models can be repaired without signing in again.
   - Verify: the connection saved with 0 models because `GET /api/config` answered `400 {"code":"org_required","message":"x-org-id is required"}` — the config call wants `x-org-id` while inference wants `x-opencode-org-id`. Measured: no header 400, `x-org-id` 200 with 77 models, `x-opencode-org-id` 400. The adapter now looks the org up from `/api/orgs` when the credential has none, so a credential saved before the org was captured recovers instead of failing forever; the stored connection went 0 to 77 models. The Anthropic lane was a second doubled path: `AnthropicAdapter` appends `v1/messages` to a base already ending in `/v1`, so Claude asked for `/v1/v1/messages` and got 404; corrected it now answers 402 Insufficient account funds, which is the endpoint working. `POST /v1/connections/:id/models/refresh` re-reads a saved catalog and keeps custom models. Also corrects a v0.9.2 claim: the config issues an `org_` id matching the orgs list, not a `wrk_` one, and the `403 Workspace access denied` measurement that suggested otherwise came from an id invented by swapping prefixes onto a real value.
-  - Files: `packages/omnihilbras-sdk/src/adapters/opencode-console.ts`, `test/opencode-console.test.js`, `apps/gateway/src/opencodeConsole.ts`, `service.ts`, `server.ts`, docs.
+  - Files: `Kernel/SDK/src/adapters/opencode-console.ts`, `test/opencode-console.test.js`, `Kernel/API/src/opencodeConsole.ts`, `service.ts`, `server.ts`, docs.
   - Depends on: Task 10j.
   - Scope: Medium.
 
 - [x] Task 10j: Claim the device exchange, and start the sign-in once per dialog.
   - Acceptance: two overlapping polls cannot spend the same single-use device code, and a re-render cannot mint a second one. Both are proven by tests that fail without the fix.
   - Verify: a device code dies the moment the token is issued, and the dashboard polls every second while saving a connection takes longer, so two polls overlap. The losing poll was told `The device code is invalid` and overwrote a success — matching the reported symptom exactly, where the Console showed "Device authorized" and the dashboard showed "The device code is invalid". The exchange is now claimed before the Console is called and a pending claim is released so the next poll may retry. Separately, `onConnected` and `onClose` are inline arrows, so their identity changes each render, which rebuilt the start callback and requested a fresh device code on every render while the browser was sent to whichever was minted last. A ref guard makes it start once. Four service-level tests drive the real method against a stubbed Console that treats the grant as dead after use; the overlapping-poll test was confirmed to fail with the claim removed and pass with it restored. In the browser, twelve forced re-renders produce exactly one start call.
-  - Files: `apps/gateway/src/service.ts`, `apps/gateway/test/opencode-console-race.test.js`, `src/components/OauthConnectDialog.tsx`, docs.
+  - Files: `Kernel/API/src/service.ts`, `Kernel/API/test/opencode-console-race.test.js`, `src/components/OauthConnectDialog.tsx`, docs.
   - Depends on: Task 10i.
   - Scope: Small.
 
 - [x] Task 10i: Take the org id from the Console config, and stop a catalog read failing a sign-in.
   - Acceptance: the org id sent with inference requests is the one the Console's own config hands out, a sign-in the user approved is not thrown away because the catalog would not read, and a failure names the provider's reason instead of a generic refusal.
   - Verify: the config issues a `wrk_` workspace id and the orgs list carries `org_` ids, and the live lane answers `403 Workspace access denied` for the `org_` form while `wrk_` and an absent header both answer `200`. `/api/orgs` is also `401` for an API key, so it is read for the org name only. Separately, the transport's generic 4xx message was being shown instead of the provider's words, so a real reason never reached the user; the provider detail is now surfaced the way the Cline sign-in already does. Model discovery is tolerated for this provider only, so a session the user just approved is kept and the reason is carried on the sign-in status. 14 gateway tests, including one that pins the workspace-id-over-orgs-list ordering and one that an unreadable config degrades to the orgs list rather than losing the org.
-  - Files: `apps/gateway/src/opencodeConsole.ts`, `apps/gateway/test/opencode-console.test.js`, `apps/gateway/src/service.ts`, `src/components/OauthConnectDialog.tsx`, docs.
+  - Files: `Kernel/API/src/opencodeConsole.ts`, `Kernel/API/test/opencode-console.test.js`, `Kernel/API/src/service.ts`, `src/components/OauthConnectDialog.tsx`, docs.
   - Depends on: Task 10h.
   - Scope: Small.
 
 - [x] Task 10h: Fix the Console verification URL, which pointed at the API host.
   - Acceptance: the device page opens on the Console web host, and the dashboard says what to expect when the browser has no Console session.
   - Verify: the Console serves its API from `console.opencode.ai` and its pages from `opencode.ai`. `verification_uri` is relative, so joining it to the API host produced `/console/console/device`, which renders a blank page and presents as a sign-in that did nothing. Reproduced live: the doubled path was reached, the corrected URL is not, and an unauthenticated visit correctly redirects to `/console/login?next=/console/device?user_code=…&reason=device` with the device query preserved. 12 gateway tests cover the host split, the leading-slash case, a missing device code, pending-as-400, `slow_down`, a refusal in the Console's words, the org the client would pick, a token with no account lookup, a token with no access token, single-claim sessions, expiry, and a malformed session id.
-  - Files: `packages/omnihilbras-sdk/src/adapters/opencode-console.ts`, `apps/gateway/src/opencodeConsole.ts`, `apps/gateway/test/opencode-console.test.js`, `src/components/OauthConnectDialog.tsx`, docs.
+  - Files: `Kernel/SDK/src/adapters/opencode-console.ts`, `Kernel/API/src/opencodeConsole.ts`, `Kernel/API/test/opencode-console.test.js`, `src/components/OauthConnectDialog.tsx`, docs.
   - Depends on: Task 10g.
   - Scope: Small.
 
 - [x] Task 10g: Build the OpenCode Console device-code sign-in, and light up the card.
   - Acceptance: the card signs in through the vendor's own device flow, stores the session per connection, renews it, and serves the catalog from the lanes the server names. Gemini is refused by name.
   - Verify: `POST /v1/oauth/opencode-console/start` returns 201 with a session, a 9-character user code, and an absolute verification URL — the Console returns a relative path, so it is joined to the server. `GET .../session/:id` reports `pending` for an unapproved code, 404 for an unknown session, 400 for a malformed id. In the dashboard the dialog shows the code, links to the code page, and falls back to the manual link when the tab is blocked. 15 new SDK tests cover lane dispatch, the Gemini refusal, renewal with the org preserved, the config-sourced org id, per-session lane caching, and the prefix-stripping of a vendor-prefixed id. Two bugs were found by those tests: a request renewed the session twice because the credential is resolved twice, and a config-supplied org id never reached the header because the adapter read only the credential.
-  - Files: `packages/omnihilbras-sdk/src/adapters/opencode-console.ts`, `types.ts`, `test/opencode-console.test.js`, `apps/gateway/src/opencodeConsole.ts`, `service.ts`, `server.ts`, `src/lib/gatewayClient.ts`, `src/components/OauthConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, docs.
+  - Files: `Kernel/SDK/src/adapters/opencode-console.ts`, `types.ts`, `test/opencode-console.test.js`, `Kernel/API/src/opencodeConsole.ts`, `service.ts`, `server.ts`, `src/lib/gatewayClient.ts`, `src/components/OauthConnectDialog.tsx`, `src/pages/ProviderDetailPage.tsx`, docs.
   - Depends on: Task 10f.
   - Scope: Medium.
 
@@ -4003,14 +4003,14 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 - [x] Task 10a: Route OpenCode Zen per model to the lane Zen publishes for it.
   - Acceptance: `ZenAdapter` picks chat, responses, or messages per model from the published table, translating each wire format, and refuses the two unimplemented lanes by name. The messages lane authenticates with `x-api-key`, not a bearer token.
   - Verify: 11 new SDK tests cover lane selection including the `qwen3.8-max` exception, both wire formats in and out, error envelopes, the streaming refusal, and a validation that spends no request. Live: `claude-sonnet-5` went from 401 to 402 when the header was corrected, which is what proves the fix; `space-bunny-free` answers through the new adapter; paid models answer 402 (no credits) and restricted free models 403.
-  - Files: `packages/omnihilbras-sdk/src/adapters/zen.ts`, `test/zen.test.js`, `src/index.ts`, `apps/gateway/src/service.ts`, docs.
+  - Files: `Kernel/SDK/src/adapters/zen.ts`, `test/zen.test.js`, `src/index.ts`, `Kernel/API/src/service.ts`, docs.
   - Depends on: Task 9z.
   - Scope: Medium.
 
 - [x] Task 9z: Match 9router's model probe, and soft-pass a reasoning-only reply.
   - Acceptance: the probe budget is 1024 tokens with a `hi` prompt, and a response whose content is empty but which carries reasoning under any of the four common field names is a pass labelled `reasoning only` rather than a failure. A genuinely empty response still fails, and a truncated one is retried once at 2x.
   - Verify: measured on the OpenRouter free tier. `inclusionai/ling-3.0-flash-fin`, `liquid/lfm-2.5-2.6b` and `nvidia/nemotron-3.5-lightning` all failed or returned nothing at a 96-token budget and answer cleanly at 1024. `nemotron-3-nano-omni-30b-a3b-reasoning` answers 4 of 5, and its one failure now reports "the provider returned no choices" instead of a bare "invalid response".
-  - Files: `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, `packages/omnihilbras-sdk/src/adapters/openai-compatible.ts`, docs.
+  - Files: `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, `Kernel/SDK/src/adapters/openai-compatible.ts`, docs.
   - Depends on: Task 9y.
   - Scope: Small.
 
@@ -4024,14 +4024,14 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 - [x] Task 9x: Say why a Cline call failed.
   - Acceptance: a Cline health check returns a reason instead of a bare `unavailable`, and a failed token renewal is reported as an expired session rather than a raw 4xx.
   - Verify: 3 new SDK tests. Live: a Cline health check that previously reported only `unavailable` now reads "Cline rejected the token. Sign in again."
-  - Files: `packages/omnihilbras-sdk/src/adapters/cline.ts`, `test/cline.test.js`, docs.
+  - Files: `Kernel/SDK/src/adapters/cline.ts`, `test/cline.test.js`, docs.
   - Depends on: Task 9w.
   - Scope: Small.
 
 - [x] Task 9w: Address credentials by connection, so a provider can hold several.
   - Acceptance: `PUT /v1/connections/:providerId` updates that provider's existing connection, and passing an `id` adds another alongside it. Each connection's credential is stored and read under its own connection id, never a provider id.
   - Verify: 3 new store tests cover two connections of one provider holding distinct credentials, an id-less save reusing the existing connection, and deleting one connection leaving the other's credential intact. Live against OpenCode: two connections (`opencode`, `opencode-backup`) coexist with 82 models each and appear separately in `/v1/routing`; the pre-existing OpenRouter and Cline connections still resolve their credentials after the vault rekey.
-  - Files: `apps/gateway/src/connections.ts`, `src/service.ts`, `src/server.ts`, `test/connections.test.js`, docs.
+  - Files: `Kernel/API/src/connections.ts`, `src/service.ts`, `src/server.ts`, `test/connections.test.js`, docs.
   - Depends on: Task 9v.
   - Scope: Medium.
 
@@ -4052,7 +4052,7 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 - [x] Task 9t: Match Cline's client identification and chat envelope.
   - Acceptance: Cline requests carry the same client-identification header set Cline's own clients send, including `HTTP-Referer: https://cline.bot`, and a non-streaming chat response wrapped in `{"success":true,"data":{…}}` is unwrapped while `{"success":false,…}` is raised with Cline's own reason.
   - Verify: 6 new SDK tests cover the envelope shapes, a chat completion read through the envelope, the full header set, and that a caller-supplied header cannot override the token. Confirmed live that the referer alone changes Cline's answer, so the header set is not cosmetic.
-  - Files: `packages/omnihilbras-sdk/src/adapters/cline.ts`, `src/adapters/openai-compatible.ts`, `test/cline.test.js`, docs.
+  - Files: `Kernel/SDK/src/adapters/cline.ts`, `src/adapters/openai-compatible.ts`, `test/cline.test.js`, docs.
   - Depends on: Task 9s.
   - Scope: Small.
 
@@ -4073,28 +4073,28 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 - [x] Task 9q: Search models on the providers page, and fix what the search exposed.
   - Acceptance: the providers page search matches provider names and imported model IDs, including the part after a vendor prefix, and reports results grouped by provider with an honest serving state. Health is recorded from the reported status rather than the absence of a throw, and a provider's own wording reaches the operator through the dashboard only.
   - Verify: 1 new gateway test asserts an adapter reporting `unavailable` is recorded as a failure. In the browser against the live Cline account, `claude` reports 3 models across 1 provider, `claude-sonnet` reports 9 across 2, a nonsense query shows the empty state, the clear control resets, and the Cline badge reads `serving`.
-  - Files: `src/pages/ProvidersPage.tsx`, `apps/gateway/src/service.ts`, `src/server.ts`, `test/routing.test.js`, docs.
+  - Files: `src/pages/ProvidersPage.tsx`, `Kernel/API/src/service.ts`, `src/server.ts`, `test/routing.test.js`, docs.
   - Depends on: Task 9p.
   - Scope: Medium.
 
 - [x] Task 9p: Return a whole connection from sign-in, and load any provider's connection.
   - Acceptance: a connected sign-in status carries the complete connection record, and a provider page loads its saved connection for every provider rather than only the first one that shipped with a flow.
   - Verify: a test asserts every connection field and every `resilience` field survives the session status. In the browser with a real Cline account connected, the page reports 1 active connection and 458 models with 0 console errors, where before it blanked on connect and reported no connection on load.
-  - Files: `apps/gateway/src/oauth.ts`, `src/service.ts`, `test/oauth-routes.test.js`, `src/components/OauthConnectDialog.tsx`, `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, docs.
+  - Files: `Kernel/API/src/oauth.ts`, `src/service.ts`, `test/oauth-routes.test.js`, `src/components/OauthConnectDialog.tsx`, `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, docs.
   - Depends on: Task 9o.
   - Scope: Small.
 
 - [x] Task 9o: Fix the Cline API base URL, expiry units, and swallowed errors.
   - Acceptance: the adapter targets `https://api.cline.bot/api/v1`, an expiry reported in epoch seconds is not read as 1970, and a provider 4xx keeps a short token-free excerpt of what the provider said so the callback page can name the reason.
   - Verify: tests pin every Cline endpoint under `/api/v1`, the resolved `models` and `chat/completions` URLs, the seconds/milliseconds boundary, and that token-shaped strings are stripped from an error excerpt. Confirmed live: `/api/v1/models` answers 200 with the full catalog and no valid token, while `/models` answers 401 with Cline's "re-authenticate" message, which is the failure this fixes.
-  - Files: `packages/omnihilbras-sdk/src/adapters/cline.ts`, `src/transport.ts`, `test/cline.test.js`, `apps/gateway/src/oauth.ts`, `src/service.ts`, docs.
+  - Files: `Kernel/SDK/src/adapters/cline.ts`, `src/transport.ts`, `test/cline.test.js`, `Kernel/API/src/oauth.ts`, `src/service.ts`, docs.
   - Depends on: Task 9n.
   - Scope: Small.
 
 - [x] Task 9n: Correlate the sign-in by redirect path instead of `state`.
   - Acceptance: a callback that carries no `state` at all still completes the sign-in, because the session id travels in the path of `redirect_uri`, which the provider must honour verbatim. `state` is still minted, sent, and checked when it comes back. A session is claimed exactly once, a wrong `state` spends nothing, and a callback identifying no session is refused with a message that points at the paste box.
   - Verify: 33 gateway tests including the regression that a state-less callback completes, a crossed state exchanges nothing and can be retried, a replayed path is refused even with the right state, and the `redirect_uri` sent to the token endpoint equals the one the authorize request carried. Confirmed live against the gateway with a state-less callback, which now reports Cline's own rejection instead of an unknown-session error.
-  - Files: `apps/gateway/src/oauth.ts`, `src/service.ts`, `src/server.ts`, `test/cline-sessions.test.js`, `test/oauth-routes.test.js`, docs.
+  - Files: `Kernel/API/src/oauth.ts`, `src/service.ts`, `src/server.ts`, `test/cline-sessions.test.js`, `test/oauth-routes.test.js`, docs.
   - Depends on: Task 9m.
   - Scope: Small.
 
@@ -4107,14 +4107,14 @@ mutation was an edit *inside* a block added in the same session. Mutate `dist/`,
 
 - [x] Task 10: Define cloud integration boundaries.
   - Acceptance: auth context, tenant context, remote `SecretStore`, and deployment configuration are represented by interfaces without implementing cloud infrastructure.
-  - Verify: typecheck and architecture review. Closed by audit rather than authorship — `DeploymentConfig`, `TenantContext`, `AuthContext` and `ConnectionSecretStore` all already existed in `apps/gateway/src/runtime.ts` from Phase 5 and are read on real request paths (`server.ts:82` assigns the tenant into every `AuthContext`). The audit found the fifth type there, `GatewayRuntime`, declared and never read by anything: `GatewayService` takes deployment and secrets as separate constructor arguments, so no constructor accepted the bundle. Removed. `apps/gateway/test/runtime.test.js` now requires every exported type in the boundary file to be read by another source file, and four mutations are caught — including the one where the exempted tenant reader stops reading it.
-  - Files: `apps/gateway/src/runtime.ts`, `apps/gateway/test/runtime.test.js`.
+  - Verify: typecheck and architecture review. Closed by audit rather than authorship — `DeploymentConfig`, `TenantContext`, `AuthContext` and `ConnectionSecretStore` all already existed in `Kernel/API/src/runtime.ts` from Phase 5 and are read on real request paths (`server.ts:82` assigns the tenant into every `AuthContext`). The audit found the fifth type there, `GatewayRuntime`, declared and never read by anything: `GatewayService` takes deployment and secrets as separate constructor arguments, so no constructor accepted the bundle. Removed. `Kernel/API/test/runtime.test.js` now requires every exported type in the boundary file to be read by another source file, and four mutations are caught — including the one where the exempted tenant reader stops reading it.
+  - Files: `Kernel/API/src/runtime.ts`, `Kernel/API/test/runtime.test.js`.
   - Depends on: Task 8.
   - Scope: Small.
 - [x] Task 11: `/v1/embeddings`, the first capability 9router has and this gateway did not.
   - Acceptance: `POST /v1/embeddings` returns OpenAI's shape; a provider with no embeddings endpoint returns `NOT_SUPPORTED` naming it rather than an empty vector list; an unauthenticated request is refused; `dimensions` is measured from the vector and omitted when the provider reports nothing; usage records one entry per request with `success` / `failure` / `cancelled` distinct; every new guard mutation-proven.
   - Verify: 19 gateway tests + 15 SDK tests. Five product mutations caught — `/v1/embeddings` dropped from `isPublicLlmRoute` (7 tests red), the implementation check dropped, `NOT_SUPPORTED` replaced by an empty vector list, a failure recorded as success, and unmeasured dimensions zero-filled — plus a guarded-but-unserved path (9 red) proving the reverse direction of the route-set guard. Full `pnpm verify` green.
-  - Files: `packages/omnihilbras-sdk/src/types.ts`, `src/adapters/openai-compatible.ts`, `src/adapters/openai.ts`, `test/embeddings.test.js`, `apps/gateway/src/request-executor.ts`, `src/service.ts`, `src/routes/inference.ts`, `test/embeddings-route.test.js`, `docs/SPEC-SDK.md`, `docs/architecture/embeddings-plan.md`.
+  - Files: `Kernel/SDK/src/types.ts`, `src/adapters/openai-compatible.ts`, `src/adapters/openai.ts`, `test/embeddings.test.js`, `Kernel/API/src/request-executor.ts`, `src/service.ts`, `src/routes/inference.ts`, `test/embeddings-route.test.js`, `docs/SPEC-SDK.md`, `docs/architecture/embeddings-plan.md`.
   - Depends on: Task 10.
   - Scope: Medium.
 
@@ -4156,7 +4156,7 @@ the session-cookie route was chosen with the trade stated, so it ships with `ris
 
 ### What was built
 
-`packages/omnihilbras-sdk/src/adapters/tokenharbor-web.ts`, plus a gateway `.onDemand`
+`Kernel/SDK/src/adapters/tokenharbor-web.ts`, plus a gateway `.onDemand`
 registration, `checkTokenHarborWeb` / `connectTokenHarborWeb`, two `/v1/web-cookie/tokenharbor/*`
 routes, a second catalog card and a `webSessionProviders` descriptor. The adapter consumes
 `chunk` and `thinking` separately (a thinking model must not answer with its reasoning), requires
@@ -4442,8 +4442,8 @@ provider bug and is not one.
 ### Measured on a rebuilt probe gateway (:8788, `requireApiKey: false`)
 
 The first probe run reported `failPending is not a function`. That was a stale `dist/` — building
-`@hilbras/omnihilbras-sdk` does not build `apps/gateway`, which is a separate package and needs
-`cd apps/gateway && pnpm build`. After rebuilding:
+`@hilbras/omnihilbras-sdk` does not build `Kernel/API`, which is a separate package and needs
+`cd Kernel/API && pnpm build`. After rebuilding:
 
 | callback | before | after |
 | --- | --- | --- |
@@ -4475,12 +4475,12 @@ not from the real flow, which calls `registerKiroClient()` for a dynamic client 
 
 Every guard was broken on purpose, watched fail, and restored:
 
-- `packages/omnihilbras-sdk/test/cline.test.js` (5 new, 31 total) — against a **real blob captured
+- `Kernel/SDK/tests/cline.test.js` (5 new, 31 total) — against a **real blob captured
   live from `api.cline.bot`**, not a hand-written fixture.
-- `apps/gateway/test/cline-sessions.test.js` (4 new, 14 total) — same constants, callback on **port
+- `Kernel/API/test/cline-sessions.test.js` (4 new, 14 total) — same constants, callback on **port
   8788** to match the captured blob. The first draft used 8787 and failed, which is the correct
   outcome for a mismatched callback.
-- `apps/gateway/test/sign-in-coordinator.test.js` — **source-scanning, not behavioural.** The
+- `Kernel/API/test/sign-in-coordinator.test.js` — **source-scanning, not behavioural.** The
   coordinator receives `takeDiscoveryNote` as a callback and cannot see whether it clears, so no
   behavioural test can catch this one; it asserts every sign-in body clears `this.lastDiscoveryNote`.
 - `tests/dashboard-truthfulness.test.js` — a device-code sign-in goes to the provider that asked for
@@ -4528,7 +4528,7 @@ failure.
 
 ### The cause
 
-`MANAGEMENT_PREFIXES` in `apps/gateway/src/server.ts` covers `/v1/oauth` — correctly, since that prefix holds
+`MANAGEMENT_PREFIXES` in `Kernel/API/src/server.ts` covers `/v1/oauth` — correctly, since that prefix holds
 `/v1/keys`-shaped routes. The provider callback lives under it, and a callback is the **one request in the
 product that cannot present an `Authorization` header**: it is a top-level navigation the provider sends the
 browser to. Enforcement therefore did not secure it, it made it unreachable — and it did so *after* the
@@ -4559,7 +4559,7 @@ rather than left implicit.
 
 ### Verify
 
-`apps/gateway/test/admin-gate.test.js` (5 new, 11 total):
+`Kernel/API/test/admin-gate.test.js` (5 new, 11 total):
 
 - the callback is reachable with enforcement on and no key, for **both** providers, and never renders the
   gate's message;
@@ -5026,7 +5026,7 @@ dynamic. Measured: `dashboard.html` loads 1034 KB over 3 chunks and does **not**
 Two commits, both from one symptom: the dashboard answered *"The gateway did not answer. Start it with
 `pnpm dev:gateway` and refresh."*, and the request behind it was a 401.
 
-**The cause.** `apps/gateway/test/signal.test.js` spawns a real `dist/main.js` to test signal handling. It
+**The cause.** `Kernel/API/test/signal.test.js` spawns a real `dist/main.js` to test signal handling. It
 redirected `OMNIHILBRAS_DATA_DIR` to a temp directory but not `XDG_CONFIG_HOME`, and the **dashboard token is
 written under `XDG_CONFIG_HOME`** (`secure-store.ts`'s `defaultStateDirectory`), not under the data dir. So the
 spawned gateway issued a token into the developer's real `~/.config/omnihilbras`, and the gateway they were
@@ -5150,9 +5150,9 @@ Ported from OmniRoute's `open-sse/executors/gemini-web.ts`, including the traps 
 
 ### Where each half lives
 
-`packages/omnihilbras-sdk/src/providers/gemini-web/` owns everything testable without a browser: the cookie
+`Kernel/SDK/gemini-web/` owns everything testable without a browser: the cookie
 normaliser (bare value, header, JSON export), rotation merge, the `wrb.fr` parse, the model table, the prompt
-building, and the refusals. `apps/gateway/src/geminiWeb.ts` owns the browser, behind a `GeminiWebDriver`
+building, and the refusals. `Kernel/API/src/geminiWeb.ts` owns the browser, behind a `GeminiWebDriver`
 interface the SDK defines — the same boundary `chatgpt-web` uses, so the SDK never depends on Playwright.
 
 A forced `tool_choice` and an unknown model are refused **before the browser launches**, and a missing Chromium
@@ -5253,13 +5253,13 @@ literals.
 
 Rather than restate the numbers, both columns are now **recomputed** by `tests/documentation-counts.test.js`,
 and the second column's rule is stated where a reader can check it: how many of the ids under
-`packages/omnihilbras-sdk/src/providers/` occur as a whole word inside a string literal, comments stripped —
+`Kernel/SDK/` occur as a whole word inside a string literal, comments stripped —
 the definition `shared-execution-has-no-provider-names.test.js` applies, generalised from "is this zero" to
 "how many". Four plants, all caught, including the original defect shape.
 
 The file was wrong about more than numbers. The SDK half of the Layers diagram drew a flat `src/` with an
 `adapters/` directory nine releases after the restructure, filed the SDK's own `zen/zen-free-tier.ts` under
-`apps/gateway/src/`, and listed a gateway `transport.ts` that has never existed — the gateway takes the
+`Kernel/API/src/`, and listed a gateway `transport.ts` that has never existed — the gateway takes the
 SDK's `HttpTransport` interface. A second guard asserts every path the diagram names is where it says.
 
 And its central narrative had expired: "The Core has no lifecycle concept at all" rested on
@@ -5270,7 +5270,7 @@ not taken.
 
 ### `AGENTS.md` contradicted the code in two places
 
-- Line 110 sent provider wire formats to `packages/omnihilbras-sdk/src/adapters/`, **a directory that does
+- Line 110 sent provider wire formats to `Kernel/SDK/src/adapters/`, **a directory that does
   not exist**. A contributor following the file's own instruction wrote into nothing.
 - The `withoutCard` paragraph claimed "the three providers the dialog can connect that have no card
   (`openai`, `anthropic`, `google`)"; that list has been **empty since 1.43.0** and all three are cards. It
@@ -5342,7 +5342,7 @@ They disagreed twice, silently:
   wrote one and reopened the store: `Encrypted credential payload contains an invalid credential.`
 - **An OAuth credential kept three of its nine declared fields.** `oauthClientId`/`oauthClientSecret` were
   discarded — **at save time**, not on reload: measured, `oauthClientId` read back `undefined` in the same
-  process. `apps/gateway/src/kiro.ts:144` stores that pair and `providers/kiro/index.ts:566` refuses to
+  process. `Kernel/API/src/kiro.ts:144` stores that pair and `providers/kiro/index.ts:566` refuses to
   renew without it (*"This Kiro session cannot be renewed. Sign in again."*), so a Kiro session could not be
   renewed from the moment it was saved — and the user would be told to sign in again, every time.
 
@@ -5388,7 +5388,7 @@ Two changes, and the second is the one that actually removes the wall:
   and a half-configured pair is refused at startup rather than failing at the click.
 
 The registered redirect is on port **1455, not the gateway's own port**, so a browser redirected there
-reaches nothing unless something is listening. `apps/gateway/src/codexCallbackListener.ts` opens that
+reaches nothing unless something is listening. `Kernel/API/src/codexCallbackListener.ts` opens that
 loopback port when a sign-in starts and closes it the moment the callback lands — the same lifecycle the
 reference project uses — so a fixed port is never held for the gateway's lifetime, and a busy port is
 reported rather than silently ignored. State correlation and the one-time claim are identical on either
@@ -5432,3 +5432,99 @@ repository. Cline's adapter says outright that none exists; Kimi, Zen, Claude Co
 API-key providers reveal credits only as a `402`, which is not a reading. Codex has one in 9router's
 registry that nothing here references and that I cannot call. Every other provider shows "does not publish
 an allowance" — which is the true answer, and the one the panel is built to give.
+
+## Release 5 (1.90.0) — four more OAuth providers: Qoder, Kilo Code, MiniMax Code (CN + Global)
+
+Four coding-agent subscriptions added to the **OAuth Providers** group, all device flows, ported from the
+`.old2` reference tree with the wire protocol checked against its executors rather than assumed:
+
+- **Kilo Code** (`kilocode`) — Kilo's own device-auth flow. It answers `202`/`403`/`410` for
+  pending/denied/expired, not the RFC 8628 error codes, so the HTTP status decides the outcome. Chat is
+  OpenAI-format against `api.kilo.ai/api/openrouter/chat/completions`; the token is long-lived with no
+  refresh. The org id from `/api/profile` rides along as `X-Kilocode-OrganizationID`.
+- **MiniMax Code** (`minimax-code` China, `minimax-code-global`) — RFC 8628 device code with PKCE S256
+  (`client_id=mcode-public`), MiniMax's own `{status}` envelope on HTTP 200, and when `device_code` is
+  absent the `user_code` is polled instead. Chat is **Claude Messages format** against
+  `agent.minimax.{cn,io}/mavis/api/v1/llm/v1/messages`. Refresh tokens are single-use, so a renewal writes
+  back through `onTokensRefreshed`.
+- **Qoder** (`qoder`) — a custom device flow with a **locally-minted** PKCE verifier, nonce, and machine id
+  (no server-issued device code). Chat is COSY-signed: an encoded body (base64 → thirds-rearranged →
+  custom-alphabet-substituted), AES-128-CBC-encrypted credentials, an RSA-encrypted AES key, and an MD5
+  signature over five newline-joined lines, producing nineteen headers.
+
+**Why the COSY signer lives in the gateway, not the SDK.** AES-CBC, RSA PKCS#1 v1.5 encryption, and MD5 are
+all outside the Web Crypto API and need `node:crypto`; the SDK barrel is imported by the dashboard, so a
+`node:crypto` import reachable from it is a blank page — the 1.42.0 failure `sdk-browser-safety.test.js`
+guards. The SDK's Qoder adapter takes the signer as an injected `signRequest`, and `qoderEncodeBody` is
+reimplemented without `Buffer` so it too is browser-safe. `Kernel/SDK/tests/qoder-encoding.test.js`
+pins the encode permutation; `Kernel/API/test/qoder-cosy.test.js` pins the header set and signature shape.
+
+**The new adapter each drew a "no fixture" reason, not a fabricated capture** — a device flow needs an
+approved real account, so `fixture-coverage.test.js` and `provider-contract.test.js` each got a stated
+reason rather than a screenshot pretending to be a capture.
+
+**Also fixed:** `kimi-code` had a working gateway route since 1.71.0 but was never listed in the dashboard's
+`oauthProvidersWithFlow`, so its sign-in button was dead. It is in the set now, with the four new ids.
+
+Counts moved in step (the tests that assert them, not the prose): cards 33 → 37, OAuth routes 6 → 10,
+cards claiming OAuth 7 → 11, SDK adapter files 21 → 26 over 22 folders, capture-guard adapters 17 → 20. The
+architecture doc's measured-state table was re-measured (`service.ts` 1959 → 2161 lines, `oauth.ts`
+490 → 570).
+
+### 1.90.0 sign-in fix — two wire details were wrong on the first port
+
+Found by probing the live endpoints rather than trusting the port, after Kimi signed in and the other
+three did not:
+
+- **MiniMax** was polled with `user_code` on every request, because `beginSignIn` fell back to it and the
+  poll preferred `user_code` when present. The live token endpoint refuses that outright:
+
+  ```
+  POST /oauth2/token  device_code=…  -> 400 {"error":"authorization_pending"}          (waiting)
+  POST /oauth2/token  user_code=…    -> 400 {"error":"invalid_request","error_description":"device_code and code_verifier are required"}
+  ```
+
+  Fixed: the poll sends `device_code` unless the variant that issued none is detected (`pollByUserCode`).
+- **Kilo Code** returns three ids and they are **not** interchangeable. Measured on one fresh grant:
+
+  ```
+  GET …/codes/<code>         -> 202 {"status":"pending"}   ← the one that polls
+  GET …/codes/<device_code>  -> 410 {"status":"expired"}
+  GET …/codes/<user_code>    -> 410 {"status":"expired"}
+  ```
+
+  The user-facing code is `user_code` (`CR62-2LDL`); the poll key is the opaque `code`. The first port
+  showed the wrong string and my first correction swapped the poll key — both wrong, both fixed, and a
+  test now drives the poll and asserts it presents `code` while the card shows `user_code`.
+
+Both fixes are asserted in `Kernel/API/test/new-oauth-flows.test.js` (the Kilo poll key, and the
+MiniMax poll body carrying `device_code` and `code_verifier`) and verified live against the two providers.
+
+### 1.90.0 completion — the sign-in notice went live under a nonce, not before
+
+The callback page's sign-in notice (it posts `{ type, provider, ok, message, sessionId }` to the tab
+that opened it) was first written inert: the page is served with CSP `default-src 'none'`, which blocks
+every inline script, so the notice could never have run — and `oauth-routes.test.js` still asserted the
+page carried no script at all, which it had every right to, because the origin also holds the local API
+keys. Three things made it real:
+
+- **`sendHtml` takes a per-response nonce** and adds `script-src 'nonce-…'` to that page's CSP. The
+  nonce is minted fresh on every render (`randomBytes`), handed to both the header and the
+  `<script nonce>` tag, so the notice is exactly the script the CSP admits and a script injected beside
+  it is still refused. The old rule — no attacker-reachable execution on the key-holding origin — now
+  holds by the nonce rather than by the absence of a tag.
+- **The dialog trusts the session id, not the origin.** `OauthConnectDialog` listens only for a payload
+  naming the session it started (`startedSessionRef`). The session id is minted per sign-in and rides
+  only on the gateway's own callback URL, so a spoofed payload from another tab is shape-correct and
+  still inert. An origin check was the first idea and is the wrong one: in development the dashboard
+  reaches the gateway through the Vite proxy, so a legitimate post arrives from an origin the
+  dashboard's config does not name, and Claude Code's and Codex's starts hand back no gateway URL to
+  derive one from.
+- **The security test now asserts the nonce**, not silence: the CSP must name a fresh nonce, the page
+  must carry exactly one script, and that tag must carry the nonce the header names — which also fails
+  if a nonce ever becomes a constant. `clinepass-catalog.test.js` pins the session id reaching the page.
+
+`Kernel/API/test/spec-success-criteria.mjs` was updated off the dead paths at the same time — it read
+`Kernel/SDK/package.json` and `Kernel/SDK/core/types.ts`, both dissolved by the restructure. "Builds
+independently of the React app" is now measured over every provider manifest, and the normalized
+`ChatChunk` over every provider's `lib/types.ts`.

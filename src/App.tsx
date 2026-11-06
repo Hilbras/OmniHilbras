@@ -58,7 +58,7 @@ const features = [
       local inference", "Per-model rules and budgets".
 
       The router sorts connections by exactly two things — `left.priority - right.priority ||
-      left.name.localeCompare(...)` in `apps/gateway/src/routing.ts` — then filters on health, credential
+      left.name.localeCompare(...)` in `Kernel/API/src/core/routing.ts` — then filters on health, credential
       and rate limit. There is no cost, no quality, no privacy, no per-model rule and no spend budget. Every
       `budget` in the gateway is a *retry* budget, which is a different word meaning a different thing, and
       the model prices in `modelFilters.ts` are a dashboard sort comparator, not a routing input.

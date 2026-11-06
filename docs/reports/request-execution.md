@@ -7,7 +7,7 @@ Phase 4 evidence. Each item is measured against existing or new tests.
 | 4.1 Request states | covered by the attempt ledger | `execution-correctness.test.js`: every attempt has exactly one outcome |
 | 4.2 Rate-limit correctness | covered | `rate-limit-policy.test.js` (sliding window, refusal spends no budget, zero means unlimited, waits per connection); `execution-correctness.test.js` races two requests against a limit of one and gets one 200 and one 429 |
 | 4.3 Retry policy | covered | `retry-policy.test.js` (14 tests): every branch of the decision, the rate-limit hand-off, the terminal codes, stream never retries |
-| 4.3 `Retry-After` | **added** | `packages/omnihilbras-sdk/test/retry-after.test.js` (6): seconds, HTTP dates, past, negative and malformed values; a 429 carries the wait in `details.retryAfterMs`; a 503 does not |
+| 4.3 `Retry-After` | **added** | `Kernel/SDK/test/retry-after.test.js` (6): seconds, HTTP dates, past, negative and malformed values; a 429 carries the wait in `details.retryAfterMs`; a 503 does not |
 | 4.4 Hedging | covered | `hedge-policy.test.js` (13): no hedge after a win, a settle or a cancel; abandoned hedges do not record health (`execution-correctness.test.js`) |
 | 4.5 Provider health | covered | `execution-correctness.test.js`: a stream that throws after its first chunk is a failure; a cancellation is neither a success nor a failure |
 

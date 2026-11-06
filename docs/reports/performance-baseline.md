@@ -1,6 +1,6 @@
 # Performance baseline and resource limits
 
-Phase 9 evidence. Measured with `apps/gateway/bench/gateway-baseline.mjs`: the real HTTP route, a deterministic
+Phase 9 evidence. Measured with `Kernel/API/bench/gateway-baseline.mjs`: the real HTTP route, a deterministic
 in-process provider with a fixed 5 ms delay, and streams of 20 chunks. These numbers measure the gateway's own
 cost plus queuing under load. They do not measure a live provider, a real network, or a remote client.
 

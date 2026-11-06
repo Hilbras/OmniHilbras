@@ -1,0 +1,52 @@
+{
+  "name": "@omnihilbras/kernel-api",
+  "version": "1.90.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json && node dist/src/main.js",
+    "start": "node dist/src/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --test test/*.test.js"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.1",
+    "@omnihilbras/sdk-chatgpt-web": "workspace:*",
+    "@omnihilbras/sdk-claude-code": "workspace:*",
+    "@omnihilbras/sdk-clinepass": "workspace:*",
+    "@omnihilbras/sdk-codebuddy": "workspace:*",
+    "@omnihilbras/sdk-codex": "workspace:*",
+    "@omnihilbras/sdk-deepseek-web": "workspace:*",
+    "@omnihilbras/sdk-duckduckgo-web": "workspace:*",
+    "@omnihilbras/sdk-gemini": "workspace:*",
+    "@omnihilbras/sdk-gemini-web": "workspace:*",
+    "@omnihilbras/sdk-kilocode": "workspace:*",
+    "@omnihilbras/sdk-kimi-code": "workspace:*",
+    "@omnihilbras/sdk-kiro": "workspace:*",
+    "@omnihilbras/sdk-minimax-code": "workspace:*",
+    "@omnihilbras/sdk-openai": "workspace:*",
+    "@omnihilbras/sdk-opencode-console": "workspace:*",
+    "@omnihilbras/sdk-openrouter": "workspace:*",
+    "@omnihilbras/sdk-qoder": "workspace:*",
+    "@omnihilbras/sdk-qwen-web": "workspace:*",
+    "@omnihilbras/sdk-tokenharbor-web": "workspace:*",
+    "@omnihilbras/sdk-anthropic": "workspace:*",
+    "@omnihilbras/sdk-cline": "workspace:*",
+    "@omnihilbras/sdk-zen": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^5.9.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./public": {
+      "types": "./dist/src/public/index.d.ts",
+      "default": "./dist/src/public/index.js"
+    }
+  }
+}

@@ -1,0 +1,486 @@
+import { ProviderError } from './errors.js';
+import { parseSseJson, parseSseStream } from './streaming.js';
+import { FetchHttpTransport, type HttpTransport } from './transport.js';
+import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from './url.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from './types.js';
+
+export type OpenAICompatibleAuth = {
+  header?: string;
+  prefix?: string;
+  required?: boolean;
+};
+
+export type OpenAICompatibleAdapterConfig = {
+  id: string;
+  name: string;
+  baseUrl: string;
+  auth?: OpenAICompatibleAuth;
+  modelsPath?: string;
+  chatPath?: string;
+  /**
+   * Where the embeddings endpoint lives, relative to `baseUrl`.
+   *
+   * Beside `modelsPath`/`chatPath` and defaulted the same way, rather than derived from `chatPath`. A
+   * provider that serves `/v1/chat/completions` and `/v1/embeddings` has no rule connecting the two —
+   * deriving one would be a guess about a third party's URL layout, and the failure mode of a wrong
+   * guess is a 404 that reads as "this provider has no embeddings" when it does.
+   */
+  embeddingsPath?: string;
+  headers?: Record<string, string>;
+  maxTokensField?: 'max_tokens' | 'max_completion_tokens';
+  capabilities?: ProviderCapabilities;
+  /** The model family this endpoint serves, so a bare name of that family is routed here. */
+  modelFamily?: string;
+  /**
+   * Rewrites a non-streaming response body before it is read as an OpenAI
+   * response, for a provider that wraps one. Scoped to non-streaming on purpose:
+   * a provider whose streaming format differs needs its own adapter, not a hook
+   * that silently reshapes a live event stream.
+   *
+   * May throw to turn a wrapped error envelope into a `ProviderError`.
+   */
+  unwrapResponse?: (body: unknown) => OpenAIResponse;
+};
+
+export type OpenAICompatibleAdapterOptions = {
+  transport?: HttpTransport;
+  timeoutMs?: number;
+};
+
+type OpenAIChoice = {
+  message?: {
+    role?: string;
+    content?: string | null;
+    tool_calls?: Array<{
+      id?: string;
+      type?: string;
+      function?: { name?: string; arguments?: string };
+    }>;
+  };
+  finish_reason?: string | null;
+};
+
+export type OpenAIResponse = {
+  id?: string;
+  model?: string;
+  created?: number;
+  choices?: OpenAIChoice[];
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+};
+
+type OpenAIStreamChunk = OpenAIResponse & {
+  error?: { message?: string };
+  choices?: Array<{
+    delta?: {
+      role?: string;
+      content?: string | null;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: string;
+        function?: { name?: string; arguments?: string };
+      }>;
+    };
+    finish_reason?: string | null;
+  }>;
+};
+
+/**
+ * OpenAI's `/v1/embeddings` response.
+ *
+ * `dimensions` is deliberately **not** a field here. OpenAI does not send one — the dimension count is
+ * `data[i].embedding.length`, which is the only measured answer — so a field for it would be a number
+ * this SDK invented. `EmbeddingVector.dimensions` is filled from the array's own length, which is a
+ * measurement and therefore cannot disagree with the vector.
+ */
+type OpenAIEmbeddingResponse = {
+  id?: string;
+  model?: string;
+  created?: number;
+  data?: Array<{ object?: string; index?: number; embedding?: number[] }>;
+  usage?: { prompt_tokens?: number; total_tokens?: number };
+};
+
+type OpenAIModelList = {
+  data?: Array<{ id?: string; owned_by?: string }>;
+};
+
+export class OpenAICompatibleAdapter implements ProviderAdapter {
+  readonly id: string;
+  readonly name: string;
+  readonly capabilities: ProviderCapabilities;
+  readonly modelFamily?: string;
+  private readonly baseUrl: string;
+  private readonly auth: Required<Pick<OpenAICompatibleAuth, 'required'>> & OpenAICompatibleAuth;
+  private readonly modelsPath: string;
+  private readonly chatPath: string;
+  private readonly embeddingsPath: string;
+  private readonly unwrap?: OpenAICompatibleAdapterConfig['unwrapResponse'];
+  private readonly headers: Record<string, string>;
+  private readonly maxTokensField: 'max_tokens' | 'max_completion_tokens';
+  private readonly transport: HttpTransport;
+
+  constructor(config: OpenAICompatibleAdapterConfig, options: OpenAICompatibleAdapterOptions = {}) {
+    this.id = config.id;
+    this.name = config.name;
+    this.baseUrl = normalizeProviderBaseUrl(config.baseUrl, config.id);
+    const authHeader = config.auth?.header ?? (config.auth?.required === false ? undefined : 'Authorization');
+    const authPrefix = config.auth?.prefix ?? (config.auth?.header ? undefined : 'Bearer');
+    if (authHeader) assertSafeProviderHeaderName(authHeader, config.id, { allowCredential: true });
+    if (authPrefix && /[\r\n\0]/.test(authPrefix)) throw new ProviderError('CONFIGURATION_ERROR', `Authentication prefix is unsafe for provider ${config.id}.`, { providerId: config.id });
+    this.auth = {
+      header: authHeader,
+      prefix: authPrefix,
+      required: config.auth?.required ?? true,
+    };
+    this.modelsPath = config.modelsPath ?? '/models';
+    this.chatPath = config.chatPath ?? '/chat/completions';
+    this.embeddingsPath = config.embeddingsPath ?? '/embeddings';
+    this.unwrap = config.unwrapResponse;
+    this.headers = sanitizeProviderHeaders(config.headers, config.id);
+    this.maxTokensField = config.maxTokensField ?? 'max_tokens';
+    if (config.modelFamily !== undefined) this.modelFamily = config.modelFamily;
+    this.capabilities = {
+      chat: true,
+      streaming: true,
+      models: true,
+      /**
+       * **Not defaulted to true, and that is a deliberate gap rather than an omission.**
+       *
+       * An OpenAI-shaped base URL is not evidence that `/embeddings` exists on it: plenty of
+       * compatible servers implement chat and nothing else. Defaulting this on would make `embed()`
+       * appear to work against a provider that has no such endpoint, and the failure would be a 404
+       * from a third party rather than a truthful `NOT_SUPPORTED` naming our own adapter.
+       *
+       * So a deployment opts in by setting `capabilities: { embeddings: true }` — a statement that
+       * someone verified the endpoint exists. `createGatewayService` does that for the built-in
+       * providers whose embeddings endpoints are documented, and not for the open-ended
+       * `openai-compatible` one, which is why the first release of this ships embeddings for named
+       * providers rather than for every custom endpoint.
+       */
+      embeddings: false,
+      ...config.capabilities,
+    };
+    this.transport = options.transport ?? new FetchHttpTransport({ timeoutMs: options.timeoutMs });
+  }
+
+  async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
+    const response = await this.transport.request<OpenAIModelList>({
+      method: 'GET',
+      providerId: this.id,
+      url: this.url(this.modelsPath),
+      headers: this.requestHeaders(context.credential, 'application/json'),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    const data = response.data?.data;
+    if (!Array.isArray(data)) throw invalidResponse(this.id, 'Provider model list is missing data.');
+
+    return data.flatMap((model) => model.id ? [{ id: model.id, providerId: this.id, ownedBy: model.owned_by }] : []);
+  }
+
+  async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
+    const response = await this.transport.request<OpenAIResponse>({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url(this.chatPath),
+      headers: this.requestHeaders(context.credential, 'application/json'),
+      body: JSON.stringify(this.toRequestBody(request, false)),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    return this.toChatResponse(this.unwrap ? this.unwrap(response.data) : response.data, request.model);
+  }
+
+  /**
+   * `/embeddings`, in the shape OpenAI's own endpoint uses.
+   *
+   * Present only because `embeddingsPath` was configured or because the caller declared the
+   * capability — see the constructor. An adapter that advertises `embeddings: false` throws
+   * `NOT_SUPPORTED` rather than making a request that is guaranteed to fail, so a caller learns the
+   * provider cannot serve this without spending a round trip finding out.
+   */
+  async embed(request: EmbeddingRequest, context: ProviderRequestContext = {}): Promise<EmbeddingResponse> {
+    if (!this.capabilities.embeddings) {
+      throw new ProviderError('NOT_SUPPORTED', `${this.name} does not support embeddings.`, {
+        providerId: this.id,
+        publicMessage: `${this.name} does not support embeddings.`,
+      });
+    }
+    const inputs = typeof request.input === 'string' ? [request.input] : [...request.input];
+    if (inputs.length === 0 || inputs.some((value) => !value)) {
+      throw new ProviderError('INVALID_REQUEST', 'Embedding input must be a non-empty string or a non-empty array of non-empty strings.', { providerId: this.id });
+    }
+    const body: Record<string, unknown> = { model: request.model, input: inputs };
+    if (request.dimensions !== undefined) body.dimensions = request.dimensions;
+    if (request.encodingFormat !== undefined) body.encoding_format = request.encodingFormat;
+    if (request.user !== undefined) body.user = request.user;
+
+    const response = await this.transport.request<OpenAIEmbeddingResponse>({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url(this.embeddingsPath),
+      headers: this.requestHeaders(context.credential, 'application/json'),
+      body: JSON.stringify(body),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    const payload = response.data;
+    const rows = payload?.data;
+    if (!Array.isArray(rows)) throw invalidResponse(this.id, 'Provider embeddings response is missing data.');
+
+    const vectors = rows.map((row, position) => {
+      const embedding = row?.embedding;
+      if (!Array.isArray(embedding) || embedding.length === 0) {
+        throw invalidResponse(this.id, `Provider embedding at index ${position} is missing its vector.`);
+      }
+      if (embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+        throw invalidResponse(this.id, `Provider embedding at index ${position} contains a non-numeric value.`);
+      }
+      return {
+        index: typeof row?.index === 'number' ? row.index : position,
+        embedding,
+        // **Measured from the vector itself**, never assumed. See `EmbeddingVector.dimensions`.
+        dimensions: embedding.length,
+      };
+    });
+
+    // The provider returns one row per input. A short list means the caller asked for N vectors and got
+    // fewer, which is a wrong answer, not a partial success — and silently returning it would hand back
+    // an array whose positions no longer line up with the inputs the caller sent.
+    if (vectors.length !== inputs.length) {
+      throw invalidResponse(this.id, `Provider returned ${vectors.length} embedding(s) for ${inputs.length} input(s).`);
+    }
+
+    return {
+      id: payload.id ?? `embed-${request.model}`,
+      providerId: this.id,
+      model: payload.model ?? request.model,
+      createdAt: new Date((typeof payload.created === 'number' ? payload.created : Date.now() / 1000) * 1000).toISOString(),
+      data: vectors,
+      ...(payload.usage ? { usage: normalizeUsage(payload.usage) } : {}),
+    };
+  }
+
+  async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
+    const events = this.transport.stream({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url(this.chatPath),
+      headers: this.requestHeaders(context.credential, 'text/event-stream'),
+      body: JSON.stringify(this.toRequestBody(request, true)),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+
+    let sawPayload = false;
+    let sawMeaningfulPayload = false;
+    let sawDone = false;
+    for await (const event of parseSseStream(events)) {
+      if (event.data.trim() === '[DONE]') {
+        sawDone = true;
+        break;
+      }
+      const payload = parseSseJson<OpenAIStreamChunk>(event, this.id);
+      if (!payload) continue;
+      sawPayload = true;
+      if (payload.error) throw providerStreamError(this.id, payload.error);
+
+      const choice = payload.choices?.[0];
+      const delta = choice?.delta;
+      if (delta?.role || delta?.content || delta?.tool_calls?.length || choice?.finish_reason || payload.usage) sawMeaningfulPayload = true;
+      const chunk: ChatChunk = {
+        id: payload.id ?? `stream-${request.model}`,
+        providerId: this.id,
+        model: payload.model ?? request.model,
+        delta: {
+          ...(delta?.role ? { role: normalizeRole(delta.role) } : {}),
+          ...(delta?.content ? { content: delta.content } : {}),
+          ...(delta?.tool_calls?.length ? { toolCalls: delta.tool_calls.map(normalizeToolCallDelta) } : {}),
+        },
+        ...(choice?.finish_reason ? { finishReason: normalizeFinishReason(choice.finish_reason) } : {}),
+        ...(payload.usage ? { usage: normalizeUsage(payload.usage) } : {}),
+      };
+      yield chunk;
+    }
+
+    if (!sawPayload || !sawMeaningfulPayload || !sawDone) {
+      throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before completion.', { providerId: this.id });
+    }
+  }
+
+  async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
+    const startedAt = performance.now();
+    try {
+      await this.listModels(context);
+      return { status: 'healthy' as const, verified: 'credential', latencyMs: Math.round(performance.now() - startedAt), checkedAt: new Date().toISOString() };
+    } catch (error) {
+      /**
+       * The reason, not just the verdict.
+       *
+       * A bare `catch {}` reported `unavailable` with nothing attached, so the dashboard could
+       * only say "unavailable" — not whether the key was rejected, the endpoint was wrong, or the
+       * provider was down. Those need three different things from the user, and "unavailable" is
+       * none of them. Found by the provider contract on its first run.
+       */
+      return {
+        status: 'unavailable' as const, verified: 'credential',
+        checkedAt: new Date().toISOString(),
+        message: error instanceof Error ? error.message : 'The health check failed without a reason.',
+      };
+    }
+  }
+
+  private url(path: string) {
+    return resolveProviderUrl(this.baseUrl, path, this.id);
+  }
+
+  private requestHeaders(credential: ProviderCredential | undefined, accept: string) {
+    const headers: Record<string, string> = {
+      accept,
+      ...this.headers,
+      'content-type': 'application/json',
+    };
+    if (credential?.type === 'api-key' && this.auth.header) {
+      assertSafeProviderHeaderValue(this.auth.header, credential.value, this.id);
+      headers[this.auth.header] = this.auth.prefix ? `${this.auth.prefix} ${credential.value}` : credential.value;
+    } else if (this.auth.required) {
+      throw new ProviderError('AUTHENTICATION_FAILED', `Missing API key for provider ${this.id}.`, { providerId: this.id });
+    }
+    return headers;
+  }
+
+  private toRequestBody(request: ChatRequest, stream: boolean) {
+    assertNoProviderOptions(request, this.id);
+    const body: Record<string, unknown> = {
+      model: request.model,
+      messages: request.messages.map(toOpenAIMessage),
+      stream,
+    };
+    if (request.temperature !== undefined) body.temperature = request.temperature;
+    if (request.topP !== undefined) body.top_p = request.topP;
+    if (request.maxOutputTokens !== undefined) body[this.maxTokensField] = request.maxOutputTokens;
+    if (request.stop !== undefined) body.stop = request.stop;
+    if (request.tools !== undefined) body.tools = request.tools.map(toOpenAITool);
+    if (request.toolChoice !== undefined) body.tool_choice = request.toolChoice;
+    if (request.reasoningEffort !== undefined) body.reasoning_effort = request.reasoningEffort;
+    return body;
+  }
+
+  private toChatResponse(response: OpenAIResponse, requestedModel: string): ChatResponse {
+    const choice = response.choices?.[0];
+    if (!choice?.message) {
+      // Say which part was missing. A provider that intermittently answers with
+      // an empty `choices` array is indistinguishable from one that answers with
+      // a choice that has no message, and both used to read as a bare
+      // "invalid response" with nothing to act on.
+      const seen = Array.isArray(response.choices) ? response.choices.length : 0;
+      const reason = seen === 0
+        ? 'the provider returned no choices'
+        : seen > 1
+          ? `the provider returned ${seen} choices and the first has no message`
+          : 'the provider returned a choice with no message';
+      throw invalidResponse(this.id, `Provider chat response is unusable: ${reason}.`, reason);
+    }
+
+    return {
+      id: response.id ?? `response-${requestedModel}`,
+      providerId: this.id,
+      model: response.model ?? requestedModel,
+      createdAt: response.created ? new Date(response.created * 1000).toISOString() : new Date().toISOString(),
+      message: {
+        role: 'assistant',
+        content: choice.message.content ?? null,
+        ...(choice.message.tool_calls?.length ? { toolCalls: choice.message.tool_calls.map(normalizeToolCall) } : {}),
+      },
+      finishReason: normalizeFinishReason(choice.finish_reason),
+      ...(response.usage ? { usage: normalizeUsage(response.usage) } : {}),
+    };
+  }
+}
+
+function toOpenAIMessage(message: ChatMessage) {
+  return {
+    role: message.role,
+    content: toOpenAIContent(message.content),
+    ...(message.name ? { name: message.name } : {}),
+    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+    ...(message.toolCalls?.length ? { tool_calls: message.toolCalls.map(toOpenAIToolCall) } : {}),
+    ...(message.role === 'assistant' && message.reasoning ? { reasoning_content: message.reasoning } : {}),
+  };
+}
+
+function toOpenAIContent(content: MessageContent) {
+  if (content === null || typeof content === 'string') return content;
+  return content.map((part) => part.type === 'text'
+    ? { type: 'text', text: part.text }
+    : { type: 'image_url', image_url: part.imageUrl });
+}
+
+function toOpenAITool(tool: ToolDefinition) {
+  return { type: 'function', function: tool };
+}
+
+function toOpenAIToolCall(toolCall: ToolCall) {
+  return { id: toolCall.id, type: 'function', function: toolCall.function };
+}
+
+function normalizeToolCall(toolCall: { id?: string; type?: string; function?: { name?: string; arguments?: string } }): ToolCall {
+  return {
+    id: toolCall.id ?? '',
+    type: 'function',
+    function: { name: toolCall.function?.name ?? '', arguments: toolCall.function?.arguments ?? '{}' },
+  };
+}
+
+function normalizeToolCallDelta(toolCall: { index?: number; id?: string; type?: string; function?: { name?: string; arguments?: string } }) {
+  return {
+    index: toolCall.index ?? 0,
+    ...(toolCall.id ? { id: toolCall.id } : {}),
+    ...(toolCall.type ? { type: 'function' as const } : {}),
+    ...(toolCall.function?.name || toolCall.function?.arguments ? { function: {
+      ...(toolCall.function.name ? { name: toolCall.function.name } : {}),
+      ...(toolCall.function.arguments ? { arguments: toolCall.function.arguments } : {}),
+    } } : {}),
+  };
+}
+
+function normalizeRole(role: string): ChatMessage['role'] {
+  return role === 'assistant' || role === 'system' || role === 'tool' ? role : 'user';
+}
+
+function normalizeFinishReason(reason: string | null | undefined): FinishReason {
+  if (reason === 'stop' || reason === 'length' || reason === 'tool_calls' || reason === 'content_filter') return reason;
+  if (reason === 'function_call') return 'tool_calls';
+  return reason ? 'other' : 'other';
+}
+
+function normalizeUsage(usage: NonNullable<OpenAIResponse['usage']>): TokenUsage {
+  return {
+    inputTokens: usage.prompt_tokens,
+    outputTokens: usage.completion_tokens,
+    totalTokens: usage.total_tokens,
+  };
+}
+
+function assertNoProviderOptions(request: ChatRequest, providerId: string) {
+  if (request.providerOptions && Object.keys(request.providerOptions).length > 0) {
+    throw new ProviderError('INVALID_REQUEST', `Provider options are not supported by ${providerId} yet.`, { providerId });
+  }
+}
+
+function providerStreamError(providerId: string, _error: unknown) {
+  return new ProviderError('PROVIDER_REQUEST_FAILED', 'The provider stream returned an error.', { providerId });
+}
+
+/**
+ * `providerMessage` is the channel the local dashboard reads. Putting the shape
+ * detail there keeps it visible to the operator without putting a provider's
+ * internals into the message an API client of the gateway receives.
+ */
+function invalidResponse(providerId: string, message: string, providerMessage?: string) {
+  return new ProviderError('INVALID_RESPONSE', message, {
+    providerId,
+    ...(providerMessage ? { publicMessage: message, details: { providerMessage } } : {}),
+  });
+}

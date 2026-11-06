@@ -67,18 +67,21 @@ test('the SPEC\'s Success Criteria all carry how they are proved', () => {
 test('the plan\'s adapter counts agree with the fixture guard that measures them', () => {
   // Prose counts rot silently. The guard prints the real figure, so a document that disagrees with it is
   // asserting something false — which is what "1 of 11 adapters" did for nineteen releases.
-  const guard = doc('packages/omnihilbras-sdk/test/fixture-coverage.test.js');
+  const guard = doc('Kernel/SDK/tests/fixture-coverage.test.js');
   const plan = doc('tasks/plan.md');
 
   // The real number, counted here rather than parsed from the guard's source: every adapter module, and
   // every fixture in the directory. That is what the document must agree with.
-  const adapterDir = join(ROOT, 'packages/omnihilbras-sdk/src/providers');
-  const fixtureDir = join(ROOT, 'packages/omnihilbras-sdk/test/fixtures');
+  const adapterDir = join(ROOT, 'Kernel/SDK');
+  const fixtureDir = join(ROOT, 'Kernel/SDK/tests/fixtures');
   // The guard excludes three adapter ids that carry no completion path of their own.
   const EXCLUDED = ['deepseek-pow', 'chatgpt-first-party', 'qwen-web'];
   // `openai-compatible` is the shared base that providers extend, not a provider, so it is not counted.
+  // The SDK is one folder per provider at its root, beside the scaffolding. Counting every directory
+  // counted `dist`, `test` and `brand` as adapters the first time this ran after the move.
+  const SCAFFOLDING = new Set(['core', 'dist', 'node_modules', 'test', 'tests', 'brand', 'docs']);
   const adapters = readdirSync(adapterDir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && e.name !== 'openai-compatible')
+    .filter((e) => e.isDirectory() && !SCAFFOLDING.has(e.name) && e.name !== 'openai-compatible')
     .map((e) => e.name)
     .filter((id) => !EXCLUDED.includes(id));
   const captures = readdirSync(fixtureDir);

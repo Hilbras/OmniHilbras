@@ -21,8 +21,8 @@ function testFiles(dir) {
 
 const files = [
   ...testFiles('tests/'),
-  ...testFiles('apps/gateway/test/'),
-  ...testFiles('packages/omnihilbras-sdk/test/'),
+  ...testFiles('Kernel/API/test/'),
+  ...testFiles('Kernel/SDK/tests/'),
 ];
 
 /** `test('...', async () => {` — a test body with no parameter. */

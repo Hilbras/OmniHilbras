@@ -105,7 +105,7 @@ function QuotaPanel({ connectionId, providerName }: { connectionId: string; prov
 
   if (state === 'loading') {
     return (
-      <section className="card mt-4 p-5" aria-label="Account allowance">
+      <section className="card p-4 sm:p-5" aria-label="Account allowance">
         <p className="muted text-xs">Asking {providerName} what this account has left…</p>
       </section>
     );
@@ -113,7 +113,7 @@ function QuotaPanel({ connectionId, providerName }: { connectionId: string; prov
 
   if (state === 'unsupported') {
     return (
-      <section className="card mt-4 p-5" aria-label="Account allowance">
+      <section className="card p-4 sm:p-5" aria-label="Account allowance">
         <p className="flex items-center gap-2 text-sm font-semibold">
           <Coins className="h-4 w-4 text-muted" aria-hidden="true" />{providerName} does not publish an allowance
         </p>
@@ -127,7 +127,7 @@ function QuotaPanel({ connectionId, providerName }: { connectionId: string; prov
 
   if (state === 'failed') {
     return (
-      <section className="card mt-4 p-5" aria-label="Account allowance">
+      <section className="card p-4 sm:p-5" aria-label="Account allowance">
         <p className="flex items-center gap-2 text-sm font-semibold text-danger">
           <CircleAlert className="h-4 w-4" aria-hidden="true" />Could not read this account&rsquo;s allowance
         </p>
@@ -138,7 +138,7 @@ function QuotaPanel({ connectionId, providerName }: { connectionId: string; prov
 
   const resources = Object.entries(quota?.resources ?? {});
   return (
-    <section className="card mt-4 p-5" aria-label="Account allowance">
+    <section className="card p-4 sm:p-5" aria-label="Account allowance">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <h3 className="text-sm font-semibold">Account allowance</h3>
         {quota?.plan ? <span className="muted text-[11px]">as {providerName} reports it · {quota.plan}</span> : null}
@@ -366,10 +366,25 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
         measurement from a different source, so it must not inherit that branch's states: a gateway with no
         usage store still answers a quota question, and a provider with no quota still has records.
       */}
-      {providerId && connectionId ? <QuotaPanel connectionId={connectionId} providerName={providerId} /> : null}
+      {providerId && connectionId ? (
+        <div className="mt-4 mb-6 sm:mt-5 sm:mb-8">
+          <QuotaPanel connectionId={connectionId} providerName={providerId} />
+          {/* A titled rule between the allowance and the records: they are two different measurements
+              from two different sources, and with only a margin between them the page read as one long
+              card whose second half happened to have numbers in it. */}
+          {/*
+            A rule, and then room. The records that follow are a different measurement from a different
+            source, and with only the rule they began immediately under it — the section boundary was
+            visible but had no space on the far side, so the first card looked like part of the divider.
+          */}
+          <div className="mt-5 flex items-center gap-3 sm:mt-6">
+            <span className="h-px flex-1 bg-line" aria-hidden="true" />
+          </div>
+        </div>
+      ) : null}
 
       {error ? (
-        <section className="card p-5" role="alert">
+        <section className="card mt-4 p-4 sm:mt-5 sm:p-5" role="alert">
           <p className="flex items-center gap-2 text-sm font-semibold text-danger">
             <CircleAlert className="h-4 w-4" aria-hidden="true" />{error}
           </p>
@@ -379,7 +394,7 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
           </p>
         </section>
       ) : usage && !usage.recording ? (
-        <section className="card p-6 text-center">
+        <section className="card mt-4 p-5 text-center sm:mt-5 sm:p-6">
           <ScrollText className="mx-auto h-6 w-6 text-muted" aria-hidden="true" />
           <p className="mt-3 text-sm font-semibold">This gateway records no usage</p>
           <p className="muted mt-1 text-xs leading-relaxed">
@@ -387,7 +402,7 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
           </p>
         </section>
       ) : usage && totals && totals.requests === 0 ? (
-        <section className="card p-6 text-center">
+        <section className="card mt-4 p-5 text-center sm:mt-5 sm:p-6">
           <BarChart3 className="mx-auto h-6 w-6 text-muted" aria-hidden="true" />
           <p className="mt-3 text-sm font-semibold">No requests in this window</p>
           <p className="muted mt-1 text-xs leading-relaxed">
@@ -400,7 +415,7 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
         <>
           {/* Two rows rather than one: the outcome counts answer "did it work", the volume figures answer
               "how much", and mixing them in a single strip reads as five unrelated numbers. */}
-          <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Outcome summary">
+          <section className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4" aria-label="Outcome summary">
             <SummaryCard
               label="Requests"
               value={totals ? String(totals.requests) : '—'}
@@ -529,8 +544,10 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
                   : `No ${filter} requests in this window.`}
               </p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-left">
+              /* Scrolling is the honest answer for five columns on a phone; the negative margin lets the
+                 table bleed to the card edge so less of that width is padding. */
+              <div className="-mx-3.5 overflow-x-auto px-3.5 sm:mx-0 sm:px-0">
+                <table className="w-full min-w-[560px] text-left sm:min-w-[640px]">
                   <thead>
                     <tr className="text-[11px] uppercase tracking-[0.12em] text-muted">
                       <th scope="col" className="px-4 py-2.5 font-semibold">When</th>

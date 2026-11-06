@@ -1,24 +1,24 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "1.89.0",
+  "version": "1.90.0",
   "packageManager": "pnpm@12.5.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:gateway": "pnpm --filter @omnihilbras/gateway dev",
+    "dev:gateway": "pnpm --filter @omnihilbras/kernel-api dev",
     "build": "pnpm build:sdk && pnpm build:frontend && pnpm build:gateway",
     "build:frontend": "vite build",
-    "build:sdk": "pnpm --filter @hilbras/omnihilbras build",
-    "build:gateway": "pnpm --filter @omnihilbras/gateway build",
+    "build:sdk": "pnpm -r --filter \"./Kernel/SDK/*\" build",
+    "build:gateway": "pnpm --filter @omnihilbras/kernel-api build",
     "preview": "vite preview",
     "typecheck": "pnpm build:sdk && tsc --noEmit && pnpm typecheck:gateway",
-    "typecheck:sdk": "pnpm --filter @hilbras/omnihilbras typecheck",
-    "typecheck:gateway": "pnpm --filter @omnihilbras/gateway typecheck",
+    "typecheck:sdk": "pnpm -r --filter \"./Kernel/SDK/*\" typecheck",
+    "typecheck:gateway": "pnpm --filter @omnihilbras/kernel-api typecheck",
     "test": "pnpm test:repo && pnpm test:sdk && pnpm test:gateway",
     "test:repo": "node --test tests/*.test.js",
-    "test:sdk": "pnpm --filter @hilbras/omnihilbras test",
-    "test:gateway": "pnpm --filter @omnihilbras/gateway test",
+    "test:sdk": "node --test tests/provider-standalone.test.js tests/providers/*.test.js",
+    "test:gateway": "pnpm --filter @omnihilbras/kernel-api test",
     "version:check": "node scripts/check-version.mjs",
     "version:fix": "node scripts/check-version.mjs --fix",
     "analyze": "node scripts/analyze-bundle.mjs",
@@ -29,7 +29,6 @@
     "release:audit": "node scripts/audit-release-trail.mjs"
   },
   "dependencies": {
-    "@hilbras/omnihilbras": "workspace:*",
     "@xyflow/react": "^12.12.0",
     "lucide-react": "^1.47.0",
     "motion": "^13.4.1",
@@ -37,7 +36,8 @@
     "react-dom": "^19.3.0",
     "react-is": "^19.3.0",
     "react-router-dom": "^7.18.4",
-    "recharts": "^3.10.1"
+    "recharts": "^3.10.1",
+    "@omnihilbras/kernel-api": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

@@ -7,7 +7,7 @@ Phase 10 evidence. Measured against the packages and the tests at the commit tha
 | Claim | Where it is stated | Measured value | Agrees? |
 | --- | --- | --- | --- |
 | Gateway / monorepo Node requirement | root `package.json` `engines`, `.nvmrc`, CI | Node 24 | yes |
-| SDK Node requirement | `packages/omnihilbras-sdk/package.json`, its README | `>=20`, tested on 20, 22, 24, 26 | yes |
+| SDK Node requirement | `Kernel/SDK/*/package.json`, its README | `>=20`, tested on 20, 22, 24, 26 | yes |
 | SDK Node requirement, in the spec | `docs/SPEC-SDK.md` | was "Node.js 24+" for the whole project | **corrected**: now states the SDK floor and the gateway requirement separately |
 | Adapter and fixture counts | `tasks/plan.md`, guarded by `documentation-counts` and `documentation-honesty` | 5 pinned of 14 considered | yes |
 | Test counts in documents | guarded by `documentation-counts` ("no document states a test count as a bare number") | not quoted | yes |

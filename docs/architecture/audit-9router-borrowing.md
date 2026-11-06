@@ -28,7 +28,7 @@ error and no `finish_reason`.
 
 OmniHilbras writes the sentinel **after** the loop, not in a `finally`:
 
-`apps/gateway/src/routes/inference.ts:110`
+`Kernel/API/src/routes/inference.ts:110`
 ```ts
 await writeStreamData(response, 'data: [DONE]\n\n', signal);
 ```
@@ -76,13 +76,13 @@ status defaults to 200 and every error is delivered as a success with an empty c
 (`src/app/api/v1/api/chat/route.js:35`).
 
 OmniHilbras has **no response-rebuilding transform at all**. There is not one `new Response(` in
-`apps/gateway/src/` or `packages/omnihilbras-sdk/src/`; the gateway is Node-based and writes through
+`Kernel/API/src/` or `Kernel/SDK/`; the gateway is Node-based and writes through
 `sendJson(response, status, …)` / `response.writeHead(status, …)`, so the status is a required argument on
 every path. There is no route that could drop it.
 
 A related check that *did* pass: the v1.54.0 work. A gateway whose only connections are over their rate limit
 answers **429** with `retryable: false`, and a *mixed* refusal is deliberately not 429 — asserted in
-`apps/gateway/test/execution-correctness.test.js` ("a refusal with any reason other than a limit is never
+`Kernel/API/test/execution-correctness.test.js` ("a refusal with any reason other than a limit is never
 reported as 429").
 
 ---
@@ -94,7 +94,7 @@ reported as 429").
 9router's `data.sqlite` sits at mode `0644` holding live provider tokens while the secret files beside it are
 correctly `0600`, because the writer passes no `mode` and inherits umask.
 
-OmniHilbras writes every secret through one helper, `apps/gateway/src/secure-store.ts:19-40`:
+OmniHilbras writes every secret through one helper, `Kernel/API/src/secure-store.ts:19-40`:
 
 - `ensureSecureDirectory` — `mkdir(..., { mode: 0o700 })` **then** `chmod(0o700)`, and refuses a symlinked
   directory (`:15-17`)

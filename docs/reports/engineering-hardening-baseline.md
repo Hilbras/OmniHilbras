@@ -10,8 +10,8 @@ Recorded before any roadmap change. Uncommitted working-tree changes from the pr
 | --- | --- | --- | --- |
 | Repo guards (`tests/*.test.js`) | 18 | 18 | 0 |
 | Repo guards (second stage) | 160 | 160 | 0 |
-| SDK (`packages/omnihilbras-sdk`) | 551 | 551 | 0 |
-| Gateway (`apps/gateway`) | 570 | 570 | 0 |
+| SDK (`Kernel/SDK`) | 551 | 551 | 0 |
+| Gateway (`Kernel/API`) | 570 | 570 | 0 |
 
 Source: `/tmp/baseline-verify.log`, run on branch `main`, HEAD `fbcff88`.
 
@@ -19,7 +19,7 @@ Source: `/tmp/baseline-verify.log`, run on branch `main`, HEAD `fbcff88`.
 
 ### F1 — Dashboard trust is derived from a request header (security, known)
 
-`apps/gateway/src/server.ts:81` sets `kind: 'dashboard'` when the request `Origin` is in the allowlist. `isTrustedDashboard` (`runtime.ts:102`) returns true for that kind. The management gate (`server.ts:249`) then skips API-key authorization for any request that is trusted this way.
+`Kernel/API/src/server.ts:81` sets `kind: 'dashboard'` when the request `Origin` is in the allowlist. `isTrustedDashboard` (`runtime.ts:102`) returns true for that kind. The management gate (`server.ts:249`) then skips API-key authorization for any request that is trusted this way.
 
 `Origin` is a browser-set header. A local non-browser process can send it freely. The project records this as an honest limitation in `server.ts:165–170`, and names the fix: a per-launch secret the browser presents. This is a design change, not a patch.
 
@@ -69,17 +69,17 @@ Provider and usage work not yet committed: Console workspace picker (gateway), m
 
 ### 1.3 API-key lifecycle: covered, with two stated gaps
 
-Keys are generated with `randomBytes`, stored as SHA-256 hashes, and compared with `timingSafeEqual` across every stored key (`apps/gateway/src/api-keys.ts`). Disabling a key takes effect on the next request, because `authorize()` reads the store each time. Failure messages do not echo the key.
+Keys are generated with `randomBytes`, stored as SHA-256 hashes, and compared with `timingSafeEqual` across every stored key (`Kernel/API/src/api-keys.ts`). Disabling a key takes effect on the next request, because `authorize()` reads the store each time. Failure messages do not echo the key.
 
 Not present: key expiry and per-key scopes. These are features, not defects, so they are recorded as limits rather than built without a decision.
 
 ### 1.4 OAuth callbacks: covered
 
-Tests exist for a single claim, replay refusal, a state from another sign-in, expiry, and a late poll learning its cause (`apps/gateway/test/cline-sessions.test.js`, `sign-in-sessions.test.js`, `sign-in-coordinator.test.js`). Callback pages escape their message. No token appears in a callback response.
+Tests exist for a single claim, replay refusal, a state from another sign-in, expiry, and a late poll learning its cause (`Kernel/API/test/cline-sessions.test.js`, `sign-in-sessions.test.js`, `sign-in-coordinator.test.js`). Callback pages escape their message. No token appears in a callback response.
 
 ### 1.5 SSRF: one verified gap (F5)
 
-`assertSafeProviderRequestUrl` (`packages/omnihilbras-sdk/src/core/url.ts`) refuses private and metadata addresses written as literals, including the IPv4-mapped IPv6 form. Redirects are refused (`transport.ts`: `redirect: 'error'`).
+`assertSafeProviderRequestUrl` (`Kernel/SDK/*/lib/url.ts`) refuses private and metadata addresses written as literals, including the IPv4-mapped IPv6 form. Redirects are refused (`transport.ts`: `redirect: 'error'`).
 
 **F5 — DNS names that resolve to private addresses are allowed.** The check reads the hostname string and never resolves it. Reproduced:
 
@@ -95,7 +95,7 @@ Status: **verified, not fixed.**
 ### F5 — status after the fix
 
 Fixed in part. A remote provider hostname that resolves to a private or loopback address is refused before the
-request is sent. The check is supplied by the gateway (`apps/gateway/src/destination-check.ts`) through the
+request is sent. The check is supplied by the gateway (`Kernel/API/src/destination-check.ts`) through the
 transport's `checkDestination` hook; the SDK itself stays free of `node:dns`, because it is bundled into the
 browser dashboard. Loopback hosts remain exempt, so local inference endpoints keep working.
 
@@ -104,11 +104,11 @@ with a public address to the check and a private one to the connection still get
 the check to run on the connection's own lookup, which Node's global `fetch` does not expose. Doing it properly
 would need `undici` (a runtime dependency the SDK does not have) or a Node-level lookup hook.
 
-Tests: `packages/omnihilbras-sdk/test/destination-check.test.js` (5), `apps/gateway/test/destination-check.test.js` (3).
+Tests: `Kernel/SDK/tests/destination-check.test.js` (5), `Kernel/API/test/destination-check.test.js` (3).
 
 ### 1.6 Secure storage: covered, with one design point to decide
 
-Tests: `apps/gateway/test/secure-storage.test.js` (9) and the existing `connections.test.js`. Covered: a
+Tests: `Kernel/API/test/secure-storage.test.js` (9) and the existing `connections.test.js`. Covered: a
 tampered ciphertext and a tampered authentication tag are refused (GCM); a non-JSON or empty secrets file fails
 closed; an empty key file is refused rather than used as a blank key; a state directory or secrets file that is
 a symbolic link is refused and not written through; an interrupted write leaves the previous vault readable; the

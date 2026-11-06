@@ -36,7 +36,7 @@ moved it into a different threat model and this policy's "low risk" statements n
   file, `chmod` **after** the rename so the mode does not depend on umask, an `fsync`, and a refusal to write
   through a symlink. `tests/browser-storage.test.js` and `tests/no-secrets.test.js` enforce the rest.
 - API key secrets are returned **exactly once**, at creation. They are absent from `list()` and from the file
-  on disk afterwards. This was measured, not assumed — see `apps/gateway/test/api-key-manager.test.js`.
+  on disk afterwards. This was measured, not assumed — see `Kernel/API/test/api-key-manager.test.js`.
 - No credential is ever handed to browser storage. `tests/browser-storage.test.js` allows exactly two
   `localStorage` keys (a sidebar preference and a theme) and requires `sessionStorage`, `document.cookie`
   writes, IndexedDB and the Cache API to be at **zero**.
@@ -75,7 +75,7 @@ and does not un-copy it.
   still usable, but "revoked at the provider" is discovered by spending one request.
 - **Pinned provider response fixtures: 4 of 12 adapters.** Provider APIs change independently of this
   repository, so an adapter's wire format is only pinned where a real capture exists. The count is printed by
-  `packages/omnihilbras-sdk/test/fixture-coverage.test.js` and fails if it drifts.
+  `Kernel/SDK/tests/fixture-coverage.test.js` and fails if it drifts.
 
 ## Supported versions
 

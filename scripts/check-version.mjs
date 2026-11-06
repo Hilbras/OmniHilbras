@@ -28,8 +28,13 @@ const version = JSON.parse(read('package.json')).version;
 const problems = [];
 const fixed = [];
 
-/** The three published manifests must agree, because a mismatch ships a mismatched artifact. */
-for (const manifest of ['packages/omnihilbras-sdk/package.json', 'apps/gateway/package.json']) {
+/**
+ * Every published manifest must agree, because a mismatch ships a mismatched artifact.
+ *
+ * The SDK is no longer one manifest: it is one package per provider under `Kernel/SDK/`, each private and
+ * versioned with the repo. `Kernel/API` is the publishable one, so it is the manifest this checks.
+ */
+for (const manifest of ['Kernel/API/package.json']) {
   const found = JSON.parse(read(manifest)).version;
   if (found !== version) problems.push(`${manifest} is ${found}, expected ${version}`);
 }
@@ -57,14 +62,14 @@ if (!readmeMatch) {
 }
 
 /** The version the Cline adapter reports as its client version. */
-const cline = read('packages/omnihilbras-sdk/src/providers/cline/index.ts');
+const cline = read('Kernel/SDK/cline/adapter/index.ts');
 const clinePattern = /const omnihilbrasVersion = '(\d+\.\d+\.\d+)';/;
 const clineMatch = clinePattern.exec(cline);
 if (!clineMatch) {
   problems.push('cline.ts has no omnihilbrasVersion constant to check');
 } else if (clineMatch[1] !== version) {
   if (fix) {
-    write('packages/omnihilbras-sdk/src/providers/cline/index.ts', cline.replace(clinePattern, `const omnihilbrasVersion = '${version}';`));
+    write('Kernel/SDK/cline/adapter/index.ts', cline.replace(clinePattern, `const omnihilbrasVersion = '${version}';`));
     fixed.push(`cline.ts → ${version}`);
   } else {
     problems.push(`cline.ts sends ${clineMatch[1]} as its client version, expected ${version}`);

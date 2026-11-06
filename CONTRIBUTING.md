@@ -24,8 +24,8 @@ If your change makes a number appear on screen, one of these must be true:
 
 | You are changing | Read first |
 | --- | --- |
-| anything under `packages/omnihilbras-sdk/src/providers/` | `docs/SPEC-SDK.md`, and `packages/omnihilbras-sdk/test/fixture-coverage.test.js` |
-| routing, retries, hedging, rate limits | the comments on `RequestExecutor` in `apps/gateway/src/request-executor.ts` |
+| anything under `Kernel/SDK/<name>/adapter/` | `docs/SPEC-SDK.md`, and `Kernel/SDK/tests/fixture-coverage.test.js` |
+| routing, retries, hedging, rate limits | the comments on `RequestExecutor` in `Kernel/API/src/request-executor.ts` |
 | the dashboard | `AGENTS.md`, and the `file:line` comments in the file you are editing |
 | anything that adds a route | `AGENTS.md` § *Boundaries*, plus `tests/gateway-routes.test.js` |
 
@@ -41,8 +41,10 @@ check, and 1.43.0 added nine providers without touching core logic.
 In practice: add a card to `src/data/providers.ts`. If the provider speaks a protocol no adapter implements,
 the generic OpenAI-compatible fallback already routes it — measured in 1.45.0, which showed the gateway
 serving all nine with no adapter at all. Write an adapter only when the wire format genuinely differs, and
-keep provider-specific formats inside `packages/omnihilbras-sdk/src/providers/<name>/`, and shared
-machinery in `src/core/`. Both paths here said `src/adapters/` for releases after the rename.
+keep provider-specific formats inside `Kernel/SDK/<name>/adapter/`, with the shared machinery each
+package needs vendored into its `lib/`. This line said `src/adapters/` for releases after the rename and
+`Kernel/SDK/src/` for releases after the restructure dissolved the shared tree into the per-provider
+packages.
 
 ## Tests, and mutation testing
 
@@ -73,7 +75,7 @@ Every change ships as its own version, and the definition of done is in `AGENTS.
 2. Version bumped, and `README.md` / `docs/SPEC-SDK.md` / `docs/architecture/` / `tasks/` updated to match.
 3. Committed, tagged `v<version>`, pushed to `main`.
 4. A GitHub release for the tag, with notes saying what changed **and how to verify it**.
-5. `npm publish` from `packages/omnihilbras-sdk`, then **confirm the version resolves from the registry**.
+5. `npm publish` from `Kernel/SDK`, then **confirm the version resolves from the registry**.
 
 Step 5 is not a formality. `npm publish` has twice reported success for a version that was absent from the
 registry, because the tarball is staged and finalised minutes later. A `409` on re-publish means *wait*, not

@@ -164,12 +164,14 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // each one *is* keyed and the dialog offers an option for it: options 16 -> 20.
   // Cards 30 -> 31 in 1.85.0 (`gemini-web`); group `web-cookie`, so no option, as with `tokenharbor-web`.
   // Card 32 is Duck.ai and card 33 Codex; neither is a keyed dialog option.
+  // Cards 37 -> 39 added `codebuddy-cn` and `codebuddy-intl`; group `oauth`, so neither is keyed —
+  // options unchanged at 20.
   //
   // **The log stopped at 26 and the assertions said 31 and 20 until 1.85.1.** Five cards and four
   // options were counted by numbers whose provenance stopped five entries earlier — the drift this
   // comment exists to prevent, inside the comment. The assertions are unchanged; the entries that
   // explain them are now present.
-  assert.equal(providerCatalog.length, 33, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerCatalog.length, 39, `the catalog now has ${providerCatalog.length} cards`);
   assert.equal(providerOptions.length, 20, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

@@ -1,4 +1,4 @@
-import type { ModelMetaMap } from '@hilbras/omnihilbras';
+import type { ModelMetaMap } from '@omnihilbras/kernel-api/public';
 
 export type GatewayProviderHealth = {
   providerId: string;
@@ -53,6 +53,8 @@ export type GatewayConnection = {
   /** Catalog metadata for `modelIds`, when the provider published any. */
   modelMeta?: ModelMetaMap;
   resilience: GatewayResilience;
+  /** Who is accountable for this connection, and what it is for. Absent means not recorded. */
+  responsibility?: { owner?: string; purpose?: string };
   createdAt: string;
   updatedAt: string;
 };
@@ -616,6 +618,28 @@ export function updateGatewayProviderStrategy(providerId: string, strategy: Gate
     body: JSON.stringify({ strategy }),
     ...(signal ? { signal } : {}),
   });
+}
+
+/**
+ * Records who owns a connection and what it is for.
+ *
+ * A `PUT` on the connection itself rather than a side endpoint: responsibility is part of the record,
+ * and a second table for it would have to be kept in step with the first.
+ */
+export function saveGatewayConnectionResponsibility(
+  connectionId: string,
+  responsibility: { owner?: string; purpose?: string },
+  signal?: AbortSignal,
+) {
+  return requestJson<{ connection: GatewayConnection }>(
+    `/v1/connections/${encodeURIComponent(connectionId)}/responsibility`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(responsibility),
+      ...(signal ? { signal } : {}),
+    },
+  );
 }
 
 export function updateGatewayConnectionResilience(connectionId: string, resilience: Partial<GatewayResilience>, signal?: AbortSignal) {

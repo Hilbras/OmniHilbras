@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.89.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.90.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -537,8 +537,8 @@ twelve in `service.ts` are clustered in a single factory rather than scattered.
 
 ## Local Gateway
 
-The first backend slice lives in `apps/gateway` and uses the shared SDK in
-`packages/omnihilbras-sdk`.
+The first backend slice lives in `Kernel/API` and uses the shared SDK in
+`Kernel/SDK`.
 
 ```bash
 pnpm dev:gateway

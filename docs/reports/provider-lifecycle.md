@@ -4,10 +4,10 @@ Phase 6 evidence. Measured against the code and tests at the commit that adds th
 
 | Roadmap item | Status | Evidence |
 | --- | --- | --- |
-| 6.1 Lifecycle contract | partial | `apps/gateway/src/credential-lifecycle.ts` answers expiry without spending a request, and fails toward "ask the provider" whenever it is unsure. It has no refresh, revoke or validate operation. |
+| 6.1 Lifecycle contract | partial | `Kernel/API/src/credential-lifecycle.ts` answers expiry without spending a request, and fails toward "ask the provider" whenever it is unsure. It has no refresh, revoke or validate operation. |
 | 6.2 Move provider lifecycle out of the service | **not done** | `service.ts` still holds the provider-specific sign-in and check calls. Moving them is a large refactor, and the roadmap asks for none that are not justified by a measured problem. |
 | 6.3 Stable registry | covered | `ProviderRegistry` and `createProviderRegistry` construct the adapters; capability declarations are per adapter |
-| 6.4 Architecture regression test | **added** | `apps/gateway/test/shared-execution-has-no-provider-names.test.js` (6): routing, the routing engine, request executor, retry, hedge and rate-limit policies name no provider in executable code |
+| 6.4 Architecture regression test | **added** | `Kernel/API/test/shared-execution-has-no-provider-names.test.js` (6): routing, the routing engine, request executor, retry, hedge and rate-limit policies name no provider in executable code |
 | 6.5 No external plugins | covered | no plugin loader exists in the tree |
 
 ## What the architecture guard found

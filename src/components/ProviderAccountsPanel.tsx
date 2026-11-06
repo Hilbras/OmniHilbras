@@ -1,0 +1,153 @@
+import { useState } from 'react';
+import { KeyRound, Power, Save } from 'lucide-react';
+import type { GatewayConnection } from '../lib/gatewayClient';
+import { saveGatewayConnectionResponsibility } from '../lib/gatewayClient';
+import { useToast } from './Toast';
+
+/**
+ * Every account signed in for this provider, one row each.
+ *
+ * ## Why this exists
+ *
+ * A provider can hold more than one connection — the `addAccount` sign-in creates a second one rather than
+ * overwriting the first — and until now the page rendered only `connections[0]`. The second account was
+ * real, billable, and invisible. Two accounts also could not be told apart: both said "Kiro".
+ *
+ * ## What makes an account recognisable
+ *
+ * The `owner`/`purpose` note, editable per row. That is deliberately free text rather than a structured
+ * account id: a connection is often a team's, not a person's, and the fact a reader needs when a key stops
+ * working is *who to ask* and *what it is for* — not a subject claim an identity provider happened to issue.
+ *
+ * ## What this deliberately does not do
+ *
+ * It does not offer a traffic policy here. Failover vs share is a property of the provider's **routing**,
+ * already edited in the Routing policy panel; a second control for it in this table would give two places to
+ * change one thing, which is how the panels drift apart.
+ */
+
+export function ProviderAccountsPanel({
+  connections,
+  providerName,
+  onSaved,
+}: {
+  connections: readonly GatewayConnection[];
+  providerName: string;
+  onSaved: () => void;
+}) {
+  if (connections.length === 0) return null;
+
+  return (
+    <section id="accounts" className="card mt-4 p-3.5 sm:mt-5 sm:p-5">
+      <div className="flex flex-col justify-between gap-3 border-b border-line pb-3 sm:flex-row sm:items-center">
+        <div className="flex items-center gap-2">
+          <span className="grid h-8 w-8 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text">
+            <KeyRound className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="text-sm font-semibold">{providerName} accounts</h2>
+            <p className="muted mt-0.5 text-xs">
+              {connections.length === 1
+                ? 'One account is signed in.'
+                : `${connections.length} accounts are signed in. Traffic follows the routing policy above.`}
+            </p>
+          </div>
+        </div>
+        <span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">
+          {connections.length === 1 ? '1 account' : `${connections.length} accounts`}
+        </span>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-3">
+        {connections.map((connection, index) => (
+          <AccountRow key={connection.id} connection={connection} index={index} onSaved={onSaved} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AccountRow({ connection, index, onSaved }: { connection: GatewayConnection; index: number; onSaved: () => void }) {
+  const { notify } = useToast();
+  const [owner, setOwner] = useState(connection.responsibility?.owner ?? '');
+  const [purpose, setPurpose] = useState(connection.responsibility?.purpose ?? '');
+  const [saving, setSaving] = useState(false);
+
+  const dirty = owner.trim() !== (connection.responsibility?.owner ?? '') || purpose.trim() !== (connection.responsibility?.purpose ?? '');
+
+  async function save() {
+    setSaving(true);
+    try {
+      await saveGatewayConnectionResponsibility(connection.id, {
+        ...(owner.trim() ? { owner: owner.trim() } : {}),
+        ...(purpose.trim() ? { purpose: purpose.trim() } : {}),
+      });
+      notify(`Saved the note on account ${index + 1}.`, 'success');
+      onSaved();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'The note could not be saved.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-line bg-bg-soft p-3 sm:p-3.5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="shrink-0 font-mono text-[10px] text-muted">{index + 1}</span>
+          {/* The account's own name, or its id when no note has been written — a row with no identity is
+              the thing this panel exists to remove. */}
+          <span className="text-xs font-medium">{connection.responsibility?.owner || connection.name}</span>
+          {connection.responsibility?.purpose && (
+            <span className="muted text-[11px]">— {connection.responsibility.purpose}</span>
+          )}
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span
+            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${connection.enabled ? 'border-success/30 bg-success/10 text-success' : 'border-line text-muted'}`}
+            title={connection.enabled ? 'This account takes traffic' : 'This account is paused'}
+          >
+            <Power className="h-2.5 w-2.5" aria-hidden="true" />
+            {connection.enabled ? 'Active' : 'Paused'}
+          </span>
+          <code className="min-w-0 max-w-full truncate rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted sm:max-w-[200px]" title={connection.id}>
+            {connection.id}
+          </code>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
+        <label className="flex flex-col gap-1">
+          <span className="muted text-[10px] uppercase tracking-wide">Owner</span>
+          <input
+            value={owner}
+            onChange={(event) => setOwner(event.target.value)}
+            maxLength={120}
+            placeholder="Who to ask about this key"
+            className="h-8 w-full min-w-0 rounded-md border border-line bg-surface px-2 text-xs sm:h-7"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="muted text-[10px] uppercase tracking-wide">Purpose</span>
+          <input
+            value={purpose}
+            onChange={(event) => setPurpose(event.target.value)}
+            maxLength={500}
+            placeholder="What this account is for"
+            className="h-8 w-full min-w-0 rounded-md border border-line bg-surface px-2 text-xs sm:h-7"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={!dirty || saving}
+          className="btn-ghost inline-flex h-8 w-full items-center justify-center gap-1.5 px-2.5 text-[11px] disabled:opacity-40 sm:h-7 sm:w-auto md:mt-auto"
+        >
+          <Save className="h-3 w-3" aria-hidden="true" />
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}

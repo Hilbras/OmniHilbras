@@ -35,7 +35,7 @@ import { dirname, join } from 'node:path';
  * Node-only import anywhere in the graph is a blank page, not a degraded feature.
  */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SDK_SRC = join(ROOT, 'packages/omnihilbras-sdk/src');
+const SDK_SRC = join(ROOT, 'Kernel/SDK');
 
 function sourceFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -54,9 +54,17 @@ function sourceFiles(directory) {
  * barrel is what makes "reachable from a .tsx" a fact instead of a guess.
  */
 function barrelExports() {
-  const barrel = join(SDK_SRC, 'index.ts');
-  const seen = new Set([barrel]);
-  const queue = [barrel];
+  // There is no single SDK barrel any more: the SDK is twenty-two provider packages, each with its own
+  // `adapter/index.ts`. The dashboard reaches them through `Kernel/API`, so this walk starts at the
+  // adapter the browser actually loads types from.
+  // Every provider's adapter is an entry point now: there is no single barrel, so walking one adapter
+  // measured one provider. The dashboard loads whichever provider a request resolves to.
+  const entries = readdirSync(SDK_SRC, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !['dist', 'node_modules', 'tests', 'log'].includes(entry.name))
+    .map((entry) => join(SDK_SRC, entry.name, 'adapter', 'index.ts'))
+    .filter((file) => existsSync(file));
+  const seen = new Set(entries);
+  const queue = [...entries];
   while (queue.length > 0) {
     const file = queue.pop();
     const source = readFileSync(file, 'utf8');
@@ -65,7 +73,10 @@ function barrelExports() {
     // It read `[\w.-]+`, so every adapter was invisible to it — see the header note. At the time the
     // barrel's paths were `./adapters/<name>.js`; the defect was the same one either way, which is why
     // this is written against the character class rather than against a list of paths.
-    for (const match of source.matchAll(/(?:export\s+(?:\*|\{[^}]*\})\s+from|import\s+[^;]*from)\s+['"]\.\/([\w.\/-]+)\.js['"]/g)) {
+    // `(\.\.?\/)` — both relative forms. The adapter now lives in `adapter/` and reaches its own copies
+    // in `lib/`, so a walker that only followed `./` reached exactly one module and reported "the resolver
+    // only reached 1 SDK modules", which is the same blind spot this function was fixed for once before.
+    for (const match of source.matchAll(/(?:export\s+(?:\*|\{[^}]*\})\s+from|import\s+[^;]*from)\s+['"](\.\.?\/[\w.\/-]+)\.js['"]/g)) {
       const target = join(dirname(file), `${match[1]}.ts`);
       if (existsSync(target) && !seen.has(target)) {
         seen.add(target);
@@ -153,7 +164,10 @@ test('every remaining Buffer use is inside a function, never at module scope', (
   const users = reachable.filter((file) => /\bBuffer\b/.test(code(readFileSync(file, 'utf8'))));
   assert.deepEqual(
     users.map((f) => f.replace(ROOT + '/', '')).sort(),
-    ['packages/omnihilbras-sdk/src/providers/cline/index.ts', 'packages/omnihilbras-sdk/src/providers/deepseek-web/index.ts', 'packages/omnihilbras-sdk/src/providers/kiro/index.ts'],
+    // Re-measured after the rebuild. `clinepass/lib/cline.ts` is a new entry because clinepass now carries
+  // its own copy of Cline's adapter (the isolation that replaced shared inheritance) — the same Buffer use,
+  // in a second file. Named rather than wildcarded, so the next addition is noticed.
+  ['Kernel/SDK/cline/adapter/index.ts', 'Kernel/SDK/clinepass/lib/cline.ts', 'Kernel/SDK/deepseek-web/adapter/index.ts', 'Kernel/SDK/kiro/adapter/index.ts'],
     'the set of Buffer users changed — re-measure the bundle before accepting this list',
   );
 });
@@ -181,17 +195,23 @@ test('the dashboard really does import the SDK barrel, so the rule above is not 
     }
     return /\.(ts|tsx)$/.test(entry.name) ? [full] : [];
   });
-  const importers = files.filter((file) => {
-    const source = readFileSync(file, 'utf8');
-    return /import\s+(?!type\b)[^;]*from\s+['"]@hilbras\/omnihilbras['"]/.test(source);
-  });
-  assert.ok(importers.length > 0, 'nothing imports the SDK as a value — so the browser-safety rule would be moot');
+  // The dashboard no longer reaches the SDK directly: its one permitted surface is
+  // `@omnihilbras/kernel-api/public`, which is types and pure helpers. That IS the browser-safety property
+  // this file was written to protect — rule one is now enforced by the import boundary rather than by
+  // noticing which SDK module leaks a Node builtin. So the assertion is that the boundary holds.
+  const SDK_IMPORTS = /from\s+['"]@hilbras\/omnihilbras['"]|from\s+['"]@omnihilbras\/sdk-[^'"]+['"]/;
+  const importers = files.filter((file) => SDK_IMPORTS.test(readFileSync(file, 'utf8')));
+  assert.equal(
+    importers.length,
+    0,
+    `the dashboard imports the SDK directly, which bypasses the API boundary:\n  ${importers.join('\n  ')}`,
+  );
 });
 
 test('the module that caused it says why it avoids node:crypto', () => {
   // A rule with no reason attached is a superstition, and this one was learned from a blank page. The
   // comment is what stops the next person from "simplifying" it back to `node:crypto`.
-  const source = readFileSync(join(SDK_SRC, 'providers/zen/zen-free-tier.ts'), 'utf8');
+  const source = readFileSync(join(SDK_SRC, 'zen/lib/zen-free-tier.ts'), 'utf8');
   assert.match(source, /node:crypto/, 'the reason the import is avoided is written down');
   assert.match(source, /getRandomValues/, 'and the replacement actually used');
 });

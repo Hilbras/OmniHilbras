@@ -3,7 +3,7 @@
  *
  * ## Why this exists
  *
- * `packages/omnihilbras-sdk/dist` is consumed by two other things in this repository, and neither
+ * `Kernel/SDK/dist` is consumed by two other things in this repository, and neither
  * of them builds it:
  *
  * - the dashboard's `tsc --noEmit`, which resolves `@hilbras/omnihilbras` through `node_modules`
@@ -31,7 +31,7 @@ import { rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const PACKAGE = join(dirname(fileURLToPath(import.meta.url)), '..', 'packages', 'omnihilbras-sdk');
+const PACKAGE = join(dirname(fileURLToPath(import.meta.url)), '..', 'Kernel', 'SDK');
 const DIST = join(PACKAGE, 'dist');
 
 rmSync(DIST, { recursive: true, force: true });

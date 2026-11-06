@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, CircleAlert, Cookie, ExternalLink, LoaderCircle, LogIn, ShieldAlert, Tag } from 'lucide-react';
-import { providerSlug } from '@hilbras/omnihilbras';
+import { providerSlug } from '@omnihilbras/kernel-api/public';
 import { requestJson, type GatewayConnection } from '../lib/gatewayClient';
 
 /**

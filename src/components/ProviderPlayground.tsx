@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, CircleAlert, LoaderCircle, MessageSquare, Square } from 'lucide-react';
 import { ProviderMark } from './ProviderMark';
-import { providerSlug } from '@hilbras/omnihilbras';
+import { providerSlug } from '@omnihilbras/kernel-api/public';
 import { streamGatewayChat, type GatewayChatMessage, type GatewayConnection } from '../lib/gatewayClient';
 import type { ProviderRecord } from './ProviderCard';
 

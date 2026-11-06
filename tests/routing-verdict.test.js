@@ -24,7 +24,7 @@ import { routingVerdict, eligibleCount } from '../src/lib/routingVerdict.ts';
  * a cooling-down connection, and nothing outside `routing-engine.test.js` called it. The promise was
  * in a comment; the value never left the object.
  *
- * The fix has two halves and this file guards the dashboard half; `apps/gateway/test/routing.test.js`
+ * The fix has two halves and this file guards the dashboard half; `Kernel/API/test/routing.test.js`
  * guards the payload half. Either half alone leaves the disagreement in place — the page would
  * compute against a field nobody sends.
  *

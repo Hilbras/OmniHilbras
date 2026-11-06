@@ -13,6 +13,7 @@ import {
   startGatewayDeviceSignIn,
   startGatewayOauthSignIn,
   startKiroSignIn,
+  listGatewayConnections,
   type GatewayConnection,
   type GatewayOauthSignInStatus,
 } from '../lib/gatewayClient';
@@ -51,8 +52,12 @@ type Phase = 'starting' | 'waiting' | 'connected' | 'failed';
  * Providers that sign in with a device code rather than a redirect. The user types a
  * code into the provider's own page and the gateway polls for the result, so there is
  * no authUrl to navigate to and nothing comes back on a callback.
+ *
+ * CodeBuddy is in this set because it polls a session the same way, but it hands back a
+ * URL and **no** code: the user only approves in the browser. The block below renders the
+ * code step only when there is a code, so the two shapes share one path.
  */
-const deviceFlowProviders = new Set(['opencode-console', 'kiro']);
+const deviceFlowProviders = new Set(['opencode-console', 'kiro', 'kimi-code', 'kilocode', 'minimax-code', 'minimax-code-global', 'qoder', 'codebuddy-cn', 'codebuddy-intl']);
 
 /**
  * Providers that sign in with PKCE and no pasted code, because the exchange needs the verifier that
@@ -85,7 +90,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
   const [showPaste, setShowPaste] = useState(false);
   const [paste, setPaste] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [deviceCode, setDeviceCode] = useState<{ userCode: string; verificationUrl: string } | null>(null);
+  const [deviceCode, setDeviceCode] = useState<{ userCode?: string; verificationUrl: string } | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
   const pollRef = useRef<number | null>(null);
@@ -93,10 +98,43 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
   const missedPollsRef = useRef(0);
   const signInWindowRef = useRef<Window | null>(signInWindow ?? null);
   const settledRef = useRef(false);
+  /**
+   * The sign-in session this dialog started, for the callback page's post. The session id is the
+   * capability that makes that post safe to act on: it is minted by the gateway per sign-in and
+   * rides only on the gateway's own callback URL, so a payload that names a different — or no —
+   * session is not ours, whoever sends it. An origin check cannot do this job: in development the
+   * dashboard talks to the gateway through the Vite proxy, so the post arrives from an origin the
+   * dashboard's own config does not name, and a legitimate notice would be dropped.
+   */
+  const startedSessionRef = useRef<string | null>(null);
 
   useEffect(() => {
     signInWindowRef.current = signInWindow ?? null;
   }, [signInWindow]);
+
+  /**
+   * Shut the tab the caller opened for us, when there is nothing to show in it.
+   *
+   * The caller opens a blank tab on the click because a popup needs that gesture, and we point it at
+   * the provider once the sign-in URL exists. When the start **fails** that URL never arrives, so the
+   * tab stays on `about:blank` for as long as the user leaves it there. Measured: a card whose start
+   * is refused (a DNS block, a provider outage) showed "Sign-in did not finish" beside an empty tab,
+   * which reads as OmniHilbras having broken the browser rather than the sign-in failing.
+   *
+   * Only a tab *we* opened — one still on `about:blank` — is closed. A tab the user navigated
+   * somewhere themselves is theirs, and closing it would lose work they did in it.
+   */
+  const discardSignInTab = useCallback(() => {
+    const opened = signInWindowRef.current;
+    signInWindowRef.current = null;
+    if (!opened || opened.closed) return;
+    try {
+      // Reading `location.href` across origins throws; a tab still on about:blank never does.
+      if (opened.location.href === 'about:blank') opened.close();
+    } catch {
+      // Cross-origin: the user, or the provider, has the tab now. Leave it.
+    }
+  }, []);
 
   useEffect(() => {
     setPortalNode(document.body);
@@ -167,11 +205,66 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
       window.setTimeout(onClose, 1200);
       return;
     }
+    discardSignInTab();
     setPhase('failed');
     setError(status.error ?? (status.status === 'expired'
       ? 'The sign-in expired. Start again.'
       : 'The sign-in did not complete.'));
-  }, [onClose, onConnected, stopWaiting]);
+  }, [discardSignInTab, onClose, onConnected, stopWaiting]);
+
+  /**
+   * The provider's own callback page telling us how the sign-in ended.
+   *
+   * Cline (and every other redirect flow) finishes on a separate page, which resolves the session on
+   * the gateway — so the poll below would keep waiting and eventually report a timeout, while the
+   * real reason sat on a tab the operator had probably already closed. Kiro never had this because its
+   * device flow is polled directly. The callback page posts `{ type, provider, ok, message, sessionId }`
+   * to the tab that opened it; on a success the connection is read back from the gateway (the message
+   * carries no credential), and on a failure the message becomes the dialog's error.
+   *
+   * The payload is trusted only when it names the session **this** dialog started
+   * (`startedSessionRef`) — see that field for why the session id, and not the message's origin, is
+   * what a payload has to present. Until a start has succeeded there is no session to match, so the
+   * listener is inert by construction.
+   */
+  useEffect(() => {
+    let active = true;
+    const onPayload = (raw: unknown) => {
+      if (!active || settledRef.current) return;
+      if (typeof raw !== 'object' || raw === null) return;
+      const data = raw as { type?: unknown; ok?: unknown; message?: unknown; sessionId?: unknown };
+      if (data.type !== 'omnihilbras:sign-in') return;
+      if (typeof data.sessionId !== 'string' || data.sessionId !== startedSessionRef.current) return;
+      if (data.ok === true) {
+        // The record itself comes from the gateway, never from the page. If it cannot be read the
+        // poll is still running and will conclude on its own, so a failure here stays silent.
+        void listGatewayConnections()
+          .then((connections) => {
+            // ClinePass reads Cline's connection, so either id can be the owner of the record.
+            const saved = connections.find((item) => (item.providerId === 'cline' || item.providerId === providerId) && item.hasCredential);
+            if (saved) finish({ status: 'connected', connection: saved });
+          })
+          .catch(() => undefined);
+        return;
+      }
+      const message = typeof data.message === 'string' ? data.message : 'The sign-in did not complete.';
+      finish({ status: 'failed', error: message });
+    };
+    const onMessage = (event: MessageEvent) => onPayload(event.data);
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel('omnihilbras:sign-in');
+      channel.onmessage = (event: MessageEvent) => onPayload(event.data);
+    } catch {
+      // No BroadcastChannel in this browser; the `window.opener` post still arrives as a message.
+    }
+    window.addEventListener('message', onMessage);
+    return () => {
+      active = false;
+      window.removeEventListener('message', onMessage);
+      channel?.close();
+    };
+  }, [finish, providerId]);
 
   /** Waits for a session, reporting a dead gateway rather than sitting out the timeout. */
   const watch = useCallback((sessionId: string, poll: (id: string) => Promise<GatewayOauthSignInStatus>, timeoutMessage: string) => {
@@ -179,6 +272,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
     timeoutRef.current = window.setTimeout(() => {
       settledRef.current = true;
       stopWaiting();
+      discardSignInTab();
       setPhase('failed');
       setError(timeoutMessage);
     }, waitTimeoutMs);
@@ -195,11 +289,12 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
         if (missedPollsRef.current < 3) return;
         settledRef.current = true;
         stopWaiting();
+        discardSignInTab();
         setPhase('failed');
         setError(pollError instanceof Error ? pollError.message : 'The local gateway stopped responding.');
       });
     }, pollIntervalMs);
-  }, [finish, stopWaiting]);
+  }, [discardSignInTab, finish, stopWaiting]);
 
   const begin = useCallback(async () => {
     setPhase('starting');
@@ -220,6 +315,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
         watch(signIn.sessionId, getKiroSignInStatus, 'The sign-in timed out. Start again from OmniHilbras.');
       } catch (startError) {
         settledRef.current = true;
+        discardSignInTab();
         setPhase('failed');
         setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
       }
@@ -230,6 +326,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
       try {
         const signIn = await startClaudeCodeSignIn();
         if (settledRef.current) return;
+        startedSessionRef.current = signIn.sessionId;
         const sentToOpenTab = navigateTo(signIn.verificationUrl);
         setPhase('waiting');
         setMessage(sentToOpenTab
@@ -238,6 +335,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
         watch(signIn.sessionId, getClaudeCodeSignInStatus, 'The sign-in timed out. Start again from OmniHilbras.');
       } catch (startError) {
         settledRef.current = true;
+        discardSignInTab();
         setPhase('failed');
         setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
       }
@@ -248,6 +346,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
       try {
         const signIn = await startCodexSignIn();
         if (settledRef.current) return;
+        startedSessionRef.current = signIn.sessionId;
         const sentToOpenTab = navigateTo(signIn.verificationUrl);
         setPhase('waiting');
         setMessage(sentToOpenTab
@@ -256,6 +355,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
         watch(signIn.sessionId, getCodexSignInStatus, 'The sign-in timed out. Start again from OmniHilbras.');
       } catch (startError) {
         settledRef.current = true;
+        discardSignInTab();
         setPhase('failed');
         setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
       }
@@ -267,16 +367,20 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
         const signIn = await startGatewayDeviceSignIn(providerId);
         if (settledRef.current) return;
         // The code has to be read by a person, so it is shown here as well as sent
-        // to the browser tab.
+        // to the browser tab. CodeBuddy has no code — an approval URL is the whole
+        // instruction — so the block below renders the code step only when there is one.
         setDeviceCode({ userCode: signIn.userCode, verificationUrl: signIn.verificationUrl });
         const sentToOpenTab = navigateTo(signIn.verificationUrl);
         setPhase('waiting');
         setMessage(sentToOpenTab
-          ? 'Approve the request in your browser using the code below. This tab will finish the connection.'
+          ? (signIn.userCode
+            ? 'Approve the request in your browser using the code below. This tab will finish the connection.'
+            : 'Approve the request in your browser. This tab will finish the connection.')
           : 'Your browser blocked the sign-in tab. Open the link below to approve.');
         watch(signIn.sessionId, (id) => getDeviceSignInStatus(providerId, id), 'The sign-in timed out. Start again from OmniHilbras.');
       } catch (startError) {
         settledRef.current = true;
+        discardSignInTab();
         setPhase('failed');
         setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
       }
@@ -286,6 +390,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
     try {
       const signIn = await startGatewayOauthSignIn(providerId);
       if (settledRef.current) return;
+      startedSessionRef.current = signIn.sessionId;
       const sentToOpenTab = navigateTo(signIn.authUrl);
       setPhase('waiting');
       setMessage(sentToOpenTab
@@ -294,6 +399,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
       watch(signIn.sessionId, getClineSignInStatus, 'The sign-in timed out. Start again, or paste the code if your browser did not return here.');
     } catch (startError) {
       settledRef.current = true;
+      discardSignInTab();
       setPhase('failed');
       setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
     }
@@ -316,7 +422,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
     if (riskNotice && !acknowledged) return;
     startedRef.current = true;
     void begin();
-  }, [acknowledged, begin, riskNotice]);
+  }, [acknowledged, begin, riskNotice, discardSignInTab]);
 
   async function submitPastedCode() {
     const value = paste.trim();
@@ -390,14 +496,19 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
 
           {deviceCode && phase !== 'connected' && (
             <div className="mt-4 rounded-xl border border-gold/25 bg-gold-soft p-3">
-              <p className="text-[11px] font-semibold text-gold-text">Approve this code at {providerName}</p>
-              <p className="mt-1 select-all font-mono text-lg tracking-[0.18em] text-text">{deviceCode.userCode}</p>
+              <p className="text-[11px] font-semibold text-gold-text">
+                {deviceCode.userCode ? `Approve this code at ${providerName}` : `Approve the request at ${providerName}`}
+              </p>
+              {deviceCode.userCode && (
+                <p className="mt-1 select-all font-mono text-lg tracking-[0.18em] text-text">{deviceCode.userCode}</p>
+              )}
               <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-                The code is filled in for you. If you are asked to sign in first, sign in there and it will
-                bring you back to this approval.
+                {deviceCode.userCode
+                  ? 'The code is filled in for you. If you are asked to sign in first, sign in there and it will bring you back to this approval.'
+                  : 'Sign in on the provider’s page to approve. This tab finishes the connection on its own.'}
               </p>
               <a href={deviceCode.verificationUrl} target="_blank" rel="noreferrer" className="btn-ghost mt-2 inline-flex !h-7 !px-2.5 !text-[11px]">
-                Open the code page
+                {deviceCode.userCode ? 'Open the code page' : 'Open the approval page'}
                 <ExternalLink className="h-3 w-3" aria-hidden="true" />
               </a>
             </div>

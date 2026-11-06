@@ -20,7 +20,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Task 1: Create the SDK package and normalized contracts.
   - Acceptance: strict TypeScript types exist for chat, streaming, models, capabilities, errors, and secret lookup.
   - Verify: package typecheck passes and public exports are documented by types.
-  - Files: `packages/omnihilbras-sdk/package.json`, `tsconfig.json`, `src/types.ts`, `src/errors.ts`, `src/secret-store.ts`, `src/index.ts`.
+  - Files: `Kernel/SDK/package.json`, `tsconfig.json`, `src/types.ts`, `src/errors.ts`, `src/secret-store.ts`, `src/index.ts`.
   - Scope: Small.
 
 - [x] Task 2: Add transport, streaming, and provider registry.
@@ -77,14 +77,14 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Task 7: Add gateway service and configuration.
   - Acceptance: local configuration loads provider credentials/endpoints through `SecretStore` and builds a provider registry without provider conditionals in the service.
   - Verify: configuration and service unit tests pass with fake adapters.
-  - Files: `apps/gateway/src/config.ts`, `src/service.ts`, tests.
+  - Files: `Kernel/API/src/config.ts`, `src/service.ts`, tests.
   - Depends on: Tasks 3–6.
   - Scope: Medium.
 
 - [x] Task 8: Add local HTTP routes and streaming responses.
   - Acceptance: `/health`, `/v1/models`, and `/v1/chat/completions` support JSON and SSE with consistent error envelopes.
   - Verify: integration tests use fake adapters and never contact real providers.
-  - Files: `apps/gateway/src/server.ts`, routes, tests, package scripts.
+  - Files: `Kernel/API/src/server.ts`, routes, tests, package scripts.
   - Depends on: Task 7.
   - Scope: Medium.
 
@@ -109,14 +109,14 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Task 9a: Add a secure local connection store.
   - Acceptance: connection metadata is stored separately from encrypted credentials; files use restrictive permissions and an injectable in-memory implementation supports tests.
   - Verify: focused storage tests cover encryption-at-rest, round trips, atomic writes, and no plaintext secret in the metadata file.
-  - Files: `apps/gateway/src/connections.ts`, gateway tests.
+  - Files: `Kernel/API/src/connections.ts`, gateway tests.
   - Depends on: Task 7.
   - Scope: Medium.
 
 - [x] Task 9b: Add OpenRouter validation and save routes.
   - Acceptance: the gateway validates credentials against OpenRouter on both Check and Save, stores only a valid key, and returns metadata without secrets.
   - Verify: gateway integration tests use a fake provider transport and assert validation-before-save, status codes, and redaction.
-  - Files: `apps/gateway/src/config.ts`, `src/service.ts`, `src/server.ts`, gateway tests.
+  - Files: `Kernel/API/src/config.ts`, `src/service.ts`, `src/server.ts`, gateway tests.
   - Depends on: Tasks 9a and 8.
   - Scope: Medium.
 
@@ -139,7 +139,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Task 9d: Add model discovery and import policy to OpenRouter connections.
   - Acceptance: Save accepts a free-only/all-models policy, fetches models server-side with the saved credential, filters free models by provider pricing, validates IDs, persists the selected model list, and preserves manually added IDs across re-imports.
   - Verify: adapter/service/gateway tests cover pricing parsing, both policies, malformed provider responses, metadata limits, concurrent mutations, and no-secret responses.
-  - Files: `packages/omnihilbras-sdk/src/adapters/openrouter.ts`, `apps/gateway/src/service.ts`, `apps/gateway/src/server.ts`, tests.
+  - Files: `Kernel/SDK/src/adapters/openrouter.ts`, `Kernel/API/src/service.ts`, `Kernel/API/src/server.ts`, tests.
   - Depends on: Tasks 9a–9c.
   - Scope: Medium.
 
@@ -162,7 +162,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Task 9f: Replace preview model tests with real gateway chat checks.
   - Acceptance: provider tests use live adapter health, model tests send a bounded real chat completion with the saved credential, and latency/success/error states come from the gateway response.
   - Verify: gateway contract test covers provider selection and max-token budget; typecheck/build and browser smoke test cover the real request path.
-  - Files: `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, `apps/gateway/test/server.test.js`, docs.
+  - Files: `src/lib/gatewayClient.ts`, `src/pages/ProviderDetailPage.tsx`, `Kernel/API/test/server.test.js`, docs.
   - Depends on: Task 9e.
   - Scope: Small/medium.
 
@@ -177,7 +177,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Task 9g: Add gateway API keys and the dashboard keys page.
   - Acceptance: the gateway mints, pauses, revokes, and authenticates client keys; only hashes are stored; enforcement guards the LLM surface with a dashboard exemption; the dashboard page manages keys without browser secret storage.
   - Verify: gateway store and route tests cover hash-at-rest, one-time reveal, constant-time auth, paused-key rejection, enforcement toggling, and origin exemption; typecheck/build and browser smoke test cover the create/pause/delete flow.
-  - Files: `apps/gateway/src/api-keys.ts`, `src/secure-store.ts`, `src/service.ts`, `src/server.ts`, `src/config.ts`, `test/api-keys.test.js`, `src/pages/ApiKeysPage.tsx`, `src/lib/gatewayClient.ts`, `src/components/DashboardShell.tsx`, `src/dashboardApp.tsx`, docs.
+  - Files: `Kernel/API/src/api-keys.ts`, `src/secure-store.ts`, `src/service.ts`, `src/server.ts`, `src/config.ts`, `test/api-keys.test.js`, `src/pages/ApiKeysPage.tsx`, `src/lib/gatewayClient.ts`, `src/components/DashboardShell.tsx`, `src/dashboardApp.tsx`, docs.
   - Depends on: Task 9f.
   - Scope: Medium.
 
@@ -186,7 +186,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Task 9h: Add per-connection retry, timeout, rate limits, and health-based failover.
   - Acceptance: each connection stores a validated resilience budget; retryable failures retry then fail over by priority; terminal failures never retry; per-request deadlines and per-connection rate limits are enforced by the gateway; failing connections are ejected and recover automatically; the dashboard exposes the controls and live state.
   - Verify: routing tests cover retry-then-failover, terminal-error short-circuiting, timeout and rate-limit handoff, ejection with cooldown recovery, streaming failover before the first chunk, and background health polling; HTTP tests cover the attempt trace and resilience route; browser smoke test covers the Reliability panel.
-  - Files: `apps/gateway/src/routing.ts`, `src/service.ts`, `src/connections.ts`, `src/server.ts`, `src/config.ts`, `test/routing.test.js`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, docs.
+  - Files: `Kernel/API/src/routing.ts`, `src/service.ts`, `src/connections.ts`, `src/server.ts`, `src/config.ts`, `test/routing.test.js`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, docs.
   - Depends on: Task 9g.
   - Scope: Medium.
 
@@ -203,7 +203,7 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 - [x] Task 9i: Add hedged requests and on-demand provider adapters.
   - Acceptance: a slow leading connection is raced against the next eligible one and the first reply wins with the loser cancelled; no hedge is sent when a fast leader answers or no second candidate exists; any provider can be added with a caller-supplied endpoint and served through an on-demand OpenAI-compatible adapter.
   - Verify: routing tests cover hedge-wins, fast-leader-not-hedged, single-candidate skip, leader-wins, failed-race fallback, and on-demand adapter resolution; live check against a deliberately slow endpoint measures the latency difference and the attempt trace.
-  - Files: `apps/gateway/src/service.ts`, `src/connections.ts`, `src/server.ts`, `test/routing.test.js`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, docs.
+  - Files: `Kernel/API/src/service.ts`, `src/connections.ts`, `src/server.ts`, `test/routing.test.js`, `src/pages/ProviderDetailPage.tsx`, `src/lib/gatewayClient.ts`, docs.
   - Depends on: Task 9h.
   - Scope: Medium.
 
@@ -219,8 +219,8 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 
 - [x] Task 10: Define cloud integration boundaries.
   - Acceptance: auth context, tenant context, a remote credential store, and deployment configuration are represented by interfaces without implementing cloud infrastructure.
-  - Verify: `apps/gateway/test/runtime.test.js` (11 tests), including *"THE BOUNDARY: no cloud infrastructure was written"* — which asserts the **absence**, because the tempting way to fail "interfaces only" is to add a remote store nobody uses. `pnpm verify` green.
-  - Files: `apps/gateway/src/runtime.ts` (new), `service.ts`, `config.ts`, `connections.ts`, `server.ts`, `routes/route-context.ts`, `docs/architecture/README.md`.
+  - Verify: `Kernel/API/test/runtime.test.js` (11 tests), including *"THE BOUNDARY: no cloud infrastructure was written"* — which asserts the **absence**, because the tempting way to fail "interfaces only" is to add a remote store nobody uses. `pnpm verify` green.
+  - Files: `Kernel/API/src/runtime.ts` (new), `service.ts`, `config.ts`, `connections.ts`, `server.ts`, `routes/route-context.ts`, `docs/architecture/README.md`.
   - Depends on: Task 8.
   - Scope: Small.
   - Findings:
@@ -235,8 +235,8 @@ Build a publishable TypeScript SDK with provider-neutral contracts and four init
 
 - [x] Task 9j: Add Duck.ai as a web-session provider whose credential is optional.
   - Acceptance: `duckduckgo-web` is served through the gateway's routing like any other provider; its anti-bot challenge is solved in-process; a connection can be saved with **no credential at all** and still answer a turn; and a pasted cookie is optional rather than required on both routes.
-  - Verify: `apps/gateway/test/duckduckgo-web-route.test.js` (11 tests) covers the admin gate, an absent and a blank paste, a paste that reads as no cookie, the note that refuses to call a cookie valid, a catalog failure that is not an endpoint failure, and a saved keyless connection routing. `packages/omnihilbras-sdk/test/duckduckgo-web.test.js` (16) and `apps/gateway/test/duckduckgo-challenge.test.js` (7), `duckduckgo-web-driver.test.js` (11). One live turn answered `port-ok`.
-  - Files: `packages/omnihilbras-sdk/src/providers/duckduckgo-web/index.ts` (new), `apps/gateway/src/duckduckgoChallenge.ts`, `duckduckgoChallengeStubs.ts`, `duckduckgoWeb.ts` (new), `service.ts`, `routes/oauth.ts`, `src/data/providers.ts`, `src/lib/webSessionProviders.ts`, `src/components/WebCookieConnectDialog.tsx`, docs.
+  - Verify: `Kernel/API/test/duckduckgo-web-route.test.js` (11 tests) covers the admin gate, an absent and a blank paste, a paste that reads as no cookie, the note that refuses to call a cookie valid, a catalog failure that is not an endpoint failure, and a saved keyless connection routing. `Kernel/SDK/tests/duckduckgo-web.test.js` (16) and `Kernel/API/test/duckduckgo-challenge.test.js` (7), `duckduckgo-web-driver.test.js` (11). One live turn answered `port-ok`.
+  - Files: `Kernel/SDK/duckduckgo-web/adapter/index.ts` (new), `Kernel/API/src/duckduckgoChallenge.ts`, `duckduckgoChallengeStubs.ts`, `duckduckgoWeb.ts` (new), `service.ts`, `routes/oauth.ts`, `src/data/providers.ts`, `src/lib/webSessionProviders.ts`, `src/components/WebCookieConnectDialog.tsx`, docs.
   - Depends on: Task 9i.
   - Scope: Medium.
   - Findings:
@@ -268,7 +268,7 @@ written, while the plan continued to read as finished:
 
 | Risk | Claimed mitigation | Measured |
 | --- | --- | --- |
-| Provider APIs change independently (**High**) | pin response fixtures per adapter | **5 of 17 adapters** (21 `.ts` files in `src/providers/`, 19 provider folders, one shared base `openai-compatible` and two helpers nested in them, none counted as adapters) — `kiro-stream.bin` plus `openrouter`, `cline` and `opencode-console` (1.48.0), and `zen` (its public model listing, shape and keys only). The other nine have a stated reason, and **seven of those need a credential this machine does not have**. `clinepass` is the one whose capture would *duplicate* rather than fill a gap — it shares Cline's host and wire format, so the bytes it would pin are the bytes `cline-models.json` already pins. The count is printed by `fixture-coverage.test.js`, so it cannot go stale again without a test failing. |
+| Provider APIs change independently (**High**) | pin response fixtures per adapter | **5 of 21 adapters** (27 `.ts` files in `Kernel/SDK/`, 23 provider folders, one shared base `openai-compatible` and four helpers nested in them, none counted as adapters) — `kiro-stream.bin` plus `openrouter`, `cline` and `opencode-console` (1.48.0), and `zen` (its public model listing, shape and keys only). The rest have a stated reason, and **most of those need a credential this machine does not have**. `clinepass` is the one whose capture would *duplicate* rather than fill a gap — it shares Cline's host and wire format, so the bytes it would pin are the bytes `cline-models.json` already pins. The count is printed by `fixture-coverage.test.js`, so it cannot go stale again without a test failing. |
 | Streaming formats differ (**High**) | test event boundaries explicitly | real: frame-level assertions across the adapter tests |
 | Secrets leak through logs/errors (**High**) | redaction helpers and tests that scan errors/log output | real: error-output scanning tests exist |
 | Gateway becomes coupled to one provider | no provider IDs in shared service logic | real: 12 files carry a zero-provider-id invariant test |
@@ -284,7 +284,7 @@ That is not hypothetical. DeepSeek Web's tests asserted two hand-written frame s
 shipped — while live traffic used bare-string appends and the adapter was silently truncating every
 answer to one character. The tests agreed with their author.
 
-**`packages/omnihilbras-sdk/test/fixture-coverage.test.js` makes the gap enforceable.** Every
+**`Kernel/SDK/tests/fixture-coverage.test.js` makes the gap enforceable.** Every
 adapter must have a pinned capture *or say why it does not*, with a reason long enough to argue
 with, and the count is asserted so it cannot drift quietly. Verified by planting a fabricated
 capture, which the guard rejected twice over: *"deepseek-web-challenge.json is pinned but no test

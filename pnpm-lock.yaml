@@ -166,9 +166,9 @@ importers:
 
   .:
     dependencies:
-      '@hilbras/omnihilbras':
+      '@omnihilbras/kernel-api':
         specifier: workspace:*
-        version: link:packages/omnihilbras-sdk
+        version: link:Kernel/API
       '@xyflow/react':
         specifier: ^12.12.0
         version: 12.12.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -225,11 +225,74 @@ importers:
         specifier: ^8.3.0
         version: 8.3.0(@types/node@26.6.2)(jiti@2.7.0)
 
-  apps/gateway:
+  Kernel/API:
     dependencies:
-      '@hilbras/omnihilbras':
+      '@omnihilbras/sdk-anthropic':
         specifier: workspace:*
-        version: link:../../packages/omnihilbras-sdk
+        version: link:../SDK/anthropic
+      '@omnihilbras/sdk-chatgpt-web':
+        specifier: workspace:*
+        version: link:../SDK/chatgpt-web
+      '@omnihilbras/sdk-claude-code':
+        specifier: workspace:*
+        version: link:../SDK/claude-code
+      '@omnihilbras/sdk-cline':
+        specifier: workspace:*
+        version: link:../SDK/cline
+      '@omnihilbras/sdk-clinepass':
+        specifier: workspace:*
+        version: link:../SDK/clinepass
+      '@omnihilbras/sdk-codebuddy':
+        specifier: workspace:*
+        version: link:../SDK/codebuddy
+      '@omnihilbras/sdk-codex':
+        specifier: workspace:*
+        version: link:../SDK/codex
+      '@omnihilbras/sdk-deepseek-web':
+        specifier: workspace:*
+        version: link:../SDK/deepseek-web
+      '@omnihilbras/sdk-duckduckgo-web':
+        specifier: workspace:*
+        version: link:../SDK/duckduckgo-web
+      '@omnihilbras/sdk-gemini':
+        specifier: workspace:*
+        version: link:../SDK/gemini
+      '@omnihilbras/sdk-gemini-web':
+        specifier: workspace:*
+        version: link:../SDK/gemini-web
+      '@omnihilbras/sdk-kilocode':
+        specifier: workspace:*
+        version: link:../SDK/kilocode
+      '@omnihilbras/sdk-kimi-code':
+        specifier: workspace:*
+        version: link:../SDK/kimi-code
+      '@omnihilbras/sdk-kiro':
+        specifier: workspace:*
+        version: link:../SDK/kiro
+      '@omnihilbras/sdk-minimax-code':
+        specifier: workspace:*
+        version: link:../SDK/minimax-code
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../SDK/openai
+      '@omnihilbras/sdk-opencode-console':
+        specifier: workspace:*
+        version: link:../SDK/opencode-console
+      '@omnihilbras/sdk-openrouter':
+        specifier: workspace:*
+        version: link:../SDK/openrouter
+      '@omnihilbras/sdk-qoder':
+        specifier: workspace:*
+        version: link:../SDK/qoder
+      '@omnihilbras/sdk-qwen-web':
+        specifier: workspace:*
+        version: link:../SDK/qwen-web
+      '@omnihilbras/sdk-tokenharbor-web':
+        specifier: workspace:*
+        version: link:../SDK/tokenharbor-web
+      '@omnihilbras/sdk-zen':
+        specifier: workspace:*
+        version: link:../SDK/zen
       playwright-core:
         specifier: 1.62.1
         version: 1.62.1
@@ -241,13 +304,136 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
 
-  packages/omnihilbras-sdk:
+  Kernel/SDK/anthropic:
     devDependencies:
-      '@types/node':
-        specifier: ^26.6.2
-        version: 26.6.2
       typescript:
-        specifier: ^5.9.0
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/chatgpt-web:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/claude-code:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/cline:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/clinepass:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/codebuddy:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/codex:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/deepseek-web:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/duckduckgo-web:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/gemini:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/gemini-web:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/kilocode:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/kimi-code:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/kiro:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/minimax-code:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/openai:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/opencode-console:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/openrouter:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/qoder:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/qwen-web:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/tokenharbor-web:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/zen:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
         version: 5.9.3
 
 packages:

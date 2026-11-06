@@ -53,7 +53,7 @@ import { WEB_SESSION_PROVIDERS } from '../src/lib/webSessionProviders.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CATALOG = join(ROOT, 'src', 'data', 'providers.ts');
-const GATEWAY = join(ROOT, 'apps', 'gateway', 'src');
+const GATEWAY = join(ROOT, 'Kernel', 'API', 'src');
 
 /** The fields a card must hold when nothing has measured them. */
 const PLACEHOLDERS = {
@@ -314,11 +314,16 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // **The log stopped at 26 and the assertion said 31 until 1.85.1**, so five cards were counted by a
   // number whose provenance ended five entries earlier — the drift this comment exists to prevent,
   // in the comment itself. The assertion is unchanged; the entries that explain it are now present.
-  assert.equal(all.length, 33, `the catalog now has ${all.length} cards`);
-  // Seven cards claim OAuth, but the gateway serves six start routes: `clinepass` shares `cline`'s,
-  // which is why the count of routes and the count of claims no longer coincide.
-  assert.equal(oauthCapableProviders().size, 6, 'the gateway serves an OAuth start route for six providers');
-  assert.equal(all.filter((card) => card.auth === 'OAuth').length, 7, 'seven cards claim OAuth, one of them over a shared route');
+  // 34-37 from 1.90.0, which added the `qoder`, `kilocode`, `minimax-code` and `minimax-code-global` OAuth
+  // cards — four coding-agent subscriptions reached by device flow.
+  // 38-39 added the `codebuddy-cn` and `codebuddy-intl` OAuth cards: one vendor, two regions on two
+  // domains, because a sign-in on one side does not reach the other.
+  assert.equal(all.length, 39, `the catalog now has ${all.length} cards`);
+  // Fifteen cards claim OAuth, but the gateway serves twelve start routes: `clinepass` shares `cline`'s,
+  // and `claude-code` and `codex` sign in through `server.ts` routes this scan reads too — the counts of
+  // claims and routes do not coincide, which is why both are asserted rather than one derived.
+  assert.equal(oauthCapableProviders().size, 12, 'the gateway serves an OAuth start route for twelve providers');
+  assert.equal(all.filter((card) => card.auth === 'OAuth').length, 13, 'thirteen cards claim OAuth, one of them over a shared route');
   console.log(`    cards: ${all.length}   claiming OAuth: ${all.filter((c) => c.auth === 'OAuth').length}   gateway OAuth routes: ${oauthCapableProviders().size}   claiming a measurement: 0`);
 });
 
@@ -333,7 +338,7 @@ test('the Gemini Web driver checks the sign-in wall before the composer, because
   // this button can give, because the user saves a dead connection and finds out when a turn fails. The fix is
   // the sign-in wall first, and a composer that is counted *and* visible. This is asserted in source because it
   // is browser behaviour a node test cannot drive.
-  const driver = readFileSync(join(GATEWAY, 'geminiWeb.ts'), 'utf8');
+  const driver = readFileSync(join(GATEWAY, 'providers', 'geminiWeb.ts'), 'utf8');
   assert.match(driver, /signedOutLink/, 'the driver no longer looks for the sign-in wall at all');
   assert.match(driver, /isVisible\(\)/, 'the composer check no longer requires visibility, so a hidden element counts again');
   assert.doesNotMatch(driver, /waitForSelector\(GEMINI_WEB\.composer/, 'the composer is checked with waitForSelector, which resolves on a hidden node');

@@ -20,6 +20,7 @@ import {
 import { ThemeToggle } from './ThemeToggle';
 import { dashboardRoutes } from '../lib/routes';
 import { useGatewayStatus } from '../lib/useGatewayStatus';
+import { PAGE_VERSION } from '../lib/pageVersion';
 
 /**
  * Which sidebar entry is active.
@@ -122,8 +123,17 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
    * message would be the last thing the tab ever said. `/v1/connections` answers in about
    * five milliseconds, so the poll costs nothing.
    */
-  const { reachable, problem } = useGatewayStatus();
+  const { reachable, problem, buildVersion } = useGatewayStatus();
   const gatewayUp = reachable !== false;
+  /**
+   * A gateway that is answering a different build from the page asking it.
+   *
+   * `unknown` on either side means no drift is claimed: a gateway older than this field reports
+   * nothing, and guessing "they match" from silence would be the same mistake as reporting no
+   * version at all.
+   */
+  const staleBuild =
+    typeof buildVersion === 'string' && buildVersion !== 'unknown' && buildVersion !== PAGE_VERSION;
   /**
    * A refusal is not an outage, and the wording has to say which one it is.
    *
@@ -143,13 +153,15 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
             ? 'Gateway needs sign-in'
             : 'Gateway offline';
   const gatewayHint =
-    reachable === false
-      ? problem === 'refused'
-        ? 'this page’s origin is not allowed'
-        : problem === 'unauthorized'
-          ? 'gateway is up · dashboard token not accepted, reload the dashboard'
-          : 'not answering · pnpm dev:gateway'
-      : 'localhost:8787 · local mode';
+    staleBuild
+      ? `running ${buildVersion}, this page is ${PAGE_VERSION} · restart the gateway`
+      : reachable === false
+        ? problem === 'refused'
+          ? 'this page’s origin is not allowed'
+          : problem === 'unauthorized'
+            ? 'gateway is up · dashboard token not accepted, reload the dashboard'
+            : 'not answering · pnpm dev:gateway'
+        : `localhost:8787 · build ${buildVersion ?? 'unknown'}`;
   return (
     <aside className={`dashboard-sidebar flex h-full w-[252px] shrink-0 flex-col border-r border-line bg-bg-soft transition-[width] duration-200 ${collapsed ? 'lg:w-[76px]' : 'lg:w-[252px]'}`}>
       <div className={`flex items-center gap-1 pb-4 pt-5 ${collapsed ? 'justify-center px-2' : 'justify-between px-5'}`}>

@@ -1,0 +1,771 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+import { KIRO, KIRO_MODELS, KiroAdapter, refreshKiroCredential, decodeKiroStream, kiroCredentialExpired, toKiroBody, toKiroEvent, parseKiroUsageLimits, kiroOrderedSurfaces } from '../kiro/dist/adapter/index.js';
+
+/**
+ * Kiro is CodeWhisperer's streaming service, not an OpenAI-compatible endpoint, so the
+ * envelope and the binary framing are the whole integration.
+ *
+ * The framing tests run against `fixtures/kiro-stream.bin`, which is a **real captured
+ * response** — a 7-frame AWS eventstream read off the live service. An earlier version of
+ * this file built its own fixture for a text framing the service never sends, every test
+ * passed, and not one request worked. The encoder below exists only to build extra cases;
+ * the format itself is pinned by the bytes the provider actually returned.
+ */
+
+const realStream = new Uint8Array(readFileSync(fileURLToPath(new URL('./fixtures/kiro-stream.bin', import.meta.url))));
+
+/** Builds one frame in the same layout, for cases the capture does not contain. */
+function frame(eventType, payload, { omitEventType = false } = {}) {
+  const header = (name, value) => {
+    const nameBytes = Buffer.from(name, 'utf8');
+    const valueBytes = Buffer.from(value, 'utf8');
+    const length = Buffer.alloc(2);
+    length.writeUInt16BE(valueBytes.length);
+    return Buffer.concat([Buffer.from([nameBytes.length]), nameBytes, Buffer.from([7]), length, valueBytes]);
+  };
+  const headers = omitEventType
+    ? Buffer.concat([header(':content-type', 'application/json')])
+    : Buffer.concat([header(':event-type', eventType), header(':content-type', 'application/json')]);
+  const body = Buffer.from(JSON.stringify(payload), 'utf8');
+  const prelude = Buffer.alloc(12);
+  prelude.writeUInt32BE(16 + headers.length + body.length, 0);
+  prelude.writeUInt32BE(headers.length, 4);
+  prelude.writeUInt32BE(crc32(prelude.subarray(0, 8)), 8);
+  const withoutTrailer = Buffer.concat([prelude, headers, body]);
+  const trailer = Buffer.alloc(4);
+  trailer.writeUInt32BE(crc32(withoutTrailer), 0);
+  return Buffer.concat([withoutTrailer, trailer]);
+}
+
+const crcTable = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (const byte of bytes) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function transport(script) {
+  const requests = [];
+  return {
+    requests,
+    async request(request) {
+      requests.push(request);
+      const entry = script[request.url];
+      if (!entry) throw new Error(`unexpected request to ${request.url}`);
+      if (entry.status && entry.status >= 400) {
+        const error = new Error(entry.message ?? 'boom');
+        error.statusCode = entry.status;
+        error.details = { providerMessage: entry.detail };
+        throw error;
+      }
+      return { status: entry.status ?? 200, headers: new Headers(), data: entry.data };
+    },
+    stream() {
+      throw new Error('not used');
+    },
+  };
+}
+
+const request = (model = 'claude-haiku-4.5', messages = [{ role: 'user', content: 'hi' }]) => ({
+  model,
+  messages,
+  maxOutputTokens: 256,
+});
+const session = { type: 'oauth', value: 'access-token', refreshToken: 'r1' };
+
+/**
+ * The same scripted answer for **every** inference surface.
+ *
+ * The adapter tries `q.`, then `codewhisperer`, then `runtime.*.kiro.dev`, and the scripted transport is
+ * keyed by URL. Scripting one host made a test pass only because it happened to name whichever host was
+ * tried first — the exact coupling the multi-surface fallback exists to remove.
+ */
+function onEverySurface(entry) {
+  return Object.fromEntries(KIRO.inferenceUrls.map((url) => [url, entry]));
+}
+
+
+test('the auth constants are the public AWS ones, with no embedded secret', () => {
+  assert.equal(KIRO.oidc, 'https://oidc.us-east-1.amazonaws.com');
+  assert.equal(KIRO.clientType, 'public');
+  // Three surfaces, tried in order — one hardcoded URL was the defect that made an account only the
+  // `q.` host accepts fail permanently. `runtime.*.kiro.dev` is present but must stay LAST.
+  assert.deepEqual(KIRO.inferenceUrls, [
+    'https://q.us-east-1.amazonaws.com/generateAssistantResponse',
+    'https://codewhisperer.us-east-1.amazonaws.com/generateAssistantResponse',
+    'https://runtime.us-east-1.kiro.dev/generateAssistantResponse',
+  ]);
+  assert.ok(KIRO.inferenceUrls[KIRO.inferenceUrls.length - 1].includes('runtime'), 'the deprecated path surface must never be tried first');
+  assert.equal(KIRO.streamingTarget, 'AmazonCodeWhispererStreamingService.GenerateAssistantResponse');
+  assert.ok(KIRO.scopes.includes('codewhisperer:completions'));
+  // Nothing here is a credential, so this file can be committed.
+  assert.equal(JSON.stringify(KIRO).includes('secret'), false);
+});
+
+test('the real captured stream decodes to the answer Kiro actually gave', () => {
+  const events = decodeKiroStream(realStream);
+  // 7 frames, consumed exactly — a decoder that stops early would still "pass" a
+  // truthiness check on the text, so the count is asserted too.
+  assert.equal(events.length, 7);
+  const text = events.map((event) => event.text ?? '').join('');
+  assert.equal(text, 'Hey. What are you working on?');
+});
+
+test('the captured frames are the event names Kiro really sends', () => {
+  // No `messageStopEvent` and no `usageEvent` exist in a real response. An adapter that
+  // waits for them waits forever, and one that reports them is inventing them.
+  const types = decodeKiroStream(realStream).map((event) => event.type);
+  assert.deepEqual(new Set(types), new Set(['assistantResponseEvent', 'contextUsageEvent', 'meteringEvent']));
+  assert.equal(types.includes('messageStopEvent'), false);
+  assert.equal(types.includes('usageEvent'), false);
+});
+
+test('credits and context usage are read rather than dropped', () => {
+  // Kiro meters credits and publishes no token counts, so this is the only cost signal.
+  const events = decodeKiroStream(realStream);
+  const metered = events.find((event) => event.type === 'meteringEvent');
+  assert.ok(typeof metered.creditsUsed === 'number' && metered.creditsUsed > 0);
+  const context = events.find((event) => event.type === 'contextUsageEvent');
+  assert.ok(typeof context.contextUsagePercent === 'number');
+});
+
+test('Kiro advertises streaming, and its stream carries the same answer as a chat request', async () => {
+  // The gateway refuses a streamed request to any adapter whose `streaming` flag is not true, with a 501
+  // "does not support streaming". Kiro's stream is assembled from the eventstream and yielded whole, so the
+  // capability is honest, and the flag was the only thing refusing it.
+  const adapter = new KiroAdapter({ transport: transport(onEverySurface({ data: realStream })) });
+  assert.equal(adapter.capabilities.streaming, true);
+  const chunks = [];
+  for await (const chunk of adapter.streamChat(request(), { credential: session })) chunks.push(chunk);
+  assert.ok(chunks.length >= 1, 'the stream yields at least one chunk');
+  const text = chunks.map((chunk) => chunk.delta?.content ?? '').join('');
+  assert.equal(text, 'Hey. What are you working on?');
+});
+
+test('a live request returns the text, the finish reason, and the credit cost', async () => {
+  const t = transport(onEverySurface({ data: realStream }));
+  const adapter = new KiroAdapter({ transport: t });
+  const response = await adapter.chat(request(), { credential: session });
+  assert.equal(response.message.content, 'Hey. What are you working on?');
+  // The stream simply ends; there is no stop event to read a reason from.
+  assert.equal(response.finishReason, 'stop');
+  assert.equal(response.meters?.unit, 'credit');
+  assert.ok(response.meters.amount > 0);
+  // Kiro publishes no token counts, so none are invented.
+  assert.equal(response.usage, undefined);
+});
+
+test('the request asks for bytes, because a text decode corrupts the stream', async () => {
+  const t = transport(onEverySurface({ data: realStream }));
+  await new KiroAdapter({ transport: t }).chat(request(), { credential: session });
+  assert.equal(t.requests[0].responseAs, 'bytes');
+  assert.equal(t.requests[0].headers['X-Amz-Target'], KIRO.streamingTarget);
+  assert.equal(t.requests[0].headers.accept, KIRO.eventStreamAccept);
+  assert.equal(t.requests[0].headers.Authorization, 'Bearer access-token');
+});
+
+test('a request carries no profileArn when the session has no profile', async () => {
+  // An empty `profileArn` is not the same as no profile: Kiro answers
+  // `400 Improperly formed request` for it, which cost a debugging round trip.
+  const body = toKiroBody(request(), 'conv-1', session);
+  assert.equal('profileArn' in body, false);
+  const t = transport(onEverySurface({ data: realStream }));
+  await new KiroAdapter({ transport: t }).chat(request(), { credential: session });
+  assert.equal(JSON.parse(t.requests[0].body).profileArn, undefined);
+});
+
+test('a session scoped to a profile does send its profileArn', () => {
+  const body = toKiroBody(request(), 'conv-1', { ...session, accountId: 'arn:aws:codewhisperer:us-east-1:1:profile/PROFILE' });
+  assert.equal(body.profileArn, 'arn:aws:codewhisperer:us-east-1:1:profile/PROFILE');
+});
+
+test('an empty-string profileArn is not sent, because it is a 400', () => {
+  const body = toKiroBody(request(), 'conv-1', { ...session, accountId: '' });
+  assert.equal('profileArn' in body, false);
+});
+
+test('a truncated stream is refused rather than returned as a partial answer', () => {
+  assert.throws(() => decodeKiroStream(realStream.subarray(0, 500)), { code: 'INVALID_RESPONSE' });
+  assert.equal(decodeKiroStream(new Uint8Array()).length, 0);
+});
+
+test('a frame claiming an impossible length is refused instead of read past', () => {
+  const corrupt = Buffer.from(realStream);
+  corrupt.writeUInt32BE(0xfffffff0, 0);
+  assert.throws(() => decodeKiroStream(new Uint8Array(corrupt)), { code: 'INVALID_RESPONSE' });
+});
+
+test('a frame with no event-type header is still an event, not a dropped one', () => {
+  const bytes = new Uint8Array(frame('assistantResponseEvent', { content: 'x' }, { omitEventType: true }));
+  const events = decodeKiroStream(bytes);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].text, undefined, 'no type means no text is claimed');
+});
+
+test('several frames are joined into one answer', () => {
+  const bytes = Buffer.concat([
+    frame('assistantResponseEvent', { content: 'Hello' }),
+    frame('assistantResponseEvent', { content: ' world' }),
+  ]);
+  assert.equal(
+    decodeKiroStream(new Uint8Array(bytes))
+      .map((event) => event.text ?? '')
+      .join(''),
+    'Hello world',
+  );
+});
+
+test('an unparseable payload still counts as a frame', () => {
+  const event = toKiroEvent('assistantResponseEvent', {});
+  assert.equal(event.type, 'assistantResponseEvent');
+  assert.equal(event.text, undefined);
+});
+
+test('an unknown event name is carried through rather than dropped', () => {
+  const event = toKiroEvent('someNewEvent', { anything: true });
+  assert.equal(event.type, 'someNewEvent');
+});
+
+test('a model the plan does not carry says so, rather than reading as a broken request', async () => {
+  // Kiro answers a 400 that reads like a malformed request. Naming the entitlement is the
+  // difference between "Kiro is broken" and "this account cannot use this model".
+  const t = transport({
+    ...onEverySurface({
+      status: 400,
+      message: 'The provider request failed.',
+      detail: 'Invalid model. Please select a different model to continue.',
+    }),
+  });
+  await assert.rejects(
+    () => new KiroAdapter({ transport: t }).chat(request('claude-sonnet-5'), { credential: session }),
+    (error) => error.code === 'NOT_SUPPORTED' && /plan does not offer claude-sonnet-5/.test(error.publicMessage ?? ''),
+  );
+});
+
+test('any other provider failure is passed through unchanged', async () => {
+  const t = transport({
+    ...onEverySurface({ status: 500, message: 'The provider request failed.', detail: 'Internal server error' }),
+  });
+  await assert.rejects(
+    () => new KiroAdapter({ transport: t }).chat(request(), { credential: session }),
+    (error) => error.code !== 'NOT_SUPPORTED',
+  );
+});
+
+test('an empty answer is a failure, not a silent success', async () => {
+  const t = transport(onEverySurface({ data: new Uint8Array(frame('meteringEvent', { usage: 0.01 })) }));
+  await assert.rejects(
+    () => new KiroAdapter({ transport: t }).chat(request(), { credential: session }),
+    (error) => error.code === 'INVALID_RESPONSE' && /no answer text/.test(error.publicMessage ?? ''),
+  );
+});
+
+test('the envelope is a conversationState, and the model rides on the current message', () => {
+  const body = toKiroBody(request('claude-sonnet-4.5'), 'conv-1');
+  const state = body.conversationState;
+  assert.equal(state.chatTriggerType, 'MANUAL');
+  assert.equal(state.conversationId, 'conv-1');
+  assert.equal(state.currentMessage.userInputMessage.modelId, 'claude-sonnet-4.5');
+  assert.equal(state.currentMessage.userInputMessage.origin, 'AI_EDITOR');
+  assert.equal(state.currentMessage.userInputMessage.content, 'hi');
+  assert.deepEqual(state.history, []);
+});
+
+test('a system turn is folded into the user content, because the envelope has no system role', () => {
+  const body = toKiroBody(
+    { model: 'claude-sonnet-4.5', messages: [{ role: 'system', content: 'be brief' }, { role: 'user', content: 'hi' }] },
+    'conv-1',
+  );
+  const content = body.conversationState.currentMessage.userInputMessage.content;
+  assert.match(content, /be brief/);
+  assert.match(content, /hi/);
+});
+
+test('earlier turns become history, with the assistant side named as Kiro names it', () => {
+  const body = toKiroBody(
+    {
+      model: 'claude-sonnet-4.5',
+      messages: [
+        { role: 'user', content: 'first' },
+        { role: 'assistant', content: 'answer' },
+        { role: 'user', content: 'second' },
+      ],
+    },
+    'conv-1',
+  );
+  const history = body.conversationState.history;
+  assert.equal(history.length, 2);
+  assert.equal(history[0].userInputMessage.content, 'first');
+  assert.equal(history[1].assistantResponseMessage.content, 'answer');
+  assert.equal(body.conversationState.currentMessage.userInputMessage.content, 'second');
+});
+
+test('message content given as parts is flattened rather than dropped', () => {
+  const body = toKiroBody(
+    { model: 'claude-sonnet-4.5', messages: [{ role: 'user', content: [{ type: 'text', text: 'part one ' }, { type: 'text', text: 'part two' }] }] },
+    'conv-1',
+  );
+  assert.match(body.conversationState.currentMessage.userInputMessage.content, /part one part two/);
+});
+
+test('a model Kiro does not offer is refused before a request is spent', async () => {
+  const t = transport({});
+  await assert.rejects(
+    () => new KiroAdapter({ transport: t }).chat(request('claude-opus-9-imaginary'), { credential: session }),
+    (error) => error.code === 'NOT_SUPPORTED' && /does not offer/.test(error.publicMessage ?? ''),
+  );
+  assert.equal(t.requests.length, 0, 'no request is sent for a model that cannot exist');
+});
+
+test('the catalog is the known set, and every id is one Kiro really serves', async () => {
+  const models = await new KiroAdapter({ transport: transport({}) }).listModels();
+  assert.deepEqual(models.map((model) => model.id), KIRO_MODELS.map((model) => model.id));
+  assert.ok(models.every((model) => model.displayName), 'each model carries a name for the dashboard');
+  // There is no wildcard, and an unknown id is a 400 upstream, so nothing invented here.
+  assert.equal(models.some((model) => model.id === 'auto'), false);
+});
+
+test('a token is renewed 15 minutes before it expires, not one', () => {
+  // A 60-second lead was the defect behind "the token keeps dying": a request that started 61 seconds
+  // before expiry passed the check, then spent longer than that connecting, and was refused mid-flight.
+  const now = Date.parse('2026-01-01T12:00:00Z');
+  const at = (ms) => new Date(now + ms).toISOString();
+
+  assert.equal(kiroCredentialExpired({ type: 'oauth', value: 'a', expiresAt: at(10 * 60_000) }, now), true, '10 minutes left is inside the lead');
+  assert.equal(kiroCredentialExpired({ type: 'oauth', value: 'a', expiresAt: at(20 * 60_000) }, now), false, '20 minutes left is not');
+  assert.equal(kiroCredentialExpired({ type: 'oauth', value: 'a', expiresAt: at(-1) }, now), true, 'already expired');
+
+  // "Cannot say" is not "fine". A credential with no expiry used to answer `false`, so a dead token that
+  // had lost its date was sent forever; `undefined` makes the caller try it and renew on a 401/403.
+  assert.equal(kiroCredentialExpired({ type: 'oauth', value: 'a' }, now), undefined);
+  assert.equal(kiroCredentialExpired({ type: 'oauth', value: 'a', expiresAt: 'not-a-date' }, now), undefined);
+  assert.equal(kiroCredentialExpired({ type: 'api-key', value: 'a' }, now), undefined);
+});
+
+/* ------------------------------------------------------------------ *
+ * The refresh grant
+ * ------------------------------------------------------------------ */
+
+/**
+ * The auth half reads OAuth token endpoints with `fetch` directly, so these stub the
+ * global rather than injecting a transport.
+ */
+async function withStubbedFetch(handler, run) {
+  const original = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    const body = init?.body ? JSON.parse(init.body) : undefined;
+    seen.push({ url: String(url), body });
+    return handler(String(url), body);
+  };
+  try {
+    // A rejection is captured rather than thrown, so a test can assert on what was sent
+    // as well as on the error.
+    return { result: await run().then((value) => ({ value }), (error) => ({ error })), seen };
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+const jsonResponse = (data, status = 200) => ({
+  status,
+  headers: new Headers(),
+  text: async () => JSON.stringify(data),
+});
+
+test('the refresh grant sends the registered client, not the client name', async () => {
+  // This is the bug: `clientId: KIRO.clientName, clientSecret: KIRO.clientName` answers
+  // `401 invalid_client — Invalid client secret provided` from AWS, every single time.
+  const session = {
+    type: 'oauth',
+    value: 'old-access',
+    refreshToken: 'r1',
+    expiresAt: new Date(Date.now() - 1000).toISOString(),
+    oauthClientId: 'client-abc123',
+    oauthClientSecret: 'secret-xyz789',
+  };
+  const { result, seen } = await withStubbedFetch(
+    () => jsonResponse({ accessToken: 'new-access', refreshToken: 'r2', expiresIn: 3600 }),
+    () => refreshKiroCredential(session),
+  );
+  const token = seen.find((call) => call.url.endsWith('/token'));
+  assert.equal(token.body.clientId, 'client-abc123');
+  assert.equal(token.body.clientSecret, 'secret-xyz789');
+  assert.equal(token.body.grantType, 'refresh_token');
+  assert.equal(result.value.value, 'new-access');
+  assert.equal(result.value.refreshToken, 'r2');
+});
+
+test('a renewed credential keeps its client, or the next refresh has nothing to send', async () => {
+  const session = {
+    type: 'oauth',
+    value: 'old',
+    refreshToken: 'r1',
+    oauthClientId: 'client-abc123',
+    oauthClientSecret: 'secret-xyz789',
+  };
+  const { result } = await withStubbedFetch(
+    () => jsonResponse({ accessToken: 'new', expiresIn: 3600 }),
+    () => refreshKiroCredential(session),
+  );
+  assert.equal(result.value.oauthClientId, 'client-abc123');
+  assert.equal(result.value.oauthClientSecret, 'secret-xyz789');
+});
+
+test('a credential with no client refuses to refresh rather than sending a placeholder', async () => {
+  // Better to say "sign in again" than to send a guess AWS will reject with a 401 that
+  // reads like a bad password.
+  const { result, seen } = await withStubbedFetch(
+    () => jsonResponse({ error: 'invalid_client' }),
+    () => refreshKiroCredential({ type: 'oauth', value: 'old', refreshToken: 'r1' }),
+  );
+  assert.equal(seen.length, 0, 'nothing is sent without a client to send');
+  assert.equal(result.error.code, 'AUTHENTICATION_FAILED');
+});
+
+test('an expired refresh token says so, rather than reporting a bad paste', async () => {
+  // `invalid_grant` is what AWS says when a token is dead or belongs to another client —
+  // both of which mean "sign in again", not "that was not a token".
+  const { result } = await withStubbedFetch(
+    () => jsonResponse({ error: 'invalid_grant', error_description: 'Invalid refresh token provided' }, 400),
+    () =>
+      refreshKiroCredential({
+        type: 'oauth',
+        value: 'old',
+        refreshToken: 'r1',
+        oauthClientId: 'c',
+        oauthClientSecret: 's',
+      }),
+  );
+  assert.match(result.error.publicMessage ?? '', /expired/);
+});
+
+test('Kiro reports whether its OAuth token has expired, and says so only when it can tell', () => {
+  // Background renewal needs to know when a Kiro token expires without a network call. "Cannot say" must stay
+  // distinct from "valid": an API key or an unreadable expiry is undefined, never a confident false.
+  const adapter = new KiroAdapter({ transport: transport({}) });
+  const now = Date.parse('2026-10-10T12:00:00Z');
+  assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'x', expiresAt: new Date(now - 1000).toISOString() }, now), true, 'an expired token is expired');
+  assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'x', expiresAt: new Date(now + 3_600_000).toISOString() }, now), false, 'a valid token is not');
+  assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'x' }, now), undefined, 'no expiry is cannot-say, not expired');
+  assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'x', expiresAt: 'not-a-date' }, now), undefined, 'an unreadable expiry is cannot-say');
+  assert.equal(adapter.isCredentialExpired({ type: 'api-key', value: 'k' }, now), undefined, 'an API key has no expiry to read');
+});
+
+test('a Kiro stream cut off mid-frame is an invalid response, not a complete answer', () => {
+  // A truncated frame used to end the decode silently, so an answer cut off by the network read as finished. The frame
+  // length says more bytes must follow; when they do not, the answer is refused.
+  const cut = realStream.slice(0, realStream.length - 7);
+  assert.throws(() => decodeKiroStream(cut), (error) => error.code === 'INVALID_RESPONSE', 'a cut-off answer is not returned as complete');
+});
+
+test('a Kiro frame whose checksum does not match is refused, not decoded', () => {
+  const corrupt = new Uint8Array(realStream);
+  corrupt[40] ^= 0xff;
+  assert.throws(() => decodeKiroStream(corrupt), (error) => error.code === 'INVALID_RESPONSE', 'a corrupted frame is not read as text');
+});
+
+test('the intact capture still decodes to the same answer after the integrity checks', () => {
+  const events = decodeKiroStream(realStream);
+  assert.equal(events.map((event) => event.text ?? '').join(''), 'Hey. What are you working on?');
+});
+
+test('tools are sent in the current message as toolSpecification entries, with their schema', () => {
+  const tools = [{ name: 'get_weather', description: 'Get the weather.', parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } }];
+  const body = toKiroBody({ ...request(), tools }, 'conv-1', session);
+  const context = body.conversationState.currentMessage.userInputMessage.userInputMessageContext;
+  assert.deepEqual(context.tools, [{
+    toolSpecification: {
+      name: 'get_weather',
+      description: 'Get the weather.',
+      inputSchema: { json: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } },
+    },
+  }]);
+});
+
+test('a request without tools carries no tool context at all', () => {
+  const body = toKiroBody(request(), 'conv-1', session);
+  assert.equal(body.conversationState.currentMessage.userInputMessage.userInputMessageContext, undefined);
+});
+
+test('a toolUseEvent frame is decoded to its id, name and the input fragment it carries', () => {
+  const bytes = frame('toolUseEvent', { toolUseId: 'tooluse_1', name: 'get_weather', input: '{"city":"Pa', stop: false });
+  const events = decodeKiroStream(new Uint8Array(bytes));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, 'toolUseEvent');
+  assert.equal(events[0].toolUseId, 'tooluse_1');
+  assert.equal(events[0].toolName, 'get_weather');
+  assert.equal(events[0].toolInput, '{"city":"Pa');
+  assert.equal(events[0].toolStop, false);
+});
+
+test('a model that calls a tool returns tool_calls with the arguments joined from its fragments', async () => {
+  const bytes = Buffer.concat([
+    frame('toolUseEvent', { toolUseId: 'tooluse_1', name: 'get_weather', input: '{"city":' }),
+    frame('toolUseEvent', { toolUseId: 'tooluse_1', name: 'get_weather', input: '"Paris"}', stop: true }),
+  ]);
+  const adapter = new KiroAdapter({ transport: transport(onEverySurface({ data: new Uint8Array(bytes) })) });
+  const response = await adapter.chat({ ...request(), tools: [{ name: 'get_weather', parameters: {} }] }, { credential: session });
+  assert.equal(response.finishReason, 'tool_calls');
+  assert.deepEqual(response.message.toolCalls, [
+    { id: 'tooluse_1', type: 'function', function: { name: 'get_weather', arguments: '{"city":"Paris"}' } },
+  ]);
+});
+
+test('a GetUsageLimits answer becomes per-resource quota: used, limit, remaining and reset', () => {
+  const quota = parseKiroUsageLimits({
+    nextDateReset: 1791000000,
+    subscriptionInfo: { subscriptionTitle: 'Kiro Pro' },
+    usageBreakdownList: [
+      { resourceType: 'AGENTIC_REQUEST', currentUsageWithPrecision: 120, usageLimitWithPrecision: 500 },
+    ],
+  });
+  assert.equal(quota.plan, 'Kiro Pro');
+  assert.deepEqual(quota.resources.agentic_request, { used: 120, limit: 500, remaining: 380, resetsAt: new Date(1791000000 * 1000).toISOString() });
+});
+
+test('a usage answer with no breakdown reports no resources rather than a zero quota', () => {
+  const quota = parseKiroUsageLimits({ subscriptionInfo: { subscriptionTitle: 'Kiro' }, usageBreakdownList: [] });
+  assert.deepEqual(quota.resources, {});
+});
+
+test('the usage read sends the bearer token and the origin Kiro expects, and returns the parsed quota', async () => {
+  const t = transport({
+    [`${KIRO.usageLimitsUrl}?origin=AI_EDITOR&resourceType=AGENTIC_REQUEST`]: { data: { subscriptionInfo: { subscriptionTitle: 'Kiro' }, usageBreakdownList: [{ resourceType: 'AGENTIC_REQUEST', currentUsageWithPrecision: 1, usageLimitWithPrecision: 10 }] } },
+  });
+  const adapter = new KiroAdapter({ transport: t });
+  const quota = await adapter.quota({ credential: session });
+  assert.equal(quota.resources.agentic_request.remaining, 9);
+  const sent = t.requests.find((request) => request.url.startsWith(KIRO.usageLimitsUrl));
+  assert.equal(sent.headers.Authorization, 'Bearer access-token');
+  assert.match(sent.url, /origin=AI_EDITOR/);
+});
+
+test('the live quota read is reproduced from the AWS body that implies it', () => {
+  // Real output from the live gateway on 2026-10-12, captured verbatim:
+  //
+  //   {"object":"kiro.quota","provider":"kiro","plan":"KIRO FREE","resources":
+  //    {"credit":{"used":0.44,"limit":50,"remaining":49.56,"resetsAt":"2026-11-01T00:00:00.000Z"}}}
+  //
+  // Two things it settled that a guess would have got wrong: the resource type is `credit`, not the
+  // `agentic_request` the request asks for, and it is a *fractional* credit figure. The AWS body below
+  // is this output's inverse — what GetUsageLimits must have sent — so the parse is pinned to the field
+  // names the live read confirmed.
+  const captured = { plan: 'KIRO FREE', resources: { credit: { used: 0.44, limit: 50, remaining: 49.56, resetsAt: '2026-11-01T00:00:00.000Z' } } };
+  const parsed = parseKiroUsageLimits({
+    subscriptionInfo: { subscriptionTitle: 'KIRO FREE' },
+    nextDateReset: Date.parse('2026-11-01T00:00:00.000Z') / 1000,
+    usageBreakdownList: [{ resourceType: 'CREDIT', currentUsageWithPrecision: 0.44, usageLimitWithPrecision: 50 }],
+  });
+  assert.equal(parsed.plan, captured.plan);
+  assert.deepEqual(parsed.resources, captured.resources);
+});
+
+test('a 403 on every surface refreshes the token once and succeeds on the retry', async () => {
+  // The reported failure: "The bearer token included in the request is invalid." across all surfaces.
+  // A revoked or stale token is a *response*, not an expiry, so a lead time cannot catch it — the only
+  // recovery is to spend the refresh grant and try again. This pins that recovery, and pins that it
+  // happens ONCE: a refresh token AWS has revoked fails identically however many times it is retried.
+  const requests = [];
+  let inferenceAttempts = 0;
+  const transport = {
+    async request(request) {
+      requests.push(request.url);
+      if (request.url.includes('/refreshToken')) {
+        return { status: 200, headers: new Headers(), data: { accessToken: 'fresh-token', refreshToken: 'r2', expiresIn: 3600 } };
+      }
+      if (request.url.includes('generateAssistantResponse')) {
+        inferenceAttempts += 1;
+        // Every surface refuses the stale token; the renewed one is accepted.
+        if (request.headers.Authorization !== 'Bearer fresh-token') {
+          const error = new Error('The bearer token included in the request is invalid.');
+          error.statusCode = 403;
+          throw error;
+        }
+        return { status: 200, headers: new Headers(), data: new Uint8Array(frame('assistantResponseEvent', { content: 'ok' })) };
+      }
+      throw new Error(`unexpected ${request.url}`);
+    },
+    async *stream() {},
+  };
+
+  const written = [];
+  let refreshCalls = 0;
+  const adapter = new KiroAdapter({
+    transport,
+    onTokensRefreshed: (credential) => { written.push(credential); },
+    // The refresh grant is its own OAuth call (global `fetch`), bound to the client pair issued at sign-in.
+    // Injected so the recovery path is testable without a live AWS round trip.
+    refreshCredential: async () => {
+      refreshCalls += 1;
+      return {
+        type: 'oauth', value: 'fresh-token', refreshToken: 'r2',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      };
+    },
+  });
+  const answer = await adapter.chat(
+    { model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] },
+    { credential: { type: 'oauth', value: 'stale-token', refreshToken: 'r1' } },
+  );
+
+  assert.equal(answer.message.content, 'ok');
+  // Three surfaces refused, then one refresh, then a success on the first surface of the second pass.
+  assert.equal(inferenceAttempts, 4, `expected 3 refusals + 1 success, saw ${inferenceAttempts}`);
+  assert.equal(refreshCalls, 1, 'exactly one refresh grant');
+  assert.equal(written.length, 1, 'the renewed credential is written back');
+  assert.equal(written[0].refreshToken, 'r2', 'and carries the rotated refresh token, or the next renewal fails');
+});
+
+test('a refreshed token that is still refused does not loop', async () => {
+  let refreshes = 0;
+  const transport = {
+    async request(request) {
+      const error = new Error('The bearer token included in the request is invalid.');
+      error.statusCode = 403;
+      throw error;
+    },
+    async *stream() {},
+  };
+  const adapter = new KiroAdapter({
+    transport,
+    refreshCredential: async () => {
+      refreshes += 1;
+      return { type: 'oauth', value: 'still-bad', refreshToken: 'r2', expiresAt: new Date(Date.now() + 3_600_000).toISOString() };
+    },
+  });
+  await assert.rejects(
+    () => adapter.chat({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] }, { credential: { type: 'oauth', value: 'stale', refreshToken: 'r1' } }),
+  );
+  assert.equal(refreshes, 1, 'one pass of retries, not unbounded');
+});
+
+test('a renewal carries the auth method and region forward, so the host choice is not lost', async () => {
+  // The method decides which inference hosts accept the token. A renewal that dropped it would look
+  // correct — a fresh access token — and then fail on the very next request with `bearer token is invalid`,
+  // which is the bug this whole phase exists to remove.
+  const { result } = await withStubbedFetch(
+    () => jsonResponse({ accessToken: 'fresh', refreshToken: 'r2', expiresIn: 3600 }),
+    async () => {
+      const { refreshKiroCredential } = await import('../kiro/dist/adapter/index.js');
+      return refreshKiroCredential({
+        type: 'oauth',
+        value: 'old',
+        refreshToken: 'r1',
+        oauthClientId: 'cid',
+        oauthClientSecret: 'csec',
+        kiroAuthMethod: 'idc',
+        region: 'eu-west-1',
+      });
+    },
+  );
+  const { value: credential } = result;
+  assert.equal(credential.kiroAuthMethod, 'idc');
+  assert.equal(credential.region, 'eu-west-1');
+  assert.equal(credential.refreshToken, 'r2', 'the rotated refresh token replaces the old one');
+});
+
+test('the recorded region moves the Amazon surfaces, and the deprecated kiro.dev host stays last', () => {
+  const surfaces = kiroOrderedSurfaces({ type: 'oauth', value: 'v', region: 'eu-west-1' });
+  assert.ok(surfaces[0].includes('eu-west-1.amazonaws.com'), `expected the first surface in the credential's region, got ${surfaces[0]}`);
+  assert.ok(surfaces[surfaces.length - 1].includes('runtime.'), 'the path-style gateway must never be tried first');
+  // No recorded region keeps the defaults unchanged, so an older connection behaves exactly as before.
+  assert.deepEqual(kiroOrderedSurfaces({ type: 'oauth', value: 'v' }), KIRO.inferenceUrls);
+});
+
+test('an idle connection is renewed by the scheduler, not merely probed', async () => {
+  // The background pass used to call `validateCredential`, which asks the provider whether a token works
+  // and never replaces one. An idle connection therefore drifted past its expiry and the next request paid
+  // for it — the "session only lasts a few hours" report. This pins that the scheduler's entry point
+  // actually spends the refresh grant and writes the result back.
+  let refreshes = 0;
+  const written = [];
+  const adapter = new KiroAdapter({
+    transport: { async request() { throw new Error('the scheduler must not need the provider'); }, async *stream() {} },
+    onTokensRefreshed: (credential) => { written.push(credential); },
+    refreshCredential: async () => {
+      refreshes += 1;
+      return { type: 'oauth', value: 'renewed', refreshToken: 'r2', expiresAt: new Date(Date.now() + 3_600_000).toISOString() };
+    },
+  });
+
+  await adapter.renewCredential({ type: 'oauth', value: 'idle', refreshToken: 'r1', expiresAt: new Date(Date.now() + 60_000).toISOString() });
+
+  assert.equal(refreshes, 1, 'the grant is spent');
+  assert.equal(written.length, 1, 'and the result is written back, so the next request uses it');
+  assert.equal(written[0].value, 'renewed');
+});
+
+test('a credential the scheduler cannot renew is refused loudly, not silently skipped', async () => {
+  const adapter = new KiroAdapter({ transport: { async request() { throw new Error('unused'); }, async *stream() {} } });
+  await assert.rejects(
+    () => adapter.renewCredential({ type: 'oauth', value: 'no-refresh-token' }),
+    (error) => error.code === 'AUTHENTICATION_FAILED',
+  );
+});
+
+test('the scheduler and the request path agree on when a token is stale', () => {
+  // Two implementations disagreed once: the scheduler used `parsed <= now` (no lead) while the request path
+  // used a 60-second lead, so an idle gateway renewed only after the token was already dead. One predicate
+  // now answers both.
+  const adapter = new KiroAdapter({ transport: { async request() { throw new Error('unused'); }, async *stream() {} } });
+  const now = Date.parse('2026-01-01T12:00:00Z');
+  const inFiveMinutes = { type: 'oauth', value: 'v', expiresAt: new Date(now + 5 * 60_000).toISOString() };
+  assert.equal(adapter.isCredentialExpired(inFiveMinutes, now), kiroCredentialExpired(inFiveMinutes, now));
+  assert.equal(adapter.isCredentialExpired(inFiveMinutes, now), true, 'inside the 15-minute lead: stale for both');
+});
+
+test('the surface that answered is tried first next time, so the refusals are paid once', async () => {
+  // Every request used to start at `q.` and walk down. For an account only `codewhisperer` serves, that is
+  // two rejected round trips per request, forever — the "slow" half of the report. Measured here as the
+  // count of requests per call: three on the first, one on the second.
+  const attempts = [];
+  const transport = {
+    async request(request) {
+      attempts.push(request.url);
+      if (request.url.includes('://q.')) {
+        const error = new Error('nope'); error.statusCode = 403; throw error;
+      }
+      return { status: 200, headers: new Headers(), data: new Uint8Array(frame('assistantResponseEvent', { content: 'ok' })) };
+    },
+    async *stream() {},
+  };
+  const adapter = new KiroAdapter({ transport });
+  const credential = { type: 'oauth', value: 'v' };
+
+  await adapter.chat({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] }, { credential });
+  assert.equal(attempts.length, 2, `first call pays the refusal: ${attempts.join(' ')}`);
+
+  attempts.length = 0;
+  await adapter.chat({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] }, { credential });
+  assert.equal(attempts.length, 1, `second call goes straight to the winner, saw ${attempts.join(' ')}`);
+  assert.ok(attempts[0].includes('codewhisperer'), 'and it is the surface that answered');
+});
+
+test('a 400 is terminal and is not retried on another surface', async () => {
+  // Retrying a malformed body on three hosts multiplies one clear error into three. Only a refused token
+  // falls through; anything else stops at the first surface.
+  const attempts = [];
+  const transport = {
+    async request(request) {
+      attempts.push(request.url);
+      const error = new Error('bad request'); error.statusCode = 400; throw error;
+    },
+    async *stream() {},
+  };
+  const adapter = new KiroAdapter({ transport });
+  await assert.rejects(() => adapter.chat({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] }, { credential: { type: 'oauth', value: 'v' } }));
+  assert.equal(attempts.length, 1, `a 400 must stop at the first surface, saw ${attempts.length}`);
+});

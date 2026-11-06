@@ -207,6 +207,62 @@
     transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
   }
 
+  /**
+   * The one field style: text inputs **and** selects.
+   *
+   * `.input` was used in twelve places and never defined, so every field fell back to the browser's own
+   * control — a grey box with an OS-native arrow that matched nothing on the page. Selects looked
+   * especially wrong beside the bordered, rounded buttons.
+   *
+   * The focus ring is a soft gold glow rather than the browser outline. `outline: none` alone would be an
+   * accessibility regression, so the ring is *replaced*, not removed: a visible 1px border plus a 3px
+   * halo, which is more visible than the default outline it stands in for.
+   */
+  .input {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.3;
+    padding: 9px 12px;
+    transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+  }
+
+  .input::placeholder {
+    color: var(--muted);
+  }
+
+  /* A select gets room for the chevron drawn below, drawn as a background image so no markup changes. */
+  select.input {
+    padding-right: 30px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+    cursor: pointer;
+  }
+
+  .input:hover:not(:disabled) {
+    border-color: var(--line-strong);
+  }
+
+  /* Focus: the ring replaces the browser outline rather than being deleted alongside it. */
+  .input:focus,
+  .input:focus-visible {
+    outline: none;
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px var(--gold-soft);
+  }
+
+  .input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
   .btn-ghost:hover {
     border-color: var(--gold);
     background: var(--gold-soft);

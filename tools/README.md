@@ -4,7 +4,7 @@ Throwaway probes and one-off investigations live here, not in `apps/` or `packag
 
 The reason is not tidiness. A probe that sits in the gateway's source tree stops being
 distinguishable from production: it gets read, copied, and eventually trusted. `qwen_probe3.mjs`
-was committed under `apps/gateway/` for exactly that long, and the architecture review found it
+was committed under `Kernel/API/` for exactly that long, and the architecture review found it
 there rather than where it was written.
 
 ## Rules

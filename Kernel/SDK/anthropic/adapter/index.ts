@@ -1,0 +1,401 @@
+import { ProviderError } from '../lib/errors.js';
+import { parseSseJson, parseSseStream } from '../lib/streaming.js';
+import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
+import { assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../lib/url.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from '../lib/types.js';
+
+export type AnthropicAdapterOptions = {
+  baseUrl?: string;
+  apiVersion?: string;
+  defaultMaxTokens?: number;
+  headers?: Record<string, string>;
+  transport?: HttpTransport;
+  timeoutMs?: number;
+};
+
+type AnthropicContentBlock = {
+  type?: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: unknown;
+  source?: { type?: string; url?: string; media_type?: string; data?: string };
+};
+
+type AnthropicMessageResponse = {
+  id?: string;
+  model?: string;
+  content?: AnthropicContentBlock[];
+  stop_reason?: string | null;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+  };
+};
+
+type AnthropicModelList = {
+  data?: Array<{
+    id?: string;
+    display_name?: string;
+    max_input_tokens?: number;
+  }>;
+};
+
+type AnthropicStreamEvent = {
+  type?: string;
+  message?: {
+    id?: string;
+    model?: string;
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
+  index?: number;
+  content_block?: AnthropicContentBlock;
+  delta?: {
+    type?: string;
+    text?: string;
+    partial_json?: string;
+    stop_reason?: string | null;
+  };
+  usage?: { input_tokens?: number; output_tokens?: number };
+  error?: { type?: string; message?: string };
+};
+
+const defaultApiVersion = '2023-06-01';
+const defaultMaxTokens = 4096;
+
+export class AnthropicAdapter implements ProviderAdapter {
+  readonly id = 'anthropic';
+  readonly name = 'Anthropic';
+  readonly capabilities: ProviderCapabilities = { chat: true, streaming: true, models: true };
+  /** Serves the `claude` model family, so a bare `claude-*` name is routed here. */
+  readonly modelFamily = 'claude';
+  private readonly baseUrl: string;
+  private readonly apiVersion: string;
+  private readonly defaultMaxTokens: number;
+  private readonly defaultHeaders: Record<string, string>;
+  private readonly transport: HttpTransport;
+
+  constructor(options: AnthropicAdapterOptions = {}) {
+    this.baseUrl = normalizeProviderBaseUrl(options.baseUrl ?? 'https://api.anthropic.com', this.id);
+    this.apiVersion = options.apiVersion ?? defaultApiVersion;
+    assertSafeProviderHeaderValue('anthropic-version', this.apiVersion, this.id);
+    this.defaultMaxTokens = options.defaultMaxTokens ?? defaultMaxTokens;
+    this.defaultHeaders = sanitizeProviderHeaders(options.headers, this.id);
+    this.transport = options.transport ?? new FetchHttpTransport({ timeoutMs: options.timeoutMs });
+  }
+
+  async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
+    const url = new URL(this.url('v1/models'));
+    url.searchParams.set('limit', '1000');
+    const response = await this.transport.request<AnthropicModelList>({
+      method: 'GET',
+      providerId: this.id,
+      url: url.toString(),
+      headers: this.requestHeaders(context.credential, 'application/json'),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    const data = response.data?.data;
+    if (!Array.isArray(data)) throw invalidResponse(this.id, 'Anthropic model list is missing data.');
+
+    return data.flatMap((model) => model.id ? [{
+      id: model.id,
+      providerId: this.id,
+      displayName: model.display_name,
+      contextWindow: model.max_input_tokens,
+    }] : []);
+  }
+
+  async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
+    const response = await this.transport.request<AnthropicMessageResponse>({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url('v1/messages'),
+      headers: this.requestHeaders(context.credential, 'application/json'),
+      body: JSON.stringify(this.toRequestBody(request, false)),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    return this.toChatResponse(response.data, request.model);
+  }
+
+  async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
+    const events = this.transport.stream({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url('v1/messages'),
+      headers: this.requestHeaders(context.credential, 'text/event-stream'),
+      body: JSON.stringify(this.toRequestBody(request, true)),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    const toolBlocks = new Map<number, { id?: string; name?: string }>();
+    let responseId = `stream-${request.model}`;
+    let responseModel = request.model;
+    let sawPayload = false;
+    let sawFinishReason = false;
+    let sawMessageStop = false;
+
+    for await (const event of parseSseStream(events)) {
+      const payload = parseSseJson<AnthropicStreamEvent>(event, this.id);
+      if (!payload) continue;
+      sawPayload = true;
+      if (event.event === 'error' || payload.type === 'error') {
+        throw new ProviderError('PROVIDER_REQUEST_FAILED', 'The Anthropic stream returned an error.', {
+          providerId: this.id,
+        });
+      }
+
+      if (payload.type === 'message_stop') {
+        sawMessageStop = true;
+        break;
+      }
+
+      if (payload.type === 'message_start') {
+        responseId = payload.message?.id ?? responseId;
+        responseModel = payload.message?.model ?? responseModel;
+        continue;
+      }
+
+      if (payload.type === 'content_block_start' && payload.index !== undefined && payload.content_block?.type === 'tool_use') {
+        toolBlocks.set(payload.index, { id: payload.content_block.id, name: payload.content_block.name });
+        continue;
+      }
+
+      if (payload.type === 'content_block_delta' && payload.index !== undefined && payload.delta) {
+        const block = toolBlocks.get(payload.index);
+        if (payload.delta.type === 'text_delta' && payload.delta.text !== undefined) {
+          yield {
+            id: responseId,
+            providerId: this.id,
+            model: responseModel,
+            delta: { role: 'assistant', content: payload.delta.text },
+          };
+        } else if (payload.delta.type === 'input_json_delta' && payload.delta.partial_json !== undefined) {
+          yield {
+            id: responseId,
+            providerId: this.id,
+            model: responseModel,
+            delta: {
+              toolCalls: [{
+                index: payload.index,
+                ...(block?.id ? { id: block.id } : {}),
+                ...(block?.name ? { function: { name: block.name, arguments: payload.delta.partial_json } } : { function: { arguments: payload.delta.partial_json } }),
+              }],
+            },
+          };
+        }
+        continue;
+      }
+
+      if (payload.type === 'message_delta') {
+        const finishReason = payload.delta?.stop_reason ? normalizeFinishReason(payload.delta.stop_reason) : undefined;
+        if (finishReason) sawFinishReason = true;
+        const usage = payload.usage ? normalizeUsage(payload.usage) : undefined;
+        if (finishReason || usage) {
+          yield {
+            id: responseId,
+            providerId: this.id,
+            model: responseModel,
+            delta: {},
+            ...(finishReason ? { finishReason } : {}),
+            ...(usage ? { usage } : {}),
+          };
+        }
+      }
+    }
+
+    if (!sawPayload || !sawFinishReason || !sawMessageStop) {
+      throw new ProviderError('INVALID_RESPONSE', 'The Anthropic stream ended before completion.', { providerId: this.id });
+    }
+  }
+
+  async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
+    const startedAt = performance.now();
+    try {
+      await this.listModels(context);
+      return { status: 'healthy' as const, verified: 'credential', latencyMs: Math.round(performance.now() - startedAt), checkedAt: new Date().toISOString() };
+    } catch (error) {
+      /**
+       * The reason, not just the verdict.
+       *
+       * A bare `catch {}` reported `unavailable` with nothing attached, so the dashboard could
+       * only say "unavailable" — not whether the key was rejected, the endpoint was wrong, or the
+       * provider was down. Those need three different things from the user, and "unavailable" is
+       * none of them. Found by the provider contract on its first run.
+       */
+      return {
+        status: 'unavailable' as const, verified: 'credential',
+        checkedAt: new Date().toISOString(),
+        message: error instanceof Error ? error.message : 'The health check failed without a reason.',
+      };
+    }
+  }
+
+  private url(path: string) {
+    return resolveProviderUrl(this.baseUrl, path, this.id);
+  }
+
+  private requestHeaders(credential: ProviderCredential | undefined, accept: string) {
+    if (credential?.type !== 'api-key') {
+      throw new ProviderError('AUTHENTICATION_FAILED', `Missing API key for provider ${this.id}.`, { providerId: this.id });
+    }
+    assertSafeProviderHeaderValue('x-api-key', credential.value, this.id);
+    return {
+      accept,
+      ...this.defaultHeaders,
+      'content-type': 'application/json',
+      'anthropic-version': this.apiVersion,
+      'x-api-key': credential.value,
+    };
+  }
+
+  private toRequestBody(request: ChatRequest, stream: boolean) {
+    assertNoProviderOptions(request, this.id);
+    const system = request.messages.filter((message) => message.role === 'system').map((message) => contentToText(message.content)).filter(Boolean).join('\n\n');
+    const messages = request.messages.filter((message) => message.role !== 'system').map(toAnthropicMessage);
+    const body: Record<string, unknown> = {
+      model: request.model,
+      max_tokens: request.maxOutputTokens ?? this.defaultMaxTokens,
+      messages,
+      stream,
+    };
+    if (system) body.system = system;
+    if (request.temperature !== undefined) body.temperature = request.temperature;
+    if (request.topP !== undefined) body.top_p = request.topP;
+    if (request.stop !== undefined) body.stop_sequences = request.stop;
+    if (request.tools !== undefined) body.tools = request.tools.map(toAnthropicTool);
+    if (request.toolChoice !== undefined) body.tool_choice = toAnthropicToolChoice(request.toolChoice);
+    if (request.reasoningEffort !== undefined) body.thinking = toAnthropicThinking(request.reasoningEffort, Number(body.max_tokens));
+    return body;
+  }
+
+  private toChatResponse(response: AnthropicMessageResponse, requestedModel: string): ChatResponse {
+    const blocks = response.content;
+    if (!Array.isArray(blocks)) throw invalidResponse(this.id, 'Anthropic response is missing content blocks.');
+
+    const text = blocks.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('');
+    const toolCalls = blocks.filter((block) => block.type === 'tool_use').map(normalizeToolUse);
+    if (!text && toolCalls.length === 0) {
+      if (response.stop_reason === 'refusal') {
+        return {
+          id: response.id ?? `response-${requestedModel}`,
+          providerId: this.id,
+          model: response.model ?? requestedModel,
+          createdAt: new Date().toISOString(),
+          message: { role: 'assistant', content: null },
+          finishReason: 'content_filter',
+          ...(response.usage ? { usage: normalizeUsage(response.usage) } : {}),
+        };
+      }
+      throw invalidResponse(this.id, 'Anthropic response did not contain text or tool use.');
+    }
+
+    return {
+      id: response.id ?? `response-${requestedModel}`,
+      providerId: this.id,
+      model: response.model ?? requestedModel,
+      createdAt: new Date().toISOString(),
+      message: {
+        role: 'assistant',
+        content: text || null,
+        ...(toolCalls.length ? { toolCalls } : {}),
+      },
+      finishReason: normalizeFinishReason(response.stop_reason),
+      ...(response.usage ? { usage: normalizeUsage(response.usage) } : {}),
+    };
+  }
+}
+
+function assertNoProviderOptions(request: ChatRequest, providerId: string) {
+  if (request.providerOptions && Object.keys(request.providerOptions).length > 0) {
+    throw new ProviderError('INVALID_REQUEST', `Provider options are not supported by ${providerId} yet.`, { providerId });
+  }
+}
+
+function toAnthropicMessage(message: ChatMessage) {
+  if (message.role === 'tool') {
+    return {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: message.toolCallId ?? '', content: contentToText(message.content), ...(message.isError ? { is_error: true } : {}) }],
+    };
+  }
+
+  const content = toAnthropicContent(message.content);
+  if (message.role === 'assistant' && message.toolCalls?.length) {
+    const toolBlocks = message.toolCalls.map((toolCall) => ({ type: 'tool_use', id: toolCall.id, name: toolCall.function.name, input: parseToolArguments(toolCall.function.arguments) }));
+    return { role: message.role, content: [...thinkingBlocks(message), ...content, ...toolBlocks] };
+  }
+  return { role: message.role, content: [...thinkingBlocks(message), ...content] };
+}
+
+function toAnthropicContent(content: MessageContent): Array<Record<string, unknown>> {
+  if (typeof content === 'string') return [{ type: 'text', text: content }];
+  if (content === null) return [];
+  return content.map((part) => {
+    if (part.type === 'text') return { type: 'text', text: part.text };
+    const dataUrl = part.imageUrl.url.match(/^data:([^;]+);base64,(.+)$/i);
+    if (dataUrl) return { type: 'image', source: { type: 'base64', media_type: dataUrl[1], data: dataUrl[2] } };
+    return { type: 'image', source: { type: 'url', url: part.imageUrl.url } };
+  });
+}
+
+function contentToText(content: MessageContent) {
+  if (typeof content === 'string') return content;
+  if (content === null) return '';
+  return content.filter((part) => part.type === 'text').map((part) => part.text).join('');
+}
+
+/** Anthropic names a required tool call `any`; the other two choices carry the same meaning under the same names. */
+/**
+ * Anthropic takes a token budget rather than an effort name. The budget grows with the effort, and stays below the
+ * output limit, because Anthropic refuses a thinking budget that leaves no room for the answer.
+ */
+const thinkingShare: Record<'low' | 'medium' | 'high', number> = { low: 0.2, medium: 0.5, high: 0.8 };
+
+function toAnthropicThinking(effort: 'low' | 'medium' | 'high', maxTokens: number) {
+  const budget = Math.max(1024, Math.floor(maxTokens * thinkingShare[effort]));
+  return { type: 'enabled', budget_tokens: Math.min(budget, maxTokens - 1) };
+}
+
+/** A replayed thinking block goes first, with the signature Anthropic issued, or it is refused. */
+function thinkingBlocks(message: ChatMessage) {
+  return message.thinking ? [{ type: 'thinking', thinking: message.thinking.text, signature: message.thinking.signature }] : [];
+}
+
+function toAnthropicToolChoice(choice: 'auto' | 'none' | 'required') {
+  return { type: choice === 'required' ? 'any' : choice };
+}
+
+function toAnthropicTool(tool: ToolDefinition) {
+  return { name: tool.name, description: tool.description, input_schema: tool.parameters };
+}
+
+function parseToolArguments(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
+function normalizeToolUse(block: AnthropicContentBlock): ToolCall {
+  return {
+    id: block.id ?? '',
+    type: 'function',
+    function: { name: block.name ?? '', arguments: JSON.stringify(block.input ?? {}) },
+  };
+}
+
+function normalizeFinishReason(reason: string | null | undefined): FinishReason {
+  if (reason === 'end_turn' || reason === 'stop_sequence') return 'stop';
+  if (reason === 'max_tokens') return 'length';
+  if (reason === 'tool_use') return 'tool_calls';
+  if (reason === 'refusal') return 'content_filter';
+  return reason ? 'other' : 'other';
+}
+
+function normalizeUsage(usage: { input_tokens?: number; output_tokens?: number }): TokenUsage {
+  return { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens };
+}
+
+function invalidResponse(providerId: string, message: string) {
+  return new ProviderError('INVALID_RESPONSE', message, { providerId });
+}

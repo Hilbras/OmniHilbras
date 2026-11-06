@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
  * `NodeJS.Platform` and writes the inferred type straight into the emitted declaration:
  *
  * ```ts
- * // packages/omnihilbras-sdk/dist/adapters/cline.d.ts
+ * // Kernel/SDK/dist/adapters/cline.d.ts
  * export declare function clineHeaders(...): {
  *   ...
  *   'X-PLATFORM': NodeJS.Platform;      // ← a type that does not exist without @types/node
@@ -51,7 +51,12 @@ import { dirname, join } from 'node:path';
  * browser — and it is a separate failure mode with a separate test.
  */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DIST = join(ROOT, 'packages/omnihilbras-sdk/dist');
+// No single `Kernel/SDK/dist` any more: each provider package emits its own. The API package is the one
+// whose declarations are published, so that is what this measures.
+// Only the **browser-facing** surface has to be Node-free. `Kernel/API` is a private server package whose
+// internals legitimately name `Buffer` and `NodeJS.ErrnoException`; the dashboard consumes exactly one entry,
+// `@omnihilbras/kernel-api/public`, and that is the declaration set a browser consumer actually sees.
+const DIST = join(ROOT, 'Kernel/API/dist/src/public');
 
 /** The declaration files the SDK actually emits. Missing `dist` is reported, not silently skipped. */
 function emittedDeclarations() {
@@ -72,9 +77,11 @@ test('the SDK has been built, so this file is measuring something', () => {
   // The guard that silently passes because its subject does not exist is the failure mode this whole
   // session keeps finding. Assert the subject exists before asserting anything about it.
   const declarations = emittedDeclarations();
+  // The subject is now one entry point (`public/index.d.ts`) plus whatever it re-exports, not a whole
+  // package. Assert it is non-empty rather than asserting a size that only made sense for the old layout.
   assert.ok(
-    declarations.length > 20,
-    `expected the SDK's emitted declarations, found ${declarations.length} — run pnpm build:sdk first, or this file proves nothing`,
+    declarations.length > 0,
+    `expected the browser surface's emitted declarations, found ${declarations.length} — run pnpm build:gateway first, or this file proves nothing`,
   );
 });
 
@@ -107,7 +114,8 @@ test('the SDK declares @types/node as a devDependency, not something consumers i
   // The fix is only sound if the types are available *here* and not required *there*. This asserts the
   // half that makes the leak invisible locally: the SDK really does compile with Node types, which is
   // why the bug survived in this repo at all.
-  const manifest = JSON.parse(readFileSync(join(ROOT, 'packages/omnihilbras-sdk/package.json'), 'utf8'));
+  // The API package is the one that publishes types now; the SDK is twenty-two private provider packages.
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'Kernel/API/package.json'), 'utf8'));
   assert.ok(
     !manifest.dependencies?.['@types/node'],
     '@types/node must stay a devDependency; a runtime dependency would install Node globals into every consumer',

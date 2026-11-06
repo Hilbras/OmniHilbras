@@ -14,10 +14,10 @@ Phase 7 evidence. Measured against tests at the commit that adds this file.
 
 ## Tests
 
-- `apps/gateway/test/usage-attempt-path.test.js` (4): an old record loads with no invented path; a request id and
+- `Kernel/API/test/usage-attempt-path.test.js` (4): an old record loads with no invented path; a request id and
   ordered path survive a read; an abandoned or never-dispatched attempt is recorded as not dispatched; a malformed
   path drops the record.
-- `apps/gateway/test/usage-failover-path.test.js` (1): an end-to-end failover through the real route writes one record
+- `Kernel/API/test/usage-failover-path.test.js` (1): an end-to-end failover through the real route writes one record
   with both attempts in order, under the request id, and marks both as dispatched.
 
 ## Compatibility

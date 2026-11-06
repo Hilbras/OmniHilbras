@@ -49,6 +49,14 @@ export type GatewayState = {
   problem?: GatewayProblem;
   /** Ticks once each time the gateway comes back after being down. */
   restoredAt: number | null;
+  /**
+   * The version the answering gateway reports, when it reported one.
+   *
+   * Read from the probe it already makes, so "is this the code in front of me?" costs nothing.
+   * Twice during the Codex work a change was described as live while this process was still serving
+   * the previous build, and nothing on screen could tell. This is the thing that would have.
+   */
+  buildVersion?: string;
   /** Probes immediately, rather than waiting out the interval. */
   checkNow: () => void;
 };
@@ -60,6 +68,7 @@ export function useGatewayStatus(): GatewayState {
   const [reachable, setReachable] = useState<boolean | undefined>(() => isGatewayReachable());
   const [problem, setProblem] = useState<GatewayProblem | undefined>(() => (isGatewayReachable() === false ? 'unreachable' : undefined));
   const [restoredAt, setRestoredAt] = useState<number | null>(null);
+  const [buildVersion, setBuildVersion] = useState<string | undefined>(undefined);
   const wasDown = useRef(false);
 
   const checkNow = useCallback(() => {
@@ -80,6 +89,15 @@ export function useGatewayStatus(): GatewayState {
           wasDown.current = true;
         } else {
           setProblem(undefined);
+          // Read the build off the probe already being made, so "is this the code in front of me"
+          // costs no extra request. A gateway that predates this field reports nothing, and saying
+          // nothing is the honest answer — not "same version".
+          const reported = await response
+            .clone()
+            .json()
+            .then((body: unknown) => (body as { build?: { version?: unknown } })?.build?.version)
+            .catch(() => undefined);
+          if (!cancelled && typeof reported === 'string') setBuildVersion(reported);
         }
         if (!response.ok) {
           // nothing to announce yet
@@ -120,7 +138,7 @@ export function useGatewayStatus(): GatewayState {
     };
   }, [checkNow]);
 
-  return { reachable, problem, restoredAt, checkNow };
+  return { reachable, problem, restoredAt, buildVersion, checkNow };
 }
 
 /**

@@ -47,7 +47,7 @@ sdk-core → provider-openai-compatible → provider-openai → provider-anthrop
 ### Where a provider URL is allowed to point
 
 A connection's `endpoint` is operator-supplied, so it is the one string in the system that decides where a
-request carrying a credential actually goes. `assertSafeProviderRequestUrl` (`packages/omnihilbras-sdk/src/url.ts`)
+request carrying a credential actually goes. `assertSafeProviderRequestUrl` (`Kernel/SDK/*/lib/url.ts`)
 is the single decision point, and it is called in two places: on save, in `routes/connections.ts`, and again
 at the transport, in `transport.ts`. Both matter — a connection written before a rule tightened, or a
 resolved base URL that drifted, must not bypass the check that admission applied.
@@ -137,7 +137,14 @@ Provider modules may share small protocol-family helpers, but provider-specific 
 
 The first local gateway exposes:
 
-- `GET /health` — gateway and configured adapter health. Each provider entry carries
+- `GET /health` — gateway and configured adapter health, plus a **`build`** object naming the version
+  this process is and, when supplied at build time, the commit — read once at startup and never
+  re-read. It is here, and not only on the admin-gated settings route, because health is the call an
+  operator makes when something looks wrong: twice during the Codex work a change was reported live
+  while the process still served the previous build, and nothing on screen could tell. `commit` is
+  omitted rather than invented when no build supplied one, and `GET /v1/connections` carries the same
+  object so the dashboard's existing probe can compare it for free.
+  Each provider entry carries
   **`verified`**: `credential` means the credential was accepted and the catalog or session is
   readable; `inference` means a request actually completed. The field is **required**. A
   health poll runs every 60 seconds on every adapter, so a real completion per poll would be
@@ -169,11 +176,13 @@ The first local gateway exposes:
 - `PATCH /v1/keys/:id` — pause or resume a key.
 - `DELETE /v1/keys/:id` — revoke a key.
 - `PUT /v1/connections/:id/resilience` — update one connection's retry, timeout, and rate-limit budget.
+- `PUT /v1/connections/:id/responsibility` — record who is accountable for one connection and what it is for. Two optional strings, `owner` and `purpose`, both bounded (120 and 500 characters); an empty string is normalised away rather than stored, so "cleared" and "never written" are the same state. Its own verb because this is a note about the connection, not configuration of it: saving one must never re-validate a credential or re-read a catalog, which a full `PUT /v1/connections/:id` would do. The note is how two accounts of the same provider are told apart — the connection id distinguishes them to a machine, the owner to a person.
 - `GET /v1/connections/:id/quota` — what the account behind a connection has left: the `plan`, and per resource `used`, `limit`, `remaining` and `resetsAt`. Served for any provider whose adapter implements `quota`; a resource whose figures the provider does not report is left out, never shown as zero. It reads the same refreshed credential context as chat, and is refused with 401 when no sign-in exists.
   - **A provider that publishes no quota is refused with 501 `NOT_SUPPORTED`, never answered with an empty balance.** "This provider does not say" and "this account has nothing left" look identical to a consumer and mean opposite things, so the refusal names the adapter and the capability instead of returning an empty `resources`. Most providers are in that state: several decide entitlement per request and reveal it only by refusing a call.
   - The route names no provider, so a second metered provider needs an adapter that implements `quota` and no change to the gateway. It replaces the earlier `/v1/connections/kiro/quota`, which was this provider's alone and reached through a per-provider branch in the service.
 - `POST /v1/responses` — the OpenAI Responses API shape for Codex-style clients. `instructions` becomes the system message and `input` (a string, or a list of role/content messages) the conversation. It is served by the chat path, so routing, failover, usage and the key gate are the same. The reply carries `object: "response"`, `status`, `output`, `output_text` and `usage`. `stream: true` is served as Responses server-sent events: each text delta as `response.output_text.delta`, then `response.completed` carrying the same body a non-streaming call returns.
 - **Model aliases.** A saved alias maps a name a client chooses to a provider and model. A request for the alias is routed to that provider and sent the model it publishes. An alias to a provider with no saved connection is refused and nothing is stored.
+- **Model ids are `<slug>/<model>`, and the slug is not always the id.** Every id the gateway hands out carries a per-provider prefix from a fixed table (`providerSlugs`), because a card's title can be renamed and an id built from it would then change under a saved client. Kiro's slug is `kr` while its id is `kiro`, so it serves `kr/claude-sonnet-5`. A request is resolved against **either** the id or the slug, so `kiro/claude-sonnet-5` from an older client keeps working — only the ids the gateway *publishes* follow the table.
 - **Bare model names.** A bare name (no `provider/` prefix) that no connection lists is routed only to a provider that declares its family (`claude`, `gpt`, `gemini`). A `claude-*` name with only an OpenAI connection is refused, not billed to OpenAI. A name a connection lists still routes to that connection.
 - `GET /v1/logs/stream` — a server-sent event stream of each finished request, as it is recorded. Each event is the usage record's fields: time, model, provider, connection, outcome, error code, attempt count and request id. It carries no message content, prompt or credential. Management route: requires a key when management enforcement is on.
 - `PUT /v1/providers/:providerId/strategy` — set how a provider's connections share traffic: `priority` (the default, the first connection by priority serves) or `round-robin` (connections at one priority take turns). Body `{"strategy": "round-robin"}`; any other value is a 400. Management route: requires a key when management enforcement is on. `GET /v1/routing` reports each set strategy under `strategies`.
@@ -298,6 +307,36 @@ The first local gateway exposes:
 - `GET /v1/oauth/kimi-code/session/:id` — whether the Kimi Code sign-in is pending, connected, failed or
   expired. The device code is never in this response. A well-formed id that does not exist is `404`; an
   id that is not a plausible session id is `400`, refused before any lookup.
+- `POST /v1/oauth/kilocode/start` — begin a Kilo Code sign-in. A custom device flow: the response carries
+  a `userCode` and a `verificationUrl`, and the same code is polled until Kilo Code approves it. Kilo
+  Code answers `202`/`403`/`410` for pending/denied/expired rather than the RFC 8628 error codes, so the
+  status decides the outcome.
+- `GET /v1/oauth/kilocode/session/:id` — whether the Kilo Code sign-in is pending, connected, failed or
+  expired.
+- `POST /v1/oauth/codebuddy-cn/start` — begin a CodeBuddy (China) sign-in against `copilot.tencent.com`.
+  Upstream calls it a device flow and names the key `state`, but there is **no code to type**: the start
+  returns a `verificationUrl` and no `userCode`, the user approves in a browser, and the session is
+  polled until `GET /v2/plugin/auth/token` answers `code: 0` with an access token (`11217` is still
+  pending).
+- `GET /v1/oauth/codebuddy-cn/session/:id` — whether the CodeBuddy (China) sign-in is pending, connected,
+  failed or expired.
+- `POST /v1/oauth/codebuddy-intl/start` — begin a CodeBuddy (Global) sign-in. The same flow against
+  `www.codebuddy.ai`, which differs in its `platform` (`ide` rather than `CLI`) and its `User-Agent`.
+- `GET /v1/oauth/codebuddy-intl/session/:id` — whether the CodeBuddy (Global) sign-in is pending,
+  connected, failed or expired.
+- `POST /v1/oauth/minimax-code/start` — begin a MiniMax Code (China) sign-in. An RFC 8628 device flow with
+  a PKCE S256 challenge (`client_id=mcode-public`, `scope=agent.default`, `audience=agent-backend`); when
+  MiniMax omits `device_code` the `user_code` is polled with instead.
+- `GET /v1/oauth/minimax-code/session/:id` — whether the MiniMax Code (China) sign-in is pending,
+  connected, failed or expired.
+- `POST /v1/oauth/minimax-code-global/start` — begin a MiniMax Code (Global) sign-in. The same flow as the
+  China variant, against `account.minimax.io` and `agent.minimax.io`.
+- `GET /v1/oauth/minimax-code-global/session/:id` — whether the MiniMax Code (Global) sign-in is pending,
+  connected, failed or expired.
+- `POST /v1/oauth/qoder/start` — begin a Qoder sign-in. A custom device flow with a locally-minted PKCE
+  verifier, nonce, and machine id; the response carries a `userCode` and the URL to approve it, and the
+  nonce is polled until a token appears.
+- `GET /v1/oauth/qoder/session/:id` — whether the Qoder sign-in is pending, connected, failed or expired.
 - `POST /v1/oauth/claude-code/start` — begin a Claude Code sign-in: the Anthropic **subscription**, reached
   by OAuth, not the metered `anthropic` API key. Returns the URL to open and the session id to poll. The
   flow is authorization-code with PKCE — the verifier is minted here and **never leaves the session**, and
@@ -2142,6 +2181,23 @@ the catalog and refused by every lane. Its own connection test already knows the
 can be down: it probes `https://opencode.ai/zen/v1/models` with `Authorization: Bearer
 public` and reports `OpenCode free tier unavailable` when that fails.
 
+**The free-tier gate is self-correcting, not predictive.** Which models need the contract is decided
+from a `-free` name suffix, because the upstream rotates its free lineup and a list would be stale
+the day after it was written. A suffix is a guess, and a guess is wrong in both directions: a free
+model the suffix missed fails outright, and a paid model named `*-free` pays for a contract it never
+needed. So when the provider answers a request we did **not** gate with its own `FreeTierError`, the
+contract is applied and the request is retried **once**. The provider's refusal is an answer where the
+suffix was a guess. The cost is one failed round trip in exactly the case that would otherwise have
+failed; a refusal that is not a free-tier refusal is rethrown untouched, because a retry there spends
+a second request to learn what the first already said.
+
+Related, and the reason the gate above is checked narrowly: `satisfiesZenUserAgentContract` matches
+only the form the upstream itself recognises (`opencode/<major>.<minor>[.<patch>]`). It previously
+also accepted forms such as `opencode/cli/v1.20.0`, which the upstream does not match — so a header
+the provider would reject was reported here as *satisfied* and left in place instead of being replaced
+with one known to work. Failing to recognise a UA is harmless, because a known-good one is
+synthesised; recognising a bad one suppresses the fix.
+
 A "works in 9router" or "works in OmniRoute" report about these models should be read
 as *"that project advertises them"*, not *"that project served them"*. The
 `mimo` name collision described above is a third possibility and the cheapest to
@@ -2605,7 +2661,7 @@ Behavior when serving a request:
 ## Project Structure
 
 ```text
-packages/omnihilbras-sdk/
+Kernel/SDK/
   src/
     index.ts
     core/
@@ -2618,7 +2674,7 @@ packages/omnihilbras-sdk/
   package.json
   tsconfig.json
 
-apps/gateway/
+Kernel/API/
   src/
     server.ts
     service.ts
@@ -2696,13 +2752,13 @@ The existing Vite commands must continue to build the frontend successfully.
 
 **Checked 1.51.0. Nine of these ten were unticked while `tasks/plan.md` read 50/50 complete** — the plan
 was finished and the criteria it was finished *against* were never revisited. Each is now verified by
-measurement, and `apps/gateway/test/spec-success-criteria.mjs` fails if any stops holding.
+measurement, and `Kernel/API/test/spec-success-criteria.mjs` fails if any stops holding.
 
 - [x] A TypeScript SDK package builds independently of the React app. — its own `tsconfig.json` and
-      `build` script; `packages/omnihilbras-sdk/package.json` declares no React dependency.
+      `build` script; every `Kernel/SDK/<provider>/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **21 files** in `packages/omnihilbras-sdk/src/providers/` — 19 provider folders, each with an `index.ts`, plus two helpers nested inside them (`deepseek-web/deepseek-pow.ts`, `zen/zen-free-tier.ts`). `openai-compatible` is a shared base that providers extend, not a provider. The helpers and `qwen-web` are not protocol adapters, so the guard does not count them, which is why the capture guard counts 17: its file count exceeds that because the helpers are not protocol adapters — each run through the same provider contract suite, and a real OpenRouter key metadata route rather than a generic model-list call pretending to be one.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **136 files** in `Kernel/SDK/` — 22 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url` and `bounded-map` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 21: it measures providers, this counts files.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and
@@ -2778,7 +2834,7 @@ circle inscribed in the square, so the mark is inset to 78% on a full-bleed plat
 Measured: the mark's bounding box is 124 px of 512 at the shipped scale and 160 px un-inset, and the guard
 asserts both bounds — an icon that survives the crop by being invisible is as wrong as one that gets cut.
 
-The npm package carries four of the generated files under `packages/omnihilbras-sdk/brand/`, because npmjs.com
+The npm package carries four of the generated files under `Kernel/SDK/brand/`, because npmjs.com
 renders the *package's* README and its image reference is relative to the package. The copy is written by the
 generator and asserted byte-identical, since a copy made by hand ships whatever geometry was current when
 someone remembered to run `cp`.

@@ -252,10 +252,87 @@ function readDashboardTokenFile(): string | undefined {
   }
 }
 
+/** The checkout's version, read once at config load so the bundle can state what it was built from. */
+function readRepoVersion(): string {
+  try {
+    const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: unknown };
+    return typeof manifest.version === 'string' ? manifest.version : 'unknown';
+  } catch {
+    // A build that cannot read its own manifest must still build; "unknown" is the honest answer.
+    return 'unknown';
+  }
+}
+
+/**
+ * Serves the checkout's version as a module.
+ *
+ * This began as a `define`, and that does not reach a dev-served source module — the identifier
+ * survived the transform untouched, so `typeof __OMNIHILBRAS_VERSION__` was guarding a variable that
+ * was genuinely undefined. A virtual module is one line of resolution and behaves identically in dev
+ * and in a build, which is what the drift check needs: in development the dashboard is served from
+ * source while the gateway runs from `dist`, so a stale gateway is *most* likely there, and a check
+ * that only worked in production would be checking the wrong case.
+ */
+function repoVersion(): Plugin {
+  const id = 'virtual:omnihilbras-version';
+  return {
+    name: 'omnihilbras-repo-version',
+    resolveId: (source) => (source === id ? `\0${id}` : undefined),
+    load: (source) => (source === `\0${id}` ? `export const version = ${JSON.stringify(readRepoVersion())};\n` : undefined),
+  };
+}
+
+/**
+ * Pages that export a non-component alongside their component cannot be hot-replaced, so Vite
+ * invalidates them and the screen never updates. This turns that silent no-op into a reload.
+ */
+const RELOAD_ON_CHANGE = [/src\/pages\/ProviderDetailPage\.tsx$/];
+
+const fullReloadForInvalidatableModules = () => ({
+  name: 'omnihilbras-full-reload',
+  // `configureServer` hooks the watcher Vite already runs; `handleHotUpdate` alone only fires for modules
+  // in the module graph, and an *invalidated* module has been dropped from it.
+  configureServer(server: { watcher: { on: (event: string, cb: (file: string) => void) => void }; ws: { send: (payload: unknown) => void } }) {
+    server.watcher.on('change', (file: string) => {
+      if (RELOAD_ON_CHANGE.some((pattern) => pattern.test(file))) {
+        server.ws.send({ type: 'full-reload', path: '*' });
+      }
+    });
+  },
+});
+
 export default defineConfig({
-  plugins: [dashboardFallback(), gatewayProxy(), logoPolarity(), react(), tailwindcss()],
+  plugins: [
+    fullReloadForInvalidatableModules(),
+    dashboardFallback(), gatewayProxy(), logoPolarity(), react(), tailwindcss(), repoVersion()],
   server: {
     port: 5173,
+    /**
+     * Full reload for the modules Fast Refresh cannot handle.
+     *
+     * `ProviderDetailPage.tsx` exports a component **and** `fallbackProvider`, which the React plugin
+     * refuses: "Could not Fast Refresh (\"fallbackProvider\" export is incompatible)". Vite then
+     * *invalidates* the module instead of updating it, and an invalidated module never repaints — so
+     * every edit to that page looked like it had not been saved. Measured: the server was serving the new
+     * markup while the browser still showed the old, which cost several rounds of "refresh the page".
+     *
+     * A reload is a coarse answer, but it is honest: the change is visible immediately rather than
+     * silently not applied.
+     */
+    hmr: { overlay: true },
+    /**
+     * The SDK's build output is a dependency of this dev server, and Vite watches it like source.
+     *
+     * `@hilbras/omnihilbras` resolves to `Kernel/SDK/dist`, so every SDK rebuild rewrites
+     * every file there and each rewrite is a full page reload — 241 of them in one session's log. The
+     * visible symptom is not "a build happened": a sign-in navigates its approval tab, and the dashboard
+     * reloads underneath it, which reads as the connection having failed.
+     *
+     * `watch.ignored` cannot express this. It also filters *module resolution* in Vite 8, and ignoring the
+     * dist directory made `@hilbras/omnihilbras` unresolvable outright ("Failed to resolve import"). So
+     * the directory stays watched, and the discipline is on the person rebuilding: restart this server
+     * after an SDK build rather than leaving it reloading mid-sign-in.
+     */
   },
   build: {
     rollupOptions: {

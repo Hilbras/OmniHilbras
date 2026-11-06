@@ -27,7 +27,7 @@ import { ProviderMark } from '../components/ProviderMark';
 import { providerRoute } from '../lib/routes';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 import { webSessionProviderIds } from '../lib/webSessionProviders';
-import { providerSlug } from '@hilbras/omnihilbras';
+import { providerSlug } from '@omnihilbras/kernel-api/public';
 import { providerCatalog } from '../data/providers';
 import { mergeGatewayConnections } from '../lib/providerCards';
 

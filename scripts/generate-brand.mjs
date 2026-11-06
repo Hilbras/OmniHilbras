@@ -457,7 +457,7 @@ writeFileSync(join(ROOT, 'logo.png'), readFileSync(join(OUT, 'logo-512.png')));
 // Only the four files a consumer can actually use are copied. The maskable Android set and the intermediate
 // PNG sizes are for the repository, not for an npm page, and shipping them to every install is bytes spent on
 // nothing.
-const SDK_BRAND = join(ROOT, 'packages/omnihilbras-sdk/brand');
+const SDK_BRAND = join(ROOT, 'Kernel/API/brand');
 mkdirSync(SDK_BRAND, { recursive: true });
 const forNpm = ['logo.svg', 'logo-mark.svg', 'wordmark.svg', 'logo-512.png'];
 for (const name of forNpm) writeFileSync(join(SDK_BRAND, name), readFileSync(join(OUT, name)));

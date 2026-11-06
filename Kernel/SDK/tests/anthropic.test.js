@@ -1,0 +1,210 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { AnthropicAdapter } from '../anthropic/dist/adapter/index.js';
+import { ProviderError } from '../anthropic/dist/lib/errors.js';
+
+function createTransport(overrides = {}) {
+  const calls = [];
+  return {
+    calls,
+    async request(request) {
+      calls.push(request);
+      return overrides.request ? overrides.request(request) : {
+        status: 200,
+        headers: new Headers(),
+        data: {
+          id: 'msg-1',
+          model: 'claude-sonnet-4',
+          content: [{ type: 'text', text: 'Hello from Claude' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 4, output_tokens: 3 },
+        },
+      };
+    },
+    async *stream(request) {
+      calls.push(request);
+      yield* (overrides.stream ? overrides.stream(request) : [
+        'event: message_start\ndata: {"type":"message_start","message":{"id":"msg-stream","model":"claude-sonnet-4"}}\n\n',
+        'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+        'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}\n\n',
+        'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" there"}}\n\n',
+        'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n\n',
+        'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+      ]);
+    },
+  };
+}
+
+test('AnthropicAdapter converts system messages, tools, and responses', async () => {
+  const transport = createTransport();
+  const adapter = new AnthropicAdapter({ transport });
+  const response = await adapter.chat({
+    model: 'claude-sonnet-4',
+    messages: [
+      { role: 'system', content: 'Be concise.' },
+      { role: 'user', content: 'Hello' },
+    ],
+    maxOutputTokens: 256,
+    tools: [{ name: 'get_weather', description: 'Get weather', parameters: { type: 'object' } }],
+  }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+
+  assert.equal(transport.calls[0].url, 'https://api.anthropic.com/v1/messages');
+  assert.equal(transport.calls[0].headers['x-api-key'], 'sk-ant-test');
+  assert.equal(transport.calls[0].headers['anthropic-version'], '2023-06-01');
+  const body = JSON.parse(transport.calls[0].body);
+  assert.equal(body.system, 'Be concise.');
+  assert.equal(body.max_tokens, 256);
+  assert.deepEqual(body.tools, [{ name: 'get_weather', description: 'Get weather', input_schema: { type: 'object' } }]);
+  assert.equal(response.providerId, 'anthropic');
+  assert.equal(response.message.content, 'Hello from Claude');
+  assert.equal(response.finishReason, 'stop');
+  assert.deepEqual(response.usage, { inputTokens: 4, outputTokens: 3 });
+});
+
+test('a failed tool result reaches Claude with is_error, and a successful one carries no such field', async () => {
+  const transport = createTransport();
+  const adapter = new AnthropicAdapter({ transport });
+  await adapter.chat({
+    model: 'claude-sonnet-4',
+    messages: [
+      { role: 'user', content: 'run it' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'toolu_1', type: 'function', function: { name: 'run', arguments: '{}' } }] },
+      { role: 'tool', toolCallId: 'toolu_1', content: 'exit 1: command not found', isError: true },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'toolu_2', type: 'function', function: { name: 'run', arguments: '{}' } }] },
+      { role: 'tool', toolCallId: 'toolu_2', content: 'ok' },
+    ],
+  }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  const messages = JSON.parse(transport.calls[0].body).messages;
+  const failed = messages[2].content[0];
+  const succeeded = messages[4].content[0];
+  assert.equal(failed.type, 'tool_result');
+  assert.equal(failed.is_error, true, 'Claude must be told the tool failed');
+  assert.equal('is_error' in succeeded, false, 'a success keeps the default wire shape');
+});
+
+test('AnthropicAdapter represents a refusal as a content-filter response', async () => {
+  const transport = createTransport({
+    request: async () => ({ status: 200, headers: new Headers(), data: { id: 'msg-refusal', model: 'claude-sonnet-4', content: [], stop_reason: 'refusal' } }),
+  });
+  const adapter = new AnthropicAdapter({ transport });
+  const response = await adapter.chat({ model: 'claude-sonnet-4', messages: [{ role: 'user', content: 'Hello' }] }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  assert.equal(response.message.content, null);
+  assert.equal(response.finishReason, 'content_filter');
+});
+
+test('AnthropicAdapter normalizes native SSE events and tool deltas', async () => {
+  const transport = createTransport({
+    stream: async function* () {
+      yield 'event: message_start\ndata: {"type":"message_start","message":{"id":"msg-stream","model":"claude-sonnet-4"}}\n\n';
+      yield 'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n';
+      yield 'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}\n\n';
+      yield 'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" there"}}\n\n';
+      yield 'event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool-1","name":"lookup"}}\n\n';
+      yield 'event: content_block_delta\ndata: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"q\\":\\"x\\"}"}}\n\n';
+      yield 'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":9}}\n\n';
+      yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n';
+    },
+  });
+  const adapter = new AnthropicAdapter({ transport });
+  const chunks = [];
+  for await (const chunk of adapter.streamChat({ model: 'claude-sonnet-4', messages: [{ role: 'user', content: 'Hi' }] }, { credential: { type: 'api-key', value: 'sk-ant-test' } })) {
+    chunks.push(chunk);
+  }
+
+  assert.deepEqual(chunks.filter((chunk) => chunk.delta.content).map((chunk) => chunk.delta.content), ['Hi', ' there']);
+  assert.equal(chunks.find((chunk) => chunk.delta.toolCalls)?.delta.toolCalls[0].function.name, 'lookup');
+  assert.equal(chunks.at(-1).finishReason, 'tool_calls');
+});
+
+test('AnthropicAdapter converts base64 image data URLs to native image blocks', async () => {
+  const transport = createTransport();
+  const adapter = new AnthropicAdapter({ transport });
+  await adapter.chat({
+    model: 'claude-sonnet-4',
+    messages: [{ role: 'user', content: [{ type: 'image_url', imageUrl: { url: 'data:image/png;base64,aGVsbG8=' } }] }],
+  }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  const body = JSON.parse(transport.calls[0].body);
+  assert.deepEqual(body.messages[0].content[0], { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' } });
+});
+
+test('AnthropicAdapter stops consuming after message_stop', async () => {
+  const transport = createTransport({
+    stream: async function* () {
+      yield 'event: message_start\ndata: {"type":"message_start","message":{"id":"msg-stop","model":"claude-sonnet-4"}}\n\n';
+      yield 'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n';
+      yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n';
+      yield 'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"late"}}\n\n';
+    },
+  });
+  const adapter = new AnthropicAdapter({ transport });
+  const chunks = [];
+  for await (const chunk of adapter.streamChat({ model: 'claude-sonnet-4', messages: [{ role: 'user', content: 'Hi' }] }, { credential: { type: 'api-key', value: 'sk-ant-test' } })) chunks.push(chunk);
+  assert.equal(chunks.some((chunk) => chunk.delta.content === 'late'), false);
+});
+
+test('AnthropicAdapter rejects unsafe API version values', () => {
+  assert.throws(() => new AnthropicAdapter({ apiVersion: '2023-06-01\r\nInjected' }), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
+});
+
+test('AnthropicAdapter requires an API key', async () => {
+  const adapter = new AnthropicAdapter({ transport: createTransport() });
+
+  await assert.rejects(
+    adapter.chat({ model: 'claude-sonnet-4', messages: [{ role: 'user', content: 'Hello' }] }),
+    (error) => error instanceof ProviderError && error.code === 'AUTHENTICATION_FAILED',
+  );
+});
+
+test('a toolChoice of none reaches Anthropic as tool_choice none, so the model is told not to call a tool', async () => {
+  const transport = createTransport();
+  const adapter = new AnthropicAdapter({ transport });
+  await adapter.chat({
+    model: 'claude-sonnet-4',
+    messages: [{ role: 'user', content: 'answer without tools' }],
+    tools: [{ name: 'get_weather', parameters: { type: 'object' } }],
+    toolChoice: 'none',
+  }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  const body = JSON.parse(transport.calls[0].body);
+  assert.deepEqual(body.tool_choice, { type: 'none' }, 'the caller\'s choice reaches the provider');
+});
+
+test('a reasoningEffort becomes an Anthropic thinking budget that grows with the effort, and an unset effort sends no thinking block', async () => {
+  const transport = createTransport();
+  const adapter = new AnthropicAdapter({ transport });
+  const send = (reasoningEffort) => adapter.chat({
+    model: 'claude-sonnet-4',
+    messages: [{ role: 'user', content: 'think' }],
+    maxOutputTokens: 8192,
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+  }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  await send('low');
+  await send('high');
+  await send(undefined);
+  const low = JSON.parse(transport.calls[0].body).thinking;
+  const high = JSON.parse(transport.calls[1].body).thinking;
+  assert.equal(low.type, 'enabled');
+  assert.equal(high.type, 'enabled');
+  assert.ok(high.budget_tokens > low.budget_tokens, 'a higher effort gets a larger budget');
+  assert.equal('thinking' in JSON.parse(transport.calls[2].body), false, 'an unset effort is not invented');
+});
+
+test('an assistant turn\'s thinking block and its signature are sent back to Anthropic before the tool use', async () => {
+  // Anthropic refuses a replayed thinking block that has lost its signature, and a multi-turn tool round needs the
+  // block back. The block is kept on the message with its signature and returned in the same position.
+  const transport = createTransport();
+  const adapter = new AnthropicAdapter({ transport });
+  await adapter.chat({
+    model: 'claude-sonnet-4',
+    messages: [
+      { role: 'user', content: 'run it' },
+      { role: 'assistant', content: '', thinking: { text: 'I should call the tool.', signature: 'sig-abc' }, toolCalls: [{ id: 'toolu_1', type: 'function', function: { name: 'run', arguments: '{}' } }] },
+      { role: 'tool', toolCallId: 'toolu_1', content: 'ok' },
+    ],
+  }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  const assistant = JSON.parse(transport.calls[0].body).messages[1];
+  assert.equal(assistant.content[0].type, 'thinking', 'the thinking block leads the assistant turn');
+  assert.equal(assistant.content[0].thinking, 'I should call the tool.');
+  assert.equal(assistant.content[0].signature, 'sig-abc', 'the signature is returned unchanged');
+  const toolUseAt = assistant.content.findIndex((block) => block.type === 'tool_use');
+  assert.ok(toolUseAt > 0, 'the tool use follows the thinking block');
+});
