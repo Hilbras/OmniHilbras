@@ -386,6 +386,13 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
    */
   const planned = provider.status === 'planned';
   const [addOpen, setAddOpen] = useState(false);
+  /**
+   * The connect dialog opened from the accounts panel's **Add account** button rather than the page's
+   * connect button: the sign-in this dialog starts saves a second connection beside the existing ones
+   * instead of repairing the first. The gateway decides the target when the sign-in starts, so the
+   * flag rides the start request and the ordinary connect path keeps repairing.
+   */
+  const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [signInWindow, setSignInWindow] = useState<Window | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
   const [refreshingModels, setRefreshingModels] = useState(false);
@@ -578,6 +585,9 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   // so the tab is opened blank here and the dialog navigates it once the
   // gateway hands back the sign-in URL.
   function openAddConnection() {
+    // The ordinary connect path is a repair: it targets the provider's one connection. Only the
+    // accounts panel's Add account button opens the dialog in add-account mode.
+    setAddAccountOpen(false);
     if (webCookieProviders.has(provider.id)) {
       setSignInWindow(null);
       setAddOpen(true);
@@ -1197,7 +1207,13 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
         </section>
       </div>
 
-      <ProviderAccountsPanel connections={connections} providerName={provider.name} onSaved={loadConnection} />
+      <ProviderAccountsPanel
+        connections={connections}
+        providerName={provider.name}
+        onSaved={loadConnection}
+        // Offered only where the connect dialog can carry it: an OAuth flow with a served start route.
+        {...(isOauth && oauthFlowAvailable ? { onAddAccount: () => { setAddAccountOpen(true); openAddConnection(); } } : {})}
+      />
 
 
       <section id="endpoint" className="card mt-4 p-3.5 sm:mt-5 sm:p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-sm font-semibold">Endpoint details</h2><p className="muted mt-1 text-xs">The base URL OmniHilbras will use for this provider.</p></div><code className="max-w-full overflow-x-auto rounded-lg border border-line bg-bg-soft px-3 py-2 font-mono text-[11px] text-muted sm:max-w-[420px]">{connection?.endpoint ?? provider.endpoint}</code></div></section>
@@ -1241,8 +1257,9 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           signInWindow={signInWindow}
           onAcknowledged={() => setSignInWindow(window.open('about:blank', '_blank'))}
-          onClose={() => { setAddOpen(false); setSignInWindow(null); }}
+          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); }}
           onConnected={handleOauthConnected}
+          addAccount={addAccountOpen}
         />
       )}
     </>

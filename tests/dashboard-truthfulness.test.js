@@ -186,7 +186,7 @@ test('a device-code sign-in goes to the provider that asked for it', () => {
 
   // And the dialog actually passes it, which is the half a signature check cannot see.
   const dialog = stripComments(readFileSync(join(DASHBOARD, 'components', 'OauthConnectDialog.tsx'), 'utf8'));
-  assert.ok(dialog.includes('startGatewayDeviceSignIn(providerId)'), 'the dialog must pass the provider it was opened for');
+  assert.ok(dialog.includes('startGatewayDeviceSignIn(providerId, addAccount)'), 'the dialog must pass the provider it was opened for, and the add-account mode it was opened in');
   assert.ok(dialog.includes('getDeviceSignInStatus(providerId, id)'), 'and poll the same provider, not a fixed one');
 });
 

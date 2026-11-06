@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { ZenAdapter } from '@omnihilbras/sdk-zen';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
 import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext, type ModelPricing } from './index.js';
@@ -756,15 +757,23 @@ export class GatewayService {
   /**
    * Starts a Kimi Code sign-in. A device flow, so the user approves a code in their own browser and
    * the dashboard polls — nothing is redirected back to us.
+   *
+   * `addAccount` decides what the sign-in saves to, made here rather than at poll time: the provider's
+   * one connection for a repair, a fresh unique id for a second account — the rule Kiro's
+   * multi-account flow states, and the reason a second Kimi account can exist beside the first without
+   * overwriting it.
    */
-  async startKimiCodeSignIn() {
+  async startKimiCodeSignIn(addAccount = false) {
     // **The registered adapter, not a fresh one.** A `new KimiCodeAdapter` here would build its own
     // `FetchHttpTransport` and reach the real Kimi even when the gateway was constructed with a
     // scripted transport — so a test of this flow made a live network call, and a caller who supplied
     // their own transport silently had it ignored for the sign-in. The adapter is memoised per
     // connection, which is exactly the lifetime this needs.
     const started = await this.kimiCodeAdapter(kimiCodeProviderId).beginSignIn();
-    const session = this.kimiCodeSessions.create(started);
+    const session = this.kimiCodeSessions.create({
+      ...started,
+      connectionId: addAccount ? `${kimiCodeProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : kimiCodeProviderId,
+    });
     return {
       sessionId: session.id,
       userCode: session.userCode,
@@ -801,7 +810,11 @@ export class GatewayService {
         return note;
       },
       connection: () => ({
-        id: kimiCodeProviderId,
+        // The session's target id, not the bare provider id: an "add account" sign-in reserved a fresh
+        // one at start, and a repair targets the connection it is repairing. Falling back to the
+        // provider id keeps every existing caller — and every old client that never sent the flag —
+        // behaving exactly as before.
+        id: this.kimiCodeSessions.get(sessionId)?.connectionId ?? kimiCodeProviderId,
         providerId: kimiCodeProviderId,
         name: 'Kimi Code',
         // The endpoint is fixed by the adapter, so it is recorded for display rather than read back —

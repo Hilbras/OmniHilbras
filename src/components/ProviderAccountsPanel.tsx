@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyRound, Power, Save } from 'lucide-react';
+import { KeyRound, Plus, Power, Save } from 'lucide-react';
 import type { GatewayConnection } from '../lib/gatewayClient';
 import { saveGatewayConnectionResponsibility } from '../lib/gatewayClient';
 import { useToast } from './Toast';
@@ -30,10 +30,17 @@ export function ProviderAccountsPanel({
   connections,
   providerName,
   onSaved,
+  onAddAccount,
 }: {
   connections: readonly GatewayConnection[];
   providerName: string;
   onSaved: () => void;
+  /**
+   * Opens the connect dialog in add-account mode: a second sign-in that saves beside these rows
+   * instead of repairing the first. Offered only when the provider's flow can carry it, so it is
+   * absent — and the button with it — for providers that connect one account at a time.
+   */
+  onAddAccount?: () => void;
 }) {
   if (connections.length === 0) return null;
 
@@ -53,9 +60,17 @@ export function ProviderAccountsPanel({
             </p>
           </div>
         </div>
-        <span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">
-          {connections.length === 1 ? '1 account' : `${connections.length} accounts`}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">
+            {connections.length === 1 ? '1 account' : `${connections.length} accounts`}
+          </span>
+          {onAddAccount && (
+            <button type="button" onClick={onAddAccount} className="btn-ghost !px-2.5 !py-1.5 !text-xs">
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              Add account
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="mt-4 flex flex-col gap-3">

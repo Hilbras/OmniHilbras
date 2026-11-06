@@ -44,6 +44,13 @@ type Props = {
   onAcknowledged?: () => void;
   onConnected: (connection: GatewayConnection) => void | Promise<void>;
   onClose: () => void;
+  /**
+   * Sign a **second** account in beside the provider's existing connection, instead of repairing the
+   * one it has. The gateway decides what the sign-in saves to when it starts, so this rides the start
+   * request and not the poll. Absent — the default — means the long-standing behaviour: re-signing a
+   * provider repairs its one connection.
+   */
+  addAccount?: boolean;
 };
 
 type Phase = 'starting' | 'waiting' | 'connected' | 'failed';
@@ -83,7 +90,7 @@ const waitTimeoutMs = 5 * 60_000;
  * nothing to paste. The paste field stays available for the case where the
  * provider does not hand the code to a browser redirect.
  */
-export function OauthConnectDialog({ providerId, providerName, riskNotice, signInWindow, onAcknowledged, onConnected, onClose }: Props) {
+export function OauthConnectDialog({ providerId, providerName, riskNotice, signInWindow, onAcknowledged, onConnected, onClose, addAccount = false }: Props) {
   const [phase, setPhase] = useState<Phase>('starting');
   const [message, setMessage] = useState('Opening the sign-in page…');
   const [error, setError] = useState('');
@@ -304,7 +311,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
 
     if (providerId === 'kiro') {
       try {
-        const signIn = await startKiroSignIn();
+        const signIn = await startKiroSignIn(addAccount);
         if (settledRef.current) return;
         setDeviceCode({ userCode: signIn.userCode, verificationUrl: signIn.verificationUrl });
         const sentToOpenTab = navigateTo(signIn.verificationUrl);
@@ -364,7 +371,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
 
     if (deviceFlowProviders.has(providerId)) {
       try {
-        const signIn = await startGatewayDeviceSignIn(providerId);
+        const signIn = await startGatewayDeviceSignIn(providerId, addAccount);
         if (settledRef.current) return;
         // The code has to be read by a person, so it is shown here as well as sent
         // to the browser tab. CodeBuddy has no code — an approval URL is the whole
@@ -403,7 +410,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
       setPhase('failed');
       setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
     }
-  }, [navigateTo, providerId, watch]);
+  }, [addAccount, navigateTo, providerId, watch]);
 
   /**
    * The flow starts exactly once per dialog.

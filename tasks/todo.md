@@ -5597,3 +5597,17 @@ independently of the React app" is now measured over every provider manifest, an
   four numbers where the subscription has two. The card now shows the 5-hour window and a single
   **Monthly** row — `limit_month_total`, falling back to the code split when a response omits it —
   and renders nothing else on the wire. Kimi's own UI shows the same two numbers.
+
+## Unreleased — Kimi Code holds more than one account
+
+- **`addAccount` reached the UI.** The gateway has taken the flag on sign-in starts since Kiro's
+  multi-account work, and the accounts panel existed to show the result — but no dashboard code ever
+  sent the flag, so a second account was uncreatable from the UI for every provider, Kiro included.
+  The accounts panel now carries an **Add account** button (offered only where a connect flow can
+  carry it), which opens the dialog in add-account mode; the dialog passes the flag on the start
+  request, and the page's ordinary connect button still repairs the one connection.
+- **Kimi Code's device flow gained the same target rule Kiro states:** the session records the
+  connection it saves to when it **starts** — the provider id for a repair, a fresh unique id for an
+  add-account sign-in — and the completion saves to that target. Two Kimi accounts can now sit beside
+  each other, each its own connection, routed by the same policy the accounts panel describes.
+  Verified live: both start modes mint sessions, and the plain empty body keeps the old behaviour.

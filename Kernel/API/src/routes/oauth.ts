@@ -136,7 +136,12 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
      * session route until Kimi reports the code approved.
      */
     if (request.method === 'POST' && url.pathname === '/v1/oauth/kimi-code/start') {
-      sendJson(response, 201, await service.startKimiCodeSignIn(), origin);
+      // `addAccount: true` keeps the existing connection and adds this one beside it — the same body
+      // field Kiro's start takes, and the same absence-means-repair default, so an old client that
+      // sends an empty body re-signs the one connection exactly as before.
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
+      sendJson(response, 201, await service.startKimiCodeSignIn(addAccount), origin);
       return true;
     }
 

@@ -930,11 +930,12 @@ export type GatewayDeviceSignInStatus = GatewayOauthSignInStatus & {
  * Kiro branch in the dialog runs first today, so nothing was routed wrongly yet — this
  * is the state that made it impossible for that to stay true.
  */
-export function startGatewayDeviceSignIn(providerId: string, signal?: AbortSignal) {
+export function startGatewayDeviceSignIn(providerId: string, addAccount?: boolean, signal?: AbortSignal) {
   return requestJson<GatewayDeviceSignIn>(`/v1/oauth/${encodeURIComponent(providerId)}/start`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({}),
+    // Absent means repair the provider's one connection; `true` signs a second account in beside it.
+    body: JSON.stringify(addAccount ? { addAccount: true } : {}),
     ...(signal ? { signal } : {}),
   });
 }
@@ -947,11 +948,12 @@ export function getDeviceSignInStatus(providerId: string, sessionId: string, sig
 }
 
 /** Kiro signs in through AWS's device flow, so there is a code and no auth URL. */
-export function startKiroSignIn(signal?: AbortSignal) {
+export function startKiroSignIn(addAccount?: boolean, signal?: AbortSignal) {
   return requestJson<{ sessionId: string; userCode: string; verificationUrl: string; expiresAt: string }>('/v1/oauth/kiro/start', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({}),
+    // The gateway has taken this flag since multi-account Kiro shipped; the dialog never sent it.
+    body: JSON.stringify(addAccount ? { addAccount: true } : {}),
     ...(signal ? { signal } : {}),
   });
 }

@@ -53,6 +53,12 @@ type Session = {
   error?: string;
   /** Set once the token has been claimed, so a poll cannot exchange it twice. */
   claimed: boolean;
+  /**
+   * The connection this sign-in will save to, decided when it **starts**: the provider id for a
+   * repair sign-in, a fresh unique id for an add-account one — the rule Kiro's multi-account flow
+   * states, so a session cannot change its target halfway through a poll.
+   */
+  connectionId?: string;
 };
 
 /**
@@ -62,11 +68,11 @@ type Session = {
  * Console and Kiro flows because the three are the same code.
  */
 export class KimiCodeSessionStore {
-  private readonly store: SignInSessionStore<Session, { deviceCode: string; deviceId: string; userCode: string; verificationUrl: string }>;
+  private readonly store: SignInSessionStore<Session, { deviceCode: string; deviceId: string; userCode: string; verificationUrl: string; connectionId?: string }>;
 
   constructor(options: { ttlMs?: number } = {}) {
     const ttlMs = options.ttlMs ?? defaultTtlMs;
-    this.store = new SignInSessionStore<Session, { deviceCode: string; deviceId: string; userCode: string; verificationUrl: string }>({
+    this.store = new SignInSessionStore<Session, { deviceCode: string; deviceId: string; userCode: string; verificationUrl: string; connectionId?: string }>({
       ttlMs,
       isPlausibleId: (id) => sessionIdPattern.test(id),
       build: (input, { id, expiresAt }) => ({ id, ...input, expiresAt, status: 'pending', claimed: false }),
@@ -74,12 +80,17 @@ export class KimiCodeSessionStore {
     });
   }
 
-  create(input: { deviceCode: string; deviceId: string; userCode: string; verificationUrl: string; expiresIn?: number }): Session {
-    return this.store.create({ deviceCode: input.deviceCode, deviceId: input.deviceId, userCode: input.userCode, verificationUrl: input.verificationUrl }, input.expiresIn);
+  create(input: { deviceCode: string; deviceId: string; userCode: string; verificationUrl: string; connectionId?: string; expiresIn?: number }): Session {
+    return this.store.create({ deviceCode: input.deviceCode, deviceId: input.deviceId, userCode: input.userCode, verificationUrl: input.verificationUrl, ...(input.connectionId ? { connectionId: input.connectionId } : {}) }, input.expiresIn);
   }
 
   get(id: string): Session | undefined {
     return this.store.get(id);
+  }
+
+  /** The connection this sign-in saves to, when it carries one. */
+  connectionId(id: string): string | undefined {
+    return this.get(id)?.connectionId;
   }
 
   /** Claims the session so a second poll cannot exchange the same device code. */

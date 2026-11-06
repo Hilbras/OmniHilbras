@@ -320,7 +320,7 @@ test('the sign-in uses the gateway\'s own transport, so a caller-supplied one is
   // the same provider id. Reaching the real network shows up as the test taking a network round trip;
   // this asserts the seam directly instead.
   const source = readFileSync(new URL('../src/core/service.ts', import.meta.url), 'utf8');
-  const method = source.slice(source.indexOf('async startKimiCodeSignIn()'), source.indexOf('async startKimiCodeSignIn()') + 1200);
+  const method = source.slice(source.indexOf('async startKimiCodeSignIn(addAccount = false)'), source.indexOf('async startKimiCodeSignIn(addAccount = false)') + 1200);
   assert.equal(
     /new KimiCodeAdapter\(/.test(method),
     false,
