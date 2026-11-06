@@ -5551,3 +5551,25 @@ independently of the React app" is now measured over every provider manifest, an
   be renewed surfaces here too, because renewal in this gateway is per request. Cancellations never
   toast. The two silent load-failure catches in `ProvidersPage` now say what happened instead of
   rendering placeholders that read as measurements.
+
+## Unreleased — Kimi Code reads its allowance
+
+- **`KimiCodeAdapter.quota()` reads `GET /coding/v1/usages`.** The claim that Kimi reveals credits only
+  as a `402` was true of the wrong provider: it described the `kimi` platform API, while the
+  `kimi-code` subscription has a usage endpoint all along — the reference tree shipped a client for it
+  (`open-sse/services/usage/kimi.js`), and the port is checked against that client's fixtures. Dual
+  auth like chat: an API key rides `x-api-key`, the OAuth token rides `Authorization: Bearer`. The
+  response names the plan (Kimi's own `LEVEL_*` → Moderato/Allegretto/Allegro/Vivace, an unknown level
+  shown lower-cased rather than swallowed), the weekly usage window, and any rate limits; a missing
+  `remaining` falls back to `limit - used`, never to a bare 0 that reads as exhausted. Verified live:
+  the route answered `plan: "Kimi Coding"`, `Ratelimit 0/100`, resets the same hour.
+- **A 403 for the usage feature is not an expired sign-in.** Kimi answers a live token without the
+  usage entitlement with `REASON_FEATURE_NO_PERMISSION`; the transport maps every 403 to
+  `PROVIDER_REQUEST_FAILED`, which the panel reads as "sign in again" — re-authenticating cannot help.
+  The adapter re-states it as `NOT_SUPPORTED` carrying the truth ("Subscribe to Kimi Code to access
+  quota"), and the panel now shows a `NOT_SUPPORTED` message that carries its own words instead of the
+  generic sentence.
+- **A failed gateway launch regenerated the dashboard token and locked the old gateway out.**
+  `issueDashboardToken` runs at every start — including a start that then dies on `EADDRINUSE` — so
+  the surviving gateway held token N while the proxy read token N+1, and every management route began
+  refusing until a clean restart reissued both sides.

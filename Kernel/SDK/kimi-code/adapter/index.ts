@@ -6,7 +6,7 @@ import { boundedMap } from '../lib/bounded-map.js';
 
 /** Renewed credentials kept per adapter, enough for every token a live gateway has recently renewed. */
 const maxRenewalMemoEntries = 64;
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../lib/types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderQuota, ProviderRequestContext, ProviderResourceQuota, TokenUsage, ToolDefinition } from '../lib/types.js';
 
 /**
  * Kimi Code — the `api.kimi.com` coding subscription, reached by OAuth device code.
@@ -60,11 +60,108 @@ export const KIMI_CODE = {
   chatPath: '/coding/v1/chat/completions',
   modelsPath: '/coding/v1/models',
   embeddingsPath: '/coding/v1/embeddings',
+  usagePath: '/coding/v1/usages',
   grantType: 'urn:ietf:params:oauth:grant-type:device_code',
   refreshGrantType: 'refresh_token',
 } as const;
 
 export const kimiCodeProviderId = 'kimi-code';
+
+/**
+ * Kimi's membership levels, named as Kimi's own product names them.
+ *
+ * Read live from a Kimi Code account (the reference client ships the same table): the API returns a
+ * `LEVEL_*` enum, and the plan a user is paying for is one of these names. An unknown level is shown
+ * lower-cased without the prefix rather than swallowed — a plan the gateway never heard of is still
+ * the plan the account is on.
+ */
+const KIMI_PLAN_LEVELS: Record<string, string> = {
+  LEVEL_BASIC: 'Moderato',
+  LEVEL_INTERMEDIATE: 'Allegretto',
+  LEVEL_ADVANCED: 'Allegro',
+  LEVEL_STANDARD: 'Vivace',
+};
+
+function kimiPlanName(level: unknown): string {
+  if (typeof level !== 'string' || !level) return 'Kimi Coding';
+  return KIMI_PLAN_LEVELS[level] ?? level.replace(/^LEVEL_/, '').toLowerCase();
+}
+
+/**
+ * Kimi reports reset times as ISO strings, Unix seconds, or Unix milliseconds — the same field has
+ * been seen in more than one shape, so each is read rather than one being assumed. An unparseable
+ * value means the panel shows no reset time, not a wrong one.
+ */
+function kimiResetTime(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value < 1e12 ? value * 1000 : value).toISOString();
+  }
+  if (typeof value === 'string' && value.trim()) {
+    if (/^\d+$/.test(value)) {
+      const timestamp = Number(value);
+      return new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp).toISOString();
+    }
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return undefined;
+}
+
+function kimiFiniteNumber(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  return fallback;
+}
+
+function kimiResource(used: unknown, limit: unknown, remaining: unknown, resetTime: unknown): ProviderResourceQuota {
+  const total = Math.max(0, kimiFiniteNumber(limit, 0));
+  const spent = Math.max(0, kimiFiniteNumber(used, 0));
+  // The provider's own remaining wins when it is present; falling back to `limit - used` keeps a
+  // response that omits the field from reading as an exhausted one (0).
+  const left = remaining == null ? Math.max(0, total - spent) : Math.max(0, kimiFiniteNumber(remaining, 0));
+  const resetsAt = kimiResetTime(resetTime);
+  return { used: spent, limit: total, remaining: left, ...(resetsAt ? { resetsAt } : {}) };
+}
+
+type KimiUsageResponse = {
+  usage?: { limit?: unknown; used?: unknown; remaining?: unknown; resetTime?: unknown };
+  limits?: Array<{ detail?: { limit?: unknown; remaining?: unknown; resetTime?: unknown } }>;
+  user?: { membership?: { level?: unknown } };
+};
+
+function parseKimiUsage(data: KimiUsageResponse): ProviderQuota {
+  const resources: Record<string, ProviderResourceQuota> = {};
+  const usage = data.usage ?? {};
+  if (kimiFiniteNumber(usage.limit, 0) > 0) {
+    // Kimi's own CLI calls this the weekly window; the name is the vendor's, kept so the row reads
+    // the way the subscription page does.
+    resources.Weekly = kimiResource(usage.used, usage.limit, usage.remaining, usage.resetTime);
+  }
+  for (const item of Array.isArray(data.limits) ? data.limits : []) {
+    const detail = item?.detail ?? {};
+    if (kimiFiniteNumber(detail.limit, 0) > 0) {
+      const total = kimiFiniteNumber(detail.limit, 0);
+      const left = detail.remaining == null ? total : Math.max(0, kimiFiniteNumber(detail.remaining, 0));
+      resources.Ratelimit = kimiResource(Math.max(0, total - left), total, left, detail.resetTime);
+    }
+  }
+  return { plan: kimiPlanName(data.user?.membership?.level), resources };
+}
+
+/**
+ * Whether a refusal is the account lacking the usage feature, not the credential being dead.
+ *
+ * Kimi answers a live OAuth token without the usage entitlement with `403 REASON_FEATURE_NO_PERMISSION`
+ * — reading it as an expired sign-in would send the operator to re-authenticate, which cannot help.
+ * The transport maps every 403 to `PROVIDER_REQUEST_FAILED` (a refusal is not proof of a bad
+ * credential), so this reads the body the transport preserved.
+ */
+function isUsageEntitlementRefusal(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return false;
+  const detail = (error.details as { providerMessage?: unknown } | undefined)?.providerMessage;
+  const text = `${error.message} ${typeof detail === 'string' ? detail : ''}`;
+  return /REASON_FEATURE_NO_PERMISSION|permission_denied|do not have permission|subscribe/i.test(text);
+}
 
 export type KimiCodeAdapterOptions = {
   transport?: HttpTransport;
@@ -399,6 +496,40 @@ export class KimiCodeAdapter implements ProviderAdapter {
       data: vectors,
       ...(data.usage ? { usage: normalizeUsage(data.usage) } : {}),
     };
+  }
+
+  /**
+   * Kimi Code's allowance for the signed-in account, read from `/coding/v1/usages`.
+   *
+   * The endpoint answers with the plan's membership level, the usage window Kimi's CLI shows as the
+   * weekly allowance, and any rate limits on the account. Auth is the same dual form the chat call
+   * takes — an API key rides `x-api-key`, the OAuth token rides `Authorization: Bearer` — so both
+   * account kinds get a reading. The read is metadata about the account, not an inference request: it
+   * spends no tokens.
+   */
+  async quota(context: ProviderRequestContext = {}): Promise<ProviderQuota> {
+    const credential = await this.credential(context);
+    let data: KimiUsageResponse;
+    try {
+      const response = await this.transport.request<KimiUsageResponse>({
+        method: 'GET',
+        providerId: this.id,
+        url: this.url(KIMI_CODE.usagePath),
+        headers: this.requestHeaders(credential),
+        ...(context.signal ? { signal: context.signal } : {}),
+      });
+      data = response.data ?? {};
+    } catch (error) {
+      if (isUsageEntitlementRefusal(error)) {
+        throw new ProviderError(
+          'NOT_SUPPORTED',
+          'Kimi Code is connected, but this account has no permission to view usage. Subscribe to Kimi Code to access quota.',
+          { providerId: this.id, publicMessage: 'Kimi Code is connected, but this account has no permission to view usage. Subscribe to Kimi Code to access quota.' },
+        );
+      }
+      throw error;
+    }
+    return parseKimiUsage(data);
   }
 
   /**

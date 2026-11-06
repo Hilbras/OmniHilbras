@@ -402,3 +402,66 @@ test('a tool result reaches Kimi with the id that ties it to the assistant\'s ca
   const toolMessage = body.messages.find((message) => message.role === 'tool');
   assert.equal(toolMessage.tool_call_id, 'call_1', 'the tool result names the call it answers');
 });
+
+// ——— quota: GET /coding/v1/usages ———
+
+const ACTIVE_USAGE = {
+  user: { membership: { level: 'LEVEL_ADVANCED' } },
+  usage: { limit: '100', used: '35', remaining: '65', resetTime: '2026-08-01T00:00:00Z' },
+  limits: [{ window: { type: 'rate' }, detail: { limit: '60', remaining: '40', resetTime: '2026-07-29T12:00:00Z' } }],
+};
+
+test('quota reads /coding/v1/usages and names the plan as Kimi names it', async () => {
+  const transport = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: ACTIVE_USAGE }) });
+  const adapter = new KimiCodeAdapter({ transport });
+
+  const quota = await adapter.quota({ credential: OAUTH });
+
+  assert.equal(transport.calls[0].url, 'https://api.kimi.com/coding/v1/usages');
+  assert.equal(transport.calls[0].headers.Authorization, 'Bearer access-token', 'the OAuth token rides Bearer on the usage read, as on chat');
+  assert.equal(quota.plan, 'Allegro');
+  assert.deepEqual(quota.resources.Weekly, { used: 35, limit: 100, remaining: 65, resetsAt: '2026-08-01T00:00:00.000Z' });
+  assert.deepEqual(quota.resources.Ratelimit, { used: 20, limit: 60, remaining: 40, resetsAt: '2026-07-29T12:00:00.000Z' });
+});
+
+test('an API-key account gets the same reading over x-api-key, and a missing remaining is derived', async () => {
+  const transport = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: { usage: { limit: 50, used: 20 }, user: { membership: { level: 'LEVEL_BASIC' } } } }) });
+  const adapter = new KimiCodeAdapter({ transport });
+
+  const quota = await adapter.quota({ credential: { type: 'api-key', value: 'sk-key' } });
+
+  assert.equal(transport.calls[0].headers['x-api-key'], 'sk-key');
+  assert.equal(quota.plan, 'Moderato');
+  // `remaining` absent upstream falls back to limit - used; a bare 0 would read as exhausted.
+  assert.deepEqual(quota.resources.Weekly, { used: 20, limit: 50, remaining: 30 });
+});
+
+test('membership levels are named as Kimi names them, and an unknown level is not swallowed', async () => {
+  const cases = [['LEVEL_BASIC', 'Moderato'], ['LEVEL_INTERMEDIATE', 'Allegretto'], ['LEVEL_ADVANCED', 'Allegro'], ['LEVEL_STANDARD', 'Vivace']];
+  for (const [level, expected] of cases) {
+    const transport = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: { user: { membership: { level } } } }) });
+    assert.equal((await new KimiCodeAdapter({ transport }).quota({ credential: OAUTH })).plan, expected);
+  }
+  const unknown = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: { user: { membership: { level: 'LEVEL_PLASMA' } } } }) });
+  assert.equal((await new KimiCodeAdapter({ transport: unknown }).quota({ credential: OAUTH })).plan, 'plasma');
+});
+
+test('a usage refusal for a missing entitlement is not an expired sign-in', async () => {
+  // Kimi answers a live token without the usage feature with 403 REASON_FEATURE_NO_PERMISSION. The
+  // transport maps every 403 to PROVIDER_REQUEST_FAILED, which the panel reads as "sign in again" —
+  // re-authenticating cannot help here, so the adapter re-states it as NOT_SUPPORTED carrying the
+  // truth about what is missing.
+  const transport = createTransport({
+    request: () => { throw new ProviderError('PROVIDER_REQUEST_FAILED', 'The provider refused the request.', { providerId: 'kimi-code', details: { providerMessage: 'permission_denied REASON_FEATURE_NO_PERMISSION' } }); },
+  });
+  const adapter = new KimiCodeAdapter({ transport });
+
+  await assert.rejects(
+    () => adapter.quota({ credential: OAUTH }),
+    (error) => {
+      assert.equal(error.code, 'NOT_SUPPORTED', 'the account is connected; the feature is what is missing');
+      assert.match(error.message, /Subscribe to Kimi Code/);
+      return true;
+    },
+  );
+});

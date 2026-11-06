@@ -96,7 +96,13 @@ function QuotaPanel({ connectionId, providerName }: { connectionId: string; prov
         if (!current) return;
         // Distinguished by the gateway's code rather than by the sentence: "does not support quota" and
         // "the request failed" both arrive as an Error, and only one of them means the provider is fine.
-        if (isNotSupported(cause)) { setState('unsupported'); return; }
+        // A NOT_SUPPORTED that carries its own words — an adapter that can name why this account gets no
+        // reading — is kept, so the panel can say that instead of the generic sentence.
+        if (isNotSupported(cause)) {
+          setState('unsupported');
+          setError(cause instanceof Error ? cause.message : '');
+          return;
+        }
         setState('failed');
         setError(cause instanceof Error ? cause.message : 'The local gateway did not answer.');
       });
@@ -112,14 +118,17 @@ function QuotaPanel({ connectionId, providerName }: { connectionId: string; prov
   }
 
   if (state === 'unsupported') {
+    // The generic gateway message reads "<Name> does not support quota." — the fixed explanation below
+    // already says that better. Any other wording is the provider's own reason, and it is the thing the
+    // operator needs (Kimi Code, one example, names the subscription that would unlock the reading).
+    const specific = error && !/does not support quota\./.test(error) ? error : null;
     return (
       <section className="card p-4 sm:p-5" aria-label="Account allowance">
         <p className="flex items-center gap-2 text-sm font-semibold">
           <Coins className="h-4 w-4 text-muted" aria-hidden="true" />{providerName} does not publish an allowance
         </p>
         <p className="muted mt-2 text-[11px] leading-relaxed">
-          Not an empty balance — the provider answers nothing about how much is left, so there is no
-          figure to show. Some of them decide per request instead, and only a refusal would show it.
+          {specific ?? 'Not an empty balance — the provider answers nothing about how much is left, so there is no figure to show. Some of them decide per request instead, and only a refusal would show it.'}
         </p>
       </section>
     );
