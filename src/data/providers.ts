@@ -19,6 +19,15 @@ export const providerLogoMap = {
   apmix: '/providers/apmix.png',
   apinex: '/providers/apinex.png',
   tiarina: '/providers/Tirina.webp',
+  // The free-tier wave (2026-11): the vendors' own marks, pulled from their sites and committed
+  // here. Nous Research publishes no favicon or mark anywhere on its site, so that card keeps its
+  // letter — the only one of the eight doing so.
+  'agnes-ai': '/providers/agnes-ai.png',
+  beatapi: '/providers/beatapi.webp',
+  kiraai: '/providers/kiraai.png',
+  vengetic: '/providers/vengetic.svg',
+  zro: '/providers/zro.svg',
+  unorouter: '/providers/unorouter.svg',
   // Added 1.43.0 with the ten API-key cards. Every path is a file already committed under
   // `public/providers/` — `tests/dashboard-assets.test.js` fails if a rendered mark is not, and 294
   // assets went missing from 18 releases once because a blanket staging rule excluded that directory.
@@ -310,6 +319,7 @@ export const providerCatalog: ProviderRecord[] = [
     requests: '0',
     lastUsed: 'never',
     health: 0,
+    logo: providerLogoMap['agnes-ai'],
     color: '#0ea5e9',
     initial: 'A',
     endpoint: 'https://apihub.agnes-ai.com/v1',
@@ -346,6 +356,7 @@ export const providerCatalog: ProviderRecord[] = [
     requests: '0',
     lastUsed: 'never',
     health: 0,
+    logo: providerLogoMap['beatapi'],
     color: '#ef4444',
     initial: 'B',
     endpoint: 'https://beatapi.io/v1',
@@ -364,6 +375,7 @@ export const providerCatalog: ProviderRecord[] = [
     requests: '0',
     lastUsed: 'never',
     health: 0,
+    logo: providerLogoMap['kiraai'],
     color: '#22c55e',
     initial: 'K',
     endpoint: 'https://kiraai.vn/v1',
@@ -382,6 +394,7 @@ export const providerCatalog: ProviderRecord[] = [
     requests: '0',
     lastUsed: 'never',
     health: 0,
+    logo: providerLogoMap['vengetic'],
     color: '#8b5cf6',
     initial: 'V',
     endpoint: 'https://api.vengetic.biz.id/v1',
@@ -418,6 +431,7 @@ export const providerCatalog: ProviderRecord[] = [
     requests: '0',
     lastUsed: 'never',
     health: 0,
+    logo: providerLogoMap['zro'],
     color: '#14b8a6',
     initial: 'Z',
     endpoint: 'https://zro.moonmath.ai/v1',
@@ -436,6 +450,7 @@ export const providerCatalog: ProviderRecord[] = [
     requests: '0',
     lastUsed: 'never',
     health: 0,
+    logo: providerLogoMap['unorouter'],
     color: '#6366f1',
     initial: 'U',
     endpoint: 'https://api.unorouter.com/v1',
