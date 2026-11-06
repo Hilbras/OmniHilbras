@@ -5691,3 +5691,24 @@ independently of the React app" is now measured over every provider manifest, an
   `QUOTA_RE` and `void`ed it. Now a chat failure whose text matches (insufficient/balance/credit/
   额度不足…) is restated as `RATE_LIMITED` naming the exhaustion, so the request fails over to a
   route with allowance instead of dying on the spent one.
+
+## Unreleased — apmix and BeatAPI read their usage, and the SDK suite finally runs
+
+- **Two small SDK adapters for the free-tier aggregators.** apmix and BeatAPI are generic
+  OpenAI-compatible saves — their completion needs no adapter, but their quota reads do, so each now
+  has one (a vendored lib copy plus a thin subclass with `quota()`), registered `.onDemand()` so the
+  dedicated adapter wins over the generic one. The parser handles **both shapes this gateway family
+  answers**: the structured allowance the live apmix account returned (dumped raw before writing —
+  `plan`, `allowance`, daily/weekly limits, a key counter with no ceiling that is deliberately not
+  rendered), and the USD credit-balance wallet the reference measured on BeatAPI, aliases accepted
+  and negatives preserved. Verified live: apmix `free`, Allowance 0 of 0.
+- **The SDK test suite ran for the first time — 746 tests, 10 failures, all fixed.** It lives in
+  `Kernel/SDK/tests/` and no script ever executed it, so the 1.90.0 adapters landed without their
+  fixture-guard reasons and several tests had drifted: cross-copy imports (an adapter from Cline's
+  dist, `ProviderError` from CodeBuddy's — `instanceof` between two vendored classes is always
+  false), an old-tree path in the stream-bounds contract, a Zen transport import that no longer
+  matched its adapter's exports, and the fixture guard missing `tests` from its scaffolding set.
+  `test:sdk` now runs the whole directory, and the failures are fixed rather than skipped: the
+  gateway's cross-copy-aware `isProviderError` where a test crosses the class boundary, the vendored
+  source path where a contract is read from source, and stated no-capture/no-contract reasons for
+  the two quota adapters and the four 1.90.0 coding agents that landed without theirs.

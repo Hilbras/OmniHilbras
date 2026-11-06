@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { FetchHttpTransport } from '../codebuddy/dist/lib/transport.js';
 import { ProviderError } from '../codebuddy/dist/lib/errors.js';
+// The registry lives in the gateway and throws the gateway's own ProviderError class — a different
+// copy from the vendored one above, so `instanceof` cannot reach across. `isProviderError` is the
+// cross-copy-aware check the gateway ships for exactly this.
+import { isProviderError } from '../../API/dist/src/core/index.js';
 import { ProviderRegistry } from '../../API/dist/src/core/registry.js';
 import { parseSseJson, parseSseStream } from '../codebuddy/dist/lib/streaming.js';
 import { normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from '../codebuddy/dist/lib/url.js';
@@ -157,8 +161,8 @@ test('ProviderRegistry resolves capabilities without provider-specific logic', (
   assert.equal(registry.supports('test-provider', 'streaming'), false);
   registry.register({ id: 'search-provider', name: 'Search provider', capabilities: { search: true } });
   assert.equal(registry.supports('search-provider', 'search'), true);
-  assert.throws(() => registry.register(adapter), (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR');
-  assert.throws(() => registry.require('missing'), (error) => error instanceof ProviderError && error.code === 'NOT_FOUND');
+  assert.throws(() => registry.register(adapter), (error) => isProviderError(error) && error.code === 'CONFIGURATION_ERROR');
+  assert.throws(() => registry.require('missing'), (error) => isProviderError(error) && error.code === 'NOT_FOUND');
 });
 
 

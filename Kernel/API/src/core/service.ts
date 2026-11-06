@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
+import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
 import { ZenAdapter } from '@omnihilbras/sdk-zen';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
 import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext, type ModelPricing } from './index.js';
@@ -171,6 +173,8 @@ export class GatewayService {
   private readonly transport: HttpTransport;
   private cline?: ProviderAdapter;
   private clinepass?: ProviderAdapter;
+  private apmix?: ProviderAdapter;
+  private beatapi?: ProviderAdapter;
   private zen?: ProviderAdapter;
   private opencodeConsole?: ProviderAdapter;
   private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
@@ -365,6 +369,8 @@ export class GatewayService {
       // No `validateOnSave`: ClinePass stores no credential of its own — it reads Cline's connection
       // through the alias in `credential-manager.ts` — so there is nothing to prove at save time.
       .onDemand('clinepass', () => this.clinepassAdapter())
+      .onDemand('apmix', () => this.apmixAdapter())
+      .onDemand('beatapi', () => this.beatapiAdapter())
       .onDemand('opencode', () => this.zenAdapter())
       .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId))
       .onDemand(kimiCodeProviderId, ({ providerId, connection }) => this.kimiCodeAdapter(connection?.id ?? providerId))
@@ -1345,6 +1351,16 @@ export class GatewayService {
    * picks a lane per model. The generic on-demand adapter cannot, which is why
    * this provider is registered rather than resolved from its endpoint.
    */
+  apmixAdapter(): ProviderAdapter {
+    if (!this.apmix) this.apmix = new ApmixAdapter({ transport: this.transport });
+    return this.apmix;
+  }
+
+  beatapiAdapter(): ProviderAdapter {
+    if (!this.beatapi) this.beatapi = new BeatApiAdapter({ transport: this.transport });
+    return this.beatapi;
+  }
+
   zenAdapter(): ProviderAdapter {
     if (!this.zen) this.zen = new ZenAdapter({ transport: this.transport });
     return this.zen;

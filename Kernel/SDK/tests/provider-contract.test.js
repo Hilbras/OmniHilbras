@@ -303,6 +303,8 @@ for (const provider of providers) {
  * a looser assertion.
  */
 const NOT_YET_CONTRACTED = {
+  apmix: 'Its completion path is the shared OpenAI-compatible wire the base class serves, which the harness contract already covers; the genuine difference is the quota read, pinned against the dumped live shape in apmix-quota.test.js.',
+  beatapi: 'The same shared completion wire as apmix, with the quota read pinned against the reference project\'s measured /v1/usage shape in beatapi-quota.test.js.',
   codex: 'Its OAuth grant and Responses SSE contract is covered by codex.test.js, but the shared generic harness does not model token refresh or Responses events.',
   kilocode: 'Its chat is an OpenRouter-compatible POST the generic harness could drive, but its device-auth grant (202/403/410 status codes, a profile lookup) is covered by the gateway flow test instead; the adapter is asserted in kilocode.test.js.',
   'minimax-code': 'It signs in by an RFC 8628 device flow with PKCE and chats in Claude Messages format, which the generic OpenAI-shaped harness does not model; the sign-in is covered by the gateway flow test.',

@@ -230,6 +230,12 @@ importers:
       '@omnihilbras/sdk-anthropic':
         specifier: workspace:*
         version: link:../SDK/anthropic
+      '@omnihilbras/sdk-apmix':
+        specifier: workspace:*
+        version: link:../SDK/apmix
+      '@omnihilbras/sdk-beatapi':
+        specifier: workspace:*
+        version: link:../SDK/beatapi
       '@omnihilbras/sdk-chatgpt-web':
         specifier: workspace:*
         version: link:../SDK/chatgpt-web
@@ -305,6 +311,18 @@ importers:
         version: 5.9.3
 
   Kernel/SDK/anthropic:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/apmix:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/beatapi:
     devDependencies:
       typescript:
         specifier: ^5.9.3

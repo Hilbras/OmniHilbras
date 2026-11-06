@@ -146,7 +146,7 @@ test('the bounds are named in the published types, so they cannot be renamed sil
   // A test that renames these options should fail here first, rather than in every probe that ever
   // measures a stall. Read from the **source**, not the build: this is about the contract being
   // documented where a reader looks for it.
-  const source = readFileSync(new URL('../src/core/transport.ts', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../codebuddy/lib/transport.ts', import.meta.url), 'utf8');
   const options = source.slice(source.indexOf('FetchHttpTransportOptions'), source.indexOf('export class FetchHttpTransport'));
   assert.ok(options.includes('streamIdleTimeoutMs'), 'streamIdleTimeoutMs must be a declared option');
   assert.ok(options.includes('maxStreamDurationMs'), 'maxStreamDurationMs must be a declared option');

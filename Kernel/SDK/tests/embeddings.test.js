@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OpenAICompatibleAdapter } from '../cline/dist/lib/openai-compatible.js';
-import { ProviderError } from '../codebuddy/dist/lib/errors.js';
+import { ProviderError } from '../cline/dist/lib/errors.js';
 
 /**
  * `/embeddings` on the OpenAI-compatible adapter.

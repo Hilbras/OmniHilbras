@@ -27,6 +27,8 @@
     "@omnihilbras/sdk-minimax-code": "workspace:*",
     "@omnihilbras/sdk-openai": "workspace:*",
     "@omnihilbras/sdk-opencode-console": "workspace:*",
+    "@omnihilbras/sdk-apmix": "workspace:*",
+    "@omnihilbras/sdk-beatapi": "workspace:*",
     "@omnihilbras/sdk-openrouter": "workspace:*",
     "@omnihilbras/sdk-qoder": "workspace:*",
     "@omnihilbras/sdk-qwen-web": "workspace:*",

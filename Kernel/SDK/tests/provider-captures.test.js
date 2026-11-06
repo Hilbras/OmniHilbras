@@ -145,7 +145,8 @@ test('every capture is small enough to read and stable enough not to churn', () 
   }
 });
 test("Zen's model listing: the pinned shape is what the adapter reads", async () => {
-  const { ZenAdapter, FetchHttpTransport } = await import('../zen/dist/adapter/index.js');
+  const { ZenAdapter } = await import('../zen/dist/adapter/index.js');
+  const { FetchHttpTransport } = await import('../zen/dist/lib/transport.js');
   const zen = capture('zen-models.json').responses[0];
   assert.equal(zen.status, 200);
   assert.equal(zen.shape.data, 'array', 'the listing carries its models in data');

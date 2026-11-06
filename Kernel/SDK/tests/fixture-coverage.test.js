@@ -52,9 +52,12 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
 const FIXTURES = new URL('./fixtures/', import.meta.url);
 
+const SCAFFOLDING = new Set(['dist', 'node_modules', 'test', 'tests', 'log', 'docs']);
+
 const ADAPTERS = readdirSync(new URL('../', import.meta.url), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name)
+  .filter((id) => !SCAFFOLDING.has(id))
   // `deepseek-pow` solves a hash rather than speaking a protocol, `chatgpt-first-party` is the
   // browser driver behind ChatGPT Web, and `qwen-web` is a probe with no completion path.
   .filter((id) => !['deepseek-pow', 'chatgpt-first-party', 'qwen-web'].includes(id));
@@ -66,7 +69,19 @@ const ADAPTERS = readdirSync(new URL('../', import.meta.url), { withFileTypes: t
  * adding one carelessly is the failure this whole guard exists to prevent.
  */
 const NO_CAPTURE_YET = {
-  'openai-compatible': 'the shape is the SSE other adapters also produce; a capture would pin OpenAI\'s framing specifically',
+  // The four 1.90.0 coding-agent subscriptions, each a device or browser-approval flow that needs an
+  // approved real account to produce any bytes — the same credential gap Kimi Code and Claude Code
+  // are excused for. Their parses are pinned against scripted transports in the gateway suite instead.
+  codebuddy: 'a browser-approval flow — the user approves on CodeBuddy\'s own page and the dashboard polls — so captureable bytes need an approved account; the header and shape pins live in `codebuddy-flow.test.js`',
+  qoder: 'a turn is COSY-signed through a device-flow account this machine signed in once for probing; the header assembly is pinned in `qoder-cosy.test.js` and the encode permutation in `qoder-encoding.test.js` rather than by a capture',
+  kilocode: 'completing a device grant needs an approved Kilo account, and the token is long-lived with no refresh, so a capture spends a grant; the flow is pinned in `new-oauth-flows.test.js`',
+  'minimax-code': 'the same device-grant shape as Kilo Code — an approved account mints the bytes, and the poll body is pinned in `new-oauth-flows.test.js` instead',
+  // The two free-tier quota adapters complete over the **shared OpenAI-compatible wire** the base
+  // class serves — a capture would duplicate that one, which is the reason `openai-compatible` itself
+  // is excluded. Their genuine difference is the quota read, and that is pinned against dumped shapes:
+  // apmix's live account body, and the reference project's measured BeatAPI report.
+  apmix: 'its completion path is the shared OpenAI-compatible wire the base class serves, so a capture would duplicate that one; the quota read is account metadata pinned against the dumped live shape in `apmix-quota.test.js`',
+  beatapi: 'the same shared completion wire, and a quota read pinned against the reference project\'s measured `/v1/usage` shape in `beatapi-quota.test.js`',
   openai: 'shares the OpenAI-compatible wire format, so a capture here would duplicate that one',
   anthropic: 'its frames are hand-written in `anthropic.test.js`; no real capture was taken',
   gemini: 'its frames are hand-written in `gemini.test.js`; no real capture was taken',
