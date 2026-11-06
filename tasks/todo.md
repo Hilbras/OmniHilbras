@@ -5589,3 +5589,11 @@ independently of the React app" is now measured over every provider manifest, an
   figures with the duration humanized (`300` minutes → "Rate limit · 5h"); an unknown window key is
   shown with its underscores spaced, never dropped. Verified live: 5-hour window 0/100, Monthly total
   100/100 resetting 2026-12-02, Monthly code 100/100, Rate limit · 5h 0/100.
+
+## Unreleased — the Kimi card shows the two windows the plan is sold with
+
+- **Four rows became two.** The endpoint also reports a per-feature monthly split
+  (`limit_month_code`) and per-window rate limits; the card rendered all of it, and the operator read
+  four numbers where the subscription has two. The card now shows the 5-hour window and a single
+  **Monthly** row — `limit_month_total`, falling back to the code split when a response omits it —
+  and renders nothing else on the wire. Kimi's own UI shows the same two numbers.

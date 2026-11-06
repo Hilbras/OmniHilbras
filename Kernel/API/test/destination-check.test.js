@@ -1,6 +1,57 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertPublicDestination } from '../dist/src/core/destination-check.js';
+import { createSocket } from 'node:dgram';
+
+/**
+ * The public-rescue tests used to reach the real internet: a name the local resolver blackholes,
+ * rescued by whatever Google DNS answered that day. Measured on 2026-11-06 that stopped testing the
+ * code at all — the network began answering `0.0.0.1` for the domain on *every* resolver, the local
+ * one and the public ones alike (direct queries to 8.8.8.8 and 1.1.1.1 included), so no reachable
+ * server carried the published answer and the test failed on the environment rather than on a defect.
+ *
+ * A network that can forge one DNS answer can forge any, so the rescue is now pinned against a stub
+ * resolver this file runs itself: deterministic, offline, and honest about the shape — a local
+ * private answer, a published public one, and the private judgement over both.
+ */
+const STUB_ANSWERS = {
+  // The address the original incident recorded: the domain's real published answer.
+  'www.codebuddy.ai': '43.169.32.91',
+};
+
+const stub = createSocket('udp4');
+stub.unref();
+stub.on('message', (message, rinfo) => {
+  if (message.length < 12 || message.readUInt16BE(4) !== 1) return;
+  // Walk the question labels to find the name and where the question ends.
+  const labels = [];
+  let offset = 12;
+  while (offset < message.length && message[offset] !== 0) {
+    const length = message[offset];
+    labels.push(message.subarray(offset + 1, offset + 1 + length).toString());
+    offset += 1 + length;
+  }
+  const questionEnd = offset + 1 + 4; // the terminating zero, then QTYPE and QCLASS
+  const header = Buffer.from(message.subarray(0, 12));
+  header.writeUInt16BE(0x8180, 2); // QR=1, RD=1, RA=1 — a normal recursive response
+  const answer = STUB_ANSWERS[labels.join('.').toLowerCase()];
+  header.writeUInt16BE(answer ? 1 : 0, 6); // ANCOUNT
+  const parts = [header, message.subarray(12, questionEnd)];
+  if (answer) {
+    const record = Buffer.alloc(16);
+    record.writeUInt16BE(0xc00c, 0); // the name, by pointer to the question
+    record.writeUInt16BE(1, 2); // type A
+    record.writeUInt16BE(1, 4); // class IN
+    record.writeUInt32BE(0, 6); // TTL
+    record.writeUInt16BE(4, 10); // RDLENGTH
+    answer.split('.').forEach((octet, index) => record.writeUInt8(Number(octet), 12 + index));
+    parts.push(record);
+  }
+  void stub.send(Buffer.concat(parts), rinfo.port, rinfo.address);
+});
+await new Promise((resolve, reject) => stub.bind(0, '127.0.0.1', () => resolve()));
+// Read once, at module load, by the code under test — so it is set before the first import of it.
+process.env.OMNIHILBRAS_PUBLIC_DNS = `127.0.0.1:${stub.address().port}`;
+const { assertPublicDestination } = await import('../dist/src/core/destination-check.js');
 
 test('a name that resolves to loopback is refused, even though its text looks public', async () => {
   await assert.rejects(
@@ -40,23 +91,25 @@ test('the refusal a user sees names the cause, instead of "not configured correc
 });
 
 test('a name the local resolver blackholes is rescued by a public one, and a private name still is not', async () => {
-  // Measured: this machine's router answered `www.codebuddy.ai` with `0.0.0.0.1`, a block, while Google
-  // DNS and Cloudflare both said `43.169.32.91` and the host served normally. Refusing on the local
-  // answer alone turned a router rule into "this provider is broken".
+  // Measured: this machine's router answered `www.codebuddy.ai` with `0.0.0.1`, a block, while public
+  // resolvers said `43.169.32.91` and the host served normally. Refusing on the local answer alone
+  // turned a router rule into "this provider is broken".
   //
   // The rule this pins: the fallback only ever *adds* an answer, and the private judgement runs over
-  // both sets — so it can rescue a name and can never unblock a real private destination.
+  // both sets — so it can rescue a name and can never unblock a real private destination. Whatever
+  // the local resolver answers today (the real address, or a network's block), the stub's published
+  // answer reaches the check.
   const { resolveForDestinationCheck } = await import('../dist/src/core/destination-check.js');
 
-  // A blackholed public name is rescued to its published address.
   const rescued = await resolveForDestinationCheck('www.codebuddy.ai');
   assert.ok(rescued.length > 0);
   assert.ok(!rescued.some((address) => address.startsWith('0.0.0.')), `a blackhole answer survived: ${rescued.join(', ')}`);
+  assert.ok(rescued.includes('43.169.32.91'), 'the published answer is among the set the judgement runs over');
 
-  // And a genuinely private name is still refused, which is the half that matters.
-  const { assertPublicDestination } = await import('../dist/src/core/destination-check.js');
+  // And a name that is private everywhere is still refused: the stub publishes nothing for it, so the
+  // fallback cannot become a way past the guard.
   await assert.rejects(
-    () => assertPublicDestination('127.0.0.1.nip.io'),
+    () => assertPublicDestination('localhost'),
     /resolves to a private address/,
     'the public fallback must not become a way past the guard',
   );

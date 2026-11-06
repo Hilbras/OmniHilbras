@@ -422,7 +422,7 @@ const LIVE_USAGE = {
   },
 };
 
-test('quota reads /coding/v1/usages and reports every window the account is bound by', async () => {
+test('quota reads /coding/v1/usages and reports the two windows the plan is sold with', async () => {
   const transport = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: LIVE_USAGE }) });
   const adapter = new KimiCodeAdapter({ transport });
 
@@ -430,13 +430,24 @@ test('quota reads /coding/v1/usages and reports every window the account is boun
 
   assert.equal(transport.calls[0].url, 'https://api.kimi.com/coding/v1/usages');
   assert.equal(transport.calls[0].headers.Authorization, 'Bearer access-token', 'the OAuth token rides Bearer on the usage read, as on chat');
+  // Two rows, the two numbers the subscription is bound by. The per-feature monthly split and the
+  // rate-limit windows are on the wire and deliberately not rendered.
+  assert.deepEqual(Object.keys(quota.resources), ['5-hour window', 'Monthly']);
   // A ratio window is expressed against 100 — that is what a ratio is — so `used_ratio: 1` reads as
   // exhausted with its reset date, never as a healthy empty window.
   assert.deepEqual(quota.resources['5-hour window'], { used: 0, limit: 100, remaining: 100, resetsAt: '2026-11-06T20:56:27.000Z' });
-  assert.deepEqual(quota.resources['Monthly total'], { used: 100, limit: 100, remaining: 0, resetsAt: '2026-12-02T00:00:00.000Z' });
-  assert.deepEqual(quota.resources['Monthly code'], { used: 100, limit: 100, remaining: 0, resetsAt: '2026-12-02T00:00:00.000Z' });
-  // The rate limit keeps its absolute figures, and its duration is humanized: 300 minutes is 5h.
-  assert.deepEqual(quota.resources['Rate limit · 5h'], { used: 0, limit: 100, remaining: 100, resetsAt: '2026-11-06T20:56:27.798Z' });
+  assert.deepEqual(quota.resources['Monthly'], { used: 100, limit: 100, remaining: 0, resetsAt: '2026-12-02T00:00:00.000Z' });
+});
+
+test('a response that omits the monthly total still gets a Monthly row, from the code split', async () => {
+  const transport = createTransport({
+    request: () => ({ status: 200, headers: new Headers(), data: { usages: { limit_5h: { used_ratio: 0.25, reset_time: '2026-11-06T20:56:27Z' }, limit_month_code: { used_ratio: 0.5, reset_time: '2026-12-02T00:00:00Z' } } } }),
+  });
+
+  const quota = await new KimiCodeAdapter({ transport }).quota({ credential: OAUTH });
+
+  assert.deepEqual(quota.resources['5-hour window'], { used: 25, limit: 100, remaining: 75, resetsAt: '2026-11-06T20:56:27.000Z' });
+  assert.deepEqual(quota.resources['Monthly'], { used: 50, limit: 100, remaining: 50, resetsAt: '2026-12-02T00:00:00.000Z' });
 });
 
 test('an API-key account gets the same reading over x-api-key', async () => {
@@ -456,10 +467,19 @@ test('a ratio is clamped, not trusted: a negative or over-one reading cannot bec
   assert.deepEqual((await new KimiCodeAdapter({ transport: negative }).quota({ credential: OAUTH })).resources['5-hour window'], { used: 0, limit: 100, remaining: 100 });
 });
 
-test('an unknown usage-window key is shown with its underscores spaced, not dropped', async () => {
-  const transport = createTransport({ request: () => ({ status: 200, headers: new Headers(), data: { usages: { limit_weekend_bonus: { used_ratio: 0.5 } } } }) });
+test('windows the card does not sell — unknown keys and rate limits — are not rendered', async () => {
+  const transport = createTransport({
+    request: () => ({
+      status: 200,
+      headers: new Headers(),
+      data: {
+        usages: { limit_weekend_bonus: { used_ratio: 0.5 } },
+        limits: [{ window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', remaining: '100', resetTime: '2026-11-06T20:56:27.798705Z' } }],
+      },
+    }),
+  });
   const quota = await new KimiCodeAdapter({ transport }).quota({ credential: OAUTH });
-  assert.deepEqual(quota.resources['weekend bonus'], { used: 50, limit: 100, remaining: 50 });
+  assert.deepEqual(quota.resources, {}, 'the card shows the two windows the plan is sold with, and nothing else');
 });
 
 test('membership levels are named as Kimi names them, and an unknown level is not swallowed', async () => {
