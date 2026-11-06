@@ -318,7 +318,10 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // cards — four coding-agent subscriptions reached by device flow.
   // 38-39 added the `codebuddy-cn` and `codebuddy-intl` OAuth cards: one vendor, two regions on two
   // domains, because a sign-in on one side does not reach the other.
-  assert.equal(all.length, 39, `the catalog now has ${all.length} cards`);
+  // 40-47 from the free-tier wave: `agnes-ai`, `nous`, `beatapi`, `kiraai`, `vengetic`, `anyrouter`,
+  // `zro` and `unorouter` — one key over an OpenAI-compatible path each, catalog cards and no adapter
+  // work; three of the eight have no documented API surface and say so on the card.
+  assert.equal(all.length, 47, `the catalog now has ${all.length} cards`);
   // Fifteen cards claim OAuth, but the gateway serves twelve start routes: `clinepass` shares `cline`'s,
   // and `claude-code` and `codex` sign in through `server.ts` routes this scan reads too — the counts of
   // claims and routes do not coincide, which is why both are asserted rather than one derived.
