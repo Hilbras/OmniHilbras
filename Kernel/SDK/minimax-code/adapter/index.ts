@@ -268,9 +268,9 @@ class MinimaxCodeAdapter implements ProviderAdapter {
       if (!parsed) continue;
       sawPayload = true;
       if (parsed.error) {
-        throw new ProviderError('PROVIDER_REQUEST_FAILED', parsed.error.message ?? 'MiniMax reported an error while streaming.', {
+        throw minimaxQuotaError(new ProviderError('PROVIDER_REQUEST_FAILED', parsed.error.message ?? 'MiniMax reported an error while streaming.', {
           providerId: this.id,
-        });
+        }));
       }
 
       // Claude Messages streaming: `content_block_delta` carries text, `message_delta` carries the
@@ -567,4 +567,22 @@ function invalidResponse(providerId: string, message: string) {
   return new ProviderError('INVALID_RESPONSE', message, { providerId });
 }
 
-void QUOTA_RE;
+/**
+ * MiniMax reports credit/quota exhaustion as 402/403 (and 429) with a message matching this regex —
+ * "insufficient balance", "credit", "额度不足" and their kin.
+ *
+ * Left as a plain provider failure, the request dies on that route and the operator reads a generic
+ * refusal; the reference executor rewrote it as a rate-limit error so the gateway fails the request
+ * over to a route that still has allowance, and the message names the exhaustion. Same rewrite here:
+ * the regex now marks the failure instead of sitting voided at the foot of this file.
+ */
+function minimaxQuotaError(error: ProviderError): ProviderError {
+  if (error.code === 'RATE_LIMITED') return error;
+  const detail = typeof (error.details as { providerMessage?: unknown } | undefined)?.providerMessage === 'string'
+    ? (error.details as { providerMessage: string }).providerMessage
+    : '';
+  const text = `${error.message} ${detail}`.trim();
+  if (!QUOTA_RE.test(text)) return error;
+  const message = `usage limit reached: ${text.slice(0, 200)}`;
+  return new ProviderError('RATE_LIMITED', message, { providerId: error.providerId, retryable: true, publicMessage: message });
+}

@@ -15,7 +15,9 @@ import type {
   ProviderCapabilities,
   ProviderCredential,
   ProviderHealth,
+  ProviderQuota,
   ProviderRequestContext,
+  ProviderResourceQuota,
   TokenUsage,
   ToolDefinition,
 } from '../lib/types.js';
@@ -83,6 +85,104 @@ export type CodeBuddyRegion = 'cn' | 'intl';
 
 export const codebuddyCnProviderId = 'codebuddy-cn';
 export const codebuddyIntlProviderId = 'codebuddy-intl';
+
+/**
+ * The billing meter both regions serve: a POST with the bearer token and an empty body, answering the
+ * account's credit packages double-wrapped under `data.Response.Data`.
+ */
+function codebuddyBillingUrl(region: CodeBuddyRegion): string {
+  return `${region === 'cn' ? CODEBUDDY_CN.server : CODEBUDDY_INTL.server}/v2/billing/meter/get-user-resource`;
+}
+
+/** The *Precise string fields are exact; the numeric ones are their rounded shadows. Prefer the strings. */
+function codebuddyNum(precise: unknown, plain: unknown): number {
+  const n = Number(precise ?? plain);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function codebuddyResetTime(value: unknown): string | undefined {
+  // The wall-clock strings the meter sends (`2026-11-09 17:13:02`) are UTC — they equal the companion
+  // DeductionEndTime epoch exactly — but `new Date` reads that format as LOCAL time, shifting every
+  // reset by the machine's offset. The space becomes a `T` and a `Z` makes the read unambiguous.
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) {
+    const date = new Date(`${value.replace(' ', 'T')}Z`);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  const date = new Date(typeof value === 'number' && value < 1e12 ? value * 1000 : value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+type CodeBuddyAccount = Record<string, unknown>;
+
+function codebuddyCycleEndMs(account: CodeBuddyAccount): number {
+  const iso = codebuddyResetTime(account.CycleEndTime);
+  return iso ? new Date(iso).getTime() : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Refill packs roll into a new cycle long before the resource itself expires (a >2-day gap between
+ * cycle end and validity end); bonus packs end exactly at expiry and never replenish. The two credit
+ * types must not be merged: their live numbers live in different fields (Cycle* vs plain Capacity*).
+ */
+function codebuddyIsRefill(account: CodeBuddyAccount): boolean {
+  const cycleEnd = codebuddyCycleEndMs(account);
+  const deductionEnd = Number(account.DeductionEndTime);
+  return Number.isFinite(cycleEnd) && Number.isFinite(deductionEnd) && deductionEnd - cycleEnd > 2 * 24 * 60 * 60 * 1000;
+}
+
+function codebuddyCadence(account: CodeBuddyAccount): string {
+  const start = codebuddyResetTime(account.CycleStartTime);
+  const end = codebuddyResetTime(account.CycleEndTime);
+  if (start && end) {
+    const days = (new Date(end).getTime() - new Date(start).getTime()) / 86_400_000;
+    if (days <= 1.5) return 'Daily';
+    if (days <= 10) return 'Weekly';
+  }
+  return 'Monthly';
+}
+
+function codebuddyRow(used: number, total: number, resetsAt: string | undefined): ProviderResourceQuota {
+  const safeTotal = Math.max(0, Math.round(total));
+  const safeUsed = Math.min(Math.max(0, Math.round(used)), safeTotal);
+  return { used: safeUsed, limit: safeTotal, remaining: safeTotal - safeUsed, ...(resetsAt ? { resetsAt } : {}) };
+}
+
+function parseCodeBuddyUsage(data: Record<string, unknown> | undefined): ProviderQuota {
+  // Double-wrapped by design: `data.Response.Data.Accounts[]` — the envelope Tencent's billing
+  // gateway puts around the payload, and the reason a naive `data.Response` read finds nothing.
+  const envelope = (data?.data as { Response?: { Data?: { Accounts?: unknown } } } | undefined)?.Response;
+  const accounts = Array.isArray(envelope?.Data?.Accounts) ? (envelope.Data.Accounts as CodeBuddyAccount[]) : [];
+  if (accounts.length === 0) return { plan: 'CodeBuddy', resources: {} };
+
+  const byExpiry = (a: CodeBuddyAccount, b: CodeBuddyAccount) => codebuddyCycleEndMs(a) - codebuddyCycleEndMs(b);
+  const refills = accounts.filter(codebuddyIsRefill).sort(byExpiry);
+  const bonuses = accounts.filter((account) => !codebuddyIsRefill(account)).sort(byExpiry);
+
+  const resources: Record<string, ProviderResourceQuota> = {};
+  // Refill packs first: cadence-labelled, using the *Cycle* balance and resetting at the next refresh.
+  const seen: Record<string, number> = {};
+  for (const account of refills) {
+    const base = codebuddyCadence(account);
+    seen[base] = (seen[base] ?? 0) + 1;
+    const name = seen[base] > 1 ? `${base} ${seen[base]}` : base;
+    const total = codebuddyNum(account.CycleCapacitySizePrecise, account.CycleCapacitySize);
+    const used = codebuddyNum(account.CycleCapacityUsedPrecise, account.CycleCapacityUsed);
+    resources[name] = codebuddyRow(used, total, codebuddyResetTime(account.CycleEndTime));
+  }
+  // Bonus packs: one-shot credits (cycle end == validity end), lifetime Capacity balance, expiry-named.
+  bonuses.forEach((account, index) => {
+    const total = codebuddyNum(account.CapacitySizePrecise, account.CapacitySize);
+    const used = codebuddyNum(account.CapacityUsedPrecise, account.CapacityUsed);
+    resources[`Bonus Pack ${index + 1}`] = codebuddyRow(used, total, codebuddyResetTime(account.CycleEndTime));
+  });
+
+  const base = refills[0] ?? accounts[0] ?? {};
+  const plan = typeof base.PackageName === 'string' && base.PackageName
+    ? base.PackageName
+    : typeof base.SubProductName === 'string' && base.SubProductName ? base.SubProductName : 'CodeBuddy';
+  return { plan, resources };
+}
 
 type CodeBuddySite = typeof CODEBUDDY_CN | typeof CODEBUDDY_INTL;
 
@@ -380,6 +480,33 @@ class CodeBuddyAdapter implements ProviderAdapter {
    * Presence and shape only — a signed-in probe would spend a billable request on every health poll,
    * and CodeBuddy has no free endpoint to read instead.
    */
+  /**
+   * CodeBuddy's credit packages, read from the billing meter both regions serve.
+   *
+   * One row per package, never merged: a refill pack's cycle resets long before the resource expires,
+   * and a bonus pack is one-shot credits that expire for good — their live numbers live in different
+   * fields, and a total across them would read a bonus pack's expiry as a refill's reset. The plan is
+   * the first package's own name. Reading it is account metadata and spends no credits.
+   */
+  async quota(context: ProviderRequestContext = {}): Promise<ProviderQuota> {
+    const credential = await this.credential(context);
+    if (credential.type !== 'oauth' || !credential.value) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'CodeBuddy needs an OAuth sign-in.', { providerId: this.id });
+    }
+    const { data } = await this.transport.request<{ code?: unknown; msg?: unknown } & Record<string, unknown>>({
+      method: 'POST',
+      providerId: this.id,
+      url: codebuddyBillingUrl(this.region),
+      headers: { accept: 'application/json', 'content-type': 'application/json', Authorization: `Bearer ${credential.value}` },
+      body: '{}',
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    if (data?.code !== 0) {
+      throw new ProviderError('PROVIDER_REQUEST_FAILED', `CodeBuddy quota error: ${typeof data?.msg === 'string' ? data.msg : 'unknown'}.`, { providerId: this.id });
+    }
+    return parseCodeBuddyUsage(data as Record<string, unknown>);
+  }
+
   async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
     const checkedAt = new Date().toISOString();
     const credential = context.credential;

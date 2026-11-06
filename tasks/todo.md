@@ -5669,3 +5669,25 @@ independently of the React app" is now measured over every provider manifest, an
   a pool with nothing remaining reads as exhausted on its own. Verified live: plan
   `personal_standard`, Credits 0 of 0. The billing-block detection (codes 110/112/10605) the
   reference guards in its executor was already ported here; only the quota read was missing.
+
+## Unreleased — three providers' quota reads, and what "no endpoint" looks like
+
+- **CodeBuddy: the billing meter, both regions.** The reference shipped parsers for codebuddy-cn and
+  codebuddy-intl; the live intl endpoint answers the same Tencent double-wrapped payload
+  (`data.Response.Data.Accounts[]`), so `CodeBuddyAdapter.quota()` ports the parse once and the
+  region picks the host. One row per package, never merged: refill packs (recurring; live numbers in
+  the *Cycle* fields, labelled Monthly/Weekly/Daily by cycle length) and bonus packs (one-shot,
+  lifetime *Capacity* fields, "Bonus Pack N" soonest-expiring first). Verified live:
+  "Monthly 0/100, resets 2026-11-30" + "Bonus Pack 1 158/250, 92 left, 2026-11-09". The wall-clock
+  strings are UTC — `new Date` reads that format as local, which shifted every reset by the
+  machine's offset until the space became a `T` and a `Z`.
+- **Kilo Code and MiniMax Code: no reachable usage endpoint, said plainly.** Kilo's registry
+  advertises nothing and its billing routes 404; MiniMax's `coding_plan/remains` demands an
+  openplatform API key and answers "no active token plan subscription" to the device-OAuth token —
+  the reference's own minimax-code executor never read usage either, it only *detected* exhaustion.
+  Both adapters therefore have no `quota` member, and their panels say "does not publish an
+  allowance" — the true answer, not a zero.
+- **MiniMax's declared-but-voided exhaustion regex is wired.** The adapter carried the reference's
+  `QUOTA_RE` and `void`ed it. Now a chat failure whose text matches (insufficient/balance/credit/
+  额度不足…) is restated as `RATE_LIMITED` naming the exhaustion, so the request fails over to a
+  route with allowance instead of dying on the spent one.
