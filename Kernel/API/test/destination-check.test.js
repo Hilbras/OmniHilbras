@@ -16,6 +16,8 @@ import { createSocket } from 'node:dgram';
 const STUB_ANSWERS = {
   // The address the original incident recorded: the domain's real published answer.
   'www.codebuddy.ai': '43.169.32.91',
+  // A name the machine's own resolver has never heard of, for the rescue-on-failure case.
+  'nous-rescue.test': '203.0.113.7',
 };
 
 const stub = createSocket('udp4');
@@ -112,5 +114,23 @@ test('a name the local resolver blackholes is rescued by a public one, and a pri
     () => assertPublicDestination('localhost'),
     /resolves to a private address/,
     'the public fallback must not become a way past the guard',
+  );
+});
+
+test('a name the system resolver cannot answer at all is rescued by the public one', async () => {
+  // Measured: this network's resolver stalled twenty seconds on names it did not know —
+  // `inference-api.nousresearch.com` hung the full getaddrinfo window while public resolvers held the
+  // answer in under 50ms — and the rescue used to fire only on a *private* answer, so a failed or
+  // stalled lookup threw instead of being rescued. A name that is private everywhere is still
+  // refused: the stub publishes nothing for the private probe, exactly as before.
+  const { resolveForDestinationCheck } = await import('../dist/src/core/destination-check.js');
+
+  const rescued = await resolveForDestinationCheck('nous-rescue.test');
+  assert.deepEqual(rescued, ['203.0.113.7'], 'the published answer survives a system-side failure');
+
+  await assert.rejects(
+    () => resolveForDestinationCheck('no-such-host.invalid'),
+    undefined,
+    'a name the public resolver also lacks still ends as a refusal',
   );
 });
