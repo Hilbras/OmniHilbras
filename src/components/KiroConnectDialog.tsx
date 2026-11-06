@@ -145,6 +145,26 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
     timeoutRef.current = null;
   }, []);
 
+  /**
+   * Shut the tab this dialog opened, once the flow has failed.
+   *
+   * The dialog opens the tab on the method pick, and the sign-in URL is pointed at it only after the
+   * start returns — so a start that fails (a gateway that was restarting, a refused request) leaves a
+   * tab sitting on `about:blank`, which reads as OmniHilbras having broken the browser. Only a tab
+   * *we* opened — one still on `about:blank` — is closed; reading `location.href` across origins
+   * throws, and a tab the user has navigated themselves is theirs.
+   */
+  const discardSignInTab = useCallback(() => {
+    const opened = signInWindowRef.current;
+    signInWindowRef.current = null;
+    if (!opened || opened.closed) return;
+    try {
+      if (opened.location.href === 'about:blank') opened.close();
+    } catch {
+      // Cross-origin: the user, or the provider, has the tab now. Leave it.
+    }
+  }, []);
+
   useEffect(() => stopWaiting, [stopWaiting]);
 
   const finish = useCallback(
@@ -162,9 +182,10 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
   const fail = useCallback((reason: string) => {
     settledRef.current = true;
     stopWaiting();
+    discardSignInTab();
     setPhase('failed');
     setError(reason);
-  }, [stopWaiting]);
+  }, [discardSignInTab, stopWaiting]);
 
   /** Polls the gateway until the browser approval lands, then saves the connection. */
   const watchDeviceSession = useCallback(
