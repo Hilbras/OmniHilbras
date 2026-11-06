@@ -359,3 +359,39 @@ test('a crafted session id is refused by the route, without reaching the store',
     assert.notEqual(traversal.status, 200, 'a path-traversal attempt must not reach a management route');
   });
 });
+test('an add-account sign-in saves a second connection, and both remain', async () => {
+  // The property the operator sees as "both accounts on the provider page": the first sign-in targets
+  // the provider's one connection, the second — sent with `addAccount: true`, exactly what the
+  // dashboard's Add-account path sends — targets a fresh id, and the store ends with two rows.
+  const { service, key } = await buildService(completedSignIn);
+  await withServer(service, async (base) => {
+    const pollUntilConnected = async (sessionId) => {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const status = await fetch(`${base}/v1/oauth/kimi-code/session/${sessionId}`, { headers: { authorization: `Bearer ${key}` } });
+        const body = await status.json();
+        if (body.status === 'connected') return body;
+        if (body.status === 'failed' || body.status === 'expired') throw new Error(`sign-in ended ${body.status}: ${body.error ?? ''}`);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      throw new Error('the sign-in never connected');
+    };
+
+    const first = await (await startFlow(base, key)).json();
+    await pollUntilConnected(first.sessionId);
+
+    const secondResponse = await fetch(`${base}/v1/oauth/kimi-code/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      body: JSON.stringify({ addAccount: true }),
+    });
+    assert.equal(secondResponse.status, 201);
+    const second = await secondResponse.json();
+    await pollUntilConnected(second.sessionId);
+
+    const list = await fetch(`${base}/v1/connections`, { headers: { authorization: `Bearer ${key}` } });
+    const body = await list.json();
+    const kimiRows = body.data.filter((connection) => connection.providerId === 'kimi-code');
+    assert.equal(kimiRows.length, 2, `expected both accounts saved, found: ${kimiRows.map((row) => row.id).join(', ')}`);
+    assert.notEqual(kimiRows[0].id, kimiRows[1].id);
+  });
+});
