@@ -161,7 +161,7 @@ function AccountRow({ connection, index, onSaved, latency, onEdit }: { connectio
     setToggling(true);
     try {
       const updated = await setGatewayConnectionEnabled(connection.id, !connection.enabled);
-      notify(`${updated.name} is ${updated.enabled ? 'taking traffic again' : 'paused'}.`, 'success');
+      notify(`${updated.name} is ${updated.enabled ? 'enabled — it can take traffic again' : 'disabled — it stays saved and takes no traffic'}.`, 'success');
       onSaved();
     } catch (error) {
       notify(error instanceof Error ? error.message : 'The account could not be changed.', 'error');
@@ -222,16 +222,27 @@ function AccountRow({ connection, index, onSaved, latency, onEdit }: { connectio
               {connection.credentialType === 'oauth' ? 'OAuth' : connection.credentialType === 'api-key' ? 'API Key' : 'No key'}
             </span>
           )}
+          {/*
+            State and action are two things, so they are two elements: a badge that says what this
+            account is right now, and a button named for what pressing it does. A single pill reading
+            "Active" made the reader guess whether it was a state or a command.
+          */}
+          <span
+            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10px] ${connection.enabled ? 'border-success/30 bg-success/10 text-success' : 'border-line bg-surface text-muted/80'}`}
+            title={connection.enabled ? 'Routing can send requests to this account' : 'Routing skips this account; its credential and models are kept'}
+          >
+            {connection.enabled ? 'Enabled' : 'Disabled'}
+          </span>
           <button
             type="button"
             onClick={() => void toggleEnabled()}
             disabled={toggling}
-            aria-pressed={connection.enabled}
-            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors disabled:opacity-50 ${connection.enabled ? 'border-success/30 bg-success/10 text-success hover:border-success/50' : 'border-line text-muted hover:border-line-strong'}`}
-            title={connection.enabled ? 'This account takes traffic — click to pause it' : 'This account is paused — click to resume it'}
+            aria-pressed={!connection.enabled}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors disabled:opacity-50 ${connection.enabled ? 'border-line text-muted hover:border-danger/40 hover:text-danger' : 'border-success/30 text-success hover:border-success/50'}`}
+            title={connection.enabled ? 'Stop routing new requests to this account — its credential is kept' : 'Let routing send requests to this account again'}
           >
             <Power className="h-2.5 w-2.5" aria-hidden="true" />
-            {toggling ? 'Saving' : connection.enabled ? 'Active' : 'Paused'}
+            {toggling ? 'Saving' : connection.enabled ? 'Disable' : 'Enable'}
           </button>
           <code className="min-w-0 max-w-full truncate rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted sm:max-w-[200px]" title={connection.id}>
             {connection.id}
