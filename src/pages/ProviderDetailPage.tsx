@@ -398,6 +398,10 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [signInWindow, setSignInWindow] = useState<Window | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
+  /** Which row is being probed, so the spinner appears on the row that was clicked and nowhere else. */
+  const [probingConnectionId, setProbingConnectionId] = useState<string | null>(null);
+  /** Each probed row's own verdict and latency, keyed by connection id. */
+  const [connectionProbeResults, setConnectionProbeResults] = useState<Record<string, { healthy: boolean; latencyMs?: number }>>({});
   const [refreshingModels, setRefreshingModels] = useState(false);
   const [connection, setConnection] = useState<GatewayConnection | undefined>();
   const [connectionHealthy, setConnectionHealthy] = useState(false);
@@ -680,8 +684,16 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
        * accounts; a row passes its connection and gets that account's credential checked.
        */
       if (target) {
-        const probe = await probeGatewayConnection(target.id);
-        flash(`${target.name} ${probe.valid ? 'accepted its credential' : 'was refused'}${probe.latencyMs === undefined ? '' : ` in ${probe.latencyMs} ms`}.`, probe.valid ? undefined : 'error');
+        setProbingConnectionId(target.id);
+        try {
+          const probe = await probeGatewayConnection(target.id);
+          // The reading belongs to the row that was probed: a provider-level number would be the
+          // first account's, which is the bug this replaced.
+          setConnectionProbeResults((current) => ({ ...current, [target.id]: { healthy: probe.valid, latencyMs: probe.latencyMs } }));
+          flash(`${target.name} ${probe.valid ? 'accepted its credential' : 'was refused'}${probe.latencyMs === undefined ? '' : ` in ${probe.latencyMs} ms`}.`, probe.valid ? undefined : 'error');
+        } finally {
+          setProbingConnectionId(null);
+        }
         return;
       }
       // This provider, not the whole registry. Reading `/health` here meant waiting for all
@@ -1075,9 +1087,9 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
                   key={item.id}
                   provider={provider}
                   connection={item}
-                  healthy={index === 0 ? connectionHealthy : false}
-                  pingMs={index === 0 ? connectionPingMs : undefined}
-                  testing={(index === 0 && testingConnection) || testing}
+                  healthy={connectionProbeResults[item.id]?.healthy ?? (index === 0 ? connectionHealthy : false)}
+                  pingMs={connectionProbeResults[item.id]?.latencyMs ?? (index === 0 ? connectionPingMs : undefined)}
+                  testing={probingConnectionId === item.id || testing}
                   onTest={() => void testConnection(item)}
                   onEdit={openAddConnection}
                 />
