@@ -1413,7 +1413,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
             the list you were reading and the page jump-scrolled on every test. A fixed-height scroll
             region keeps the controls in place and the section a predictable size.
           */}
-          <div className="mt-3 max-h-[min(60vh,32rem)] space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+          <div className="rise-in mt-3 max-h-[min(60vh,32rem)] space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
             {visibleModels.length > 0 ? visibleModels.map((entry) => <ModelRow key={entry.model} model={entry.model} prefix={providerSlug(provider.id)} facets={entry.facets} onCopy={() => void copyModel(entry.model)} onTest={() => void testModel(entry.model)} testing={testingSet.has(entry.model)} disabled={testing || testingConnection} testState={modelTests[entry.model] ?? 'idle'} testError={modelTestErrors[entry.model]} testLatencyMs={modelTestLatencies[entry.model]} testNote={modelTestNotes[entry.model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{filters.query ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{filters.query ? <>Nothing in {allModels.length} models matches &ldquo;{filters.query.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}
           </div>
           <div className="mt-4 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>

@@ -534,6 +534,102 @@
   }
 }
 
+/* ── Motion ─────────────────────────────────────────────────────────────────────
+   One place for the timing, so a hover, a dialog and a list entry feel like the same product.
+
+   Every animation here moves only `transform` and `opacity`, and every one of them is inside
+   `prefers-reduced-motion: no-preference`. That is not decoration: `tests/ui-performance.test.js`
+   exists because this dashboard was slow once, and the fixed cost of that was per-frame work nobody
+   could see. A compositor-only property is off the main thread; a filter or a layout property is not.
+
+   `--i` is the stagger index — a list sets it per item and the delay follows, so a grid arrives as a
+   wave instead of a single flash. */
+
+:root {
+  --motion-fast: 140ms;
+  --motion-base: 220ms;
+  --motion-slow: 380ms;
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* A list entry: `.rise-in` with `--i` set on the element staggers it by position. */
+  .rise-in {
+    animation: rise-in var(--motion-base) var(--motion-ease) both;
+    /* Capped, so a long list cannot put the last row a second behind the first. */
+    animation-delay: calc(min(var(--i, 0), 12) * 35ms);
+  }
+
+  /* Every dialog and its overlay, wherever it is mounted. Modal components portal to the body, so a
+     rule on the roles covers all of them without each one opting in — and a new dialog cannot forget. */
+  [role='presentation'] > [role='dialog'][aria-modal='true'],
+  [role='dialog'][aria-modal='true'] {
+    animation: pop-in var(--motion-base) var(--motion-ease) both;
+  }
+
+  [role='presentation']:has(> [role='dialog']) {
+    animation: overlay-in var(--motion-fast) ease both;
+  }
+
+  /* Hover lift, for anything that answers a pointer. Layout is untouched: transform does not reflow. */
+  .lift {
+    transition: transform var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) ease, background-color var(--motion-fast) ease;
+  }
+
+  .lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise-in,
+  [role='presentation'] > [role='dialog'][aria-modal='true'],
+  [role='dialog'][aria-modal='true'],
+  [role='presentation']:has(> [role='dialog']) {
+    animation: none;
+  }
+
+  .lift {
+    transition: none;
+  }
+
+  .lift:hover {
+    transform: none;
+  }
+}
+
 @keyframes route-travel {
   0% {
     opacity: 0;

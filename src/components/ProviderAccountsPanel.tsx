@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { useState } from 'react';
 import { KeyRound, Pencil, Plus, Save, Timer, Trash2 } from 'lucide-react';
 import type { GatewayConnection } from '../lib/gatewayClient';
@@ -96,7 +97,11 @@ export function ProviderAccountsPanel({
         data-account-scroll={connections.length > 5 ? 'true' : undefined}
       >
         {connections.map((connection, index) => (
-          <AccountRow key={connection.id} connection={connection} index={index} onSaved={onSaved} latency={latencyByConnection?.get(connection.id)} {...(onEdit ? { onEdit } : {})} />
+          // Each row arrives just after the one above it, so a panel of accounts reads as a list rather
+          // than a single flash of text.
+          <div key={connection.id} className="rise-in" style={{ '--i': index } as CSSProperties}>
+            <AccountRow connection={connection} index={index} onSaved={onSaved} latency={latencyByConnection?.get(connection.id)} {...(onEdit ? { onEdit } : {})} />
+          </div>
         ))}
       </div>
     </section>

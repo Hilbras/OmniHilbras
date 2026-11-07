@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -406,7 +407,7 @@ export function ProvidersContent() {
     }
   }
 
-  function renderProviderCard(provider: ProviderRecord) {
+  function renderProviderCard(provider: ProviderRecord, index = 0) {
     const detailTo = providerRoute(provider.catalogId ?? provider.id);
     const simpleEnabled = provider.status === 'connected' && !disabledProviderIds.has(provider.id);
     /**
@@ -420,7 +421,12 @@ export function ProvidersContent() {
     const onConnect = webSessionProviderIds().includes(provider.catalogId ?? provider.id)
       ? () => navigate(detailTo)
       : () => openAdd(provider.catalogId ?? provider.id);
-    return <ProviderCard key={provider.id} provider={provider} detailTo={detailTo} mode={cardMode} simpleEnabled={simpleEnabled} onToggle={(enabled) => toggleProvider(provider.id, enabled)} onManage={() => navigate(detailTo)} onConnect={onConnect} />;
+    // The grid arrives as a wave: the wrapper carries the stagger index, and the card inside fills it.
+    return (
+      <div key={provider.id} className="rise-in h-full" style={{ '--i': index } as CSSProperties}>
+        <ProviderCard provider={provider} detailTo={detailTo} mode={cardMode} simpleEnabled={simpleEnabled} onToggle={(enabled) => toggleProvider(provider.id, enabled)} onManage={() => navigate(detailTo)} onConnect={onConnect} />
+      </div>
+    );
   }
 
   return (
@@ -569,22 +575,22 @@ export function ProvidersContent() {
                       <span className="muted font-mono text-[10px]">{grouped.length} {grouped.length === 1 ? 'provider' : 'providers'}</span>
                     </div>
                     {/*
-                      Columns follow the container, not the viewport — `auto-fit` with a minimum
-                      card width, rather than `sm:`/`md:`/`xl:` steps.
+                      **Four to a row on a wide screen**, which is what was asked for, with the
+                      container still deciding below that.
 
-                      The breakpoints could not express this, and that is the point. The sidebar
-                      is 252px from `lg` up and off-canvas below it, so the same viewport width
-                      yields a content area 252px narrower on one side of that breakpoint than the
-                      other. Every fixed column count is therefore wrong somewhere: `md:grid-cols-3`
-                      put three cards in 225px at an 800px viewport, which truncated *every*
-                      provider name ("OpenCode Console" needs 129px and had 75). Collapsing the
-                      sidebar changes it again, and so does any future chrome.
+                      The count is fixed only from `xl` up, and that is not a preference: the sidebar is
+                      252px from `lg` up and off-canvas below it, so the same viewport width yields a
+                      content area 252px narrower on one side of that breakpoint — `md:grid-cols-3` once
+                      put three cards in 225px at an 800px viewport and truncated every provider name.
+                      Below `xl` the `auto-fit` minimum still applies, so a card is never narrower than
+                      it can show its own name. At `xl` (1280px, sidebar present) four columns leave
+                      ~248px each, comfortably above that floor.
 
-                      With a minimum, a card is never rendered narrower than it can show its name
-                      and status, and it takes an extra column as soon as there is room for one.
+                      Advanced cards carry a model list, so they take a fourth column only at `2xl`,
+                      where there is room for one without squeezing the list.
                     */}
-                    <div className={`grid gap-3 ${cardMode === 'simple' ? 'grid-cols-[repeat(auto-fit,minmax(272px,1fr))]' : 'grid-cols-[repeat(auto-fit,minmax(320px,1fr))]'}`}>
-                      {grouped.map((provider) => renderProviderCard(provider))}
+                    <div className={`grid gap-3 ${cardMode === 'simple' ? 'grid-cols-[repeat(auto-fit,minmax(272px,1fr))] xl:grid-cols-4' : 'grid-cols-[repeat(auto-fit,minmax(320px,1fr))] xl:grid-cols-3 2xl:grid-cols-4'}`}>
+                      {grouped.map((provider, index) => renderProviderCard(provider, index))}
                     </div>
                   </section>
                 ))}

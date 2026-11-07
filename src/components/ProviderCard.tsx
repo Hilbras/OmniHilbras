@@ -145,7 +145,7 @@ function SimpleProviderCard({ provider, detailTo, onManage, onConnect, simpleEna
       : attention ? 'Needs attention' : 'No connections';
 
   return (
-    <article className="group relative isolate flex min-h-[84px] cursor-pointer flex-col justify-center gap-2 rounded-xl border border-line bg-surface-2/75 p-3 transition-colors hover:border-line-strong hover:bg-surface-2">
+    <article className="lift group relative isolate flex h-full min-h-[84px] cursor-pointer flex-col justify-center gap-2 rounded-xl border border-line bg-surface-2/75 p-3 hover:border-line-strong hover:bg-surface-2">
       <Link to={detailTo} aria-label={`Open ${provider.name} provider`} className="absolute inset-0 z-0 rounded-xl" />
       <div className="pointer-events-none relative z-10 flex min-w-0 items-center gap-3">
         <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-10 w-10 shrink-0 rounded-xl" />
@@ -157,7 +157,8 @@ function SimpleProviderCard({ provider, detailTo, onManage, onConnect, simpleEna
             ended up with 93 pixels of text in 82 and an ellipsis. The badge also reads better
             beside the status than jammed against the name.
           */}
-          <span className="block truncate text-sm font-semibold text-text transition-colors group-hover:text-gold-text">{provider.name}</span>
+                    {/* Four to a row leaves the name less width than the button beside it; the full name is on the title. */}
+          <span title={provider.name} className="block truncate text-sm font-semibold text-text transition-colors group-hover:text-gold-text">{provider.name}</span>
           <span className={`mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] ${connected && simpleEnabled ? 'text-success' : attention ? 'text-gold-text' : 'text-muted'}`}>
             {connected && simpleEnabled && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" aria-hidden="true" />}
             <span className="truncate">{statusLabel}</span>
