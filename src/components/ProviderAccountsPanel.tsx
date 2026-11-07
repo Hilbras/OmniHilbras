@@ -73,7 +73,16 @@ export function ProviderAccountsPanel({
         </div>
       </div>
 
-      <div className="mt-4 flex flex-col gap-3">
+      {/*
+        Five rows at a time, then scroll. A provider with a dozen accounts would otherwise push
+        everything below it — endpoint, playground — off the page, and the panel's job is to show the
+        accounts that exist, not to make the rest of the page unreachable. The height is a cap rather
+        than a page size: the scrollbar is the affordance, and no row is hidden behind a "show more".
+      */}
+      <div
+        className={`mt-4 flex flex-col gap-3${connections.length > 5 ? ' max-h-[26rem] overflow-y-auto pr-1' : ''}`}
+        data-account-scroll={connections.length > 5 ? 'true' : undefined}
+      >
         {connections.map((connection, index) => (
           <AccountRow key={connection.id} connection={connection} index={index} onSaved={onSaved} />
         ))}
