@@ -82,6 +82,25 @@ export function ProviderAccountsPanel({
   );
 }
 
+/**
+ * What a row calls its account: the note a person wrote, else the name the sign-in recorded, else the
+ * credential's own email, else the id. The old project ordered them this way and it is the order that
+ * makes two accounts of one vendor tellable apart.
+ */
+function accountTitle(connection: GatewayConnection): string {
+  return connection.responsibility?.owner?.trim() || connection.name?.trim() || connection.email?.trim() || connection.id;
+}
+
+/** The second line, only when it adds something the title does not already say. */
+function accountSubtitle(connection: GatewayConnection): string | null {
+  const title = accountTitle(connection);
+  const email = connection.email?.trim();
+  if (email && email !== title) return email;
+  const name = connection.name?.trim();
+  if (name && name !== title) return name;
+  return null;
+}
+
 function AccountRow({ connection, index, onSaved }: { connection: GatewayConnection; index: number; onSaved: () => void }) {
   const { notify } = useToast();
   const [owner, setOwner] = useState(connection.responsibility?.owner ?? '');
@@ -129,16 +148,27 @@ function AccountRow({ connection, index, onSaved }: { connection: GatewayConnect
   return (
     <div className="rounded-xl border border-line bg-bg-soft p-3 sm:p-3.5">
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="shrink-0 font-mono text-[10px] text-muted">{index + 1}</span>
-          {/* The account's own name, or its id when no note has been written — a row with no identity is
-              the thing this panel exists to remove. */}
-          <span className="text-xs font-medium">{connection.responsibility?.owner || connection.name}</span>
-          {connection.responsibility?.purpose && (
-            <span className="muted text-[11px]">— {connection.responsibility.purpose}</span>
-          )}
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted">{index + 1}</span>
+          {/* The account's own identity, in the old project's order: the written note, then the name,
+              then the credential's email — and the email as a second line when it is not already the
+              first. Two accounts of one vendor are told apart by this, which a bare id never did. */}
+          <div className="min-w-0">
+            <span className="text-xs font-medium">{accountTitle(connection)}</span>
+            {accountSubtitle(connection) ? (
+              <p className="muted mt-0.5 truncate text-[11px]" title={accountSubtitle(connection) ?? undefined}>{accountSubtitle(connection)}</p>
+            ) : null}
+            {connection.responsibility?.purpose && (
+              <p className="muted mt-0.5 text-[11px]">— {connection.responsibility.purpose}</p>
+            )}
+          </div>
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {connection.credentialType && (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-line bg-surface px-2 py-0.5 font-mono text-[10px] text-muted">
+              {connection.credentialType === 'oauth' ? 'OAuth' : connection.credentialType === 'api-key' ? 'API Key' : 'No key'}
+            </span>
+          )}
           <span
             className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${connection.enabled ? 'border-success/30 bg-success/10 text-success' : 'border-line text-muted'}`}
             title={connection.enabled ? 'This account takes traffic' : 'This account is paused'}

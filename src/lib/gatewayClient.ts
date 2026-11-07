@@ -47,6 +47,10 @@ export type GatewayConnection = {
   proxyPool: string;
   enabled: boolean;
   hasCredential: boolean;
+  /** The account identity the credential carries (an OAuth email), when it has one. */
+  email?: string;
+  /** The kind of credential this connection holds — for the account row's badge. Never the value. */
+  credentialType?: 'oauth' | 'api-key' | 'none';
   modelPolicy: 'free' | 'all';
   modelIds: string[];
   customModelIds: string[];

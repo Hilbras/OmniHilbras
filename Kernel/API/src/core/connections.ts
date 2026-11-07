@@ -77,6 +77,10 @@ export type ConnectionRecord = {
   responsibility?: ConnectionResponsibility;
   createdAt: string;
   updatedAt: string;
+  /** The account identity the credential carries (an OAuth email), when it has one. */
+  email?: string;
+  /** The kind of credential this connection holds — for the account row's badge. Never the value. */
+  credentialType?: 'oauth' | 'api-key' | 'none';
 };
 
 /** The ownership note a person writes on a connection. */
@@ -272,7 +276,19 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
   }
 
   async list() {
-    return [...this.connections.values()].map((connection) => cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.id) }));
+    return [...this.connections.values()].map((connection) => this.withPreview(connection));
+  }
+
+  /**
+   * The record as the gateway's readers see it: whether a credential exists, and the two facts about
+   * it that are preview data rather than secrets — an OAuth account's email and the credential's kind.
+   * Shared by `list()` and `save()` so a saved record and a listed one cannot disagree, which is the
+   * drift that made a test comparing the two fail the moment only one of them was decorated.
+   */
+  private withPreview(connection: ConnectionRecord): ConnectionRecord {
+    const credential = this.credentials.get(connection.id);
+    const email = credential?.type === 'oauth' && typeof credential.email === 'string' && credential.email ? credential.email : undefined;
+    return cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.id), ...(email ? { email } : {}), ...(credential ? { credentialType: credential.type } : {}) });
   }
 
   async save(input: ConnectionInput, credential: ProviderCredential) {
@@ -285,7 +301,7 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     const record = buildRecord({ ...normalized, id }, existing);
     this.connections.set(id, record);
     this.credentials.set(id, storedCredential(credential));
-    return cloneRecord(record);
+    return this.withPreview(record);
   }
 
   async updateModels(connectionId: string, modelIds: string[], modelMeta?: ModelMetaMap, options: { replace?: boolean } = {}) {
