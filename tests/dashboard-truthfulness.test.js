@@ -186,7 +186,9 @@ test('a device-code sign-in goes to the provider that asked for it', () => {
 
   // And the dialog actually passes it, which is the half a signature check cannot see.
   const dialog = stripComments(readFileSync(join(DASHBOARD, 'components', 'OauthConnectDialog.tsx'), 'utf8'));
-  assert.ok(dialog.includes('startGatewayDeviceSignIn(providerId, addAccount)'), 'the dialog must pass the provider it was opened for, and the add-account mode it was opened in');
+  // The target account id follows the two arguments this guard is about; the assertion stops before it
+  // so adding that parameter did not make the check fail for a reason it is not testing.
+  assert.ok(dialog.includes('startGatewayDeviceSignIn(providerId, addAccount'), 'the dialog must pass the provider it was opened for, and the add-account mode it was opened in');
   assert.ok(dialog.includes('getDeviceSignInStatus(providerId, id)'), 'and poll the same provider, not a fixed one');
 });
 

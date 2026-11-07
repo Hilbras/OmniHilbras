@@ -48,6 +48,10 @@ function manager(overrides = {}, records = []) {
     discover: async ({ providerId, policy }) => { seen.discovered.push([providerId, policy]); return overrides.models ?? [{ id: 'm1' }, { id: 'm2' }]; },
     readCredential: async () => overrides.credential ?? { type: 'api-key', value: 'k' },
     noteDiscoveryFailure: (error) => { seen.notes.push(error); },
+    // The duplicate check needs a fingerprint per credential. This stand-in is deterministic and keyed
+    // by provider the way the vault's is, so two saves of one key collide and two providers do not.
+    credentialFingerprint: async (providerId, credential) => `${providerId}:${credential.type}:${'value' in credential ? credential.value : ''}`,
+    canonicalProviderId: (providerId) => providerId,
   });
   return { instance, seen, backing };
 }
@@ -115,7 +119,9 @@ test('a credential is proven before it reaches the store', async () => {
   assert.deepEqual(seen.validated.map(([id]) => id), ['p']);
   // The order is the whole point: a connection that exists but cannot be used reads in the
   // dashboard as working and fails on its first request.
-  assert.deepEqual(backing.calls.map(([name]) => name), ['save']);
+  // `list` is the duplicate check, which runs before the write; the write itself still comes after
+  // the provider was asked, which is the order this test is about.
+  assert.deepEqual(backing.calls.map(([name]) => name), ['list', 'save']);
 });
 
 test('a credential the provider refuses is never stored', async () => {
@@ -141,6 +147,8 @@ test('a provider that cannot be probed is stored without a pre-flight check', as
     discover: async () => [],
     readCredential: async () => undefined,
     noteDiscoveryFailure: () => {},
+    credentialFingerprint: async (providerId, credential) => `${providerId}:${credential.type}`,
+    canonicalProviderId: (providerId) => providerId,
   });
   await instanceNoProbe.save(input(), { type: 'api-key', value: 'k' });
   assert.equal(seen.validated.length, 0);
@@ -209,7 +217,7 @@ test('the narrow operations lock only their own store call', async () => {
 
 test('an absent store is a configuration problem, named as one', async () => {
   const { instance } = manager();
-  const none = new ConnectionManager(undefined, { lock: async (op) => op(), canValidate: () => false, validate: async () => {}, discover: async () => [], readCredential: async () => undefined, noteDiscoveryFailure: () => {} });
+  const none = new ConnectionManager(undefined, { lock: async (op) => op(), canValidate: () => false, validate: async () => {}, discover: async () => [], readCredential: async () => undefined, noteDiscoveryFailure: () => {}, credentialFingerprint: async (providerId, credential) => `${providerId}:${credential.type}`, canonicalProviderId: (providerId) => providerId });
   assert.equal(await none.list ? (await none.list()).length : -1, 0, 'listing nothing is not an error');
   await assert.rejects(() => none.save(input(), { type: 'api-key', value: 'k' }), (error) => {
     assert.equal(error.code, 'CONFIGURATION_ERROR');
@@ -231,10 +239,12 @@ test('a tolerant save keeps the session and records why the catalog could not be
     discover: async () => { throw new ProviderError('PROVIDER_UNAVAILABLE', 'no catalog today', { details: { providerMessage: 'The provider said: catalog disabled.' } }); },
     readCredential: async () => undefined,
     noteDiscoveryFailure: (error) => notes.push(error),
+    credentialFingerprint: async (providerId, credential) => `${providerId}:${credential.type}`,
+    canonicalProviderId: (providerId) => providerId,
   });
   const saved = await instance.save(input({ modelPolicy: 'all' }), { type: 'api-key', value: 'k' }, undefined, { tolerateDiscoveryFailure: true });
   assert.equal(backing.calls.filter(([name]) => name === 'save').length, 1, 'the connection is still stored');
-  assert.deepEqual(saved.modelIds, [], 'with an empty catalog, not a stale one');
+  assert.deepEqual(saved.connection.modelIds, [], 'with an empty catalog, not a stale one');
   assert.equal(notes.length, 1, 'and the reason is recorded, so the dashboard can say so');
   // The whole error is handed over, not a string: the service knows how to ask a provider what it
   // actually said, and reducing it here would throw that away.
@@ -250,6 +260,8 @@ test('an intolerant save lets a failed catalog read fail the save', async () => 
     discover: async () => { throw new ProviderError('PROVIDER_UNAVAILABLE', 'no catalog today'); },
     readCredential: async () => undefined,
     noteDiscoveryFailure: () => {},
+    credentialFingerprint: async (providerId, credential) => `${providerId}:${credential.type}`,
+    canonicalProviderId: (providerId) => providerId,
   });
   await assert.rejects(() => instance.save(input({ modelPolicy: 'all' }), { type: 'api-key', value: 'k' }), (error) => error.code === 'PROVIDER_UNAVAILABLE');
   assert.equal(backing.calls.filter(([name]) => name === 'save').length, 0);
@@ -258,7 +270,7 @@ test('an intolerant save lets a failed catalog read fail the save', async () => 
 // ── the two lookups ────────────────────────────────────────────────────────
 
 test('listing is not an error when there is no store, but changing something is', async () => {
-  const none = new ConnectionManager(undefined, { lock: async (op) => op(), canValidate: () => false, validate: async () => {}, discover: async () => [], readCredential: async () => undefined, noteDiscoveryFailure: () => {} });
+  const none = new ConnectionManager(undefined, { lock: async (op) => op(), canValidate: () => false, validate: async () => {}, discover: async () => [], readCredential: async () => undefined, noteDiscoveryFailure: () => {}, credentialFingerprint: async (providerId, credential) => `${providerId}:${credential.type}`, canonicalProviderId: (providerId) => providerId });
   assert.deepEqual(await none.list(), []);
   await assert.rejects(() => none.setModels('c', []), (error) => error.code === 'CONFIGURATION_ERROR');
 });

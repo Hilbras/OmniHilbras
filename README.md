@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.90.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.91.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -164,7 +164,18 @@ curl -X PUT http://127.0.0.1:8787/v1/connections/opencode \
 ```
 
 Health is reported per provider rather than per connection, so a page shows one
-health figure for a provider even when it has several connections.
+health figure for a provider even when it has several connections. The accounts
+panel above it is per connection: each row carries its own measured latency, an
+**Active/Paused** switch (`PUT /v1/connections/:id/enabled`, so a paused account
+keeps its credential and models and simply stops taking traffic) and **Edit**,
+which re-authenticates a signed-in account or replaces an API key in place.
+
+Adding a credential that is already saved does not create a second row. The
+gateway fingerprints each credential inside the vault and compares it within the
+provider that owns it: an API key that is already stored comes back as the
+existing account with `duplicate: "identical"`, and the same sign-in again renews
+that account with `duplicate: "updated"`. A genuinely different credential is the
+only thing that becomes a new account.
 
 ## OpenCode Zen
 

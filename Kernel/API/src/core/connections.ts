@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, scryptSync } from 'node:crypto';
 import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { assertSafeProviderRequestUrl, type ModelImportPolicy, type ProviderCredential, type ProviderId } from './index.js';;
@@ -81,6 +81,15 @@ export type ConnectionRecord = {
   email?: string;
   /** The kind of credential this connection holds — for the account row's badge. Never the value. */
   credentialType?: 'oauth' | 'api-key' | 'none';
+  /**
+   * A vault-local, non-reversible fingerprint of the stored credential, for duplicate detection.
+   *
+   * An HMAC keyed by the vault's own master key, truncated: the same key in another vault produces a
+   * different value, so this cannot be compared across vaults or against a precomputed table. It is
+   * what lets a save recognise "this key is already account 2" without ever decrypting a credential to
+   * compare, and it is metadata — never the secret, and never anything a secret can be recovered from.
+   */
+  credentialFingerprint?: string;
 };
 
 /** The ownership note a person writes on a connection. */
@@ -115,6 +124,8 @@ export type ConnectionInput = {
   priority: number;
   proxyPool: string;
   enabled?: boolean;
+  /** Set by the store on every save; not part of a caller's input in practice. */
+  credentialFingerprint?: string;
   modelPolicy?: ModelImportPolicy;
   modelIds?: string[];
   customModelIds?: string[];
@@ -189,6 +200,10 @@ export interface ConnectionStore extends ConnectionCredentialStore {
   updateResilience(connectionId: string, resilience: Partial<ResilienceSettings>): Promise<ConnectionRecord | undefined>;
   /** Writes the ownership note; `undefined` clears it. */
   setResponsibility(connectionId: string, responsibility: ConnectionResponsibility | undefined): Promise<ConnectionRecord | undefined>;
+  /** Pauses or resumes one connection. Metadata-only, like the note: no credential is re-validated. */
+  setEnabled(connectionId: string, enabled: boolean): Promise<ConnectionRecord | undefined>;
+  /** The vault-local fingerprint of a credential, for recognising one that is already saved. */
+  credentialFingerprint(providerId: string, credential: ProviderCredential): Promise<string>;
   remove(connectionId: string): Promise<boolean>;
 }
 
@@ -305,7 +320,10 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     if (existing && existing.providerId !== normalized.providerId) throw new Error('Connection ID is already used by another provider.');
     if (!existing && this.connections.size >= maxConnections) throw new Error('The local connection limit has been reached.');
 
-    const record = buildRecord({ ...normalized, id }, existing);
+    // The fingerprint rides with the record so a later save can recognise the same credential without
+    // decrypting anything to compare.
+    const fingerprint = credentialFingerprintFor(normalized.providerId, credential.type === 'none' ? 'none' : credential.value);
+    const record = buildRecord({ ...normalized, id, credentialFingerprint: fingerprint }, existing);
     this.connections.set(id, record);
     this.credentials.set(id, storedCredential(credential));
     return this.withPreview(record);
@@ -344,6 +362,18 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     return cloneRecord(updated);
   }
 
+  async setEnabled(connectionId: string, enabled: boolean) {
+    const record = this.connections.get(connectionId);
+    if (!record) return undefined;
+    const updated = { ...record, enabled, updatedAt: new Date().toISOString() };
+    this.connections.set(connectionId, updated);
+    return cloneRecord(updated);
+  }
+
+  async credentialFingerprint(providerId: string, credential: ProviderCredential) {
+    return credentialFingerprintFor(providerId, credential.type === 'none' ? 'none' : credential.value);
+  }
+
   async remove(connectionId: string) {
     const record = this.connections.get(connectionId);
     if (!record) return false;
@@ -369,6 +399,20 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
  * — so a keyless connection's credential was deleted on the first restart and the connection quietly
  * stopped being a routing candidate. Two spellings of one decision, and the one that won was the wrong one.
  */
+/**
+ * A vault-local fingerprint of a credential, for duplicate detection.
+ *
+ * Keyed by the vault's master key when one exists, so the value is meaningless outside this vault; an
+ * in-memory store with no key still gets a stable hash, which is what its tests need. Truncated to 32
+ * hex characters: this is an equality check, and a longer value would only be a longer thing to store.
+ */
+function credentialFingerprintFor(providerId: string, value: string, masterKey?: Uint8Array): string {
+  const digest = masterKey
+    ? createHmac('sha256', Buffer.from(masterKey)).update(`${providerId}\u0000${value}`).digest('hex')
+    : createHash('sha256').update(`${providerId}\u0000${value}`).digest('hex');
+  return digest.slice(0, 32);
+}
+
 function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefined): ConnectionRecord {
   const normalized = normalizeInput(input);
   const now = new Date().toISOString();
@@ -383,6 +427,15 @@ function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefi
     proxyPool: normalized.proxyPool,
     enabled: normalized.enabled ?? existing?.enabled ?? true,
     hasCredential: true,
+    // Read from the **raw** input, not `normalized`: `normalizeInput` does not carry this field (it is
+    // set by the store, not by a caller), so reading it off the normalized copy meant every save wrote
+    // a record with no fingerprint — the duplicate check compared a hash against `undefined` and never
+    // matched, which is why the same key could be added twice over HTTP while the manager's own tests
+    // (which supply fingerprints directly) passed.
+    ...(input.credentialFingerprint ?? existing?.credentialFingerprint ? { credentialFingerprint: input.credentialFingerprint ?? existing?.credentialFingerprint } : {}),
+    // Same reasoning for the ownership note: a save that does not mention it must not erase it, which
+    // is what happened while `buildRecord` read only from the normalized input.
+    ...(input.responsibility ?? existing?.responsibility ? { responsibility: input.responsibility ?? existing?.responsibility } : {}),
     modelPolicy: normalized.modelPolicy ?? existing?.modelPolicy ?? 'all',
     modelIds: modelLists.modelIds,
     customModelIds: modelLists.customModelIds,
@@ -507,7 +560,10 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       // newest credential overwriting the others.
       const previousCredential = this.credentials.get(id);
       const previousConnections = new Map(this.connections);
-      const record = buildRecord({ ...normalized, id }, existing);
+      // Keyed by the vault's master key, so the value is meaningless in another vault.
+      const masterKey = await this.getMasterKey();
+      const fingerprint = credentialFingerprintFor(normalized.providerId, credential.type === 'none' ? 'none' : credential.value, masterKey);
+      const record = buildRecord({ ...normalized, id, credentialFingerprint: fingerprint }, existing);
 
       this.credentials.set(id, storedCredential(credential));
       this.connections.set(id, record);
@@ -573,6 +629,28 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
         throw error;
       }
       return cloneRecord(updated);
+    });
+  }
+
+  async credentialFingerprint(providerId: string, credential: ProviderCredential) {
+    const masterKey = await this.getMasterKey();
+    return credentialFingerprintFor(providerId, credential.type === 'none' ? 'none' : credential.value, masterKey);
+  }
+
+  async setEnabled(connectionId: string, enabled: boolean) {
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const record = this.connections.get(connectionId);
+      if (!record) return undefined;
+      const updated = { ...record, enabled, updatedAt: new Date().toISOString() };
+      this.connections.set(connectionId, updated);
+      try {
+        await this.persistMetadata();
+      } catch (error) {
+        this.connections.set(connectionId, record);
+        throw error;
+      }
+      return this.withPreview(updated);
     });
   }
 
@@ -945,6 +1023,7 @@ function parseRecord(value: unknown): ConnectionRecord {
     priority: value.priority,
     proxyPool: value.proxyPool,
     enabled: value.enabled,
+    ...(typeof value.credentialFingerprint === 'string' && value.credentialFingerprint ? { credentialFingerprint: value.credentialFingerprint } : {}),
     modelPolicy: value.modelPolicy === undefined ? 'all' : value.modelPolicy,
     ...(Array.isArray(value.providers) ? { providers: value.providers.filter((id): id is ProviderId => typeof id === 'string') } : {}),
     modelIds: modelLists.modelIds,
@@ -962,6 +1041,19 @@ function parseRecord(value: unknown): ConnectionRecord {
     proxyPool: input.proxyPool,
     enabled: value.enabled,
     hasCredential: value.hasCredential,
+    // Both are written to the metadata and were never read back: `normalizeInput` carries neither
+    // (the fingerprint is the store's, the note is its own operation), so building the record from the
+    // normalized copy dropped them on the first restart. A fingerprint lost on reload disables the
+    // duplicate check for every saved account, which is a failure no live session would show.
+    ...(typeof value.credentialFingerprint === 'string' && value.credentialFingerprint ? { credentialFingerprint: value.credentialFingerprint } : {}),
+    ...(isRecord(value.responsibility) && (typeof value.responsibility.owner === 'string' || typeof value.responsibility.purpose === 'string')
+      ? {
+          responsibility: {
+            ...(typeof value.responsibility.owner === 'string' && value.responsibility.owner ? { owner: value.responsibility.owner } : {}),
+            ...(typeof value.responsibility.purpose === 'string' && value.responsibility.purpose ? { purpose: value.responsibility.purpose } : {}),
+          },
+        }
+      : {}),
     modelPolicy: input.modelPolicy ?? 'all',
     ...(input.modelMeta ? { modelMeta: input.modelMeta } : {}),
     modelIds: input.modelIds ?? [],

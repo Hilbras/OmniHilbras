@@ -61,7 +61,7 @@ import { TimeoutPolicy } from './timeout-policy.js';
 import { startRequestScope, type RequestScope } from './request-context.js';
 import { notSupported } from './capability.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayStreamOutcome } from './request-executor.js';
-import { sharedCatalogProviders } from './provider-alias.js';
+import { providerAlias, sharedCatalogProviders } from './provider-alias.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
 import type { UsageRecord, UsageStore } from './usage-store.js';
@@ -335,6 +335,10 @@ export class GatewayService {
         this.discoverConnectionModels(providerId, credential, policy, signal, pendingEndpoint),
       readCredential: (connectionId, providerId) => this.secretStore.get(connectionId, providerId),
       noteDiscoveryFailure: (error) => { this.lastDiscoveryNote = error instanceof ProviderError ? providerSaid(error) : error instanceof Error ? error.message : undefined; },
+      // A service built without a store has nothing to fingerprint against, and no save will reach
+      // here; the empty string simply never matches a stored fingerprint.
+      credentialFingerprint: (providerId, credential) => this.connectionStore?.credentialFingerprint(providerId, credential) ?? Promise.resolve(''),
+      canonicalProviderId: (providerId) => providerAlias(providerId) ?? providerId,
     });
     this.credentials = new CredentialManager(this.secretStore, this.connections);
     this.routing = new RoutingEngine({
@@ -684,6 +688,17 @@ export class GatewayService {
    * reading a catalog — because both need the registry and the resolver.
    */
   async saveConnection(input: ConnectionInput, credential: ProviderCredential, signal?: AbortSignal, options: { tolerateDiscoveryFailure?: boolean } = {}): Promise<ConnectionRecord> {
+    return (await this.saveConnectionDetailed(input, credential, signal, options)).connection;
+  }
+
+  /**
+   * The same save, reporting what happened to the credential.
+   *
+   * `identical` means the key was already saved and nothing was written — the caller should say so
+   * rather than imply a new account. `updated` means the same sign-in was renewed in place. The plain
+   * `saveConnection` wraps this for the many callers that only want the record.
+   */
+  async saveConnectionDetailed(input: ConnectionInput, credential: ProviderCredential, signal?: AbortSignal, options: { tolerateDiscoveryFailure?: boolean } = {}): Promise<{ connection: ConnectionRecord; duplicate: 'none' | 'identical' | 'updated' }> {
     const saved = await this.connections.save(input, credential, signal, options);
     // A provider whose catalog lives on a **shared** record has no connection of its own until this
     // runs: ClinePass was reachable by the gateway but absent from the model list and, at routing time,
@@ -781,7 +796,7 @@ export class GatewayService {
    * multi-account flow states, and the reason a second Kimi account can exist beside the first without
    * overwriting it.
    */
-  async startKimiCodeSignIn(addAccount = false) {
+  async startKimiCodeSignIn(addAccount = false, targetConnectionId?: string) {
     // **The registered adapter, not a fresh one.** A `new KimiCodeAdapter` here would build its own
     // `FetchHttpTransport` and reach the real Kimi even when the gateway was constructed with a
     // scripted transport — so a test of this flow made a live network call, and a caller who supplied
@@ -790,7 +805,7 @@ export class GatewayService {
     const started = await this.kimiCodeAdapter(kimiCodeProviderId).beginSignIn();
     const session = this.kimiCodeSessions.create({
       ...started,
-      connectionId: addAccount ? `${kimiCodeProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : kimiCodeProviderId,
+      connectionId: targetConnectionId ?? (addAccount ? `${kimiCodeProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : kimiCodeProviderId),
     });
     return {
       sessionId: session.id,
@@ -850,12 +865,12 @@ export class GatewayService {
    * Kilo Code, MiniMax Code, Qoder — all device flows.
    * ------------------------------------------------------------------ */
 
-  async startKilocodeSignIn(addAccount = false) {
+  async startKilocodeSignIn(addAccount = false, targetConnectionId?: string) {
     const adapter = this.kilocodeAdapter(kilocodeProviderId) as unknown as {
       beginSignIn(): Promise<{ deviceCode: string; userCode: string; verificationUrl: string; expiresIn?: number }>;
     };
     const started = await adapter.beginSignIn();
-    const session = this.kilocodeSessions.create({ ...started, connectionId: addAccount ? `kilocode-${randomUUID().replace(/-/g, '').slice(0, 12)}` : kilocodeProviderId });
+    const session = this.kilocodeSessions.create({ ...started, connectionId: targetConnectionId ?? (addAccount ? `kilocode-${randomUUID().replace(/-/g, '').slice(0, 12)}` : kilocodeProviderId) });
     return { sessionId: session.id, userCode: session.userCode ?? started.userCode, verificationUrl: session.verificationUrl, expiresAt: new Date(session.expiresAt).toISOString() };
   }
 
@@ -906,13 +921,13 @@ export class GatewayService {
    * user approves in a browser, and the poll asks for the token. So `userCode` is absent from the
    * response and the dashboard opens `verificationUrl`.
    */
-  async startCodeBuddySignIn(providerId: string, addAccount = false) {
+  async startCodeBuddySignIn(providerId: string, addAccount = false, targetConnectionId?: string) {
     const region = codebuddyRegionFor(providerId);
     const adapter = codebuddySignInAdapter(region, { transport: this.transport }) as unknown as {
       beginSignIn(): Promise<{ deviceCode: string; userCode: string; verificationUrl: string; expiresIn?: number }>;
     };
     const started = await adapter.beginSignIn();
-    const session = this.codebuddySessions.create({ ...started, region, connectionId: addAccount ? `${providerId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : providerId });
+    const session = this.codebuddySessions.create({ ...started, region, connectionId: targetConnectionId ?? (addAccount ? `${providerId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : providerId) });
     return {
       sessionId: session.id,
       verificationUrl: session.verificationUrl,
@@ -962,12 +977,12 @@ export class GatewayService {
     });
   }
 
-  async startMinimaxCodeSignIn(providerId: string, addAccount = false) {
+  async startMinimaxCodeSignIn(providerId: string, addAccount = false, targetConnectionId?: string) {
     const adapter = this.minimaxCodeAdapter(providerId) as unknown as {
       beginSignIn(): Promise<{ deviceCode: string; userCode: string; verificationUrl: string; codeVerifier: string; expiresIn?: number }>;
     };
     const started = await adapter.beginSignIn();
-    const session = this.minimaxCodeSessions.create({ ...started, connectionId: addAccount ? `${providerId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : providerId });
+    const session = this.minimaxCodeSessions.create({ ...started, connectionId: targetConnectionId ?? (addAccount ? `${providerId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : providerId) });
     return { sessionId: session.id, userCode: session.userCode, verificationUrl: session.verificationUrl, expiresAt: new Date(session.expiresAt).toISOString() };
   }
 
@@ -1067,8 +1082,8 @@ export class GatewayService {
    * is where the gateway's own reachable origin is known — the same value `defaultClineRedirect`
    * uses. The callback path derived from it must match the one the route and `http.ts` exempt.
    */
-  startClaudeCodeSignIn(publicBaseUrl: string, addAccount = false) {
-    return beginClaudeCodeSignIn({ store: this.claudeCodeSessions, publicBaseUrl, connectionId: addAccount ? `claude-code-${randomUUID().replace(/-/g, '').slice(0, 12)}` : claudeCodeProviderId });
+  startClaudeCodeSignIn(publicBaseUrl: string, addAccount = false, targetConnectionId?: string) {
+    return beginClaudeCodeSignIn({ store: this.claudeCodeSessions, publicBaseUrl, connectionId: targetConnectionId ?? (addAccount ? `claude-code-${randomUUID().replace(/-/g, '').slice(0, 12)}` : claudeCodeProviderId) });
   }
 
   /**
@@ -1081,14 +1096,14 @@ export class GatewayService {
    * is what an operator's registered URI does — needs no second socket, and opening one there
    * would simply collide with the server that is already bound to it.
    */
-  async startCodexSignIn(publicBaseUrl: string, addAccount = false) {
+  async startCodexSignIn(publicBaseUrl: string, addAccount = false, targetConnectionId?: string) {
     const config = this.gatewayConfig?.codex;
     const redirect = resolveCodexConfig({ clientId: config?.clientId, redirectUri: config?.redirectUri, publicBaseUrl });
     const gatewayPort = Number(new URL(publicBaseUrl).port || 80);
     if (redirect.redirectPort !== gatewayPort) {
       await this.codexCallbackListener.open(redirect.redirectPort, '127.0.0.1');
     }
-    return beginCodexSignIn({ store: this.codexSessions, ...redirect, connectionId: addAccount ? `codex-${randomUUID().replace(/-/g, '').slice(0, 12)}` : codexProviderId });
+    return beginCodexSignIn({ store: this.codexSessions, ...redirect, connectionId: targetConnectionId ?? (addAccount ? `codex-${randomUUID().replace(/-/g, '').slice(0, 12)}` : codexProviderId) });
   }
 
   /**
@@ -1292,11 +1307,11 @@ export class GatewayService {
    * session id is how the dashboard learns the outcome; the `state` is what
    * ties the callback to this sign-in when Cline hands one back at all.
    */
-  startClineSignIn(redirectUri: string, addAccount = false) {
+  startClineSignIn(redirectUri: string, addAccount = false, targetConnectionId?: string) {
     // The session id goes in the redirect path, because the path is the one
     // part of the callback Cline has to honour verbatim.
     // The same redirect is what gets sent to the token endpoint later.
-    const { sessionId, state, redirectUri: callback } = this.clineSessions.start((id) => redirectUri.replace(/\/v1\/oauth\/cline\/callback\/?$/, clineCallbackPathFor(id)), addAccount ? `cline-${randomUUID().replace(/-/g, '').slice(0, 12)}` : 'cline');
+    const { sessionId, state, redirectUri: callback } = this.clineSessions.start((id) => redirectUri.replace(/\/v1\/oauth\/cline\/callback\/?$/, clineCallbackPathFor(id)), targetConnectionId ?? (addAccount ? `cline-${randomUUID().replace(/-/g, '').slice(0, 12)}` : 'cline'));
     return { ...this.beginClineAuthorization(callback, state), sessionId, state };
   }
 
@@ -1866,8 +1881,8 @@ export class GatewayService {
    * "I want more than one account" gap. The flag is explicit rather than automatic because re-signing-in to
    * *repair* a connection is the common case and must not leave a duplicate behind.
    */
-  async startKiroSignInFlow(startUrl?: string, addAccount = false) {
-    return startKiroSignIn(this.kiroSessions, startUrl, addAccount);
+  async startKiroSignInFlow(startUrl?: string, addAccount = false, targetConnectionId?: string) {
+    return startKiroSignIn(this.kiroSessions, startUrl, addAccount, targetConnectionId);
   }
 
   /**
@@ -1912,8 +1927,8 @@ export class GatewayService {
    * handles, so the browser cannot come back here on its own. The user pastes the code
    * instead, and the exchange happens below.
    */
-  async startKiroSocialSignInFlow(provider: 'google' | 'github', addAccount = false) {
-    return startKiroSocialDeviceFlow(this.kiroSessions, provider, addAccount);
+  async startKiroSocialSignInFlow(provider: 'google' | 'github', addAccount = false, targetConnectionId?: string) {
+    return startKiroSocialDeviceFlow(this.kiroSessions, provider, addAccount, targetConnectionId);
   }
 
   /**
@@ -2083,6 +2098,13 @@ export class GatewayService {
    */
   async updateConnectionResponsibility(connectionId: string, responsibility: { owner?: string; purpose?: string }) {
     return this.connections.setResponsibility(connectionId, responsibility);
+  }
+
+  /** Pauses or resumes one account. Routing reads `enabled` per request, so this takes effect at once. */
+  async setConnectionEnabled(connectionId: string, enabled: boolean) {
+    const updated = await this.connections.setEnabled(connectionId, enabled);
+    if (!updated) throw new ProviderError('NOT_FOUND', 'That connection no longer exists.', { publicMessage: 'That connection no longer exists.' });
+    return updated;
   }
 
   async updateConnectionResilience(connectionId: string, resilience: Partial<ResilienceSettings>) {

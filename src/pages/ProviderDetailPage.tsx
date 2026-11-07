@@ -37,7 +37,7 @@ import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, f
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { ProviderPlayground } from '../components/ProviderPlayground';
-import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, probeGatewayConnection, putGatewayConnection, refreshGatewayConnectionModels, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, probeGatewayConnection, refreshGatewayConnectionModels, saveGatewayConnectionDetailed, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import { dashboardRoutes, providerRoute, providerUsageRoute } from '../lib/routes';
 import { UsageContent } from './UsagePage';
@@ -397,6 +397,13 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
    */
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [signInWindow, setSignInWindow] = useState<Window | null>(null);
+  /**
+   * The account an Edit is updating, if any. Both update paths carry its id: the connect dialog starts
+   * the flow against this connection, and the save dialog sends `id` so the gateway rewrites that row
+   * instead of minting a second one. Cleared whenever a dialog closes, so "Add connection" can never
+   * inherit a stale target and silently overwrite the wrong account.
+   */
+  const [editingConnection, setEditingConnection] = useState<GatewayConnection | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
   /** Which row is being probed, so the spinner appears on the row that was clicked and nowhere else. */
   const [probingConnectionId, setProbingConnectionId] = useState<string | null>(null);
@@ -404,6 +411,22 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   const [connectionProbeResults, setConnectionProbeResults] = useState<Record<string, { healthy: boolean; latencyMs?: number }>>({});
   const [refreshingModels, setRefreshingModels] = useState(false);
   const [connection, setConnection] = useState<GatewayConnection | undefined>();
+  /**
+   * The save dialog's seed for that account, memoized: the dialog reseeds from `initialConnection` when
+   * its identity changes, so a fresh object on every render would empty the fields being typed into.
+   */
+  const editSeed = useMemo(
+    () => editingConnection
+      ? {
+          id: editingConnection.id,
+          name: editingConnection.name ?? provider.name,
+          endpoint: editingConnection.endpoint ?? provider.endpoint,
+          priority: editingConnection.priority ?? 1,
+          modelPolicy: (editingConnection.modelPolicy ?? connection?.modelPolicy ?? 'all') as 'free' | 'all',
+        }
+      : undefined,
+    [editingConnection, provider.name, provider.endpoint, connection?.modelPolicy],
+  );
   const [connectionHealthy, setConnectionHealthy] = useState(false);
   /**
    * What the last health read established, and whether one has happened yet.
@@ -634,6 +657,40 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     setAddOpen(true);
   }
 
+  /**
+   * Updates one account in place.
+   *
+   * A signed-in account has no credential the dashboard could show or patch, so editing it means
+   * signing in again — into **that** connection, which the gateway honours via the id in the start
+   * request. An API-key account opens the save dialog, which asks for the new key: the vault never
+   * returns an old one, and offering a blank field that "keeps" it would leave a row nobody could
+   * prove still works.
+   */
+  function openEditConnection(row: GatewayConnection) {
+    setEditingConnection(row);
+    setAddAccountOpen(false);
+    if (webCookieProviders.has(provider.id)) {
+      flash(`${provider.name} accounts are edited by pasting a fresh session.`, 'error');
+      setEditingConnection(null);
+      return;
+    }
+    if (isOauth) {
+      if (!oauthFlowAvailable) {
+        flash(`${provider.name} sign-in is not available yet.`, 'error');
+        setEditingConnection(null);
+        return;
+      }
+      // Same popup rule as Add connection: the dialog opens the tab from the click that needs it,
+      // except for a card whose warning must be acknowledged first.
+      const opensOnAcknowledge = Boolean(provider.riskNotice) && signInProviderId !== 'kiro';
+      setSignInWindow(opensOnAcknowledge || signInProviderId === 'kiro' ? null : window.open('about:blank', '_blank'));
+      setAddOpen(true);
+      return;
+    }
+    setSignInWindow(null);
+    setAddOpen(true);
+  }
+
   const testingSet = useMemo(() => new Set(testingModels), [testingModels]);
 
   /**
@@ -772,13 +829,18 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     // adapter for the endpoint on demand. This used to fall through and only
     // report success: the dialog said "connection added" while nothing was
     // written, so the card looked connected with no credential behind it.
-    const savedConnection = await putGatewayConnection(newProvider.providerId, {
+    const { connection: savedConnection, duplicate } = await saveGatewayConnectionDetailed(newProvider.providerId, {
       // When the provider already holds a connection, "Add connection" means **add**: a fresh id saves
       // a second connection beside the first instead of overwriting it. The gateway accepts `id` for
       // exactly this; omitting it reuses the existing connection, which is the repair path. An
       // API-key account has no sign-in session, so its rows are managed here and in the accounts
-      // panel rather than through a flow.
-      ...(connections.length > 0 ? { id: `${newProvider.providerId}-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}` } : {}),
+      // panel rather than through a flow. An Edit names its own row, so it rewrites that account and
+      // mints nothing.
+      ...(newProvider.connectionId
+        ? { id: newProvider.connectionId }
+        : connections.length > 0
+          ? { id: `${newProvider.providerId}-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}` }
+          : {}),
       // `credential: 'none'` rather than an empty key: the gateway refuses `''`, so sending it made every
       // keyless save a 400 dressed as a connection.
       ...(keyless ? { credential: 'none' as const } : { apiKey: apiKey! }),
@@ -793,7 +855,18 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     setAddOpen(false);
     setConnectionHealthy(false);
     setConnectionVerified(undefined);
-    flash(`${savedConnection.name} saved with ${savedConnection.modelIds.length} models.`);
+    // The gateway compares a vault-local fingerprint of the key against every account of this provider.
+    // A key already saved is not an error and not a second row: it is the same account, and the message
+    // names which one instead of claiming it added something.
+    flash(
+      duplicate === 'identical'
+        ? `${savedConnection.name} already holds this key — nothing was added. It is the same account, saved once.`
+        : duplicate === 'updated'
+          ? `${savedConnection.name} was already signed in; its credential was updated in place.`
+          : newProvider.connectionId
+            ? `${savedConnection.name} updated — its credential was replaced.`
+            : `${savedConnection.name} saved with ${savedConnection.modelIds.length} models.`,
+    );
   }
 
   /**
@@ -1278,6 +1351,9 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
         connections={connections}
         providerName={provider.name}
         onSaved={loadConnection}
+        // Not offered for a web-cookie provider: its connection is an exported session, so an "edit"
+        // would have to re-paste one — which the connect dialog next to the row already does.
+        {...(webCookieProviders.has(provider.id) ? {} : { onEdit: openEditConnection })}
         latencyByConnection={latencyByConnection}
         // Offered only where the connect dialog can carry it: an OAuth flow with a served start route.
         {...(isOauth && oauthFlowAvailable ? { onAddAccount: () => { setAddAccountOpen(true); openAddConnection(); } } : {})}
@@ -1296,13 +1372,21 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
 
       {/* Not for a web-cookie provider: that one connects by pasting an exported session,
           so the API-key modal would open underneath the right one and be the one on top. */}
-      <AddProviderModal open={addOpen && !isOauth && !webCookieProviders.has(provider.id)} initialProviderId={provider.id} initialModelPolicy={connection?.modelPolicy} onClose={() => setAddOpen(false)} onSave={handleAddConnection} onSaveMany={handleAddConnections} />
+      <AddProviderModal
+        open={addOpen && !isOauth && !webCookieProviders.has(provider.id)}
+        initialProviderId={provider.id}
+        initialModelPolicy={connection?.modelPolicy}
+        {...(editSeed ? { initialConnection: editSeed } : {})}
+        onClose={() => { setAddOpen(false); setEditingConnection(null); }}
+        onSave={handleAddConnection}
+        onSaveMany={handleAddConnections}
+      />
       {descriptor && addOpen && (
         <WebCookieConnectDialog
           provider={descriptor}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           {...(provider.riskSeverity ? { riskSeverity: provider.riskSeverity } : {})}
-          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); }}
+          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); setEditingConnection(null); }}
           onConnected={handleOauthConnected}
           addAccount={addAccountOpen}
         />
@@ -1311,9 +1395,10 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
           providerName={provider.name}
           signInWindow={signInWindow}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
-          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); }}
+          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); setEditingConnection(null); }}
           onConnected={handleOauthConnected}
           addAccount={addAccountOpen}
+          {...(editingConnection ? { targetConnectionId: editingConnection.id } : {})}
         />
       )}
       {isOauth && oauthFlowAvailable && addOpen && signInProviderId !== 'kiro' && (
@@ -1326,9 +1411,10 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           signInWindow={signInWindow}
           onAcknowledged={() => setSignInWindow(window.open('about:blank', '_blank'))}
-          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); }}
+          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); setEditingConnection(null); }}
           onConnected={handleOauthConnected}
           addAccount={addAccountOpen}
+          {...(editingConnection ? { targetConnectionId: editingConnection.id } : {})}
         />
       )}
     </>

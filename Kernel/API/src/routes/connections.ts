@@ -74,12 +74,14 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
     // covers Anthropic, Gemini, Ollama, and arbitrary OpenAI-compatible servers.
     // `/responsibility` is excluded here as well as `/resilience`: this generic branch runs first, so a
     // sub-resource that is not listed is parsed as a provider id and refused with a confusing message.
-    if (request.method === 'PUT' && url.pathname.startsWith('/v1/connections/') && !url.pathname.endsWith('/models') && !url.pathname.endsWith('/resilience') && !url.pathname.endsWith('/responsibility')) {
+    if (request.method === 'PUT' && url.pathname.startsWith('/v1/connections/') && !url.pathname.endsWith('/models') && !url.pathname.endsWith('/resilience') && !url.pathname.endsWith('/responsibility') && !url.pathname.endsWith('/enabled')) {
       const providerId = decodeProviderId(url.pathname.slice('/v1/connections/'.length));
       const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
       const { credential, ...input } = parseGenericConnectionRequest(body, providerId);
-      const connection = await service.saveConnection(input, credential, signal);
-      sendJson(response, 200, { connection }, origin);
+      // Detailed, so the dashboard can say "that key is already account 2" instead of silently
+      // appearing to add a twin. `identical` wrote nothing; `updated` renewed an existing sign-in.
+      const { connection, duplicate } = await service.saveConnectionDetailed(input, credential, signal);
+      sendJson(response, 200, { connection, ...(duplicate === 'none' ? {} : { duplicate }) }, origin);
       return true;
     }
 
@@ -151,6 +153,23 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
       const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
       if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
       const connection = await service.updateConnectionResponsibility(connectionId, parseResponsibility(body));
+      sendJson(response, 200, { connection }, origin);
+      return true;
+    }
+
+    /**
+     * Pauses or resumes one account.
+     *
+     * Metadata, like the note above: a full `PUT /v1/connections/:id` would re-validate the credential
+     * and re-read the catalog, which is not what flipping a switch means.
+     */
+    if (request.method === 'PUT' && url.pathname.endsWith('/enabled') && url.pathname.startsWith('/v1/connections/')) {
+      const connectionId = decodeConnectionId(url.pathname.slice('/v1/connections/'.length, -'/enabled'.length));
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['enabled']);
+      if (typeof body.enabled !== 'boolean') throw invalidRequest('enabled must be a boolean.');
+      const connection = await service.setConnectionEnabled(connectionId, body.enabled);
       sendJson(response, 200, { connection }, origin);
       return true;
     }

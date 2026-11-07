@@ -108,10 +108,10 @@ export class KiroSessionStore {
  *   Without this every sign-in overwrote the previous account, because `save()` reuses the connection it
  *   can find for the provider when no id is given.
  */
-export async function startKiroSignIn(store: KiroSessionStore, startUrl?: string, addAccount = false) {
+export async function startKiroSignIn(store: KiroSessionStore, startUrl?: string, addAccount = false, targetConnectionId?: string) {
   const authorization = {
     ...(await beginKiroSignIn(startUrl)),
-    connectionId: addAccount ? `${kiroProviderId}-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}` : kiroProviderId,
+    connectionId: targetConnectionId ?? (addAccount ? `${kiroProviderId}-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}` : kiroProviderId),
   };
   const session = store.create(authorization);
   return {
@@ -164,7 +164,7 @@ export async function importKiroRefreshToken(refreshToken: string): Promise<Prov
  * gateway: the user approves a code on Kiro's page and this session polls Kiro's device endpoint for the
  * result. It reuses the Builder ID session store, so the grant is claimed and released by the same rules.
  */
-export async function startKiroSocialDeviceFlow(store: KiroSessionStore, provider: KiroSocialProvider, addAccount = false) {
+export async function startKiroSocialDeviceFlow(store: KiroSessionStore, provider: KiroSocialProvider, addAccount = false, targetConnectionId?: string) {
   const authorization = await startKiroSocialDeviceSignIn(provider);
   const session = store.create({
     deviceCode: authorization.deviceCode,
@@ -175,7 +175,7 @@ export async function startKiroSocialDeviceFlow(store: KiroSessionStore, provide
     clientSecret: '',
     // The same target rule the Builder ID flow states: the connection this sign-in saves to is chosen
     // when it starts, so an add-account grant lands beside the existing connection instead of on it.
-    connectionId: addAccount ? `${kiroProviderId}-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}` : kiroProviderId,
+    connectionId: targetConnectionId ?? (addAccount ? `${kiroProviderId}-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}` : kiroProviderId),
     ...(authorization.expiresIn === undefined ? {} : { expiresIn: authorization.expiresIn }),
     social: true,
   } as KiroDeviceAuthorization & { social: true });

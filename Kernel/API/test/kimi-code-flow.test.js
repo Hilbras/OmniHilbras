@@ -320,7 +320,12 @@ test('the sign-in uses the gateway\'s own transport, so a caller-supplied one is
   // the same provider id. Reaching the real network shows up as the test taking a network round trip;
   // this asserts the seam directly instead.
   const source = readFileSync(new URL('../src/core/service.ts', import.meta.url), 'utf8');
-  const method = source.slice(source.indexOf('async startKimiCodeSignIn(addAccount = false)'), source.indexOf('async startKimiCodeSignIn(addAccount = false)') + 1200);
+  // The signature gained parameters after this guard was written (the account an Edit targets), so the
+  // anchor stops at the method name: a guard pinned to one argument list fails on a signature change
+  // that has nothing to do with what it is checking.
+  const start = source.indexOf('async startKimiCodeSignIn(');
+  assert.notEqual(start, -1, 'startKimiCodeSignIn must still exist');
+  const method = source.slice(start, start + 1200);
   assert.equal(
     /new KimiCodeAdapter\(/.test(method),
     false,
@@ -363,7 +368,20 @@ test('an add-account sign-in saves a second connection, and both remain', async 
   // The property the operator sees as "both accounts on the provider page": the first sign-in targets
   // the provider's one connection, the second — sent with `addAccount: true`, exactly what the
   // dashboard's Add-account path sends — targets a fresh id, and the store ends with two rows.
-  const { service, key } = await buildService(completedSignIn);
+  //
+  // Each sign-in is given a **distinct** access token, as a real provider does. The shared fixture
+  // returned the same one twice, and once the duplicate rule existed that made the second sign-in a
+  // renewal of the first — correctly, since an identical credential is the same account.
+  let exchanges = 0;
+  const distinctSignIns = (request) => {
+    const answer = completedSignIn(request);
+    if (!request.url.includes('/models') && answer.data?.access_token) {
+      exchanges += 1;
+      return { data: { ...answer.data, access_token: `acc-${exchanges}` } };
+    }
+    return answer;
+  };
+  const { service, key } = await buildService(distinctSignIns);
   await withServer(service, async (base) => {
     const pollUntilConnected = async (sessionId) => {
       for (let attempt = 0; attempt < 5; attempt += 1) {

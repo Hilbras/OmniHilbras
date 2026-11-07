@@ -293,12 +293,27 @@ export type GatewayConnectionInput = {
  * the endpoint on demand, so a provider needs no code change to be connectable.
  */
 export function putGatewayConnection(providerId: string, input: GatewayConnectionInput, signal?: AbortSignal) {
-  return requestJson<{ connection: GatewayConnection }>(`/v1/connections/${encodeURIComponent(providerId)}`, {
+  return requestJson<{ connection: GatewayConnection; duplicate?: 'identical' | 'updated' }>(`/v1/connections/${encodeURIComponent(providerId)}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
     ...(signal ? { signal } : {}),
   }).then((body) => body.connection);
+}
+
+/**
+ * The same save, reporting whether the credential was already saved.
+ *
+ * `identical` wrote nothing — the key is already an account, and the caller should say which one
+ * instead of implying it added a twin. `updated` renewed that account's credential in place.
+ */
+export async function saveGatewayConnectionDetailed(providerId: string, input: GatewayConnectionInput, signal?: AbortSignal) {
+  return requestJson<{ connection: GatewayConnection; duplicate?: 'identical' | 'updated' }>(`/v1/connections/${encodeURIComponent(providerId)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+    ...(signal ? { signal } : {}),
+  });
 }
 
 export function saveOpenRouterConnection(input: OpenRouterConnectionInput, signal?: AbortSignal) {
@@ -653,6 +668,21 @@ export function updateGatewayProviderStrategy(providerId: string, strategy: Gate
  * A `PUT` on the connection itself rather than a side endpoint: responsibility is part of the record,
  * and a second table for it would have to be kept in step with the first.
  */
+/**
+ * Pauses or resumes one account.
+ *
+ * Its own call rather than a full connection PUT: that route re-validates the credential and re-reads
+ * the catalog, and a switch must not spend a provider request to flip.
+ */
+export function setGatewayConnectionEnabled(connectionId: string, enabled: boolean, signal?: AbortSignal) {
+  return requestJson<{ connection: GatewayConnection }>(`/v1/connections/${encodeURIComponent(connectionId)}/enabled`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+    ...(signal ? { signal } : {}),
+  }).then((body) => body.connection);
+}
+
 export function saveGatewayConnectionResponsibility(
   connectionId: string,
   responsibility: { owner?: string; purpose?: string },
@@ -882,11 +912,11 @@ export type GatewayOauthSignInStatus = {
 };
 
 /** Starts a sign-in and returns the URL to send the browser to. */
-export function startGatewayOauthSignIn(providerId: string, signal?: AbortSignal) {
+export function startGatewayOauthSignIn(providerId: string, signal?: AbortSignal, connectionId?: string) {
   return requestJson<GatewayOauthSignIn>(`/v1/oauth/${encodeURIComponent(providerId)}/start`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({}),
+    body: JSON.stringify(connectionId ? { connectionId } : {}),
     ...(signal ? { signal } : {}),
   });
 }
@@ -903,11 +933,11 @@ export function getClineSignInStatus(sessionId: string, signal?: AbortSignal) {
  * `authUrl`/`state` pair here: the session id travels in the redirect path, so the callback can be tied
  * to its PKCE verifier without the provider echoing anything back.
  */
-export function startClaudeCodeSignIn(addAccount?: boolean, signal?: AbortSignal) {
+export function startClaudeCodeSignIn(addAccount?: boolean, signal?: AbortSignal, connectionId?: string) {
   return requestJson<{ sessionId: string; verificationUrl: string; expiresAt: string }>('/v1/oauth/claude-code/start', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(addAccount ? { addAccount: true } : {}),
+    body: JSON.stringify({ ...(addAccount ? { addAccount: true } : {}), ...(connectionId ? { connectionId } : {}) }),
     ...(signal ? { signal } : {}),
   });
 }
@@ -919,9 +949,9 @@ export function getClaudeCodeSignInStatus(sessionId: string, signal?: AbortSigna
   );
 }
 
-export function startCodexSignIn(addAccount?: boolean, signal?: AbortSignal) {
+export function startCodexSignIn(addAccount?: boolean, signal?: AbortSignal, connectionId?: string) {
   return requestJson<{ sessionId: string; verificationUrl: string; expiresAt: string }>('/v1/oauth/codex/start', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(addAccount ? { addAccount: true } : {}), ...(signal ? { signal } : {}),
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...(addAccount ? { addAccount: true } : {}), ...(connectionId ? { connectionId } : {}) }), ...(signal ? { signal } : {}),
   });
 }
 
@@ -957,12 +987,12 @@ export type GatewayDeviceSignInStatus = GatewayOauthSignInStatus & {
  * Kiro branch in the dialog runs first today, so nothing was routed wrongly yet — this
  * is the state that made it impossible for that to stay true.
  */
-export function startGatewayDeviceSignIn(providerId: string, addAccount?: boolean, signal?: AbortSignal) {
+export function startGatewayDeviceSignIn(providerId: string, addAccount?: boolean, signal?: AbortSignal, connectionId?: string) {
   return requestJson<GatewayDeviceSignIn>(`/v1/oauth/${encodeURIComponent(providerId)}/start`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     // Absent means repair the provider's one connection; `true` signs a second account in beside it.
-    body: JSON.stringify(addAccount ? { addAccount: true } : {}),
+    body: JSON.stringify({ ...(addAccount ? { addAccount: true } : {}), ...(connectionId ? { connectionId } : {}) }),
     ...(signal ? { signal } : {}),
   });
 }

@@ -101,8 +101,11 @@ test('every provider save path reaches the gateway, on every page that saves one
   // with no caller at all.
   for (const [name, source] of PAGES) {
     const text = code(source);
+    // Two entry points into the same route: the plain save, and the detailed one that also reports
+    // whether the credential was already saved. Either is the gateway; a page that calls neither is
+    // the defect this guard exists for.
     assert.ok(
-      text.includes('putGatewayConnection('),
+      text.includes('putGatewayConnection(') || text.includes('saveGatewayConnectionDetailed('),
       `${name} must call the generic connection save; otherwise the key is dropped and a card is invented`,
     );
 
@@ -115,6 +118,7 @@ test('every provider save path reaches the gateway, on every page that saves one
       if (!/^handle(Save|Add)/.test(handler)) continue;
       assert.ok(
         body.includes('putGatewayConnection(') ||
+          body.includes('saveGatewayConnectionDetailed(') ||
           body.includes('saveOpenRouterConnection(') ||
           body.includes('handleSave(') ||
           body.includes('handleAddConnection('),
@@ -126,7 +130,10 @@ test('every provider save path reaches the gateway, on every page that saves one
     // anywhere in the file. Planting `void putGatewayConnection(...)` with a hand-built object in its place
     // passed it — the call was present, unreachably, and the key was discarded exactly as before. So the
     // assertion is on the *shape*: awaited, and bound to the connection the card is built from.
-    const generic = text.match(/const (\w+) = await putGatewayConnection\(([\s\S]*?)\);/);
+    // Both shapes are awaited and bound: `const saved = await putGatewayConnection(...)` and the
+    // detailed variant that destructures the connection out of `{ connection, duplicate }`.
+    const generic = text.match(/const (\w+) = await putGatewayConnection\(([\s\S]*?)\);/)
+      ?? text.match(/const \{ connection: (\w+)[^}]*\} = await saveGatewayConnectionDetailed\(([\s\S]*?)\);/);
     assert.ok(generic, `${name}: the generic save must be awaited and its result bound — an un-awaited call discards the key`);
     assert.match(
       text.slice(text.indexOf(generic[0])).slice(0, 1200),

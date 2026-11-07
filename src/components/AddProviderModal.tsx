@@ -22,6 +22,11 @@ export type NewProvider = {
   name: string;
   endpoint: string;
   hasKey: boolean;
+  /**
+   * The connection this save updates. Present when the dialog was opened by an account row's Edit —
+   * the same save then replaces that account's credential instead of adding a new one.
+   */
+  connectionId?: string;
   priority?: number;
   proxyPool?: string;
   modelPolicy?: 'free' | 'all';
@@ -33,6 +38,8 @@ type TestState = 'idle' | 'success' | 'error';
 type AddProviderModalProps = {
   open: boolean;
   initialProviderId?: string;
+  /** The account being edited: its endpoint, name and priority seed the form, and the save targets it. */
+  initialConnection?: { id: string; name: string; endpoint: string; priority: number; modelPolicy: 'free' | 'all' };
   initialModelPolicy?: 'free' | 'all';
   onClose: () => void;
   /**
@@ -47,10 +54,11 @@ type AddProviderModalProps = {
   onSaveMany?: (entries: Array<{ provider: NewProvider; key: string }>) => void | Promise<void>;
 };
 
-export function AddProviderModal({ open, initialProviderId, initialModelPolicy, onClose, onSave, onSaveMany }: AddProviderModalProps) {
+export function AddProviderModal({ open, initialProviderId, initialModelPolicy, initialConnection, onClose, onSave, onSaveMany }: AddProviderModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const checkAbortRef = useRef<AbortController | null>(null);
+  const editing = initialConnection !== undefined;
   const [selectedId, setSelectedId] = useState(initialProviderId ?? 'openai');
   const [mode, setMode] = useState<AddMode>('single');
   const [name, setName] = useState('');
@@ -70,17 +78,17 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
     const option = resolveProviderOption(initialProviderId);
     setSelectedId(option.id);
     setMode('single');
-    setName('');
+    setName(initialConnection?.name ?? '');
     setApiKey('');
     setBulkText('');
-    setEndpoint(option.defaultEndpoint ?? '');
-    setPriority('1');
+    setEndpoint(initialConnection?.endpoint ?? option.defaultEndpoint ?? '');
+    setPriority(String(initialConnection?.priority ?? 1));
     setProxyPool('none');
     setTesting(false);
     setSaving(false);
     setTestState('idle');
     setError('');
-  }, [open, initialProviderId]);
+  }, [open, initialProviderId, initialConnection]);
 
   useEffect(() => {
     if (!open) return;
@@ -118,7 +126,8 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
   const showsEndpoint = selected.id === 'custom' || selected.id === 'ollama';
   const hasSingleConnection = Boolean(name.trim() && (!requiresKey || apiKey.trim()) && (!showsEndpoint || endpoint.trim()));
   const canSave = mode === 'single' ? hasSingleConnection : Boolean(bulkText.trim());
-  const title = `Add ${selected.name} ${requiresKey ? 'API Key' : 'Connection'}`;
+  // An edit says so: the same form, but the key it asks for replaces one already saved.
+  const title = editing ? `Update ${selected.name} account` : `Add ${selected.name} ${requiresKey ? 'API Key' : 'Connection'}`;
 
   /**
    * Abandons an in-flight check.
@@ -230,13 +239,17 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
       }
 
       if (!name.trim()) throw new Error('Give this connection a name so you can recognize it later.');
-      if (requiresKey && !apiKey.trim()) throw new Error('Add an API key before saving this connection.');
+      if (requiresKey && !apiKey.trim()) {
+        throw new Error(editing ? 'Paste the new API key — a saved key is never read back, so an update cannot reuse it.' : 'Add an API key before saving this connection.');
+      }
       if (showsEndpoint && !endpoint.trim()) throw new Error('Add the local endpoint before saving this connection.');
       await onSave({
         providerId: selected.id,
         name: name.trim(),
         endpoint: endpoint.trim(),
         hasKey: Boolean(apiKey.trim()),
+        // Editing an account updates that connection; adding leaves it out and the page mints an id.
+        ...(initialConnection ? { connectionId: initialConnection.id } : {}),
         priority: Number(priority) || 1,
         proxyPool,
         ...(selected.id === 'openrouter' ? { modelPolicy: importFreeModels ? 'free' as const : 'all' as const } : {}),
@@ -269,7 +282,7 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
             <p id="add-provider-description" className="sr-only">Add a local provider connection and choose its routing settings.</p>
             <div className="mb-5 flex gap-2" role="tablist" aria-label="Connection add mode">
               <button type="button" role="tab" aria-selected={mode === 'single'} onClick={() => { setMode('single'); setTestState('idle'); setError(''); }} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${mode === 'single' ? 'bg-gold-soft text-gold-text ring-1 ring-gold/30' : 'text-muted hover:bg-bg-soft hover:text-text'}`}>Single</button>
-              <button type="button" role="tab" aria-selected={mode === 'bulk'} disabled={selected.id === 'openrouter' || !requiresKey} title={!requiresKey ? `${selected.name} needs no key, so there is nothing to add in bulk` : undefined} onClick={() => { setMode('bulk'); setTestState('idle'); setError(''); }} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${mode === 'bulk' ? 'bg-gold-soft text-gold-text ring-1 ring-gold/30' : 'text-muted hover:bg-bg-soft hover:text-text'}`}>Bulk Add</button>
+              <button type="button" role="tab" aria-selected={mode === 'bulk'} disabled={editing || selected.id === 'openrouter' || !requiresKey} title={!requiresKey ? `${selected.name} needs no key, so there is nothing to add in bulk` : undefined} onClick={() => { setMode('bulk'); setTestState('idle'); setError(''); }} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${mode === 'bulk' ? 'bg-gold-soft text-gold-text ring-1 ring-gold/30' : 'text-muted hover:bg-bg-soft hover:text-text'}`}>Bulk Add</button>
             </div>
 
             {mode === 'single' ? (

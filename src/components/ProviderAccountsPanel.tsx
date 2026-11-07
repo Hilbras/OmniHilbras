@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { KeyRound, Plus, Power, Save, Timer, Trash2 } from 'lucide-react';
+import { KeyRound, Pencil, Plus, Power, Save, Timer, Trash2 } from 'lucide-react';
 import type { GatewayConnection } from '../lib/gatewayClient';
-import { removeGatewayConnection, saveGatewayConnectionResponsibility } from '../lib/gatewayClient';
+import { removeGatewayConnection, saveGatewayConnectionResponsibility, setGatewayConnectionEnabled } from '../lib/gatewayClient';
 import { useToast } from './Toast';
 
 /**
@@ -32,6 +32,7 @@ export function ProviderAccountsPanel({
   onSaved,
   onAddAccount,
   latencyByConnection,
+  onEdit,
 }: {
   connections: readonly GatewayConnection[];
   providerName: string;
@@ -44,6 +45,13 @@ export function ProviderAccountsPanel({
    * absent — and the button with it — for providers that connect one account at a time.
    */
   onAddAccount?: () => void;
+  /**
+   * Opens the update path for one account: the connect dialog again for a signed-in account, or the
+   * save dialog for an API key. Both target `connection.id`, so an edit replaces that account's
+   * credential instead of writing a second row beside it — and the old secret is never read back, so
+   * a signed-in account re-authenticates and a key must be pasted again.
+   */
+  onEdit?: (connection: GatewayConnection) => void;
 }) {
   if (connections.length === 0) return null;
 
@@ -87,7 +95,7 @@ export function ProviderAccountsPanel({
         data-account-scroll={connections.length > 5 ? 'true' : undefined}
       >
         {connections.map((connection, index) => (
-          <AccountRow key={connection.id} connection={connection} index={index} onSaved={onSaved} latency={latencyByConnection?.get(connection.id)} />
+          <AccountRow key={connection.id} connection={connection} index={index} onSaved={onSaved} latency={latencyByConnection?.get(connection.id)} {...(onEdit ? { onEdit } : {})} />
         ))}
       </div>
     </section>
@@ -113,12 +121,13 @@ function accountSubtitle(connection: GatewayConnection): string | null {
   return null;
 }
 
-function AccountRow({ connection, index, onSaved, latency }: { connection: GatewayConnection; index: number; onSaved: () => void; latency?: { latencyMs: number; samples: number } }) {
+function AccountRow({ connection, index, onSaved, latency, onEdit }: { connection: GatewayConnection; index: number; onSaved: () => void; latency?: { latencyMs: number; samples: number }; onEdit?: (connection: GatewayConnection) => void }) {
   const { notify } = useToast();
   const [owner, setOwner] = useState(connection.responsibility?.owner ?? '');
   const [purpose, setPurpose] = useState(connection.responsibility?.purpose ?? '');
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   const dirty = owner.trim() !== (connection.responsibility?.owner ?? '') || purpose.trim() !== (connection.responsibility?.purpose ?? '');
 
@@ -143,6 +152,24 @@ function AccountRow({ connection, index, onSaved, latency }: { connection: Gatew
    * so a row a user no longer wants — a replaced key, a duplicate sign-in — needs a way out that is
    * not the gateway's API.
    */
+  /**
+   * Pauses or resumes this account. The gateway reads `enabled` per request, so a paused account stops
+   * taking traffic at once — and stays saved, with its credential and its models, for when it is wanted
+   * back. The row's own reading is re-read rather than assumed, so the badge cannot drift from the vault.
+   */
+  async function toggleEnabled() {
+    setToggling(true);
+    try {
+      const updated = await setGatewayConnectionEnabled(connection.id, !connection.enabled);
+      notify(`${updated.name} is ${updated.enabled ? 'taking traffic again' : 'paused'}.`, 'success');
+      onSaved();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'The account could not be changed.', 'error');
+    } finally {
+      setToggling(false);
+    }
+  }
+
   async function remove() {
     if (!window.confirm(`Remove account ${index + 1} (${connection.responsibility?.owner || connection.name})? Its credential is deleted and its traffic stops.`)) return;
     setRemoving(true);
@@ -195,13 +222,17 @@ function AccountRow({ connection, index, onSaved, latency }: { connection: Gatew
               {connection.credentialType === 'oauth' ? 'OAuth' : connection.credentialType === 'api-key' ? 'API Key' : 'No key'}
             </span>
           )}
-          <span
-            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${connection.enabled ? 'border-success/30 bg-success/10 text-success' : 'border-line text-muted'}`}
-            title={connection.enabled ? 'This account takes traffic' : 'This account is paused'}
+          <button
+            type="button"
+            onClick={() => void toggleEnabled()}
+            disabled={toggling}
+            aria-pressed={connection.enabled}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors disabled:opacity-50 ${connection.enabled ? 'border-success/30 bg-success/10 text-success hover:border-success/50' : 'border-line text-muted hover:border-line-strong'}`}
+            title={connection.enabled ? 'This account takes traffic — click to pause it' : 'This account is paused — click to resume it'}
           >
             <Power className="h-2.5 w-2.5" aria-hidden="true" />
-            {connection.enabled ? 'Active' : 'Paused'}
-          </span>
+            {toggling ? 'Saving' : connection.enabled ? 'Active' : 'Paused'}
+          </button>
           <code className="min-w-0 max-w-full truncate rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted sm:max-w-[200px]" title={connection.id}>
             {connection.id}
           </code>
@@ -229,6 +260,17 @@ function AccountRow({ connection, index, onSaved, latency }: { connection: Gatew
             className="h-8 w-full min-w-0 rounded-md border border-line bg-surface px-2 text-xs sm:h-7"
           />
         </label>
+        {onEdit && (
+          <button
+            type="button"
+            onClick={() => onEdit(connection)}
+            className="btn-ghost inline-flex h-8 w-full items-center justify-center gap-1.5 px-2.5 text-[11px] sm:h-7 sm:w-auto md:mt-auto"
+            title={connection.credentialType === 'oauth' ? 'Sign in again to renew this account’s credential' : 'Replace this account’s API key, endpoint or name'}
+          >
+            <Pencil className="h-3 w-3" aria-hidden="true" />
+            Edit
+          </button>
+        )}
         <button
           type="button"
           onClick={() => void save()}

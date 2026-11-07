@@ -28,6 +28,21 @@ import {
   sendJson,
 } from '../core/http.js';
 
+/**
+ * The sign-in target from a start body: whether this is an add-account sign-in, and which account is
+ * being **edited**.
+ *
+ * `connectionId` is the row's Edit: the sign-in then replaces that connection's credential instead of
+ * minting a new one. Shape-checked here because it becomes a stored connection id, and refused rather
+ * than ignored when malformed — a typo that silently added a third account would be the worst outcome.
+ */
+function readSignInTarget(body: unknown): { addAccount: boolean; targetConnectionId?: string } {
+  if (!isRecord(body)) return { addAccount: false };
+  const connectionId = typeof body.connectionId === 'string' ? body.connectionId : undefined;
+  if (connectionId !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(connectionId)) throw invalidRequest('connectionId is not a valid connection id.');
+  return { addAccount: body.addAccount === true, ...(connectionId ? { targetConnectionId: connectionId } : {}) };
+}
+
 export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
   const { request, response, url, service, origin, options, signal } = ctx;
 
@@ -35,10 +50,10 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       // The 415 guard above already required a JSON content type.
       const body = await readJsonBody(request, maxKeyBodyBytes);
       if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
-      assertOnlyFields(body, ['redirectUri']);
+      assertOnlyFields(body, ['redirectUri', 'addAccount', 'connectionId']);
       const redirectUri = typeof body.redirectUri === 'string' ? body.redirectUri : defaultClineRedirect(options.publicBaseUrl);
-      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
-      sendJson(response, 201, service.startClineSignIn(redirectUri, addAccount), origin);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, service.startClineSignIn(redirectUri, addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -141,8 +156,8 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       // field Kiro's start takes, and the same absence-means-repair default, so an old client that
       // sends an empty body re-signs the one connection exactly as before.
       const body = await readJsonBody(request, maxKeyBodyBytes);
-      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
-      sendJson(response, 201, await service.startKimiCodeSignIn(addAccount), origin);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startKimiCodeSignIn(addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -166,8 +181,8 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
      */
     if (request.method === 'POST' && url.pathname === '/v1/oauth/kilocode/start') {
       const body = await readJsonBody(request, maxKeyBodyBytes);
-      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
-      sendJson(response, 201, await service.startKilocodeSignIn(addAccount), origin);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startKilocodeSignIn(addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -190,8 +205,8 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
      */
     if (request.method === 'POST' && url.pathname === '/v1/oauth/codebuddy-cn/start') {
       const body = await readJsonBody(request, maxConnectionBodyBytes);
-      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
-      sendJson(response, 201, await service.startCodeBuddySignIn('codebuddy-cn', addAccount), origin);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startCodeBuddySignIn('codebuddy-cn', addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -209,8 +224,8 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
 
     if (request.method === 'POST' && url.pathname === '/v1/oauth/codebuddy-intl/start') {
       const body = await readJsonBody(request, maxConnectionBodyBytes);
-      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
-      sendJson(response, 201, await service.startCodeBuddySignIn('codebuddy-intl', addAccount), origin);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startCodeBuddySignIn('codebuddy-intl', addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -232,8 +247,8 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
      */
     if (request.method === 'POST' && url.pathname === '/v1/oauth/minimax-code/start') {
       const body = await readJsonBody(request, maxKeyBodyBytes);
-      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
-      sendJson(response, 201, await service.startMinimaxCodeSignIn('minimax-code', addAccount), origin);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startMinimaxCodeSignIn('minimax-code', addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -251,8 +266,8 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
 
     if (request.method === 'POST' && url.pathname === '/v1/oauth/minimax-code-global/start') {
       const body = await readJsonBody(request, maxKeyBodyBytes);
-      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
-      sendJson(response, 201, await service.startMinimaxCodeSignIn('minimax-code-global', addAccount), origin);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startMinimaxCodeSignIn('minimax-code-global', addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -299,8 +314,8 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
      */
     if (request.method === 'POST' && url.pathname === '/v1/oauth/claude-code/start') {
       const body = await readJsonBody(request, maxKeyBodyBytes);
-      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
-      sendJson(response, 201, service.startClaudeCodeSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:8787', addAccount), origin);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, service.startClaudeCodeSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:8787', addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -348,8 +363,8 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
 
     if (request.method === 'POST' && url.pathname === '/v1/oauth/codex/start') {
       const body = await readJsonBody(request, maxKeyBodyBytes);
-      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
-      sendJson(response, 201, await service.startCodexSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:8787', addAccount), origin);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startCodexSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:8787', addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -388,10 +403,9 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       const startUrl = readOptionalString(body, 'startUrl');
       // `addAccount: true` keeps the existing connection and adds this one beside it. Absent means the
       // long-standing behaviour — repair the provider's connection — so an older client is unchanged.
-      const addAccount = typeof (body as { addAccount?: unknown }).addAccount === 'boolean'
-        ? (body as { addAccount: boolean }).addAccount
-        : false;
-      sendJson(response, 201, await service.startKiroSignInFlow(startUrl, addAccount), origin);
+      // `connectionId` names the account an Edit is updating; absent means the flow decides.
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startKiroSignInFlow(startUrl, addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -514,8 +528,8 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       const body = await readJsonBody(request, maxConnectionBodyBytes);
       const provider = readRequiredString(body, 'provider');
       if (provider !== 'google' && provider !== 'github') throw invalidRequest('provider must be google or github.');
-      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
-      sendJson(response, 201, await service.startKiroSocialSignInFlow(provider, addAccount), origin);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startKiroSocialSignInFlow(provider, addAccount, targetConnectionId), origin);
       return true;
     }
 

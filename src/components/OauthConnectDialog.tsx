@@ -51,6 +51,11 @@ type Props = {
    * provider repairs its one connection.
    */
   addAccount?: boolean;
+  /**
+   * The account being **edited**: the sign-in replaces that connection's credential instead of
+   * adding one or repairing the provider's first. Present only when a row's Edit opened the dialog.
+   */
+  targetConnectionId?: string;
 };
 
 type Phase = 'starting' | 'waiting' | 'connected' | 'failed';
@@ -90,7 +95,7 @@ const waitTimeoutMs = 5 * 60_000;
  * nothing to paste. The paste field stays available for the case where the
  * provider does not hand the code to a browser redirect.
  */
-export function OauthConnectDialog({ providerId, providerName, riskNotice, signInWindow, onAcknowledged, onConnected, onClose, addAccount = false }: Props) {
+export function OauthConnectDialog({ providerId, providerName, riskNotice, signInWindow, onAcknowledged, onConnected, onClose, addAccount = false, targetConnectionId }: Props) {
   const [phase, setPhase] = useState<Phase>('starting');
   const [message, setMessage] = useState('Opening the sign-in page…');
   const [error, setError] = useState('');
@@ -331,7 +336,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
 
     if (providerId === 'claude-code') {
       try {
-        const signIn = await startClaudeCodeSignIn(addAccount);
+        const signIn = await startClaudeCodeSignIn(addAccount, undefined, targetConnectionId);
         if (settledRef.current) return;
         startedSessionRef.current = signIn.sessionId;
         const sentToOpenTab = navigateTo(signIn.verificationUrl);
@@ -351,7 +356,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
 
     if (providerId === 'codex') {
       try {
-        const signIn = await startCodexSignIn(addAccount);
+        const signIn = await startCodexSignIn(addAccount, undefined, targetConnectionId);
         if (settledRef.current) return;
         startedSessionRef.current = signIn.sessionId;
         const sentToOpenTab = navigateTo(signIn.verificationUrl);
@@ -371,7 +376,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
 
     if (deviceFlowProviders.has(providerId)) {
       try {
-        const signIn = await startGatewayDeviceSignIn(providerId, addAccount);
+        const signIn = await startGatewayDeviceSignIn(providerId, addAccount, undefined, targetConnectionId);
         if (settledRef.current) return;
         // The code has to be read by a person, so it is shown here as well as sent
         // to the browser tab. CodeBuddy has no code — an approval URL is the whole
@@ -395,7 +400,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
     }
 
     try {
-      const signIn = await startGatewayOauthSignIn(providerId);
+      const signIn = await startGatewayOauthSignIn(providerId, undefined, targetConnectionId);
       if (settledRef.current) return;
       startedSessionRef.current = signIn.sessionId;
       const sentToOpenTab = navigateTo(signIn.authUrl);
@@ -410,7 +415,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
       setPhase('failed');
       setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
     }
-  }, [addAccount, navigateTo, providerId, watch]);
+  }, [addAccount, navigateTo, providerId, targetConnectionId, watch]);
 
   /**
    * The flow starts exactly once per dialog.

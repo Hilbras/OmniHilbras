@@ -104,6 +104,10 @@ export type ConnectionManagerDeps = {
    * would throw away the provider's own explanation.
    */
   noteDiscoveryFailure: (error: unknown) => void;
+  /** The vault-local fingerprint of a credential, so a saved account is recognised on the next save. */
+  credentialFingerprint: (providerId: string, credential: ProviderCredential) => Promise<string>;
+  /** The provider whose stored connection a card reads (`clinepass` → `cline`), or the id itself. */
+  canonicalProviderId: (providerId: string) => string;
 };
 
 export class ConnectionManager {
@@ -169,7 +173,57 @@ export class ConnectionManager {
    * because a connection that exists but cannot be used reads in the dashboard as working and fails
    * on its first request.
    */
-  async save(input: ConnectionInput, credential: ProviderCredential, signal?: AbortSignal, options: { tolerateDiscoveryFailure?: boolean } = {}): Promise<ConnectionRecord> {
+  /**
+   * Saves a connection, recognising a credential that is already saved.
+   *
+   * ## Why this exists
+   *
+   * Adding the same account twice used to create a second connection holding the same key — two rows
+   * the operator had to tell apart by hand, both taking traffic, both billed to one credential. The
+   * store keeps a **vault-local fingerprint** of each credential for exactly this check, and the rule
+   * differs by kind because the two mean different things:
+   *
+   * - **An API key that is already saved** is accepted and *not* duplicated: the existing connection
+   *   comes back, so the caller can say "this key is already account 2" rather than adding a twin.
+   * - **The same sign-in again** updates the connection that holds it. Signing into one account twice
+   *   is a renewal, not a second account, and the credential that comes back from the provider is
+   *   fresher than the one on file.
+   *
+   * A genuinely different credential is a new account and saves normally — that is what
+   * `addAccount` mints an id for.
+   */
+  async save(input: ConnectionInput, credential: ProviderCredential, signal?: AbortSignal, options: { tolerateDiscoveryFailure?: boolean } = {}): Promise<{ connection: ConnectionRecord; duplicate: 'none' | 'identical' | 'updated' }> {
+    this.require();
+    const existing = await this.findSameCredential(input.providerId, credential);
+    if (existing && existing.id !== input.id) {
+      if (credential.type === 'oauth') {
+        const connection = await this.saveUnchecked({ ...input, id: existing.id }, credential, signal, options);
+        return { connection, duplicate: 'updated' };
+      }
+      return { connection: existing, duplicate: 'identical' };
+    }
+    return { connection: await this.saveUnchecked(input, credential, signal, options), duplicate: 'none' };
+  }
+
+  /**
+   * The connection already holding this credential, if any.
+   *
+   * Compared within one provider, because the fingerprint is keyed by provider id: the same string
+   * used against two vendors is two credentials, not one. A provider whose card reads another's
+   * connection (`clinepass` → `cline`) is compared under its owner, which is where the credential
+   * actually lives.
+   */
+  private async findSameCredential(providerId: string, credential: ProviderCredential): Promise<ConnectionRecord | undefined> {
+    // Fingerprinted under the **owner**, because that is the id the record was saved under. Keying it
+    // on the card's own id made a shared card (`clinepass`) hash a different string than the `cline`
+    // credential it reads, so the same sign-in was saved twice and neither row could see the other.
+    const owner = this.deps.canonicalProviderId(providerId);
+    const fingerprint = await this.deps.credentialFingerprint(owner, credential);
+    const connections = await this.require().list();
+    return connections.find((connection) => connection.providerId === owner && connection.credentialFingerprint === fingerprint);
+  }
+
+  private async saveUnchecked(input: ConnectionInput, credential: ProviderCredential, signal?: AbortSignal, options: { tolerateDiscoveryFailure?: boolean } = {}): Promise<ConnectionRecord> {
     this.require();
     // Not every provider can be probed without spending a request, so a capability without a
     // validator is saved without a pre-flight check. An unregistered provider is configuration for
@@ -239,6 +293,15 @@ export class ConnectionManager {
   async setResponsibility(connectionId: string, responsibility: { owner?: string; purpose?: string }): Promise<ConnectionRecord> {
     return this.deps.lock(async () => {
       const updated = await this.storeCall('The connection responsibility', (store) => store.setResponsibility(connectionId, responsibility));
+      if (!updated) throw new ProviderError('NOT_FOUND', 'The local connection was not found.');
+      return updated;
+    });
+  }
+
+  /** Pauses or resumes one account. Metadata only: nothing is re-validated and no catalog is re-read. */
+  async setEnabled(connectionId: string, enabled: boolean): Promise<ConnectionRecord> {
+    return this.deps.lock(async () => {
+      const updated = await this.storeCall('The connection state', (store) => store.setEnabled(connectionId, enabled));
       if (!updated) throw new ProviderError('NOT_FOUND', 'The local connection was not found.');
       return updated;
     });
