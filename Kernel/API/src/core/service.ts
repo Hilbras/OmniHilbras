@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
+import { NousAdapter } from '@omnihilbras/sdk-nous';
 import { ZenAdapter } from '@omnihilbras/sdk-zen';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
 import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext, type ModelPricing } from './index.js';
@@ -176,6 +177,7 @@ export class GatewayService {
   private clinepass?: ProviderAdapter;
   private apmix?: ProviderAdapter;
   private beatapi?: ProviderAdapter;
+  private nous?: ProviderAdapter;
   private zen?: ProviderAdapter;
   private opencodeConsole?: ProviderAdapter;
   private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
@@ -384,6 +386,9 @@ export class GatewayService {
       .onDemand('clinepass', () => this.clinepassAdapter())
       .onDemand('apmix', () => this.apmixAdapter())
       .onDemand('beatapi', () => this.beatapiAdapter())
+      // `validateOnSave`: Nous publishes its model catalog unauthenticated, so a save that only read
+      // the catalog would accept any string as a key. The adapter proves it with one 1-token inference.
+      .onDemand('nous', () => this.nousAdapter(), { validateOnSave: true })
       .onDemand('opencode', () => this.zenAdapter())
       .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId))
       .onDemand(kimiCodeProviderId, ({ providerId, connection }) => this.kimiCodeAdapter(connection?.id ?? providerId))
@@ -1387,6 +1392,11 @@ export class GatewayService {
   beatapiAdapter(): ProviderAdapter {
     if (!this.beatapi) this.beatapi = new BeatApiAdapter({ transport: this.transport });
     return this.beatapi;
+  }
+
+  nousAdapter(): ProviderAdapter {
+    if (!this.nous) this.nous = new NousAdapter({ transport: this.transport });
+    return this.nous;
   }
 
   zenAdapter(): ProviderAdapter {

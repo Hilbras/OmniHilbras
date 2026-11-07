@@ -1,6 +1,6 @@
 {
   "name": "@omnihilbras/kernel-api",
-  "version": "1.92.0",
+  "version": "1.93.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,9 +11,12 @@
     "test": "tsc -p tsconfig.json && node --test test/*.test.js"
   },
   "dependencies": {
-    "playwright-core": "1.62.1",
+    "@omnihilbras/sdk-anthropic": "workspace:*",
+    "@omnihilbras/sdk-apmix": "workspace:*",
+    "@omnihilbras/sdk-beatapi": "workspace:*",
     "@omnihilbras/sdk-chatgpt-web": "workspace:*",
     "@omnihilbras/sdk-claude-code": "workspace:*",
+    "@omnihilbras/sdk-cline": "workspace:*",
     "@omnihilbras/sdk-clinepass": "workspace:*",
     "@omnihilbras/sdk-codebuddy": "workspace:*",
     "@omnihilbras/sdk-codex": "workspace:*",
@@ -25,17 +28,15 @@
     "@omnihilbras/sdk-kimi-code": "workspace:*",
     "@omnihilbras/sdk-kiro": "workspace:*",
     "@omnihilbras/sdk-minimax-code": "workspace:*",
+    "@omnihilbras/sdk-nous": "workspace:*",
     "@omnihilbras/sdk-openai": "workspace:*",
     "@omnihilbras/sdk-opencode-console": "workspace:*",
-    "@omnihilbras/sdk-apmix": "workspace:*",
-    "@omnihilbras/sdk-beatapi": "workspace:*",
     "@omnihilbras/sdk-openrouter": "workspace:*",
     "@omnihilbras/sdk-qoder": "workspace:*",
     "@omnihilbras/sdk-qwen-web": "workspace:*",
     "@omnihilbras/sdk-tokenharbor-web": "workspace:*",
-    "@omnihilbras/sdk-anthropic": "workspace:*",
-    "@omnihilbras/sdk-cline": "workspace:*",
-    "@omnihilbras/sdk-zen": "workspace:*"
+    "@omnihilbras/sdk-zen": "workspace:*",
+    "playwright-core": "1.62.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",

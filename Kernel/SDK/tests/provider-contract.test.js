@@ -24,6 +24,7 @@ import { KimiCodeAdapter } from '../kimi-code/dist/adapter/index.js';
 import { ClaudeCodeAdapter } from '../claude-code/dist/adapter/index.js';
 import { OpencodeConsoleAdapter } from '../opencode-console/dist/adapter/index.js';
 import { ZenAdapter } from '../zen/dist/adapter/index.js';
+import { NousAdapter } from '../nous/dist/adapter/index.js';
 import { ProviderRegistry } from '../../API/dist/src/core/registry.js';
 
 /**
@@ -52,6 +53,16 @@ const providers = [
     make: () => {
       const { stub, transport: t } = transport('openai');
       return { adapter: new OpenAIAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    // Nous serves chat and streaming on the OpenAI wire format, so the contract applies. Its catalog is
+    // public and carries non-chat entries, which is why the adapter overrides `listModels` — and why its
+    // credential check is a real inference rather than a catalog read.
+    name: 'nous',
+    make: () => {
+      const { stub, transport: t } = transport('openai');
+      return { adapter: new NousAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
     },
   },
   {

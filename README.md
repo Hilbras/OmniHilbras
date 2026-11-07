@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.92.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.93.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -233,6 +233,34 @@ browser rather than an API call.
 subscription for third-party API access, so the dialog asks you to acknowledge that before it starts
 anything. If you have an Anthropic API key, the **Anthropic** card is the metered path that Anthropic's
 terms cover.
+
+## Nous Research
+
+Nous Portal serves an OpenAI-compatible API at
+`https://inference-api.nousresearch.com/v1`, keyed from
+`portal.nousresearch.com/api-keys`. Two facts about it shape how the gateway
+talks to it, both taken from the reference project's own measurements:
+
+- **Its model catalog is public.** `/v1/models` answers without a credential, so
+  "the catalog loaded" proves nothing about the key — a wrong key reads as valid.
+  The gateway therefore proves a Nous key with a **one-token inference request**
+  to a free model, chosen from the public catalog at check time — the reference
+  project pinned `poolside/laguna-xs-2.1:free`, and by November 2026 that id
+  answered `404 Model not found`, which turned every check into "the key could
+  not be verified". Validating never spends paid credits. A 401 or 403 means the
+  key was refused; a 404 means the probe model rotated; any other status says the
+  key could not be verified rather than that it is bad.
+- **The catalog is not all chat models.** Embeddings and image-only entries are
+  listed beside the text ones, so the import keeps only entries whose output
+  modalities include text — an entry that states no modalities is kept, because
+  silence is not evidence.
+
+Because the health check really sends a request, the card labels it **Route
+health** rather than **Credential check** — that is the stronger of the two
+claims, and it is the honest one here. Prices from the catalog are converted
+from per-token to per-1M, and a zero price stays a zero, so the free models are
+visibly free. Nous publishes no account-quota endpoint, so the Usage tab says it
+is not supported rather than showing an empty balance.
 
 ## Web Cookie providers, and the warning that comes with them
 

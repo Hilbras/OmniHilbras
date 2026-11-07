@@ -1,0 +1,261 @@
+{
+  "_capture": {
+    "provider": "nous",
+    "url": "https://inference-api.nousresearch.com/v1/models",
+    "status": 200,
+    "capturedAt": "2026-11-07",
+    "how": "a plain GET of the provider's public model listing (no credential is required to read it), so no tokens were generated and nothing was billed.",
+    "note": "The five bodies below are the provider's own entries, unmodified. Keys under `_capture` are ours and are not part of the wire format.",
+    "responses": 1,
+    "pinnedItems": 3,
+    "totalItemsAtCapture": 394
+  },
+  "responses": [
+    {
+      "url": "https://inference-api.nousresearch.com/v1/models",
+      "status": 200,
+      "shape": "object{data}",
+      "topLevelKeys": [
+        "data"
+      ],
+      "itemShape": {
+        "aliases": "array",
+        "architecture": "object",
+        "canonical_slug": "string",
+        "context_length": "number",
+        "created": "number",
+        "default_parameters": "object",
+        "description": "string",
+        "endpoints": "array",
+        "expiration_date": "null",
+        "hugging_face_id": "null",
+        "id": "string",
+        "knowledge_cutoff": "null",
+        "links": "object",
+        "name": "string",
+        "per_request_limits": "null",
+        "pricing": "object",
+        "reasoning": "object",
+        "supported_parameters": "array",
+        "supported_voices": "null",
+        "synthesizedFreeVariant": "boolean",
+        "top_provider": "object"
+      },
+      "pinnedFor": {
+        "first-party": [],
+        "free text": [
+          "upstage/solar-mini4:free"
+        ],
+        "non-text output": [
+          [
+            "cohere/embed-5-fast",
+            [
+              "embeddings"
+            ]
+          ]
+        ],
+        "paid text": [
+          "liquid/lfm-3-1.7b"
+        ]
+      },
+      "items": [
+        {
+          "id": "upstage/solar-mini4:free",
+          "canonical_slug": "upstage/solar-mini4-20260922",
+          "hugging_face_id": null,
+          "name": "Upstage: Solar Mini 4",
+          "created": 1790160358,
+          "description": "Solar Mini 4 is Upstage's compact, cost-efficient language model, a 35B-parameter mixture-of-experts with 3B active parameters and a 524K context window. It is built for agentic use cases where response...",
+          "context_length": 524288,
+          "architecture": {
+            "modality": "text->text",
+            "input_modalities": [
+              "text"
+            ],
+            "output_modalities": [
+              "text"
+            ],
+            "tokenizer": "Other",
+            "instruct_type": null
+          },
+          "pricing": {
+            "prompt": "0",
+            "completion": "0",
+            "input_cache_read": "0"
+          },
+          "top_provider": {
+            "context_length": 524288,
+            "max_completion_tokens": 131072,
+            "is_moderated": false
+          },
+          "per_request_limits": null,
+          "supported_parameters": [
+            "frequency_penalty",
+            "include_reasoning",
+            "max_tokens",
+            "parallel_tool_calls",
+            "presence_penalty",
+            "reasoning",
+            "reasoning_effort",
+            "response_format",
+            "structured_outputs",
+            "temperature",
+            "tool_choice",
+            "tools",
+            "top_p"
+          ],
+          "default_parameters": {},
+          "supported_voices": null,
+          "knowledge_cutoff": null,
+          "expiration_date": null,
+          "links": {
+            "details": "/api/v1/models/upstage/solar-mini4-20260922/endpoints"
+          },
+          "endpoints": [
+            "/api/v1/chat/completions",
+            "/api/v1/completions",
+            "/api/v1/messages",
+            "/api/v1/responses"
+          ],
+          "reasoning": {
+            "mandatory": false,
+            "default_enabled": false,
+            "supported_efforts": [
+              "max",
+              "xhigh",
+              "high",
+              "medium",
+              "low",
+              "minimal",
+              "none"
+            ],
+            "default_effort": "medium"
+          },
+          "aliases": [],
+          "synthesizedFreeVariant": true
+        },
+        {
+          "id": "cohere/embed-5-fast",
+          "canonical_slug": "cohere/embed-5-fast-20261029",
+          "hugging_face_id": null,
+          "name": "Cohere: Embed 5 Fast",
+          "created": 1793739025,
+          "description": "Embed 5 Fast is the lower-latency, cost-efficient tier of Cohere's Embed 5 family of multimodal embedding models (about 1B parameters). It embeds text, images, and interleaved text and image content...",
+          "context_length": 128000,
+          "architecture": {
+            "modality": "text+image->embeddings",
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "output_modalities": [
+              "embeddings"
+            ],
+            "tokenizer": "Cohere",
+            "instruct_type": null
+          },
+          "pricing": {
+            "prompt": "0.0000000800",
+            "completion": "0.0000000000",
+            "image_token": "0.0000004"
+          },
+          "top_provider": {
+            "context_length": 128000,
+            "max_completion_tokens": 115200,
+            "is_moderated": true
+          },
+          "per_request_limits": null,
+          "supported_parameters": [],
+          "default_parameters": {},
+          "supported_voices": null,
+          "knowledge_cutoff": null,
+          "expiration_date": null,
+          "links": {
+            "details": "/api/v1/models/cohere/embed-5-fast-20261029/endpoints"
+          },
+          "endpoints": [
+            "/api/v1/embeddings"
+          ],
+          "aliases": [
+            "cohere/embed-5-fast-20261029"
+          ]
+        },
+        {
+          "id": "liquid/lfm-3-1.7b",
+          "canonical_slug": "liquid/lfm-3-1.7b-20261106",
+          "hugging_face_id": "LiquidAI/LFM3-1.7B",
+          "name": "LiquidAI: LFM3-1.7B",
+          "created": 1794009477,
+          "description": "A compact 1.7B-parameter text model with a 256K-token context, post-trained for agents, tool calling, and structured outputs. It reasons before it answers. Prompts and outputs may be retained and used...",
+          "context_length": 262144,
+          "architecture": {
+            "modality": "text->text",
+            "input_modalities": [
+              "text"
+            ],
+            "output_modalities": [
+              "text"
+            ],
+            "tokenizer": "Other",
+            "instruct_type": null
+          },
+          "pricing": {
+            "prompt": "0.0000000800",
+            "completion": "0.0000002000",
+            "input_cache_read": "0.0000000200"
+          },
+          "top_provider": {
+            "context_length": 262144,
+            "max_completion_tokens": 8192,
+            "is_moderated": false
+          },
+          "per_request_limits": null,
+          "supported_parameters": [
+            "frequency_penalty",
+            "include_reasoning",
+            "logprobs",
+            "max_completion_tokens",
+            "max_tokens",
+            "min_p",
+            "presence_penalty",
+            "reasoning",
+            "repetition_penalty",
+            "response_format",
+            "seed",
+            "stop",
+            "structured_outputs",
+            "temperature",
+            "tool_choice",
+            "tools",
+            "top_k",
+            "top_logprobs",
+            "top_p"
+          ],
+          "default_parameters": {
+            "temperature": 0.1,
+            "top_k": 50,
+            "repetition_penalty": 1.1
+          },
+          "supported_voices": null,
+          "knowledge_cutoff": null,
+          "expiration_date": null,
+          "links": {
+            "details": "/api/v1/models/liquid/lfm-3-1.7b-20261106/endpoints"
+          },
+          "endpoints": [
+            "/api/v1/chat/completions",
+            "/api/v1/completions",
+            "/api/v1/messages",
+            "/api/v1/responses"
+          ],
+          "reasoning": {
+            "mandatory": true
+          },
+          "aliases": [
+            "liquid/lfm-3-1.7b-20261106"
+          ]
+        }
+      ]
+    }
+  ]
+}

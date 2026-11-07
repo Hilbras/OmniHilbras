@@ -87,15 +87,27 @@ test('every adapter that answers a health check declares what it verified', () =
 });
 
 test('no adapter claims it verified inference without completing a request', () => {
-  // `inference` is reserved for a check that really sent something and read an answer back. None of
-  // these do — they read a catalog or a session — so any that claimed it would be asserting a
-  // stronger fact than it measured, which is the same overclaim pointed the other way.
+  // `inference` is reserved for a check that really sent a request and read an answer back. Most of
+  // these read a catalog or a session, so a claim from them would assert a stronger fact than they
+  // measured — the same overclaim pointed the other way.
+  //
+  // The rule is measured on the mechanism, not on a name: the file must **POST** something to a chat
+  // path — a one-token completion is the shape Nous uses, because its catalog is public and a catalog
+  // read proves nothing about the key. Pinning the set as well means the next adapter that starts
+  // claiming `inference` is a visible edit to this list, not a quiet pass.
   const files = readdirSync(ADAPTERS, { withFileTypes: true }).filter((e) => e.isDirectory() && !SDK_SCAFFOLDING.has(e.name)).map((e) => `${e.name}/adapter/index.ts`);
-  const overclaiming = files.filter((file) => {
+  const sendsInference = (source) => /method:\s*'POST'/.test(source) && /chat\/completions|messages:\s*\[/.test(source);
+  const claiming = [];
+  const overclaiming = [];
+  for (const file of files) {
     const source = code(readFileSync(join(ADAPTERS, file), 'utf8'));
-    return /healthCheck\s*[:=(]/.test(source) && /verified:\s*'inference'/.test(source);
-  });
+    const claims = /healthCheck\s*[:=(]/.test(source) && /verified:\s*'inference'/.test(source);
+    if (!claims) continue;
+    claiming.push(file);
+    if (!sendsInference(source)) overclaiming.push(file);
+  }
   assert.deepEqual(overclaiming, [], `${overclaiming.join(', ')} claim inference but send no request`);
+  assert.deepEqual(claiming.sort(), ['nous/adapter/index.ts'], 'the adapters that send an inference request, so a new claimer is a reviewed edit');
 });
 
 test('the merge carries the scope, so the card can name what was checked', () => {

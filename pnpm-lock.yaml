@@ -278,6 +278,9 @@ importers:
       '@omnihilbras/sdk-minimax-code':
         specifier: workspace:*
         version: link:../SDK/minimax-code
+      '@omnihilbras/sdk-nous':
+        specifier: workspace:*
+        version: link:../SDK/nous
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../SDK/openai
@@ -407,6 +410,12 @@ importers:
         version: 5.9.3
 
   Kernel/SDK/minimax-code:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/nous:
     devDependencies:
       typescript:
         specifier: ^5.9.3
