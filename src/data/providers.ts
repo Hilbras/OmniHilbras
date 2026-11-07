@@ -20,9 +20,11 @@ export const providerLogoMap = {
   apinex: '/providers/apinex.png',
   tiarina: '/providers/Tirina.webp',
   // The free-tier wave (2026-11): the vendors' own marks, pulled from their sites and committed
-  // here. Nous Research publishes no favicon or mark anywhere on its site, so that card keeps its
-  // letter — the only one of the eight doing so.
+  // here. Nous Research's mark is carried over from the reference project, which had it bundled —
+  // the portal itself publishes no favicon — so no card in this group is left on its initial.
   'agnes-ai': '/providers/agnes-ai.png',
+  nous: '/providers/nous.png',
+  anyrouter: '/providers/anyrouter.png',
   beatapi: '/providers/beatapi.webp',
   kiraai: '/providers/kiraai.png',
   vengetic: '/providers/vengetic.svg',
@@ -344,6 +346,7 @@ export const providerCatalog: ProviderRecord[] = [
     requests: '0',
     lastUsed: 'never',
     health: 0,
+    logo: providerLogoMap.nous,
     color: '#d97706',
     initial: 'N',
     endpoint: 'https://inference-api.nousresearch.com/v1',
@@ -423,6 +426,7 @@ export const providerCatalog: ProviderRecord[] = [
     requests: '0',
     lastUsed: 'never',
     health: 0,
+    logo: providerLogoMap.anyrouter,
     color: '#f59e0b',
     initial: 'A',
     endpoint: 'https://anyrouter.dev/api/v1',
@@ -506,7 +510,7 @@ export const providerCatalog: ProviderRecord[] = [
     name: 'Mistral',
     description: 'Efficient open and hosted models for fast, focused responses.',
     category: 'Multi-model provider',
-    group: 'api-key',
+    group: 'free-tier',
     status: 'available',
     auth: 'API key',
     models: '—',
@@ -1080,7 +1084,7 @@ export const providerCatalog: ProviderRecord[] = [
     name: 'Groq',
     description: 'Groq LPU inference. Very fast first tokens, which is what a router wants most.',
     category: 'Model provider',
-    group: 'api-key',
+    group: 'free-tier',
     // Placeholders, because this catalog is the state a card shows when the gateway has no connection
     // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists, and
     // `tests/provider-cards.test.js` fails if a card here claims a measurement — see the Ollama entry
@@ -1128,7 +1132,7 @@ export const providerCatalog: ProviderRecord[] = [
     name: 'NVIDIA',
     description: 'NVIDIA NIM catalog of open models on its OpenAI-compatible endpoint.',
     category: 'Model provider',
-    group: 'api-key',
+    group: 'free-tier',
     // Placeholders, because this catalog is the state a card shows when the gateway has no connection
     // for the provider. `mergeGatewayConnections` overwrites every measured field once one exists, and
     // `tests/provider-cards.test.js` fails if a card here claims a measurement — see the Ollama entry

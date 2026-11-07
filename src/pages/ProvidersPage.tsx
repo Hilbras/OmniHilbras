@@ -48,11 +48,14 @@ function matchesStatus(status: ProviderStatus, filter: Filter) {
 
 function groupForNewProvider(providerId: string, auth: string): ProviderGroup {
   if (providerId === 'custom') return 'custom';
-  if (providerId === 'ollama' || auth === 'No key') return 'local';
-  if (providerId === 'openrouter') return 'api-key';
-  if (providerId === 'mistral') return 'free-tier';
+  // The card's own group decides where a newly saved connection appears. This used to be a chain of
+  // per-provider exceptions — `mistral` was the one that said `free-tier` — so a provider the catalog
+  // regrouped kept landing in the old section until someone remembered to edit this function too.
+  const catalogGroup = providerCatalog.find((item) => item.id === providerId)?.group;
+  if (catalogGroup) return catalogGroup;
+  if (auth === 'No key') return 'local';
   if (auth === 'OAuth') return 'oauth';
-  return 'hosted';
+  return 'api-key';
 }
 
 /**

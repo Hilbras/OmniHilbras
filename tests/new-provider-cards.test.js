@@ -183,14 +183,23 @@ test('a new provider id is one edit away from a web-session id, and stays distin
   );
 });
 
-test('every api-key card is one the connect dialog can actually collect a key for', () => {
+test('every key-collecting card sits in a group the connect dialog actually offers', () => {
   // The dialog filters by group. A card in a group it does not offer is a card a user can see and cannot
-  // use, which is the defect this guards — and `custom` is deliberately excluded because its group is
-  // `custom`, which the dialog does include.
-  const apiKeyCards = providerCatalog.filter((card) => card.group === 'api-key').map((card) => card.id);
-  assert.ok(apiKeyCards.length >= 10, `expected the ten requested providers, found ${apiKeyCards.length}: ${apiKeyCards.join(', ')}`);
-  for (const id of ['kimi', 'deepseek', 'qwen', 'groq', 'grok', 'nvidia', 'openai', 'anthropic', 'gemini']) {
-    assert.ok(apiKeyCards.includes(id), `${id} was asked for and is not an api-key card`);
+  // use, which is the defect this guards.
+  //
+  // The measurement used to be `group === 'api-key'`, which conflated the property with one placement:
+  // when Mistral, Groq and NVIDIA moved to **Free Tier Providers** the guard failed even though every
+  // one of them is still offered by the dialog — `eligibleGroups` in `lib/providerOptions.ts` includes
+  // free-tier. The property is membership in a group the dialog offers, whatever the group is called.
+  const dialogGroups = new Set(['api-key', 'free-tier', 'local', 'custom']);
+  const keyCards = providerCatalog.filter((card) => card.auth === 'API key');
+  for (const id of ['kimi', 'deepseek', 'qwen', 'groq', 'grok', 'nvidia', 'openai', 'anthropic', 'gemini', 'openrouter', 'mistral']) {
+    const card = keyCards.find((entry) => entry.id === id);
+    assert.ok(card, `${id} was asked for and is not a card that takes a key`);
+    assert.ok(
+      dialogGroups.has(card.group),
+      `${id} is in group '${card.group}', which the connect dialog does not offer — a card a user can see and cannot use`,
+    );
   }
 });
 

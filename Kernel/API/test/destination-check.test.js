@@ -18,6 +18,15 @@ const STUB_ANSWERS = {
   'www.codebuddy.ai': '43.169.32.91',
   // A name the machine's own resolver has never heard of, for the rescue-on-failure case.
   'nous-rescue.test': '203.0.113.7',
+  /**
+   * `nip.io` is answered by the machine's resolver here — normally in milliseconds, and that is the
+   * path this test has always taken. Under load that lookup has been measured stalling past the 2.5s
+   * budget, and a stalled lookup is treated as "no local answer", so the rescue was asked instead and
+   * the stub did not know the name: the refusal became "did not resolve" rather than "resolves to a
+   * private address". Answering it here makes both paths reach the same verdict, so the test measures
+   * the judgement rather than the resolver's mood.
+   */
+  '127.0.0.1.nip.io': '127.0.0.1',
 };
 
 const stub = createSocket('udp4');
