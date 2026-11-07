@@ -24,6 +24,7 @@ import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type
 import type { GatewayConfig } from './config.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { KimiCodeSessionStore, kimiCodeProviderId, type KimiCodeSessionStatus } from '../providers/kimiCode.js';
+import { NousSessionStore, nousProviderId, NOUS_BASE_URL, type NousSessionStatus } from '../providers/nous.js';
 import { KiloCodeSessionStore, kilocodeProviderId, KILOCODE, type KiloCodeSessionStatus } from '../providers/kilocode.js';
 import {
   CodeBuddySessionStore,
@@ -177,7 +178,8 @@ export class GatewayService {
   private clinepass?: ProviderAdapter;
   private apmix?: ProviderAdapter;
   private beatapi?: ProviderAdapter;
-  private nous?: ProviderAdapter;
+  private readonly nousAdapters = new Map<string, ProviderAdapter>();
+  private readonly nousSessions = new NousSessionStore();
   private zen?: ProviderAdapter;
   private opencodeConsole?: ProviderAdapter;
   private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
@@ -388,7 +390,7 @@ export class GatewayService {
       .onDemand('beatapi', () => this.beatapiAdapter())
       // `validateOnSave`: Nous publishes its model catalog unauthenticated, so a save that only read
       // the catalog would accept any string as a key. The adapter proves it with one 1-token inference.
-      .onDemand('nous', () => this.nousAdapter(), { validateOnSave: true })
+      .onDemand('nous', ({ providerId, connection }) => this.nousAdapter(connection?.id ?? providerId), { validateOnSave: true })
       .onDemand('opencode', () => this.zenAdapter())
       .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId))
       .onDemand(kimiCodeProviderId, ({ providerId, connection }) => this.kimiCodeAdapter(connection?.id ?? providerId))
@@ -858,6 +860,67 @@ export class GatewayService {
         // The endpoint is fixed by the adapter, so it is recorded for display rather than read back —
         // an operator needs to see which host this connection talks to.
         endpoint: KIMI_CODE.server,
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      }),
+      save: (input, credential, pollSignal) => this.saveConnection(input, credential, pollSignal),
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Nous Research — a device flow beside the API-key path on the same card.
+   * ------------------------------------------------------------------ */
+
+  async startNousSignIn(addAccount = false, targetConnectionId?: string) {
+    const adapter = this.nousAdapter(nousProviderId) as unknown as {
+      beginSignIn(): Promise<{ deviceCode: string; userCode: string; verificationUrl: string; expiresIn?: number }>;
+    };
+    const started = await adapter.beginSignIn();
+    const session = this.nousSessions.create({
+      ...started,
+      connectionId: targetConnectionId ?? (addAccount ? `${nousProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : nousProviderId),
+    });
+    return {
+      sessionId: session.id,
+      userCode: session.userCode,
+      verificationUrl: session.verificationUrl,
+      expiresAt: new Date(session.expiresAt).toISOString(),
+    };
+  }
+
+  nousSignInStatus(sessionId: string, signal?: AbortSignal): Promise<NousSessionStatus | undefined> {
+    return completeSignIn({
+      sessions: this.nousSessions,
+      sessionId,
+      signal,
+      fallback: 'The Nous Research sign-in could not be completed.',
+      poll: async () => {
+        const session = this.nousSessions.get(sessionId);
+        if (!session) return { status: 'denied', error: 'This sign-in no longer exists.' };
+        const adapter = this.nousAdapter(nousProviderId) as unknown as {
+          pollSignIn(deviceCode: string, signal?: AbortSignal): Promise<
+            | { status: 'pending' }
+            | { status: 'denied'; error: string }
+            | { status: 'connected'; credential: ProviderCredential; account: string }
+          >;
+        };
+        const outcome = await adapter.pollSignIn(session.deviceCode, signal);
+        if (outcome.status === 'pending') return { status: 'pending' };
+        if (outcome.status === 'denied') return { status: 'denied', error: outcome.error };
+        return { status: 'connected', credential: outcome.credential };
+      },
+      takeDiscoveryNote: () => {
+        const note = this.lastDiscoveryNote;
+        this.lastDiscoveryNote = undefined;
+        return note;
+      },
+      connection: () => ({
+        // The session's target: the provider id for a repair, a reserved fresh id for an added account.
+        id: this.nousSessions.get(sessionId)?.connectionId ?? nousProviderId,
+        providerId: nousProviderId,
+        name: 'Nous Research',
+        endpoint: NOUS_BASE_URL,
         priority: 1,
         proxyPool: 'none',
         modelPolicy: 'all',
@@ -1394,9 +1457,26 @@ export class GatewayService {
     return this.beatapi;
   }
 
-  nousAdapter(): ProviderAdapter {
-    if (!this.nous) this.nous = new NousAdapter({ transport: this.transport });
-    return this.nous;
+  /**
+   * One adapter per connection, because a renewal has to be written back to the account that made it.
+   * A single shared adapter would renew one account's token and hand it the storage callback of whichever
+   * connection happened to build it first — the drift the per-provider caches exist to avoid.
+   *
+   * `onTokensRefreshed` is only supplied when there is a saved connection to write to: during a first
+   * save the connection does not exist yet, and the credential being renewed is about to be stored by
+   * the save itself.
+   */
+  nousAdapter(connectionId: string): ProviderAdapter {
+    const existing = this.nousAdapters.get(connectionId);
+    if (existing) return existing;
+    const adapter = new NousAdapter({
+      transport: this.transport,
+      ...(this.connectionStore
+        ? { onTokensRefreshed: async (credential) => { await this.connectionStore?.set(connectionId, credential).catch(() => undefined); } }
+        : {}),
+    });
+    this.nousAdapters.set(connectionId, adapter);
+    return adapter;
   }
 
   zenAdapter(): ProviderAdapter {

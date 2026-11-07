@@ -242,3 +242,120 @@ test('the pinned capture decodes: the real catalog shape, through the adapter', 
   assert.ok(paid.pricing.inputPer1M > 0 && paid.pricing.outputPer1M > 0, 'a captured per-token price is converted to per-1M');
   assert.ok(paid.contextWindow >= 1024, 'the context window is read from the listing');
 });
+
+
+// ── the portal sign-in, beside the API key ────────────────────────────────────
+
+/** A handler for the portal's three endpoints, so each test states only the step it is about. */
+function portalHandler({ device = { device_code: 'dev-1', user_code: 'NOUS-1234', verification_uri: 'https://portal.nousresearch.com/device', expires_in: 900 }, token = { access_token: 'at-1', refresh_token: 'rt-1', expires_in: 3600 }, agentKey = { status: 200, data: { api_key: 'sk-agent-1', expires_at: '2030-01-01T00:00:00Z' } } } = {}) {
+  const calls = [];
+  return {
+    calls,
+    handler: (request) => {
+      calls.push(request);
+      if (request.url.endsWith('/api/oauth/device/code')) return { data: device };
+      if (request.url.endsWith('/api/oauth/agent-key')) return agentKey;
+      return { status: token.error ? 400 : 200, data: token };
+    },
+  };
+}
+
+test('the sign-in asks the portal for a device code, form-encoded', async () => {
+  const portal = portalHandler();
+  const adapter = new NousAdapter({ transport: transportFor((request) => portal.handler(request)) });
+  const started = await adapter.beginSignIn();
+
+  const call = portal.calls[0];
+  assert.equal(call.url, 'https://portal.nousresearch.com/api/oauth/device/code');
+  assert.equal(call.headers['content-type'], 'application/x-www-form-urlencoded');
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(call.body)), {
+    client_id: 'hermes-cli',
+    scope: 'inference:invoke inference:mint_agent_key',
+  });
+  assert.deepEqual(started, {
+    deviceCode: 'dev-1',
+    userCode: 'NOUS-1234',
+    verificationUrl: 'https://portal.nousresearch.com/device',
+    expiresIn: 900,
+  });
+});
+
+test('a pending poll is a wait, not a refusal', async () => {
+  const portal = portalHandler({ token: { error: 'authorization_pending' } });
+  const outcome = await new NousAdapter({ transport: transportFor((request) => portal.handler(request)) }).pollSignIn('dev-1');
+  assert.deepEqual(outcome, { status: 'pending' });
+});
+
+test('an approved poll mints an agent key, which is what the credential carries', async () => {
+  const portal = portalHandler();
+  const outcome = await new NousAdapter({ transport: transportFor((request) => portal.handler(request)) }).pollSignIn('dev-1');
+
+  assert.equal(outcome.status, 'connected');
+  assert.equal(outcome.credential.value, 'sk-agent-1', 'the inference host wants the agent key, not the access token');
+  assert.equal(outcome.credential.refreshToken, 'rt-1');
+  assert.equal(outcome.credential.expiresAt, '2030-01-01T00:00:00.000Z', 'the agent key states its own expiry');
+  assert.equal(outcome.credential.oauthClientId, 'hermes-cli');
+  const mint = portal.calls.find((call) => call.url.endsWith('/api/oauth/agent-key'));
+  assert.equal(mint.headers.Authorization, 'Bearer at-1');
+  assert.deepEqual(JSON.parse(mint.body), { min_ttl_seconds: 7200 });
+});
+
+test('a mint that fails keeps the sign-in, with the access token as the bearer', async () => {
+  const portal = portalHandler({ agentKey: { status: 500, data: {} } });
+  const outcome = await new NousAdapter({ transport: transportFor((request) => portal.handler(request)) }).pollSignIn('dev-1');
+  assert.equal(outcome.status, 'connected');
+  assert.equal(outcome.credential.value, 'at-1', 'discarding a working sign-in over a convenience token is the wrong trade');
+});
+
+test('a refused grant is denied, with the portal’s own words', async () => {
+  const portal = portalHandler({ token: { error: 'access_denied', error_description: 'The user refused the request.' } });
+  const outcome = await new NousAdapter({ transport: transportFor((request) => portal.handler(request)) }).pollSignIn('dev-1');
+  assert.deepEqual(outcome, { status: 'denied', error: 'The user refused the request.' });
+});
+
+test('an expired credential is renewed, and the renewal is memoised', async () => {
+  let refreshes = 0;
+  const stored = [];
+  const transport = transportFor((request) => {
+    if (request.url.endsWith('/api/oauth/token')) {
+      const fields = Object.fromEntries(new URLSearchParams(request.body));
+      if (fields.grant_type === 'refresh_token') {
+        refreshes += 1;
+        return { data: { access_token: 'at-2', refresh_token: 'rt-2', expires_in: 3600 } };
+      }
+      return { data: { access_token: 'at-1', refresh_token: 'rt-1', expires_in: 3600 } };
+    }
+    if (request.url.endsWith('/api/oauth/agent-key')) return { data: { api_key: `sk-agent-${refreshes}`, expires_at: '2030-01-01T00:00:00Z' } };
+    if (request.url.endsWith('/chat/completions')) {
+      return { data: { id: 'x', model: 'm', choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }] } };
+    }
+    return { data: { data: [] } };
+  });
+  const adapter = new NousAdapter({ transport, onTokensRefreshed: (credential) => { stored.push(credential); } });
+  const expired = { type: 'oauth', value: 'sk-agent-0', refreshToken: 'rt-1', expiresAt: '2020-01-01T00:00:00.000Z' };
+
+  const first = await adapter.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, { credential: expired });
+  const second = await adapter.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, { credential: expired });
+
+  assert.equal(refreshes, 1, 'one expiry costs one renewal, not one per request');
+  assert.equal(stored.length, 1, 'and the replacement is handed to storage, so it outlives the request');
+  assert.equal(stored[0].refreshToken, 'rt-2');
+  assert.equal(first.model, 'm');
+  assert.equal(second.model, 'm');
+});
+
+test('an expired credential with no refresh token says so instead of pretending', async () => {
+  const adapter = new NousAdapter({ transport: transportFor(() => ({ data: { data: [] } })) });
+  await assert.rejects(
+    () => adapter.chat({ model: 'm', messages: [] }, { credential: { type: 'oauth', value: 'sk-old', expiresAt: '2020-01-01T00:00:00.000Z' } }),
+    (error) => error.code === 'AUTHENTICATION_FAILED' && /expired/.test(error.message),
+  );
+});
+
+test('expiry is answered without a request, and answered "cannot say" when it cannot be read', () => {
+  const adapter = new NousAdapter({ transport: transportFor(() => ({ data: {} })) });
+  assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'v', expiresAt: '2020-01-01T00:00:00.000Z' }), true);
+  assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'v', expiresAt: '2030-01-01T00:00:00.000Z' }), false);
+  assert.equal(adapter.isCredentialExpired({ type: 'api-key', value: 'v' }), undefined, 'a key has no expiry to read');
+  assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'v', expiresAt: 'not-a-date' }), undefined, 'unreadable is not "not expired"');
+});

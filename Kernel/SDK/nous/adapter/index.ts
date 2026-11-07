@@ -2,6 +2,9 @@ import { ProviderError } from '../lib/errors.js';
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '../lib/openai-compatible.js';
 import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
 import type {
+  ChatChunk,
+  ChatRequest,
+  ChatResponse,
   CredentialValidation,
   Model,
   ProviderCredential,
@@ -11,6 +14,44 @@ import type {
 
 export const nousProviderId = 'nous';
 export const NOUS_BASE_URL = 'https://inference-api.nousresearch.com/v1';
+
+/**
+ * The portal that issues the device-code sign-in and the agent key.
+ *
+ * These are **two different credentials for one account**, and the portal is not the inference host:
+ * OAuth lives at `portal.nousresearch.com` and inference at `inference-api.nousresearch.com`. The
+ * reference project measured both, including the scope string, and the agent key exists because the
+ * access token is short-lived while an agent key is a bearer the inference API accepts directly.
+ */
+export const NOUS_PORTAL_BASE_URL = 'https://portal.nousresearch.com';
+export const NOUS_OAUTH_CLIENT_ID = 'hermes-cli';
+export const NOUS_OAUTH_SCOPE = 'inference:invoke inference:mint_agent_key';
+const NOUS_DEVICE_CODE_PATH = '/api/oauth/device/code';
+const NOUS_TOKEN_PATH = '/api/oauth/token';
+const NOUS_AGENT_KEY_PATH = '/api/oauth/agent-key';
+const NOUS_DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
+
+/** A credential with less than this much life left is renewed rather than spent. */
+const EXPIRY_SKEW_MS = 60_000;
+
+type DeviceCodeAnswer = {
+  device_code?: unknown;
+  user_code?: unknown;
+  verification_uri?: unknown;
+  verification_uri_complete?: unknown;
+  expires_in?: unknown;
+  interval?: unknown;
+};
+
+type TokenAnswer = {
+  access_token?: unknown;
+  refresh_token?: unknown;
+  expires_in?: unknown;
+  error?: unknown;
+  error_description?: unknown;
+};
+
+type AgentKeyAnswer = { api_key?: unknown; key_id?: unknown; expires_at?: unknown; expires_in?: unknown };
 
 /**
  * The free model the credential probe asks for.
@@ -84,7 +125,11 @@ function isTextCapable(model: NousRawModel): boolean {
  *
  * Everything else is the OpenAI wire format, so chat and streaming come from the shared base.
  */
-export type NousAdapterOptions = OpenAICompatibleAdapterOptions & { baseUrl?: string };
+export type NousAdapterOptions = OpenAICompatibleAdapterOptions & {
+  baseUrl?: string;
+  /** Called when an expired credential was renewed, so the gateway can store the replacement. */
+  onTokensRefreshed?: (credential: ProviderCredential) => void | Promise<void>;
+};
 
 export class NousAdapter extends OpenAICompatibleAdapter {
   // The base keeps its transport private; this is the same instance the gateway supplied, used by the
@@ -92,8 +137,12 @@ export class NousAdapter extends OpenAICompatibleAdapter {
   private readonly probeTransport: HttpTransport;
   private readonly chatUrl: string;
   private readonly modelsUrl: string;
+  private readonly portalUrl = NOUS_PORTAL_BASE_URL;
+  private readonly onTokensRefreshed?: (credential: ProviderCredential) => void | Promise<void>;
   /** The probe model last read from the public catalog, and when. */
   private chosenProbeModel?: { id: string; at: number };
+  /** A renewed OAuth credential, keyed by the token it replaced, so one expiry costs one renewal. */
+  private readonly renewed = new Map<string, ProviderCredential>();
 
   constructor(options: NousAdapterOptions = {}) {
     const baseUrl = (options.baseUrl ?? NOUS_BASE_URL).replace(/\/$/, '');
@@ -109,6 +158,96 @@ export class NousAdapter extends OpenAICompatibleAdapter {
     this.probeTransport = options.transport ?? new FetchHttpTransport();
     this.chatUrl = `${baseUrl}/chat/completions`;
     this.modelsUrl = `${baseUrl}/models`;
+    this.onTokensRefreshed = options.onTokensRefreshed;
+  }
+
+  // ── sign-in ────────────────────────────────────────────────────────────────
+
+  /**
+   * Asks the portal for a device code.
+   *
+   * Form-encoded, not JSON: the reference project's client posts `client_id` and `scope` as a form and
+   * the portal's own endpoints are read from that shape. Nothing here is a served substitute — if the
+   * portal refuses, the refusal is the answer.
+   */
+  async beginSignIn(): Promise<{ deviceCode: string; userCode: string; verificationUrl: string; expiresIn?: number }> {
+    const { data } = await this.postForm<DeviceCodeAnswer>(NOUS_DEVICE_CODE_PATH, {
+      client_id: NOUS_OAUTH_CLIENT_ID,
+      scope: NOUS_OAUTH_SCOPE,
+    });
+    const deviceCode = typeof data.device_code === 'string' ? data.device_code : '';
+    const userCode = typeof data.user_code === 'string' ? data.user_code : '';
+    const given = typeof data.verification_uri_complete === 'string' && data.verification_uri_complete
+      ? data.verification_uri_complete
+      : typeof data.verification_uri === 'string' ? data.verification_uri : '';
+    if (!deviceCode || !userCode) {
+      throw new ProviderError('PROVIDER_REQUEST_FAILED', 'Nous did not return a device code. Try again in a moment.', {
+        providerId: nousProviderId,
+        publicMessage: 'Nous did not answer with a sign-in code. Try again.',
+      });
+    }
+    return {
+      deviceCode,
+      userCode,
+      verificationUrl: given || `${NOUS_PORTAL_BASE_URL}/device`,
+      ...(typeof data.expires_in === 'number' ? { expiresIn: data.expires_in } : {}),
+    };
+  }
+
+  /**
+   * Polls the portal until the grant is approved, then mints the agent key.
+   *
+   * The poll reads the **body** whatever the status: a pending grant is `400
+   * {"error":"authorization_pending"}` — data, not a failure — so the transport is asked for the refusal
+   * body and the code decides the outcome. `slow_down` is a wait, not a denial.
+   *
+   * The agent key is best-effort, exactly as the reference project has it: the access token alone is a
+   * valid bearer for inference, so a mint failure must not discard a sign-in that worked.
+   */
+  async pollSignIn(deviceCode: string, signal?: AbortSignal): Promise<
+    | { status: 'pending' }
+    | { status: 'denied'; error: string }
+    | { status: 'connected'; credential: ProviderCredential; account: string }
+  > {
+    const { data } = await this.postFormAllowingRefusal<TokenAnswer>(NOUS_TOKEN_PATH, {
+      grant_type: NOUS_DEVICE_GRANT,
+      client_id: NOUS_OAUTH_CLIENT_ID,
+      device_code: deviceCode,
+    }, signal);
+
+    const error = typeof data.error === 'string' ? data.error : '';
+    if (error === 'authorization_pending' || error === 'slow_down') return { status: 'pending' };
+    if (error) {
+      const description = typeof data.error_description === 'string' ? data.error_description : '';
+      return { status: 'denied', error: description || `Nous reported ${error.replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 40)}.` };
+    }
+    const access = typeof data.access_token === 'string' ? data.access_token : '';
+    if (!access) return { status: 'denied', error: 'Nous did not return a session. Start the sign-in again.' };
+
+    const minted = await this.mintAgentKey(access, signal);
+    return {
+      status: 'connected',
+      account: 'Nous Research',
+      credential: {
+        type: 'oauth',
+        // The agent key is what the inference host accepts as a bearer; the access token is the fallback.
+        value: minted?.apiKey ?? access,
+        ...(typeof data.refresh_token === 'string' ? { refreshToken: data.refresh_token } : {}),
+        expiresAt: minted?.expiresAt ?? (typeof data.expires_in === 'number'
+          ? new Date(Date.now() + data.expires_in * 1000).toISOString()
+          : new Date(Date.now() + 3600 * 1000).toISOString()),
+        oauthClientId: NOUS_OAUTH_CLIENT_ID,
+      },
+    };
+  }
+
+  /** Whether a stored credential is already past its stated expiry — answered without a request. */
+  isCredentialExpired(credential: ProviderCredential | undefined, now = Date.now()): boolean | undefined {
+    if (credential?.type !== 'oauth') return undefined;
+    if (!credential.expiresAt) return undefined;
+    const expiry = Date.parse(credential.expiresAt);
+    if (Number.isNaN(expiry)) return undefined;
+    return expiry - EXPIRY_SKEW_MS <= now;
   }
 
   /**
@@ -119,15 +258,14 @@ export class NousAdapter extends OpenAICompatibleAdapter {
    * a zero stays zero, so a free model is recognisably free rather than an absent price.
    */
   async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
+    const credential = await this.credential(context);
     const { data } = await this.probeTransport.request<NousCatalog>({
       method: 'GET',
       providerId: nousProviderId,
       url: this.modelsUrl,
       headers: {
         accept: 'application/json',
-        ...(context.credential && 'value' in context.credential && context.credential.value
-          ? { Authorization: `Bearer ${context.credential.value}` }
-          : {}),
+        ...(credential && 'value' in credential && credential.value ? { Authorization: `Bearer ${credential.value}` } : {}),
       },
       ...(context.signal ? { signal: context.signal } : {}),
     });
@@ -170,7 +308,8 @@ export class NousAdapter extends OpenAICompatibleAdapter {
     credential: ProviderCredential | undefined,
     context: ProviderRequestContext = {},
   ): Promise<CredentialValidation> {
-    const value = credential && 'value' in credential ? credential.value : undefined;
+    const resolved = await this.credential({ ...context, ...(credential ? { credential } : {}) }).catch(() => credential);
+    const value = resolved && 'value' in resolved ? resolved.value : undefined;
     if (typeof value !== 'string' || !value) {
       throw new ProviderError('AUTHENTICATION_FAILED', 'Enter a Nous Research API key.', {
         providerId: nousProviderId,
@@ -233,6 +372,135 @@ export class NousAdapter extends OpenAICompatibleAdapter {
     return { status: 'valid', checkedAt: new Date().toISOString(), latencyMs: Math.round(performance.now() - startedAt) };
   }
 
+  /** Chat, after making sure the credential still is one. */
+  async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
+    return super.chat(request, { ...context, credential: this.asRequestCredential(await this.credential(context)) });
+  }
+
+  async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
+    yield* super.streamChat(request, { ...context, credential: this.asRequestCredential(await this.credential(context)) });
+  }
+
+  /**
+   * The credential as the shared base needs to see it.
+   *
+   * The base sends its auth header **only** for an `api-key` credential, and that is right for it: an
+   * OAuth token usually needs a different header or a different endpoint. Nous is the case where it does
+   * not — the agent key minted from the sign-in is the same `Authorization: Bearer` an API key is — so the
+   * shape is stated for the request and never stored. Without this, a signed-in connection failed with
+   * "Missing API key for provider nous" while holding a perfectly good bearer.
+   */
+  private asRequestCredential(credential: ProviderCredential | undefined): ProviderCredential | undefined {
+    if (credential && 'value' in credential && typeof credential.value === 'string' && credential.value) {
+      return { type: 'api-key', value: credential.value };
+    }
+    return credential;
+  }
+
+  /**
+   * The credential to use, renewed if it has expired.
+   *
+   * An OAuth session is two tokens: the portal's access/refresh pair, and the agent key minted from it.
+   * The stored `value` is the agent key (what the inference host accepts) and `refreshToken` is the
+   * portal's — so renewal is a refresh **and** a fresh mint, which is what the reference project does.
+   * A renewal is memoised by the token it replaced, so one expiry costs one round trip rather than one
+   * per request.
+   */
+  private async credential(context: ProviderRequestContext): Promise<ProviderCredential | undefined> {
+    const current = context.credential;
+    if (!this.isCredentialExpired(current)) return current;
+    const refresh = current?.type === 'oauth' ? current.refreshToken : undefined;
+    if (typeof refresh !== 'string' || !refresh) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'The Nous Research session has expired. Sign in again.', {
+        providerId: nousProviderId,
+        publicMessage: 'The Nous Research session has expired. Sign in again.',
+      });
+    }
+    const replaced = current?.type === 'oauth' ? current.value : '';
+    const memo = this.renewed.get(replaced);
+    if (memo) return memo;
+
+    const { data } = await this.postFormAllowingRefusal<TokenAnswer>(NOUS_TOKEN_PATH, {
+      grant_type: 'refresh_token',
+      refresh_token: refresh,
+      client_id: NOUS_OAUTH_CLIENT_ID,
+    }, context.signal);
+    const access = typeof data.access_token === 'string' ? data.access_token : '';
+    if (!access) {
+      const description = typeof data.error_description === 'string' ? data.error_description : '';
+      throw new ProviderError('AUTHENTICATION_FAILED', description || 'Nous refused to renew the session. Sign in again.', {
+        providerId: nousProviderId,
+        publicMessage: description || 'Nous refused to renew the session. Sign in again.',
+      });
+    }
+    const minted = await this.mintAgentKey(access, context.signal);
+    const renewed: ProviderCredential = {
+      type: 'oauth',
+      value: minted?.apiKey ?? access,
+      refreshToken: typeof data.refresh_token === 'string' && data.refresh_token ? data.refresh_token : refresh,
+      expiresAt: minted?.expiresAt ?? (typeof data.expires_in === 'number'
+        ? new Date(Date.now() + data.expires_in * 1000).toISOString()
+        : new Date(Date.now() + 3600 * 1000).toISOString()),
+      oauthClientId: NOUS_OAUTH_CLIENT_ID,
+    };
+    this.renewed.set(replaced, renewed);
+    await this.onTokensRefreshed?.(renewed);
+    return renewed;
+  }
+
+  /**
+   * Exchanges an access token for an agent key — best-effort, exactly as the reference project has it.
+   * A mint that fails leaves the access token as the bearer, because that is still a valid credential and
+   * discarding a working sign-in over a short-lived convenience token would be the wrong trade.
+   */
+  private async mintAgentKey(accessToken: string, signal?: AbortSignal): Promise<{ apiKey?: string; expiresAt?: string } | undefined> {
+    try {
+      const { status, data } = await this.probeTransport.request<AgentKeyAnswer>({
+        method: 'POST',
+        providerId: nousProviderId,
+        url: `${this.portalUrl}${NOUS_AGENT_KEY_PATH}`,
+        headers: { accept: 'application/json', 'content-type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ min_ttl_seconds: 7200 }),
+        tolerateRefusalBody: true,
+        ...(signal ? { signal } : {}),
+      });
+      if (status < 200 || status >= 300) return undefined;
+      const apiKey = typeof data.api_key === 'string' && data.api_key ? data.api_key : undefined;
+      const expiresAt = typeof data.expires_at === 'string' && data.expires_at
+        ? (Number.isNaN(Date.parse(data.expires_at)) ? undefined : new Date(data.expires_at).toISOString())
+        : typeof data.expires_in === 'number' ? new Date(Date.now() + data.expires_in * 1000).toISOString() : undefined;
+      return {
+        ...(apiKey ? { apiKey } : {}),
+        ...(expiresAt ? { expiresAt } : {}),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async postForm<T>(path: string, fields: Record<string, string>): Promise<{ data: T }> {
+    const { data } = await this.probeTransport.request<T>({
+      method: 'POST',
+      providerId: nousProviderId,
+      url: `${this.portalUrl}${path}`,
+      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(fields).toString(),
+    });
+    return { data };
+  }
+
+  private async postFormAllowingRefusal<T>(path: string, fields: Record<string, string>, signal?: AbortSignal): Promise<{ data: T; status: number }> {
+    return this.probeTransport.request<T>({
+      method: 'POST',
+      providerId: nousProviderId,
+      url: `${this.portalUrl}${path}`,
+      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(fields).toString(),
+      tolerateRefusalBody: true,
+      ...(signal ? { signal } : {}),
+    });
+  }
+
   /**
    * The model to probe with: a free text model from the **public** catalog, cached briefly.
    *
@@ -270,7 +538,7 @@ export class NousAdapter extends OpenAICompatibleAdapter {
    */
   async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
     const startedAt = performance.now();
-    const credential = context.credential;
+    const credential = await this.credential(context).catch(() => context.credential);
     const value = credential && 'value' in credential ? credential.value : undefined;
     if (typeof value !== 'string' || !value) {
       return {

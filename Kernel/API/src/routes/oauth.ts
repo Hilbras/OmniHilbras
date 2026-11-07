@@ -176,6 +176,33 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     /**
+     * Nous Research signs in two ways, and this is the second one.
+     *
+     * A device flow at the portal (`hermes-cli`): the start returns a code, the user approves it on
+     * Nous's page, the gateway polls, and the adapter mints an agent key from the access token. The card
+     * also accepts an API key through the ordinary connection save — the two end as the same bearer, so
+     * nothing downstream distinguishes them.
+     */
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/nous/start') {
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startNousSignIn(addAccount, targetConnectionId), origin);
+      return true;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/nous/session/')) {
+      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/nous/session/'.length)).trim();
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
+      const status = await service.nousSignInStatus(sessionId, signal);
+      if (!status) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
+        return true;
+      }
+      sendJson(response, 200, status, origin);
+      return true;
+    }
+
+    /**
      * Kilo Code, a custom device flow. A single code serves as both device and user code; the user
      * approves at the verification URL and the dashboard polls until it is approved.
      */

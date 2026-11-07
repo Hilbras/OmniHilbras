@@ -253,7 +253,7 @@ const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, req
  * does not serve: the request 404s, the tab opened for it is never navigated, and the button looks dead
  * with a blank page. The dialog is sent to the connection owner instead (see `signInProviderId`).
  */
-const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro', 'claude-code', 'codex', 'kimi-code', 'kilocode', 'minimax-code', 'minimax-code-global', 'qoder', 'codebuddy-cn', 'codebuddy-intl']);
+const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro', 'claude-code', 'codex', 'kimi-code', 'kilocode', 'minimax-code', 'minimax-code-global', 'qoder', 'codebuddy-cn', 'codebuddy-intl', 'nous']);
 
 /** Providers whose flow is a pasted credential rather than a browser sign-in. */
 const webCookieProviders = new Set(webSessionProviderIds());
@@ -413,6 +413,8 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
    * flag rides the start request and the ordinary connect path keeps repairing.
    */
   const [addAccountOpen, setAddAccountOpen] = useState(false);
+  /** The key dialog was chosen by name on a card that also has a sign-in, so it must not be gated off. */
+  const [apiKeyMode, setApiKeyMode] = useState(false);
   const [signInWindow, setSignInWindow] = useState<Window | null>(null);
   /**
    * The account an Edit is updating, if any. Both update paths carry its id: the connect dialog starts
@@ -622,7 +624,13 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   }, [effectiveFilters, filterableModels]);
 
   const testing = testingModels.length > 0;
-  const isOauth = provider.auth === 'OAuth';
+  /**
+   * What this card can actually do. `auth` is the label; `authModes` is the truth when a provider offers
+   * more than one way in. Nous Research is the first: a portal device sign-in, and an API key.
+   */
+  const authModes = provider.authModes ?? (provider.auth === 'OAuth' ? (['oauth'] as const) : (['api-key'] as const));
+  const isOauth = authModes.includes('oauth');
+  const supportsApiKey = authModes.includes('api-key');
   /**
    * The provider whose sign-in this card uses.
    *
@@ -644,11 +652,21 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   // Browsers only allow window.open inside the click that granted the gesture,
   // so the tab is opened blank here and the dialog navigates it once the
   // gateway hands back the sign-in URL.
+  /** The save dialog, for a card that has a key path — including one that also has a sign-in. */
+  function openApiKeyConnection() {
+    setEditingConnection(null);
+    setAddAccountOpen(false);
+    setSignInWindow(null);
+    setApiKeyMode(true);
+    setAddOpen(true);
+  }
+
   function openAddConnection() {
     // "Add connection" does what it says: when the provider already holds an account, the sign-in
     // saves a second connection beside it. With none, it is a first connect and the two are the same.
     // The gateway decides the target when the sign-in starts, so the flag rides the start request —
     // an empty body still repairs, which is what old clients send.
+    setApiKeyMode(false);
     setAddAccountOpen(isOauth && connections.length > 0);
     if (webCookieProviders.has(provider.id)) {
       setSignInWindow(null);
@@ -688,6 +706,8 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   function openEditConnection(row: GatewayConnection) {
     setEditingConnection(row);
     setAddAccountOpen(false);
+    // An API-key account edits in the key dialog, a signed-in one in its flow.
+    setApiKeyMode(!isOauth);
     if (webCookieProviders.has(provider.id)) {
       flash(`${provider.name} accounts are edited by pasting a fresh session.`, 'error');
       setEditingConnection(null);
@@ -1111,7 +1131,10 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
             <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-12 w-12 rounded-xl text-sm" />
             <div className="min-w-0"><div className="flex flex-wrap items-center gap-2.5"><h2 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{provider.name}</h2>{provider.apiKeysUrl && (<a href={provider.apiKeysUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-xs font-medium text-gold-text hover:underline" title={`Open ${provider.name}’s key page`}><KeyRound className="h-3 w-3" aria-hidden="true" />API keys<ArrowUpRight className="h-3 w-3" aria-hidden="true" /></a>)}<span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[9px] ${meta.className}`}><span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />{meta.label}</span></div><p className="muted mt-1 text-sm">{provider.description}</p>{provider.freeTier && <p className="mt-2 text-sm text-gold-text"><span className="font-semibold">Free tier: </span>{provider.freeTier}</p>}</div>
           </div>
-          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={refreshModels} disabled={!connection || refreshingModels} title={connection ? 'Ask the provider which models it serves right now' : 'Connect this provider first'} className="btn-ghost !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40">{refreshingModels ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <ListRestart className="h-3.5 w-3.5" aria-hidden="true" />}{refreshingModels ? 'Updating' : 'Update models'}</button><button type="button" onClick={() => void testConnection()} disabled={testingConnection || testing} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable || planned} title={planned ? provider.unavailableReason : !oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
+          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={refreshModels} disabled={!connection || refreshingModels} title={connection ? 'Ask the provider which models it serves right now' : 'Connect this provider first'} className="btn-ghost !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40">{refreshingModels ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <ListRestart className="h-3.5 w-3.5" aria-hidden="true" />}{refreshingModels ? 'Updating' : 'Update models'}</button><button type="button" onClick={() => void testConnection()} disabled={testingConnection || testing} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button>{isOauth && supportsApiKey && (
+          <button type="button" onClick={openApiKeyConnection} disabled={planned} title={planned ? provider.unavailableReason : `Add a ${provider.name} API key instead of signing in`} className="btn-ghost !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40">Use an API key</button>
+        )}
+        <button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable || planned} title={planned ? provider.unavailableReason : !oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
         </div>
       </div>
 
@@ -1221,7 +1244,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
                 />
               ))}
             </div>
-          ) : connectionState === 'ready' ? <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">{planned ? provider.unavailableReason : isOauth ? (oauthFlowAvailable ? 'Sign in to finish connecting this provider.' : 'Sign-in for this provider is not available yet.') : 'Add an API key or point OmniHilbras at a local endpoint.'}</p></div></div><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable || planned} title={planned ? provider.unavailableReason : !oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2 !text-xs disabled:cursor-not-allowed disabled:opacity-40">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text ${connectionState === 'loading' ? 'animate-pulse' : ''}`}><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">{connectionState === 'loading' ? 'Checking the gateway' : "Couldn't read the gateway"}</p><p className="muted mt-1 text-xs">{connectionState === 'loading' ? 'Asking which connections are saved. This is usually instant.' : `OmniHilbras asked the local gateway which connections are saved and did not get an answer, so it does not yet know whether ${provider.name} is connected. Nothing has been changed.`}</p></div></div>{connectionState === 'failed' && <button type="button" onClick={loadConnection} className="btn-gold !px-3 !py-2 !text-xs">Try again <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /></button>}</div>}
+          ) : connectionState === 'ready' ? <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">No connection yet</p><p className="muted mt-1 text-xs">{planned ? provider.unavailableReason : isOauth ? (oauthFlowAvailable ? (supportsApiKey ? 'Sign in, or use an API key — both connect this provider.' : 'Sign in to finish connecting this provider.') : 'Sign-in for this provider is not available yet.') : 'Add an API key or point OmniHilbras at a local endpoint.'}</p></div></div><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable || planned} title={planned ? provider.unavailableReason : !oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2 !text-xs disabled:cursor-not-allowed disabled:opacity-40">Add connection <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button></div> : <div className="flex flex-col items-center justify-between gap-4 rounded-xl border border-dashed border-line-strong p-6 text-center sm:flex-row sm:text-left"><div className="flex items-start gap-3"><span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text ${connectionState === 'loading' ? 'animate-pulse' : ''}`}><Server className="h-4 w-4" aria-hidden="true" /></span><div><p className="text-sm font-semibold">{connectionState === 'loading' ? 'Checking the gateway' : "Couldn't read the gateway"}</p><p className="muted mt-1 text-xs">{connectionState === 'loading' ? 'Asking which connections are saved. This is usually instant.' : `OmniHilbras asked the local gateway which connections are saved and did not get an answer, so it does not yet know whether ${provider.name} is connected. Nothing has been changed.`}</p></div></div>{connectionState === 'failed' && <button type="button" onClick={loadConnection} className="btn-gold !px-3 !py-2 !text-xs">Try again <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /></button>}</div>}
         </div>
       </section>
 
@@ -1426,11 +1449,11 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       {/* Not for a web-cookie provider: that one connects by pasting an exported session,
           so the API-key modal would open underneath the right one and be the one on top. */}
       <AddProviderModal
-        open={addOpen && !isOauth && !webCookieProviders.has(provider.id)}
+        open={addOpen && (!isOauth || apiKeyMode) && !webCookieProviders.has(provider.id)}
         initialProviderId={provider.id}
         initialModelPolicy={connection?.modelPolicy}
         {...(editSeed ? { initialConnection: editSeed } : {})}
-        onClose={() => { setAddOpen(false); setEditingConnection(null); }}
+        onClose={() => { setAddOpen(false); setEditingConnection(null); setApiKeyMode(false); }}
         onSave={handleAddConnection}
         onSaveMany={handleAddConnections}
       />
@@ -1439,7 +1462,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
           provider={descriptor}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           {...(provider.riskSeverity ? { riskSeverity: provider.riskSeverity } : {})}
-          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); setEditingConnection(null); }}
+          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); setEditingConnection(null); setApiKeyMode(false); }}
           onConnected={handleOauthConnected}
           addAccount={addAccountOpen}
         />
@@ -1448,7 +1471,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
           providerName={provider.name}
           signInWindow={signInWindow}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
-          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); setEditingConnection(null); }}
+          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); setEditingConnection(null); setApiKeyMode(false); }}
           onConnected={handleOauthConnected}
           addAccount={addAccountOpen}
           {...(editingConnection ? { targetConnectionId: editingConnection.id } : {})}
@@ -1464,7 +1487,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           signInWindow={signInWindow}
           onAcknowledged={() => setSignInWindow(window.open('about:blank', '_blank'))}
-          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); setEditingConnection(null); }}
+          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); setEditingConnection(null); setApiKeyMode(false); }}
           onConnected={handleOauthConnected}
           addAccount={addAccountOpen}
           {...(editingConnection ? { targetConnectionId: editingConnection.id } : {})}

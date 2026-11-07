@@ -154,7 +154,10 @@ test('a card may claim OAuth only where the gateway has an OAuth flow to sign in
    * would call a correctly-signed-in card "unsupported".
    */
   const servedBy = (card) => capable.has(card.id) || (card.connectionProviderId ? capable.has(card.connectionProviderId) : false);
-  const claimOauth = allCards.filter((card) => card.auth === 'OAuth');
+  // `authModes` is the truth when a card offers more than one way in (Nous Research: sign-in **and**
+  // API key), so a dual card is still checked against the route it claims.
+  const claimsOauth = (card) => card.auth === 'OAuth' || card.authModes?.includes('oauth');
+  const claimOauth = allCards.filter(claimsOauth);
   const unsupported = claimOauth.filter((card) => !servedBy(card)).map((card) => card.id);
   assert.deepEqual(
     unsupported,
@@ -167,7 +170,7 @@ test('a card may claim OAuth only where the gateway has an OAuth flow to sign in
   for (const card of claimOauth) {
     if (!card.connectionProviderId) continue;
     assert.ok(
-      cardById.get(card.connectionProviderId)?.auth === 'OAuth',
+      claimsOauth(cardById.get(card.connectionProviderId) ?? {}),
       `${card.id} shares ${card.connectionProviderId}'s connection, but that card is not an OAuth card`,
     );
   }
@@ -260,6 +263,7 @@ test('every card that pastes a credential has a descriptor, and its routes are r
   const descriptors = new Map(webSessionDescriptors().map((entry) => [entry.id, entry]));
   for (const card of cards()) {
     if (card.auth === 'API key' || card.auth === 'No key' || card.auth === 'OAuth') continue;
+    if (card.authModes?.some((mode) => mode === 'api-key' || mode === 'oauth')) continue;
     if (!descriptors.has(card.id)) {
       problems.push(`${card.id} claims auth ${JSON.stringify(card.auth)} and nothing collects it: no descriptor with that id, and it is not an API key or an OAuth flow`);
     }
@@ -268,7 +272,7 @@ test('every card that pastes a credential has a descriptor, and its routes are r
 });
 
 test('no card claims an auth mode outside the set the collectors understand', () => {
-  const known = new Set(['API key', 'No key', 'OAuth', 'Web cookie', 'Session cookie', 'Web session']);
+  const known = new Set(['API key', 'No key', 'OAuth', 'Web cookie', 'Session cookie', 'Web session', 'OAuth or API key']);
   const used = [...new Set(cards().map((card) => card.auth))].sort();
   const unknown = used.filter((mode) => !known.has(mode));
   assert.deepEqual(unknown, [], `these auth modes are new: ${unknown.join(', ')}. Add the collector and say here what asks for the credential, or the card promises a flow that does not exist`);
@@ -325,9 +329,10 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // Fifteen cards claim OAuth, but the gateway serves twelve start routes: `clinepass` shares `cline`'s,
   // and `claude-code` and `codex` sign in through `server.ts` routes this scan reads too — the counts of
   // claims and routes do not coincide, which is why both are asserted rather than one derived.
-  assert.equal(oauthCapableProviders().size, 12, 'the gateway serves an OAuth start route for twelve providers');
-  assert.equal(all.filter((card) => card.auth === 'OAuth').length, 13, 'thirteen cards claim OAuth, one of them over a shared route');
-  console.log(`    cards: ${all.length}   claiming OAuth: ${all.filter((c) => c.auth === 'OAuth').length}   gateway OAuth routes: ${oauthCapableProviders().size}   claiming a measurement: 0`);
+  assert.equal(oauthCapableProviders().size, 13, 'the gateway serves an OAuth start route for thirteen providers');
+  const oauthClaiming = all.filter((card) => card.auth === 'OAuth' || card.authModes?.includes('oauth'));
+  assert.equal(oauthClaiming.length, 14, 'fourteen cards claim an OAuth sign-in: thirteen named OAuth, and Nous Research which offers it beside a key');
+  console.log(`    cards: ${all.length}   claiming OAuth: ${oauthClaiming.length}   gateway OAuth routes: ${oauthCapableProviders().size}   claiming a measurement: 0`);
 });
 
 test('the Gemini Web driver checks the sign-in wall before the composer, because the composer check alone lied', () => {

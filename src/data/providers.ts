@@ -336,11 +336,14 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'nous',
     name: 'Nous Research',
-    description: 'Nous Portal\u2019s OpenAI-compatible inference API: the Hermes series and hosted third-party models, keyed from portal.nousresearch.com.',
+    description: 'Nous Portal\u2019s OpenAI-compatible inference API: the Hermes series and hosted third-party models, keyed from portal.nousresearch.com or a Portal sign-in.',
     category: 'Model provider',
     group: 'free-tier',
     status: 'available',
-    auth: 'API key',
+    // Two ways in, and both are real flows: a Portal API key, or a device sign-in that mints an agent
+    // key. `authModes` is what the page reads; `auth` is the string a person sees.
+    auth: 'OAuth or API key',
+    authModes: ['oauth', 'api-key'],
     models: '—',
     latency: '—',
     requests: '0',

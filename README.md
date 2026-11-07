@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.93.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.94.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -254,6 +254,16 @@ talks to it, both taken from the reference project's own measurements:
   listed beside the text ones, so the import keeps only entries whose output
   modalities include text — an entry that states no modalities is kept, because
   silence is not evidence.
+
+**Two ways in, and both are real.** `Use an API key` saves a Portal key through
+the ordinary connection route. `Add connection` runs Nous's **device sign-in**
+(`portal.nousresearch.com`, `hermes-cli`): it shows a code, the user approves it,
+and the gateway exchanges the grant for an **agent key** — the bearer the
+inference host accepts. The sign-in also carries a refresh token, so an expired
+session is renewed and re-minted on use rather than asking the user to sign in
+again; the fresh credential is written back to that account. Both paths end as
+the same bearer, so nothing downstream distinguishes them, and a mint that fails
+leaves the access token as the bearer rather than discarding a working sign-in.
 
 Because the health check really sends a request, the card labels it **Route
 health** rather than **Credential check** — that is the stronger of the two

@@ -48,6 +48,14 @@ export type ProviderRecord = {
   group: ProviderGroup;
   status: ProviderStatus;
   auth: string;
+  /**
+   * The credential paths this card really has, when that is more than the one `auth` names.
+   *
+   * `auth` is the label a person reads; this is what the page acts on. A dual-auth card (Nous Research:
+   * portal sign-in **or** API key) would otherwise have to pick one and hide the other, and the hidden
+   * path would look like a provider the dashboard cannot connect.
+   */
+  authModes?: readonly ('oauth' | 'api-key')[];
   models: string;
   latency: string;
   requests: string;

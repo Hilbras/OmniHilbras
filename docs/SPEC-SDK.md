@@ -308,6 +308,19 @@ The first local gateway exposes:
 - `GET /v1/oauth/kimi-code/session/:id` — whether the Kimi Code sign-in is pending, connected, failed or
   expired. The device code is never in this response. A well-formed id that does not exist is `404`; an
   id that is not a plausible session id is `400`, refused before any lookup.
+- `POST /v1/oauth/nous/start` — begin a Nous Research sign-in at `portal.nousresearch.com`
+  (`client_id: hermes-cli`, scope `inference:invoke inference:mint_agent_key`). The response carries a
+  `userCode` and a `verificationUrl`; the gateway polls until the grant is approved. Both halves are
+  **form-encoded** — the portal is an RFC 8628 device flow, and a pending poll answers
+  `400 {"error":"authorization_pending"}`, so the poll reads the body and treats that as a wait rather
+  than a failure. On approval the access token is exchanged for an **agent key** (`/api/oauth/agent-key`,
+  `min_ttl_seconds: 7200`), which is the bearer the inference host accepts; the mint is best-effort and
+  the access token is used if it fails. `addAccount` and `connectionId` select the connection saved to,
+  exactly as every other start route here does. The card also accepts an API key through
+  `PUT /v1/connections/nous`; both end as the same bearer.
+- `GET /v1/oauth/nous/session/:id` — whether the Nous Research sign-in is pending, connected, failed or
+  expired. The device code is never in this response; a malformed id is `400`, a well-formed unknown one
+  is `404`.
 - `POST /v1/oauth/kilocode/start` — begin a Kilo Code sign-in. A custom device flow: the response carries
   a `userCode` and a `verificationUrl`, and the same code is polled until Kilo Code approves it. Kilo
   Code answers `202`/`403`/`410` for pending/denied/expired rather than the RFC 8628 error codes, so the
