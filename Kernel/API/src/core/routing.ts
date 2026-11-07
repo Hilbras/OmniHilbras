@@ -1,4 +1,4 @@
-import { ProviderError, providerSlug } from './index.js';;
+import { ProviderError, providerPrefixes } from './index.js';;
 import type { ConnectionRecord, ResilienceSettings } from './connections.js';
 
 /** Why a candidate was skipped, so the gateway can explain the decision. */
@@ -232,7 +232,9 @@ export function splitProviderPrefix(
   const prefix = trimmed.slice(0, slash);
   const rest = trimmed.slice(slash + 1);
   if (!rest) return { model: trimmed };
-  const owner = connections.find((connection) => connection.providerId === prefix || providerSlug(connection.providerId) === prefix);
+  // The id, the current slug, or a slug this table used to publish — so a client that saved an id before
+  // a rename still resolves. See `provider-slugs.ts`.
+  const owner = connections.find((connection) => connection.providerId === prefix || providerPrefixes(connection.providerId).includes(prefix));
   return owner ? { model: rest, providerId: owner.providerId } : { model: trimmed };
 }
 
@@ -250,7 +252,7 @@ export function bareModelFor(model: string, providerId: string): string {
   const prefix = trimmed.slice(0, slash);
   const rest = trimmed.slice(slash + 1);
   if (!rest) return trimmed;
-  return prefix === providerId || prefix === providerSlug(providerId) ? rest : trimmed;
+  return prefix === providerId || providerPrefixes(providerId).includes(prefix) ? rest : trimmed;
 }
 
 /**
