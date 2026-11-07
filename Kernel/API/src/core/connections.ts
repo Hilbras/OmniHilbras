@@ -515,7 +515,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
         await this.persistMetadata().catch(() => undefined);
         throw error;
       }
-      return cloneRecord(record);
+      return this.withPreview(record);
     });
   }
 
