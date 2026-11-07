@@ -143,6 +143,9 @@ const MEASURED_FIELDS = {
   models: 'the connection modelIds and the model policy',
   modelList: 'the connection modelIds',
   modelMeta: 'the connection model metadata',
+  // The number of connections the gateway reported for this provider. Not derived, not a guess: it is
+  // `connections.filter(...).length` from the same list the detail page renders.
+  accountCount: 'the count of connection records the gateway returned for the provider',
 };
 
 test('the merge changes only measured fields, whatever they are called', () => {

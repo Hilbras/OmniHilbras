@@ -87,6 +87,8 @@ export type ProviderRecord = {
   unavailableReason?: string;
   /** Where this provider mints or manages keys — rendered as a link under the provider's title. */
   apiKeysUrl?: string;
+  /** How many accounts the provider holds, when a merge established it. Absent on a catalog card. */
+  accountCount?: number;
 };
 
 function statusMeta(status: ProviderStatus) {
@@ -131,7 +133,7 @@ function SimpleProviderCard({ provider, detailTo, onManage, onConnect, simpleEna
   const statusLabel = planned
     ? 'Not built yet'
     : connected
-      ? simpleEnabled ? '1 Connected' : 'Disabled'
+      ? simpleEnabled ? `${provider.accountCount && provider.accountCount > 1 ? `${provider.accountCount} accounts` : '1 Connected'}` : 'Disabled'
       : attention ? 'Needs attention' : 'No connections';
 
   return (

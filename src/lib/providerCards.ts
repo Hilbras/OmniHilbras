@@ -36,14 +36,25 @@ import type { ProviderRecord } from '../components/ProviderCard';
 import type { GatewayConnection, GatewayHealth } from './gatewayClient';
 
 export function mergeGatewayConnections(providers: ProviderRecord[], connections: GatewayConnection[], health?: GatewayHealth): ProviderRecord[] {
-  const connectionByProvider = new Map(connections.map((connection) => [connection.providerId, connection]));
+  // Grouped, not a single-value Map: a provider can hold several accounts, and a `Map` keyed by
+  // providerId kept only the last one — so a card could not say how many accounts it has, and the
+  // detail page (which lists them all) disagreed with the card beside it.
+  const connectionsByProvider = new Map<string, GatewayConnection[]>();
+  for (const connection of connections) {
+    const list = connectionsByProvider.get(connection.providerId) ?? [];
+    list.push(connection);
+    connectionsByProvider.set(connection.providerId, list);
+  }
   const healthByProvider = new Map(health?.providers.map((provider) => [provider.providerId, provider]));
   return providers.map((provider) => {
     // `connectionProviderId` first: a card that shares another card's account (`clinepass` reads
     // `cline`'s one connection) names its owner there. Otherwise a card's own id, or the catalog id it
     // was written under. Getting this wrong is silent — the card simply keeps its placeholders and reads
     // as unconnected — so the field is what makes sharing a deliberate statement rather than a guess.
-    const connection = connectionByProvider.get(provider.connectionProviderId ?? provider.catalogId ?? provider.id);
+    const accounts = connectionsByProvider.get(provider.connectionProviderId ?? provider.catalogId ?? provider.id) ?? [];
+    // The card's own connection is the first account, which is what every single-account field below
+    // describes; `accountCount` carries how many there really are.
+    const connection = accounts[0];
     // No connection: the card keeps the catalog's placeholders, untouched. Not "reset to defaults" —
     // untouched, so there is no path by which a value from a previous merge survives a disconnect.
     if (!connection) return provider;
@@ -62,6 +73,8 @@ export function mergeGatewayConnections(providers: ProviderRecord[], connections
       // Every adapter checks its credential or its catalog, never a completed request — so this is
       // `credential`, and the card must not read as "this route can serve traffic".
       ...(providerHealth ? { healthVerified: providerHealth.verified } : {}),
+      /** How many accounts this provider holds — the number the card states, not a hardcoded one. */
+      accountCount: accounts.length,
       // Measured: the models the connection actually imported.
       models: modelIds.length > 0 ? `${modelIds.length} models · ${connection.modelPolicy === 'free' ? 'free import' : 'all import'}` : connection.hasCredential ? 'No imported models' : '—',
       modelList: modelIds,
