@@ -72,6 +72,8 @@ export type GatewayRoutingState = {
     providerId: string;
     enabled: boolean;
     hasCredential: boolean;
+    /** Measured round trip for this account, once it has served a request. Absent means never measured. */
+    latency?: { latencyMs: number; samples: number; measuredAt: string };
     resilience: GatewayResilience;
     /**
      * How long routing was last told this connection must wait, in ms.
@@ -218,6 +220,20 @@ export async function listGatewayConnections(signal?: AbortSignal) {
  * a single card meant waiting for the whole registry. A dashboard card shows one provider, so
  * it asks about one provider.
  */
+/**
+ * Probes **one saved connection** with its own stored credential.
+ *
+ * `/v1/health/:providerId` answers about a provider, and a provider with several accounts has no
+ * single answer — the resolver picks the first — so "Test provider" on the second row used to test
+ * the first account. A row calls this and tests itself.
+ */
+export async function probeGatewayConnection(connectionId: string, signal?: AbortSignal) {
+  return requestJson<{ providerId: string; valid: boolean; checkedAt: string; latencyMs?: number }>(
+    `/v1/connections/${encodeURIComponent(connectionId)}/probe`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', ...(signal ? { signal } : {}) },
+  );
+}
+
 export async function getGatewayProviderHealth(providerId: string, signal?: AbortSignal) {
   const body = await requestJson<{ provider: GatewayProviderHealth }>(`/v1/health/${encodeURIComponent(providerId)}`, { signal });
   return body.provider;
@@ -619,7 +635,8 @@ export function refreshGatewayConnectionModels(connectionId: string, signal?: Ab
 }
 
 /** How a provider's connections share traffic. `priority` is the default; `round-robin` takes turns across them. */
-export type GatewayProviderStrategy = 'priority' | 'round-robin';
+/** How a provider's connections share traffic: `fastest` orders same-priority accounts by measured round trip. */
+export type GatewayProviderStrategy = 'priority' | 'round-robin' | 'fastest';
 
 export function updateGatewayProviderStrategy(providerId: string, strategy: GatewayProviderStrategy, signal?: AbortSignal) {
   return requestJson<{ providerId: string; strategy: GatewayProviderStrategy }>(`/v1/providers/${encodeURIComponent(providerId)}/strategy`, {

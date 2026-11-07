@@ -5712,3 +5712,22 @@ independently of the React app" is now measured over every provider manifest, an
   gateway's cross-copy-aware `isProviderError` where a test crosses the class boundary, the vendored
   source path where a contract is read from source, and stated no-capture/no-contract reasons for
   the two quota adapters and the four 1.90.0 coding agents that landed without theirs.
+
+## Unreleased — accounts: a per-connection latency ledger, and the `fastest` strategy
+
+- **The bug first: a row's Test button tested the first account.** `/v1/health/:providerId` answers
+  about a *provider*, and a provider with several accounts has no single answer — the resolver picks
+  the first connection. `POST /v1/connections/:id/probe` now validates one connection with **its own**
+  stored credential, and a row's Test calls it. The page-level Test still asks about the provider,
+  which is the only sensible meaning for a card that may hold several accounts.
+- **A ledger keyed by connection, not provider.** Health answers "who is ejected?" and is per provider;
+  latency answers "which account is quickest?" and a provider with two accounts has two answers. The
+  ledger records a sample only on **success** (a timeout says unreachable, not slow), smooths with an
+  EWMA (a recovered account reads quick again), reports `samples` so a caller can refuse to trust one
+  reading, and is bounded with least-recently-measured eviction — the lesson the routing maps learned
+  when 2000 stale entries survived deleted connections.
+- **`fastest` as a third strategy.** Within each priority band, measured connections first, quickest
+  first. Three decisions, each pinned by a test: **priority is never reordered** (a fast account at
+  priority 2 must not outrank a deliberate priority 1); **an unmeasured account sorts last** (unknown is
+  not fast); and a provider not set to `fastest` keeps its order untouched. The account row now shows
+  the measured round trip, or "unmeasured" — never a fabricated 0 ms.

@@ -28,3 +28,4 @@ export * from './url.js';
 export * from './streaming.js';
 export * from './bounded-map.js';
 export * from './provider-error.js';
+export * from './connection-latency.js';

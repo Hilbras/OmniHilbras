@@ -170,6 +170,7 @@ The first local gateway exposes:
   stated in the UI rather than simulated.
 - `PUT /v1/connections/openrouter` — validate again, discover the selected model policy, then upsert the single local OpenRouter connection.
 - `POST /v1/connections/:id/models` — add validated model IDs to a saved connection.
+- `POST /v1/connections/:id/probe` — validate **one** saved connection with its own stored credential, returning `valid`, `checkedAt` and a measured `latencyMs`. `/v1/health/:providerId` answers about a provider, and a provider with several accounts has no single answer — the resolver picks the first connection — so a row's Test button calls this and tests its own account.
 - `DELETE /v1/connections/:id` — remove a local connection.
 - `GET /v1/keys` — gateway key metadata plus the enforcement flag; never returns a secret.
 - `POST /v1/keys` — mint a key; the response is the only time the secret is returned.

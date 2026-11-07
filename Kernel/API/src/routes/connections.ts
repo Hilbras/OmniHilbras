@@ -83,6 +83,15 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
       return true;
     }
 
+    // Probes ONE connection with its own stored credential. `/v1/health/:providerId` answers about a
+    // provider, and a provider with several accounts has no single answer — this is what a row's
+    // "Test provider" button calls, so row N tests account N.
+    if (request.method === 'POST' && url.pathname.endsWith('/probe') && url.pathname.startsWith('/v1/connections/')) {
+      const connectionId = decodeConnectionId(url.pathname.slice('/v1/connections/'.length, -'/probe'.length));
+      sendJson(response, 200, await service.probeConnection(connectionId, signal), origin);
+      return true;
+    }
+
     // Re-reads a saved connection's catalog. A connection can be saved with no models
     // when a sign-in could not read one, and this is the way back without signing in
     // again — which for a device flow would mean another browser approval.

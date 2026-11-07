@@ -299,6 +299,62 @@ function rotateBalancedConnections(sorted: ConnectionRecord[], rotation: number)
   }
 }
 
+/**
+ * The `fastest` strategy: within each priority band, measured connections first, quickest first.
+ *
+ * Three decisions worth stating, because each is a way this could quietly do harm:
+ *
+ * - **Priority is never reordered.** Bands keep their order, so a `fastest` provider still respects the
+ *   priorities an operator set; only the accounts sharing a priority are re-ordered. Otherwise one fast
+ *   account would outrank every deliberate choice above it.
+ * - **An unmeasured connection sorts after every measured one.** No samples means no reading, and
+ *   "unknown" is not "fast" — a brand-new account should not outrank one with a measured 200 ms until
+ *   it has proven itself. Once it has samples it competes normally.
+ * - **A single sample is enough to compete.** The ledger reports `samples` so a stricter caller could
+ *   demand more, but the alternative — refusing to order until N samples — leaves a provider with two
+ *   accounts on name order for its first N requests. The EWMA settles quickly, and a bad first reading
+ *   costs one request, not a permanent choice.
+ *
+ * A provider not set to `fastest` is untouched: the comparator returns without sorting anything.
+ */
+function orderFastestFirst(
+  connections: ConnectionRecord[],
+  strategyFor: ((providerId: string) => 'priority' | 'round-robin' | 'fastest') | undefined,
+  latencyFor: ((connectionId: string) => { latencyMs: number; samples: number } | undefined) | undefined,
+): void {
+  if (!strategyFor || !latencyFor) return;
+  const bands = new Map<string, ConnectionRecord[]>();
+  for (const connection of connections) {
+    if (strategyFor(connection.providerId) !== 'fastest') continue;
+    const key = `${connection.providerId}:${connection.priority}`;
+    const band = bands.get(key) ?? [];
+    band.push(connection);
+    bands.set(key, band);
+  }
+  for (const band of bands.values()) {
+    if (band.length < 2) continue;
+    const ordered = [...band].sort((left, right) => {
+      const a = latencyFor(left.id);
+      const b = latencyFor(right.id);
+      // Unmeasured last; ties fall back to name so the order is deterministic between requests.
+      if (!a && !b) return left.name.localeCompare(right.name);
+      if (!a) return 1;
+      if (!b) return -1;
+      return a.latencyMs - b.latencyMs || left.name.localeCompare(right.name);
+    });
+    // Rewrite the band in place, keeping every other connection where it is.
+    let cursor = 0;
+    for (let index = 0; index < connections.length; index += 1) {
+      const current = connections[index];
+      if (!current || !band.includes(current)) continue;
+      const next = ordered[cursor];
+      if (!next) continue;
+      connections[index] = next;
+      cursor += 1;
+    }
+  }
+}
+
 /** Resolves a failover chain, ordered by priority then name for determinism. */
 export function resolveRoute(input: {
   connections: ConnectionRecord[];
@@ -311,12 +367,17 @@ export function resolveRoute(input: {
   rotation?: number;
   /** The model family a provider declares (`claude`, `gpt`), so a bare name is routed only within its family. */
   familyOf?: (providerId: string) => string | undefined;
+  /** A provider's strategy; only `fastest` changes this function's order. */
+  strategyFor?: (providerId: string) => 'priority' | 'round-robin' | 'fastest';
+  /** Measured round trip per connection, for the `fastest` strategy. */
+  latencyFor?: (connectionId: string) => { latencyMs: number; samples: number } | undefined;
 }): RouteDecision {
   const modelId = input.model.trim();
   const usable = input.connections
     .filter((connection) => connection.enabled && connection.hasCredential)
     .sort((left, right) => left.priority - right.priority || left.name.localeCompare(right.name));
   rotateBalancedConnections(usable, input.rotation ?? 0);
+  orderFastestFirst(usable, input.strategyFor, input.latencyFor);
 
   const skipped: RouteDecision['skipped'] = [];
   const lookupId = lookupModelId(modelId);

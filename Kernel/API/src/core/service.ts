@@ -47,6 +47,7 @@ import { createGeminiWebDriver } from '../providers/geminiWeb.js';
 import { createDuckDuckGoWebDriver } from '../providers/duckduckgoWeb.js';
 import { SlidingWindowRateLimiter, bareModelFor, type RouteCandidate } from './routing.js';
 import { HealthManager } from './health.js';
+import { ConnectionLatencyLedger } from './connection-latency.js';
 import { TokenRenewal, classifyRenewalFailure } from './token-renewal.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
@@ -249,7 +250,9 @@ export class GatewayService {
    */
   private readonly routing: RoutingEngine;
   /** Each provider's strategy, synchronous for routing. Loaded from the store and updated only through this service. */
-  private readonly providerStrategies = new Map<string, 'priority' | 'round-robin'>();
+  private readonly providerStrategies = new Map<string, 'priority' | 'round-robin' | 'fastest'>();
+  /** How fast each account has been, keyed by connection. Read by the `fastest` strategy. */
+  private readonly connectionLatency = new ConnectionLatencyLedger();
   /** Saved model aliases, synchronous for routing. Loaded from the store and updated only through this service. */
   private readonly aliasSnapshot = new Map<string, { providerId: string; model: string }>();
   /**
@@ -342,6 +345,7 @@ export class GatewayService {
       aliasFor: (name) => this.aliasSnapshot.get(name),
       familyOf: (providerId) => this.registry.get(providerId)?.modelFamily,
       strategyFor: (providerId) => this.providerStrategies.get(providerId) ?? 'priority',
+      latencyFor: (connectionId) => this.connectionLatency.get(connectionId),
     });
     this.models = new ModelCatalog({
       connections: this.connections,
@@ -359,7 +363,12 @@ export class GatewayService {
       embed: (providerId, request, signal, scope) => this.embed(providerId, request, signal, scope),
       withDeadline: (signal, timeoutMs, providerId, run) => this.withDeadline(signal, timeoutMs, providerId, run),
       enforceRateLimit: (candidate) => this.enforceRateLimit(candidate),
-      recordSuccess: (providerId, latencyMs, at) => this.healthManager.recordSuccess(providerId, latencyMs, at),
+      recordSuccess: (providerId, latencyMs, at, connectionId) => {
+        this.healthManager.recordSuccess(providerId, latencyMs, at);
+        // The account that served it, when the attempt named one: `unmanaged:` candidates have no
+        // connection record, and inventing one would put a reading under an id nobody can look up.
+        if (connectionId && !connectionId.startsWith('unmanaged:')) this.connectionLatency.record(connectionId, latencyMs);
+      },
       recordFailure: (providerId, code, reason) => this.healthManager.recordFailure(providerId, code, reason),
       recordModelRateLimit: (providerId, modelId, input) => this.healthManager.recordModelRateLimit(providerId, modelId, input),
       recordRateLimitUse: (connectionId) => this.rateLimiter.record(connectionId),
@@ -494,8 +503,8 @@ export class GatewayService {
     });
   }
 
-  /** A provider's connection strategy: `priority` (the default) or `round-robin`. */
-  providerStrategy(providerId: string): 'priority' | 'round-robin' {
+  /** A provider's connection strategy: `priority` (the default), `round-robin`, or `fastest`. */
+  providerStrategy(providerId: string): 'priority' | 'round-robin' | 'fastest' {
     return this.providerStrategies.get(providerId) ?? 'priority';
   }
 
@@ -524,7 +533,7 @@ export class GatewayService {
     const store = this.connectionStore as { allStrategies?: () => Promise<Array<[string, string]>> } | undefined;
     if (!store?.allStrategies) return;
     for (const [providerId, strategy] of await store.allStrategies()) {
-      this.providerStrategies.set(providerId, strategy as 'priority' | 'round-robin');
+      this.providerStrategies.set(providerId, strategy as 'priority' | 'round-robin' | 'fastest');
     }
   }
 
@@ -533,7 +542,7 @@ export class GatewayService {
     const store = this.connectionStore as { setStrategy?: (id: string, value: string) => Promise<void> } | undefined;
     if (!store?.setStrategy) throw new ProviderError('CONFIGURATION_ERROR', 'Provider strategies are not stored by this connection store.');
     await store.setStrategy(providerId, strategy);
-    this.providerStrategies.set(providerId, strategy as 'priority' | 'round-robin');
+    this.providerStrategies.set(providerId, strategy as 'priority' | 'round-robin' | 'fastest');
   }
 
   /** How often background health polling runs. 0 keeps polling off. */
@@ -615,6 +624,9 @@ export class GatewayService {
         providerId: connection.providerId,
         enabled: connection.enabled,
         hasCredential: connection.hasCredential,
+        // Measured round trip for this account, when it has served a request. Absent, never zero:
+        // "never measured" and "instant" are different answers and the panel shows them differently.
+        ...(this.connectionLatency.get(connection.id) ? { latency: this.connectionLatency.get(connection.id) } : {}),
         resilience: connection.resilience,
         ...(waits.has(connection.id) ? { rateLimitWaitMs: waits.get(connection.id) } : {}),
         ...(this.healthManager.snapshot(connection.providerId) ?? {}),
@@ -2247,6 +2259,25 @@ export class GatewayService {
     if (!adapter.validateCredential) throw notSupported(adapter, 'credential validation');
     const result = await adapter.validateCredential(credential, context);
     return { providerId, valid: true, checkedAt: result?.checkedAt ?? new Date().toISOString(), ...(result?.latencyMs === undefined ? {} : { latencyMs: result.latencyMs }) };
+  }
+
+  /**
+   * Probes **one saved connection**, with its own stored credential.
+   *
+   * `/v1/health/:providerId` answers about a provider, and a provider with several accounts has no
+   * single answer — the resolver picks the first connection, so "Test provider" on the second row
+   * tested the first account. This reads the credential of the connection the caller named and asks
+   * its adapter to validate it, so a row tests its own account.
+   */
+  async probeConnection(connectionId: string, signal?: AbortSignal): Promise<GatewayConnectionValidation> {
+    const connection = (await this.connections.list()).find((entry) => entry.id === connectionId);
+    if (!connection) throw new ProviderError('NOT_FOUND', 'That connection no longer exists.', { publicMessage: 'That connection no longer exists.' });
+    const adapter = await this.resolveAdapter(connection.providerId);
+    const context = await this.credentials.context(connectionId, connection.providerId, signal);
+    if (!adapter.validateCredential) throw notSupported(adapter, 'credential validation');
+    const startedAt = Date.now();
+    const result = await adapter.validateCredential(context.credential, context);
+    return { providerId: connection.providerId, valid: true, checkedAt: result?.checkedAt ?? new Date().toISOString(), latencyMs: result?.latencyMs ?? Date.now() - startedAt };
   }
 
   private async withProviderLock<T>(providerId: string, operation: () => Promise<T>) {

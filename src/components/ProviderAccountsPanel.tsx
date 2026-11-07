@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyRound, Plus, Power, Save, Trash2 } from 'lucide-react';
+import { KeyRound, Plus, Power, Save, Timer, Trash2 } from 'lucide-react';
 import type { GatewayConnection } from '../lib/gatewayClient';
 import { removeGatewayConnection, saveGatewayConnectionResponsibility } from '../lib/gatewayClient';
 import { useToast } from './Toast';
@@ -31,10 +31,13 @@ export function ProviderAccountsPanel({
   providerName,
   onSaved,
   onAddAccount,
+  latencyByConnection,
 }: {
   connections: readonly GatewayConnection[];
   providerName: string;
   onSaved: () => void;
+  /** Measured round trip per connection id, from the gateway's routing state. Absent means unmeasured. */
+  latencyByConnection?: ReadonlyMap<string, { latencyMs: number; samples: number }>;
   /**
    * Opens the connect dialog in add-account mode: a second sign-in that saves beside these rows
    * instead of repairing the first. Offered only when the provider's flow can carry it, so it is
@@ -84,7 +87,7 @@ export function ProviderAccountsPanel({
         data-account-scroll={connections.length > 5 ? 'true' : undefined}
       >
         {connections.map((connection, index) => (
-          <AccountRow key={connection.id} connection={connection} index={index} onSaved={onSaved} />
+          <AccountRow key={connection.id} connection={connection} index={index} onSaved={onSaved} latency={latencyByConnection?.get(connection.id)} />
         ))}
       </div>
     </section>
@@ -110,7 +113,7 @@ function accountSubtitle(connection: GatewayConnection): string | null {
   return null;
 }
 
-function AccountRow({ connection, index, onSaved }: { connection: GatewayConnection; index: number; onSaved: () => void }) {
+function AccountRow({ connection, index, onSaved, latency }: { connection: GatewayConnection; index: number; onSaved: () => void; latency?: { latencyMs: number; samples: number } }) {
   const { notify } = useToast();
   const [owner, setOwner] = useState(connection.responsibility?.owner ?? '');
   const [purpose, setPurpose] = useState(connection.responsibility?.purpose ?? '');
@@ -173,6 +176,20 @@ function AccountRow({ connection, index, onSaved }: { connection: GatewayConnect
           </div>
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {latency ? (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-line bg-surface px-2 py-0.5 font-mono text-[10px] text-muted"
+              title={`${latency.samples} successful request${latency.samples === 1 ? '' : 's'} measured; the fastest strategy orders accounts by this`}
+            >
+              <Timer className="h-2.5 w-2.5" aria-hidden="true" />
+              {latency.latencyMs} ms
+            </span>
+          ) : (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-line bg-surface px-2 py-0.5 font-mono text-[10px] text-muted/70" title="No successful request has been measured on this account yet">
+              <Timer className="h-2.5 w-2.5" aria-hidden="true" />
+              unmeasured
+            </span>
+          )}
           {connection.credentialType && (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-line bg-surface px-2 py-0.5 font-mono text-[10px] text-muted">
               {connection.credentialType === 'oauth' ? 'OAuth' : connection.credentialType === 'api-key' ? 'API Key' : 'No key'}

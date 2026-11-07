@@ -118,7 +118,7 @@ export type RequestExecutorDeps = {
   withDeadline: <T>(signal: AbortSignal | undefined, timeoutMs: number, providerId: string, run: (signal: AbortSignal | undefined) => Promise<T>) => Promise<T>;
   /** Refuses an attempt that would exceed the connection's per-minute limit. */
   enforceRateLimit: (candidate: RouteCandidate) => void;
-  recordSuccess: (providerId: string, latencyMs: number, at: string) => void;
+  recordSuccess: (providerId: string, latencyMs: number, at: string, connectionId?: string) => void;
   recordFailure: (providerId: string, code: string, reason: string) => void;
   /** A rate limit on one model: cools that model on that provider, with the provider's reset time when it gave one. */
   recordModelRateLimit?: (providerId: string, modelId: string, input: { retryAfterMs?: number }) => void;
@@ -302,7 +302,9 @@ export class RequestExecutor {
           this.deps.recordRateLimitUse(candidate.connectionId);
           const response = await this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => input.dispatch(candidate, deadline));
           const latencyMs = Date.now() - startedAt;
-          this.deps.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString());
+          // Keyed by the connection as well as the provider: latency is a property of the account that
+          // served the request, and two accounts of one vendor are not equally fast.
+          this.deps.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString(), candidate.connectionId);
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: true, latencyMs });
           return { response, attempts };
         } catch (error) {

@@ -37,7 +37,7 @@ import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, f
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { ProviderPlayground } from '../components/ProviderPlayground';
-import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, putGatewayConnection, refreshGatewayConnectionModels, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, probeGatewayConnection, putGatewayConnection, refreshGatewayConnectionModels, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import { dashboardRoutes, providerRoute, providerUsageRoute } from '../lib/routes';
 import { UsageContent } from './UsagePage';
@@ -151,7 +151,7 @@ function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest,
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <button type="button" onClick={onTest} disabled={testing} className="btn-ghost !px-3 !py-2 !text-xs">{testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testing ? 'Testing' : 'Test provider'}</button>
+        <button type="button" onClick={() => onTest()} disabled={testing} className="btn-ghost !px-3 !py-2 !text-xs">{testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testing ? 'Testing' : 'Test provider'}</button>
         <button type="button" onClick={onEdit} className="btn-quiet !px-2 !py-2 text-xs"><SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />Edit</button>
       </div>
     </div>
@@ -279,11 +279,14 @@ function ResiliencePanel({ connection, routingState, onSave, strategy, onStrateg
             <select value={strategy} onChange={(event) => { void onStrategy(event.target.value as GatewayProviderStrategy); }} className="input !py-2 !text-xs">
               <option value="priority">Follow priority</option>
               <option value="round-robin">Take turns (round-robin)</option>
+              <option value="fastest">Fastest measured account</option>
             </select>
           </label>
           <p className="muted text-[11px] leading-relaxed">{strategy === 'round-robin'
             ? 'Every connection of this provider takes turns, so no single account carries all the traffic.'
-            : 'The first connection by priority serves requests and the others are fallbacks.'}</p>
+            : strategy === 'fastest'
+              ? 'Accounts at the same priority are tried quickest-measured first. A reading comes from the requests each account has served, so a new account competes once it has answered one; an account with no reading is never treated as fast. Priority is still respected, and the others remain fallbacks.'
+              : 'The first connection by priority serves requests and the others are fallbacks.'}</p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="block"><span className="mono-label mb-1.5 block">Hedge after (ms)</span><input type="number" min={0} max={30000} step={100} value={draft.hedgeAfterMs} onChange={(event) => setDraft((current) => ({ ...current, hedgeAfterMs: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
             <label className="block"><span className="mono-label mb-1.5 block">Retries</span><input type="number" min={0} max={5} value={draft.maxRetries} onChange={(event) => setDraft((current) => ({ ...current, maxRetries: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
@@ -447,6 +450,17 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   const { notify } = useToast();
   const [copiedModel, setCopiedModel] = useState<string | null>(null);
   const [routingState, setRoutingState] = useState<GatewayRoutingState | undefined>();
+  /**
+   * Each account's measured round trip, from the gateway's routing state. A Map rather than a lookup
+   * per row so the panel does not walk the whole state once per account.
+   */
+  const latencyByConnection = useMemo(() => {
+    const map = new Map<string, { latencyMs: number; samples: number }>();
+    for (const entry of routingState?.connections ?? []) {
+      if (entry.latency) map.set(entry.connectionId, { latencyMs: entry.latency.latencyMs, samples: entry.latency.samples });
+    }
+    return map;
+  }, [routingState]);
   // Before the read lands, the badge must not assert a credential state it has not checked.
   const meta =
     connectionState === 'ready'
@@ -655,11 +669,21 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     [provider.connectionProviderId, provider.catalogId, provider.id],
   );
 
-  async function testConnection() {
+  async function testConnection(target?: GatewayConnection) {
     if (testingConnection || testing) return;
     scrollAnchorRef.current = window.scrollY;
     setTestingConnection(true);
     try {
+      /**
+       * A row tests **its own** connection. Without a target this is the page-level button and it asks
+       * about the provider, which is the only sensible meaning for a card that may hold several
+       * accounts; a row passes its connection and gets that account's credential checked.
+       */
+      if (target) {
+        const probe = await probeGatewayConnection(target.id);
+        flash(`${target.name} ${probe.valid ? 'accepted its credential' : 'was refused'}${probe.latencyMs === undefined ? '' : ` in ${probe.latencyMs} ms`}.`, probe.valid ? undefined : 'error');
+        return;
+      }
       // This provider, not the whole registry. Reading `/health` here meant waiting for all
       // thirteen adapters to be probed before answering a question about one of them, which
       // on a loaded machine was long enough that the button looked broken.
@@ -957,7 +981,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
             <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-12 w-12 rounded-xl text-sm" />
             <div className="min-w-0"><div className="flex flex-wrap items-center gap-2.5"><h2 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{provider.name}</h2>{provider.apiKeysUrl && (<a href={provider.apiKeysUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-xs font-medium text-gold-text hover:underline" title={`Open ${provider.name}’s key page`}><KeyRound className="h-3 w-3" aria-hidden="true" />API keys<ArrowUpRight className="h-3 w-3" aria-hidden="true" /></a>)}<span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[9px] ${meta.className}`}><span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />{meta.label}</span></div><p className="muted mt-1 text-sm">{provider.description}</p>{provider.freeTier && <p className="mt-2 text-sm text-gold-text"><span className="font-semibold">Free tier: </span>{provider.freeTier}</p>}</div>
           </div>
-          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={refreshModels} disabled={!connection || refreshingModels} title={connection ? 'Ask the provider which models it serves right now' : 'Connect this provider first'} className="btn-ghost !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40">{refreshingModels ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <ListRestart className="h-3.5 w-3.5" aria-hidden="true" />}{refreshingModels ? 'Updating' : 'Update models'}</button><button type="button" onClick={testConnection} disabled={testingConnection || testing} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable || planned} title={planned ? provider.unavailableReason : !oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
+          <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={refreshModels} disabled={!connection || refreshingModels} title={connection ? 'Ask the provider which models it serves right now' : 'Connect this provider first'} className="btn-ghost !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40">{refreshingModels ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <ListRestart className="h-3.5 w-3.5" aria-hidden="true" />}{refreshingModels ? 'Updating' : 'Update models'}</button><button type="button" onClick={() => void testConnection()} disabled={testingConnection || testing} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable || planned} title={planned ? provider.unavailableReason : !oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
         </div>
       </div>
 
@@ -1054,7 +1078,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
                   healthy={index === 0 ? connectionHealthy : false}
                   pingMs={index === 0 ? connectionPingMs : undefined}
                   testing={(index === 0 && testingConnection) || testing}
-                  onTest={testConnection}
+                  onTest={() => void testConnection(item)}
                   onEdit={openAddConnection}
                 />
               ))}
@@ -1242,6 +1266,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
         connections={connections}
         providerName={provider.name}
         onSaved={loadConnection}
+        latencyByConnection={latencyByConnection}
         // Offered only where the connect dialog can carry it: an OAuth flow with a served start route.
         {...(isOauth && oauthFlowAvailable ? { onAddAccount: () => { setAddAccountOpen(true); openAddConnection(); } } : {})}
       />

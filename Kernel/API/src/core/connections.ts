@@ -242,11 +242,18 @@ type MetadataEnvelope = {
 };
 
 /** How connections of one provider are chosen. `priority` is the default, and it is what a file without a strategy means. */
-export type ProviderStrategy = 'priority' | 'round-robin';
+/**
+ * How a provider's connections share traffic.
+ *
+ * - `priority` — the default: the lowest priority number first, then by name;
+ * - `round-robin` — balanced across every connection of the provider;
+ * - `fastest` — same-priority connections ordered by measured round trip, unmeasured last.
+ */
+export type ProviderStrategy = 'priority' | 'round-robin' | 'fastest';
 
 /** Where a requested model name is sent: a connected provider and the model id it publishes. */
 export type ModelAlias = { providerId: string; model: string };
-const providerStrategies: readonly ProviderStrategy[] = ['priority', 'round-robin'];
+const providerStrategies: readonly ProviderStrategy[] = ['priority', 'round-robin', 'fastest'];
 
 export function defaultConnectionDirectory(env: Readonly<Record<string, string | undefined>> = process.env) {
   return defaultStateDirectory(env);

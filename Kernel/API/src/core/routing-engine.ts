@@ -36,8 +36,20 @@ export type RoutingEngineOptions = {
   aliasFor?: (name: string) => { providerId: string; model: string } | undefined;
   /** A provider's model family, as its registration declares it. Used to route a bare model name within its family. */
   familyOf?: (providerId: string) => string | undefined;
-  /** A provider's strategy. `round-robin` balances all of that provider's connections; absent or `priority` leaves them alone. */
-  strategyFor?: (providerId: string) => 'priority' | 'round-robin';
+  /**
+   * A provider's strategy.
+   *
+   * - `round-robin` balances all of that provider's connections;
+   * - `fastest` orders same-priority connections by their measured latency, unmeasured last;
+   * - absent or `priority` leaves them alone.
+   */
+  strategyFor?: (providerId: string) => 'priority' | 'round-robin' | 'fastest';
+  /**
+   * The measured round trip for one connection, or `undefined` when it has never served a request.
+   * Read only by the `fastest` strategy, and deliberately **per connection**: two accounts of one
+   * provider are not equally fast, which is the whole reason the ledger is keyed that way.
+   */
+  latencyFor?: (connectionId: string) => { latencyMs: number; samples: number } | undefined;
   /**
    * The provider to serve when nothing is configured.
    *
@@ -152,6 +164,8 @@ export class RoutingEngine {
       model: split.model,
       rotation,
       ...(this.options.familyOf ? { familyOf: this.options.familyOf } : {}),
+      ...(this.options.strategyFor ? { strategyFor: this.options.strategyFor } : {}),
+      ...(this.options.latencyFor ? { latencyFor: this.options.latencyFor } : {}),
       ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
       health,
       failureThreshold: this.options.health.getFailureThreshold(),
