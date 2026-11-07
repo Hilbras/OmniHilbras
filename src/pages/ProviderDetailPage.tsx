@@ -951,7 +951,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
         <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
           <div className="flex min-w-0 items-start gap-3.5 sm:gap-4">
             <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-12 w-12 rounded-xl text-sm" />
-            <div className="min-w-0"><div className="flex flex-wrap items-center gap-2.5"><h2 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{provider.name}</h2><span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[9px] ${meta.className}`}><span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />{meta.label}</span></div><p className="muted mt-1 text-sm">{provider.description}</p>{provider.freeTier && <p className="mt-2 text-sm text-gold-text"><span className="font-semibold">Free tier: </span>{provider.freeTier}</p>}</div>
+            <div className="min-w-0"><div className="flex flex-wrap items-center gap-2.5"><h2 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{provider.name}</h2>{provider.apiKeysUrl && (<a href={provider.apiKeysUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-xs font-medium text-gold-text hover:underline" title={`Open ${provider.name}’s key page`}><KeyRound className="h-3 w-3" aria-hidden="true" />API keys<ArrowUpRight className="h-3 w-3" aria-hidden="true" /></a>)}<span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[9px] ${meta.className}`}><span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />{meta.label}</span></div><p className="muted mt-1 text-sm">{provider.description}</p>{provider.freeTier && <p className="mt-2 text-sm text-gold-text"><span className="font-semibold">Free tier: </span>{provider.freeTier}</p>}</div>
           </div>
           <div className="flex shrink-0 items-center gap-2"><button type="button" onClick={refreshModels} disabled={!connection || refreshingModels} title={connection ? 'Ask the provider which models it serves right now' : 'Connect this provider first'} className="btn-ghost !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40">{refreshingModels ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <ListRestart className="h-3.5 w-3.5" aria-hidden="true" />}{refreshingModels ? 'Updating' : 'Update models'}</button><button type="button" onClick={testConnection} disabled={testingConnection || testing} className="btn-ghost !px-3 !py-2.5 !text-xs">{testingConnection ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testingConnection ? 'Testing' : 'Test provider'}</button><button type="button" onClick={openAddConnection} disabled={!oauthFlowAvailable || planned} title={planned ? provider.unavailableReason : !oauthFlowAvailable ? `${provider.name} sign-in is not available yet.` : undefined} className="btn-gold !px-3 !py-2.5 !text-xs disabled:cursor-not-allowed disabled:opacity-40"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Add connection</button></div>
         </div>
@@ -1242,8 +1242,9 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
           provider={descriptor}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}
           {...(provider.riskSeverity ? { riskSeverity: provider.riskSeverity } : {})}
-          onClose={() => { setAddOpen(false); setSignInWindow(null); }}
+          onClose={() => { setAddOpen(false); setAddAccountOpen(false); setSignInWindow(null); }}
           onConnected={handleOauthConnected}
+          addAccount={addAccountOpen}
         />
       )}      {isOauth && oauthFlowAvailable && addOpen && signInProviderId === 'kiro' && (
         <KiroConnectDialog

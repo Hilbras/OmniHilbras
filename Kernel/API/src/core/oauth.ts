@@ -108,6 +108,8 @@ type ClineSession = {
   /** Set once a callback has claimed this session, so it cannot be replayed. */
   claimed?: boolean;
   result: ClineSessionStatus;
+  /** The connection this sign-in saves to, chosen when it starts (add-account vs repair). */
+  connectionId?: string;
 };
 
 function randomToken(bytes: number) {
@@ -135,7 +137,7 @@ export class ClineSessionStore {
    * sent to the token endpoint: OAuth requires the `redirect_uri` at exchange
    * time to match the one the authorize request carried.
    */
-  start(buildRedirect: (sessionId: string) => string) {
+  start(buildRedirect: (sessionId: string) => string, connectionId?: string) {
     this.prune();
     const id = randomToken(32);
     const session: ClineSession = {
@@ -145,6 +147,9 @@ export class ClineSessionStore {
       createdAt: this.now(),
       expiresAt: this.now() + clineSessionTtlMs,
       result: { status: 'pending' },
+      // The target is chosen when the sign-in starts: the provider id for a repair, a fresh unique
+      // id for an add-account grant — the rule every multi-account flow states.
+      ...(connectionId ? { connectionId } : {}),
     };
     this.sessions.set(id, session);
     return { sessionId: id, state: session.state as string, redirectUri: session.redirectUri };

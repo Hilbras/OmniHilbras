@@ -31,9 +31,11 @@ type Session = {
   connection?: unknown;
   error?: string;
   claimed: boolean;
+  /** The connection this sign-in saves to, chosen when it starts (add-account vs repair). */
+  connectionId?: string;
 };
 
-type CreateInput = { deviceCode: string; userCode: string; verificationUrl: string };
+type CreateInput = { deviceCode: string; userCode: string; verificationUrl: string; connectionId?: string };
 
 export class KiloCodeSessionStore {
   private readonly store: SignInSessionStore<Session, CreateInput>;
@@ -47,6 +49,7 @@ export class KiloCodeSessionStore {
         deviceCode: input.deviceCode,
         userCode: input.userCode,
         verificationUrl: input.verificationUrl,
+        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
         expiresAt,
         status: 'pending',
         claimed: false,
@@ -55,15 +58,20 @@ export class KiloCodeSessionStore {
     });
   }
 
-  create(input: { deviceCode: string; userCode: string; verificationUrl: string; expiresIn?: number }): Session {
+  create(input: { deviceCode: string; userCode: string; verificationUrl: string; connectionId?: string; expiresIn?: number }): Session {
     return this.store.create(
-      { deviceCode: input.deviceCode, userCode: input.userCode, verificationUrl: input.verificationUrl },
+      { deviceCode: input.deviceCode, userCode: input.userCode, verificationUrl: input.verificationUrl, ...(input.connectionId ? { connectionId: input.connectionId } : {}) },
       input.expiresIn,
     );
   }
 
   get(id: string): Session | undefined {
     return this.store.get(id);
+  }
+
+  /** The connection this sign-in saves to, when it carries one. */
+  connectionId(id: string): string | undefined {
+    return this.get(id)?.connectionId;
   }
 
   claim(id: string): Session | undefined {

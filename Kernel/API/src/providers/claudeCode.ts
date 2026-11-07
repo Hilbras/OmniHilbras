@@ -51,6 +51,8 @@ type Session = {
   connection?: unknown;
   error?: string;
   claimed: boolean;
+  /** The connection this sign-in saves to, chosen when it starts (add-account vs repair). */
+  connectionId?: string;
 };
 
 /**
@@ -72,6 +74,8 @@ type ClaudeCodeSessionInput = {
   redirectUri: string;
   state: string;
   verificationUrl: string;
+
+  connectionId?: string;
 };
 
 export class ClaudeCodeSessionStore {
@@ -170,12 +174,14 @@ export function claudeCodeRedirectUri(publicBaseUrl: string, sessionId: string):
  * redirect a provider must honour verbatim, so the id is put there, exactly as Cline's is. The verifier
  * stays on the session and never enters a URL.
  */
-export function beginClaudeCodeSignIn(input: { store: ClaudeCodeSessionStore; publicBaseUrl: string }): ClaudeCodeSessionStatus & { sessionId: string } {
+export function beginClaudeCodeSignIn(input: { store: ClaudeCodeSessionStore; publicBaseUrl: string; connectionId?: string }): ClaudeCodeSessionStatus & { sessionId: string } {
   const { verifier, challenge } = generatePkcePair();
   const state = randomBytes(24).toString('base64url');
   // Two steps rather than one: the redirect embeds the id, and the id only exists once the session does.
   // `verificationUrl` is assigned below, once the challenge is known, because the URL *is* the challenge.
-  const session = input.store.create({ codeVerifier: verifier, redirectUri: '', state, verificationUrl: '' });
+  // The target connection is chosen when the sign-in starts: the provider id for a repair, a fresh
+  // unique id for an add-account grant — the rule every multi-account flow states.
+  const session = input.store.create({ codeVerifier: verifier, redirectUri: '', state, verificationUrl: '', ...(input.connectionId ? { connectionId: input.connectionId } : {}) });
   const redirectUri = claudeCodeRedirectUri(input.publicBaseUrl, session.id);
   session.redirectUri = redirectUri;
   const verificationUrl = claudeCodeAuthorizeUrl({ redirectUri, state, codeChallenge: challenge });

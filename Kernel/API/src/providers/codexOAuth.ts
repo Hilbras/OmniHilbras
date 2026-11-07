@@ -22,6 +22,8 @@ type Session = {
   clientId: string;
   redirectUri: string;
   callbackPath: string;
+  /** The connection this sign-in saves to, chosen when it starts (add-account vs repair). */
+  connectionId?: string;
   verificationUrl: string;
   expiresAt: number;
   status: 'pending' | 'connected' | 'failed' | 'expired';
@@ -155,11 +157,12 @@ function codexFailureReason(error: unknown): string {
   return 'The gateway could not store the Codex connection. Start again from OmniHilbras.';
 }
 
-export function beginCodexSignIn(input: { store: CodexSessionStore; clientId: string; redirectUri: string; callbackPath: string }) {
+export function beginCodexSignIn(input: { store: CodexSessionStore; clientId: string; redirectUri: string; callbackPath: string; connectionId?: string }) {
   const codeVerifier = randomBytes(64).toString('base64url');
   const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
   const state = randomBytes(24).toString('base64url');
-  const session = input.store.create({ codeVerifier, state, clientId: input.clientId, redirectUri: input.redirectUri, callbackPath: input.callbackPath, verificationUrl: '' });
+  // The target connection is chosen when the sign-in starts (add-account vs repair).
+  const session = input.store.create({ codeVerifier, state, clientId: input.clientId, redirectUri: input.redirectUri, callbackPath: input.callbackPath, verificationUrl: '', ...(input.connectionId ? { connectionId: input.connectionId } : {}) });
   session.verificationUrl = codexAuthorizeUrl({ clientId: input.clientId, redirectUri: input.redirectUri, state, codeChallenge });
   return { sessionId: session.id, ...input.store.publicStatus(session) };
 }

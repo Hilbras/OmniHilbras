@@ -37,7 +37,8 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
       assertOnlyFields(body, ['redirectUri']);
       const redirectUri = typeof body.redirectUri === 'string' ? body.redirectUri : defaultClineRedirect(options.publicBaseUrl);
-      sendJson(response, 201, service.startClineSignIn(redirectUri), origin);
+      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
+      sendJson(response, 201, service.startClineSignIn(redirectUri, addAccount), origin);
       return true;
     }
 
@@ -164,7 +165,9 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
      * approves at the verification URL and the dashboard polls until it is approved.
      */
     if (request.method === 'POST' && url.pathname === '/v1/oauth/kilocode/start') {
-      sendJson(response, 201, await service.startKilocodeSignIn(), origin);
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
+      sendJson(response, 201, await service.startKilocodeSignIn(addAccount), origin);
       return true;
     }
 
@@ -186,7 +189,9 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
      * cards on two domains, so two literal path sets.
      */
     if (request.method === 'POST' && url.pathname === '/v1/oauth/codebuddy-cn/start') {
-      sendJson(response, 201, await service.startCodeBuddySignIn('codebuddy-cn'), origin);
+      const body = await readJsonBody(request, maxConnectionBodyBytes);
+      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
+      sendJson(response, 201, await service.startCodeBuddySignIn('codebuddy-cn', addAccount), origin);
       return true;
     }
 
@@ -203,7 +208,9 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'POST' && url.pathname === '/v1/oauth/codebuddy-intl/start') {
-      sendJson(response, 201, await service.startCodeBuddySignIn('codebuddy-intl'), origin);
+      const body = await readJsonBody(request, maxConnectionBodyBytes);
+      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
+      sendJson(response, 201, await service.startCodeBuddySignIn('codebuddy-intl', addAccount), origin);
       return true;
     }
 
@@ -224,7 +231,9 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
      * have their own routes, so the spec and the machines that read it see two literal paths.
      */
     if (request.method === 'POST' && url.pathname === '/v1/oauth/minimax-code/start') {
-      sendJson(response, 201, await service.startMinimaxCodeSignIn('minimax-code'), origin);
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
+      sendJson(response, 201, await service.startMinimaxCodeSignIn('minimax-code', addAccount), origin);
       return true;
     }
 
@@ -241,7 +250,9 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'POST' && url.pathname === '/v1/oauth/minimax-code-global/start') {
-      sendJson(response, 201, await service.startMinimaxCodeSignIn('minimax-code-global'), origin);
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
+      sendJson(response, 201, await service.startMinimaxCodeSignIn('minimax-code-global', addAccount), origin);
       return true;
     }
 
@@ -287,7 +298,9 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
      * for why — and `start` hands back both the URL to open and the id to poll.
      */
     if (request.method === 'POST' && url.pathname === '/v1/oauth/claude-code/start') {
-      sendJson(response, 201, service.startClaudeCodeSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:8787'), origin);
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
+      sendJson(response, 201, service.startClaudeCodeSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:8787', addAccount), origin);
       return true;
     }
 
@@ -334,7 +347,9 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'POST' && url.pathname === '/v1/oauth/codex/start') {
-      sendJson(response, 201, await service.startCodexSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:8787'), origin);
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const addAccount = isRecord(body) && (body as { addAccount?: unknown }).addAccount === true;
+      sendJson(response, 201, await service.startCodexSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:8787', addAccount), origin);
       return true;
     }
 
@@ -488,7 +503,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       // Optional here, unlike every other web-cookie connect route: an empty paste is this
       // provider's normal case and stores the honest `{ type: 'none' }` rather than a fake secret.
       const cookieHeader = readOptionalString(body, 'cookieHeader');
-      const connection = await service.connectDuckDuckGoWeb(cookieHeader, signal);
+      const connection = await service.connectDuckDuckGoWeb(cookieHeader, signal, body.addAccount === true);
       sendJson(response, 201, { connection }, origin);
       return true;
     }

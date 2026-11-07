@@ -73,6 +73,11 @@ type Props = {
   riskSeverity?: 'standard' | 'high';
   onConnected: (connection: GatewayConnection) => void | Promise<void>;
   onClose: () => void;
+  /**
+   * Save this paste as a **second** account beside the existing connection instead of repairing the
+   * one it has. The gateway mints the target when this flag rides the paste body.
+   */
+  addAccount?: boolean;
 };
 
 type CheckResult = {
@@ -97,7 +102,7 @@ type ProbeResult = {
   models: string[];
 };
 
-export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskSeverity = 'standard', onConnected, onClose }: Props) {
+export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskSeverity = 'standard', onConnected, onClose, addAccount = false }: Props) {
   const { name: providerName, website, credentialName: credential } = descriptor;
   const [acknowledged, setAcknowledged] = useState(false);
   const [exported, setExported] = useState('');
@@ -186,7 +191,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
         headers: { 'content-type': 'application/json' },
         // Sent to the gateway and nowhere else, so the browser is not trusted to decide
         // which cookies belong to this connection.
-        body: JSON.stringify({ [descriptor.paste.field]: exported, freeOnly }),
+        body: JSON.stringify({ [descriptor.paste.field]: exported, freeOnly, ...(addAccount ? { addAccount: true } : {}) }),
       });
       settledRef.current = true;
       setPhase('done');

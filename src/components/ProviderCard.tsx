@@ -85,6 +85,8 @@ export type ProviderRecord = {
    * why is a dead end, and one that hides the reason is worse.
    */
   unavailableReason?: string;
+  /** Where this provider mints or manages keys — rendered as a link under the provider's title. */
+  apiKeysUrl?: string;
 };
 
 function statusMeta(status: ProviderStatus) {

@@ -31,9 +31,11 @@ type Session = SignInSessionBase & {
   deviceCode: string;
   verificationUrl: string;
   region: CodeBuddyRegion;
+  /** The connection this sign-in saves to, chosen when it starts (add-account vs repair). */
+  connectionId?: string;
 };
 
-type CreateInput = { deviceCode: string; verificationUrl: string; region: CodeBuddyRegion };
+type CreateInput = { deviceCode: string; verificationUrl: string; region: CodeBuddyRegion; connectionId?: string };
 
 export class CodeBuddySessionStore {
   private readonly store: SignInSessionStore<Session, CreateInput>;
@@ -47,6 +49,7 @@ export class CodeBuddySessionStore {
         deviceCode: input.deviceCode,
         verificationUrl: input.verificationUrl,
         region: input.region,
+        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
         expiresAt,
         status: 'pending',
         claimed: false,
@@ -56,12 +59,17 @@ export class CodeBuddySessionStore {
     });
   }
 
-  create(input: { deviceCode: string; verificationUrl: string; region: CodeBuddyRegion; expiresIn?: number }): Session {
-    return this.store.create({ deviceCode: input.deviceCode, verificationUrl: input.verificationUrl, region: input.region }, input.expiresIn);
+  create(input: { deviceCode: string; verificationUrl: string; region: CodeBuddyRegion; connectionId?: string; expiresIn?: number }): Session {
+    return this.store.create({ deviceCode: input.deviceCode, verificationUrl: input.verificationUrl, region: input.region, ...(input.connectionId ? { connectionId: input.connectionId } : {}) }, input.expiresIn);
   }
 
   get(id: string): Session | undefined {
     return this.store.get(id);
+  }
+
+  /** The connection this sign-in saves to, when it carries one. */
+  connectionId(id: string): string | undefined {
+    return this.get(id)?.connectionId;
   }
 
   claim(id: string): Session | undefined {

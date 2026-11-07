@@ -34,9 +34,12 @@ type Session = {
   connection?: unknown;
   error?: string;
   claimed: boolean;
+  /** The connection this sign-in saves to, chosen when it starts (add-account vs repair). */
+  connectionId?: string;
 };
 
-type CreateInput = { deviceCode: string; userCode: string; codeVerifier: string; verificationUrl: string; pollByUserCode?: boolean };
+type CreateInput = { deviceCode: string; userCode: string; codeVerifier: string; verificationUrl: string; pollByUserCode?: boolean; connectionId?: string;
+};
 
 export class MinimaxCodeSessionStore {
   private readonly store: SignInSessionStore<Session, CreateInput>;
@@ -60,15 +63,20 @@ export class MinimaxCodeSessionStore {
     });
   }
 
-  create(input: CreateInput & { expiresIn?: number }): Session {
+  create(input: CreateInput & { connectionId?: string; expiresIn?: number }): Session {
     return this.store.create(
-      { deviceCode: input.deviceCode, userCode: input.userCode, codeVerifier: input.codeVerifier, verificationUrl: input.verificationUrl, pollByUserCode: input.pollByUserCode },
+      { deviceCode: input.deviceCode, userCode: input.userCode, codeVerifier: input.codeVerifier, verificationUrl: input.verificationUrl, pollByUserCode: input.pollByUserCode, ...(input.connectionId ? { connectionId: input.connectionId } : {}) },
       input.expiresIn,
     );
   }
 
   get(id: string): Session | undefined {
     return this.store.get(id);
+  }
+
+  /** The connection this sign-in saves to, when it carries one. */
+  connectionId(id: string): string | undefined {
+    return this.get(id)?.connectionId;
   }
 
   claim(id: string): Session | undefined {

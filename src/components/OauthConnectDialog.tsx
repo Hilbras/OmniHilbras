@@ -331,7 +331,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
 
     if (providerId === 'claude-code') {
       try {
-        const signIn = await startClaudeCodeSignIn();
+        const signIn = await startClaudeCodeSignIn(addAccount);
         if (settledRef.current) return;
         startedSessionRef.current = signIn.sessionId;
         const sentToOpenTab = navigateTo(signIn.verificationUrl);
@@ -351,7 +351,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
 
     if (providerId === 'codex') {
       try {
-        const signIn = await startCodexSignIn();
+        const signIn = await startCodexSignIn(addAccount);
         if (settledRef.current) return;
         startedSessionRef.current = signIn.sessionId;
         const sentToOpenTab = navigateTo(signIn.verificationUrl);

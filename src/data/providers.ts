@@ -163,6 +163,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'Q',
     logo: providerLogoMap.qwen,
     endpoint: 'https://chat.qwen.ai',
+    apiKeysUrl: 'https://chat.qwen.ai/',
     /**
      * A dated snapshot of the guest catalog, not a promise.
      *
@@ -197,6 +198,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'D',
     logo: providerLogoMap.deepseek,
     endpoint: 'https://chat.deepseek.com',
+    apiKeysUrl: 'https://chat.deepseek.com/',
     modelList: [],
     /**
      * Real, and worth reading before connecting.
@@ -232,6 +234,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'K',
     logo: providerLogoMap.kiro,
     endpoint: 'https://codewhisperer.us-east-1.amazonaws.com',
+    apiKeysUrl: 'https://kiro.dev/',
     modelList: [],
     // Not a preference. Kiro's terms prohibit third-party proxy and harness use, and
     // this is exactly that, so the card says so before anyone connects rather than in a
@@ -256,6 +259,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'C',
     logo: providerLogoMap.cline,
     endpoint: 'http://127.0.0.1:8787/v1',
+    apiKeysUrl: 'https://app.cline.bot/',
     modelList: [],
   },
   {
@@ -303,6 +307,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'Z',
     logo: providerLogoMap.opencode,
     endpoint: 'https://opencode.ai/zen/v1',
+    apiKeysUrl: 'https://opencode.ai/auth',
     modelList: [],
   },
   {
@@ -323,6 +328,7 @@ export const providerCatalog: ProviderRecord[] = [
     color: '#0ea5e9',
     initial: 'A',
     endpoint: 'https://apihub.agnes-ai.com/v1',
+    apiKeysUrl: 'https://platform.agnes-ai.com/',
     modelList: [],
   },
   {
@@ -341,6 +347,7 @@ export const providerCatalog: ProviderRecord[] = [
     color: '#d97706',
     initial: 'N',
     endpoint: 'https://inference-api.nousresearch.com/v1',
+    apiKeysUrl: 'https://portal.nousresearch.com/api-keys',
     modelList: [],
   },
   {
@@ -360,6 +367,7 @@ export const providerCatalog: ProviderRecord[] = [
     color: '#ef4444',
     initial: 'B',
     endpoint: 'https://api.beatapi.io/v1',
+    apiKeysUrl: 'https://beatapi.io/dashboard/apikeys',
     modelList: [],
   },
   {
@@ -379,6 +387,7 @@ export const providerCatalog: ProviderRecord[] = [
     color: '#22c55e',
     initial: 'K',
     endpoint: 'https://kiraai.vn/api/v1',
+    apiKeysUrl: 'https://kiraai.vn/',
     modelList: [],
   },
   {
@@ -398,6 +407,7 @@ export const providerCatalog: ProviderRecord[] = [
     color: '#8b5cf6',
     initial: 'V',
     endpoint: 'https://api.vengetic.biz.id/v1',
+    apiKeysUrl: 'https://api.vengetic.biz.id',
     modelList: [],
   },
   {
@@ -416,6 +426,7 @@ export const providerCatalog: ProviderRecord[] = [
     color: '#f59e0b',
     initial: 'A',
     endpoint: 'https://anyrouter.dev/api/v1',
+    apiKeysUrl: 'https://anyrouter.dev/',
     modelList: [],
   },
   {
@@ -435,6 +446,7 @@ export const providerCatalog: ProviderRecord[] = [
     color: '#14b8a6',
     initial: 'Z',
     endpoint: 'https://zro.moonmath.ai/v1',
+    apiKeysUrl: 'https://zro.moonmath.ai',
     modelList: [],
   },
   {
@@ -454,6 +466,7 @@ export const providerCatalog: ProviderRecord[] = [
     color: '#6366f1',
     initial: 'U',
     endpoint: 'https://api.unorouter.com/v1',
+    apiKeysUrl: 'https://api.unorouter.com/',
     modelList: [],
   },
   {
@@ -505,6 +518,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'M',
     logo: providerLogoMap.mistral,
     endpoint: 'https://api.mistral.ai/v1',
+    apiKeysUrl: 'https://console.mistral.ai/api-keys',
     modelList: [],
   },
   {
@@ -525,6 +539,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'R',
     logo: providerLogoMap.openrouter,
     endpoint: 'https://openrouter.ai/api/v1',
+    apiKeysUrl: 'https://openrouter.ai/keys',
     modelList: [],
   },
   {
@@ -545,6 +560,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'N',
     logo: providerLogoMap.nara,
     endpoint: 'https://router.bynara.id/v1',
+    apiKeysUrl: 'https://router.bynara.id/',
     modelList: [],
   },
   {
@@ -568,6 +584,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'T',
     logo: providerLogoMap.tokenharbor,
     endpoint: 'https://tokenharbor.ai/v1',
+    apiKeysUrl: 'https://tokenharbor.ai/dashboard',
     modelList: [],
   },
   {
@@ -589,6 +606,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'A',
     logo: providerLogoMap.apmix,
     endpoint: 'https://api.apmix.ai/v1',
+    apiKeysUrl: 'https://api.apmix.ai/',
     modelList: [],
   },
   {
@@ -610,6 +628,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'A',
     logo: providerLogoMap.apinex,
     endpoint: 'https://api.apinex.bond/v1',
+    apiKeysUrl: 'https://api.apinex.bond/',
     modelList: [],
   },
   {
@@ -631,6 +650,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'T',
     logo: providerLogoMap.tiarina,
     endpoint: 'https://ai.tiarina.cloud/v1',
+    apiKeysUrl: 'https://ai.tiarina.cloud/',
     modelList: [],
   },
   {
@@ -652,6 +672,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'X',
     logo: providerLogoMap.xkiro,
     endpoint: 'https://api.xkiro.com/v1',
+    apiKeysUrl: 'https://api.xkiro.com/',
     modelList: [],
   },
   {
@@ -721,6 +742,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'G',
     logo: providerLogoMap.google,
     endpoint: 'https://gemini.google.com',
+    apiKeysUrl: 'https://gemini.google.com/',
     modelList: [],
     /**
      * A live session for a whole Google account, and Google's terms.
@@ -756,6 +778,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'D',
     logo: '/providers/duckai.png',
     endpoint: 'https://duck.ai',
+    apiKeysUrl: 'https://duck.ai/',
     modelList: [],
     /**
      * A public, anonymous service — and the free tier is a courtesy, not a contract.
@@ -793,6 +816,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'K',
     logo: providerLogoMap.kimi,
     endpoint: 'https://api.moonshot.ai/v1',
+    apiKeysUrl: 'https://platform.moonshot.ai/console/api-keys',
     modelList: [],
   },
   {
@@ -814,6 +838,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'KC',
     logo: providerLogoMap['kimi-code'],
     endpoint: 'https://api.kimi.com',
+    apiKeysUrl: 'https://www.kimi.com/',
     modelList: [],
   },
   {
@@ -836,6 +861,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'CC',
     logo: providerLogoMap['claude-code'],
     endpoint: 'https://api.anthropic.com',
+    apiKeysUrl: 'https://claude.ai/settings',
     modelList: [],
     /**
      * Real, and the reason this is a separate card from `anthropic`.
@@ -866,6 +892,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'C',
     logo: providerLogoMap.codex,
     endpoint: 'https://chatgpt.com/backend-api/codex/responses',
+    apiKeysUrl: 'https://chatgpt.com/',
     modelList: [],
     /**
      * Stated on the card because it is the user's trade to make, not ours to hide.
@@ -897,6 +924,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'QO',
     logo: providerLogoMap.qoder,
     endpoint: 'https://api3.qoder.sh',
+    apiKeysUrl: 'https://qoder.com/',
     modelList: [],
   },
   {
@@ -916,6 +944,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'KC',
     logo: providerLogoMap.kilocode,
     endpoint: 'https://api.kilo.ai',
+    apiKeysUrl: 'https://app.kilo.ai/',
     modelList: [],
   },
   {
@@ -935,6 +964,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'MM',
     logo: providerLogoMap['minimax-code'],
     endpoint: 'https://agent.minimax.cn',
+    apiKeysUrl: 'https://platform.minimaxi.com/',
     modelList: [],
   },
   {
@@ -954,6 +984,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'MG',
     logo: providerLogoMap['minimax-code-global'],
     endpoint: 'https://agent.minimax.io',
+    apiKeysUrl: 'https://platform.minimax.io/',
     modelList: [],
   },
   {
@@ -975,6 +1006,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'CB',
     logo: providerLogoMap['codebuddy-cn'],
     endpoint: 'https://copilot.tencent.com',
+    apiKeysUrl: 'https://www.codebuddy.ai/',
     modelList: [],
   },
   {
@@ -1017,6 +1049,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'D',
     logo: providerLogoMap.deepseek,
     endpoint: 'https://api.deepseek.com/v1',
+    apiKeysUrl: 'https://platform.deepseek.com/api_keys',
     modelList: [],
   },
   {
@@ -1063,6 +1096,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'G',
     logo: providerLogoMap.groq,
     endpoint: 'https://api.groq.com/openai/v1',
+    apiKeysUrl: 'https://console.groq.com/keys',
     modelList: [],
   },
   {
@@ -1086,6 +1120,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'X',
     logo: providerLogoMap.grok,
     endpoint: 'https://api.x.ai/v1',
+    apiKeysUrl: 'https://console.x.ai/',
     modelList: [],
   },
   {
@@ -1109,6 +1144,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'N',
     logo: providerLogoMap.nvidia,
     endpoint: 'https://integrate.api.nvidia.com/v1',
+    apiKeysUrl: 'https://build.nvidia.com/',
     modelList: [],
   },
   {
@@ -1132,6 +1168,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'O',
     logo: providerLogoMap.openai,
     endpoint: 'https://api.openai.com/v1',
+    apiKeysUrl: 'https://platform.openai.com/api-keys',
     modelList: [],
   },
   {
@@ -1155,6 +1192,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'A',
     logo: providerLogoMap.anthropic,
     endpoint: 'https://api.anthropic.com/v1',
+    apiKeysUrl: 'https://console.anthropic.com/settings/keys',
     modelList: [],
   },
   {
@@ -1178,6 +1216,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'G',
     logo: providerLogoMap.google,
     endpoint: 'https://generativelanguage.googleapis.com/v1beta',
+    apiKeysUrl: 'https://aistudio.google.com/apikey',
     modelList: [],
   },
   {

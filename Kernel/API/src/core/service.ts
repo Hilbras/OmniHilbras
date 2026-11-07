@@ -715,14 +715,14 @@ export class GatewayService {
    * Completes a Cline sign-in: exchanges what the user pasted for tokens,
    * proves them against Cline, and only then stores the connection.
    */
-  async connectCline(input: { code: string; callback?: string; redirectUri: string; name?: string; priority?: number }, signal?: AbortSignal): Promise<ConnectionRecord> {
+  async connectCline(input: { code: string; callback?: string; redirectUri: string; connectionId?: string; name?: string; priority?: number }, signal?: AbortSignal): Promise<ConnectionRecord> {
     if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
     const tokens = await exchangeClineCode(input, this.transport, signal);
     const credential = toClineCredential(tokens);
     // `saveConnection` proves the token against Cline and imports the catalog
     // before anything reaches the vault, so nothing is stored on a bad sign-in.
     return this.saveConnection({
-      id: 'cline',
+      id: input.connectionId ?? 'cline',
       providerId: 'cline',
       name: input.name?.trim() || (tokens.email ? `Cline (${tokens.email})` : 'Cline'),
       endpoint: CLINE_OAUTH.apiBaseUrl,
@@ -838,12 +838,12 @@ export class GatewayService {
    * Kilo Code, MiniMax Code, Qoder — all device flows.
    * ------------------------------------------------------------------ */
 
-  async startKilocodeSignIn() {
+  async startKilocodeSignIn(addAccount = false) {
     const adapter = this.kilocodeAdapter(kilocodeProviderId) as unknown as {
       beginSignIn(): Promise<{ deviceCode: string; userCode: string; verificationUrl: string; expiresIn?: number }>;
     };
     const started = await adapter.beginSignIn();
-    const session = this.kilocodeSessions.create(started);
+    const session = this.kilocodeSessions.create({ ...started, connectionId: addAccount ? `kilocode-${randomUUID().replace(/-/g, '').slice(0, 12)}` : kilocodeProviderId });
     return { sessionId: session.id, userCode: session.userCode ?? started.userCode, verificationUrl: session.verificationUrl, expiresAt: new Date(session.expiresAt).toISOString() };
   }
 
@@ -875,7 +875,7 @@ export class GatewayService {
         return note;
       },
       connection: () => ({
-        id: kilocodeProviderId,
+        id: this.kilocodeSessions.get(sessionId)?.connectionId ?? kilocodeProviderId,
         providerId: kilocodeProviderId,
         name: 'Kilo Code',
         endpoint: KILOCODE.server,
@@ -894,13 +894,13 @@ export class GatewayService {
    * user approves in a browser, and the poll asks for the token. So `userCode` is absent from the
    * response and the dashboard opens `verificationUrl`.
    */
-  async startCodeBuddySignIn(providerId: string) {
+  async startCodeBuddySignIn(providerId: string, addAccount = false) {
     const region = codebuddyRegionFor(providerId);
     const adapter = codebuddySignInAdapter(region, { transport: this.transport }) as unknown as {
       beginSignIn(): Promise<{ deviceCode: string; userCode: string; verificationUrl: string; expiresIn?: number }>;
     };
     const started = await adapter.beginSignIn();
-    const session = this.codebuddySessions.create({ ...started, region });
+    const session = this.codebuddySessions.create({ ...started, region, connectionId: addAccount ? `${providerId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : providerId });
     return {
       sessionId: session.id,
       verificationUrl: session.verificationUrl,
@@ -938,7 +938,7 @@ export class GatewayService {
         return note;
       },
       connection: () => ({
-        id: providerId,
+        id: this.codebuddySessions.get(sessionId)?.connectionId ?? providerId,
         providerId,
         name: providerId === codebuddyIntlProviderId ? 'CodeBuddy (Global)' : 'CodeBuddy',
         endpoint: codebuddyEndpointFor(providerId),
@@ -950,12 +950,12 @@ export class GatewayService {
     });
   }
 
-  async startMinimaxCodeSignIn(providerId: string) {
+  async startMinimaxCodeSignIn(providerId: string, addAccount = false) {
     const adapter = this.minimaxCodeAdapter(providerId) as unknown as {
       beginSignIn(): Promise<{ deviceCode: string; userCode: string; verificationUrl: string; codeVerifier: string; expiresIn?: number }>;
     };
     const started = await adapter.beginSignIn();
-    const session = this.minimaxCodeSessions.create(started);
+    const session = this.minimaxCodeSessions.create({ ...started, connectionId: addAccount ? `${providerId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : providerId });
     return { sessionId: session.id, userCode: session.userCode, verificationUrl: session.verificationUrl, expiresAt: new Date(session.expiresAt).toISOString() };
   }
 
@@ -1055,8 +1055,8 @@ export class GatewayService {
    * is where the gateway's own reachable origin is known — the same value `defaultClineRedirect`
    * uses. The callback path derived from it must match the one the route and `http.ts` exempt.
    */
-  startClaudeCodeSignIn(publicBaseUrl: string) {
-    return beginClaudeCodeSignIn({ store: this.claudeCodeSessions, publicBaseUrl });
+  startClaudeCodeSignIn(publicBaseUrl: string, addAccount = false) {
+    return beginClaudeCodeSignIn({ store: this.claudeCodeSessions, publicBaseUrl, connectionId: addAccount ? `claude-code-${randomUUID().replace(/-/g, '').slice(0, 12)}` : claudeCodeProviderId });
   }
 
   /**
@@ -1069,14 +1069,14 @@ export class GatewayService {
    * is what an operator's registered URI does — needs no second socket, and opening one there
    * would simply collide with the server that is already bound to it.
    */
-  async startCodexSignIn(publicBaseUrl: string) {
+  async startCodexSignIn(publicBaseUrl: string, addAccount = false) {
     const config = this.gatewayConfig?.codex;
     const redirect = resolveCodexConfig({ clientId: config?.clientId, redirectUri: config?.redirectUri, publicBaseUrl });
     const gatewayPort = Number(new URL(publicBaseUrl).port || 80);
     if (redirect.redirectPort !== gatewayPort) {
       await this.codexCallbackListener.open(redirect.redirectPort, '127.0.0.1');
     }
-    return beginCodexSignIn({ store: this.codexSessions, ...redirect });
+    return beginCodexSignIn({ store: this.codexSessions, ...redirect, connectionId: addAccount ? `codex-${randomUUID().replace(/-/g, '').slice(0, 12)}` : codexProviderId });
   }
 
   /**
@@ -1128,7 +1128,7 @@ export class GatewayService {
       // be read must not throw away a completed sign-in. The connection is stored and the reason the
       // model list is missing travels with it, which is what the dashboard shows afterwards.
       saveConnection: async (credential) => this.saveConnection({
-        id: codexProviderId,
+        id: this.codexSessions.get(input.sessionId)?.connectionId ?? codexProviderId,
         providerId: codexProviderId,
         name: 'Codex',
         endpoint: 'https://chatgpt.com/backend-api/codex/responses',
@@ -1153,6 +1153,7 @@ export class GatewayService {
    */
   completeClaudeCodeCallback(input: { sessionId?: string; raw: string }, signal?: AbortSignal): Promise<ClaudeCodeSessionStatus | undefined> {
     if (!input.sessionId) return Promise.resolve(undefined);
+    const sessionId = input.sessionId;
     return completeClaudeCodeSignIn({
       store: this.claudeCodeSessions,
       sessionId: input.sessionId,
@@ -1160,7 +1161,7 @@ export class GatewayService {
       transport: this.transport,
       ...(signal ? { signal } : {}),
       saveConnection: async ({ credential }) => this.saveConnection({
-        id: claudeCodeProviderId,
+        id: this.claudeCodeSessions.get(sessionId)?.connectionId ?? claudeCodeProviderId,
         providerId: claudeCodeProviderId,
         name: 'Claude Code',
         // The endpoint is fixed by the adapter; recorded so an operator can see which host it reaches.
@@ -1279,11 +1280,11 @@ export class GatewayService {
    * session id is how the dashboard learns the outcome; the `state` is what
    * ties the callback to this sign-in when Cline hands one back at all.
    */
-  startClineSignIn(redirectUri: string) {
+  startClineSignIn(redirectUri: string, addAccount = false) {
     // The session id goes in the redirect path, because the path is the one
     // part of the callback Cline has to honour verbatim.
     // The same redirect is what gets sent to the token endpoint later.
-    const { sessionId, state, redirectUri: callback } = this.clineSessions.start((id) => redirectUri.replace(/\/v1\/oauth\/cline\/callback\/?$/, clineCallbackPathFor(id)));
+    const { sessionId, state, redirectUri: callback } = this.clineSessions.start((id) => redirectUri.replace(/\/v1\/oauth\/cline\/callback\/?$/, clineCallbackPathFor(id)), addAccount ? `cline-${randomUUID().replace(/-/g, '').slice(0, 12)}` : 'cline');
     return { ...this.beginClineAuthorization(callback, state), sessionId, state };
   }
 
@@ -1321,7 +1322,7 @@ export class GatewayService {
       return { ok: false, message };
     }
     try {
-      const connection = await this.connectCline({ code: input.code, redirectUri: session.redirectUri }, signal);
+      const connection = await this.connectCline({ code: input.code, redirectUri: session.redirectUri, connectionId: session.connectionId }, signal);
       // The whole record, so the dashboard can render the provider page from it
       // without a second fetch. It is metadata-only; the token stays in the vault.
       this.clineSessions.resolve(session.id, { status: 'connected', connection });
@@ -1469,7 +1470,7 @@ export class GatewayService {
    *
    * Checked first, so a refused cookie never becomes a connection that looks connected and answers nothing.
    */
-  async connectGeminiWeb(raw: string, signal?: AbortSignal) {
+  async connectGeminiWeb(raw: string, signal?: AbortSignal, addAccount = false) {
     const cookie = normalizeGeminiWebCookie(raw);
     if (!geminiWebCookiePresent(cookie)) {
       throw new ProviderError('AUTHENTICATION_FAILED', 'No usable Gemini cookie was pasted.', {
@@ -1486,7 +1487,7 @@ export class GatewayService {
     }
     return this.saveConnection(
       {
-        id: geminiWebProviderId,
+        id: addAccount ? `geminiWebProviderId-${randomUUID().replace(/-/g, '').slice(0, 12)}` : geminiWebProviderId,
         providerId: geminiWebProviderId,
         name: 'Gemini Web',
         endpoint: 'https://gemini.google.com',
@@ -1572,7 +1573,7 @@ export class GatewayService {
    * `none` is the honest third option, and 1.86.0 is the release that made it a credential the vault can read
    * back.
    */
-  async connectDuckDuckGoWeb(raw: string | undefined, signal?: AbortSignal) {
+  async connectDuckDuckGoWeb(raw: string | undefined, signal?: AbortSignal, addAccount = false) {
     const cookieHeader = this.duckDuckGoWebPaste(raw);
     const check = await this.checkDuckDuckGoWeb(raw, signal);
     if (!check.verified) {
@@ -1583,7 +1584,7 @@ export class GatewayService {
     }
     return this.saveConnection(
       {
-        id: duckduckgoWebProviderId,
+        id: addAccount ? `duckai-${randomUUID().replace(/-/g, '').slice(0, 12)}` : duckduckgoWebProviderId,
         providerId: duckduckgoWebProviderId,
         name: 'Duck.ai',
         endpoint: DUCKDUCKGO_WEB.origin,
@@ -1611,13 +1612,13 @@ export class GatewayService {
 
 
   /** Stores a DeepSeek Web userToken, after checking DeepSeek accepts it. */
-  async connectDeepSeekWeb(userToken: string, signal?: AbortSignal) {
+  async connectDeepSeekWeb(userToken: string, signal?: AbortSignal, addAccount = false) {
     const credential = deepSeekWebCredential(userToken);
     // Verified before the save, so a refused token never becomes a connection.
     await this.deepSeekAdapter().validateCredential(credential);
     return this.saveConnection(
       {
-        id: deepseekWebProviderId,
+        id: addAccount ? `deepseekWebProviderId-${randomUUID().replace(/-/g, '').slice(0, 12)}` : deepseekWebProviderId,
         providerId: deepseekWebProviderId,
         name: 'DeepSeek Web',
         endpoint: 'https://chat.deepseek.com',
@@ -1663,12 +1664,12 @@ export class GatewayService {
    * `modelPolicy` follows the dialog's free-only checkbox. The adapter's catalog is a dated
    * snapshot that needs no request, and the two `:free` ids are the ones that do not bill.
    */
-  async connectTokenHarborWeb(cookie: string, signal?: AbortSignal, freeOnly = false) {
+  async connectTokenHarborWeb(cookie: string, signal?: AbortSignal, freeOnly = false, addAccount = false) {
     const credential = tokenHarborWebCredential(cookie);
     await this.tokenHarborWebAdapter().validateCredential(credential, { signal });
     return this.saveConnection(
       {
-        id: tokenHarborWebProviderId,
+        id: addAccount ? `tokenHarborWebProviderId-${randomUUID().replace(/-/g, '').slice(0, 12)}` : tokenHarborWebProviderId,
         providerId: tokenHarborWebProviderId,
         name: 'Token Harbor Web',
         endpoint: 'https://tokenharbor.ai',
@@ -1697,11 +1698,11 @@ export class GatewayService {
     return probeQwenWeb(cookieHeader, this.transport, signal);
   }
 
-  async connectChatGptWeb(exported: string, signal?: AbortSignal, freeOnly = false) {
+  async connectChatGptWeb(exported: string, signal?: AbortSignal, freeOnly = false, addAccount = false) {
     const state = parseChatGptStorageState(exported);
     return this.saveConnection(
       {
-        id: chatGptWebProviderId,
+        id: addAccount ? `chatGptWebProviderId-${randomUUID().replace(/-/g, '').slice(0, 12)}` : chatGptWebProviderId,
         providerId: chatGptWebProviderId,
         name: 'ChatGPT Web',
         endpoint: 'https://chatgpt.com',

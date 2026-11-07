@@ -882,11 +882,11 @@ export function getClineSignInStatus(sessionId: string, signal?: AbortSignal) {
  * `authUrl`/`state` pair here: the session id travels in the redirect path, so the callback can be tied
  * to its PKCE verifier without the provider echoing anything back.
  */
-export function startClaudeCodeSignIn(signal?: AbortSignal) {
+export function startClaudeCodeSignIn(addAccount?: boolean, signal?: AbortSignal) {
   return requestJson<{ sessionId: string; verificationUrl: string; expiresAt: string }>('/v1/oauth/claude-code/start', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({}),
+    body: JSON.stringify(addAccount ? { addAccount: true } : {}),
     ...(signal ? { signal } : {}),
   });
 }
@@ -898,9 +898,9 @@ export function getClaudeCodeSignInStatus(sessionId: string, signal?: AbortSigna
   );
 }
 
-export function startCodexSignIn(signal?: AbortSignal) {
+export function startCodexSignIn(addAccount?: boolean, signal?: AbortSignal) {
   return requestJson<{ sessionId: string; verificationUrl: string; expiresAt: string }>('/v1/oauth/codex/start', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ }), ...(signal ? { signal } : {}),
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(addAccount ? { addAccount: true } : {}), ...(signal ? { signal } : {}),
   });
 }
 
