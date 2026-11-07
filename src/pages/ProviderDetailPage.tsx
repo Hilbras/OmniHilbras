@@ -28,6 +28,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
+import { EnabledSwitch } from '../components/EnabledSwitch';
 import { KiroConnectDialog } from '../components/KiroConnectDialog';
 import { WebCookieConnectDialog } from '../components/WebCookieConnectDialog';
 import { useGatewayReload } from '../lib/useGatewayStatus';
@@ -37,7 +38,7 @@ import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, f
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { ProviderPlayground } from '../components/ProviderPlayground';
-import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, probeGatewayConnection, refreshGatewayConnectionModels, saveGatewayConnectionDetailed, saveOpenRouterConnection, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, probeGatewayConnection, refreshGatewayConnectionModels, saveGatewayConnectionDetailed, saveOpenRouterConnection, setGatewayConnectionEnabled, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import { dashboardRoutes, providerRoute, providerUsageRoute } from '../lib/routes';
 import { UsageContent } from './UsagePage';
@@ -130,14 +131,19 @@ function DetailStat({ label, value, icon: Icon, tone = 'muted' }: { label: strin
   return <div className="rounded-xl border border-line bg-bg-soft/70 p-3.5"><Icon className={`h-4 w-4 ${toneClass}`} aria-hidden="true" /><p className="muted mt-3 text-[10px] uppercase tracking-[0.1em]">{label}</p><p className="mt-1 truncate font-mono text-sm font-semibold">{value}</p></div>;
 }
 
-function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest, onEdit }: { provider: ProviderRecord; connection?: GatewayConnection; healthy: boolean; pingMs?: number; testing: boolean; onTest: () => void; onEdit: () => void }) {
+function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest, onEdit, onToggleEnabled, togglingEnabled }: { provider: ProviderRecord; connection?: GatewayConnection; healthy: boolean; pingMs?: number; testing: boolean; onTest: () => void; onEdit: () => void; onToggleEnabled?: () => void; togglingEnabled?: boolean }) {
   const connectionName = connection?.name ?? provider.name;
   const endpoint = connection?.endpoint ?? provider.endpoint;
   const priority = connection?.priority ?? 1;
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-line bg-bg-soft/55 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex min-w-0 items-start gap-3">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-success/20 bg-success/10 text-success"><KeyRound className="h-4 w-4" aria-hidden="true" /></span>
+    <div
+      data-connection-state={connection ? (connection.enabled ? 'enabled' : 'disabled') : 'unsaved'}
+      className={`flex flex-col gap-4 rounded-xl border p-4 transition-colors sm:flex-row sm:items-center sm:justify-between ${connection && !connection.enabled ? 'border-line/40 bg-black/50' : 'border-line bg-bg-soft/55'}`}
+    >
+      {/* The account's own description is dimmed when it is off — it is still there, and still this
+          row, but it is not in play. The switch is left at full contrast, because it is the way back. */}
+      <div className={`flex min-w-0 items-start gap-3 ${connection && !connection.enabled ? 'opacity-55' : ''}`}>
+        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border ${connection && !connection.enabled ? 'border-line/50 bg-surface/50 text-muted' : 'border-success/20 bg-success/10 text-success'}`}><KeyRound className="h-4 w-4" aria-hidden="true" /></span>
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">{connectionName} · local connection</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
@@ -150,9 +156,20 @@ function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest,
           <p className="muted mt-2 truncate font-mono text-[10px]">{endpoint}</p>
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex flex-wrap shrink-0 items-center gap-2">
         <button type="button" onClick={() => onTest()} disabled={testing} className="btn-ghost !px-3 !py-2 !text-xs">{testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testing ? 'Testing' : 'Test provider'}</button>
         <button type="button" onClick={onEdit} className="btn-quiet !px-2 !py-2 text-xs"><SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />Edit</button>
+        {/* On the far side of the row from the account's identity, the same place the accounts panel
+            puts it. Both surfaces write `PUT /v1/connections/:id/enabled` and both re-read what the
+            gateway returns, so neither can hold a state the other does not. */}
+        {connection && onToggleEnabled && (
+          <EnabledSwitch
+            enabled={connection.enabled}
+            busy={Boolean(togglingEnabled)}
+            onToggle={onToggleEnabled}
+            label={connection.enabled ? `Disable ${connectionName}` : `Enable ${connectionName}`}
+          />
+        )}
       </div>
     </div>
   );
@@ -407,6 +424,8 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   const [testingConnection, setTestingConnection] = useState(false);
   /** Which row is being probed, so the spinner appears on the row that was clicked and nowhere else. */
   const [probingConnectionId, setProbingConnectionId] = useState<string | null>(null);
+  /** Which row's enable/disable call is in flight, for the same reason. */
+  const [togglingConnectionId, setTogglingConnectionId] = useState<string | null>(null);
   /** Each probed row's own verdict and latency, keyed by connection id. */
   const [connectionProbeResults, setConnectionProbeResults] = useState<Record<string, { healthy: boolean; latencyMs?: number }>>({});
   const [refreshingModels, setRefreshingModels] = useState(false);
@@ -691,6 +710,8 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     setAddOpen(true);
   }
 
+  const activeConnectionCount = useMemo(() => connections.filter((item) => item.enabled).length, [connections]);
+
   const testingSet = useMemo(() => new Set(testingModels), [testingModels]);
 
   /**
@@ -796,6 +817,30 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       flash(error instanceof Error ? error.message : `The local gateway could not read ${provider.name} models.`, 'error');
     } finally {
       setRefreshingModels(false);
+    }
+  }
+
+  /**
+   * Enables or disables one connection from the Connections card.
+   *
+   * The row is the same account the accounts panel lists, so this is the same route the panel's own
+   * button calls — and both take the gateway's answer rather than flipping a local boolean, which is
+   * what keeps the two surfaces from disagreeing after one of them is used.
+   */
+  async function toggleConnectionEnabled(row: GatewayConnection) {
+    setTogglingConnectionId(row.id);
+    try {
+      const updated = await setGatewayConnectionEnabled(row.id, !row.enabled);
+      await loadConnection();
+      flash(
+        updated.enabled
+          ? `${updated.name} is enabled — routing can send requests to it again.`
+          : `${updated.name} is disabled — it stays saved and takes no traffic.`,
+      );
+    } catch (error) {
+      flash(error instanceof Error ? error.message : `${row.name} could not be changed.`, 'error');
+    } finally {
+      setTogglingConnectionId(null);
     }
   }
 
@@ -1119,11 +1164,15 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
             // The count, not a hard-coded 1. A provider may hold several accounts since the
             // `addAccount` sign-in, and this card said "1 active" while the accounts panel below
             // listed three — the same page disagreeing with itself.
-            : connections.length === 0
-              ? '0'
-              : connections.length === 1
-                ? '1 active'
-                : `${connections.length} active`
+            //
+            // And "active" means active: once an account can be switched off, counting every row as
+            // active made a paused account indistinguishable from a working one in the first number
+            // a reader sees. Disabled accounts are named separately rather than folded in.
+            : activeConnectionCount === 0
+              ? `0 active · ${connections.length} disabled`
+              : activeConnectionCount === connections.length
+                ? `${activeConnectionCount} active`
+                : `${activeConnectionCount} active · ${connections.length - activeConnectionCount} disabled`
         } icon={KeyRound} tone={connectionAdded && connectionState === 'ready' ? 'green' : 'muted'} />
         <DetailStat label="Models" value={allModels.length > 0 ? String(allModels.length) : '—'} icon={Cpu} tone="blue" />
         <DetailStat label="Latency" value={connectionPingMs === undefined ? (connectionHealthy ? 'Checked just now' : provider.latency) : `${connectionPingMs} ms`} icon={Clock3} tone="gold" />
@@ -1164,7 +1213,11 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
                   pingMs={connectionProbeResults[item.id]?.latencyMs ?? (index === 0 ? connectionPingMs : undefined)}
                   testing={probingConnectionId === item.id || testing}
                   onTest={() => void testConnection(item)}
-                  onEdit={openAddConnection}
+                  // Edit targets this row, not "add one": the row a person clicks is the account they
+                  // mean, and it used to open the add-a-connection dialog instead.
+                  onEdit={() => openEditConnection(item)}
+                  onToggleEnabled={() => void toggleConnectionEnabled(item)}
+                  togglingEnabled={togglingConnectionId === item.id}
                 />
               ))}
             </div>

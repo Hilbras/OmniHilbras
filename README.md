@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.91.1** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.91.2** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -165,11 +165,12 @@ curl -X PUT http://127.0.0.1:8787/v1/connections/opencode \
 
 Health is reported per provider rather than per connection, so a page shows one
 health figure for a provider even when it has several connections. The accounts
-panel above it is per connection: each row carries its own measured latency, an
-**Enabled/Disabled** badge with an **Enable**/**Disable** button
-(`PUT /v1/connections/:id/enabled`, so a disabled account keeps its credential
-and models and simply stops taking traffic) and **Edit**, which re-authenticates
-a signed-in account or replaces an API key in place.
+panel above it is per connection: each row carries its own measured latency, a
+switch at its far edge (`PUT /v1/connections/:id/enabled`, so a disabled account
+keeps its credential and models and simply stops taking traffic — the row goes
+dark while it is off) and **Edit**, which re-authenticates a signed-in account
+or replaces an API key in place. The switch is also in the Connections card, so
+either one works; both read the state back from the gateway.
 
 Adding a credential that is already saved does not create a second row. The
 gateway fingerprints each credential inside the vault and compares it within the

@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { KeyRound, Pencil, Plus, Power, Save, Timer, Trash2 } from 'lucide-react';
+import { KeyRound, Pencil, Plus, Save, Timer, Trash2 } from 'lucide-react';
 import type { GatewayConnection } from '../lib/gatewayClient';
 import { removeGatewayConnection, saveGatewayConnectionResponsibility, setGatewayConnectionEnabled } from '../lib/gatewayClient';
+import { EnabledSwitch } from './EnabledSwitch';
 import { useToast } from './Toast';
 
 /**
@@ -185,9 +186,12 @@ function AccountRow({ connection, index, onSaved, latency, onEdit }: { connectio
   }
 
   return (
-    <div className="rounded-xl border border-line bg-bg-soft p-3 sm:p-3.5">
+    <div
+      data-account-state={connection.enabled ? 'enabled' : 'disabled'}
+      className={`rounded-xl border p-3 transition-colors sm:p-3.5 ${connection.enabled ? 'border-line bg-bg-soft' : 'border-line/40 bg-black/50'}`}
+    >
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-start gap-2.5">
+        <div className={`flex min-w-0 items-start gap-2.5 ${connection.enabled ? '' : 'opacity-55'}`}>
           <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted">{index + 1}</span>
           {/* The account's own identity, in the old project's order: the written note, then the name,
               then the credential's email — and the email as a second line when it is not already the
@@ -222,31 +226,17 @@ function AccountRow({ connection, index, onSaved, latency, onEdit }: { connectio
               {connection.credentialType === 'oauth' ? 'OAuth' : connection.credentialType === 'api-key' ? 'API Key' : 'No key'}
             </span>
           )}
-          {/*
-            State and action are two things, so they are two elements: a badge that says what this
-            account is right now, and a button named for what pressing it does. A single pill reading
-            "Active" made the reader guess whether it was a state or a command.
-          */}
-          <span
-            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10px] ${connection.enabled ? 'border-success/30 bg-success/10 text-success' : 'border-line bg-surface text-muted/80'}`}
-            title={connection.enabled ? 'Routing can send requests to this account' : 'Routing skips this account; its credential and models are kept'}
-          >
-            {connection.enabled ? 'Enabled' : 'Disabled'}
-          </span>
-          <button
-            type="button"
-            onClick={() => void toggleEnabled()}
-            disabled={toggling}
-            aria-pressed={!connection.enabled}
-            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors disabled:opacity-50 ${connection.enabled ? 'border-line text-muted hover:border-danger/40 hover:text-danger' : 'border-success/30 text-success hover:border-success/50'}`}
-            title={connection.enabled ? 'Stop routing new requests to this account — its credential is kept' : 'Let routing send requests to this account again'}
-          >
-            <Power className="h-2.5 w-2.5" aria-hidden="true" />
-            {toggling ? 'Saving' : connection.enabled ? 'Disable' : 'Enable'}
-          </button>
           <code className="min-w-0 max-w-full truncate rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted sm:max-w-[200px]" title={connection.id}>
             {connection.id}
           </code>
+          {/* Last on the row, at the far side from the account's identity: the switch is about the
+              account as a whole, and it is the control most likely to be reached for repeatedly. */}
+          <EnabledSwitch
+            enabled={connection.enabled}
+            busy={toggling}
+            onToggle={() => void toggleEnabled()}
+            label={connection.enabled ? `Disable account ${index + 1} (${accountTitle(connection)})` : `Enable account ${index + 1} (${accountTitle(connection)})`}
+          />
         </div>
       </div>
 
