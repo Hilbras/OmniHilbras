@@ -470,8 +470,21 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
     await this.mutationQueue;
     await this.ensureLoaded();
     return [...this.connections.values()]
-      .map((connection) => cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.id) }))
+      .map((connection) => this.withPreview(connection))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  /**
+   * The record as the gateway's readers see it: whether a credential exists, and the two facts about
+   * it that are preview data rather than secrets — an OAuth account's email and the credential's kind.
+   * Shared with `save()` so a saved record and a listed one cannot disagree. Both stores carry this
+   * copy for the same reason every vendored file is duplicated: the vault and the in-memory store are
+   * separate classes, and a fix to one that skipped the other is drift.
+   */
+  private withPreview(connection: ConnectionRecord): ConnectionRecord {
+    const credential = this.credentials.get(connection.id);
+    const email = credential?.type === 'oauth' && typeof credential.email === 'string' && credential.email ? credential.email : undefined;
+    return cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.id), ...(email ? { email } : {}), ...(credential ? { credentialType: credential.type } : {}) });
   }
 
   async save(input: ConnectionInput, credential: ProviderCredential) {
