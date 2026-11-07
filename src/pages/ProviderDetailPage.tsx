@@ -637,10 +637,14 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
    */
   const handleOauthConnected = useCallback(
     async (saved: GatewayConnection) => {
-      const authoritative = await listGatewayConnections()
-        .then((connections) => connections.find((item) => item.providerId === provider.id && item.hasCredential))
+      // Re-read the whole list, not a single find: an add-account sign-in just landed **beside** the
+      // first connection, and the accounts panel only updates when the plural state does. The
+      // singular state targets the connection that was just saved.
+      const list = await listGatewayConnections()
+        .then((all) => all.filter((item) => item.providerId === (provider.connectionProviderId ?? provider.catalogId ?? provider.id) && item.hasCredential))
         .catch(() => undefined);
-      const next = authoritative ?? saved;
+      if (list) setConnections(list);
+      const next = list?.find((item) => item.id === saved.id) ?? saved;
       setConnection(next);
       setConnectionAdded(true);
       setConnectionHealthy(false);
@@ -648,7 +652,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       flash(`Signed in to ${next.name} with ${next.modelIds.length} models.`);
       void getGatewayRoutingState().then(setRoutingState).catch(() => undefined);
     },
-    [provider.id],
+    [provider.connectionProviderId, provider.catalogId, provider.id],
   );
 
   async function testConnection() {
@@ -748,11 +752,11 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       proxyPool: newProvider.proxyPool ?? 'none',
       modelPolicy: newProvider.modelPolicy ?? 'all',
     });
-    setConnection(savedConnection);
-    setConnectionAdded(true);
+    await loadConnection();
+    setConnection((current) => (current?.id === savedConnection.id ? savedConnection : current));
     setAddOpen(false);
     setConnectionHealthy(false);
-      setConnectionVerified(undefined);
+    setConnectionVerified(undefined);
     flash(`${savedConnection.name} saved with ${savedConnection.modelIds.length} models.`);
   }
 
