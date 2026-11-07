@@ -2274,10 +2274,20 @@ export class GatewayService {
     if (!connection) throw new ProviderError('NOT_FOUND', 'That connection no longer exists.', { publicMessage: 'That connection no longer exists.' });
     const adapter = await this.resolveAdapter(connection.providerId);
     const context = await this.credentials.context(connectionId, connection.providerId, signal);
-    if (!adapter.validateCredential) throw notSupported(adapter, 'credential validation');
     const startedAt = Date.now();
-    const result = await adapter.validateCredential(context.credential, context);
-    return { providerId: connection.providerId, valid: true, checkedAt: result?.checkedAt ?? new Date().toISOString(), latencyMs: result?.latencyMs ?? Date.now() - startedAt };
+    // A provider with no `validateCredential` — every generic OpenAI-compatible endpoint — still has a
+    // free, authenticated read: its model list. Asking that is a real check of this account's own
+    // credential, which is what the row needs; refusing to check would leave half the catalog with a
+    // dead Test button.
+    if (adapter.validateCredential) {
+      const result = await adapter.validateCredential(context.credential, context);
+      return { providerId: connection.providerId, valid: true, checkedAt: result?.checkedAt ?? new Date().toISOString(), latencyMs: result?.latencyMs ?? Date.now() - startedAt };
+    }
+    if (adapter.listModels) {
+      await adapter.listModels(context);
+      return { providerId: connection.providerId, valid: true, checkedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt };
+    }
+    throw notSupported(adapter, 'credential validation');
   }
 
   private async withProviderLock<T>(providerId: string, operation: () => Promise<T>) {
