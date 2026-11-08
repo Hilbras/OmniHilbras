@@ -69,7 +69,7 @@ type Phase = 'starting' | 'waiting' | 'connected' | 'failed';
  * URL and **no** code: the user only approves in the browser. The block below renders the
  * code step only when there is a code, so the two shapes share one path.
  */
-const deviceFlowProviders = new Set(['opencode-console', 'kiro', 'kimi-code', 'kilocode', 'minimax-code', 'minimax-code-global', 'qoder', 'codebuddy-cn', 'codebuddy-intl', 'nous']);
+const deviceFlowProviders = new Set(['opencode-console', 'opencode', 'opencode-go', 'kiro', 'kimi-code', 'kilocode', 'minimax-code', 'minimax-code-global', 'qoder', 'codebuddy-cn', 'codebuddy-intl', 'nous']);
 
 /**
  * Providers that sign in with PKCE and no pasted code, because the exchange needs the verifier that

@@ -159,7 +159,7 @@ test('a new provider id is one edit away from a web-session id, and stays distin
    * the base's credential, and cannot silently borrow the base's *name* — (3) makes the sharing explicit
    * in one field rather than leaving two similar ids to be told apart by a prefix.
    */
-  const oauthIds = new Set(providerCatalog.filter((card) => card.auth === 'OAuth').map((card) => card.id));
+  const oauthIds = new Set(providerCatalog.filter((card) => card.auth === 'OAuth' || card.authModes?.includes('oauth')).map((card) => card.id));
   /**
    * 4. **A separate plan on the same host, with its own key.** Added for `opencode`/`opencode-go`:
    *    OpenCode Zen is pay-as-you-go and OpenCode Go is a monthly subscription — the same gateway and the

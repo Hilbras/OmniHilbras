@@ -254,7 +254,7 @@ const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, req
  * does not serve: the request 404s, the tab opened for it is never navigated, and the button looks dead
  * with a blank page. The dialog is sent to the connection owner instead (see `signInProviderId`).
  */
-const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'kiro', 'claude-code', 'codex', 'kimi-code', 'kilocode', 'minimax-code', 'minimax-code-global', 'qoder', 'codebuddy-cn', 'codebuddy-intl', 'nous']);
+const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'opencode', 'opencode-go', 'kiro', 'claude-code', 'codex', 'kimi-code', 'kilocode', 'minimax-code', 'minimax-code-global', 'qoder', 'codebuddy-cn', 'codebuddy-intl', 'nous']);
 
 /** Providers whose flow is a pasted credential rather than a browser sign-in. */
 const webCookieProviders = new Set(webSessionProviderIds());

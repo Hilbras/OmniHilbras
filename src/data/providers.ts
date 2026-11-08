@@ -299,7 +299,10 @@ export const providerCatalog: ProviderRecord[] = [
     category: 'Multi-model provider',
     group: 'api-key',
     status: 'available',
-    auth: 'API key',
+    // Two ways in: a Console sign-in that yields a bearer the lane accepts, and a plain API key
+    // from opencode.ai/auth. `authModes` is what the page reads; `auth` is what a person sees.
+    auth: 'OAuth or API key',
+    authModes: ['oauth', 'api-key'],
     models: '—',
     latency: '—',
     requests: '0',
@@ -518,7 +521,8 @@ export const providerCatalog: ProviderRecord[] = [
     category: 'Multi-model provider',
     group: 'api-key',
     status: 'available',
-    auth: 'API key',
+    auth: 'OAuth or API key',
+    authModes: ['oauth', 'api-key'],
     models: '\u2014',
     latency: '\u2014',
     requests: '0',

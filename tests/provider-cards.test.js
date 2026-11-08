@@ -329,9 +329,9 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // Fifteen cards claim OAuth, but the gateway serves twelve start routes: `clinepass` shares `cline`'s,
   // and `claude-code` and `codex` sign in through `server.ts` routes this scan reads too — the counts of
   // claims and routes do not coincide, which is why both are asserted rather than one derived.
-  assert.equal(oauthCapableProviders().size, 13, 'the gateway serves an OAuth start route for thirteen providers');
+  assert.equal(oauthCapableProviders().size, 15, 'the gateway serves an OAuth start route for fifteen providers');
   const oauthClaiming = all.filter((card) => card.auth === 'OAuth' || card.authModes?.includes('oauth'));
-  assert.equal(oauthClaiming.length, 14, 'fourteen cards claim an OAuth sign-in: thirteen named OAuth, and Nous Research which offers it beside a key');
+  assert.equal(oauthClaiming.length, 16, 'sixteen cards claim an OAuth sign-in: fourteen named OAuth, and Nous Research and the two OpenCode cards which offer it beside a key');
   console.log(`    cards: ${all.length}   claiming OAuth: ${oauthClaiming.length}   gateway OAuth routes: ${oauthCapableProviders().size}   claiming a measurement: 0`);
 });
 

@@ -131,6 +131,44 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/opencode/start') {
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startOpencodeSignIn(addAccount, targetConnectionId), origin);
+      return true;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/opencode/session/')) {
+      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/opencode/session/'.length)).trim();
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
+      const status = await service.opencodeSignInStatus(sessionId, signal);
+      if (!status) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
+        return true;
+      }
+      sendJson(response, 200, status, origin);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/opencode-go/start') {
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startOpencodeGoSignIn(addAccount, targetConnectionId), origin);
+      return true;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/opencode-go/session/')) {
+      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/opencode-go/session/'.length)).trim();
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
+      const status = await service.opencodeGoSignInStatus(sessionId, signal);
+      if (!status) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
+        return true;
+      }
+      sendJson(response, 200, status, origin);
+      return true;
+    }
+
     if (request.method === 'POST' && /^\/v1\/oauth\/opencode-console\/session\/[^/]+\/workspace$/.test(url.pathname)) {
       const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/opencode-console/session/'.length, -'/workspace'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');

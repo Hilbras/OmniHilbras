@@ -184,6 +184,8 @@ export class GatewayService {
   private opencodeGo?: ProviderAdapter;
   private opencodeConsole?: ProviderAdapter;
   private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
+  private readonly opencodeSignInSessions = new NousSessionStore();
+  private readonly opencodeGoSignInSessions = new NousSessionStore();
   private readonly kimiCodeSessions = new KimiCodeSessionStore();
   /** Built on demand, so signing in is what constructs it. */
   private kimiCode?: KimiCodeAdapter;
@@ -926,6 +928,107 @@ export class GatewayService {
         providerId: nousProviderId,
         name: 'Nous Research',
         endpoint: NOUS_BASE_URL,
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      }),
+      save: (input, credential, pollSignal) => this.saveConnection(input, credential, pollSignal),
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * OpenCode Zen / Go — an OpenCode Console sign-in beside the API-key path.
+   *
+   * Both use the Console's device flow to obtain an access token, then save
+   * it as the connection's credential for their own Zen/Go endpoint. The
+   * token is a bearer the lane accepts, so no Console lane resolution is
+   * needed here — the existing Zen adapter serves the models.
+   * ------------------------------------------------------------------ */
+
+  async startOpencodeSignIn(addAccount = false, targetConnectionId?: string) {
+    const started = await beginOpencodeConsoleSignIn();
+    const session = this.opencodeSignInSessions.create({
+      ...started,
+      connectionId: targetConnectionId ?? (addAccount ? `opencode-${randomUUID().replace(/-/g, '').slice(0, 12)}` : 'opencode'),
+    });
+    return {
+      sessionId: session.id,
+      userCode: session.userCode,
+      verificationUrl: session.verificationUrl,
+      expiresAt: new Date(session.expiresAt).toISOString(),
+    };
+  }
+
+  opencodeSignInStatus(sessionId: string, signal?: AbortSignal): Promise<NousSessionStatus | undefined> {
+    return completeSignIn({
+      sessions: this.opencodeSignInSessions,
+      sessionId,
+      signal,
+      fallback: 'The OpenCode sign-in could not be completed.',
+      poll: async () => {
+        const session = this.opencodeSignInSessions.get(sessionId);
+        if (!session) return { status: 'denied', error: 'This sign-in no longer exists.' };
+        const outcome = await pollOpencodeConsoleSignIn(session.deviceCode);
+        if (outcome.status === 'pending') return { status: 'pending' };
+        if (outcome.status === 'denied') return { status: 'denied', error: outcome.error };
+        return { status: 'connected', credential: outcome.credential };
+      },
+      takeDiscoveryNote: () => {
+        const note = this.lastDiscoveryNote;
+        this.lastDiscoveryNote = undefined;
+        return note;
+      },
+      connection: () => ({
+        id: this.opencodeSignInSessions.get(sessionId)?.connectionId ?? 'opencode',
+        providerId: 'opencode',
+        name: 'OpenCode Zen',
+        endpoint: 'https://opencode.ai/zen/v1',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      }),
+      save: (input, credential, pollSignal) => this.saveConnection(input, credential, pollSignal),
+    });
+  }
+
+  async startOpencodeGoSignIn(addAccount = false, targetConnectionId?: string) {
+    const started = await beginOpencodeConsoleSignIn();
+    const session = this.opencodeGoSignInSessions.create({
+      ...started,
+      connectionId: targetConnectionId ?? (addAccount ? `opencode-go-${randomUUID().replace(/-/g, '').slice(0, 12)}` : 'opencode-go'),
+    });
+    return {
+      sessionId: session.id,
+      userCode: session.userCode,
+      verificationUrl: session.verificationUrl,
+      expiresAt: new Date(session.expiresAt).toISOString(),
+    };
+  }
+
+  opencodeGoSignInStatus(sessionId: string, signal?: AbortSignal): Promise<NousSessionStatus | undefined> {
+    return completeSignIn({
+      sessions: this.opencodeGoSignInSessions,
+      sessionId,
+      signal,
+      fallback: 'The OpenCode sign-in could not be completed.',
+      poll: async () => {
+        const session = this.opencodeGoSignInSessions.get(sessionId);
+        if (!session) return { status: 'denied', error: 'This sign-in no longer exists.' };
+        const outcome = await pollOpencodeConsoleSignIn(session.deviceCode);
+        if (outcome.status === 'pending') return { status: 'pending' };
+        if (outcome.status === 'denied') return { status: 'denied', error: outcome.error };
+        return { status: 'connected', credential: outcome.credential };
+      },
+      takeDiscoveryNote: () => {
+        const note = this.lastDiscoveryNote;
+        this.lastDiscoveryNote = undefined;
+        return note;
+      },
+      connection: () => ({
+        id: this.opencodeGoSignInSessions.get(sessionId)?.connectionId ?? 'opencode-go',
+        providerId: 'opencode-go',
+        name: 'OpenCode Go',
+        endpoint: 'https://opencode.ai/zen/go/v1',
         priority: 1,
         proxyPool: 'none',
         modelPolicy: 'all',

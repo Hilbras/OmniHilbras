@@ -268,6 +268,10 @@ The first local gateway exposes:
 - `POST /v1/oauth/opencode-console/start` — begin an OpenCode Console device-flow sign-in.
 - `GET /v1/oauth/opencode-console/session/:id` — whether a device flow is awaiting approval, connected, or failed. When the account has more than one workspace the status is `pending` and carries `workspaces` (`id`, `name`) to choose from.
 - `POST /v1/oauth/opencode-console/session/:id/workspace` — body `{ "workspaceId": "…" }`. Saves the OpenCode Console connection with the chosen workspace. The id must be one offered by the sign-in.
+- `POST /v1/oauth/opencode/start` — begin an OpenCode Console device-flow sign-in that saves under the OpenCode Zen provider id.
+- `GET /v1/oauth/opencode/session/:id` — poll the OpenCode Zen sign-in to completion.
+- `POST /v1/oauth/opencode-go/start` — begin an OpenCode Console device-flow sign-in that saves under the OpenCode Go provider id.
+- `GET /v1/oauth/opencode-go/session/:id` — poll the OpenCode Go sign-in to completion.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
 - `POST /v1/web-cookie/tokenharbor/check` — verify a pasted Token Harbor session cookie against
   `tokenharbor.ai` by reading the account profile, and store nothing. A credential check, not a
