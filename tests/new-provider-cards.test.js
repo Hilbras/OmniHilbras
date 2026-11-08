@@ -160,6 +160,20 @@ test('a new provider id is one edit away from a web-session id, and stays distin
    * in one field rather than leaving two similar ids to be told apart by a prefix.
    */
   const oauthIds = new Set(providerCatalog.filter((card) => card.auth === 'OAuth').map((card) => card.id));
+  /**
+   * 4. **A separate plan on the same host, with its own key.** Added for `opencode`/`opencode-go`:
+   *    OpenCode Zen is pay-as-you-go and OpenCode Go is a monthly subscription — the same gateway and the
+   *    same three wire formats under a different base path (`/zen/v1` vs `/zen/go/v1`), and **two different
+   *    keys**. The property is that the derived card cannot be collected by the base's credential path,
+   *    which for an API-key card is structural: a credential is stored under the card's own provider id,
+   *    and only `connectionProviderId` reads a sibling's. So this checks the two measurable facts — no
+   *    `connectionProviderId`, and a different endpoint — rather than the id, and it does *not* catch a
+   *    derived card that is merely mislabelled. It is a distinct-lane check, not a spelling check.
+   */
+  const isSeparateApiKeyPlan = (base, derived) => {
+    const card = cardById.get(derived);
+    return card?.auth === 'API key' && card.connectionProviderId === undefined && cardById.get(base)?.endpoint !== card.endpoint;
+  };
   const oauthRoutes = new Set(
     [...readFileSync(join(ROOT, 'Kernel/API/src/routes/oauth.ts'), 'utf8')
       .matchAll(/url\.pathname === '\/v1\/oauth\/([\w-]+)\/start'/g)].map((m) => m[1]),
@@ -169,16 +183,18 @@ test('a new provider id is one edit away from a web-session id, and stays distin
     const isWebSession = webSessionIds.has(derived);
     const isOAuth = oauthIds.has(derived) && oauthRoutes.has(derived);
     const sharesConnection = cardById.get(derived)?.connectionProviderId === base;
+    const separatePlan = isSeparateApiKeyPlan(base, derived);
     assert.ok(
-      isWebSession || isOAuth || sharesConnection,
+      isWebSession || isOAuth || sharesConnection || separatePlan,
       `${derived} is one character from ${base} and must resolve to a different credential path — ` +
         'either a web session, an OAuth card whose gateway really serves a start route for it, ' +
-        "or a card that names the base's connection explicitly",
+        "a card that names the base's connection explicitly, " +
+        'or a separate API-key plan with its own endpoint',
     );
   }
   assert.deepEqual(
     pairs.map(([, derived]) => derived).sort(),
-    ['clinepass', 'deepseek-web', 'gemini-web', 'kimi-code', 'minimax-code-global', 'opencode-console', 'qwen-web', 'tokenharbor-web'],
+    ['clinepass', 'deepseek-web', 'gemini-web', 'kimi-code', 'minimax-code-global', 'opencode-console', 'opencode-go', 'qwen-web', 'tokenharbor-web'],
     'the near-miss ids are exactly the ones expected, so this stays a measurement and not a tautology',
   );
 });

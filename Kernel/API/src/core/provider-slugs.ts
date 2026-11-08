@@ -51,6 +51,8 @@ export const PROVIDER_SLUGS: Readonly<Record<string, string>> = {
   'duckduckgo-web': 'ddw',
   // ── Free tier ─────────────────────────────────────────────────────────────
   opencode: 'opz',
+  // The subscription lane of the same product: `ocg`, the alias the reference project uses.
+  'opencode-go': 'ocg',
   'agnes-ai': 'ag',
   nous: 'ns',
   beatapi: 'bt',

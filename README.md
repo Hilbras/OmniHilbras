@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 1.95.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 1.96.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -187,7 +187,13 @@ serves it through the generic OpenAI-compatible path at
 `https://opencode.ai/zen/v1`, and the model catalog imports without a credential
 because OpenCode publishes it.
 
-The credential check reads Zen's model listing **with the key**. That endpoint is
+**OpenCode Go** is the same gateway on the OpenCode team's monthly plan: same three
+API shapes, same model lanes, at `opencode.ai/zen/go` and with its own key — its own
+card, its own `ocg/` prefix, and a Usage tab reading `/zen/go/v1/usage`, which reports
+rolling, weekly and monthly meters. Both lanes are one adapter with a different base,
+so a fix to one is a fix to both.
+
+The credential check reads the OpenCode model listing **with the key**. That endpoint is
 public without one, but it answers `401 Invalid credential` for a bad one, so
 passing the key turns the read into a real check that costs no tokens — which is how
 an expired Zen key is now reported instead of showing "Credential check 100%" while

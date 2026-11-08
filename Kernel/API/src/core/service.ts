@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
 import { NousAdapter } from '@omnihilbras/sdk-nous';
-import { ZenAdapter } from '@omnihilbras/sdk-zen';
+import { ZenAdapter, ZEN_GO_BASE_URL } from '@omnihilbras/sdk-zen';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
 import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext, type ModelPricing } from './index.js';
 import { ChatGptWebAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, type ChatGptWebDriver } from '@omnihilbras/sdk-chatgpt-web';
@@ -181,6 +181,7 @@ export class GatewayService {
   private readonly nousAdapters = new Map<string, ProviderAdapter>();
   private readonly nousSessions = new NousSessionStore();
   private zen?: ProviderAdapter;
+  private opencodeGo?: ProviderAdapter;
   private opencodeConsole?: ProviderAdapter;
   private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
   private readonly kimiCodeSessions = new KimiCodeSessionStore();
@@ -392,6 +393,10 @@ export class GatewayService {
       // the catalog would accept any string as a key. The adapter proves it with one 1-token inference.
       .onDemand('nous', ({ providerId, connection }) => this.nousAdapter(connection?.id ?? providerId), { validateOnSave: true })
       .onDemand('opencode', () => this.zenAdapter())
+      // OpenCode Go is the same wire on the subscription lane (`/zen/go`), so it is the same adapter with
+      // a different base and id. `validateOnSave`: both lanes judge a key — measured on Zen, where the
+      // listing answers 401 for a bad one — so a save proves it rather than trusting it.
+      .onDemand('opencode-go', () => this.opencodeGoAdapter(), { validateOnSave: true })
       .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId))
       .onDemand(kimiCodeProviderId, ({ providerId, connection }) => this.kimiCodeAdapter(connection?.id ?? providerId))
       .onDemand(claudeCodeProviderId, ({ providerId, connection }) => this.claudeCodeAdapter(connection?.id ?? providerId))
@@ -1477,6 +1482,13 @@ export class GatewayService {
     });
     this.nousAdapters.set(connectionId, adapter);
     return adapter;
+  }
+
+  opencodeGoAdapter(): ProviderAdapter {
+    if (!this.opencodeGo) {
+      this.opencodeGo = new ZenAdapter({ id: 'opencode-go', name: 'OpenCode Go', base: ZEN_GO_BASE_URL, transport: this.transport });
+    }
+    return this.opencodeGo;
   }
 
   zenAdapter(): ProviderAdapter {

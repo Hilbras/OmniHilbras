@@ -212,3 +212,71 @@ test('the model catalog is read from the Zen models endpoint', async () => {
   assert.deepEqual(models.map((model) => model.id), ['kimi-k3', 'claude-sonnet-5'], 'blank and malformed entries are dropped');
   assert.equal(t.requests[0].headers.Authorization, 'Bearer k');
 });
+
+
+// ── OpenCode Go: the same wire on the subscription lane ───────────────────────
+
+test('the Go instance answers as itself and sends every lane to the /zen/go base', async () => {
+  const t = transport({
+    'https://opencode.ai/zen/go/v1/chat/completions': { data: { id: 'c', model: 'glm-5.3', choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }] } },
+    'https://opencode.ai/zen/go/v1/responses': { data: { id: 'r', status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }] } },
+    'https://opencode.ai/zen/go/v1/messages': { data: { id: 'm', content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' } },
+    'https://opencode.ai/zen/go/v1/models': { data: { data: [{ id: 'glm-5.3' }, { id: 'kimi-k3' }] } },
+  });
+  const go = new ZenAdapter({ id: 'opencode-go', name: 'OpenCode Go', base: 'https://opencode.ai/zen/go', transport: t });
+
+  assert.equal(go.id, 'opencode-go');
+  assert.equal(go.name, 'OpenCode Go');
+  assert.deepEqual((await go.listModels({ credential: { type: 'api-key', value: 'k' } })).map((m) => m.id), ['glm-5.3', 'kimi-k3']);
+
+  // One model per lane, so the base is proved for all three rather than for the one a default picks.
+  const answer = await go.chat({ model: 'glm-5.3', messages: [{ role: 'user', content: 'hi' }] }, { credential: { type: 'api-key', value: 'k' } });
+  assert.equal(answer.providerId, 'opencode-go', 'a Go answer says Go, not Zen — the two are different accounts');
+  await go.chat({ model: 'gpt-5.6-luna', messages: [{ role: 'user', content: 'hi' }] }, { credential: { type: 'api-key', value: 'k' } });
+  await go.chat({ model: 'claude-haiku-5-5', messages: [{ role: 'user', content: 'hi' }] }, { credential: { type: 'api-key', value: 'k' } });
+  assert.deepEqual(t.requests.map((r) => r.url).filter((u) => u.includes('/chat/') || u.includes('/responses') || u.includes('/messages')).sort(), [
+    'https://opencode.ai/zen/go/v1/chat/completions',
+    'https://opencode.ai/zen/go/v1/messages',
+    'https://opencode.ai/zen/go/v1/responses',
+  ]);
+});
+
+test('the Go dictionary of models is read, because the Zen one is a different product', () => {
+  // The lane table is shared — it is the same gateway — but the model *families* on each lane are the
+  // plan's, so a Go-only id has to land on the lane Go serves it from.
+  assert.deepEqual(zenLaneFor('kimi-k3'), { lane: 'chat', supported: true });
+  assert.deepEqual(zenLaneFor('claude-haiku-5-5'), { lane: 'messages', supported: true });
+  assert.deepEqual(zenLaneFor('grok-4.7'), { lane: 'responses', supported: true });
+});
+
+test('usage reports three meters, and percent is the used side of 100', async () => {
+  const t = transport({
+    'https://opencode.ai/zen/go/v1/usage': { data: { usage: { rolling: { percent: 12.5, resetsAt: '2026-11-08T20:00:00.000Z' }, weekly: { percent: '40' }, monthly: {} } } },
+  });
+  const go = new ZenAdapter({ id: 'opencode-go', name: 'OpenCode Go', base: 'https://opencode.ai/zen/go', transport: t });
+  const quota = await go.quota({ credential: { type: 'api-key', value: 'k' } });
+
+  assert.equal(t.requests[0].headers.Authorization, 'Bearer k');
+  // `percent` is what is *used*: reporting 100 − percent here would show an exhausted plan as empty.
+  assert.deepEqual(quota.resources.Rolling, { used: 12.5, limit: 100, remaining: 87.5, resetsAt: '2026-11-08T20:00:00.000Z' });
+  assert.deepEqual(quota.resources.Weekly, { used: 40, limit: 100, remaining: 60 }, 'a string percent is a percent');
+  assert.equal('Monthly' in quota.resources, false, 'a meter the provider did not report is left out, not shown as zero');
+});
+
+test('usage with no meters at all reports none, rather than an empty balance', async () => {
+  // A pay-as-you-go key answers a wallet, not these meters. An empty resource map is the honest answer:
+  // the dashboard then says the provider did not report one instead of drawing an empty bar.
+  const t = transport({ 'https://opencode.ai/zen/v1/usage': { data: { usage: {} } } });
+  const quota = await new ZenAdapter({ transport: t }).quota({ credential: { type: 'api-key', value: 'k' } });
+  assert.deepEqual(quota.resources, {});
+  assert.equal(quota.plan, 'OpenCode Zen');
+});
+
+test('usage without a credential is refused by name, and no request is made', async () => {
+  const t = transport({});
+  await assert.rejects(
+    () => new ZenAdapter({ transport: t }).quota({ credential: { type: 'none' } }),
+    (error) => error.code === 'AUTHENTICATION_FAILED',
+  );
+  assert.equal(t.requests.length, 0);
+});

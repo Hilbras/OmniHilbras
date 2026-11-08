@@ -630,6 +630,21 @@ presence-and-shape only, on the premise that a public listing cannot speak about
 token; that reported `valid` for a key Zen answered `401 This API key has expired`
 to on every chat. Health reads the same listing.
 
+### OpenCode Go — the same gateway, a subscription
+
+`opencode-go` is the OpenCode team's **monthly plan** over the same gateway as Zen: the same three wire
+formats (chat/completions, messages, responses) and the same per-model lane table, under
+`https://opencode.ai/zen/go/v1` instead of `/zen/v1`, with **its own key**. The reference project ships it
+as a separate provider (`ocg`) and so does this one — a Zen key is not a Go key, and the card, the slug
+(`ocg/`) and the stored credential are all separate.
+
+It is one adapter class with a different base and id, not a copy: `ZenAdapter` takes `{ id, name, base }`,
+which is what made the second lane a configuration rather than a second implementation. Its catalog is
+read from `/zen/go/v1/models`, and its usage from `/zen/go/v1/usage`, where the plan reports three
+percentage meters — `rolling`, `weekly` and `monthly` — each `{ percent, resetsAt }`. `percent` is the
+**used** side, so it is carried as `used` against a limit of 100; a meter the account does not report is
+left out rather than drawn as zero.
+
 ### Why a Zen refusal looks like a bare status code
 
 Zen returns an **empty body to an authenticated caller and a descriptive one to an

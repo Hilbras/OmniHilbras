@@ -4,7 +4,7 @@ import type { HttpTransport } from '../lib/transport.js';
 import { OpenAICompatibleAdapter } from '../lib/openai-compatible.js';
 import { parseSseJson, parseSseStream } from '../lib/streaming.js';
 import { ZEN_FINGERPRINT_TOOL_NAMES, isZenFreeTierRefusal, zenFingerprintTools, zenFreeTierHeaders, zenSessionId, zenContractSatisfied, zenConversationSeed, zenFreeTierRefusal, zenGatedToolChoice } from '../lib/zen-free-tier.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../lib/types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderQuota, ProviderResourceQuota, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../lib/types.js';
 
 /**
  * OpenCode Zen serves one catalog through three different wire formats. Which
@@ -16,6 +16,15 @@ import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValid
  * documents for the remainder of the catalog.
  */
 export const ZEN_BASE_URL = 'https://opencode.ai/zen';
+/**
+ * OpenCode Go — the same product's **subscription** lane.
+ *
+ * A different base path under the same host (`/zen/go`), the same three wire formats and the same
+ * per-model lane table; what differs is what a key entitles you to. The reference project ships it as a
+ * separate provider (`opencode-go`) with its own usage endpoint, and so does this adapter now: the two are
+ * one class with a different base.
+ */
+export const ZEN_GO_BASE_URL = 'https://opencode.ai/zen/go';
 export const ZEN_LANES = {
   chat: `${ZEN_BASE_URL}/v1/chat/completions`,
   messages: `${ZEN_BASE_URL}/v1/messages`,
@@ -158,11 +167,11 @@ export function zenLaneFor(model: string): { lane: ZenLane; supported: boolean }
   return { lane: 'chat', supported: true };
 }
 
-function unsupportedLane(model: string, id: string) {
+function unsupportedLane(model: string, id: string, providerId: string, providerName: string) {
   const kind = unsupported.has(id) ? 'decision models on /zen/v1/systemone' : 'Gemini models on /zen/v1/models/{id}';
-  return new ProviderError('NOT_SUPPORTED', `OpenCode Zen serves ${kind}, which this gateway does not implement. Skipping ${model}.`, {
-    providerId: 'opencode',
-    publicMessage: `OpenCode Zen serves ${kind}, which this gateway does not implement yet.`,
+  return new ProviderError('NOT_SUPPORTED', `${providerName} serves ${kind}, which this gateway does not implement. Skipping ${model}.`, {
+    providerId,
+    publicMessage: `${providerName} serves ${kind}, which this gateway does not implement yet.`,
   });
 }
 
@@ -249,11 +258,11 @@ function responsesText(payload: ResponsesPayload): string {
   return parts.join('');
 }
 
-function toResponsesChatResponse(payload: ResponsesPayload, requestedModel: string): ChatResponse {
+function toResponsesChatResponse(payload: ResponsesPayload, requestedModel: string, providerId: string): ChatResponse {
   const text = responsesText(payload);
   return {
     id: payload.id ?? `response-${requestedModel}`,
-    providerId: 'opencode',
+    providerId,
     model: payload.model ?? requestedModel,
     createdAt: payload.created_at ? new Date(payload.created_at * 1000).toISOString() : new Date().toISOString(),
     message: { role: 'assistant', content: text },
@@ -307,11 +316,11 @@ function toMessagesBody(request: ChatRequest) {
   return body;
 }
 
-function toMessagesChatResponse(payload: MessagesPayload, requestedModel: string): ChatResponse {
+function toMessagesChatResponse(payload: MessagesPayload, requestedModel: string, providerId: string): ChatResponse {
   const text = (payload.content ?? []).filter((part) => part.type === 'text' && typeof part.text === 'string').map((part) => part.text).join('');
   return {
     id: payload.id ?? `msg-${requestedModel}`,
-    providerId: 'opencode',
+    providerId,
     model: payload.model ?? requestedModel,
     createdAt: new Date().toISOString(),
     message: { role: 'assistant', content: text },
@@ -330,23 +339,82 @@ export type ZenAdapterOptions = {
   transport?: HttpTransport;
   /** Overrides the model catalog endpoint, for tests. */
   modelsUrl?: string;
+  /** The provider id this instance answers as — `opencode` (Zen) or `opencode-go`. */
+  id?: string;
+  /** The name a person sees, for the same reason. */
+  name?: string;
+  /** The Zen root this instance talks to, e.g. `https://opencode.ai/zen/go` for Go. */
+  base?: string;
 };
 
 export class ZenAdapter implements ProviderAdapter {
-  readonly id = 'opencode';
-  readonly name = 'OpenCode Zen';
+  readonly id: string;
+  readonly name: string;
   readonly capabilities = { chat: true, streaming: true, models: true } as const;
   private readonly transport: HttpTransport;
   private readonly chatLane: OpenAICompatibleAdapter;
   private readonly modelsUrl: string;
+  private readonly base: string;
 
   constructor(options: ZenAdapterOptions = {}) {
+    this.id = options.id ?? 'opencode';
+    this.name = options.name ?? 'OpenCode Zen';
+    this.base = (options.base ?? ZEN_BASE_URL).replace(/\/$/, '');
     this.transport = options.transport ?? new FetchHttpTransport();
     this.chatLane = new OpenAICompatibleAdapter(
-      { id: 'opencode', name: 'OpenCode Zen', baseUrl: `${ZEN_BASE_URL}/v1`, auth: { header: 'Authorization', prefix: 'Bearer' } },
+      { id: this.id, name: this.name, baseUrl: `${this.base}/v1`, auth: { header: 'Authorization', prefix: 'Bearer' } },
       { transport: this.transport },
     );
-    this.modelsUrl = options.modelsUrl ?? `${ZEN_BASE_URL}/v1/models`;
+    this.modelsUrl = options.modelsUrl ?? `${this.base}/v1/models`;
+  }
+
+  /** The endpoint for one lane, on this instance's root. */
+  private lane(lane: ZenLane): string {
+    return `${this.base}/v1/${lane === 'chat' ? 'chat/completions' : lane}`;
+  }
+
+  /**
+   * The account's own usage report — `GET {base}/v1/usage`, the read the reference project parses for
+   * both plugins.
+   *
+   * The shape is three percentage meters (`rolling`, `weekly`, `monthly`), each `{ percent, resetsAt }`.
+   * `percent` is what is **used**, so it is carried as `used` against a limit of 100: the dashboard's
+   * quota bar reads `used/limit`, and reporting 100 − used there would show an exhausted account as
+   * empty. A meter the response omits is left out rather than shown as zero.
+   *
+   * The matrix varies by plan: a Zen pay-as-you-go key answers with a wallet rather than these meters, so
+   * resources can legitimately be empty — the card then says the provider did not report one.
+   */
+  async quota(context: ProviderRequestContext = {}): Promise<ProviderQuota> {
+    const credential = context.credential;
+    const value = credential && 'value' in credential ? credential.value : undefined;
+    if (typeof value !== 'string' || !value) {
+      throw new ProviderError('AUTHENTICATION_FAILED', `Connect ${this.name} to read its usage.`, {
+        providerId: this.id,
+        publicMessage: `Connect ${this.name} to read its usage.`,
+      });
+    }
+    const { data } = await this.transport.request<{ usage?: Record<string, { percent?: unknown; resetsAt?: unknown }> }>({
+      method: 'GET',
+      providerId: this.id,
+      url: `${this.base}/v1/usage`,
+      headers: { accept: 'application/json', Authorization: `Bearer ${value}` },
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    const resources: Record<string, ProviderResourceQuota> = {};
+    const names: Record<string, string> = { rolling: 'Rolling', weekly: 'Weekly', monthly: 'Monthly' };
+    for (const [period, label] of Object.entries(names)) {
+      const meter = data?.usage?.[period];
+      if (!meter) continue;
+      const percent = typeof meter.percent === 'number' ? meter.percent : Number(meter.percent);
+      if (!Number.isFinite(percent)) continue;
+      const used = Math.max(0, Math.min(100, Math.round(percent * 10) / 10));
+      const resetsAt = typeof meter.resetsAt === 'string' && meter.resetsAt && !Number.isNaN(Date.parse(meter.resetsAt))
+        ? new Date(meter.resetsAt).toISOString()
+        : undefined;
+      resources[label] = { used, limit: 100, remaining: Math.round((100 - used) * 10) / 10, ...(resetsAt ? { resetsAt } : {}) };
+    }
+    return { plan: this.name, resources };
   }
 
   async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
@@ -402,9 +470,9 @@ export class ZenAdapter implements ProviderAdapter {
         ? (error as { statusCode: number }).statusCode
         : undefined;
       if (status === 401 || status === 403) {
-        throw new ProviderError('AUTHENTICATION_FAILED', 'OpenCode Zen refused this API key.', {
+        throw new ProviderError('AUTHENTICATION_FAILED', `${this.name} refused this API key.`, {
           providerId: this.id,
-          publicMessage: 'OpenCode Zen refused this key — it is invalid or expired. Create a new one in OpenCode Console.',
+          publicMessage: `${this.name} refused this key — it is invalid or expired. Create a new one at opencode.ai/auth.`,
         });
       }
       throw error;
@@ -415,7 +483,7 @@ export class ZenAdapter implements ProviderAdapter {
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
     const { lane, supported } = zenLaneFor(request.model);
     const id = request.model.includes('/') ? request.model.slice(request.model.lastIndexOf('/') + 1) : request.model;
-    if (!supported) throw unsupportedLane(request.model, id);
+    if (!supported) throw unsupportedLane(request.model, id, this.id, this.name);
 
     if (lane === 'chat') {
       // Free-tier models need the request contract, which the delegated chat lane knows nothing
@@ -446,7 +514,7 @@ export class ZenAdapter implements ProviderAdapter {
     const response = await this.transport.request<ResponsesPayload | MessagesPayload>({
       method: 'POST',
       providerId: this.id,
-      url: ZEN_LANES[lane],
+      url: this.lane(lane),
       // The messages lane does not take a bearer token. It takes the raw key in
       // `x-api-key`, and sending `Authorization: Bearer` there is answered with a
       // 401 even when the key is valid.
@@ -464,7 +532,7 @@ export class ZenAdapter implements ProviderAdapter {
         publicMessage: reason ? `OpenCode Zen rejected the request: ${reason}` : 'OpenCode Zen rejected the request.',
       });
     }
-    return isResponses ? toResponsesChatResponse(payload, request.model) : toMessagesChatResponse(payload, request.model);
+    return isResponses ? toResponsesChatResponse(payload, request.model, this.id) : toMessagesChatResponse(payload, request.model, this.id);
   }
 
   /**
@@ -475,7 +543,7 @@ export class ZenAdapter implements ProviderAdapter {
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
     const { lane, supported } = zenLaneFor(request.model);
     const id = request.model.includes('/') ? request.model.slice(request.model.lastIndexOf('/') + 1) : request.model;
-    if (!supported) throw unsupportedLane(request.model, id);
+    if (!supported) throw unsupportedLane(request.model, id, this.id, this.name);
     if (lane !== 'chat') {
       throw new ProviderError('NOT_SUPPORTED', `Streaming is not implemented for OpenCode Zen models on the ${lane} lane.`, {
         providerId: this.id,
@@ -595,7 +663,7 @@ export class ZenAdapter implements ProviderAdapter {
       this.transport.stream({
         method: 'POST',
         providerId: this.id,
-        url: ZEN_LANES.chat,
+        url: this.lane('chat'),
         headers: { ...headers, accept: 'text/event-stream' },
         body: JSON.stringify(body),
         ...(context.signal ? { signal: context.signal } : {}),

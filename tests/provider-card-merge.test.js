@@ -231,7 +231,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // property it asserts is about every card, and it holds for a new one without being extended.
   // 38-39 added `codebuddy-cn` and `codebuddy-intl`: one vendor, two regions on two domains, because a
   // sign-in on one side does not reach the other — the same split as `minimax-code`/`minimax-code-global`.
-  assert.equal(providerCatalog.length, 47, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerCatalog.length, 48, `the catalog now has ${providerCatalog.length} cards`);
   const connected = mergeGatewayConnections(providerCatalog, [connection()], health());
   assert.equal(connected.length, providerCatalog.length, 'a merge must not add or drop a card');
   console.log(`    cards: ${providerCatalog.length}   fields that may change on a merge: 5   that may not: 2`);
