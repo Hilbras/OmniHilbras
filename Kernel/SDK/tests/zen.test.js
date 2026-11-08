@@ -168,14 +168,35 @@ test('streaming is refused on a lane that has no stream, rather than faked', asy
   );
 });
 
-test('validating a credential does not spend a request', async () => {
-  // The Zen catalog is public, so a live probe would prove nothing and would
-  // bill on every health poll.
-  const t = transport({});
+test('validating a credential reads the catalog with the key, and refuses a key Zen refuses', async () => {
+  /**
+   * This test used to assert the opposite — that no request was made — on the premise that the Zen
+   * catalog is public, so a listing could not say anything about a key. Measured on 2026-11-08:
+   *
+   * ```
+   * GET /zen/v1/models                                    -> 200 (no credential needed)
+   * GET /zen/v1/models   Authorization: Bearer <bad>      -> 401 {"message":"Invalid credential"}
+   * ```
+   *
+   * The endpoint judges the credential when one is sent, which is exactly what `listModels` sends. So the
+   * check reads the listing **with** the key: it still spends no tokens, and it stops reporting "valid"
+   * for a key the provider answers `401 This API key has expired` to — which is what the dashboard showed
+   * for an expired Zen key while every chat through it failed.
+   */
+  const t = transport({ 'https://opencode.ai/zen/v1/models': { data: { data: [{ id: 'kimi-k3' }] } } });
   const adapter = new ZenAdapter({ transport: t });
   const result = await adapter.validateCredential({ type: 'api-key', value: 'k' });
   assert.equal(result.status, 'valid');
-  assert.equal(t.requests.length, 0, 'no request is made');
+  assert.equal(t.requests.length, 1, 'the listing is what proves the key');
+  assert.equal(t.requests[0].headers.Authorization, 'Bearer k', 'and it carries the credential, or it proves nothing');
+
+  const refused = transport({ 'https://opencode.ai/zen/v1/models': { status: 401, data: {} } });
+  await assert.rejects(
+    () => new ZenAdapter({ transport: refused }).validateCredential({ type: 'api-key', value: 'expired' }),
+    (error) => error.code === 'AUTHENTICATION_FAILED' && /refused this key/.test(error.publicMessage ?? ''),
+    'a refused key must not be reported as valid',
+  );
+
   await assert.rejects(
     () => adapter.validateCredential({ type: 'none' }),
     (error) => error.code === 'AUTHENTICATION_FAILED',

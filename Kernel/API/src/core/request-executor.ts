@@ -700,8 +700,27 @@ function attachAttempts(error: unknown, attempts: GatewayFailoverAttempt[]) {
       });
     }
     const message = `Every provider route failed. Tried: ${failedProviders.join(', ')}.`;
-    return new ProviderError('PROVIDER_UNAVAILABLE', message, { retryable: true, publicMessage: message, details: ledger, cause: error });
+    // The provider's own wording and status are **merged** into the ledger, not replaced by it. They used
+    // to be dropped on this branch alone — the one branch a caller reaches whenever failover engaged — so
+    // the dashboard showed "Every provider route failed" with no cause while the sibling branch above
+    // carried both. Measured while checking every free-tier provider: six reported failures and the
+    // upstream reason was available in none of them.
+    return new ProviderError('PROVIDER_UNAVAILABLE', message, {
+      ...(error.providerId ? { providerId: error.providerId } : {}),
+      ...(error.statusCode ? { statusCode: error.statusCode } : {}),
+      retryable: true,
+      publicMessage: message,
+      details: { ...(typeof error.details === 'object' && error.details !== null ? error.details : {}), ...ledger },
+      cause: error,
+    });
   }
   const message = `Every provider route failed.${failedProviders.length > 0 ? ` Tried: ${failedProviders.join(', ')}.` : ''}`;
-  return new ProviderError('PROVIDER_REQUEST_FAILED', message, { retryable: true, publicMessage: message, details: ledger, cause: error });
+  // Same reasoning as above: a non-ProviderError still has to leave the ledger *and* anything the throw
+  // carried, or the reason a request failed is unavailable on exactly the path that reports failure.
+  return new ProviderError('PROVIDER_REQUEST_FAILED', message, {
+    retryable: true,
+    publicMessage: message,
+    details: { ...(typeof (error as { details?: unknown }).details === 'object' && (error as { details?: unknown }).details !== null ? (error as { details: Record<string, unknown> }).details : {}), ...ledger },
+    cause: error,
+  });
 }

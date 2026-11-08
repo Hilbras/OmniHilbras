@@ -368,18 +368,48 @@ export class ZenAdapter implements ProviderAdapter {
   }
 
   /**
-   * The catalog is public, so a successful listing says nothing about a token.
-   * A signed-in probe would cost a billable request on every health poll, so the
-   * credential is checked for presence and shape only.
+   * **The catalog is public only when no credential is sent.**
+   *
+   * This used to report `valid` for any non-empty string, on the premise that a listing endpoint cannot
+   * say anything about a token. Measured against the live host on 2026-11-08:
+   *
+   * ```
+   * GET /zen/v1/models                          -> 200, no credential needed
+   * GET /zen/v1/models  Authorization: Bearer <bad>  -> 401 {"error":{"message":"Invalid credential"}}
+   * ```
+   *
+   * So the endpoint *does* judge the credential when one is present — which is exactly what `listModels`
+   * sends — and a check that reads the catalog **with the key** is a real check. Found while checking the
+   * free-tier group: the card showed "Credential check 100%" for a key the provider answered
+   * `401 This API key has expired` to, because the check had never asked.
+   *
+   * It costs no tokens: it is the model listing, not an inference request.
    */
-  async validateCredential(credential: ProviderCredential | undefined): Promise<CredentialValidation> {
+  async validateCredential(credential: ProviderCredential | undefined, context: ProviderRequestContext = {}): Promise<CredentialValidation> {
     if (credential?.type === 'none' || !credential?.value) {
       throw new ProviderError('AUTHENTICATION_FAILED', 'An OpenCode Zen API key is required.', {
         providerId: this.id,
         publicMessage: 'An OpenCode Zen API key is required.',
       });
     }
-    return { status: 'valid', checkedAt: new Date().toISOString() };
+    const startedAt = performance.now();
+    // The listing carries the credential, so a key the provider refuses fails here rather than on the
+    // first chat — which is what "the key looks valid" has to mean.
+    try {
+      await this.listModels({ ...context, credential });
+    } catch (error) {
+      const status = error && typeof error === 'object' && typeof (error as { statusCode?: unknown }).statusCode === 'number'
+        ? (error as { statusCode: number }).statusCode
+        : undefined;
+      if (status === 401 || status === 403) {
+        throw new ProviderError('AUTHENTICATION_FAILED', 'OpenCode Zen refused this API key.', {
+          providerId: this.id,
+          publicMessage: 'OpenCode Zen refused this key — it is invalid or expired. Create a new one in OpenCode Console.',
+        });
+      }
+      throw error;
+    }
+    return { status: 'valid', checkedAt: new Date().toISOString(), latencyMs: Math.round(performance.now() - startedAt) };
   }
 
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {

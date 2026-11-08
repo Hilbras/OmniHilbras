@@ -621,9 +621,14 @@ Gemini, which Zen serves from its own path, and Jev, a decision model on
 `/systemone`. Streaming is refused on the `messages` and `responses` lanes rather
 than silently answered without a stream.
 
-Credential validation is presence-and-shape only: Zen's catalog is public, so a live
-probe would prove nothing and would bill on every health poll. Health reads the
-public catalog instead.
+Credential validation reads the catalog **with the key**, which costs no tokens.
+Zen's listing is public only when no credential is sent — measured 2026-11-08:
+`GET /zen/v1/models` answers `200` with no credential, and `401 {"message":"Invalid
+credential"}` for a bad one. So the endpoint does judge the credential when it is
+presented, and passing it makes the catalog read a real check. It used to be
+presence-and-shape only, on the premise that a public listing cannot speak about a
+token; that reported `valid` for a key Zen answered `401 This API key has expired`
+to on every chat. Health reads the same listing.
 
 ### Why a Zen refusal looks like a bare status code
 
