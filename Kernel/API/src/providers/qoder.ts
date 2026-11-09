@@ -23,6 +23,7 @@ export type QoderSessionStatus = {
 
 type Session = {
   id: string;
+  connectionId: string;
   nonce: string;
   deviceCode: string;
   userCode: string;
@@ -36,7 +37,7 @@ type Session = {
   claimed: boolean;
 };
 
-type CreateInput = { deviceCode: string; userCode: string; codeVerifier: string; machineId: string; verificationUrl: string };
+type CreateInput = { deviceCode: string; userCode: string; codeVerifier: string; machineId: string; verificationUrl: string; connectionId?: string };
 
 export class QoderSessionStore {
   private readonly store: SignInSessionStore<Session, CreateInput>;
@@ -47,6 +48,7 @@ export class QoderSessionStore {
       isPlausibleId: (id) => sessionIdPattern.test(id),
       build: (input, { id, expiresAt }) => ({
         id,
+        connectionId: input.connectionId ?? qoderProviderId,
         nonce: input.deviceCode,
         deviceCode: input.deviceCode,
         userCode: input.userCode,
@@ -61,7 +63,7 @@ export class QoderSessionStore {
     });
   }
 
-  create(input: CreateInput & { expiresIn?: number }): Session {
+  create(input: CreateInput & { expiresIn?: number; connectionId?: string }): Session {
     return this.store.create(
       {
         deviceCode: input.deviceCode,
@@ -69,6 +71,7 @@ export class QoderSessionStore {
         codeVerifier: input.codeVerifier,
         machineId: input.machineId,
         verificationUrl: input.verificationUrl,
+        connectionId: input.connectionId,
       },
       input.expiresIn,
     );

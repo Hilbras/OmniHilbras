@@ -34,6 +34,7 @@ export type OpencodeConsoleSessionStatus = {
 
 type Session = {
   id: string;
+  connectionId: string;
   deviceCode: string;
   userCode: string;
   verificationUrl: string;
@@ -62,20 +63,20 @@ type Session = {
  * is what the polling path in the service reads. That is Console's shape and it stays Console's.
  */
 export class OpencodeConsoleSessionStore {
-  private readonly store: SignInSessionStore<Session, { deviceCode: string; userCode: string; verificationUrl: string }>;
+  private readonly store: SignInSessionStore<Session, { deviceCode: string; userCode: string; verificationUrl: string; connectionId?: string }>;
 
   constructor(options: { ttlMs?: number } = {}) {
     const ttlMs = options.ttlMs ?? defaultTtlMs;
-    this.store = new SignInSessionStore<Session, { deviceCode: string; userCode: string; verificationUrl: string }>({
+    this.store = new SignInSessionStore<Session, { deviceCode: string; userCode: string; verificationUrl: string; connectionId?: string }>({
       ttlMs,
       isPlausibleId: (id) => sessionIdPattern.test(id),
-      build: (input, { id, expiresAt }) => ({ id, ...input, expiresAt, status: 'pending', claimed: false }),
+      build: (input, { id, expiresAt }) => ({ id, connectionId: input.connectionId ?? opencodeConsoleProviderId, deviceCode: input.deviceCode, userCode: input.userCode, verificationUrl: input.verificationUrl, expiresAt, status: 'pending', claimed: false }),
       read: (session) => ({ userCode: session.userCode, verificationUrl: session.verificationUrl }),
     });
   }
 
-  create(input: { deviceCode: string; userCode: string; verificationUrl: string; expiresIn?: number }): Session {
-    return this.store.create({ deviceCode: input.deviceCode, userCode: input.userCode, verificationUrl: input.verificationUrl }, input.expiresIn);
+  create(input: { deviceCode: string; userCode: string; verificationUrl: string; expiresIn?: number; connectionId?: string }): Session {
+    return this.store.create({ deviceCode: input.deviceCode, userCode: input.userCode, verificationUrl: input.verificationUrl, connectionId: input.connectionId }, input.expiresIn);
   }
 
   get(id: string): Session | undefined {

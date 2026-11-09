@@ -1204,12 +1204,13 @@ export class GatewayService {
     });
   }
 
-  async startQoderSignIn() {
+  async startQoderSignIn(addAccount = false, targetConnectionId?: string) {
     const adapter = this.qoderAdapter(qoderProviderId) as unknown as {
       beginSignIn(): Promise<{ deviceCode: string; userCode: string; verificationUrl: string; codeVerifier: string; machineId: string; expiresIn: number }>;
     };
     const started = await adapter.beginSignIn();
-    const session = this.qoderSessions.create(started);
+    const connectionId = targetConnectionId ?? (addAccount ? `qoder-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}` : qoderProviderId);
+    const session = this.qoderSessions.create({ ...started, connectionId });
     return { sessionId: session.id, userCode: session.userCode, verificationUrl: session.verificationUrl, expiresAt: new Date(session.expiresAt).toISOString() };
   }
 
@@ -1238,7 +1239,7 @@ export class GatewayService {
         return note;
       },
       connection: () => ({
-        id: qoderProviderId,
+        id: this.qoderSessions.get(sessionId)?.connectionId ?? qoderProviderId,
         providerId: qoderProviderId,
         name: 'Qoder',
         endpoint: 'https://api3.qoder.sh',
@@ -1376,9 +1377,10 @@ export class GatewayService {
     });
   }
 
-  async startOpencodeConsoleSignIn() {
+  async startOpencodeConsoleSignIn(addAccount = false, targetConnectionId?: string) {
     const started = await beginOpencodeConsoleSignIn();
-    const session = this.opencodeConsoleSessions.create(started);
+    const connectionId = targetConnectionId ?? (addAccount ? `opencode-console-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}` : opencodeConsoleProviderId);
+    const session = this.opencodeConsoleSessions.create({ ...started, connectionId });
     return {
       sessionId: session.id,
       userCode: session.userCode,
@@ -1420,7 +1422,7 @@ export class GatewayService {
     const orgName = credential.type === 'oauth' ? credential.orgName : undefined;
     try {
       const connection = await this.saveConnection({
-        id: opencodeConsoleProviderId,
+        id: this.opencodeConsoleSessions.get(sessionId)?.connectionId ?? opencodeConsoleProviderId,
         providerId: opencodeConsoleProviderId,
         name: `OpenCode Console${orgName ? ` (${orgName})` : ''}`,
         endpoint: 'https://opencode.ai/inference/openai/v1',
@@ -1458,7 +1460,7 @@ export class GatewayService {
         // blind — a blind read is a runtime failure on exactly the accounts that paid.
         const orgName = credential.type === 'oauth' ? credential.orgName : undefined;
         return {
-          id: opencodeConsoleProviderId,
+          id: this.opencodeConsoleSessions.get(sessionId)?.connectionId ?? opencodeConsoleProviderId,
           providerId: opencodeConsoleProviderId,
           name: `OpenCode Console${orgName ? ` (${orgName})` : ''}`,
           endpoint: 'https://opencode.ai/inference/openai/v1',

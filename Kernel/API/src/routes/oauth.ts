@@ -115,7 +115,9 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     // OpenCode Console uses a device flow, so there is no callback: the dashboard
     // starts the flow, shows the code, and polls until the Console reports it approved.
     if (request.method === 'POST' && url.pathname === '/v1/oauth/opencode-console/start') {
-      sendJson(response, 201, await service.startOpencodeConsoleSignIn(), origin);
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startOpencodeConsoleSignIn(addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -353,7 +355,9 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
      * the session route until the token lands.
      */
     if (request.method === 'POST' && url.pathname === '/v1/oauth/qoder/start') {
-      sendJson(response, 201, await service.startQoderSignIn(), origin);
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, await service.startQoderSignIn(addAccount, targetConnectionId), origin);
       return true;
     }
 
