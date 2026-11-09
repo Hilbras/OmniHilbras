@@ -27,6 +27,7 @@ export function FailureNotifications() {
 
   useEffect(() => {
     const COLLAPSE_MS = 1500;
+    let announcedDown = false;
     return openGatewayLogStream((event: GatewayLogEvent) => {
       if (event.outcome !== 'failure') return;
       const key = `${event.providerId ?? 'gateway'}:${event.errorCode ?? ''}`;
@@ -40,7 +41,15 @@ export function FailureNotifications() {
       const why = event.errorCode ? ` — ${event.errorCode}` : '';
       const after = event.attempts > 1 ? `, after ${event.attempts} attempts` : '';
       notify(`${who} request failed${after}${why}`, 'error');
-    }, () => undefined);
+    }, (connected) => {
+      // The feed can be unavailable for a real reason (built dashboard, refused origin, gateway down).
+      // Saying so once is the difference between "quiet" and "silent".
+      if (connected) announcedDown = false;
+      else if (!announcedDown) {
+        announcedDown = true;
+        notify('Live failure feed unavailable. Failed requests will not be announced.', 'error');
+      }
+    });
   }, [notify]);
 
   return null;

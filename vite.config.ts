@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PNG } from 'pngjs';
@@ -237,7 +238,8 @@ function gatewayProxy(): Plugin {
           upstream.headers.forEach((value, name) => {
             if (name !== 'content-encoding' && name !== 'transfer-encoding') response.setHeader(name, value);
           });
-          response.end(Buffer.from(await upstream.arrayBuffer()));
+          if (upstream.body) Readable.fromWeb(upstream.body as import('node:stream/web').ReadableStream).pipe(response);
+          else response.end();
         } catch {
           response.statusCode = 502;
           response.setHeader('content-type', 'application/json');

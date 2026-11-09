@@ -496,7 +496,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   const bulkAbortRef = useRef<AbortController | null>(null);
   const bulkRunRef = useRef(false);
   const scrollAnchorRef = useRef<number | null>(null);
-  const [customModels, setCustomModels] = useState<string[]>([]);
+  const [customModels] = useState<string[]>([]);
   const [filters, setFilters] = useState<ModelFilterState>(defaultModelFilters);
   const { notify } = useToast();
   const [copiedModel, setCopiedModel] = useState<string | null>(null);
@@ -723,14 +723,17 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   function openEditConnection(row: GatewayConnection) {
     setEditingConnection(row);
     setAddAccountOpen(false);
-    // An API-key account edits in the key dialog, a signed-in one in its flow.
-    setApiKeyMode(!isOauth);
+    // The credential the row actually holds decides how it is edited. The card's `isOauth` is true for
+    // every dual-mode provider (`nous`, `opencode`), so branching on it sent an API-key account into a
+    // sign-in flow and, with a target id, would replace its key with an OAuth credential.
+    const rowIsOauth = row.credentialType === 'oauth';
+    setApiKeyMode(!rowIsOauth);
     if (webCookieProviders.has(provider.id)) {
       flash(`${provider.name} accounts are edited by pasting a fresh session.`, 'error');
       setEditingConnection(null);
       return;
     }
-    if (isOauth) {
+    if (rowIsOauth) {
       if (!oauthFlowAvailable) {
         flash(`${provider.name} sign-in is not available yet.`, 'error');
         setEditingConnection(null);
@@ -901,6 +904,10 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       });
       setConnection(savedConnection);
       setConnectionAdded(true);
+      // The page renders rows from `connections`, not from `connection`. Setting only the latter left
+      // the Connections card empty after a successful OpenRouter save while the header said
+      // "No connection".
+      await loadConnection();
       setAddOpen(false);
       setConnectionHealthy(false);
       setConnectionVerified(undefined);
@@ -993,10 +1000,13 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       throw new Error(message);
     }
     let persisted = false;
-    if (provider.id === 'openrouter' && connection) {
+    // The route is generic (`POST /v1/connections/:id/models`); only OpenRouter used it, so for every
+    // other provider the toast said "added to the provider catalog" and the model vanished on reload.
+    if (connection) {
       try {
         const updated = await addGatewayConnectionModels(connection.id, [model]);
         setConnection(updated);
+        await loadConnection();
         persisted = true;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'The model could not be saved.';
@@ -1004,7 +1014,10 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
         throw error instanceof Error ? error : new Error(message);
       }
     }
-    if (!persisted) setCustomModels((current) => [...current, model]);
+    if (!persisted) {
+      flash(`No saved connection to attach ${model} to.`, 'error');
+      throw new Error('No saved connection.');
+    }
     flash(`${model} added to the provider catalog.`);
   }
 
@@ -1039,8 +1052,9 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       setModelTests((current) => ({ ...current, [model]: 'ok' }));
       setModelTestNotes((current) => ({ ...current, [model]: result.note ?? '' }));
       setModelTestLatencies((current) => ({ ...current, [model]: result.latencyMs }));
-      setConnectionHealthy(true);
-      setConnectionPingMs(result.latencyMs);
+      // This proves the model answered, not that the credential was accepted. Marking the connection
+      // healthy here painted "credential accepted" from an inference test while the credential badge
+      // still read "not read yet" — two claims about one thing.
       return { ok: true as const, latencyMs: result.latencyMs, message: '' };
     } catch (error) {
       const message = signal.aborted ? 'Model test timed out or was cancelled.' : error instanceof Error ? error.message : 'The model test failed.';
@@ -1434,7 +1448,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   */}
           <div className="mt-5 space-y-3 border-t border-line pt-5"><div className="flex flex-col gap-0.5 text-xs sm:flex-row sm:items-center sm:justify-between"><span className="muted">Endpoint</span><button type="button" onClick={() => document.getElementById('endpoint')?.scrollIntoView({ behavior: 'smooth' })} className="min-w-0 max-w-full truncate text-left font-mono text-[10px] text-gold-text hover:underline sm:max-w-[180px]">{connection?.endpoint ?? provider.endpoint}</button></div><div className="flex items-center justify-between text-xs"><span className="muted">Priority</span><span className="font-mono text-[10px]">#{connection?.priority ?? 1}</span></div><div className="flex items-center justify-between text-xs"><span className="muted">Credentials</span><span className="flex items-center gap-1.5 font-mono text-[10px] text-success"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />local only</span></div></div>
           {connection && <ResiliencePanel connection={connection} routingState={routingState} onSave={saveResilience} strategy={routingState?.strategies?.[connection.providerId] ?? 'priority'} onStrategy={(next) => saveStrategy(connection.providerId, next)} />}
-          <div className="mt-5 rounded-lg border border-gold/20 bg-gold-soft/45 p-3 text-[11px] leading-relaxed text-muted"><Sparkles className="mr-1 inline h-3.5 w-3.5 text-gold-text" aria-hidden="true" />{provider.id === 'openrouter' ? 'OpenRouter credentials are managed by the local gateway.' : 'Policy changes are preview-only until a provider management API is connected.'}</div>
+          <div className="mt-5 rounded-lg border border-gold/20 bg-gold-soft/45 p-3 text-[11px] leading-relaxed text-muted"><Sparkles className="mr-1 inline h-3.5 w-3.5 text-gold-text" aria-hidden="true" />{provider.id === 'openrouter' ? 'OpenRouter credentials are managed by the local gateway.' : 'Priority, resilience, enabled state and strategy are saved to the local gateway.'}</div>
         </section>
       </div>
 

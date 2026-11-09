@@ -53,13 +53,13 @@ export const KIRO_METHODS: KiroMethod[] = [
     id: 'google',
     title: 'Google Account',
     detail: 'Log in with your Google account.',
-    hint: 'Kiro sends your browser to a kiro:// address, which only the Kiro app can open. Copy the code from your address bar and paste it below.',
+    hint: 'Approve the code in the tab that opens, or open the verification link and enter it. Nothing is pasted back.',
   },
   {
     id: 'github',
     title: 'GitHub Account',
     detail: 'Log in with your GitHub account.',
-    hint: 'Kiro sends your browser to a kiro:// address, which only the Kiro app can open. Copy the code from your address bar and paste it below.',
+    hint: 'Approve the code in the tab that opens, or open the verification link and enter it. Nothing is pasted back.',
   },
   {
     id: 'import-token',

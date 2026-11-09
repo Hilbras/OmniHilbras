@@ -115,7 +115,7 @@ function SidebarLink({ item, activePage, collapsed, onNavigate }: { item: Sideba
   );
 }
 
-function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose: () => void; activePage: DashboardPage; collapsed: boolean; onToggleCollapse: () => void }) {
+function Sidebar({ onClose, activePage, collapsed, onToggleCollapse, status }: { onClose: () => void; activePage: DashboardPage; collapsed: boolean; onToggleCollapse: () => void; status: ReturnType<typeof useGatewayStatus> }) {
   /**
    * The badge is driven by a real probe, polled every few seconds.
    *
@@ -124,7 +124,7 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse }: { onClose
    * message would be the last thing the tab ever said. `/v1/connections` answers in about
    * five milliseconds, so the poll costs nothing.
    */
-  const { reachable, problem, buildVersion } = useGatewayStatus();
+  const { reachable, problem, buildVersion } = status;
   const gatewayUp = reachable !== false;
   /**
    * A gateway that is answering a different build from the page asking it.
@@ -270,7 +270,8 @@ export function DashboardShell({
     which typechecked — `gatewayUp` was in scope file-wide — and rendered a blank page, because a hook
     called at module scope has no React dispatcher. `tsc` cannot see that; the browser can.
   */
-  const { reachable } = useGatewayStatus();
+  const gatewayStatus = useGatewayStatus();
+  const { reachable } = gatewayStatus;
   const gatewayUp = reachable !== false;
 
 
@@ -289,7 +290,7 @@ export function DashboardShell({
       {mobileOpen && <button type="button" aria-label="Close dashboard navigation" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] lg:hidden" />}
 
       <div className={`fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <Sidebar onClose={() => setMobileOpen(false)} activePage={activePage} collapsed={collapsed} onToggleCollapse={() => setCollapsed((value) => !value)} />
+        <Sidebar onClose={() => setMobileOpen(false)} activePage={activePage} collapsed={collapsed} onToggleCollapse={() => setCollapsed((value) => !value)} status={gatewayStatus} />
       </div>
 
       {/*

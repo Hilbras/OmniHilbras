@@ -19,7 +19,7 @@ function ProviderRoute() {
   // One component serves both paths, so the header and tab strip cannot drift between the two tabs. The tab is
   // read from the pathname rather than passed in, so a reload lands on the same tab.
   const tab = location.pathname.endsWith('/usage') ? 'usage' : 'overview';
-  return <ProviderDetailContent provider={provider} tab={tab} />;
+  return <ProviderDetailContent key={provider.id} provider={provider} tab={tab} />;
 }
 
 const activePageTitles = {
@@ -30,19 +30,21 @@ const activePageTitles = {
   // Added in 1.64.0 with the page itself. `overview` remains only as the fallback for an unrouted path,
   // which the catch-all `<Route path="*">` redirects to Providers — so it is a title nothing can reach.
   usage: 'Usage',
+  logs: 'Request log',
   settings: 'Settings',
 } as const;
 
 const pageDescriptions = {
   overview: 'Your gateway at a glance',
   providers: 'Connect and manage the routes behind your gateway',
-  routing: 'Policies, fallbacks, and request flow',
+  routing: 'Per-connection eligibility, health, and last attempt',
   keys: 'Keys that authorize access to your local gateway',
   // Worded to avoid the phrase the marketing guard forbids across all of `src/`. The guard is a
   // substring match, and the claim is now *true* — but "what it cost" with no published price is
   // exactly the overstatement the guard exists to catch, so the description says what the page
   // actually shows instead.
   usage: 'Requests your gateway actually served, and their measured cost',
+  logs: 'Requests as the gateway records them, newest first',
   settings: 'The configuration this gateway loaded at startup',
 } as const;
 
@@ -57,7 +59,9 @@ function DashboardRoutes() {
         ? 'keys'
         : location.pathname.startsWith('/usage')
           ? 'usage'
-          : location.pathname.startsWith('/settings')
+          : location.pathname.startsWith('/logs')
+            ? 'logs'
+            : location.pathname.startsWith('/settings')
             ? 'settings'
             : 'overview';
   const provider = isProviderDetail ? getProviderById(location.pathname.split('/').filter(Boolean).at(-1)) : undefined;

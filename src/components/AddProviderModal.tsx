@@ -112,11 +112,11 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape' && !saving) onClose();
     };
     document.addEventListener('keydown', closeOnEscape);
     return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [open, onClose]);
+  }, [open, onClose, saving]);
 
   if (!open) return null;
 
@@ -336,7 +336,7 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
                 {showsEndpoint && (
                   <label className="mt-4 block">
                     <span className="mb-2 block text-xs font-semibold">Endpoint</span>
-                    <input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="http://localhost:8000/v1" className="input !h-11 !w-full !rounded-lg !border-line !bg-surface-2 !px-3 !font-mono !text-xs" />
+                    <input value={endpoint} onChange={(event) => { cancelPendingCheck(); setEndpoint(event.target.value); setTestState('idle'); }} placeholder="http://localhost:8000/v1" className="input !h-11 !w-full !rounded-lg !border-line !bg-surface-2 !px-3 !font-mono !text-xs" />
                   </label>
                 )}
 
@@ -376,6 +376,13 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
                 )}
                 <p className="mt-5 text-xs leading-relaxed text-muted">One key per line. Format: <code className="font-mono text-gold-text">name|apiKey</code> or just <code className="font-mono text-gold-text">apiKey</code> (auto-named by index).</p>
                 <textarea id="bulk-api-keys" aria-label="API Keys" autoComplete="off" spellCheck={false} value={bulkText} onChange={(event) => { setBulkText(event.target.value); setError(''); }} placeholder={'name1|sk-key1\nname2|sk-key2\nsk-key-only-auto-named'} rows={8} className="input !mt-3 !min-h-[160px] !w-full !resize-y !rounded-lg !border-gold/35 !bg-surface-2 !p-3 !font-mono !text-xs focus:!border-gold/70" />
+                {showsEndpoint && (
+                  <label className="mt-4 block">
+                    <span className="mb-2 block text-xs font-semibold">Endpoint</span>
+                    <input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="http://localhost:8000/v1" className="input !h-11 !w-full !rounded-lg !border-line !bg-surface-2 !px-3 !font-mono !text-xs" />
+                    <span className="muted mt-1 block text-[11px]">Every key in the batch is saved against this endpoint.</span>
+                  </label>
+                )}
               </div>
             )}
             {error && <p role="alert" className="mt-3 flex items-center gap-1.5 text-[11px] text-danger"><CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />{error}</p>}

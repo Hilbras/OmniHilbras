@@ -14,6 +14,7 @@ import {
 import { DashboardShell } from '../components/DashboardShell';
 import { getGatewayRoutingState, type GatewayRoutingState } from '../lib/gatewayClient';
 import { routingVerdict, eligibleCount } from '../lib/routingVerdict';
+import { useGatewayReload } from '../lib/useGatewayStatus';
 
 /**
  * The routing control plane, showing what routing can actually use.
@@ -80,7 +81,16 @@ function whyNotUsable(connection: GatewayRoutingState['connections'][number], th
 
 function ConnectionCard({ connection, threshold }: { connection: GatewayRoutingState['connections'][number]; threshold: number }) {
   const blocked = whyNotUsable(connection, threshold);
-  const health: Health = blocked ? (connection.ejected || (connection.failures ?? 0) > 0 ? 'degraded' : 'unavailable') : connection.lastCheckedAt ? 'healthy' : 'unknown';
+  // A timestamp only says a check happened, not that it passed: `recordFailure` writes it too. The
+  // failure count and the last error are what distinguish the two.
+  const failures = connection.failures ?? 0;
+  const health: Health = connection.ejected || (threshold > 0 && failures >= threshold)
+    ? 'unavailable'
+    : failures > 0 || connection.lastError
+      ? 'degraded'
+      : connection.lastCheckedAt
+        ? 'healthy'
+        : 'unknown';
   const tone = HEALTH_TONE[health];
   return (
     <article className="card min-w-0 p-4 sm:p-5">
@@ -155,17 +165,25 @@ export function RoutingContent() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(() => {
+  const load = useCallback((signal?: AbortSignal) => {
     setLoading(true);
-    getGatewayRoutingState()
+    getGatewayRoutingState(signal)
       .then((next) => { setState(next); setError(null); })
-      // The gateway is not running, or refused. Said plainly, because "no data" and "no gateway" are
-      // different states and only one of them is the operator's fault.
-      .catch(() => setError('The gateway did not answer. Start it with `pnpm dev:gateway` and refresh.'))
+      // Preserve the gateway's own answer: a 403 is a running gateway refusing this origin, not an
+      // offline one, and "start the gateway" sends the operator to fix the wrong thing.
+      .catch((cause: unknown) => {
+        if (cause instanceof DOMException && cause.name === 'AbortError') return;
+        setError(cause instanceof Error ? cause.message : 'The gateway did not answer.');
+      })
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
+  useGatewayReload(load);
 
   const connections = state?.connections ?? [];
   // Counted by the same function the cards render, so the number above cannot disagree with the
@@ -184,7 +202,7 @@ export function RoutingContent() {
             credential, what its last health check measured, and the reason it would be skipped.
           </p>
         </div>
-        <button type="button" onClick={load} className="btn-ghost !px-3 !py-2.5 !text-xs">
+        <button type="button" onClick={() => load()} className="btn-ghost !px-3 !py-2.5 !text-xs">
           <RefreshCw className={`h-3.5 w-3.5${loading ? ' animate-spin' : ''}`} aria-hidden="true" />
           {loading ? 'Reading routing state' : 'Refresh'}
         </button>
@@ -220,10 +238,10 @@ export function RoutingContent() {
             <div>
               <p className="text-xs font-semibold">What this page does not show</p>
               <p className="muted mt-1 text-[11px] leading-relaxed">
-                No request counts, no fallback totals, no p95. The gateway keeps no request log and no
-                timing history, so there is nothing to report — an earlier version of this page showed
-                invented figures here, including a health-check result from a button that made no
-                request.
+                Request counts, cost and p95 for served traffic are on the Usage page, read from the
+                gateway's usage store. This page reports routing eligibility and the health counters
+                routing itself acts on — an earlier version showed invented figures here, including a
+                health-check result from a button that made no request.
               </p>
               <p className="muted mt-1 text-[11px] leading-relaxed">
                 "Eligible" means routing would put this connection in the candidate list for a request:

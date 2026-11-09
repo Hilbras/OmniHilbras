@@ -85,10 +85,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
-const TONE_STYLES: Record<ToastTone, { container: string; icon: typeof CircleAlert; Icon: typeof CircleAlert }> = {
-  success: { container: 'border-success/30 bg-success/10 text-success', icon: CheckCircle2, Icon: CheckCircle2 },
-  error: { container: 'border-danger/30 bg-danger/10 text-danger', icon: CircleAlert, Icon: CircleAlert },
-  info: { container: 'border-line bg-surface text-text', icon: Info, Icon: Info },
+const TONE_STYLES: Record<ToastTone, { container: string; Icon: typeof CircleAlert }> = {
+  success: { container: 'border-success/30 bg-success/10 text-success', Icon: CheckCircle2 },
+  error: { container: 'border-danger/30 bg-danger/10 text-danger', Icon: CircleAlert },
+  info: { container: 'border-line bg-surface text-text', Icon: Info },
 };
 
 function ToastViewport({ toasts, onDismiss }: { toasts: readonly Toast[]; onDismiss: (id: number) => void }) {

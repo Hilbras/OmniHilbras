@@ -18,10 +18,12 @@ import {
   removeGatewayApiKey,
   setGatewayApiKeyEnabled,
   setGatewayRequireApiKey,
+  gatewayOrigin,
   type GatewayApiKey,
 } from '../lib/gatewayClient';
+import { useGatewayReload } from '../lib/useGatewayStatus';
 
-const gatewayUrl = 'http://127.0.0.1:8787';
+const gatewayUrl = gatewayOrigin();
 
 function formatDate(value: string) {
   const parsed = new Date(value);
@@ -99,8 +101,11 @@ function CopyButton({ value, label }: { value: string; label: string }) {
     <button
       type="button"
       onClick={() => {
-        void navigator.clipboard?.writeText(value);
-        setCopied(true);
+        // Claiming "copied" without checking was a button that lied whenever the clipboard API was
+        // unavailable or the write was refused.
+        const write = navigator.clipboard?.writeText(value);
+        if (!write) return;
+        void write.then(() => setCopied(true)).catch(() => setCopied(false));
       }}
       aria-label={copied ? `${label} copied` : `Copy ${label}`}
       className="muted grid h-7 w-7 shrink-0 place-items-center rounded-lg hover:bg-surface-2 hover:text-gold-text"
@@ -133,6 +138,8 @@ export function ApiKeysContent() {
   const [createdKey, setCreatedKey] = useState<{ name: string; key: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [busyKeyId, setBusyKeyId] = useState<string | null>(null);
+  /** Whether the key list has been read. `keys: []` before a read is not "there are no keys". */
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -140,6 +147,7 @@ export function ApiKeysContent() {
       const result = await listGatewayApiKeys(signal);
       setKeys(result.keys);
       setRequireApiKey(result.requireApiKey);
+      setLoaded(true);
     } catch (error) {
       if (signal?.aborted) return;
       setNoticeError(true);
@@ -154,6 +162,7 @@ export function ApiKeysContent() {
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+  useGatewayReload(load);
 
   function flash(message: string, tone: 'success' | 'error' = 'success') {
     setNotice(message);
@@ -271,7 +280,13 @@ export function ApiKeysContent() {
             </button>
           </div>
 
-          {keys.length === 0 && !loading ? (
+          {!loaded ? (
+            <div className="px-5 py-12 text-center" role="status">
+              <KeyRound className="mx-auto h-6 w-6 text-muted" aria-hidden="true" />
+              <p className="mt-4 text-sm font-semibold">{loading ? 'Reading keys' : 'Keys could not be read'}</p>
+              <p className="muted mt-1 text-xs">{loading ? 'Asking the gateway for its key list.' : 'Nothing is claimed about enforcement until the gateway answers.'}</p>
+            </div>
+          ) : keys.length === 0 ? (
             <div className="px-5 py-12 text-center">
               <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-gold/25 bg-gold-soft text-gold-text">
                 <KeyRound className="h-6 w-6" aria-hidden="true" />
@@ -338,13 +353,13 @@ export function ApiKeysContent() {
               <p className="muted text-xs leading-relaxed">When enforcement is on, gateway clients must send a valid key. The dashboard stays exempt so it can keep testing models.</p>
               <Switch checked={requireApiKey} disabled={saving} onChange={(next) => void toggleEnforcement(next)} label="Require API key" />
             </div>
-            {requireApiKey && keys.length === 0 && !loading && (
+            {loaded && requireApiKey && keys.length === 0 && (
               <p className="mt-3 flex items-start gap-2 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-[11px] text-danger">
                 <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 Enforcement is on and no keys exist, so every gateway client is rejected.
               </p>
             )}
-            {requireApiKey && keys.length > 0 && (
+            {loaded && requireApiKey && keys.length > 0 && (
               <p className="mt-3 flex items-start gap-2 rounded-lg border border-gold/25 bg-gold-soft px-3 py-2 text-[11px] text-gold-text">
                 <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 {activeCount === 0 ? 'All keys are paused, so no client can authenticate.' : 'Clients authenticate with a bearer token on every request.'}

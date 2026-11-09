@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { DashboardShell } from '../components/DashboardShell';
 import { getGatewaySettings, type GatewaySettings } from '../lib/gatewayClient';
+import { useGatewayReload } from '../lib/useGatewayStatus';
 
 /**
  * Settings: what this gateway is actually running with.
@@ -86,15 +87,23 @@ export function SettingsContent() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(() => {
+  const load = useCallback((signal?: AbortSignal) => {
     setLoading(true);
-    getGatewaySettings()
+    getGatewaySettings(signal)
       .then((next) => { setSettings(next.settings); setReason(next.reason ?? null); setError(null); })
-      .catch(() => setError('The gateway did not answer. Start it with `pnpm dev:gateway` and refresh.'))
+      .catch((cause: unknown) => {
+        if (cause instanceof DOMException && cause.name === 'AbortError') return;
+        setError(cause instanceof Error ? cause.message : 'The gateway did not answer.');
+      })
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
+  useGatewayReload(load);
 
   // The gateway's own answer, used rather than a second opinion computed here — a page that decided which
   // settings were mutable on its own would drift from the gateway the first time one changed.
@@ -111,7 +120,7 @@ export function SettingsContent() {
             copy of the environment and it cannot drift from what the process is doing.
           </p>
         </div>
-        <button type="button" onClick={load} className="btn-ghost !px-3 !py-2.5 !text-xs">
+        <button type="button" onClick={() => load()} className="btn-ghost !px-3 !py-2.5 !text-xs">
           <RefreshCw className={`h-3.5 w-3.5${loading ? ' animate-spin' : ''}`} aria-hidden="true" />
           {loading ? 'Reading configuration' : 'Refresh'}
         </button>
@@ -125,6 +134,12 @@ export function SettingsContent() {
           <p className="muted mt-2 text-xs leading-relaxed">
             Nothing here is shown from memory. A gateway that is not running has no configuration to report.
           </p>
+        </section>
+      ) : !settings && loading ? (
+        <section className="card p-6 text-center" role="status">
+          <Settings2 className="mx-auto h-6 w-6 text-muted" aria-hidden="true" />
+          <p className="mt-3 text-sm font-semibold">Reading configuration</p>
+          <p className="muted mt-1 text-xs leading-relaxed">Asking the gateway what it resolved at startup.</p>
         </section>
       ) : !settings ? (
         <section className="card p-6 text-center">

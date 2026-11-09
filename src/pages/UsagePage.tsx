@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { DashboardShell } from '../components/DashboardShell';
 import { getGatewayUsage, getProviderQuota, isNotSupported, type GatewayProviderQuota, type GatewayUsage, type GatewayUsageRecord } from '../lib/gatewayClient';
+import { useGatewayReload } from '../lib/useGatewayStatus';
 
 const REQUESTS_PER_PAGE = 10;
 
@@ -308,32 +309,51 @@ function RecordRow({ record }: { record: GatewayUsageRecord }) {
  */
 export function UsageContent({ providerId, connectionId }: { providerId?: string; connectionId?: string } = {}) {
   const [usage, setUsage] = useState<GatewayUsage | null>(null);
+  const [summary, setSummary] = useState<GatewayUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<OutcomeFilter>('all');
   const [period, setPeriod] = useState<Period>('7d');
   const [page, setPage] = useState(0);
 
-  const load = useCallback(() => {
+  const load = useCallback((signal?: AbortSignal) => {
     setLoading(true);
     const offset = page * REQUESTS_PER_PAGE;
-    // The period windows the whole response — totals, charts and the listed rows describe one slice, which
-    // is why a chart cannot disagree with the card above it.
-    getGatewayUsage({
+    const base = {
       period,
+      ...(providerId ? { provider: providerId } : {}),
+    };
+    // Two reads, deliberately. The cards, cost and charts describe the window; the outcome filter
+    // lives in the table and must not rewrite them. One request with `outcome` made "Failed 0" appear
+    // while failures existed, and "All (7)" report the filtered count.
+    const summaryRequest = getGatewayUsage({ ...base, limit: 1, offset: 0 }, signal);
+    const rowsRequest = getGatewayUsage({
+      ...base,
       limit: REQUESTS_PER_PAGE,
       offset,
-      ...(providerId ? { provider: providerId } : {}),
       ...(filter === 'all' ? {} : { outcome: filter }),
-    })
-      .then((next) => { setUsage(next); setError(null); })
-      // Said plainly, because "the gateway is not running" and "nothing has been recorded" are different
-      // states and only one of them is the operator's fault.
-      .catch(() => setError('The gateway did not answer. Start it with `pnpm dev:gateway` and refresh.'))
+    }, signal);
+    Promise.all([summaryRequest, rowsRequest])
+      .then(([nextSummary, nextRows]) => {
+        setSummary(nextSummary);
+        setUsage(nextRows);
+        setError(null);
+      })
+      // Preserve the gateway's own message: "403 origin denied" and "gateway is not running" are
+      // different problems, and the old blanket text sent a running gateway to be restarted.
+      .catch((cause: unknown) => {
+        if (cause instanceof DOMException && cause.name === 'AbortError') return;
+        setError(cause instanceof Error ? cause.message : 'The gateway did not answer.');
+      })
       .finally(() => setLoading(false));
   }, [filter, page, period, providerId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
+  useGatewayReload(load);
 
   const chooseFilter = (next: OutcomeFilter) => {
     setPage(0);
@@ -346,10 +366,10 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
     setPeriod(next);
   };
 
-  const totals = usage?.totals;
-  const cost = usage?.cost;
+  const totals = summary?.totals;
+  const cost = summary?.cost;
   const records = usage?.records ?? [];
-  const breakdown = usage?.breakdown;
+  const breakdown = summary?.breakdown;
 
   return (
     <div id="usage">
@@ -381,7 +401,7 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
               </button>
             ))}
           </div>
-          <button type="button" onClick={load} className="btn-ghost !px-3 !py-2.5 !text-xs">
+          <button type="button" onClick={() => load()} className="btn-ghost !px-3 !py-2.5 !text-xs">
             <RefreshCw className={`h-3.5 w-3.5${loading ? ' animate-spin' : ''}`} aria-hidden="true" />
             {loading ? 'Reading usage' : 'Refresh'}
           </button>
@@ -547,7 +567,7 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
               <div className="flex items-center gap-2">
                 <Timer className="h-4 w-4 text-muted" aria-hidden="true" />
                 <h3 className="text-sm font-semibold">Most recent requests</h3>
-                <span className="muted text-[11px]">latest 10</span>
+                <span className="muted text-[11px]">latest {REQUESTS_PER_PAGE}</span>
               </div>
               <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by outcome">
                 {(['all', 'success', 'failure', 'cancelled'] as OutcomeFilter[]).map((option) => (
@@ -624,7 +644,7 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
               <p className="text-xs font-semibold">What this page does not show</p>
               <p className="muted mt-1 text-[11px] leading-relaxed">
                 No prompts, no responses, and no headers — the gateway's usage record has no field capable of
-                holding any, so there is nothing here to redact. It is also a **tail, not a history**: the
+                holding any, so there is nothing here to redact. It is also a tail, not a history: the
                 gateway keeps a bounded number of recent records and drops the rest, so these totals and the
                 charts above cover the last window of what is retained, not everything ever sent. A cancelled
                 request is counted as cancelled and never as a provider failure, because a client stopping is

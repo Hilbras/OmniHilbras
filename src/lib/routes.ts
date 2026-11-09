@@ -46,8 +46,3 @@ export function providerRoute(providerId: string) {
 export function providerUsageRoute(providerId: string) {
   return `${providerRoute(providerId)}/usage`;
 }
-
-/** Public URL for a dashboard route, for links that leave the router. */
-export function dashboardUrl(route: string = dashboardRoutes.providers) {
-  return `/dashboard${route === dashboardRoutes.providers ? '' : route}`;
-}

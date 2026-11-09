@@ -21,6 +21,7 @@ import {
   listGatewayConnections,
   putGatewayConnection,
   saveOpenRouterConnection,
+  setGatewayConnectionEnabled,
   type GatewayConnection,
   type GatewayHealth
 } from '../lib/gatewayClient';
@@ -29,6 +30,7 @@ import { useToast } from '../components/Toast';
 import { providerRoute } from '../lib/routes';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 import { webSessionProviderIds } from '../lib/webSessionProviders';
+import { customOption } from '../lib/providerOptions';
 import { providerSlug } from '@omnihilbras/kernel-api/public';
 import { providerCatalog } from '../data/providers';
 import { mergeGatewayConnections } from '../lib/providerCards';
@@ -73,7 +75,7 @@ function groupForNewProvider(providerId: string, auth: string): ProviderGroup {
  * asserts the merge with a *connection*, and this path never had one.
  */
 function recordForUnsavedProvider(newProvider: NewProvider, index = 0): ProviderRecord {
-  const option = providerOptions.find((item) => item.id === newProvider.providerId) ?? providerOptions[0];
+  const option = providerOptions.find((item) => item.id === newProvider.providerId) ?? customOption();
   return {
     id: `${option.id}-${Date.now()}-${index}`,
     catalogId: option.id,
@@ -126,7 +128,6 @@ export function ProvidersContent() {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [cardMode, setCardMode] = useState<ProviderCardMode>('simple');
-  const [disabledProviderIds, setDisabledProviderIds] = useState<Set<string>>(() => new Set());
   const [addOpen, setAddOpen] = useState(false);
   const [initialProviderId, setInitialProviderId] = useState<string | undefined>();
   const [initialModelPolicy, setInitialModelPolicy] = useState<'free' | 'all'>();
@@ -142,6 +143,7 @@ export function ProvidersContent() {
    */
   const [healthReport, setHealthReport] = useState<GatewayHealth | undefined>();
   const [notice, setNotice] = useState('');
+  const [noticeError, setNoticeError] = useState(false);
 
   /**
    * Connections first, health second.
@@ -255,27 +257,41 @@ export function ProvidersContent() {
     .filter((group) => group.providers.length > 0), [filteredProviders]);
 
   function openAdd(providerId?: string) {
-    // This modal collects an API key. A web-session provider is signed into instead, so
-    // sending one here asked for a credential it does not use — and the connection that came
-    // back could not work. Guarded at the function rather than at the one caller, because
-    // every path into this modal goes through it.
-    if (providerId && isWebSessionProvider(providerId)) {
-      navigate(providerRoute(providerId));
-      return;
+    // This modal collects an API key. A web-session provider is signed into instead, and an OAuth-only
+    // card is *signed into* rather than keyed — the dialog's own provider list says so. Sending either
+    // here asked for a credential the provider does not use. Guarded at the function rather than at the
+    // one caller, because every path into this modal goes through it.
+    if (providerId) {
+      const card = providerCatalog.find((item) => item.id === providerId);
+      if (isWebSessionProvider(providerId) || card?.auth === 'OAuth') {
+        navigate(providerRoute(providerId));
+        return;
+      }
     }
     setInitialProviderId(providerId);
     setInitialModelPolicy(providerId ? gatewayConnections.find((connection) => connection.providerId === providerId)?.modelPolicy : undefined);
     setAddOpen(true);
   }
 
-  function toggleProvider(providerId: string, enabled: boolean) {
-    setDisabledProviderIds((current) => {
-      const next = new Set(current);
-      if (enabled) next.delete(providerId);
-      else next.add(providerId);
-      return next;
-    });
-    setNotice(enabled ? 'Provider connection enabled.' : 'Provider connection disabled.');
+  async function toggleProvider(provider: ProviderRecord, enabled: boolean) {
+    const owner = provider.connectionProviderId ?? provider.catalogId ?? provider.id;
+    const connection = gatewayConnections.find((item) => item.providerId === owner);
+    if (!connection) {
+      setNoticeError(true);
+      setNotice(`${provider.name} has no saved connection to turn ${enabled ? 'on' : 'off'}.`);
+      window.setTimeout(() => setNotice(''), 3000);
+      return;
+    }
+    try {
+      const saved = await setGatewayConnectionEnabled(connection.id, enabled);
+      setGatewayConnections((current) => current.map((item) => (item.id === saved.id ? saved : item)));
+      setProviders((current) => mergeGatewayConnections(current, [saved]));
+      setNoticeError(false);
+      setNotice(`${provider.name} ${enabled ? 'enabled' : 'disabled'}.`);
+    } catch (error) {
+      setNoticeError(true);
+      setNotice(error instanceof Error ? error.message : 'The gateway did not answer.');
+    }
     window.setTimeout(() => setNotice(''), 2500);
   }
 
@@ -312,11 +328,14 @@ export function ProvidersContent() {
         proxyPool: newProvider.proxyPool ?? 'none',
         modelPolicy: newProvider.modelPolicy ?? 'all',
       });
-      setGatewayConnections((current) => [...current.filter((item) => item.providerId !== connection.providerId), connection]);
-      setProviders((current) => mergeGatewayConnections(current, [connection]));
+      // Reload rather than splicing one record in: the page's list, the accounts panel and the
+      // provider cards all read the same gateway state, and a local append left the connections card
+      // empty after a successful save.
+      await load();
       setAddOpen(false);
       setInitialProviderId(undefined);
       setInitialModelPolicy(undefined);
+      setNoticeError(false);
       setNotice(`OpenRouter connection saved with ${connection.modelIds.length} models (${connection.modelPolicy === 'free' ? 'free import' : 'all import'}).`);
       window.setTimeout(() => setNotice(''), 3500);
       return;
@@ -338,24 +357,23 @@ export function ProvidersContent() {
     const keyless = card?.auth === 'No key';
     if (!keyless && !apiKey) throw new Error(`Enter the ${newProvider.name} API key before saving.`);
     const connection = await putGatewayConnection(newProvider.providerId, {
+      // An explicit id is what makes the Nth entry a new account instead of overwriting the first:
+      // omitting it makes the gateway reuse the provider's existing connection. Edit carries its own.
+      ...(newProvider.connectionId ? { id: newProvider.connectionId } : {}),
       name: newProvider.name,
       endpoint: newProvider.endpoint,
       ...(keyless ? { credential: 'none' as const } : { apiKey: apiKey! }),
       ...(newProvider.priority ? { priority: newProvider.priority } : {}),
       ...(newProvider.modelPolicy ? { modelPolicy: newProvider.modelPolicy } : {}),
     });
-    setGatewayConnections((current) => [...current.filter((item) => item.providerId !== connection.providerId), connection]);
-    setProviders((current) => {
-      // Drop any unsaved card for this provider first: the gateway now reports the real state, and
-      // leaving the placeholder beside it would show the same provider twice with different numbers.
-      const withoutPlaceholder = current.filter((card) => card.id !== `${newProvider.providerId}-unsaved`);
-      const base = providerCatalog.find((item) => item.id === newProvider.providerId);
-      if (!base) return current;
-      return mergeGatewayConnections([...withoutPlaceholder, { ...base, name: newProvider.name }], [connection]);
-    });
+    // Read the gateway back instead of splicing the response into local state. Splicing a `{...base}`
+    // card beside an unsaved placeholder produced two nodes with the same React key, and the filter
+    // meant to drop the placeholder matched an id shape the placeholder does not use.
+    await load();
     setAddOpen(false);
     setInitialProviderId(undefined);
     setInitialModelPolicy(undefined);
+    setNoticeError(false);
     setNotice(`${newProvider.name} connection saved. ${connection.modelIds.length} models available.`);
     window.setTimeout(() => setNotice(''), 4000);
   }
@@ -372,7 +390,10 @@ export function ProvidersContent() {
     const notSaved: NewProvider[] = [];
     for (const { provider, key } of entries) {
       try {
-        await handleSave(provider, key);
+        // Every entry is its own connection. Without an id the gateway reuses the provider's existing
+        // connection, so N pasted keys produced one row while this loop reported N saved successes.
+        const connectionId = provider.connectionId ?? `${provider.providerId.slice(0, 40)}-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+        await handleSave({ ...provider, connectionId }, key);
         saved.push(provider.name);
       } catch (error) {
         failed.push(`${provider.name}: ${error instanceof Error ? error.message : 'the gateway refused it'}`);
@@ -381,8 +402,10 @@ export function ProvidersContent() {
     }
     if (failed.length > 0) {
       finishAddLocally(notSaved);
+      setNoticeError(true);
       setNotice(`${saved.length} saved. ${failed.length} not saved — ${failed.join('; ')}`);
     } else if (saved.length > 0) {
+      setNoticeError(false);
       setNotice(`${saved.length} ${saved.length === 1 ? 'connection was' : 'connections were'} saved.`);
     }
     window.setTimeout(() => setNotice(''), 5000);
@@ -398,8 +421,10 @@ export function ProvidersContent() {
       // measured. The data was in this function the whole time.
       setHealthReport(health);
       const healthyCount = health.providers.filter((provider) => provider.status === 'healthy').length;
+      setNoticeError(false);
       setNotice(`${healthyCount} of ${health.providers.length} provider connections are healthy.`);
     } catch {
+      setNoticeError(true);
       setNotice('Local gateway unavailable. Start it with pnpm dev:gateway.');
     } finally {
       setTestingAll(false);
@@ -409,7 +434,7 @@ export function ProvidersContent() {
 
   function renderProviderCard(provider: ProviderRecord, index = 0) {
     const detailTo = providerRoute(provider.catalogId ?? provider.id);
-    const simpleEnabled = provider.status === 'connected' && !disabledProviderIds.has(provider.id);
+    const simpleEnabled = provider.status === 'connected' && (gatewayConnections.find((connection) => connection.providerId === (provider.connectionProviderId ?? provider.id))?.enabled ?? true);
     /**
      * A web-session provider is connected on its own page, not from here.
      *
@@ -424,7 +449,7 @@ export function ProvidersContent() {
     // The grid arrives as a wave: the wrapper carries the stagger index, and the card inside fills it.
     return (
       <div key={provider.id} className="rise-in h-full" style={{ '--i': index } as CSSProperties}>
-        <ProviderCard provider={provider} detailTo={detailTo} mode={cardMode} simpleEnabled={simpleEnabled} onToggle={(enabled) => toggleProvider(provider.id, enabled)} onManage={() => navigate(detailTo)} onConnect={onConnect} />
+        <ProviderCard provider={provider} detailTo={detailTo} mode={cardMode} simpleEnabled={simpleEnabled} onToggle={(enabled) => toggleProvider(provider, enabled)} onManage={() => navigate(detailTo)} onConnect={onConnect} />
       </div>
     );
   }
@@ -444,7 +469,7 @@ export function ProvidersContent() {
           </div>
         </div>
 
-        {notice && <div role="status" className="mb-5 flex items-center gap-2 rounded-xl border border-success/25 bg-success/10 px-3.5 py-3 text-xs text-success"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />{notice}</div>}
+        {notice && <div role="status" className={`mb-5 flex items-center gap-2 rounded-xl border px-3.5 py-3 text-xs ${noticeError ? 'border-danger/25 bg-danger/10 text-danger' : 'border-success/25 bg-success/10 text-success'}`}>{noticeError ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}{notice}</div>}
 
         {cardMode === 'advanced' && (
           <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Provider summary">
@@ -529,8 +554,8 @@ export function ProvidersContent() {
                         <div className="flex flex-wrap items-center gap-2">
                           <ProviderMark logo={provider.logo} initial={provider.initial} color={provider.color} className="h-5 w-5 rounded-md" />
                           <span className="text-[11px] font-semibold">{provider.name}</span>
-                          <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${connectionBadge(provider, savedProviderIds.has(provider.id)).tone}`}>
-                            {connectionBadge(provider, savedProviderIds.has(provider.id)).label}
+                          <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${connectionBadge(provider, savedProviderIds.has(provider.connectionProviderId ?? provider.id)).tone}`}>
+                            {connectionBadge(provider, savedProviderIds.has(provider.connectionProviderId ?? provider.id)).label}
                           </span>
                           <button
                             type="button"

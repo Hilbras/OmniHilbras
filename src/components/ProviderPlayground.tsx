@@ -35,6 +35,8 @@ type Turn = {
   latencyMs?: number;
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
   failed?: boolean;
+  /** The user stopped it. Kept visible, never replayed to the model as an assistant turn. */
+  stopped?: boolean;
   /** False when the provider cannot stream, so the wait is explained rather than mysterious. */
   streamed?: boolean;
 };
@@ -95,7 +97,7 @@ export function ProviderPlayground({ provider, connection }: { provider: Provide
     // teach it to refuse.
     const history: GatewayChatMessage[] = [
       ...turns
-        .filter((turn) => !turn.failed && turn.content.trim())
+        .filter((turn) => !turn.failed && !turn.stopped && turn.content.trim())
         .map((turn) => ({ role: turn.role, content: turn.content })),
       { role: 'user', content: prompt },
     ];
@@ -131,8 +133,15 @@ export function ProviderPlayground({ provider, connection }: { provider: Provide
       );
     } catch (error) {
       const aborted = error instanceof DOMException && error.name === 'AbortError';
-      const message = aborted ? 'Stopped.' : error instanceof Error ? error.message : 'The request failed.';
-      setTurns((current) => current.map((turn) => (turn.id === replyId ? { ...turn, content: message, failed: !aborted } : turn)));
+      setTurns((current) => current.map((turn) => {
+        if (turn.id !== replyId) return turn;
+        if (aborted) {
+          // Keep what was already streamed and billed. Overwriting it with "Stopped." destroyed the
+          // partial answer, and a non-failed turn was then replayed to the model on the next message.
+          return { ...turn, content: turn.content ? `${turn.content}\n\n_(stopped)_` : '_(stopped before any text arrived)_', stopped: true };
+        }
+        return { ...turn, content: error instanceof Error ? error.message : 'The request failed.', failed: true };
+      }));
     } finally {
       setStreaming(false);
       abortRef.current = null;
@@ -173,7 +182,7 @@ export function ProviderPlayground({ provider, connection }: { provider: Provide
             <MessageSquare className="h-4 w-4 text-gold-text" aria-hidden="true" />
             Try a model
           </h2>
-          <p className="muted mt-1 text-xs">A real request through the gateway, on this connection.</p>
+          <p className="muted mt-1 text-xs">A real request through the gateway. Routing may serve it from any account of this provider.</p>
         </div>
         {turns.length > 0 && (
           <button type="button" onClick={clear} disabled={streaming} className="btn-ghost self-start !px-3 !py-2 !text-xs disabled:opacity-40 sm:self-auto">

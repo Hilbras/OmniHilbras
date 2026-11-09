@@ -110,7 +110,11 @@ export function UsageTimelineChart({ timeline }: { timeline: GatewayUsageTimelin
   const costAvailable = timeline.some((point) => point.pricedRequests > 0);
   const anyMeasured = timeline.some((point) => measurement(point, mode).measured);
   const data = useMemo(
-    () => timeline.map((point) => ({ label: point.label, value: measurement(point, mode).value })),
+    () => timeline.map((point) => {
+      const measured = measurement(point, mode);
+      // A point nobody measured is absent, not a zero. Plotting `0` is a claim the value was zero.
+      return { label: point.label, value: measured.measured ? measured.value : null };
+    }),
     [timeline, mode],
   );
 
@@ -174,7 +178,10 @@ function GroupBarChart<T extends GatewayUsageGroup>({ title, ariaLabel, groups, 
   const [mode, setMode] = useState<Mode>('tokens');
   const anyMeasured = groups.some((group) => measurement(group, mode).measured);
   const data = useMemo(
-    () => groups.map((group) => ({ name: nameOf(group), value: measurement(group, mode).value })),
+    () => groups.map((group) => {
+      const measured = measurement(group, mode);
+      return { name: nameOf(group), value: measured.measured ? measured.value : null };
+    }),
     [groups, mode, nameOf],
   );
   const vertical = layout === 'horizontal';
@@ -230,7 +237,7 @@ export function ProviderBarChart({ groups }: { groups: GatewayUsageProviderGroup
   return (
     <GroupBarChart
       title="By provider"
-      ariaLabel="Requests by provider"
+      ariaLabel="Usage by provider"
       groups={groups}
       nameOf={(group) => group.id}
       emptyMessage="No provider served a request in this window."
@@ -245,7 +252,7 @@ export function TopModelsChart({ groups }: { groups: GatewayUsageModelGroup[] })
   return (
     <GroupBarChart
       title="Top models"
-      ariaLabel="Requests by model"
+      ariaLabel="Usage by model"
       groups={top}
       nameOf={(group) => group.model}
       emptyMessage="No model was asked for in this window."

@@ -151,6 +151,11 @@ const gatewayBaseUrl = import.meta.env.DEV && typeof window !== 'undefined'
  */
 export const gatewayBase = gatewayBaseUrl;
 
+/** The same value as a call, for callers the truthfulness guard treats as data sources. */
+export function gatewayOrigin() {
+  return gatewayBaseUrl;
+}
+
 function normalizeGatewayBaseUrl(value: string) {
   try {
     const url = new URL(value);
@@ -392,20 +397,29 @@ export async function streamGatewayChat(
   signal?: AbortSignal,
 ): Promise<GatewayChatTurn> {
   if (!gatewayBaseUrl) throw new Error('Gateway URL must target a loopback address.');
+  if (request.stream === false) {
+    return sendWithoutStreaming(request, onDelta, signal, Date.now());
+  }
   const startedAt = Date.now();
-  const response = await fetch(`${gatewayBaseUrl}/v1/chat/completions`, {
-    method: 'POST',
-    cache: 'no-store',
-    credentials: 'omit',
-    headers: { 'content-type': 'application/json', accept: 'text/event-stream', 'x-omnihilbras-provider': request.providerId },
-    body: JSON.stringify({
-      model: request.model,
-      messages: request.messages,
-      max_tokens: request.maxTokens ?? 2048,
-      stream: true,
-    }),
-    ...(signal ? { signal } : {}),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${gatewayBaseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'omit',
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream', 'x-omnihilbras-provider': request.providerId },
+      body: JSON.stringify({
+        model: request.model,
+        messages: request.messages,
+        max_tokens: request.maxTokens ?? 2048,
+        stream: true,
+      }),
+      ...(signal ? { signal } : {}),
+    });
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === 'AbortError')) noteGatewayReachability(false);
+    throw error;
+  }
   noteGatewayReachability(true);
 
   if (!response.ok) {
@@ -423,7 +437,7 @@ export async function streamGatewayChat(
     // A provider that cannot stream is not a provider that cannot answer. Send the same turn
     // as one request so the panel still works against it, and report `streamed: false` so the
     // user is told the answer arrived at once rather than being left waiting on deltas.
-    if (code === 'NOT_SUPPORTED' && request.stream !== false) {
+    if (code === 'NOT_SUPPORTED') {
       return sendWithoutStreaming(request, onDelta, signal, startedAt);
     }
     throw new Error(message);
@@ -819,7 +833,15 @@ export type GatewayLogEvent = {
  * connected. Returns a function that closes it.
  */
 export function openGatewayLogStream(onEvent: (event: GatewayLogEvent) => void, onState: (connected: boolean) => void): () => void {
-  const source = new EventSource('/v1/logs/stream');
+  // In development the relative URL is required: EventSource cannot carry the per-launch dashboard
+  // token, and the Vite proxy attaches it. In a build there is no proxy, so a relative URL reaches
+  // the static host instead of the gateway — the feed used to be dead in production for that reason.
+  const url = import.meta.env.DEV ? '/v1/logs/stream' : gatewayBaseUrl ? `${gatewayBaseUrl}/v1/logs/stream` : '';
+  if (!url) {
+    onState(false);
+    return () => undefined;
+  }
+  const source = new EventSource(url);
   source.onopen = () => onState(true);
   source.onerror = () => onState(false);
   source.onmessage = (message) => {
@@ -1022,10 +1044,6 @@ export function getKiroSignInStatus(sessionId: string, signal?: AbortSignal) {
   );
 }
 
-export function getGatewayOauthAuthorization(providerId: string, signal?: AbortSignal) {
-  return requestJson<GatewayOauthAuthorization>(`/v1/oauth/${encodeURIComponent(providerId)}/authorize`, { signal });
-}
-
 /** Exchanges what the user pasted for tokens, then saves the connection. */
 export function connectGatewayOauthProvider(providerId: string, input: { code: string; redirectUri?: string; name?: string }, signal?: AbortSignal) {
   return requestJson<{ connection: GatewayConnection }>(`/v1/oauth/${encodeURIComponent(providerId)}/exchange`, {
@@ -1173,5 +1191,8 @@ export async function requestJson<T>(path: string, init: RequestInit = {}) {
       { ...(body?.error?.code ? { code: body.error.code } : {}), status: response.status },
     );
   }
+  // A 200 that is not JSON is an HTML error page or a proxy response, not a gateway answer. Returning
+  // `undefined` as `T` moved the failure to the caller as `Cannot read properties of undefined`.
+  if (body === undefined) throw new GatewayRequestError(`The gateway returned a ${response.status} response that is not JSON.`, { status: response.status });
   return body as T;
 }
