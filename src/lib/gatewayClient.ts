@@ -1,4 +1,5 @@
 import type { ModelMetaMap } from '@omnihilbras/kernel-api/public';
+import { desktopBridge, type OmniBridge } from './electronBridge';
 
 export type GatewayProviderHealth = {
   providerId: string;
@@ -397,6 +398,8 @@ export async function streamGatewayChat(
   signal?: AbortSignal,
 ): Promise<GatewayChatTurn> {
   if (!gatewayBaseUrl) throw new Error('Gateway URL must target a loopback address.');
+  const bridge = desktopBridge();
+  if (bridge) return streamGatewayChatViaBridge(bridge, request, onDelta, signal);
   if (request.stream === false) {
     return sendWithoutStreaming(request, onDelta, signal, Date.now());
   }
@@ -447,10 +450,7 @@ export async function streamGatewayChat(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  let content = '';
-  let provider = request.providerId;
-  let model = request.model;
-  let usage: GatewayChatTurn['usage'];
+  const state: SseState = { content: '', provider: request.providerId, model: request.model };
 
   // SSE frames are separated by a blank line, and a frame can be split across reads, so the
   // tail is carried over rather than parsed per chunk.
@@ -462,39 +462,11 @@ export async function streamGatewayChat(
     while (boundary !== -1) {
       const frame = buffer.slice(0, boundary);
       buffer = buffer.slice(boundary + 2);
+      consumeSseFrame(frame, state, onDelta);
       boundary = buffer.indexOf('\n\n');
-
-      const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
-      if (!dataLine) continue;
-      const payload = dataLine.slice(5).trim();
-      if (payload === '[DONE]') continue;
-      // A stream that fails mid-answer reports it as an event, not a status code — by then
-      // the 200 is long gone, so this is the only place the reason can come from.
-      if (frame.includes('event: error')) throw new Error(safeErrorPayload(payload));
-
-      let parsed: { choices?: Array<{ delta?: { content?: string } }>; provider?: string; model?: string; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } };
-      try {
-        parsed = JSON.parse(payload) as typeof parsed;
-      } catch {
-        continue;
-      }
-      if (parsed.provider) provider = parsed.provider;
-      if (parsed.model) model = parsed.model;
-      if (parsed.usage) {
-        usage = {
-          promptTokens: parsed.usage.prompt_tokens ?? 0,
-          completionTokens: parsed.usage.completion_tokens ?? 0,
-          totalTokens: parsed.usage.total_tokens ?? 0,
-        };
-      }
-      const delta = parsed.choices?.[0]?.delta?.content;
-      if (delta) {
-        content += delta;
-        onDelta(delta, content);
-      }
     }
   }
-  return { content, provider, model, latencyMs: Date.now() - startedAt, streamed: true, ...(usage ? { usage } : {}) };
+  return { content: state.content, provider: state.provider, model: state.model, latencyMs: Date.now() - startedAt, streamed: true, ...(state.usage ? { usage: state.usage } : {}) };
 }
 
 function safeErrorPayload(payload: string) {
@@ -504,6 +476,135 @@ function safeErrorPayload(payload: string) {
   } catch {
     return 'The stream failed partway through.';
   }
+}
+
+type SseState = {
+  content: string;
+  provider: string;
+  model: string;
+  usage?: GatewayChatTurn['usage'];
+};
+
+/** One SSE frame from the chat stream, applied to the running state. Shared by both transports. */
+function consumeSseFrame(frame: string, state: SseState, onDelta: (delta: string, accumulated: string) => void) {
+  const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
+  if (!dataLine) return;
+  const payload = dataLine.slice(5).trim();
+  if (payload === '[DONE]') return;
+  // A stream that fails mid-answer reports it as an event, not a status code — by then the 200 is
+  // long gone, so this is the only place the reason can come from.
+  if (frame.includes('event: error')) throw new Error(safeErrorPayload(payload));
+
+  let parsed: { choices?: Array<{ delta?: { content?: string } }>; provider?: string; model?: string; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } };
+  try {
+    parsed = JSON.parse(payload) as typeof parsed;
+  } catch {
+    return;
+  }
+  if (parsed.provider) state.provider = parsed.provider;
+  if (parsed.model) state.model = parsed.model;
+  if (parsed.usage) {
+    state.usage = {
+      promptTokens: parsed.usage.prompt_tokens ?? 0,
+      completionTokens: parsed.usage.completion_tokens ?? 0,
+      totalTokens: parsed.usage.total_tokens ?? 0,
+    };
+  }
+  const delta = parsed.choices?.[0]?.delta?.content;
+  if (delta) {
+    state.content += delta;
+    onDelta(delta, state.content);
+  }
+}
+
+/**
+ * The same streaming turn through the desktop bridge.
+ *
+ * The renderer cannot open a cross-origin SSE connection under `app://`, and the token must not be in
+ * the page. Main sends decoded text chunks over IPC; this keeps the one SSE parser above.
+ */
+async function streamGatewayChatViaBridge(
+  bridge: OmniBridge,
+  request: { providerId: string; model: string; messages: GatewayChatMessage[]; maxTokens?: number },
+  onDelta: (delta: string, accumulated: string) => void,
+  signal?: AbortSignal,
+): Promise<GatewayChatTurn> {
+  const startedAt = Date.now();
+  const state: SseState = { content: '', provider: request.providerId, model: request.model };
+  let buffer = '';
+  let wake: (() => void) | undefined;
+  let ended = false;
+  let failure: Error | undefined;
+
+  const cancel = bridge.gateway.streamChat('/v1/chat/completions', {
+    body: JSON.stringify({
+      model: request.model,
+      messages: request.messages,
+      max_tokens: request.maxTokens ?? 2048,
+      stream: true,
+    }),
+  }, {
+    onChunk: (text) => {
+      buffer += text;
+      try {
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          consumeSseFrame(frame, state, onDelta);
+          boundary = buffer.indexOf('\n\n');
+        }
+      } catch (error) {
+        failure = error instanceof Error ? error : new Error('The stream failed.');
+        ended = true;
+        cancel();
+      }
+      wake?.();
+      wake = undefined;
+    },
+    onEnd: () => {
+      ended = true;
+      wake?.();
+      wake = undefined;
+    },
+    onError: (error) => {
+      failure = error;
+      ended = true;
+      wake?.();
+      wake = undefined;
+    },
+  });
+
+  const abort = () => {
+    failure = new DOMException('Stopped.', 'AbortError');
+    ended = true;
+    cancel();
+    wake?.();
+    wake = undefined;
+  };
+  signal?.addEventListener('abort', abort, { once: true });
+  try {
+    while (!ended || buffer.includes('\n\n')) {
+      if (!ended) await new Promise<void>((resolve) => { wake = resolve; });
+      const boundary = buffer.indexOf('\n\n');
+      if (boundary === -1) continue;
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      consumeSseFrame(frame, state, onDelta);
+    }
+    if (failure) throw failure;
+  } finally {
+    signal?.removeEventListener('abort', abort);
+    cancel();
+  }
+  return {
+    content: state.content,
+    provider: state.provider,
+    model: state.model,
+    latencyMs: Date.now() - startedAt,
+    streamed: true,
+    ...(state.usage ? { usage: state.usage } : {}),
+  };
 }
 
 /**
@@ -833,6 +934,22 @@ export type GatewayLogEvent = {
  * connected. Returns a function that closes it.
  */
 export function openGatewayLogStream(onEvent: (event: GatewayLogEvent) => void, onState: (connected: boolean) => void): () => void {
+  const bridge = desktopBridge();
+  if (bridge) {
+    // Main owns the SSE connection and the token; the renderer only receives parsed records.
+    const offEvent = bridge.gateway.onLog((event) => {
+      if (event.streamError) {
+        onState(false);
+        return;
+      }
+      onEvent(event as GatewayLogEvent);
+    });
+    const offState = bridge.gateway.onLogState((state) => onState(state.connected));
+    return () => {
+      offEvent();
+      offState();
+    };
+  }
   // In development the relative URL is required: EventSource cannot carry the per-launch dashboard
   // token, and the Vite proxy attaches it. In a build there is no proxy, so a relative URL reaches
   // the static host instead of the gateway — the feed used to be dead in production for that reason.
@@ -1152,6 +1269,34 @@ export function getProviderQuota(connectionId: string, signal?: AbortSignal) {
 }
 
 export async function requestJson<T>(path: string, init: RequestInit = {}) {
+  const bridge = desktopBridge();
+  if (bridge) {
+    if (init.body !== undefined && typeof init.body !== 'string') throw new Error('Desktop gateway requests require a string body.');
+    const result = await bridge.gateway.request(path, {
+      ...(init.method ? { method: String(init.method) } : {}),
+      ...(init.body === undefined ? {} : { body: init.body }),
+    });
+    noteGatewayReachability(result.status !== 0);
+    let body: { error?: { code?: string; message?: string; providerMessage?: string } } | undefined;
+    try {
+      body = JSON.parse(result.text) as typeof body;
+    } catch {
+      body = undefined;
+    }
+    if (!result.ok) {
+      if (result.status === 0) throw new Error(result.text || 'Could not reach the local gateway.');
+      const providerMessage = body?.error?.providerMessage?.trim();
+      const summary = body?.error?.message?.trim();
+      throw new GatewayRequestError(
+        providerMessage && providerMessage !== summary
+          ? `${summary ? `${summary} ` : ''}${providerMessage}`.trim()
+          : summary || `Gateway request failed with status ${result.status}.`,
+        { ...(body?.error?.code ? { code: body.error.code } : {}), status: result.status },
+      );
+    }
+    if (body === undefined) throw new GatewayRequestError(`The gateway returned a ${result.status} response that is not JSON.`, { status: result.status });
+    return body as T;
+  }
   if (!gatewayBaseUrl) throw new Error('Gateway URL must target a loopback address.');
   let response: Response;
   try {

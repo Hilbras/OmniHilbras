@@ -263,6 +263,9 @@ pnpm build
 pnpm analyze        # per-page bundle cost, attributed per package
 pnpm verify         # release gate: version, brand, typecheck, test, SPEC, build, bundle budget
 pnpm release:audit  # every tag: pushed, released on GitHub, published to npm
+pnpm app:dev        # desktop app, gateway owned by Electron main
+pnpm app:build      # unpacked desktop build
+pnpm app:pack       # desktop installers
 ```
 
 `omnihilbras` is `bin/omnihilbras.js`, registered as a `bin` on the **private root** package — not on a

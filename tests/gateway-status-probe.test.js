@@ -17,7 +17,7 @@ const shell = readFileSync(join(ROOT, 'src/components/DashboardShell.tsx'), 'utf
 
 test('the probe classifies a status through one function, not an inline check that mixes 401 with 403', () => {
   assert.match(probe, /export function problemForStatus\(status: number\): GatewayProblem/);
-  assert.match(probe, /setProblem\(problemForStatus\(response\.status\)\)/);
+  assert.match(probe, /setProblem\(problemForStatus\((?:response\.)?status\)\)/);
   assert.doesNotMatch(probe, /status === 403 \|\| response\.status === 401/, 'a 401 must not be folded into refused');
 });
 

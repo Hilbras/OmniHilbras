@@ -371,12 +371,12 @@ test('the Settings nav entry is live, and its route exists', () => {
   );
 });
 
-test('only Request log remains disabled, and it says why it has nothing to show', () => {
-  // Worth pinning: the day the last "soon" entry goes, this test should be the one that fails, because a
-  // `pending: true` list that nobody prunes is how a project ends up advertising features it removed.
+test('no sidebar entry is disabled, because every advertised page exists', () => {
+  // The last "soon" entry (Request log) shipped as the desktop main page's live feed and the separate
+  // Logs page. The guard stays: a `pending: true` list that nobody prunes is how a project ends up
+  // advertising features it removed.
   const shell = readFileSync(join(SRC, 'components', 'DashboardShell.tsx'), 'utf8');
   const pending = [...shell.matchAll(/label: '([^']+)'[^\n]*pending: true/g)].map((match) => match[1]);
-  assert.deepEqual(pending, ['Request log'],
-    `the disabled nav items changed: ${pending.join(', ') || 'none'}. If one shipped, delete its pending flag; ` +
-      'if one was removed, update this list.');
+  assert.deepEqual(pending, [],
+    `a disabled nav item is back: ${pending.join(', ') || 'none'}. If it is a real page, remove the flag.`);
 });

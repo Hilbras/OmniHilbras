@@ -564,7 +564,23 @@ pnpm version:fix   # rewrite the derived copies from package.json
 pnpm release:audit # every tag: on main, released on GitHub, published to npm
 omnihilbras        # the gateway and the dashboard together, in one terminal
 ./scripts/dev.sh   # the same thing, for before you have run `npm link`
+pnpm app:dev       # desktop app: builds, starts the app, starts the gateway
+pnpm app:build     # unpacked desktop build in release/linux-unpacked
+pnpm app:pack      # installers
 ```
+
+## Desktop app
+
+`pnpm app:dev` opens the Electron app. Electron's main process owns the gateway: Start, Stop and
+Restart are on the **Servers** page, which is the app's home, together with the gateway's stdout and
+stderr and the live request feed. Stopping the app stops the gateway; a second launch focuses the
+existing window.
+
+The renderer never holds the dashboard token and never calls `127.0.0.1` directly. Requests, chat
+streams and the log stream cross a narrow preload bridge (`desktop/preload.cjs`); main attaches the
+token and an allowlisted origin. The packaged dashboard is served from `app://omnihilbras` out of
+`dist/`, so there is no Vite server in the app. The browser dashboard still works exactly as before
+with `pnpm dev`.
 
 `pnpm verify` is what CI runs on every push and pull request. `version:check` exists because the
 README advertised `0.2.0` while the project was at `1.12.2` — a hundred minor versions, unnoticed.

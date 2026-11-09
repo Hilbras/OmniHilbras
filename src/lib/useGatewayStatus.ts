@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { gatewayBase, isGatewayReachable, onGatewayReachabilityChange } from './gatewayClient';
+import { desktopBridge } from './electronBridge';
 
 /**
  * Whether the gateway is answering, and a way to hear that it started again.
@@ -78,30 +79,37 @@ export function useGatewayStatus(): GatewayState {
         // Absolute, because the gateway is on a different port from the dashboard: a
         // relative `/v1/connections` reaches Vite, which answers with the app's own HTML —
         // that parses as a 200 and would report the gateway as up while it is down.
-        const response = await fetch(`${gatewayBase}/v1/connections`, {
-          cache: 'no-store',
-          headers: { accept: 'application/json' },
-        });
+        //
+        // In the desktop app the token lives in main, so the probe goes through the bridge. A direct
+        // fetch there would be cross-origin, carry no token, and report the running gateway as down.
+        const bridge = desktopBridge();
+        let ok: boolean;
+        let status: number;
+        let reported: unknown;
+        if (bridge) {
+          const result = await bridge.gateway.request('/v1/connections');
+          ok = result.ok;
+          status = result.status;
+          reported = result.text ? JSON.parse(result.text)?.build?.version : undefined;
+        } else {
+          const response = await fetch(`${gatewayBase}/v1/connections`, {
+            cache: 'no-store',
+            headers: { accept: 'application/json' },
+          });
+          ok = response.ok;
+          status = response.status;
+          reported = await response.clone().json().then((body: unknown) => (body as { build?: { version?: unknown } })?.build?.version).catch(() => undefined);
+        }
         if (cancelled) return;
-        setReachable(response.ok);
-        if (!response.ok) {
-          setProblem(problemForStatus(response.status));
+        setReachable(ok);
+        if (!ok) {
+          setProblem(problemForStatus(status));
           wasDown.current = true;
         } else {
           setProblem(undefined);
-          // Read the build off the probe already being made, so "is this the code in front of me"
-          // costs no extra request. A gateway that predates this field reports nothing, and saying
-          // nothing is the honest answer — not "same version".
-          const reported = await response
-            .clone()
-            .json()
-            .then((body: unknown) => (body as { build?: { version?: unknown } })?.build?.version)
-            .catch(() => undefined);
-          if (!cancelled && typeof reported === 'string') setBuildVersion(reported);
+          if (typeof reported === 'string') setBuildVersion(reported);
         }
-        if (!response.ok) {
-          // nothing to announce yet
-        } else if (wasDown.current) {
+        if (ok && wasDown.current) {
           // Only announce a *restoration*, never the first success — otherwise every page
           // load would fire the event and every listener would refetch for no reason.
           wasDown.current = false;

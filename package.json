@@ -4,9 +4,14 @@
   "version": "1.99.0",
   "packageManager": "pnpm@12.5.1",
   "type": "module",
+  "main": "desktop/main.mjs",
   "scripts": {
     "dev": "vite",
     "dev:gateway": "pnpm --filter @omnihilbras/kernel-api dev",
+    "app:dev": "pnpm build:gateway && pnpm build:frontend && electron .",
+    "app:start": "electron .",
+    "app:build": "pnpm build && electron-builder --dir",
+    "app:pack": "pnpm build && electron-builder",
     "build": "pnpm build:sdk && pnpm build:gateway && pnpm build:frontend",
     "build:frontend": "vite build",
     "build:sdk": "node scripts/clean-sdk-dist.mjs && pnpm -r --filter \"./Kernel/SDK/*\" build",
@@ -28,6 +33,7 @@
     "release:audit": "node scripts/audit-release-trail.mjs"
   },
   "dependencies": {
+    "@omnihilbras/kernel-api": "workspace:*",
     "@xyflow/react": "^12.12.0",
     "lucide-react": "^1.47.0",
     "motion": "^13.4.1",
@@ -35,8 +41,7 @@
     "react-dom": "^19.3.0",
     "react-is": "^19.3.0",
     "react-router-dom": "^7.18.4",
-    "recharts": "^3.10.1",
-    "@omnihilbras/kernel-api": "workspace:*"
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -45,6 +50,8 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
     "pngjs": "^7.0.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.0",
@@ -55,5 +62,30 @@
   },
   "bin": {
     "omnihilbras": "./bin/omnihilbras.js"
+  },
+  "build": {
+    "appId": "ai.hilbras.omnihilbras",
+    "productName": "OmniHilbras",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/**",
+      "dist/**",
+      "Kernel/API/dist/**",
+      "Kernel/SDK/*/dist/**",
+      "node_modules/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "Kernel/**",
+      "node_modules/**"
+    ],
+    "linux": {
+      "target": ["dir"],
+      "icon": "brand/logo-512.png",
+      "category": "Development",
+      "executableName": "omnihilbras"
+    }
   }
 }

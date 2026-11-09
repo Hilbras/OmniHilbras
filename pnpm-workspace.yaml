@@ -1,3 +1,5 @@
 packages:
   - Kernel/SDK/*
   - Kernel/API
+allowBuilds:
+  electron-winstaller: true

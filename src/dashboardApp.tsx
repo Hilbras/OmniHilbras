@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from '
 import { DashboardShell } from './components/DashboardShell';
 import { getProviderById } from './data/providers';
 import { ApiKeysContent } from './pages/ApiKeysPage';
+import { AppHomePage } from './pages/AppHomePage';
 import { ProviderDetailContent, fallbackProvider } from './pages/ProviderDetailPage';
 import { ProvidersContent } from './pages/ProvidersPage';
 import { RoutingContent } from './pages/RoutingPage';
@@ -23,6 +24,7 @@ function ProviderRoute() {
 }
 
 const activePageTitles = {
+  home: 'Servers',
   overview: 'Overview',
   providers: 'Providers',
   routing: 'Routing',
@@ -35,6 +37,7 @@ const activePageTitles = {
 } as const;
 
 const pageDescriptions = {
+  home: 'Gateway lifecycle and live logs',
   overview: 'Your gateway at a glance',
   providers: 'Connect and manage the routes behind your gateway',
   routing: 'Per-connection eligibility, health, and last attempt',
@@ -51,7 +54,9 @@ const pageDescriptions = {
 function DashboardRoutes() {
   const location = useLocation();
   const isProviderDetail = location.pathname.startsWith('/providers/');
-  const activePage = location.pathname.startsWith('/providers')
+  const activePage = location.pathname === '/' || location.pathname === ''
+    ? 'home'
+    : location.pathname.startsWith('/providers')
     ? 'providers'
     : location.pathname.startsWith('/routing')
       ? 'routing'
@@ -84,7 +89,7 @@ function DashboardRoutes() {
         */}
       <div className="page-enter">
         <Routes>
-          <Route path="/" element={<Navigate to="/providers" replace />} />
+          <Route path="/" element={<AppHomePage />} />
           <Route path="/providers" element={<ProvidersContent />} />
           <Route path="/providers/:providerId" element={<ProviderRoute />} />
           {/* The provider page's own usage tab, a real route so it can be linked to and reloaded. */}

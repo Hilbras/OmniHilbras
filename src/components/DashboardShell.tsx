@@ -13,7 +13,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Route as RouteIcon,
-  ScrollText,
+  Server,
   Settings2,
   X,
 } from 'lucide-react';
@@ -21,6 +21,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { FailureNotifications } from './FailureNotifications';
 import { dashboardRoutes } from '../lib/routes';
 import { useGatewayStatus } from '../lib/useGatewayStatus';
+import { desktopBridge } from '../lib/electronBridge';
 import { PAGE_VERSION } from '../lib/pageVersion';
 
 /**
@@ -34,7 +35,7 @@ import { PAGE_VERSION } from '../lib/pageVersion';
  * it. `tests/marketing-claims.test.js` pins which entries are still disabled, so this comment going stale
  * fails a test rather than misleading the next reader quietly.
  */
-type DashboardPage = 'overview' | 'providers' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings';
+type DashboardPage = 'home' | 'overview' | 'providers' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings';
 
 type SidebarItem = {
   label: string;
@@ -48,6 +49,9 @@ type SidebarItem = {
 // No Overview entry: that page was a mockup with no data source, and it is gone. `/` now lands on
 // Providers, so the sidebar starts there rather than offering a link to nowhere.
 const primaryItems: SidebarItem[] = [
+  // The desktop app's main page. In a browser it says the gateway is managed by `pnpm dev:gateway`
+  // rather than pretending to control a process this window does not own.
+  { label: 'Servers', icon: Server, to: '/', page: 'home' },
   { label: 'Providers', icon: Network, to: dashboardRoutes.providers, page: 'providers' },
   { label: 'Routing', icon: RouteIcon, to: dashboardRoutes.routing, page: 'routing' },
   { label: 'API keys', icon: KeyRound, to: dashboardRoutes.keys, page: 'keys' },
@@ -59,7 +63,6 @@ const insightItems: SidebarItem[] = [
   // data existed.
   { label: 'Usage', icon: BarChart3, to: '/usage', page: 'usage' },
   { label: 'Logs', icon: BarChart3, to: '/logs', page: 'logs' },
-  { label: 'Request log', icon: ScrollText, to: '/request-log', page: 'overview', pending: true },
   // Real since 1.65.0, when `GET /v1/settings` and the page landed. The last disabled entry:
   // every setting had been an environment variable, so there was nothing to show but a copy of
   // `.env.example`.
@@ -161,7 +164,7 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse, status }: {
           ? 'this page’s origin is not allowed'
           : problem === 'unauthorized'
             ? 'gateway is up · dashboard token not accepted, reload the dashboard'
-            : 'not answering · pnpm dev:gateway'
+            : desktopBridge() ? 'open Servers to start it' : 'not answering · pnpm dev:gateway'
         : `localhost:8787 · build ${buildVersion ?? 'unknown'}`;
   return (
     <aside className={`dashboard-sidebar flex h-full w-[252px] shrink-0 flex-col border-r border-line bg-bg-soft transition-[width] duration-200 ${collapsed ? 'lg:w-[76px]' : 'lg:w-[252px]'}`}>
