@@ -95,7 +95,10 @@ export class CodeBuddySessionStore {
 
 /** Region for either of the two CodeBuddy provider ids; anything else is answered with the CN region. */
 export function codebuddyRegionFor(providerId: string): CodeBuddyRegion {
-  return providerId === codebuddyIntlProviderId ? 'intl' : 'cn';
+  // Add-account ids carry the provider id plus a suffix (`codebuddy-intl-<uuid>`), so an equality
+  // check silently built the China adapter for a Global account: wrong host, wrong X-Domain, wrong
+  // model catalog. Match the prefix the id contract uses.
+  return providerId === codebuddyIntlProviderId || providerId.startsWith(`${codebuddyIntlProviderId}-`) ? 'intl' : 'cn';
 }
 
 /** The endpoint a card should display for a region. */

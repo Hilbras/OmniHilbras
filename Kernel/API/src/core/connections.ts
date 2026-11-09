@@ -378,7 +378,7 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     const record = this.connections.get(connectionId);
     if (!record) return false;
     this.connections.delete(connectionId);
-    this.credentials.delete(record.providerId);
+    this.credentials.delete(connectionId);
     return true;
   }
 
@@ -573,7 +573,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       } catch (error) {
         this.connections = previousConnections;
         if (previousCredential) this.credentials.set(id, previousCredential);
-        else this.credentials.delete(normalized.providerId);
+        else this.credentials.delete(id);
         await this.persistSecrets().catch(() => undefined);
         await this.persistMetadata().catch(() => undefined);
         throw error;
@@ -730,16 +730,16 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       await this.ensureLoaded();
       const record = this.connections.get(connectionId);
       if (!record) return false;
-      const previousCredential = this.credentials.get(record.providerId);
+      const previousCredential = this.credentials.get(connectionId);
       const previousConnections = new Map(this.connections);
       this.connections.delete(connectionId);
-      this.credentials.delete(record.providerId);
+      this.credentials.delete(connectionId);
       try {
         await this.persistSecrets();
         await this.persistMetadata();
       } catch (error) {
         this.connections = previousConnections;
-        if (previousCredential) this.credentials.set(record.providerId, previousCredential);
+        if (previousCredential) this.credentials.set(connectionId, previousCredential);
         await this.persistSecrets().catch(() => undefined);
         await this.persistMetadata().catch(() => undefined);
         throw error;
@@ -802,7 +802,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
     }
     if (discardedOrphans) await this.persistSecrets();
     for (const connection of this.connections.values()) {
-      if (!this.credentials.has(connection.providerId)) connection.hasCredential = false;
+      if (!this.credentials.has(connection.id)) connection.hasCredential = false;
     }
   }
 
@@ -1121,7 +1121,7 @@ function decodeBase64(value: string, expectedLength: number | undefined, label: 
  * Every optional field the `oauth` variant declares. **One list**, because two lists that "happen to
  * agree" is what this function replaces.
  */
-const oauthStringFields = ['refreshToken', 'expiresAt', 'email', 'orgId', 'orgName', 'accountId', 'oauthClientId', 'oauthClientSecret', 'machineId', 'name'] as const;
+const oauthStringFields = ['refreshToken', 'expiresAt', 'email', 'orgId', 'orgName', 'accountId', 'oauthClientId', 'oauthClientSecret', 'kiroAuthMethod', 'region', 'machineId', 'name'] as const;
 
 /**
  * The credential shape, decided in one place — for the writer and the reader alike.

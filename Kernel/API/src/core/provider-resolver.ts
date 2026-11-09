@@ -192,7 +192,27 @@ export class ProviderResolver {
     listConnections?: () => Promise<ReadonlyArray<SavedConnection>>,
   ): Promise<SavedConnection | undefined> {
     if (!listConnections) return undefined;
-    return (await listConnections()).find((item) => item.providerId === providerId);
+    const all = await listConnections();
+    // A shared card (ClinePass) reads the owner's connection. The provider id stays the shared card's,
+    // so the adapter and its failures still name the card the user asked for.
+    const owner = providerAlias(providerId);
+    return all.find((item) => item.providerId === providerId) ?? (owner ? all.find((item) => item.providerId === owner) : undefined);
+  }
+
+  /**
+   * The routed account, when the caller named one.
+   *
+   * Resolving by provider id returns the **first** connection, so every account of a provider was
+   * served by an adapter built for the first one. That is only cosmetic for a stateless adapter and
+   * wrong for one that writes a refreshed token back: the second account's renewal landed on the
+   * first. The executor has the connection id at dispatch, so it is passed here rather than guessed.
+   */
+  private async savedConnectionById(
+    connectionId: string,
+    listConnections?: () => Promise<ReadonlyArray<SavedConnection>>,
+  ): Promise<SavedConnection | undefined> {
+    if (!listConnections) return undefined;
+    return (await listConnections()).find((item) => item.id === connectionId);
   }
 
   /**
@@ -202,14 +222,18 @@ export class ProviderResolver {
    * their provider and a generic OpenAI-compatible one would be wrong; then the registry; then the
    * saved-endpoint fallback, which is the only path that invents an adapter.
    */
-  async resolve(providerId: string, pendingEndpoint?: PendingEndpoint, listConnections?: () => Promise<ReadonlyArray<SavedConnection>>): Promise<ProviderAdapter> {
+  async resolve(providerId: string, pendingEndpoint?: PendingEndpoint, listConnections?: () => Promise<ReadonlyArray<SavedConnection>>, connectionId?: string): Promise<ProviderAdapter> {
+    // A named connection wins over the provider's first one, and the two are looked up by their own
+    // ids rather than by a provider id that happens to equal one of them.
+    const saved = connectionId
+      ? await this.savedConnectionById(connectionId, listConnections)
+      : await this.savedConnectionFor(providerId, listConnections);
     const factory = this.onDemandFactories.get(providerId);
     if (factory) {
       // Only the id crosses. The saved connection is looked up here rather than in the factory, so
       // this path and `active()` cannot disagree about which connection an adapter belongs to — and
       // the rest of the record stays the connection layer's business rather than becoming a second
       // opinion about the endpoint.
-      const saved = await this.savedConnectionFor(providerId, listConnections);
       return factory({ providerId, ...(saved ? { connection: { id: saved.id } } : {}) });
     }
 
@@ -218,8 +242,7 @@ export class ProviderResolver {
 
     // A connection being saved is not in the store yet, so the caller can pass the endpoint it is
     // about to use.
-    const connection = await this.savedConnectionFor(providerId, listConnections);
-    const endpoint = pendingEndpoint ?? (connection ? { endpoint: connection.endpoint, name: connection.name } : undefined);
+    const endpoint = pendingEndpoint ?? (saved ? { endpoint: saved.endpoint, name: saved.name } : undefined);
     if (!endpoint) return this.registry.require(providerId);
 
     // Cached per endpoint, so a stable connection reuses one adapter — and a *changed* endpoint

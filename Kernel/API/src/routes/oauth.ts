@@ -507,13 +507,13 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
       // Checked before the save, so a cookie the page refuses never becomes a connection that reads as
       // connected and answers nothing.
-      sendJson(response, 201, { connection: await service.connectGeminiWeb(readRequiredString(body, 'cookieHeader'), signal) }, origin);
+      sendJson(response, 201, { connection: await service.connectGeminiWeb(readRequiredString(body, 'cookieHeader'), signal, body.addAccount === true) }, origin);
       return true;
     }
 
     if (request.method === 'POST' && url.pathname === '/v1/web-cookie/deepseek/connect') {
       const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
-      sendJson(response, 201, { connection: await service.connectDeepSeekWeb(readRequiredString(body, 'userToken'), signal) }, origin);
+      sendJson(response, 201, { connection: await service.connectDeepSeekWeb(readRequiredString(body, 'userToken'), signal, body.addAccount === true) }, origin);
       return true;
     }
 
@@ -531,7 +531,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       // Anything other than a literal `true` is not the free-only import; a truthy string from a
       // hand-written request would otherwise narrow a connection nobody asked to narrow.
       const freeOnly = body.freeOnly === true;
-      const connection = await service.connectTokenHarborWeb(readRequiredString(body, 'cookieHeader'), signal, freeOnly);
+      const connection = await service.connectTokenHarborWeb(readRequiredString(body, 'cookieHeader'), signal, freeOnly, body.addAccount === true);
       sendJson(response, 201, { connection }, origin);
       return true;
     }
@@ -561,7 +561,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       // Anything other than a literal `true` is not the free-only import; a truthy string
       // from a hand-written request would otherwise narrow a connection nobody asked to narrow.
       const freeOnly = body.freeOnly === true;
-      const connection = await service.connectChatGptWeb(readRequiredString(body, 'storageState'), signal, freeOnly);
+      const connection = await service.connectChatGptWeb(readRequiredString(body, 'storageState'), signal, freeOnly, body.addAccount === true);
       sendJson(response, 201, { connection }, origin);
       return true;
     }
@@ -591,25 +591,14 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
-    // Google or GitHub. The browser cannot return from a `kiro://` callback, so this
-    // returns a URL to open and the code is pasted back on the exchange route below.
+    // Google or GitHub. The browser cannot return from a `kiro://` callback, so this returns a
+    // device code and a verification URL the dialog polls; there is no paste step.
     if (request.method === 'POST' && url.pathname === '/v1/oauth/kiro/social/start') {
       const body = await readJsonBody(request, maxConnectionBodyBytes);
       const provider = readRequiredString(body, 'provider');
       if (provider !== 'google' && provider !== 'github') throw invalidRequest('provider must be google or github.');
       const { addAccount, targetConnectionId } = readSignInTarget(body);
       sendJson(response, 201, await service.startKiroSocialSignInFlow(provider, addAccount, targetConnectionId), origin);
-      return true;
-    }
-
-    if (request.method === 'POST' && url.pathname === '/v1/oauth/kiro/social/exchange') {
-      const body = await readJsonBody(request, maxConnectionBodyBytes);
-      const connection = await service.completeKiroSocialSignIn(
-        readRequiredString(body, 'sessionId'),
-        readRequiredString(body, 'code'),
-        signal,
-      );
-      sendJson(response, 201, { connection }, origin);
       return true;
     }
 

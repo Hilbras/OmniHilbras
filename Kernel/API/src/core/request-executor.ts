@@ -98,10 +98,10 @@ export type RequestExecutorDeps = {
    * route can be refused at dispatch, and it is too narrow to hit reliably without this.
    */
   afterPlan?: () => Promise<void> | void;
-  /** Sends one request to one provider. */
-  chat: (providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope) => Promise<ChatResponse>;
+  /** Sends one request to one provider. `connectionId` is the routed account, not the provider. */
+  chat: (providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string) => Promise<ChatResponse>;
   /** Opens a stream with one provider. Only the first chunk is a failover decision point. */
-  streamChat: (providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope) => AsyncIterable<ChatChunk>;
+  streamChat: (providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string) => AsyncIterable<ChatChunk>;
   /**
    * Embeds with one provider.
    *
@@ -113,15 +113,15 @@ export type RequestExecutorDeps = {
    * would have had to re-derive all six, and would have been correct until someone changed one of them
    * here only.
    */
-  embed: (providerId: string, request: EmbeddingRequest, signal?: AbortSignal, scope?: RequestScope) => Promise<EmbeddingResponse>;
+  embed: (providerId: string, request: EmbeddingRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string) => Promise<EmbeddingResponse>;
   /** Applies a per-attempt deadline and never leaks its timer. */
   withDeadline: <T>(signal: AbortSignal | undefined, timeoutMs: number, providerId: string, run: (signal: AbortSignal | undefined) => Promise<T>) => Promise<T>;
   /** Refuses an attempt that would exceed the connection's per-minute limit. */
   enforceRateLimit: (candidate: RouteCandidate) => void;
   recordSuccess: (providerId: string, latencyMs: number, at: string, connectionId?: string) => void;
-  recordFailure: (providerId: string, code: string, reason: string) => void;
+  recordFailure: (providerId: string, code: string, reason: string, connectionId?: string) => void;
   /** A rate limit on one model: cools that model on that provider, with the provider's reset time when it gave one. */
-  recordModelRateLimit?: (providerId: string, modelId: string, input: { retryAfterMs?: number }) => void;
+  recordModelRateLimit?: (providerId: string, modelId: string, input: { retryAfterMs?: number }, connectionId?: string) => void;
   /** Credits a connection for a request that was actually sent. */
   recordRateLimitUse: (connectionId: string) => void;
 };
@@ -144,10 +144,10 @@ export class RequestExecutor {
    * A rate limit cools the one model that caused it. The provider's reset time is read from the error when it gave
    * one, so the cooldown matches what the provider asked for rather than a guess.
    */
-  private noteModelRateLimit(providerId: string, modelId: string, error: ProviderError) {
+  private noteModelRateLimit(providerId: string, modelId: string, error: ProviderError, connectionId?: string) {
     const details = typeof error.details === 'object' && error.details !== null ? error.details as { retryAfterMs?: unknown } : {};
     const retryAfterMs = typeof details.retryAfterMs === 'number' ? details.retryAfterMs : undefined;
-    this.deps.recordModelRateLimit?.(providerId, modelId, retryAfterMs === undefined ? {} : { retryAfterMs });
+    this.deps.recordModelRateLimit?.(providerId, modelId, retryAfterMs === undefined ? {} : { retryAfterMs }, connectionId);
   }
 
   async chat(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayChatOutcome> {
@@ -179,9 +179,9 @@ export class RequestExecutor {
    */
   private async dispatchChat(candidate: RouteCandidate, request: ChatRequest, deadline: AbortSignal | undefined, scope: RequestScope | undefined): Promise<ChatResponse> {
     try {
-      return await this.deps.chat(candidate.providerId, request, deadline, scope);
+      return await this.deps.chat(candidate.providerId, request, deadline, scope, candidate.connectionId);
     } catch (error) {
-      if (error instanceof ProviderError && error.code === 'RATE_LIMITED') this.noteModelRateLimit(candidate.providerId, request.model, error);
+      if (error instanceof ProviderError && error.code === 'RATE_LIMITED') this.noteModelRateLimit(candidate.providerId, request.model, error, candidate.connectionId);
       throw error;
     }
   }
@@ -216,7 +216,7 @@ export class RequestExecutor {
       lastError: undefined,
       signal,
       scope,
-      dispatch: (candidate, deadline) => this.deps.embed(candidate.providerId, request, deadline, scope),
+      dispatch: (candidate, deadline) => this.deps.embed(candidate.providerId, request, deadline, scope, candidate.connectionId),
     });
   }
 
@@ -310,7 +310,7 @@ export class RequestExecutor {
         } catch (error) {
           const latencyMs = Date.now() - startedAt;
           const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
-          if (!isCallerFault(code) && code !== 'RATE_LIMITED') this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.');
+          if (!isCallerFault(code) && code !== 'RATE_LIMITED') this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.', candidate.connectionId);
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs, errorCode: code });
           lastError = error;
           const action = this.retryPolicy.afterFailure({
@@ -408,7 +408,7 @@ export class RequestExecutor {
           if (outcome.ok) {
             this.deps.recordSuccess(candidate.providerId, outcome.latencyMs, new Date().toISOString());
           } else {
-            if (!isCallerFault(code ?? 'PROVIDER_REQUEST_FAILED')) this.deps.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.');
+            if (!isCallerFault(code ?? 'PROVIDER_REQUEST_FAILED')) this.deps.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.', candidate.connectionId);
           }
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: outcome.ok, latencyMs: outcome.latencyMs, ...(code ? { errorCode: code } : {}) });
           if (outcome.ok) {
@@ -516,7 +516,7 @@ export class RequestExecutor {
       try {
         this.deps.recordRateLimitUse(candidate.connectionId);
         const opened = await this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, async (deadline) => {
-          const source = this.deps.streamChat(candidate.providerId, request, deadline, scope)[Symbol.asyncIterator]();
+          const source = this.deps.streamChat(candidate.providerId, request, deadline, scope, candidate.connectionId)[Symbol.asyncIterator]();
           const first = await source.next();
           if (first.done) throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before producing a chunk.');
           // The deadline has passed; the rest of the stream continues without it.
@@ -533,7 +533,7 @@ export class RequestExecutor {
         rest = opened.remainder[Symbol.asyncIterator]();
       } catch (error) {
         const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
-        if (!isCallerFault(code)) this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.');
+        if (!isCallerFault(code)) this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.', candidate.connectionId);
         attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
         lastError = error;
         // `canRetry: false`, because a stream walks the route chain once: once the first chunk has
@@ -593,6 +593,7 @@ export class RequestExecutor {
               candidate.providerId,
               code,
               error instanceof Error ? error.message : 'The provider stream failed after it started.',
+              candidate.connectionId,
             );
             attempts.push({
               providerId: candidate.providerId,

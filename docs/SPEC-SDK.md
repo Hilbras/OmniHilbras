@@ -260,11 +260,9 @@ The first local gateway exposes:
 - `POST /v1/oauth/kiro/api-key` — store a long-lived Kiro/CodeWhisperer key **as given**. It has no
   refresh token, so it cannot be renewed and has to be replaced by hand. This is the one credential
   route that stores the pasted secret itself, which is why it is written down separately.
-- `POST /v1/oauth/kiro/social/start` — begin a Google or GitHub sign-in. The returned URL redirects
-  to a `kiro://` scheme only the Kiro desktop app handles, so the browser cannot return here on its own.
-- `POST /v1/oauth/kiro/social/exchange` — exchange the code the user pasted. The code is spent at
-  most once: a second attempt against the same session is refused rather than sending an
-  already-used code to Kiro.
+- `POST /v1/oauth/kiro/social/start` — begin a Google or GitHub sign-in. Returns a device code and
+  verification URL; the dialog opens the URL and polls the same session until it is approved, so
+  nothing is pasted back.
 - `POST /v1/oauth/opencode-console/start` — begin an OpenCode Console device-flow sign-in.
 - `GET /v1/oauth/opencode-console/session/:id` — whether a device flow is awaiting approval, connected, or failed. When the account has more than one workspace the status is `pending` and carries `workspaces` (`id`, `name`) to choose from.
 - `POST /v1/oauth/opencode-console/session/:id/workspace` — body `{ "workspaceId": "…" }`. Saves the OpenCode Console connection with the chosen workspace. The id must be one offered by the sign-in.

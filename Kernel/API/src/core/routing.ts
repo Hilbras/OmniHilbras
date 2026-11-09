@@ -412,11 +412,14 @@ export function resolveRoute(input: {
   const fallbackPool = matching.length > 0 ? matching : sameFamily;
   const candidates: RouteCandidate[] = [];
   for (const connection of fallbackPool) {
-    if (input.health.isUnhealthy(connection.providerId, input.failureThreshold)) {
+    // Health is recorded per connection for request outcomes, and per provider for a background
+    // sweep. Either answer ejects the connection: a provider-level check that failed says nothing
+    // good about any account on it, while one account's failures must not eject its sibling.
+    if (input.health.isUnhealthy(connection.id, input.failureThreshold) || input.health.isUnhealthy(connection.providerId, input.failureThreshold)) {
       skipped.push({ providerId: connection.providerId, reason: 'unhealthy' });
       continue;
     }
-    if (input.health.isModelCoolingDown(connection.providerId, modelId)) {
+    if (input.health.isModelCoolingDown(connection.id, modelId) || input.health.isModelCoolingDown(connection.providerId, modelId)) {
       skipped.push({ providerId: connection.providerId, reason: 'model-cooling-down' });
       continue;
     }

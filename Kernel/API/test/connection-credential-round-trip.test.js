@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { InMemorySecretStore, ProviderRegistry } from '../dist/src/core/index.js';
 import {
   GatewayService,
@@ -43,29 +45,38 @@ const input = {
   modelIds: ['probe-model'],
 };
 
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+
+/**
+ * The field list is read from the declaration, not hand-written. A hand-written fixture only proves
+ * the fields somebody remembered: `region` and `kiroAuthMethod` were added to the Kiro type and dropped
+ * by the vault for releases while this test stayed green. Deriving the names means a newly declared
+ * field automatically joins the fixture and fails the round trip until the writer learns about it.
+ */
+const OAUTH_SOURCE = readFileSync(join(ROOT, 'Kernel/API/src/core/types.ts'), 'utf8');
+const oauthLine = OAUTH_SOURCE.split('\n').find((line) => line.includes("| { type: 'oauth'"));
+assert.ok(oauthLine, 'the oauth variant of ProviderCredential could not be found to derive its fields');
+const oauthFields = [...oauthLine.matchAll(/(\w+)\?:\s/g)]
+  .map((match) => match[1])
+  .filter((field) => field !== 'type' && field !== 'value');
+assert.ok(oauthFields.length >= 10, `only ${oauthFields.length} oauth fields were derived; the parser is broken`);
+
+const SPECIAL_OAUTH_VALUES = {
+  expiresAt: '2030-01-01T00:00:00.000Z',
+  email: 'someone@example.com',
+  kiroLogin: 'social',
+  kiroAuthMethod: 'idc',
+  region: 'us-east-1',
+};
+const OAUTH_CREDENTIAL = { type: 'oauth', value: 'grant-value', refreshToken: 'refresh-value' };
+for (const field of oauthFields) {
+  if (field in OAUTH_CREDENTIAL) continue;
+  OAUTH_CREDENTIAL[field] = SPECIAL_OAUTH_VALUES[field] ?? `${field}-value`;
+}
+
 const CREDENTIALS = [
   ['an API key', { type: 'api-key', value: 'sk-test-value' }],
-  [
-    'an OAuth grant',
-    {
-      // Every field the `oauth` variant declares, deliberately. The defect this guards against *was* a
-      // dropped field: `cloneCredential` kept three of the nine and discarded the rest, and two of the
-      // ones it discarded are the client pair Kiro cannot renew without.
-      type: 'oauth',
-      value: 'grant-value',
-      refreshToken: 'refresh-value',
-      expiresAt: '2030-01-01T00:00:00.000Z',
-      email: 'someone@example.com',
-      orgId: 'org-value',
-      orgName: 'Org name',
-      accountId: 'account-value',
-      oauthClientId: 'registered-client-id',
-      oauthClientSecret: 'registered-client-secret',
-      kiroLogin: 'social',
-      machineId: 'machine-uuid',
-      name: 'User Name',
-    },
-  ],
+  ['an OAuth grant', OAUTH_CREDENTIAL],
   ['no credential at all', { type: 'none' }],
 ];
 

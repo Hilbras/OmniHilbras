@@ -125,16 +125,16 @@ export class HealthManager {
   }
 
   /** Records a success or failure for the ejection counters, for callers outside a sweep. */
-  recordSuccess(providerId: string, latencyMs: number, checkedAt: string) {
-    this.registry.recordSuccess(providerId, latencyMs, checkedAt);
+  recordSuccess(providerId: string, latencyMs: number, checkedAt: string, connectionId?: string) {
+    this.registry.recordSuccess(connectionId ?? providerId, latencyMs, checkedAt);
   }
 
   noteLoginRefused(providerId: string, reason: string) {
     this.registry.noteLoginRefused(providerId, reason);
   }
 
-  recordFailure(providerId: string, code: string, message: string) {
-    this.registry.recordFailure(providerId, code, message);
+  recordFailure(providerId: string, code: string, message: string, connectionId?: string) {
+    this.registry.recordFailure(connectionId ?? providerId, code, message);
   }
 
   /** Routing's view of a provider's health, or undefined when it has never been checked. */
@@ -154,8 +154,8 @@ export class HealthManager {
     return this.registry;
   }
 
-  recordModelRateLimit(providerId: string, modelId: string, input: { retryAfterMs?: number }) {
-    this.registry.recordModelRateLimit(providerId, modelId, input);
+  recordModelRateLimit(providerId: string, modelId: string, input: { retryAfterMs?: number }, connectionId?: string) {
+    this.registry.recordModelRateLimit(connectionId ?? providerId, modelId, input);
   }
 
   /**

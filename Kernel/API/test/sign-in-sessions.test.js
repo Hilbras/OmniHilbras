@@ -2,16 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { SignInSessionStore, claimOnce, releaseClaim } from '../dist/src/core/sign-in-sessions.js';
-import { KiroSessionStore, KiroSocialStore } from '../dist/src/providers/kiro.js';
+import { KiroSessionStore } from '../dist/src/providers/kiro.js';
 import { OpencodeConsoleSessionStore } from '../dist/src/core/opencodeConsole.js';
 
 /**
  * The one sign-in session lifecycle.
  *
  * `KiroSessionStore` and `OpencodeConsoleSessionStore` were 67 and 76 lines whose lifecycle was
- * byte-for-byte identical, and `KiroSocialStore` had a third copy of the one rule that matters most.
- * The tests below are for the rules, not for the move — and the rules are the parts that are easy to
- * get subtly wrong and hard to notice.
+ * byte-for-byte identical. The tests below are for the rules, not for the move — and the rules are
+ * the parts that are easy to get subtly wrong and hard to notice.
  */
 
 const idPattern = /^[A-Za-z0-9_-]{16,128}$/;
@@ -207,22 +206,10 @@ test('OpenCode Console keeps its flat device code, because the service reads it'
   assert.equal(sessions.claim(session.id)?.userCode, 'C-1');
 });
 
-test('a social sign-in spends its code once too, through the same rule', () => {
-  const social = new KiroSocialStore();
-  const id = social.create('google', 'verifier', 'state');
-  assert.ok(social.claim(id), 'the first callback gets the code');
-  // A browser that retries its callback must not spend the code twice, and the social flow is the
-  // one most likely to be retried: it is a redirect, and a redirect is exactly what a user redoes.
-  assert.equal(social.claim(id), undefined);
-  social.release(id);
-  assert.ok(social.claim(id), 'and a failed exchange can be retried');
-});
-
-test('all three stores reject an implausible session id the same way', () => {
+test('all stores reject an implausible session id the same way', () => {
   const kiro = new KiroSessionStore();
   const console_ = new OpencodeConsoleSessionStore();
-  const social = new KiroSocialStore();
-  for (const claim of [() => kiro.claim('short'), () => console_.claim('short'), () => social.claim('short')]) {
+  for (const claim of [() => kiro.claim('short'), () => console_.claim('short')]) {
     assert.equal(claim(), undefined);
   }
 });

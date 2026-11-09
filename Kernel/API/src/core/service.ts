@@ -13,7 +13,7 @@ import { DuckDuckGoWebAdapter, duckduckgoWebProviderId, DUCKDUCKGO_WEB, normaliz
 import { GeminiWebAdapter, geminiWebProviderId, GEMINI_WEB_MODELS, normalizeGeminiWebCookie, geminiWebCookiePresent, type GeminiWebDriver } from '@omnihilbras/sdk-gemini-web';
 import { createKiloCodeAdapter } from '@omnihilbras/sdk-kilocode';
 import { KIMI_CODE, KimiCodeAdapter } from '@omnihilbras/sdk-kimi-code';
-import { KiroAdapter, exchangeKiroSocialCode, kiroCredentialFromApiKey, kiroProviderId } from '@omnihilbras/sdk-kiro';
+import { KiroAdapter, kiroCredentialFromApiKey, kiroProviderId } from '@omnihilbras/sdk-kiro';
 import { createMinimaxCodeAdapter } from '@omnihilbras/sdk-minimax-code';
 import { OpencodeConsoleAdapter } from '@omnihilbras/sdk-opencode-console';
 import { createQoderAdapter } from '@omnihilbras/sdk-qoder';
@@ -43,7 +43,7 @@ import { CodexAdapter, codexProviderId } from '@omnihilbras/sdk-codex';
 import { beginCodexSignIn, CodexSessionStore, completeCodexSignIn, resolveCodexConfig, type CodexSignInStatus } from '../providers/codexOAuth.js';
 import { CodexCallbackListener } from './codexCallbackListener.js';
 import { OpencodeConsoleSessionStore, beginOpencodeConsoleSignIn, opencodeConsoleProviderId, pollOpencodeConsoleSignIn, withConsoleWorkspace, type OpencodeConsoleSessionStatus } from './opencodeConsole.js';
-import { KiroSessionStore, KiroSocialStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialDeviceFlow, type KiroSignInStatus } from '../providers/kiro.js';
+import { KiroSessionStore, importKiroRefreshToken, pollKiroSignInWithClaim, startKiroSignIn, startKiroSocialDeviceFlow, type KiroSignInStatus } from '../providers/kiro.js';
 import { createChatGptWebDriver } from '../providers/chatgptWeb.js';
 import { createGeminiWebDriver } from '../providers/geminiWeb.js';
 import { createDuckDuckGoWebDriver } from '../providers/duckduckgoWeb.js';
@@ -60,7 +60,7 @@ import { localDeployment, type ConnectionSecretStore, type DeploymentConfig } fr
 import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
-import { startRequestScope, type RequestScope } from './request-context.js';
+import { startRequestScope, withRequestScope, type RequestScope } from './request-context.js';
 import { notSupported } from './capability.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { providerAlias, sharedCatalogProviders } from './provider-alias.js';
@@ -174,32 +174,31 @@ export class GatewayService {
   private readonly usageStore?: UsageStore;
   private readonly gatewayConfig: GatewayConfig | undefined;
   private readonly transport: HttpTransport;
-  private cline?: ProviderAdapter;
-  private clinepass?: ProviderAdapter;
+  private readonly clineAdapters = new Map<string, ProviderAdapter>();
+  private readonly clinepassAdapters = new Map<string, ProviderAdapter>();
   private apmix?: ProviderAdapter;
   private beatapi?: ProviderAdapter;
   private readonly nousAdapters = new Map<string, ProviderAdapter>();
   private readonly nousSessions = new NousSessionStore();
   private zen?: ProviderAdapter;
   private opencodeGo?: ProviderAdapter;
-  private opencodeConsole?: ProviderAdapter;
+  private readonly opencodeConsoleAdapters = new Map<string, ProviderAdapter>();
   private readonly opencodeConsoleSessions = new OpencodeConsoleSessionStore();
   private readonly opencodeSignInSessions = new NousSessionStore();
   private readonly opencodeGoSignInSessions = new NousSessionStore();
   private readonly kimiCodeSessions = new KimiCodeSessionStore();
-  /** Built on demand, so signing in is what constructs it. */
-  private kimiCode?: KimiCodeAdapter;
+  /** Built on demand per connection, so signing in is what constructs it. */
+  private readonly kimiCodeAdapters = new Map<string, KimiCodeAdapter>();
   private kilocode?: ProviderAdapter;
   private readonly minimaxAdapters = new Map<string, ProviderAdapter>();
   private qoder?: ProviderAdapter;
   private readonly claudeCodeSessions = new ClaudeCodeSessionStore();
-  /** Built on demand, so signing in is what constructs it. */
-  private claudeCode?: ClaudeCodeAdapter;
+  /** Built on demand per connection, so signing in is what constructs it. */
+  private readonly claudeCodeAdapters = new Map<string, ClaudeCodeAdapter>();
   private readonly codexSessions = new CodexSessionStore();
   /** Serves the registered redirect port while a Codex sign-in is in flight. */
   private readonly codexCallbackListener = new CodexCallbackListener((pathname, params) => this.codexRegisteredCallback(pathname, params));
   private readonly kiroSessions = new KiroSessionStore();
-  private readonly kiroSocial = new KiroSocialStore();
   private readonly kilocodeSessions = new KiloCodeSessionStore();
   /** CodeBuddy, both regions: one store, with the region kept on each session. */
   private readonly codebuddySessions = new CodeBuddySessionStore();
@@ -207,12 +206,12 @@ export class GatewayService {
   private readonly minimaxCodeSessions = new MinimaxCodeSessionStore();
   private readonly qoderSessions = new QoderSessionStore();
   private chatGptWeb?: ProviderAdapter;
-  private geminiWeb?: ProviderAdapter;
+  private readonly geminiWebAdapters = new Map<string, ProviderAdapter>();
   private duckDuckGoWeb?: ProviderAdapter;
   /** DeepSeek Web, built once so its access-token cache is shared across requests. */
   private deepSeek?: DeepSeekWebAdapter;
   private tokenHarborWeb?: TokenHarborWebAdapter;
-  private kiro?: ProviderAdapter;
+  private readonly kiroAdapters = new Map<string, ProviderAdapter>();
   /** Why the last model discovery failed, when it was tolerated rather than fatal. */
   private lastDiscoveryNote?: string;
   private readonly clineSessions = new ClineSessionStore();
@@ -369,26 +368,26 @@ export class GatewayService {
     this.requests = new RequestExecutor({
       planRoute: (model, explicitProviderId) => this.planRoute(model, explicitProviderId),
       afterPlan: () => this.testAfterPlan?.(),
-      chat: (providerId, request, signal, scope) => this.chat(providerId, request, signal, scope),
-      streamChat: (providerId, request, signal, scope) => this.streamChat(providerId, request, signal, scope),
-      embed: (providerId, request, signal, scope) => this.embed(providerId, request, signal, scope),
+      chat: (providerId, request, signal, scope, connectionId) => this.chat(providerId, request, signal, scope, connectionId),
+      streamChat: (providerId, request, signal, scope, connectionId) => this.streamChat(providerId, request, signal, scope, connectionId),
+      embed: (providerId, request, signal, scope, connectionId) => this.embed(providerId, request, signal, scope, connectionId),
       withDeadline: (signal, timeoutMs, providerId, run) => this.withDeadline(signal, timeoutMs, providerId, run),
       enforceRateLimit: (candidate) => this.enforceRateLimit(candidate),
       recordSuccess: (providerId, latencyMs, at, connectionId) => {
-        this.healthManager.recordSuccess(providerId, latencyMs, at);
+        this.healthManager.recordSuccess(providerId, latencyMs, at, connectionId);
         // The account that served it, when the attempt named one: `unmanaged:` candidates have no
         // connection record, and inventing one would put a reading under an id nobody can look up.
         if (connectionId && !connectionId.startsWith('unmanaged:')) this.connectionLatency.record(connectionId, latencyMs);
       },
-      recordFailure: (providerId, code, reason) => this.healthManager.recordFailure(providerId, code, reason),
-      recordModelRateLimit: (providerId, modelId, input) => this.healthManager.recordModelRateLimit(providerId, modelId, input),
+      recordFailure: (providerId, code, reason, connectionId) => this.healthManager.recordFailure(providerId, code, reason, connectionId),
+      recordModelRateLimit: (providerId, modelId, input, connectionId) => this.healthManager.recordModelRateLimit(providerId, modelId, input, connectionId),
       recordRateLimitUse: (connectionId) => this.rateLimiter.record(connectionId),
     });
     this.providers = new ProviderResolver(registry)
-      .onDemand('cline', () => this.clineAdapter(), { validateOnSave: true })
+      .onDemand('cline', ({ connection }) => this.clineAdapter(connection?.id ?? 'cline'), { validateOnSave: true })
       // No `validateOnSave`: ClinePass stores no credential of its own — it reads Cline's connection
       // through the alias in `credential-manager.ts` — so there is nothing to prove at save time.
-      .onDemand('clinepass', () => this.clinepassAdapter())
+      .onDemand('clinepass', ({ connection }) => this.clinepassAdapter(connection?.id ?? 'cline'))
       .onDemand('apmix', () => this.apmixAdapter())
       .onDemand('beatapi', () => this.beatapiAdapter())
       // `validateOnSave`: Nous publishes its model catalog unauthenticated, so a save that only read
@@ -411,7 +410,7 @@ export class GatewayService {
       .onDemand(codebuddyIntlProviderId, ({ providerId, connection }) => this.codebuddyAdapter(connection?.id ?? providerId))
       .onDemand(qoderProviderId, ({ providerId, connection }) => this.qoderAdapter(connection?.id ?? providerId))
       .onDemand(chatGptWebProviderId, () => this.chatGptWebAdapter())
-      .onDemand(geminiWebProviderId, () => this.geminiWebAdapter())
+      .onDemand(geminiWebProviderId, ({ providerId, connection }) => this.geminiWebAdapter(connection?.id ?? providerId))
       .onDemand(duckduckgoWebProviderId, () => this.duckDuckGoWebAdapter())
       .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter())
       .onDemand(tokenHarborWebProviderId, () => this.tokenHarborWebAdapter());
@@ -489,7 +488,7 @@ export class GatewayService {
         return due;
       },
       renew: async (connection) => {
-        const adapter = await this.resolveAdapter(connection.providerId);
+        const adapter = await this.resolveAdapter(connection.providerId, undefined, connection.id);
         const context = await this.credentials.context(connection.id, connection.providerId);
         const credential = context.credential;
         if (!credential || credential.type !== 'oauth' || !adapter.isCredentialExpired) return;
@@ -647,7 +646,7 @@ export class GatewayService {
         ...(this.connectionLatency.get(connection.id) ? { latency: this.connectionLatency.get(connection.id) } : {}),
         resilience: connection.resilience,
         ...(waits.has(connection.id) ? { rateLimitWaitMs: waits.get(connection.id) } : {}),
-        ...(this.healthManager.snapshot(connection.providerId) ?? {}),
+        ...(this.healthManager.snapshot(connection.id) ?? this.healthManager.snapshot(connection.providerId) ?? {}),
       })),
     };
   }
@@ -736,7 +735,15 @@ export class GatewayService {
       const owner = connections.find((connection) => connection.providerId === ownerId && connection.hasCredential);
       if (!owner) continue;
       try {
-        const credential = (await this.connectionStore?.get(owner.id, owner.providerId)) ?? ({ type: 'none' } as ProviderCredential);
+        /**
+         * A `none` credential, not a copy of the owner's.
+         *
+         * This record is a **catalog alias**: `CredentialManager` resolves the alias for the request
+         * path, so the token is read from Cline's connection. Copying it here is what the old code did,
+         * and it both invalidated one of two copies on refresh and failed outright with "Connection ID
+         * is already used by another provider" — a failure the bare `catch` then hid, so the shared
+         * card simply never existed.
+         */
         await this.connections.save({
           id: aliasId,
           providerId: aliasId,
@@ -745,9 +752,11 @@ export class GatewayService {
           priority: owner.priority,
           proxyPool: owner.proxyPool,
           modelPolicy: owner.modelPolicy ?? 'all',
-        }, credential, signal, { tolerateDiscoveryFailure: true });
-      } catch {
-        // Best-effort by design — see the comment above. The tier is still listable on the next read.
+        }, { type: 'none' }, signal, { tolerateDiscoveryFailure: true });
+      } catch (error) {
+        // Best-effort still, but not silent: a shared card that could not be created is a real
+        // missing capability, and the sign-in it followed has already succeeded.
+        console.warn(`[shared-catalog] could not create ${aliasId}: ${error instanceof Error ? error.message : 'unknown error'}`);
       }
     }
   }
@@ -816,11 +825,9 @@ export class GatewayService {
     // scripted transport — so a test of this flow made a live network call, and a caller who supplied
     // their own transport silently had it ignored for the sign-in. The adapter is memoised per
     // connection, which is exactly the lifetime this needs.
-    const started = await this.kimiCodeAdapter(kimiCodeProviderId).beginSignIn();
-    const session = this.kimiCodeSessions.create({
-      ...started,
-      connectionId: targetConnectionId ?? (addAccount ? `${kimiCodeProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : kimiCodeProviderId),
-    });
+    const connectionId = targetConnectionId ?? (addAccount ? `${kimiCodeProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : kimiCodeProviderId);
+    const started = await this.kimiCodeAdapter(connectionId).beginSignIn();
+    const session = this.kimiCodeSessions.create({ ...started, connectionId });
     return {
       sessionId: session.id,
       userCode: session.userCode,
@@ -846,7 +853,7 @@ export class GatewayService {
       poll: async () => {
         const session = this.kimiCodeSessions.get(sessionId);
         if (!session) return { status: 'denied', error: 'This sign-in no longer exists.' };
-        const outcome = await this.kimiCodeAdapter(sessionId).pollSignIn(session.deviceCode, signal, session.deviceId);
+        const outcome = await this.kimiCodeAdapter(session.connectionId ?? kimiCodeProviderId).pollSignIn(session.deviceCode, signal, session.deviceId);
         if (outcome.status === 'pending') return { status: 'pending' };
         if (outcome.status === 'denied') return { status: 'denied', error: outcome.error };
         return { status: 'connected', credential: outcome.credential };
@@ -1164,11 +1171,12 @@ export class GatewayService {
   }
 
   async startMinimaxCodeSignIn(providerId: string, addAccount = false, targetConnectionId?: string) {
-    const adapter = this.minimaxCodeAdapter(providerId) as unknown as {
+    const connectionId = targetConnectionId ?? (addAccount ? `${providerId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : providerId);
+    const adapter = this.minimaxCodeAdapter(connectionId) as unknown as {
       beginSignIn(): Promise<{ deviceCode: string; userCode: string; verificationUrl: string; codeVerifier: string; expiresIn?: number }>;
     };
     const started = await adapter.beginSignIn();
-    const session = this.minimaxCodeSessions.create({ ...started, connectionId: targetConnectionId ?? (addAccount ? `${providerId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : providerId) });
+    const session = this.minimaxCodeSessions.create({ ...started, connectionId });
     return { sessionId: session.id, userCode: session.userCode, verificationUrl: session.verificationUrl, expiresAt: new Date(session.expiresAt).toISOString() };
   }
 
@@ -1181,7 +1189,7 @@ export class GatewayService {
       poll: async () => {
         const session = this.minimaxCodeSessions.get(sessionId);
         if (!session) return { status: 'denied', error: 'This sign-in no longer exists.' };
-        const adapter = this.minimaxCodeAdapter(providerId) as unknown as {
+        const adapter = this.minimaxCodeAdapter(session.connectionId ?? providerId) as unknown as {
           pollSignIn(deviceCode: string, signal?: AbortSignal, codeVerifier?: string, userCode?: string, pollByUserCode?: boolean): Promise<
             | { status: 'pending' }
             | { status: 'slow_down' }
@@ -1202,7 +1210,7 @@ export class GatewayService {
         return note;
       },
       connection: () => ({
-        id: providerId,
+        id: this.minimaxCodeSessions.get(sessionId)?.connectionId ?? providerId,
         providerId,
         name: providerId === minimaxCodeGlobalProviderId ? 'MiniMax Code (Global)' : 'MiniMax Code',
         endpoint: minimaxCodeSiteEndpoint(providerId),
@@ -1676,16 +1684,21 @@ export class GatewayService {
    * Typed as `ProviderAdapter` like ChatGPT Web's, because nothing here reaches past the interface — the
    * rotation callback is what carries a refreshed cookie back, and it is wired in.
    */
-  geminiWebAdapter(): ProviderAdapter {
-    this.geminiWeb ??= new GeminiWebAdapter({
+  geminiWebAdapter(connectionId = geminiWebProviderId): ProviderAdapter {
+    const memo = this.geminiWebAdapters.get(connectionId);
+    if (memo) return memo;
+    const adapter = new GeminiWebAdapter({
       driver: this.options.geminiWebDriver ?? createGeminiWebDriver(),
-      // Rotation reaches storage here. Deliberately tolerant: a turn that produced an answer must not be
-      // reported as failed because the refreshed cookie could not be written.
+      // Rotation reaches storage here, keyed by the connection whose cookie was rotated. Writing to the
+      // provider id made a second account overwrite the first — or write a credential for a connection
+      // that does not exist. Deliberately tolerant: a turn that produced an answer must not be reported
+      // as failed because the refreshed cookie could not be written.
       onTokensRefreshed: async (merged) => {
-        await this.connectionStore?.set(geminiWebProviderId, { type: 'api-key', value: merged }).catch(() => undefined);
+        await this.connectionStore?.set(connectionId, { type: 'api-key', value: merged }).catch(() => undefined);
       },
     });
-    return this.geminiWeb;
+    this.geminiWebAdapters.set(connectionId, adapter);
+    return adapter;
   }
 
   /** Checks a pasted Gemini cookie and stores nothing. */
@@ -1731,7 +1744,7 @@ export class GatewayService {
     }
     return this.saveConnection(
       {
-        id: addAccount ? `geminiWebProviderId-${randomUUID().replace(/-/g, '').slice(0, 12)}` : geminiWebProviderId,
+        id: addAccount ? `${geminiWebProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : geminiWebProviderId,
         providerId: geminiWebProviderId,
         name: 'Gemini Web',
         endpoint: 'https://gemini.google.com',
@@ -1862,7 +1875,7 @@ export class GatewayService {
     await this.deepSeekAdapter().validateCredential(credential);
     return this.saveConnection(
       {
-        id: addAccount ? `deepseekWebProviderId-${randomUUID().replace(/-/g, '').slice(0, 12)}` : deepseekWebProviderId,
+        id: addAccount ? `${deepseekWebProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : deepseekWebProviderId,
         providerId: deepseekWebProviderId,
         name: 'DeepSeek Web',
         endpoint: 'https://chat.deepseek.com',
@@ -1913,7 +1926,7 @@ export class GatewayService {
     await this.tokenHarborWebAdapter().validateCredential(credential, { signal });
     return this.saveConnection(
       {
-        id: addAccount ? `tokenHarborWebProviderId-${randomUUID().replace(/-/g, '').slice(0, 12)}` : tokenHarborWebProviderId,
+        id: addAccount ? `${tokenHarborWebProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : tokenHarborWebProviderId,
         providerId: tokenHarborWebProviderId,
         name: 'Token Harbor Web',
         endpoint: 'https://tokenharbor.ai',
@@ -1944,9 +1957,12 @@ export class GatewayService {
 
   async connectChatGptWeb(exported: string, signal?: AbortSignal, freeOnly = false, addAccount = false) {
     const state = parseChatGptStorageState(exported);
+    // Verified before the save, like Gemini, DeepSeek and Token Harbor. Parsing accepts a revoked or
+    // dead token; the page is the only authority on whether the session still works.
+    await this.checkChatGptWeb(exported, signal);
     return this.saveConnection(
       {
-        id: addAccount ? `chatGptWebProviderId-${randomUUID().replace(/-/g, '').slice(0, 12)}` : chatGptWebProviderId,
+        id: addAccount ? `${chatGptWebProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : chatGptWebProviderId,
         providerId: chatGptWebProviderId,
         name: 'ChatGPT Web',
         endpoint: 'https://chatgpt.com',
@@ -1969,18 +1985,19 @@ export class GatewayService {
    * same thing and a connection saved under one is never consulted for the other.
    */
   kimiCodeAdapter(connectionId: string): KimiCodeAdapter {
-    if (!this.kimiCode) {
-      this.kimiCode = new KimiCodeAdapter({
-        transport: this.transport,
-        // A renewal must outlive the request that triggered it, or the next request presents a
-        // token Kimi has already replaced.
-        onTokensRefreshed: async (credential) => {
-          if (!this.connectionStore) return;
-          await this.connectionStore.set(connectionId, credential).catch(() => undefined);
-        },
-      });
-    }
-    return this.kimiCode;
+    const memo = this.kimiCodeAdapters.get(connectionId);
+    if (memo) return memo;
+    const adapter = new KimiCodeAdapter({
+      transport: this.transport,
+      // A renewal must outlive the request that triggered it, or the next request presents a
+      // token Kimi has already replaced.
+      onTokensRefreshed: async (credential) => {
+        if (!this.connectionStore) return;
+        await this.connectionStore.set(connectionId, credential).catch(() => undefined);
+      },
+    });
+    this.kimiCodeAdapters.set(connectionId, adapter);
+    return adapter;
   }
 
   /**
@@ -2049,16 +2066,17 @@ export class GatewayService {
    * outlive the request that triggered it — hence the write-back to the vault below.
    */
   claudeCodeAdapter(connectionId: string): ClaudeCodeAdapter {
-    if (!this.claudeCode) {
-      this.claudeCode = new ClaudeCodeAdapter({
-        transport: this.transport,
-        onTokensRefreshed: async (credential) => {
-          if (!this.connectionStore) return;
-          await this.connectionStore.set(connectionId, credential).catch(() => undefined);
-        },
-      });
-    }
-    return this.claudeCode;
+    const memo = this.claudeCodeAdapters.get(connectionId);
+    if (memo) return memo;
+    const adapter = new ClaudeCodeAdapter({
+      transport: this.transport,
+      onTokensRefreshed: async (credential) => {
+        if (!this.connectionStore) return;
+        await this.connectionStore.set(connectionId, credential).catch(() => undefined);
+      },
+    });
+    this.claudeCodeAdapters.set(connectionId, adapter);
+    return adapter;
   }
 
   codexAdapter(connectionId: string): CodexAdapter {
@@ -2074,16 +2092,17 @@ export class GatewayService {
   }
 
   kiroAdapter(connectionId: string): ProviderAdapter {
-    if (!this.kiro) {
-      this.kiro = new KiroAdapter({
-        transport: this.transport,
-        onTokensRefreshed: async (credential) => {
-          if (!this.connectionStore) return;
-          await this.connectionStore.set(connectionId, credential).catch(() => undefined);
-        },
-      });
-    }
-    return this.kiro;
+    const memo = this.kiroAdapters.get(connectionId);
+    if (memo) return memo;
+    const adapter = new KiroAdapter({
+      transport: this.transport,
+      onTokensRefreshed: async (credential) => {
+        if (!this.connectionStore) return;
+        await this.connectionStore.set(connectionId, credential).catch(() => undefined);
+      },
+    });
+    this.kiroAdapters.set(connectionId, adapter);
+    return adapter;
   }
 
   /**
@@ -2149,30 +2168,6 @@ export class GatewayService {
   }
 
   /**
-   * Completes a social sign-in with the code the user pasted.
-   *
-   * The code is spent at most once: a second attempt against the same session is refused
-   * rather than sending an already-used code to Kiro.
-   */
-  async completeKiroSocialSignIn(sessionId: string, code: string, signal?: AbortSignal) {
-    const session = this.kiroSocial.claim(sessionId);
-    if (!session) {
-      throw new ProviderError('INVALID_REQUEST', 'This sign-in has expired or was already completed. Start again.', {
-        providerId: kiroProviderId,
-        publicMessage: 'This sign-in has expired or was already completed. Start again.',
-      });
-    }
-    try {
-      const credential = await exchangeKiroSocialCode(session, code);
-      return await this.connectKiroFromCredential(credential, signal);
-    } catch (error) {
-      // A failed exchange leaves the session usable, so a mistyped code can be retried.
-      this.kiroSocial.release(sessionId);
-      throw error;
-    }
-  }
-
-  /**
    * Reports whether the Kiro sign-in finished, exchanging the device grant on the first
    * poll that finds it approved.
    */
@@ -2221,30 +2216,32 @@ export class GatewayService {
 
 
   opencodeConsoleAdapter(connectionId: string): ProviderAdapter {
-    if (!this.opencodeConsole) {
-      this.opencodeConsole = new OpencodeConsoleAdapter({
-        transport: this.transport,
-        // A renewal has to outlive the request that triggered it, or the next one
-        // would present a token the Console has already replaced.
-        onTokensRefreshed: async (credential) => {
-          if (!this.connectionStore) return;
-          await this.connectionStore.set(connectionId, credential).catch(() => undefined);
-        },
-      });
-    }
-    return this.opencodeConsole;
+    const memo = this.opencodeConsoleAdapters.get(connectionId);
+    if (memo) return memo;
+    const adapter = new OpencodeConsoleAdapter({
+      transport: this.transport,
+      // A renewal has to outlive the request that triggered it, or the next one
+      // would present a token the Console has already replaced.
+      onTokensRefreshed: async (credential) => {
+        if (!this.connectionStore) return;
+        await this.connectionStore.set(connectionId, credential).catch(() => undefined);
+      },
+    });
+    this.opencodeConsoleAdapters.set(connectionId, adapter);
+    return adapter;
   }
 
-  clineAdapter(): ProviderAdapter {
-    if (!this.cline) {
-      this.cline = createClineAdapter({
-        transport: this.transport,
-        onTokensRefreshed: async (tokens) => {
-          await this.connectionStore?.set('cline', toClineCredential(tokens));
-        },
-      });
-    }
-    return this.cline;
+  clineAdapter(connectionId = 'cline'): ProviderAdapter {
+    const memo = this.clineAdapters.get(connectionId);
+    if (memo) return memo;
+    const adapter = createClineAdapter({
+      transport: this.transport,
+      onTokensRefreshed: async (tokens) => {
+        await this.connectionStore?.set(connectionId, toClineCredential(tokens));
+      },
+    });
+    this.clineAdapters.set(connectionId, adapter);
+    return adapter;
   }
 
   /**
@@ -2252,16 +2249,17 @@ export class GatewayService {
    * OAuth token rather than a key of its own. The renewal is wired back to the `cline` vault entry — the
    * one connection the two cards share — because the token it renews is that connection's.
    */
-  clinepassAdapter(): ProviderAdapter {
-    if (!this.clinepass) {
-      this.clinepass = new ClinePassAdapter({
-        transport: this.transport,
-        onTokensRefreshed: async (tokens) => {
-          await this.connectionStore?.set('cline', toClineCredential(tokens));
-        },
-      });
-    }
-    return this.clinepass;
+  clinepassAdapter(connectionId = 'cline'): ProviderAdapter {
+    const memo = this.clinepassAdapters.get(connectionId);
+    if (memo) return memo;
+    const adapter = new ClinePassAdapter({
+      transport: this.transport,
+      onTokensRefreshed: async (tokens) => {
+        await this.connectionStore?.set(connectionId, toClineCredential(tokens));
+      },
+    });
+    this.clinepassAdapters.set(connectionId, adapter);
+    return adapter;
   }
 
   async listConnections() {
@@ -2355,21 +2353,23 @@ export class GatewayService {
    * left" look identical from outside and mean opposite things.
    */
   async connectionQuota(connectionId: string, signal?: AbortSignal, scope?: RequestScope): Promise<ProviderQuota> {
-    const adapter = await this.resolveAdapter(connectionId);
+    const connection = (await this.connections.list()).find((entry) => entry.id === connectionId);
+    if (!connection) throw new ProviderError('NOT_FOUND', 'That connection no longer exists.', { publicMessage: 'That connection no longer exists.' });
+    const adapter = await this.resolveAdapter(connection.providerId, undefined, connection.id);
     if (!adapter.quota) throw notSupported(adapter, 'quota');
     return adapter.quota(await this.credentials.contextForProvider(connectionId, signal, scope));
   }
 
-  async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope): Promise<ChatResponse> {
-    const adapter = await this.resolveAdapter(providerId);
+  async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<ChatResponse> {
+    const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    return adapter.chat({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: this.preparedMessages(request, scope) }, await this.credentials.contextForProvider(providerId, signal, scope));
+    return adapter.chat({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: this.preparedMessages(request, scope) }, await this.contextForRequest(providerId, connectionId, signal, scope));
   }
 
-  async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope): AsyncIterable<ChatChunk> {
-    const adapter = await this.resolveAdapter(providerId);
+  async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): AsyncIterable<ChatChunk> {
+    const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    yield* adapter.streamChat({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: this.preparedMessages(request, scope) }, await this.credentials.contextForProvider(providerId, signal, scope));
+    yield* adapter.streamChat({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: this.preparedMessages(request, scope) }, await this.contextForRequest(providerId, connectionId, signal, scope));
   }
 
   /**
@@ -2385,10 +2385,33 @@ export class GatewayService {
    * flag without having implemented the call (a registry entry that advertises before it builds), and
    * calling `undefined` would be a `TypeError` reaching the client as a 500 instead of a 404.
    */
-  async embed(providerId: string, request: EmbeddingRequest, signal?: AbortSignal, scope?: RequestScope): Promise<EmbeddingResponse> {
-    const adapter = await this.resolveAdapter(providerId);
+  async embed(providerId: string, request: EmbeddingRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<EmbeddingResponse> {
+    const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (adapter.capabilities.embeddings !== true || typeof adapter.embed !== 'function') throw notSupported(adapter, 'embeddings');
-    return adapter.embed({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId) }, await this.credentials.contextForProvider(providerId, signal, scope));
+    return adapter.embed({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId) }, await this.contextForRequest(providerId, connectionId, signal, scope));
+  }
+
+  /**
+   * The credential and policy for the account a route selected.
+   *
+   * A dispatched candidate carries a connection id; reading by provider id instead is how every
+   * attempt for account B was authenticated with account A's key. `unmanaged:` candidates exist for a
+   * registered provider with no saved connection, so they keep the provider-id fallback that
+   * `contextForProvider` owns.
+   */
+  private async contextForRequest(providerId: string, connectionId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<ProviderRequestContext> {
+    if (!connectionId || connectionId.startsWith('unmanaged:')) return this.credentials.contextForProvider(providerId, signal, scope);
+    const canonical = providerAlias(providerId);
+    if (canonical && canonical !== providerId) {
+      // A shared card's routed connection is the alias record, which deliberately holds no token of
+      // its own. The credential lives on the owner's connection, and this is the one lookup that
+      // follows the alias.
+      const owner = await this.connections.firstWithCredentialFor(canonical);
+      const context = await this.credentials.context(owner?.id ?? connectionId, providerId, signal);
+      return scope ? withRequestScope(context, scope) : context;
+    }
+    const context = await this.credentials.context(connectionId, providerId, signal);
+    return scope ? withRequestScope(context, scope) : context;
   }
 
   /**
@@ -2511,7 +2534,7 @@ export class GatewayService {
   async probeConnection(connectionId: string, signal?: AbortSignal): Promise<GatewayConnectionValidation> {
     const connection = (await this.connections.list()).find((entry) => entry.id === connectionId);
     if (!connection) throw new ProviderError('NOT_FOUND', 'That connection no longer exists.', { publicMessage: 'That connection no longer exists.' });
-    const adapter = await this.resolveAdapter(connection.providerId);
+    const adapter = await this.resolveAdapter(connection.providerId, undefined, connection.id);
     const context = await this.credentials.context(connectionId, connection.providerId, signal);
     const startedAt = Date.now();
     // A provider with no `validateCredential` — every generic OpenAI-compatible endpoint — still has a
@@ -2554,8 +2577,8 @@ export class GatewayService {
    * algorithm itself is in `ProviderResolver` and contains no provider id, so adding a provider
    * is a registration rather than a new case in someone else's control flow.
    */
-  private async resolveAdapter(providerId: string, pendingEndpoint?: { endpoint: string; name: string }): Promise<ProviderAdapter> {
-    return this.providers.resolve(providerId, pendingEndpoint, () => this.listConnections());
+  private async resolveAdapter(providerId: string, pendingEndpoint?: { endpoint: string; name: string }, connectionId?: string): Promise<ProviderAdapter> {
+    return this.providers.resolve(providerId, pendingEndpoint, () => this.listConnections(), connectionId);
   }
 
   /**

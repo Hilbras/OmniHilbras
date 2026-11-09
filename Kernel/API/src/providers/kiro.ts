@@ -1,5 +1,5 @@
-import { KIRO_MODELS, beginKiroSignIn, buildKiroSocialUrl, createKiroPkce, kiroProviderId, kiroSocialSessionExpired, registerKiroClient, newKiroSocialState, pollKiroSignIn, pollKiroSocialDeviceSignIn, refreshKiroCredential, startKiroSocialDeviceSignIn, type KiroDeviceAuthorization, type KiroPoll, type KiroSocialProvider, type KiroSocialSession } from '@omnihilbras/sdk-kiro';
-import { SignInSessionStore, claimOnce, releaseClaim } from '../core/sign-in-sessions.js';
+import { KIRO_MODELS, beginKiroSignIn, kiroProviderId, registerKiroClient, pollKiroSignIn, pollKiroSocialDeviceSignIn, refreshKiroCredential, startKiroSocialDeviceSignIn, type KiroDeviceAuthorization, type KiroPoll, type KiroSocialProvider } from '@omnihilbras/sdk-kiro';
+import { SignInSessionStore } from '../core/sign-in-sessions.js';
 import { ProviderError } from '../core/index.js';
 import { ProviderCredential } from '../core/index.js';
 
@@ -200,20 +200,20 @@ async function pollKiroSignInOutcome(authorization: KiroDeviceAuthorization & { 
   // A social grant always yields an OAuth credential, so narrow to it before reading its fields.
   const credential = poll.credential;
   if (credential.type !== 'oauth') return { status: 'denied', error: 'Kiro returned an unexpected credential type.' };
-  const expiresIn = credential.expiresAt ? Math.max(0, Math.round((Date.parse(credential.expiresAt) - Date.now()) / 1000)) : undefined;
   return {
     status: 'connected',
-    accessToken: credential.value,
-    ...(credential.refreshToken ? { refreshToken: credential.refreshToken } : {}),
-    ...(expiresIn === undefined ? {} : { expiresIn }),
-    ...(credential.accountId ? { profileArn: credential.accountId } : {}),
+    // The credential whole. Rebuilding it from token fields dropped `kiroLogin`, and the adapter's
+    // refresh dispatches on that field: without it a social session took the AWS path, found no
+    // client pair, and refused to renew — so it worked until the first expiry and then needed a
+    // full re-sign-in.
+    credential,
   };
 }
 
-/** A Builder ID outcome, or a social one, which carries no client pair because its refresh is not AWS's. */
+/** A Builder ID outcome, or a social one, which carries its own credential shape. */
 type KiroPollOutcomeAny =
   | KiroPoll
-  | { status: 'connected'; accessToken: string; refreshToken?: string; expiresIn?: number; profileArn?: string };
+  | { status: 'connected'; credential: ProviderCredential };
 
 /**
  * Polls AWS for the session.
@@ -237,80 +237,20 @@ export async function pollKiroSignInWithClaim(store: KiroSessionStore, sessionId
     store.resolve(sessionId, { status: 'failed', error: outcome.error });
     return { status: 'denied', error: outcome.error };
   }
-  const credential: ProviderCredential = {
-    type: 'oauth',
-    value: outcome.accessToken,
-    ...(outcome.refreshToken ? { refreshToken: outcome.refreshToken } : {}),
-    ...(outcome.expiresIn === undefined ? {} : { expiresAt: new Date(Date.now() + outcome.expiresIn * 1000).toISOString() }),
-    // AWS scopes the session to a profile, and Kiro echoes it back on inference.
-    ...(outcome.profileArn ? { accountId: outcome.profileArn } : {}),
-    // The registered client, which the refresh grant is bound to. A social grant has none: its
-    // token renews through Kiro's own refresh endpoint, so the pair is only set for Builder ID.
-    ...('clientId' in outcome ? { oauthClientId: outcome.clientId, oauthClientSecret: outcome.clientSecret } : {}),
-  };
+  const credential: ProviderCredential = 'credential' in outcome
+    ? outcome.credential
+    : {
+        type: 'oauth',
+        value: outcome.accessToken,
+        ...(outcome.refreshToken ? { refreshToken: outcome.refreshToken } : {}),
+        ...(outcome.expiresIn === undefined ? {} : { expiresAt: new Date(Date.now() + outcome.expiresIn * 1000).toISOString() }),
+        // AWS scopes the session to a profile, and Kiro echoes it back on inference.
+        ...(outcome.profileArn ? { accountId: outcome.profileArn } : {}),
+        // The registered client, which the refresh grant is bound to.
+        ...('clientId' in outcome ? { oauthClientId: outcome.clientId, oauthClientSecret: outcome.clientSecret } : {}),
+      };
   return { status: 'connected', credential };
 }
 
 export { KIRO_MODELS, kiroProviderId };
 
-
-/* ------------------------------------------------------------------ *
- * Social sign-in sessions
- * ------------------------------------------------------------------ */
-
-/**
- * One in-flight Google or GitHub sign-in.
- *
- * The PKCE verifier lives here and never leaves the gateway: the browser only ever holds
- * the challenge, so a code pasted into it cannot be exchanged without the matching
- * verifier. Sessions are dropped once they age out, and a code can only be spent once —
- * an authorization code is single-use, so a double submit must not burn it.
- */
-export class KiroSocialStore {
-  private readonly sessions = new Map<string, KiroSocialSession & { claimed: boolean }>();
-
-  create(provider: KiroSocialProvider, verifier: string, state: string): string {
-    this.sweep();
-    const id = crypto.randomUUID().replace(/-/g, '');
-    this.sessions.set(id, { provider, verifier, state, createdAt: Date.now(), claimed: false });
-    return id;
-  }
-
-  get(id: string): (KiroSocialSession & { claimed: boolean }) | undefined {
-    if (!sessionIdPattern.test(id)) return undefined;
-    const session = this.sessions.get(id);
-    if (!session) return undefined;
-    if (kiroSocialSessionExpired(session)) {
-      this.sessions.delete(id);
-      return undefined;
-    }
-    return session;
-  }
-
-  /** Returns the session only if its code has not been spent, and marks it spent. */
-  claim(id: string): KiroSocialSession | undefined {
-    // The spending rule is shared with the other sign-in stores. The lifecycle around it is not:
-    // this store expires on `createdAt`, deletes rather than marks, and has no public status.
-    return claimOnce(() => this.get(id));
-  }
-
-  /** Un-claims a session whose exchange did not go through, so the code can be retried. */
-  release(id: string) {
-    const stored = this.sessions.get(id);
-    if (stored) releaseClaim(stored);
-  }
-
-  private sweep() {
-    for (const [id, session] of this.sessions) {
-      if (kiroSocialSessionExpired(session)) this.sessions.delete(id);
-    }
-  }
-}
-
-/** Starts a Google or GitHub sign-in and returns the URL the user must open. */
-export async function startKiroSocialSignIn(store: KiroSocialStore, provider: KiroSocialProvider) {
-  const { verifier, challenge } = await createKiroPkce();
-  const state = newKiroSocialState();
-  const sessionId = store.create(provider, verifier, state);
-  return { sessionId, authUrl: buildKiroSocialUrl(provider, challenge, state) };
-}

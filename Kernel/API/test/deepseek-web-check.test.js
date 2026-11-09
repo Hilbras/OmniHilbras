@@ -110,6 +110,15 @@ test('a free-only import survives a model refresh', async () => {
     createProviderRegistry(loadGatewayConfig({})),
     secretStore,
     new InMemoryConnectionStore(),
+    undefined,
+    {
+      // Connect now verifies the session before saving, like every other web-cookie provider.
+      chatGptWebDriver: {
+        available: async () => ({ ok: true }),
+        ask: async () => ({ text: '' }),
+        verify: async () => ({ ok: true }),
+      },
+    },
   );
   const paid = export_({ account: { planType: 'chatgptplus' } });
   await gateway.connectChatGptWeb(paid, undefined, true);

@@ -1,5 +1,4 @@
 import {
-  connectGatewayOauthProvider,
   requestJson,
   type GatewayConnection,
 } from './gatewayClient';
@@ -113,8 +112,6 @@ export function getKiroSignInStatus(sessionId: string, signal?: AbortSignal): Pr
   return requestJson<KiroSignInStatus>(`/v1/oauth/kiro/session/${encodeURIComponent(sessionId)}`, { signal });
 }
 
-export type KiroSocialSignIn = { sessionId: string; authUrl: string };
-
 /**
  * Google or GitHub through Kiro's device flow: the gateway returns a code and a verification URL, and the
  * session is polled like Builder ID's. There is no paste step, so no authorization URL is involved.
@@ -126,22 +123,6 @@ export function startKiroSocialDeviceSignIn(provider: 'google' | 'github', addAc
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ provider, ...(addAccount ? { addAccount: true } : {}), ...(connectionId ? { connectionId } : {}) }),
-  });
-}
-
-export function startKiroSocialSignIn(provider: 'google' | 'github'): Promise<KiroSocialSignIn> {
-  return requestJson<KiroSocialSignIn>('/v1/oauth/kiro/social/start', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ provider }),
-  });
-}
-
-export function exchangeKiroSocialCode(sessionId: string, code: string): Promise<{ connection: GatewayConnection }> {
-  return requestJson<{ connection: GatewayConnection }>('/v1/oauth/kiro/social/exchange', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ sessionId, code }),
   });
 }
 
@@ -160,26 +141,3 @@ export function connectKiroApiKey(apiKey: string): Promise<{ connection: Gateway
     body: JSON.stringify({ apiKey }),
   });
 }
-
-/**
- * Pulls a code out of whatever the user pasted.
- *
- * The social flow hands back a whole `kiro://…?code=…&state=…` URL, and people paste the
- * address bar verbatim, so a bare code and a full URL are both accepted. The provider is
- * also validated as a known option rather than interpolated into anything.
- */
-export function extractKiroCode(pasted: string): string {
-  const trimmed = pasted.trim();
-  if (!trimmed) return '';
-  // A `kiro://` or `https://` address, possibly with the code in the fragment.
-  if (trimmed.includes('://') || trimmed.includes('code=')) {
-    const query = trimmed.split('#')[0] ?? trimmed;
-    const match = /[?&#]code=([^&#]+)/.exec(query) ?? /code=([^&#]+)/.exec(query);
-    if (match?.[1]) return decodeURIComponent(match[1]);
-    return '';
-  }
-  // A bare code, or a `code#state` pair.
-  return trimmed.split('#')[0]?.trim() ?? trimmed;
-}
-
-export { connectGatewayOauthProvider };

@@ -1,15 +1,7 @@
 /**
- * Remove the SDK's build output before it is rebuilt.
+ * Remove build output before it is rebuilt.
  *
  * ## Why this exists
- *
- * `Kernel/SDK/dist` is consumed by two other things in this repository, and neither
- * of them builds it:
- *
- * - the dashboard's `tsc --noEmit`, which resolves `@hilbras/omnihilbras` through `node_modules`
- *   to `package.json`'s `types: ./dist/index.d.ts` — there is no `paths` mapping in the root
- *   `tsconfig.json`, so a build artifact *is* the type surface;
- * - the gateway's `tsc`, likewise.
  *
  * `tsc` emits over `dist/` and never empties it first. So a stale artifact outlives the source that
  * produced it, and a local tree can typecheck against an export that no longer exists in any
@@ -21,17 +13,27 @@
  * scratch every time, a local tree and a fresh checkout are the same tree, and there is no leftover
  * state left for the two to disagree about.
  *
- * Deliberately narrow. Only the SDK's output is removed, because only the SDK's output is consumed
- * by something that does not build it. The gateway's `dist` is the deployable and nothing in this
- * repository imports it, so there is no demonstrated failure behind cleaning it and no reason to
- * touch it.
+ * ## What is cleaned
+ *
+ * - One `Kernel/SDK/<provider>/dist` per package. There is no single `Kernel/SDK/dist` any more.
+ * - `Kernel/API/dist` when `--gateway` is passed. The dashboard imports
+ *   `@omnihilbras/kernel-api/public` from that directory, so it has the same stale-artifact problem;
+ *   the gateway's own `build` script calls this before `tsc`.
  */
 
-import { rmSync } from 'node:fs';
+import { readdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const PACKAGE = join(dirname(fileURLToPath(import.meta.url)), '..', 'Kernel', 'SDK');
-const DIST = join(PACKAGE, 'dist');
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const sdkRoot = join(root, 'Kernel', 'SDK');
 
-rmSync(DIST, { recursive: true, force: true });
+const gatewayOnly = process.argv.includes('--gateway');
+
+if (gatewayOnly) {
+  rmSync(join(root, 'Kernel', 'API', 'dist'), { recursive: true, force: true });
+} else {
+  for (const entry of readdirSync(sdkRoot, { withFileTypes: true })) {
+    if (entry.isDirectory()) rmSync(join(sdkRoot, entry.name, 'dist'), { recursive: true, force: true });
+  }
+}

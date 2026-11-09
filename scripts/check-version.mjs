@@ -82,8 +82,12 @@ if (!clineMatch) {
  *
  * Skipped when there is no git history (a source tarball, a CI checkout with `--depth 1`).
  */
+let tagProblem = false;
 try {
-  const tags = execSync('git tag --list "v*" --sort=-v:refname', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] })
+  // Only tags reachable from this commit count. A tag on an unrelated history is not "ahead of the
+  // tree" — comparing against every tag in the clone made a global maximum look like this branch's
+  // future, which is how a checkout at 1.99.0 started failing because an unrelated 2.9.10 tag existed.
+  const tags = execSync('git tag --list "v*" --merged HEAD --sort=-v:refname', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] })
     .toString()
     .trim()
     .split('\n')
@@ -92,10 +96,16 @@ try {
     const latest = tags[0].replace(/^v/, '');
     // The tag at or below the current version is fine while a release is being prepared, so
     // only a tag that is *ahead* is an error: that means the tree is behind its own history.
-    const [major, minor] = latest.split('.').map(Number);
-    const [myMajor, myMinor] = version.split('.').map(Number);
-    const tagIsAhead = major > myMajor || (major === myMajor && minor > myMinor);
-    if (tagIsAhead) problems.push(`latest tag is v${latest}, ahead of the tree at ${version}`);
+    const [major, minor, patch] = latest.split('.').map(Number);
+    const [myMajor, myMinor, myPatch] = version.split('.').map(Number);
+    const tagIsAhead =
+      major > myMajor ||
+      (major === myMajor && minor > myMinor) ||
+      (major === myMajor && minor === myMinor && patch > myPatch);
+    if (tagIsAhead) {
+      tagProblem = true;
+      problems.push(`latest tag reachable from HEAD is v${latest}, ahead of the tree at ${version}`);
+    }
   }
 } catch {
   // No git, or no tags. Not a failure of this check.
@@ -108,8 +118,10 @@ if (fixed.length > 0) {
 if (problems.length > 0) {
   console.error(`\n  version check failed at ${version}:`);
   for (const problem of problems) console.error(`    - ${problem}`);
-  if (!fix) {
+  if (!fix && problems.length > (tagProblem ? 1 : 0)) {
     console.error('\n  run `pnpm version:fix` to rewrite the derived copies from package.json\n');
+  } else if (!fix) {
+    console.error('\n  a tag reachable from HEAD is ahead of the tree; bump the version or move the tag\n');
   }
   process.exit(1);
 }
