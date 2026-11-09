@@ -971,6 +971,11 @@ export class GatewayService {
         const outcome = await pollOpencodeConsoleSignIn(session.deviceCode);
         if (outcome.status === 'pending') return { status: 'pending' };
         if (outcome.status === 'denied') return { status: 'denied', error: outcome.error };
+        if (outcome.status === 'choose') {
+          const workspace = outcome.workspaces[0];
+          if (!workspace) return { status: 'denied', error: 'No workspace was offered for this account.' };
+          return { status: 'connected', credential: withConsoleWorkspace(outcome.credential, workspace) };
+        }
         return { status: 'connected', credential: outcome.credential };
       },
       takeDiscoveryNote: () => {
@@ -1017,6 +1022,11 @@ export class GatewayService {
         const outcome = await pollOpencodeConsoleSignIn(session.deviceCode);
         if (outcome.status === 'pending') return { status: 'pending' };
         if (outcome.status === 'denied') return { status: 'denied', error: outcome.error };
+        if (outcome.status === 'choose') {
+          const workspace = outcome.workspaces[0];
+          if (!workspace) return { status: 'denied', error: 'No workspace was offered for this account.' };
+          return { status: 'connected', credential: withConsoleWorkspace(outcome.credential, workspace) };
+        }
         return { status: 'connected', credential: outcome.credential };
       },
       takeDiscoveryNote: () => {
