@@ -502,6 +502,9 @@ export function assistantTextsFromSnapshot(snapshot: { texts: readonly string[] 
  * never told their cookie had gone.
  */
 function driverFailureCode(message: string): ProviderError['code'] {
+  // A missing Chromium is an install problem, and the raw Playwright message names the command.
+  // Classified before the generic branch so it does not arrive as a retryable provider fault.
+  if (/executable doesn't exist|executablenotfound|playwright install/i.test(message)) return 'PROVIDER_UNAVAILABLE';
   if (/sign(ed)?[ -]?in|signed[ -]?out|logged[ -]?out|session (has )?expired|no longer|unauthori[sz]ed|401|log in again/i.test(message)) {
     return 'AUTHENTICATION_FAILED';
   }

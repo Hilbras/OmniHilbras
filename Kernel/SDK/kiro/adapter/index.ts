@@ -606,9 +606,13 @@ export async function refreshKiroCredential(credential: ProviderCredential): Pro
    * registering a fresh client and retrying once, so the same does here. A token that is refused for
    * its own reasons is refused again and reported as before.
    */
+  let usedClientId = clientId;
+  let usedClientSecret = clientSecret;
   if (!(typeof renewal.data.accessToken === 'string' && renewal.data.accessToken)) {
     const fresh = await registerKiroClient().catch(() => undefined);
     if (fresh) {
+      usedClientId = fresh.clientId;
+      usedClientSecret = fresh.clientSecret;
       renewal = await postAuthJson<Json>(`${KIRO.oidc}/token`, {
         grantType: 'refresh_token',
         refreshToken: credential.refreshToken,
@@ -634,9 +638,10 @@ export async function refreshKiroCredential(credential: ProviderCredential): Pro
     value: accessToken,
     ...(typeof data.refreshToken === 'string' ? { refreshToken: data.refreshToken } : { refreshToken: credential.refreshToken }),
     ...(expiresIn === undefined ? {} : { expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() }),
-    // Carried forward, or the next refresh has no client to send.
-    oauthClientId: clientId,
-    oauthClientSecret: clientSecret,
+    // The pair that actually succeeded. Saving the refused one made the next refresh re-register a
+    // client every time.
+    oauthClientId: usedClientId,
+    oauthClientSecret: usedClientSecret,
     // And so is how the account was minted — losing it on renewal would silently undo the host choice.
     ...(credential.kiroAuthMethod ? { kiroAuthMethod: credential.kiroAuthMethod } : {}),
     ...(credential.region ? { region: credential.region } : {}),

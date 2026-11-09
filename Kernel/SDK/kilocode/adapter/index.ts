@@ -62,7 +62,7 @@ type OpenAIChatResponse = {
   model?: string;
   created?: number;
   choices?: Array<{
-    message?: { role?: string; content?: string | null };
+    message?: { role?: string; content?: string | null; tool_calls?: Array<{ id?: string; type?: string; function?: { name?: string; arguments?: string } }> };
     finish_reason?: string | null;
   }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
@@ -202,7 +202,9 @@ class KiloCodeAdapter implements ProviderAdapter {
       ...(context.signal ? { signal: context.signal } : {}),
     });
     const rows = response.data?.data;
-    if (!Array.isArray(rows)) return fallbackModels(this.id);
+    // A malformed catalog is not a reason to invent eight model ids and call the provider healthy.
+    // The hardcoded list made a changed response shape look like a working account.
+    if (!Array.isArray(rows)) throw invalidResponse(this.id, 'Kilo Code returned an unreadable model catalog.');
     return rows.flatMap((row) => (row.id ? [{ id: row.id, providerId: this.id, ...(row.name ? { displayName: row.name } : {}) }] : []));
   }
 
@@ -281,8 +283,9 @@ class KiloCodeAdapter implements ProviderAdapter {
 
   isCredentialExpired(_credential: ProviderCredential | undefined, _now?: number): boolean | undefined {
     // Kilo Code issues a long-lived token with neither an expiry nor a refresh token, so this
-    // adapter can never say a credential is expired.
-    return false;
+    // adapter can never say a credential is expired. `undefined` is the type's word for that;
+    // `false` would be a claim it definitely is not expired.
+    return undefined;
   }
 
   private async credential(context: ProviderRequestContext): Promise<ProviderCredential> {
@@ -332,7 +335,15 @@ class KiloCodeAdapter implements ProviderAdapter {
       providerId: this.id,
       model: response.model ?? requestedModel,
       createdAt: new Date((typeof response.created === 'number' ? response.created : Date.now() / 1000) * 1000).toISOString(),
-      message: { role: 'assistant', content: choice.message.content ?? '' },
+      message: {
+        role: 'assistant',
+        content: choice.message.content ?? '',
+        // The non-streaming path used to drop these while the streaming path kept them, so the same
+        // provider returned tool calls on one lane and an empty answer with `tool_calls` on the other.
+        ...(choice.message.tool_calls?.length
+          ? { toolCalls: choice.message.tool_calls.flatMap((call) => (call.id && call.function?.name ? [{ id: call.id, type: 'function' as const, function: { name: call.function.name, arguments: call.function.arguments ?? '{}' } }] : [])) }
+          : {}),
+      },
       finishReason: normalizeFinishReason(choice.finish_reason),
       ...(response.usage ? { usage: normalizeUsage(response.usage) } : {}),
     };
@@ -341,19 +352,6 @@ class KiloCodeAdapter implements ProviderAdapter {
 
 export function createKiloCodeAdapter(options: KiloCodeAdapterOptions = {}): ProviderAdapter {
   return new KiloCodeAdapter(options);
-}
-
-function fallbackModels(providerId: string): Model[] {
-  return [
-    'anthropic/claude-sonnet-4-20250514',
-    'anthropic/claude-opus-4-20250514',
-    'google/gemini-2.5-pro',
-    'google/gemini-2.5-flash',
-    'openai/gpt-4.1',
-    'openai/o3',
-    'deepseek/deepseek-chat',
-    'deepseek/deepseek-reasoner',
-  ].map((id) => ({ id, providerId }));
 }
 
 function normalizeRole(role: string): ChatMessage['role'] {

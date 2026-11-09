@@ -377,7 +377,7 @@ class QoderAdapter implements ProviderAdapter {
   }
 
   isCredentialExpired(credential: ProviderCredential | undefined, now?: number): boolean | undefined {
-    if (!credential || credential.type !== 'oauth') return false;
+    if (!credential || credential.type !== 'oauth') return undefined;
     if (typeof credential.expiresAt !== 'string') return undefined;
     const at = Date.parse(credential.expiresAt);
     if (!Number.isFinite(at)) return undefined;

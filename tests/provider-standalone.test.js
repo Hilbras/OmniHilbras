@@ -10,10 +10,10 @@ import { join } from 'node:path';
  *
  * A provider folder may import nothing outside itself — no sibling provider, no shared `core/`, no
  * barrel. It carries its own `types`, `transport`, `streaming`, `errors` and `url`, so deleting any
- * folder leaves the other twenty-one able to build on their own.
+ * folder leaves the other twenty-four able to build on their own.
  *
  * This is a deliberate duplication. The cost is stated rather than hidden: a fix to the HTTP client or
- * the SSE parser is now a fix in twenty-two places. That cost was accepted in exchange for a provider
+ * the SSE parser is now a fix in twenty-five places. That cost was accepted in exchange for a provider
  * being removable, testable and ownable on its own, and this file is what makes the exchange hold —
  * a single helpful `import … from '../openai-compatible/…'` would quietly undo it.
  *

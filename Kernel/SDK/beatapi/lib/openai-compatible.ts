@@ -469,8 +469,12 @@ function assertNoProviderOptions(request: ChatRequest, providerId: string) {
   }
 }
 
-function providerStreamError(providerId: string, _error: unknown) {
-  return new ProviderError('PROVIDER_REQUEST_FAILED', 'The provider stream returned an error.', { providerId });
+function providerStreamError(providerId: string, error: unknown) {
+  // The provider's own sentence is the only thing that separates a content filter from a quota or an
+  // expired key. Dropping it made every mid-stream refusal read identically.
+  const payload = error as { message?: unknown; error?: { message?: unknown } } | undefined;
+  const detail = typeof payload?.error?.message === 'string' ? payload.error.message : typeof payload?.message === 'string' ? payload.message : '';
+  return new ProviderError('PROVIDER_REQUEST_FAILED', detail ? `The provider stream returned an error: ${detail}` : 'The provider stream returned an error.', { providerId });
 }
 
 /**

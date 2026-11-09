@@ -174,7 +174,9 @@ function fail(code: ProviderError['code'], message: string, options: { retryable
  * would otherwise reassemble to a garbage session that fails later as an unexplained refusal.
  */
 export function parseTokenHarborCookieHeader(raw: string): string {
-  const trimmed = raw.trim();
+  // A whole `Cookie:` header line is what the guide asks for. Keeping the prefix made the first pair's
+  // name `Cookie: sb-auth-auth-token`, so the parser reported that the header carried no session cookie.
+  const trimmed = raw.trim().replace(/^cookie:\s*/i, '').trim();
   if (!trimmed) {
     throw fail('INVALID_REQUEST', 'Paste the Cookie header or the sb-auth-auth-token value from tokenharbor.ai.', {
       publicMessage: 'Paste the Cookie header or the sb-auth-auth-token value from tokenharbor.ai.',

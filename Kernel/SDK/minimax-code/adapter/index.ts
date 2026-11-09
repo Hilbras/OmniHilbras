@@ -70,7 +70,7 @@ type ClaudeOrOpenAiResponse = {
   model?: string;
   created?: number;
   /** Claude Messages content blocks. */
-  content?: Array<{ type?: string; text?: string }> | string;
+  content?: Array<{ type?: string; text?: string; id?: string; name?: string; input?: unknown }> | string;
   stop_reason?: string | null;
   choices?: Array<{
     message?: { role?: string; content?: string | null };
@@ -85,7 +85,9 @@ type StreamChunkShape = {
   type?: string;
   error?: { message?: string };
   /** Claude streaming events. */
-  delta?: { type?: string; text?: string; stop_reason?: string | null };
+  index?: number;
+  delta?: { type?: string; text?: string; stop_reason?: string | null; partial_json?: string };
+  content_block?: { type?: string; id?: string; name?: string; input?: unknown };
   message?: { usage?: { input_tokens?: number; output_tokens?: number } };
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; input_tokens?: number; output_tokens?: number };
   choices?: Array<{
@@ -229,7 +231,8 @@ class MinimaxCodeAdapter implements ProviderAdapter {
       ...(context.signal ? { signal: context.signal } : {}),
     });
     const rows = response.data?.data;
-    if (!Array.isArray(rows)) return fallbackModels(this.id);
+    // Inventing a catalog from a malformed response made a changed shape look like a healthy account.
+    if (!Array.isArray(rows)) throw invalidResponse(this.id, 'MiniMax returned an unreadable model catalog.');
     return rows.flatMap((row) => (row.id ? [{ id: row.id, providerId: this.id, ...(row.name ? { displayName: row.name } : {}) }] : []));
   }
 
@@ -259,6 +262,8 @@ class MinimaxCodeAdapter implements ProviderAdapter {
 
     let sawPayload = false;
     let sawDone = false;
+    /** Claude sends input-token usage once in `message_start`, not with the stop event. */
+    let inputUsage: TokenUsage | undefined;
     for await (const event of parseSseStream(events)) {
       if (event.data.trim() === '[DONE]') {
         sawDone = true;
@@ -279,6 +284,26 @@ class MinimaxCodeAdapter implements ProviderAdapter {
         sawDone = true;
         break;
       }
+      if (parsed.type === 'message_start' && parsed.message?.usage) {
+        inputUsage = normalizeUsage(parsed.message.usage);
+        continue;
+      }
+      if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use' && parsed.content_block.name) {
+        yield {
+          id: parsed.id ?? `stream-${request.model}`,
+          providerId: this.id,
+          model: parsed.model ?? request.model,
+          delta: {
+            toolCalls: [{
+              index: parsed.index ?? 0,
+              ...(parsed.content_block.id ? { id: parsed.content_block.id } : {}),
+              type: 'function' as const,
+              function: { name: parsed.content_block.name, arguments: '' },
+            }],
+          },
+        };
+        continue;
+      }
       if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
         yield {
           id: parsed.id ?? `stream-${request.model}`,
@@ -288,14 +313,24 @@ class MinimaxCodeAdapter implements ProviderAdapter {
         };
         continue;
       }
+      if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'input_json_delta' && parsed.delta.partial_json) {
+        yield {
+          id: parsed.id ?? `stream-${request.model}`,
+          providerId: this.id,
+          model: parsed.model ?? request.model,
+          delta: { toolCalls: [{ index: parsed.index ?? 0, function: { arguments: parsed.delta.partial_json } }] },
+        };
+        continue;
+      }
       if (parsed.type === 'message_delta') {
+        const usage = { ...inputUsage, ...(parsed.usage ? normalizeUsage(parsed.usage) : {}) };
         yield {
           id: parsed.id ?? `stream-${request.model}`,
           providerId: this.id,
           model: parsed.model ?? request.model,
           delta: {},
           ...(parsed.delta?.stop_reason ? { finishReason: normalizeClaudeStopReason(parsed.delta.stop_reason) } : {}),
-          ...(parsed.usage ? { usage: normalizeUsage(parsed.usage) } : {}),
+          ...(Object.keys(usage).length ? { usage } : {}),
         };
         continue;
       }
@@ -338,7 +373,7 @@ class MinimaxCodeAdapter implements ProviderAdapter {
   }
 
   isCredentialExpired(credential: ProviderCredential | undefined, now?: number): boolean | undefined {
-    if (!credential || credential.type !== 'oauth') return false;
+    if (!credential || credential.type !== 'oauth') return undefined;
     if (typeof credential.expiresAt !== 'string') return undefined;
     const at = Date.parse(credential.expiresAt);
     if (!Number.isFinite(at)) return undefined;
@@ -400,7 +435,9 @@ class MinimaxCodeAdapter implements ProviderAdapter {
     const body: Record<string, unknown> = {
       model: request.model,
       messages: request.messages.map(toClaudeMessage),
-      max_tokens: request.maxOutputTokens ?? 4096,
+      // Omitted when the caller did not ask for a cap; inventing 4096 made a request cost more than
+      // the caller specified.
+      ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
       stream,
     };
     if (request.temperature !== undefined) body.temperature = request.temperature;
@@ -431,12 +468,18 @@ class MinimaxCodeAdapter implements ProviderAdapter {
       const text = response.content
         .map((block) => (block && typeof block === 'object' && block.type === 'text' ? block.text ?? '' : ''))
         .join('');
+      // `tool_use` blocks are the answer for a coding turn. Dropping them left a `tool_calls` finish
+      // reason with no calls, which a client cannot act on.
+      const toolCalls = response.content.flatMap((block) => {
+        if (!block || typeof block !== 'object' || block.type !== 'tool_use' || typeof block.id !== 'string' || typeof block.name !== 'string') return [];
+        return [{ id: block.id, type: 'function' as const, function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) } }];
+      });
       return {
         id: response.id ?? `chat-${requestedModel}`,
         providerId: this.id,
         model: response.model ?? requestedModel,
         createdAt: new Date().toISOString(),
-        message: { role: 'assistant', content: text },
+        message: { role: 'assistant', content: text, ...(toolCalls.length ? { toolCalls } : {}) },
         finishReason: normalizeClaudeStopReason(response.stop_reason),
         ...(response.usage ? { usage: normalizeUsage(response.usage) } : {}),
       };
@@ -500,15 +543,6 @@ function normalizeDeadline(data: DeviceCodeResponse): number | undefined {
   return undefined;
 }
 
-function fallbackModels(providerId: string): Model[] {
-  return [
-    'MiniMax-M3.1-Flash-Preview',
-    'MiniMax-M3',
-    'MiniMax-M2.7',
-    'MiniMax-M2.7-highspeed',
-  ].map((id) => ({ id, providerId }));
-}
-
 function normalizeRole(role: string): ChatMessage['role'] {
   return role === 'assistant' || role === 'system' || role === 'tool' ? role : 'user';
 }
@@ -544,14 +578,34 @@ function normalizeToolCallDelta(call: { index?: number; id?: string; type?: stri
 }
 
 function toClaudeMessage(message: ChatMessage) {
-  const content =
-    typeof message.content === 'string' || message.content === null
-      ? message.content
-      : message.content.map((part) => (part.type === 'text' ? { type: 'text' as const, text: part.text } : part));
+  // Claude's tool round is `tool_result` inside a **user** message, not a `tool` role with a
+  // `tool_call_id`; and an assistant's calls are `tool_use` blocks. Sending the OpenAI shape reached
+  // the provider as an unknown role and the turn failed.
+  if (message.role === 'tool') {
+    const text = typeof message.content === 'string' ? message.content : (message.content ?? []).map((part) => (part.type === 'text' ? part.text : '')).join('');
+    return { role: 'user', content: [{ type: 'tool_result', tool_use_id: message.toolCallId ?? '', content: text }] };
+  }
+  const blocks: Array<Record<string, unknown>> = [];
+  if (typeof message.content === 'string') {
+    if (message.content) blocks.push({ type: 'text', text: message.content });
+  } else if (Array.isArray(message.content)) {
+    for (const part of message.content) {
+      if (part.type === 'text') blocks.push({ type: 'text', text: part.text });
+      else blocks.push({ type: 'image', source: { type: 'url', url: part.imageUrl.url } });
+    }
+  }
+  for (const call of message.toolCalls ?? []) {
+    let input: unknown = {};
+    try {
+      input = JSON.parse(call.function.arguments);
+    } catch {
+      input = {};
+    }
+    blocks.push({ type: 'tool_use', id: call.id, name: call.function.name, input });
+  }
   return {
     role: message.role,
-    content,
-    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+    content: blocks.length === 0 ? (typeof message.content === 'string' ? message.content : '') : blocks,
   };
 }
 

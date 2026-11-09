@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ProviderError } from '../codebuddy/dist/lib/errors.js';
-import { ZenAdapter, zenLaneFor, ZEN_LANES } from '../opencode-console/dist/lib/zen-adapter.js';
+import { ProviderError } from '../zen/dist/lib/errors.js';
+import { ZenAdapter, zenLaneFor, ZEN_LANES } from '../zen/dist/adapter/index.js';
 
 /** Records requests and answers from a script keyed by URL. */
 function transport(script) {
@@ -134,6 +134,24 @@ test('a messages-lane request is built and read in the Anthropic shape', async (
   assert.equal(response.message.content, 'OK');
   assert.equal(response.finishReason, 'stop');
   assert.deepEqual(response.usage, { inputTokens: 4, outputTokens: 1 });
+});
+
+test('an OAuth grant on the messages lane sends a bearer token and its org header', async () => {
+  // The last three commits fixed exactly this path, and no test exercised it: every Zen test passed an
+  // API key. An OAuth credential sent as `x-api-key` reached the lane with no credential at all.
+  const t = transport({
+    [ZEN_LANES.messages]: {
+      data: { id: 'msg_2', model: 'claude-sonnet-5', content: [{ type: 'text', text: 'OK' }], stop_reason: 'end_turn' },
+    },
+  });
+  const adapter = new ZenAdapter({ transport: t });
+  await adapter.chat(
+    { model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }], maxOutputTokens: 16 },
+    { credential: { type: 'oauth', value: 'grant-token', orgId: 'org-42' } },
+  );
+  assert.equal(t.requests[0].headers.Authorization, 'Bearer grant-token');
+  assert.equal(t.requests[0].headers['x-api-key'], undefined, 'an OAuth grant is not a raw key');
+  assert.equal(t.requests[0].headers['x-opencode-org-id'], 'org-42');
 });
 
 test('an error envelope from either lane is raised with the reason', async () => {

@@ -35,7 +35,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/provider-resolver.ts` | 261 | 1 | enforced by a test that greps the file |
 | `Kernel/API/src/core/request-executor.ts` | 727 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 333 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 2693 | 23 | all twenty-three `.onDemand()` registrations, in one constructor |
+| `Kernel/API/src/core/service.ts` | 2703 | 23 | all twenty-three `.onDemand()` registrations, in one constructor |
 | `Kernel/API/src/core/http.ts` | 314 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 776 | 12 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 358 | 1 | one OpenRouter save shortcut, the generic quota route, and the build stamp |
@@ -245,11 +245,11 @@ thirty methods. Threading a value nothing reads would be decoration shaped like 
 
 ## The provider contract
 
-`Kernel/SDK/test/provider-contract.js` holds the invariants the Core is entitled to
+`Kernel/SDK/tests/provider-contract.js` holds the invariants the Core is entitled to
 assume, and `provider-contract.test.js` runs them against every adapter that can be driven offline
-— **all sixteen**, which is the point of the coverage guard below: every directory under
-`src/providers/` is either contracted or listed with a reason why not, and adding a seventeenth fails
-the suite until it is dealt with.
+— **all twenty-five provider packages**, which is the point of the coverage guard below: every
+directory under `Kernel/SDK/` that ships a contract is either contracted or listed with a reason
+why not, and adding another fails the suite until it is dealt with.
 
 The split is the design: **the contract owns the invariants, a provider supplies only its wire
 format.** Asking a provider to describe its own expectations would make this a second copy of its
@@ -321,8 +321,10 @@ Three things in this repository have earned their keep and should be protected:
 
 ## Deliberate non-goals
 
-- **Splitting the SDK into per-provider packages.** The SDK is small and the adapters are the
-  point. Package sprawl costs more than it saves until there is a size or ownership reason.
+- **Splitting the SDK into per-provider packages.** — **Done, and this line used to say the
+  opposite.** The Kernel restructure dissolved the shared SDK into one private package per provider
+  under `Kernel/SDK/`; the reason was ownership and per-provider release/build isolation, and the
+  cost is vendored copies of shared files, which drift unless every copy is changed together.
 - **A rewrite.** The provider-specific surface of the Core is a registration list and two route
   modules, not a scattered set of conditionals — so a rewrite has nothing to collect. Doing it
   incrementally keeps the whole suite green throughout.

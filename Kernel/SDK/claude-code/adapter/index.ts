@@ -57,8 +57,8 @@ export const CLAUDE_CODE = {
   authorizePath: '/oauth/authorize',
   tokenPath: '/v1/oauth/token',
   messagesPath: '/v1/messages',
-  /** Scoped to inference and profile only — **not** `org:create_api_key`, which would mint API keys. */
-  scopes: ['org:create_api_key', 'user:profile', 'user:inference'],
+  /** Scoped to inference and profile only — `org:create_api_key` would mint API keys. */
+  scopes: ['user:profile', 'user:inference'],
   grantType: 'authorization_code',
   refreshGrantType: 'refresh_token',
   apiVersion: '2023-06-01',

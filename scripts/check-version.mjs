@@ -61,18 +61,20 @@ if (!readmeMatch) {
   }
 }
 
-/** The version the Cline adapter reports as its client version. */
-const cline = read('Kernel/SDK/cline/adapter/index.ts');
-const clinePattern = /const omnihilbrasVersion = '(\d+\.\d+\.\d+)';/;
-const clineMatch = clinePattern.exec(cline);
-if (!clineMatch) {
-  problems.push('cline.ts has no omnihilbrasVersion constant to check');
-} else if (clineMatch[1] !== version) {
-  if (fix) {
-    write('Kernel/SDK/cline/adapter/index.ts', cline.replace(clinePattern, `const omnihilbrasVersion = '${version}';`));
-    fixed.push(`cline.ts → ${version}`);
-  } else {
-    problems.push(`cline.ts sends ${clineMatch[1]} as its client version, expected ${version}`);
+/** The version the Cline adapters report as their client version. Both copies, because both send it. */
+for (const file of ['Kernel/SDK/cline/adapter/index.ts', 'Kernel/SDK/clinepass/lib/cline.ts']) {
+  const source = read(file);
+  const pattern = /const omnihilbrasVersion = '(\d+\.\d+\.\d+)';/;
+  const match = pattern.exec(source);
+  if (!match) {
+    problems.push(`${file} has no omnihilbrasVersion constant to check`);
+  } else if (match[1] !== version) {
+    if (fix) {
+      write(file, source.replace(pattern, `const omnihilbrasVersion = '${version}';`));
+      fixed.push(`${file} → ${version}`);
+    } else {
+      problems.push(`${file} sends ${match[1]} as its client version, expected ${version}`);
+    }
   }
 }
 

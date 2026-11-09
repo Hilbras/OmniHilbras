@@ -50,7 +50,7 @@ packages.
 
 ```bash
 pnpm install
-pnpm verify        # version:check → typecheck → test → build, in that order
+pnpm verify        # version:check → test:brand → typecheck → test → SPEC guard → build → analyze:check
 ```
 
 A test that cannot fail is a comment. In this repository a guard is only considered real once someone has
@@ -75,7 +75,7 @@ Every change ships as its own version, and the definition of done is in `AGENTS.
 2. Version bumped, and `README.md` / `docs/SPEC-SDK.md` / `docs/architecture/` / `tasks/` updated to match.
 3. Committed, tagged `v<version>`, pushed to `main`.
 4. A GitHub release for the tag, with notes saying what changed **and how to verify it**.
-5. `npm publish` from `Kernel/SDK`, then **confirm the version resolves from the registry**.
+5. `npm publish` is **suspended** while there is no publishable manifest; until it resumes, `pnpm release:audit` will report the npm gap rather than a step anyone can complete.
 
 Step 5 is not a formality. `npm publish` has twice reported success for a version that was absent from the
 registry, because the tarball is staged and finalised minutes later. A `409` on re-publish means *wait*, not

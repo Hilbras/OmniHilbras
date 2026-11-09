@@ -520,7 +520,12 @@ export class ZenAdapter implements ProviderAdapter {
       // 401 even when the key is valid.
       headers: isResponses
         ? this.authHeaders(context.credential)
-        : this.apiKeyHeaders(context.credential),
+        : context.credential?.type === 'oauth'
+          // An OAuth grant on the messages lane is still a bearer token. Sending it as `x-api-key`
+          // reached the lane with no credential and no org header, which is a 401 for every Claude
+          // model on an OAuth account.
+          ? this.authHeaders(context.credential, { 'anthropic-version': '2023-06-01' })
+          : this.apiKeyHeaders(context.credential),
       body: JSON.stringify(isResponses ? toResponsesBody(request) : toMessagesBody(request)),
       ...(context.signal ? { signal: context.signal } : {}),
     });
@@ -673,8 +678,12 @@ export class ZenAdapter implements ProviderAdapter {
     );
 
     let opened = false;
+    let sawDone = false;
     for await (const event of parseSseStream(events)) {
-      if (event.data.trim() === '[DONE]') return;
+      if (event.data.trim() === '[DONE]') {
+        sawDone = true;
+        break;
+      }
       const chunk = parseSseJson<GatedStreamChunk>(event, this.id);
       if (!chunk) continue;
       opened = true;
@@ -702,13 +711,19 @@ export class ZenAdapter implements ProviderAdapter {
         };
       }
       const finish = chunk.choices?.[0]?.finish_reason;
-      if (finish) yield { id: chunkId, providerId: this.id, model: id, delta: {}, finishReason: toGatedFinishReason(finish) };
+      if (finish) {
+        sawDone = true;
+        yield { id: chunkId, providerId: this.id, model: id, delta: {}, finishReason: toGatedFinishReason(finish) };
+      }
     }
 
     // The stream closed without a single payload: either the gate refused before the first event, or
     // the answer was JSON rather than SSE. Those need different messages, so it is read rather than
     // guessed at.
     if (!opened) throw this.gatedRefusal(request.model, undefined, satisfied);
+    // A stream that stopped mid-answer is not a finished answer. The shared base treats a missing
+    // terminator as fatal; this path used to return the partial text as a success.
+    if (!sawDone) throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before completion.', { providerId: this.id });
   }
 
   /**
@@ -746,24 +761,28 @@ export class ZenAdapter implements ProviderAdapter {
   }
 
 
-  /** The messages lane: raw key in `x-api-key`, plus the required version header. */
+  /** The messages lane: OAuth is a bearer on the messages lane too; an API key is raw `x-api-key`. */
   private apiKeyHeaders(credential: ProviderCredential | undefined) {
     const value = credential?.type === 'none' ? '' : credential?.value ?? '';
+    const org = credential?.type === 'oauth' && credential.orgId ? credential.orgId : undefined;
     return {
       accept: 'application/json',
       'content-type': 'application/json',
       'anthropic-version': '2023-06-01',
       ...(value ? { 'x-api-key': value } : {}),
+      ...(org ? { 'x-opencode-org-id': org } : {}),
     };
   }
 
   private authHeaders(credential: ProviderCredential | undefined, extra: Record<string, string> = {}) {
     const value = credential?.type === 'none' ? '' : credential?.value ?? '';
+    const org = credential?.type === 'oauth' && credential.orgId ? credential.orgId : undefined;
     return {
       accept: 'application/json',
       'content-type': 'application/json',
       ...extra,
       ...(value ? { Authorization: `Bearer ${value}` } : {}),
+      ...(org ? { 'x-opencode-org-id': org } : {}),
     };
   }
 }

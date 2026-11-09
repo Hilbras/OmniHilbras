@@ -22,7 +22,7 @@
     "version:fix": "node scripts/check-version.mjs --fix",
     "analyze": "node scripts/analyze-bundle.mjs",
     "analyze:check": "node scripts/analyze-bundle.mjs --check",
-    "verify": "pnpm version:check && pnpm test:brand && pnpm typecheck && pnpm test && pnpm build && pnpm analyze:check",
+    "verify": "pnpm version:check && pnpm test:brand && pnpm typecheck && pnpm test && node Kernel/API/test/spec-success-criteria.mjs && pnpm build && pnpm analyze:check",
     "test:brand": "BRAND_STRICT=1 node --test tests/brand-assets.test.js",
     "brand": "node scripts/generate-brand.mjs",
     "release:audit": "node scripts/audit-release-trail.mjs"

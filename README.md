@@ -40,9 +40,10 @@ into one figure. Most providers publish no allowance at all, and say so: several
 request and reveal it only by refusing a call. "This provider does not say" is rendered as a sentence, never
 as a zero, because an unanswerable question and an exhausted account are different facts.
 
-**Request log** is the one sidebar entry still disabled with no route. `Usage` and `Settings` were both
-disabled for the whole life of the project for the same reason — **there was nothing to show** — and both are
-now real: `Usage` over `GET /v1/usage`, `Settings` over the configuration the gateway actually loaded.
+**Request log** is a real page at `/dashboard/logs`, fed by `GET /v1/logs/stream`. `Usage` and
+`Settings` were both disabled for the whole life of the project for the same reason — **there was
+nothing to show** — and both are now real: `Usage` over `GET /v1/usage`, `Settings` over the
+configuration the gateway actually loaded.
 
 `Settings` is the one page you might expect to be a form and is not. Every setting is an environment
 variable, so there is nothing to submit; what the page shows is the configuration **this process** resolved,
@@ -75,7 +76,7 @@ an inference-scoped API key, which is stated on the Codex card. Other providers 
 be added with a base URL through `PUT /v1/connections/:id`.
 
 The providers page groups cards as **OAuth Providers**, **API Key Providers**,
-**Hosted API Providers**, **Free Tier Providers**, **Local Providers**, and
+**Free Tier Providers**, **Web Session Providers**, **Local Providers**, and
 **Custom Endpoints**. A card is catalog metadata: it shows `—` metrics and
 `No connections` until a real connection exists behind it.
 
@@ -127,11 +128,10 @@ when the provider omits `choices` entirely.
 **Free-tier rate limits.** A `:free` model answers `429` when the shared free quota
 is spent, which is a provider limit and not a fault in the gateway.
 
-**Providers that do not speak one API shape.** OpenCode Zen routes different models
-to different endpoints: GPT models from `/zen/v1/responses`, some others from
-`/zen/v1/messages`, the rest from `/zen/v1/chat/completions`. The gateway speaks
-the last of those, so a model on either of the other two shapes fails here and
-works in OpenCode. Choosing a path per model is not implemented.
+**Providers that do not speak one API shape.** OpenCode Zen routes different models to
+different endpoints: GPT models from `/zen/v1/responses`, Claude and Qwen from `/zen/v1/messages`,
+the rest from `/zen/v1/chat/completions`. The gateway picks the lane per model and refuses the two
+shapes it does not implement (Gemini's own path and the Jev decision model) by name.
 
 **Account state, or model access.** Cline answers `402 Payment Required` when the
 account has no credits. OpenCode Zen answers a bare `403` with an empty body for
@@ -212,8 +212,8 @@ gateway sends all four, streaming upstream and decoding the answer, because ther
 no non-streaming path. From a datacenter network the upstream still answers `403`
 ("OpenCode's free tier can only be used from within OpenCode"), which is a network
 restriction rather than a credential problem; the error says so, so nobody rotates a
-key that already works. `OMNIHILBRAS_ZEN_PLACEHOLDER_TOOL` and
-`OMNIHILBRAS_ZEN_USER_AGENT` override the two parts of the contract that drift.
+key that already works. `OMNIHILBRAS_ZEN_USER_AGENT` overrides the user-agent part of the
+contract that drifts.
 
 Zen also returns an empty body to a caller holding a key and a real explanation to one
 that is not, so a refusal in the dashboard reads as a bare status code. Re-issue the
@@ -377,10 +377,10 @@ localStorage. Every completion is gated by DeepSeek's proof of work — a 23-rou
 variant of SHA3-256 that the platform cannot compute — which OmniHilbras solves in a bounded
 search.
 
-**Qwen Web has a catalog and no card.** Its models endpoint answers a guest with 1M-context
+**Qwen Web has a catalog and a card.** Its models endpoint answers a guest with 1M-context
 Qwen3.7-Plus, Qwen3.8-Max and Qwen3.8-Omni-Flash, and the chat endpoint is a plain
-unobfuscated `POST /api/v2/chat/completions`. The turn is refused by Alibaba's TMD anti-bot,
-which returns a captcha that has to be rendered in a browser. Not built on a maybe.
+unobfuscated `POST /api/v2/chat/completions`. The card offers a probe rather than pretending a
+turn will work: Alibaba's TMD anti-bot can return a captcha that has to be rendered in a browser.
 
 **Token Harbor Web is the one to think twice about.** Token Harbor is itself a gateway, and its
 terms **prohibit** constructing a proxy over it — which is what a web-cookie card is. Their
@@ -556,7 +556,7 @@ pnpm dev:gateway
 pnpm build
 pnpm typecheck
 pnpm test
-pnpm verify        # the release gate: version, typecheck, test, build, bundle budget
+pnpm verify        # release gate: version, brand, typecheck, test, SPEC, build, bundle budget
 pnpm analyze       # what each page downloads, attributed to the package that shipped it
 pnpm analyze:check # the same, failing if the dashboard pulls the animation library again
 pnpm version:check # one version, stated once — fails if the copies disagree
@@ -645,24 +645,30 @@ OMNIHILBRAS_COMPATIBLE_MODELS_PATH=/models
 OMNIHILBRAS_COMPATIBLE_CHAT_PATH=/chat/completions
 ```
 
-Available routes:
+Available routes (the full table, with request/response shapes, is `docs/SPEC-SDK.md`):
 
 - `GET /health`
+- `GET /v1/health/:providerId`
 - `GET /v1/models`
+- `POST /v1/chat/completions` (JSON, or `stream: true` for SSE)
+- `POST /v1/embeddings`
+- `POST /v1/responses` (Codex-style clients; JSON or Responses SSE)
 - `GET /v1/connections`
+- `PUT /v1/connections/:id`
+- `DELETE /v1/connections/:id`
+- `POST /v1/connections/:id/models`
+- `PUT /v1/connections/:id/resilience`
+- `PUT /v1/connections/:id/enabled`
+- `GET /v1/connections/:id/quota`
 - `POST /v1/connections/openrouter/check`
 - `PUT /v1/connections/openrouter`
-- `POST /v1/connections/:id/models`
-- `DELETE /v1/connections/:id`
-- `PUT /v1/connections/:id/resilience`
 - `GET /v1/routing`
-- `GET /v1/keys`
-- `POST /v1/keys`
-- `PATCH /v1/keys/:id`
-- `DELETE /v1/keys/:id`
+- `GET /v1/usage`
+- `GET /v1/logs/stream`
+- `GET /v1/settings`
 - `PUT /v1/settings/require-api-key`
-- `POST /v1/chat/completions`
-- `POST /v1/chat/completions` with `stream: true` for SSE
+- `GET /v1/keys`, `POST /v1/keys`, `PATCH /v1/keys/:id`, `DELETE /v1/keys/:id`
+- `/v1/oauth/*` and `/v1/web-cookie/*` for interactive sign-in and cookie imports
 
 ## API Keys
 
@@ -778,11 +784,11 @@ returned by OpenRouter. Manually added model IDs are tracked separately and
 remain in the catalog when the connection is re-saved with either policy. The
 model endpoint accepts validated model IDs for adding custom entries later.
 
-Provider **Test provider** checks live adapter health through `GET /health`. Each
-model **Test** button sends one real, bounded chat completion through
-`POST /v1/chat/completions` using the saved gateway credential. The test prompt
-is fixed and limited to 16 output tokens, but it can still consume provider
-quota or credits.
+Provider **Test provider** checks one provider's live adapter health through
+`GET /v1/health/:providerId`. Each model **Test** button sends one real, bounded chat
+completion through `POST /v1/chat/completions` using the saved gateway credential. The test
+prompt is fixed and limited to 1024 output tokens, but it can still consume provider quota or
+credits.
 
 Use the `x-omnihilbras-provider` header to select a configured provider, for
 example `x-omnihilbras-provider: anthropic`.

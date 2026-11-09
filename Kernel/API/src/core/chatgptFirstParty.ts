@@ -550,8 +550,9 @@ export function extractAssistantText(sseBody: string): string {
         : [];
     const text = parts
       .map((part) => (typeof part === 'string' ? part : ((part as Json)?.content as string | undefined) ?? ((part as Json)?.text as string | undefined) ?? ''))
-      .join('')
-      .trim();
+      .join('');
+    // Not trimmed: the adapter documents that an answer asked to be exactly `"  indented  "` arrives
+    // with its spaces, and trimming here silently broke that contract end to end.
     if (text) lastText = text;
   }
   return lastText;

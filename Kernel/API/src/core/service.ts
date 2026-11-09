@@ -205,7 +205,7 @@ export class GatewayService {
   private readonly codebuddyAdapters = new Map<string, ProviderAdapter>();
   private readonly minimaxCodeSessions = new MinimaxCodeSessionStore();
   private readonly qoderSessions = new QoderSessionStore();
-  private chatGptWeb?: ProviderAdapter;
+  private readonly chatGptWebAdapters = new Map<string, ProviderAdapter>();
   private readonly geminiWebAdapters = new Map<string, ProviderAdapter>();
   private duckDuckGoWeb?: ProviderAdapter;
   /** DeepSeek Web, built once so its access-token cache is shared across requests. */
@@ -409,7 +409,7 @@ export class GatewayService {
       .onDemand(codebuddyCnProviderId, ({ providerId, connection }) => this.codebuddyAdapter(connection?.id ?? providerId))
       .onDemand(codebuddyIntlProviderId, ({ providerId, connection }) => this.codebuddyAdapter(connection?.id ?? providerId))
       .onDemand(qoderProviderId, ({ providerId, connection }) => this.qoderAdapter(connection?.id ?? providerId))
-      .onDemand(chatGptWebProviderId, () => this.chatGptWebAdapter())
+      .onDemand(chatGptWebProviderId, ({ providerId, connection }) => this.chatGptWebAdapter(connection?.id ?? providerId))
       .onDemand(geminiWebProviderId, ({ providerId, connection }) => this.geminiWebAdapter(connection?.id ?? providerId))
       .onDemand(duckduckgoWebProviderId, () => this.duckDuckGoWebAdapter())
       .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter())
@@ -1638,9 +1638,15 @@ export class GatewayService {
    * The driver is created once and shared, so the Playwright import and the browser
    * availability check are not repeated per request.
    */
-  chatGptWebAdapter(): ProviderAdapter {
-    this.chatGptWeb ??= new ChatGptWebAdapter({ driver: this.options.chatGptWebDriver ?? createChatGptWebDriver() });
-    return this.chatGptWeb;
+  chatGptWebAdapter(connectionId = chatGptWebProviderId): ProviderAdapter {
+    const memo = this.chatGptWebAdapters.get(connectionId);
+    if (memo) return memo;
+    // One persistent browser profile per connection. A single shared profile meant account B's stored
+    // cookies were never used when the profile was signed in as A, and "Check cookie" reported A's plan
+    // for B's paste.
+    const adapter = new ChatGptWebAdapter({ driver: this.options.chatGptWebDriver ?? createChatGptWebDriver(connectionId) });
+    this.chatGptWebAdapters.set(connectionId, adapter);
+    return adapter;
   }
 
   /**
@@ -1666,9 +1672,11 @@ export class GatewayService {
    * the authority on what the account gets, and a `planType` read out of an export is weaker
    * evidence than the page itself.
    */
-  async checkChatGptWeb(exported: string, signal?: AbortSignal) {
+  async checkChatGptWeb(exported: string, signal?: AbortSignal, connectionId?: string) {
     const state = parseChatGptStorageState(exported);
-    const adapter = await this.resolveAdapter(chatGptWebProviderId, { endpoint: 'https://chatgpt.com', name: 'ChatGPT Web' });
+    const adapter = connectionId
+      ? this.chatGptWebAdapter(connectionId)
+      : await this.resolveAdapter(chatGptWebProviderId, { endpoint: 'https://chatgpt.com', name: 'ChatGPT Web' });
     // Throws with the real cause — expired, challenged, signed out, no browser — so the
     // dialog says which of those it was instead of reporting a generic failure.
     await adapter.validateCredential?.(chatGptWebCredential(state), { signal });
@@ -1960,12 +1968,14 @@ export class GatewayService {
 
   async connectChatGptWeb(exported: string, signal?: AbortSignal, freeOnly = false, addAccount = false) {
     const state = parseChatGptStorageState(exported);
+    const connectionId = addAccount ? `${chatGptWebProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : chatGptWebProviderId;
     // Verified before the save, like Gemini, DeepSeek and Token Harbor. Parsing accepts a revoked or
-    // dead token; the page is the only authority on whether the session still works.
-    await this.checkChatGptWeb(exported, signal);
+    // dead token; the page is the only authority on whether the session still works. The check uses the
+    // target connection's profile, so it reads the pasted session rather than another account's.
+    await this.checkChatGptWeb(exported, signal, connectionId);
     return this.saveConnection(
       {
-        id: addAccount ? `${chatGptWebProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : chatGptWebProviderId,
+        id: connectionId,
         providerId: chatGptWebProviderId,
         name: 'ChatGPT Web',
         endpoint: 'https://chatgpt.com',

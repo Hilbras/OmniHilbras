@@ -12,7 +12,7 @@ const dashboardPrefix = '/dashboard';
 
 /** Old entry files, mapped to the route that replaced them. */
 const legacyRoutes: Record<string, (search: URLSearchParams) => string> = {
-  '/dashboard.html': () => '/dashboard/overview',
+  '/dashboard.html': () => '/dashboard/providers',
   '/providers.html': () => '/dashboard/providers',
   '/routing.html': () => '/dashboard/routing',
   '/provider.html': (search) => {

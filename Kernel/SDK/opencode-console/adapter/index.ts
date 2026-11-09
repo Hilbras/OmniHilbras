@@ -7,7 +7,7 @@ import { OpenAICompatibleAdapter } from '../lib/openai-compatible.js';
 import { zenConversationSeed, zenContractSatisfied, isZenFreeTierRefusalError, zenFreeTierRefusal, zenSessionId, zenGatedToolChoice, zenUserAgent } from '../lib/zen-free-tier.js';
 import { gatedTools } from '../lib/zen-adapter.js';
 import { parseSseStream } from '../lib/streaming.js';
-import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext } from '../lib/types.js';
+import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, ToolCall } from '../lib/types.js';
 
 /**
  * OpenCode Console is the credential that reaches OpenCode's free Zen models. An API
@@ -279,17 +279,28 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
       let text = '';
       let finishReason: ChatResponse['finishReason'] | undefined;
       let responseId = '';
+      const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
       for await (const chunk of this.streamFree(request, context)) {
         responseId = chunk.id || responseId;
         if (chunk.delta?.content) text += chunk.delta.content;
+        for (const delta of chunk.delta?.toolCalls ?? []) {
+          const call = toolCalls.get(delta.index) ?? { id: delta.id ?? `call_${delta.index}`, name: '', arguments: '' };
+          if (delta.id) call.id = delta.id;
+          if (delta.function?.name) call.name = delta.function.name;
+          if (delta.function?.arguments) call.arguments += delta.function.arguments;
+          toolCalls.set(delta.index, call);
+        }
         if (chunk.finishReason) finishReason = chunk.finishReason;
       }
+      const calls: ToolCall[] = [...toolCalls.values()].map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
       return {
         id: responseId || `opencode-${request.model}`,
         providerId: this.id,
         model: request.model,
         createdAt: new Date().toISOString(),
-        message: { role: 'assistant', content: text },
+        // The streaming path emitted tool calls and this aggregation only summed text, so a free model
+        // asked for a tool returned `finishReason: 'tool_calls'` with `content: ''` and nothing to act on.
+        message: { role: 'assistant', content: text, ...(calls.length ? { toolCalls: calls } : {}) },
         finishReason: finishReason ?? 'stop',
       };
     }
@@ -390,13 +401,17 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
       ...(context.signal ? { signal: context.signal } : {}),
     });
     let opened = false;
+    let sawDone = false;
     // A free-tier refusal usually arrives as an HTTP error, not as an SSE frame — the transport
     // raises before the loop starts, so the branch inside it never runs. Without this the operator
     // is shown OpenCode's marketing text and told the gateway failed unexpectedly: the two erasures
     // this adapter had once.
     try {
     for await (const event of parseSseStream(events)) {
-      if (event.data.trim() === '[DONE]') return;
+      if (event.data.trim() === '[DONE]') {
+        sawDone = true;
+        break;
+      }
       opened = true;
       let chunk: { id?: string; choices?: Array<{ delta?: { content?: string; tool_calls?: Array<{ index?: number; id?: string; type?: string; function?: { name?: string; arguments?: string } }> }; finish_reason?: string | null }>; error?: { message?: string } };
       try {
@@ -429,7 +444,10 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
         };
       }
       const finish = chunk.choices?.[0]?.finish_reason;
-      if (finish) yield { id: chunk.id ?? `opencode-${id}`, providerId: this.id, model: id, delta: {}, finishReason: normalizeFinish(finish) };
+      if (finish) {
+        sawDone = true;
+        yield { id: chunk.id ?? `opencode-${id}`, providerId: this.id, model: id, delta: {}, finishReason: normalizeFinish(finish) };
+      }
     }
     } catch (error) {
       // The transport's own refusal carries the provider's text but no public message, so it reaches
@@ -450,6 +468,7 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
       throw error;
     }
     if (!opened) throw new ProviderError('PROVIDER_REQUEST_FAILED', 'OpenCode answered the free request with no stream.', { providerId: this.id });
+    if (!sawDone) throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before completion.', { providerId: this.id });
   }
 
   /**

@@ -9,10 +9,11 @@ with `@hilbras/sdk`, which is a separate, unrelated project.
 manifest: the SDK is now one private package per provider under `Kernel/SDK/`,
 each versioned `0.1.0`, and `Kernel/API` — the gateway — is private too. There
 is no manifest to publish until a new publishing story is chosen, and until
-then a release ends at the tag and the GitHub release. The last published
-version is `@hilbras/omnihilbras@0.2.0` (GitHub tag `v0.2.0`); the steps below
-describe the process before the restructure and are kept for when that story
-exists — their paths name the tree as it was.
+then a release ends at the tag and the GitHub release. The npm registry may hold
+later versions from a different tag lineage; this checkout has no publishable
+manifest, so its own release trail ends at the tag. The steps below describe the
+process before the restructure and are kept for when that story exists — their
+paths name the tree as it was.
 
 ## Version bumps
 

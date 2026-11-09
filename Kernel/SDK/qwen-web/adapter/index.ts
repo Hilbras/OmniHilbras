@@ -55,7 +55,7 @@ const BROWSER_USER_AGENT =
 
 /** Reads a pasted cookie header, or a lone `name=value`, into a plain object. */
 export function parseQwenCookieHeader(raw: string): Record<string, string> {
-  const trimmed = raw.trim();
+  const trimmed = raw.trim().replace(/^cookie:\s*/i, '').trim();
   if (!trimmed) {
     throw new ProviderError('INVALID_REQUEST', 'Paste the Cookie header from auth.qwen.ai.', {
       providerId: qwenWebProviderId,

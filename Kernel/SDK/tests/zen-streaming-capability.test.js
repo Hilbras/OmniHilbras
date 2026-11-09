@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ZenAdapter } from '../opencode-console/dist/lib/zen-adapter.js';
+import { ZenAdapter } from '../zen/dist/adapter/index.js';
 
 /**
  * Zen declared `streaming: false` while its adapter streams the chat lane and the free tier. The gateway reads

@@ -131,7 +131,9 @@ export type GeminiWebCookie = { name: string; value: string };
  * `=`: `abc=def` is a header and `abcdef` is a value, and only one of those parses as a cookie.
  */
 export function normalizeGeminiWebCookie(raw: string, cookieName = GEMINI_WEB_PRIMARY_COOKIE): string {
-  const trimmed = raw.trim();
+  // The guide says "copy the whole Cookie header line", which includes the `Cookie:` prefix. Without
+  // this strip that prefix became the first cookie's name, and Playwright refused the batch.
+  const trimmed = raw.trim().replace(/^cookie:\s*/i, '').trim();
   if (!trimmed) return '';
   const pairs = cookiePairsFromJson(trimmed);
   if (pairs.length > 0) return pairs.map((pair) => `${pair.name}=${pair.value}`).join('; ');
@@ -470,7 +472,9 @@ export class GeminiWebAdapter implements ProviderAdapter {
   async healthCheck(context: ProviderRequestContext = {}): Promise<ProviderHealth> {
     try {
       await this.validateCredential(context.credential);
-      return { status: 'healthy', verified: 'credential', checkedAt: new Date().toISOString() };
+      // Syntax and expiry are all this check can establish without a browser. Rendering it as
+      // `healthy` made "parses" look like "works"; only the gateway's page check can prove a session.
+      return { status: 'degraded', verified: 'credential', checkedAt: new Date().toISOString(), message: 'The cookie parses. Open the provider page to prove the session still works.' };
     } catch (error) {
       return {
         status: 'unavailable',

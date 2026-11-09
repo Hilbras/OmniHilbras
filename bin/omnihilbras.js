@@ -306,8 +306,7 @@ function createSpinner(text) {
 }
 
 const KEEP_LINES = 40;
-function captureTail(stream, label) {
-  const lines = [];
+function captureTail(stream, label, lines = []) {
   stream?.on('data', (chunk) => {
     for (const line of chunk.toString().split('\n')) {
       if (!line.trim()) continue;
@@ -315,7 +314,7 @@ function captureTail(stream, label) {
       if (lines.length > KEEP_LINES) lines.shift();
     }
   });
-  return () => lines;
+  return lines;
 }
 
 /* ------------------------------------------------------------------ *
@@ -362,9 +361,10 @@ async function main() {
 
   const spinner = createSpinner('starting').start();
   const tails = { gateway: [], dashboard: [] };
-  const spawnOne = (label, args) => {
+  const spawnOne = (label, args, env) => {
     const child = spawn(pm, args, {
       cwd: ROOT,
+      env: { ...process.env, ...env },
       // Detached so Ctrl-C here does not race the package manager's own signal handling; we kill the
       // whole group explicitly in `shutdown`.
       detached: true,
@@ -372,13 +372,18 @@ async function main() {
     });
     if (!options.log) {
       tails[label] = captureTail(child.stdout, label);
-      captureTail(child.stderr, label);
+      // Stderr, into the same buffer. It used to be dropped, so a server that failed by printing to
+      // stderr showed an empty tail — the one thing the tail exists for.
+      captureTail(child.stderr, label, tails[label]);
     }
     return child;
   };
 
-  const gateway = spawnOne('gateway', ['dev:gateway']);
-  const dashboard = spawnOne('dashboard', ['dev']);
+  const gateway = spawnOne('gateway', ['dev:gateway'], { OMNIHILBRAS_PORT: String(options.gatewayPort) });
+  // Both the port and the gateway's port reach the dashboard: Vite binds `--port`, and its proxy reads
+  // `OMNIHILBRAS_PORT` to find the gateway. Neither was forwarded, so a custom port was awaited and
+  // announced while Vite served 5173.
+  const dashboard = spawnOne('dashboard', ['dev', '--', '--port', String(options.dashboardPort)], { OMNIHILBRAS_PORT: String(options.gatewayPort) });
 
   const children = { gateway, dashboard };
   let shuttingDown = false;
@@ -447,8 +452,10 @@ async function main() {
   console.log(`  ${paint(DIM, 'Ctrl-C stops both.')}`);
 
   if (options.open) {
-    const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-    spawn(opener, [url], { stdio: 'ignore', detached: true }).on('error', () => {
+    // `start` is a cmd.exe builtin, not an executable: `spawn('start', ...)` is ENOENT on Windows.
+    const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? (process.env.COMSPEC ?? 'cmd') : 'xdg-open';
+    const openerArgs = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
+    spawn(opener, openerArgs, { stdio: 'ignore', detached: true }).on('error', () => {
       console.log(`${paint(DIM, '  (could not open a browser — open the dashboard yourself)')}`);
     }).unref();
   }

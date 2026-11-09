@@ -56,10 +56,18 @@ and does not un-copy it.
   The dev proxy reads the file on each request, so if the file is changed while the gateway runs, the proxy
   forwards the new value and the gateway refuses it with 401. A restart re-issues and rewrites the file, which
   brings them back into agreement. Management routes (`/v1/connections`, `/v1/keys`, `/v1/oauth`, `/v1/settings`,
-  `/v1/web-cookie`, `/v1/routing`, `/v1/usage`) still require the admin key when enforcement is on.
+  `/v1/web-cookie`, `/v1/routing`, `/v1/usage`, `/v1/providers`, `/v1/logs`, `/v1/health`) still require the admin
+  key when enforcement is on.
 - **The token protects the dev dashboard only.** A production build has no proxy and calls the gateway directly,
   so it has no per-launch token; treat a production build served from another machine as unsupported until it is
   given its own delivery path.
+- **The dev proxy is a loopback development boundary, not a multi-user service.** `sec-fetch-site` is browser-set
+  and blocks cross-origin page script, which is the CSRF case. A local process can send the same header to the
+  Vite port and receive the token. The token file is 0600 and the dev server binds loopback; do not expose the
+  dev port beyond loopback, and use the gateway's API keys for any shared machine.
+- **The DuckDuckGo challenge runs upstream JavaScript in `node:vm`.** Code generation is disabled and no
+  `process`/`require` is exposed, but `vm` is not a security boundary against a malicious challenge blob. It is
+  treated as a supply-chain risk in that provider path; the proper fix is an out-of-process solver.
 - **The two OAuth callbacks are exempt from that gate, and here is what that means.** `GET
   /v1/oauth/cline/callback/:sessionId` and `GET /v1/oauth/claude-code/callback/:sessionId` answer the
   provider's redirect, which is a top-level navigation the browser is *sent* to — it carries no `Origin` and
@@ -73,9 +81,9 @@ and does not un-copy it.
 - **Provider tokens are stored, encrypted at rest** with a key derived from a local master key. They are not
   encrypted in a vault that can revoke them: `CredentialLifecycle` decides whether a stored credential is
   still usable, but "revoked at the provider" is discovered by spending one request.
-- **Pinned provider response fixtures: 4 of 12 adapters.** Provider APIs change independently of this
-  repository, so an adapter's wire format is only pinned where a real capture exists. The count is printed by
-  `Kernel/SDK/tests/fixture-coverage.test.js` and fails if it drifts.
+- **Pinned provider response fixtures: 6 captures, across 24 provider packages considered.** Provider APIs
+  change independently of this repository, so an adapter's wire format is only pinned where a real capture
+  exists. The count is printed by `Kernel/SDK/tests/fixture-coverage.test.js` and fails if it drifts.
 
 ## Supported versions
 

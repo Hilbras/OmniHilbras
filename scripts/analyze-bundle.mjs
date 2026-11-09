@@ -121,12 +121,19 @@ const MOTION_BUDGET_BYTES = 8 * 1024;
 
 if (process.argv.includes('--check')) {
   const failures = [];
+  let checked = 0;
   for (const [page, cost] of pageCost) {
     if (page !== 'dashboard.html') continue;
+    checked += 1;
+    // Zero measured bytes means the analyzer found nothing to measure, not that the page is free. A
+    // build that renamed the entry, or a Vite output shape that omits `renderedLength`, would
+    // otherwise pass this gate while checking nothing.
+    if (cost.total === 0) failures.push('dashboard.html measured as zero rendered bytes — the analyzer found no modules to measure, so this run proves nothing');
     if (cost.motion > MOTION_BUDGET_BYTES) {
       failures.push(`dashboard.html statically loads ${kb(cost.motion)} of motion (budget ${kb(MOTION_BUDGET_BYTES)}) — its only use is the theme-toggle flip; make that import dynamic`);
     }
   }
+  if (checked === 0) failures.push('no dashboard.html entry was found in the build output — the budget was not evaluated');
   if (failures.length) {
     console.error('\nBUNDLE BUDGET FAILED:');
     for (const failure of failures) console.error(`  ${failure}`);
@@ -145,9 +152,9 @@ for (const item of out.output) {
 }
 
 /**
- * The build above runs in memory (`write: false`) so this script never touches a working tree it
- * was not asked to. That is why there is no "what `dist/*.html` references" line here: it would
- * have to read a `dist/` this run did not write, and a stale answer to "what does the page load"
- * is worse than no answer. The per-page section above is computed from the same output you just
- * built, which is the honest version of the same question.
+ * The build above runs with `write: false`, so the bundle itself is produced in memory. **That is not
+ * "never touches the tree":** the `logoPolarity` plugin runs on `buildStart` and rewrites
+ * `src/lib/logoPolarity.generated.ts` from `public/providers/`. Treat an analyze run as one that may
+ * leave that generated file regenerated. The per-page section is computed from the same output this
+ * run built; there is no "what `dist/*.html` references" line because this run did not write `dist/`.
  */

@@ -282,7 +282,7 @@ function regionFromProviderId(providerId: string): CodeBuddyRegion {
 class CodeBuddyAdapter implements ProviderAdapter {
   readonly id: string;
   readonly name: string;
-  readonly capabilities: ProviderCapabilities = { chat: true, streaming: true, models: false };
+  readonly capabilities: ProviderCapabilities = { chat: true, streaming: true, models: true };
 
   private readonly region: CodeBuddyRegion;
   private readonly site: CodeBuddySite;

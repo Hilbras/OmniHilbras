@@ -200,7 +200,7 @@ function main() {
   }
 
   const recordedVersions = knownGaps.reduce((sum, entry) => sum + entry.versions.length, 0);
-  console.log(`  release trail is complete: every tag is on npm and has a release`);
+  console.log(`  release trail has no unrecorded gaps: every tag is on npm and has a release, except the recorded ones`);
   console.log(`  (${knownGaps.length} recorded gap(s) covering ${recordedVersions} version(s), none of them new)\n`);
 }
 

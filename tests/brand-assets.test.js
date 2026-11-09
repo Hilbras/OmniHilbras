@@ -419,10 +419,18 @@ test('the generator is deterministic: same input, byte-identical output', () => 
   if (process.env.BRAND_STRICT !== '1') return;
 
   const before = readdirSync(BRAND).sort().map((name) => [name, readFileSync(join(BRAND, name)).toString('base64')]);
-  const run = spawnSync(process.execPath, ['scripts/generate-brand.mjs'], { cwd: ROOT, encoding: 'utf8' });
-  assert.equal(run.status, 0, `the generator failed: ${run.stderr}`);
-  const after = readdirSync(BRAND).sort().map((name) => [name, readFileSync(join(BRAND, name)).toString('base64')]);
-  assert.deepEqual(after, before, 'regenerating changed the files; the generator is not deterministic');
+  const first = spawnSync(process.execPath, ['scripts/generate-brand.mjs'], { cwd: ROOT, encoding: 'utf8' });
+  assert.equal(first.status, 0, `the generator failed: ${first.stderr}`);
+  const afterFirst = readdirSync(BRAND).sort().map((name) => [name, readFileSync(join(BRAND, name)).toString('base64')]);
+  if (JSON.stringify(afterFirst) === JSON.stringify(before)) return;
+  // The first run mutated the tree, so the test cannot also claim nondeterminism until a second run
+  // proves the bytes keep moving. A theme change leaves the generator deterministic and the committed
+  // files stale — two different fixes, and the old message sent the reader to the wrong one.
+  const second = spawnSync(process.execPath, ['scripts/generate-brand.mjs'], { cwd: ROOT, encoding: 'utf8' });
+  assert.equal(second.status, 0, `the generator failed on its second run: ${second.stderr}`);
+  const afterSecond = readdirSync(BRAND).sort().map((name) => [name, readFileSync(join(BRAND, name)).toString('base64')]);
+  assert.deepEqual(afterSecond, afterFirst, 'regenerating changed the files twice; the generator is not deterministic');
+  assert.fail('the committed brand files were stale; they have been regenerated — review and commit them (pnpm brand)');
 });
 
 test('something actually sets BRAND_STRICT, so the determinism check cannot quietly stop running', () => {

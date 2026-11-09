@@ -241,7 +241,16 @@ export async function completeClaudeCodeSignIn(input: {
     return store.publicStatus(store.get(sessionId) ?? claimed);
   }
 
-  const connection = await saveConnection({ providerId: claudeCodeProviderId, credential, label: 'Claude Code subscription' });
+  let connection;
+  try {
+    connection = await saveConnection({ providerId: claudeCodeProviderId, credential, label: 'Claude Code subscription' });
+  } catch (error) {
+    // A store failure after the exchange used to escape and turn the callback route into a JSON 500,
+    // leaving the dashboard polling a session that would never resolve. The code is already spent, so
+    // the answer is to start again rather than to release it.
+    store.resolve(sessionId, { status: 'failed', error: error instanceof Error ? error.message : 'The Claude Code connection could not be saved.' });
+    return store.publicStatus(store.get(sessionId) ?? claimed);
+  }
   store.resolve(sessionId, { status: 'connected', connection });
   return store.publicStatus(store.get(sessionId) ?? claimed);
 }
