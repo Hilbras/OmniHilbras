@@ -41,13 +41,12 @@ import type { SignInSessionBase } from './sign-in-sessions.js';
 export function describeSignInFailure(error: unknown, fallback: string): string {
   if (isProviderError(error)) {
     const said = [error.publicMessage ?? error.message, providerSaid(error)].filter(Boolean).join(' ');
-    // The `cause` is where a wrapped failure keeps the only real sentence. `storeCall` turns any store
-    // failure into "The local connection could not be saved." and puts the actual reason in `cause` —
-    // so the user, and whoever reads the report, got nothing to act on. Measured on a Cline sign-in:
-    // five attempts, five identical lines, no clue which of the twelve steps failed.
+    // The `cause` stays server-side. `storeCall` puts the real reason there, and it can be a
+    // filesystem path — this string is returned by `/v1/oauth/.../session/:id` and rendered in the
+    // callback page, so appending it disclosed the vault's location to every session reader.
     const cause = (error as { cause?: unknown }).cause;
-    const tail = cause instanceof Error && cause.message && cause.message !== error.message ? ` (${cause.message})` : '';
-    return said + tail;
+    if (cause instanceof Error) console.error(`[sign-in] ${error.code}: ${cause.message}`);
+    return said;
   }
   if (error instanceof Error && error.message) return error.message;
   return fallback;

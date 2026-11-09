@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { canonicalLoopbackHost, isLoopbackHostname } from './core/index.js';
+import { canonicalLoopbackHost, isLoopbackHostname, loopbackBaseUrl } from './core/index.js';
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './core/config.js';
 import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, resolveCorsOrigins, sendError, sendJson, setCors } from './core/http.js';
 import { dashboardTokenHeader, issueDashboardToken, tokenMatches } from './core/dashboard-token.js';
@@ -117,7 +117,7 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     };
     const responseOrigin = allowedOrigin ? requestOrigin : undefined;
     setCors(response, responseOrigin);
-    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage')) response.setHeader('cache-control', 'no-store');
+    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage') || request.url?.startsWith('/v1/oauth')) response.setHeader('cache-control', 'no-store');
     if ((request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') && !isJsonRequest(request)) {
       sendJson(response, 415, { error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'JSON requests must use application/json.' } }, responseOrigin);
       return;
@@ -140,7 +140,7 @@ export async function startGatewayServer(options: {
   const config = options.config ?? loadGatewayConfig(options.env);
   assertLoopbackHost(config.host);
   const bindHost = canonicalLoopbackHost(config.host);
-  const publicBaseUrl = `http://${config.host}:${config.port}`;
+  const publicBaseUrl = loopbackBaseUrl(config.host, config.port);
   // A partial override is a configuration error worth refusing at startup rather than at the click:
   // the client and its registered redirect URI only make sense as a pair.
   if (config.codex.clientId || config.codex.redirectUri) {
@@ -256,7 +256,7 @@ export async function startGatewayServer(options: {
  * were already reachable, because `authorize()` returns before it can refuse anything. What changed is that
  * a gateway *with* keys enforced now answers the navigation the same way a gateway without them does.
  */
-const MANAGEMENT_PREFIXES = ['/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs'] as const;
+const MANAGEMENT_PREFIXES = ['/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/health'] as const;
 
 function isManagementPath(pathname: string) {
   return MANAGEMENT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));

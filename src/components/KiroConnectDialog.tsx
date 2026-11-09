@@ -12,6 +12,7 @@ import {
   type KiroAuthMethod,
 } from '../lib/kiroAuth';
 import type { GatewayConnection } from '../lib/gatewayClient';
+import { safeProviderUrl } from '../lib/safeUrl';
 
 /**
  * Connecting to Kiro.
@@ -114,9 +115,10 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
    * are different situations and the user needs to be told which one they are in.
    */
   const navigateTo = useCallback((authUrl: string) => {
+    const safeUrl = safeProviderUrl(authUrl);
     const opened = signInWindowRef.current;
-    if (opened && !opened.closed) {
-      opened.location.href = authUrl;
+    if (safeUrl && opened && !opened.closed) {
+      opened.location.href = safeUrl;
       // One-shot: a retry should not silently re-navigate a tab the user has since used.
       signInWindowRef.current = null;
       return true;
@@ -448,7 +450,7 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
                         The code is filled in for you. If you are asked to sign in first, sign in there and it will bring
                         you back to this approval.
                       </p>
-                      <a href={deviceCode.verificationUrl} target="_blank" rel="noreferrer" className="btn-ghost mt-2 inline-flex !h-7 !px-2.5 !text-[11px]">
+                      <a href={safeProviderUrl(deviceCode.verificationUrl)} target="_blank" rel="noreferrer" className="btn-ghost mt-2 inline-flex !h-7 !px-2.5 !text-[11px]">
                         Open the code page
                         <ExternalLink className="h-3 w-3" aria-hidden="true" />
                       </a>

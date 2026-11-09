@@ -14,17 +14,25 @@ import { isPrivateHostname } from './index.js';;
  * **only** when the system answer is private, so a working machine does no extra traffic and a
  * deliberately-blocked name still has to survive the same public-address check.
  */
-const PUBLIC_DNS_SERVERS = (process.env.OMNIHILBRAS_PUBLIC_DNS ?? '8.8.8.8,8.8.4.4')
-  .split(',')
-  .map((server) => server.trim())
-  .filter(Boolean);
-
-/** Set `OMNIHILBRAS_PUBLIC_DNS=` (empty) to disable the fallback entirely. */
-const publicDnsEnabled = PUBLIC_DNS_SERVERS.length > 0;
+/**
+ * The public resolvers, read at call time rather than module load.
+ *
+ * An embedder that passes a configuration object (or a test that sets the variable after import)
+ * otherwise gets the process's boot-time value. Only IPv4 literals are accepted; a hostname here
+ * would be resolved by the system resolver before the very check this exists to perform.
+ */
+function publicDnsServers(): string[] {
+  return (process.env.OMNIHILBRAS_PUBLIC_DNS ?? '8.8.8.8,8.8.4.4')
+    .split(',')
+    .map((server) => server.trim())
+    .filter((server) => /^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?$/.test(server));
+}
 
 async function resolvePublicly(hostname: string, timeoutMs = 4000): Promise<string[]> {
+  const servers = publicDnsServers();
+  if (servers.length === 0) return [];
   const resolver = new Resolver({ timeout: timeoutMs, tries: 1 });
-  resolver.setServers(PUBLIC_DNS_SERVERS);
+  resolver.setServers(servers);
   try {
     return await resolver.resolve4(hostname);
   } catch {
@@ -71,7 +79,7 @@ export async function resolveForDestinationCheck(hostname: string, signal?: Abor
   }
   // Rescue when the local answer is missing or private — both mean the local resolver is not the
   // authority on this name.
-  if (!publicDnsEnabled || (addresses.length > 0 && !addresses.some((address) => isPrivateHostname(address)))) return addresses;
+  if (!publicDnsServers().length || (addresses.length > 0 && !addresses.some((address) => isPrivateHostname(address)))) return addresses;
 
   const published = await resolvePublicly(hostname);
   if (published.length === 0) {

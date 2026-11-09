@@ -31,9 +31,16 @@ const close = (code: number) => {
   // The server stops accepting first, then the service drains. That order is the contract: the
   // key store's drain loops until nothing is in flight, which terminates on an idle queue and not
   // on a busy one, so it must not run while requests are still arriving.
-  instance!.server.close(() => {
+  const server = instance!.server;
+  server.close(() => {
     void instance!.service.close().then(() => process.exit(code));
   });
+  // A log stream or an open SSE answer never becomes idle, so `server.close()` waits forever and the
+  // drain never starts. Idle sockets are dropped at once; anything still open gets a bounded grace
+  // period, after which it is closed and the callback can run.
+  server.closeIdleConnections?.();
+  const deadline = setTimeout(() => server.closeAllConnections?.(), 5_000);
+  deadline.unref();
 };
 
 const shutdown = (signal: NodeJS.Signals) => {

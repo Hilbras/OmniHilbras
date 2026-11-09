@@ -91,7 +91,20 @@ export function isPrivateHostname(hostname: string) {
     const parts = normalized.split('.').map(Number);
     const first = parts[0] ?? -1;
     const second = parts[1] ?? -1;
-    return first === 0 || first === 10 || first === 127 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168) || (first === 169 && second === 254) || (first === 100 && second >= 64 && second <= 127);
+    // Reserved and special-purpose ranges a provider endpoint must never reach: this machine,
+    // private networks, link-local (cloud metadata), CGNAT, benchmarking, multicast, and the
+    // reserved 240/4 block. 192.0.0.0/24 matters specifically because 192.0.0.192 is a metadata
+    // service on some clouds.
+    return first === 0
+      || first === 10
+      || first === 127
+      || (first === 172 && second >= 16 && second <= 31)
+      || (first === 192 && second === 168)
+      || (first === 192 && second === 0 && (parts[2] ?? 0) === 0)
+      || (first === 169 && second === 254)
+      || (first === 100 && second >= 64 && second <= 127)
+      || (first === 198 && (second === 18 || second === 19))
+      || first >= 224;
   }
   if (!normalized.includes(':')) return false;
   return normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe8') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb');
@@ -162,8 +175,19 @@ function isUnspecifiedIpv6(value: string) {
   return [...headGroups, ...tailGroups].every((group) => Number.parseInt(group, 16) === 0);
 }
 
-export function isLoopbackHostname(hostname: string) {
-  const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
+/**
+ * The URL a loopback gateway advertises, with an IPv6 literal bracketed.
+ *
+ * `assertLoopbackHost` accepts `::1`, so `http://${host}:${port}` produced `http://::1:8787`, which
+ * `new URL()` refuses. Every OAuth redirect is built from this string, so binding on IPv6 loopback
+ * broke sign-in rather than merely displaying an odd URL.
+ */
+export function loopbackBaseUrl(host: string, port: number) {
+  const normalized = host.trim().replace(/^\[|\]$/g, '');
+  return `http://${normalized.includes(':') ? `[${normalized}]` : normalized}:${port}`;
+}
+
+export function isLoopbackHostname(hostname: string) {  const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
   if (normalized === 'localhost') return true;
   if (isStrictIpv4(normalized)) return normalized.split('.')[0] === '127';
   return normalized === '::1' || normalized === '0:0:0:0:0:0:0:1';

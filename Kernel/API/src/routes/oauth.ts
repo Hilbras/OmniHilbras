@@ -24,6 +24,7 @@ import {
   readJsonBody,
   readOptionalString,
   readRequiredString,
+  decodeSessionId,
   sendHtml,
   sendJson,
 } from '../core/http.js';
@@ -86,7 +87,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/cline/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/cline/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/cline/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = service.clineSignInStatus(sessionId);
       if (!status) {
@@ -122,7 +123,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/opencode-console/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/opencode-console/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/opencode-console/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = await service.opencodeConsoleSignInStatus(sessionId, signal);
       if (!status) {
@@ -141,7 +142,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/opencode/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/opencode/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/opencode/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = await service.opencodeSignInStatus(sessionId, signal);
       if (!status) {
@@ -160,7 +161,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/opencode-go/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/opencode-go/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/opencode-go/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = await service.opencodeGoSignInStatus(sessionId, signal);
       if (!status) {
@@ -172,7 +173,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'POST' && /^\/v1\/oauth\/opencode-console\/session\/[^/]+\/workspace$/.test(url.pathname)) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/opencode-console/session/'.length, -'/workspace'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/opencode-console/session/'.length, -'/workspace'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const body = await readJsonBody(request, maxKeyBodyBytes);
       const workspaceId = readRequiredString(body, 'workspaceId');
@@ -202,7 +203,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/kimi-code/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/kimi-code/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/kimi-code/session/'.length)).trim();
       // Shape-checked before it reaches the store, which is what stops a crafted path from being used
       // to probe for sessions. The store checks it too; this is the outer of the two.
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
@@ -231,7 +232,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/nous/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/nous/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/nous/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = await service.nousSignInStatus(sessionId, signal);
       if (!status) {
@@ -254,7 +255,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/kilocode/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/kilocode/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/kilocode/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = await service.kilocodeSignInStatus(sessionId, signal);
       if (!status) {
@@ -278,7 +279,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/codebuddy-cn/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/codebuddy-cn/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/codebuddy-cn/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = await service.codebuddySignInStatus('codebuddy-cn', sessionId, signal);
       if (!status) {
@@ -297,7 +298,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/codebuddy-intl/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/codebuddy-intl/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/codebuddy-intl/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = await service.codebuddySignInStatus('codebuddy-intl', sessionId, signal);
       if (!status) {
@@ -320,7 +321,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/minimax-code/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/minimax-code/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/minimax-code/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = await service.minimaxCodeSignInStatus('minimax-code', sessionId, signal);
       if (!status) {
@@ -339,7 +340,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/minimax-code-global/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/minimax-code-global/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/minimax-code-global/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = await service.minimaxCodeSignInStatus('minimax-code-global', sessionId, signal);
       if (!status) {
@@ -362,7 +363,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/qoder/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/qoder/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/qoder/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = await service.qoderSignInStatus(sessionId, signal);
       if (!status) {
@@ -438,7 +439,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/codex/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/codex/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/codex/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = service.codexSignInStatus(sessionId);
       if (!status) {
@@ -450,7 +451,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/claude-code/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/claude-code/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/claude-code/session/'.length)).trim();
       // Shape-checked before it reaches the store, which is what stops a crafted path from being used
       // to probe for sessions. The store checks it too; this is the outer of the two.
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
@@ -612,7 +613,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/kiro/session/')) {
-      const sessionId = decodeURIComponent(url.pathname.slice('/v1/oauth/kiro/session/'.length)).trim();
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/kiro/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = await service.kiroSignInStatus(sessionId, signal);
       if (!status) {

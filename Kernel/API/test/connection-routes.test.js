@@ -48,6 +48,7 @@ test('the same API key saved twice is reported as the existing account, not a se
   assert.equal(first.status, 200);
   const firstBody = await first.json();
   assert.equal(firstBody.duplicate, undefined, 'a first save is not a duplicate of anything');
+  assert.equal('credentialFingerprint' in firstBody.connection, false, 'the credential fingerprint is not a management response field');
 
   const second = await fetch(`${base}/v1/connections/customthing`, {
     method: 'PUT',

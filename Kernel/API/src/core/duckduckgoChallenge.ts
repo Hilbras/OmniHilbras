@@ -127,7 +127,10 @@ export async function solveDuckDuckGoChallenge(
   const timeoutMs = options.timeoutMs ?? 5_000;
   const stubs = CHALLENGE_STUBS.replace('__DDG_REAL_UA__', JSON.stringify(userAgent)).replace('__DDG_HTML_LOOKUP__', '{}');
 
-  const context = createContext({});
+  // `vm` is not a security boundary. These options raise the cost of the obvious escapes (no dynamic
+  // code generation, no `process`/`require` in the context) but a malicious challenge blob remains a
+  // supply-chain risk in this provider path. See SECURITY.md.
+  const context = createContext({}, { codeGeneration: { strings: false, wasm: false } });
   // The shims first: they define the environment the challenge probes for.
   runInContext(stubs, context, { timeout: timeoutMs });
 

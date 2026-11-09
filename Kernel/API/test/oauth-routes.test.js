@@ -246,6 +246,10 @@ test('an unknown or malformed session id is not a pending sign-in', async (t) =>
   assert.equal(unknown.status, 404);
   const malformed = await fetch(`${baseUrl}/v1/oauth/cline/session/short`);
   assert.equal(malformed.status, 400);
+  // A percent sign that is not a valid escape used to throw `URIError` past the route and become a
+  // 500. It is the id that is wrong, not the gateway.
+  const undecodable = await fetch(`${baseUrl}/v1/oauth/cline/session/%E0%A4%A`);
+  assert.equal(undecodable.status, 400);
 });
 
 test('the authorize route hands back a Cline sign-in URL for a loopback callback', async (t) => {

@@ -1,4 +1,4 @@
-import { ProviderError } from '../core/index.js';
+import { ProviderError, isProviderError } from '../core/index.js';
 import type { RouteContext } from './route-context.js';
 import type { UsageOutcome } from '../core/usage-store.js';
 import { priceUsage, pricingCaveat } from '../core/usage-pricing.js';
@@ -129,6 +129,9 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
     const offset = offsetParam !== null ? Number(offsetParam) : 0;
     const pageSize = limitParam !== null ? Number(limitParam) : recentRequestsDefault;
     const listed = summary.records.slice(offset, offset + pageSize);
+    const untilParam = url.searchParams.get('until');
+    const breakdownSince = explicitSince ? new Date(explicitSince) : window.since;
+    const breakdownUntil = untilParam ? new Date(untilParam) : undefined;
     // Priced at read time from the connection's catalog, never stored and never defaulted. See
     // `usage-pricing.ts`: a model whose provider publishes no price contributes tokens to the totals and
     // nothing to the cost, and the response says how much of the page that covers.
@@ -138,7 +141,7 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
     // above it. The records here are every matched record, not the capped page slice.
     const breakdown = buildUsageBreakdown(
       summary.records.map((record, index) => ({ ...record, pricing: prices[index] })),
-      { period },
+      { period, ...(breakdownSince ? { since: breakdownSince } : {}), ...(breakdownUntil ? { until: breakdownUntil } : {}) },
     );
     sendJson(response, 200, {
       recording: true,
@@ -155,9 +158,10 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
     }, origin);
     return true;
   } catch (error) {
-    // A store that cannot be read is a report that is missing, not a request that failed. The error shape is
-    // the standard one so a client can read it, and the cause is the real one rather than a blanket 500.
-    const code = (error as Partial<ProviderError>)?.code ?? 'INTERNAL_ERROR';
+    // A store that cannot be read is a report that is missing, not a request that failed. Only a
+    // ProviderError's code belongs in the documented vocabulary; a filesystem error's `EACCES` is
+    // not a client-facing code and discloses the vault's layout.
+    const code = isProviderError(error) ? error.code : 'INTERNAL_ERROR';
     sendJson(response, 500, {
       error: {
         code,

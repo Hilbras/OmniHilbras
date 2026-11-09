@@ -22,10 +22,10 @@ function recordingProvider(seen) {
   };
 }
 
-async function start(t, seen) {
+async function start(t, seen, provider = recordingProvider(seen)) {
   const apiKeys = new InMemoryApiKeyStore();
   const key = (await apiKeys.create('responses')).key;
-  const registry = new ProviderRegistry().register(recordingProvider(seen));
+  const registry = new ProviderRegistry().register(provider);
   const store = new InMemoryConnectionStore();
   await store.save({ id: 'fake', providerId: 'fake', name: 'Fake', endpoint: 'https://f.example/v1', priority: 1, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 } },
     { type: 'api-key', value: 'k' });
@@ -65,6 +65,62 @@ test('a Responses request is answered in the Responses shape, and reaches the pr
   assert.equal(body.output[0].content[0].text, 'pong');
   assert.equal(seen[0].messages.find((message) => message.role === 'system')?.content, 'Be brief.', 'instructions become the system message');
   assert.equal(seen[0].messages.at(-1).content, 'ping', 'input becomes the user message');
+});
+
+test('the Responses wire shapes are translated: parts, developer role, flat tools, reasoning', async (t) => {
+  const seen = [];
+  const { base, key } = await start(t, seen);
+  const response = await fetch(`${base}/v1/responses`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model: 'fake-1',
+      input: [
+        { role: 'developer', content: [{ type: 'input_text', text: 'Be terse.' }] },
+        { role: 'user', content: [{ type: 'input_text', text: 'ping' }] },
+        { type: 'function_call_output', call_id: 'call_1', output: 'result' },
+      ],
+      tools: [{ type: 'function', name: 'lookup', description: 'Find a thing', parameters: { type: 'object', properties: {} } }],
+      tool_choice: 'auto',
+      reasoning: { effort: 'low' },
+      max_output_tokens: 64,
+    }),
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.ok(body.gateway?.requestId, 'a successful response carries the gateway request id');
+  assert.deepEqual(seen[0].messages.map((message) => message.role), ['system', 'user', 'tool']);
+  assert.deepEqual(seen[0].messages[2].toolCallId, 'call_1');
+  assert.equal(seen[0].tools[0].name, 'lookup', 'a flat Responses tool became a chat tool');
+  assert.equal(seen[0].toolChoice, 'auto');
+  assert.equal(seen[0].reasoningEffort, 'low');
+  assert.equal(seen[0].maxOutputTokens, 64);
+});
+
+test('a tool-call answer is emitted as function_call output instead of an empty message', async (t) => {
+  const seen = [];
+  const provider = {
+    ...recordingProvider(seen),
+    async chat(request) {
+      seen.push(request);
+      return {
+        id: 'r1', providerId: 'fake', model: request.model, createdAt: new Date().toISOString(),
+        message: { role: 'assistant', content: '', toolCalls: [{ id: 'call_9', type: 'function', function: { name: 'lookup', arguments: '{"q":"x"}' } }] },
+        finishReason: 'tool_calls',
+      };
+    },
+  };
+  const { base, key } = await start(t, seen, provider);
+  const body = await (await fetch(`${base}/v1/responses`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model: 'fake-1', input: 'ping', tools: [{ type: 'function', name: 'lookup', parameters: { type: 'object' } }] }),
+  })).json();
+  assert.equal(body.output_text, '');
+  assert.equal(body.output.length, 1, 'no empty assistant message beside the call');
+  assert.deepEqual({ type: body.output[0].type, call_id: body.output[0].call_id, name: body.output[0].name, arguments: body.output[0].arguments }, {
+    type: 'function_call', call_id: 'call_9', name: 'lookup', arguments: '{"q":"x"}',
+  });
 });
 
 function streamingProvider() {

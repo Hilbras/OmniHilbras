@@ -1,4 +1,4 @@
-import { FetchHttpTransport, ProviderRegistry, canonicalLoopbackHost, isLoopbackHostname, type ProviderCredential, type SecretStore } from './index.js';
+import { FetchHttpTransport, ProviderRegistry, canonicalLoopbackHost, isLoopbackHostname, loopbackBaseUrl, type ProviderCredential, type SecretStore } from './index.js';
 import { AnthropicAdapter } from '@omnihilbras/sdk-anthropic';
 import { OpenAICompatibleAdapter } from '@omnihilbras/sdk-openai';
 import { GeminiAdapter } from '@omnihilbras/sdk-gemini';
@@ -163,7 +163,7 @@ export function deploymentFrom(config: GatewayConfig): DeploymentConfig {
   return localDeployment({
     // The config knows the port; the deployment has to state the URL an OAuth callback is built
     // from, and deriving it here is what keeps those two from being set separately.
-    publicBaseUrl: `http://${config.host}:${config.port}`,
+    publicBaseUrl: loopbackBaseUrl(config.host, config.port),
     dataDir: config.dataDir,
     corsOrigins: config.corsOrigins,
   });

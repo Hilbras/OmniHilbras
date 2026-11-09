@@ -1,10 +1,10 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PNG } from 'pngjs';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { dashboardTokenPath } from './Kernel/API/src/core/dashboard-token';
 
 /** Routes that must reach the dashboard SPA instead of a missing file. */
 const dashboardPrefix = '/dashboard';
@@ -213,9 +213,11 @@ function gatewayProxy(): Plugin {
           if (typeof value === 'string' && name !== 'host') headers[name] = value;
         }
         headers.host = `127.0.0.1:${gatewayPort}`;
-        // Only the dashboard's own page gets the token. A request that the browser marks cross-site, or that a
-        // local client sends with no browser context, is forwarded as it arrived: the gateway refuses it, which is
-        // the point. Attaching the token to every request made the proxy a way around the key gate.
+        // Only the dashboard's own page gets the token. `sec-fetch-site` is browser-set and cannot be
+        // forged by cross-origin page script, which is the CSRF case this blocks. It is **not** a
+        // boundary against another local process: such a process can send the same header to the dev
+        // server's loopback port. The token file is 0600 and the dev server is a local development
+        // tool; do not expose its port beyond loopback and do not treat it as a multi-user service.
         const fromDashboardPage = request.headers['sec-fetch-site'] === 'same-origin';
         if (fromDashboardPage && token) {
           headers.origin = `http://${request.headers.host ?? 'localhost:5173'}`;
@@ -249,10 +251,11 @@ function gatewayProxy(): Plugin {
 const gatewayPort = Number(process.env.OMNIHILBRAS_PORT?.trim() || 8787);
 
 function readDashboardTokenFile(): string | undefined {
-  const configHome = process.env.XDG_CONFIG_HOME?.trim();
-  const path = join(configHome || join(homedir(), '.config'), 'omnihilbras', 'dashboard-token');
+  // The gateway owns where this file lives. Re-deriving the `XDG_CONFIG_HOME || ~/.config` path here
+  // was a second copy that could drift: changing the gateway's location would silently turn every
+  // dashboard management call into a 401 with no build error.
   try {
-    return readFileSync(path, 'utf8').trim() || undefined;
+    return readFileSync(dashboardTokenPath(process.env), 'utf8').trim() || undefined;
   } catch {
     return undefined;
   }

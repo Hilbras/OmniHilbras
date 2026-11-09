@@ -97,7 +97,7 @@ export function isJsonRequest(request: IncomingMessage) {
 
 export function setCors(response: ServerResponse, origin: string | undefined) {
   if (origin) response.setHeader('access-control-allow-origin', origin);
-  response.setHeader('access-control-allow-headers', 'content-type, x-omnihilbras-provider, authorization, x-api-key, x-goog-api-key');
+  response.setHeader('access-control-allow-headers', 'content-type, x-omnihilbras-provider, x-omnihilbras-dashboard-token, x-omnihilbras-token-saver, authorization, x-api-key, x-goog-api-key');
   response.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   response.setHeader('x-content-type-options', 'nosniff');
   response.setHeader('vary', 'Origin');
@@ -192,8 +192,26 @@ export function toErrorEnvelope(error: unknown, includeProviderMessage = false) 
 }
 
 
-export function statusForError(error: unknown) {
-  if (!isProviderError(error)) return 500;
+/**
+ * Percent-decodes a path segment that names a sign-in session.
+ *
+ * `decodeURIComponent('%')` throws `URIError`, which used to reach the generic handler as a 500 even
+ * though the id was never looked up. The shape check is the same one the sign-in stores apply, so a
+ * malformed id is a 400 before any store is consulted.
+ */
+export function decodeSessionId(value: string) {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    throw invalidRequest('session id is invalid.');
+  }
+  const trimmed = decoded.trim();
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(trimmed)) throw invalidRequest('session id is invalid.');
+  return trimmed;
+}
+
+export function statusForError(error: unknown) {  if (!isProviderError(error)) return 500;
   if (error.code === 'INVALID_REQUEST') return 400;
   if (error.code === 'AUTHENTICATION_FAILED') return 401;
   if (error.code === 'NOT_SUPPORTED') return 501;

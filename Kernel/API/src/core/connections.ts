@@ -310,7 +310,12 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
   private withPreview(connection: ConnectionRecord): ConnectionRecord {
     const credential = this.credentials.get(connection.id);
     const email = credential?.type === 'oauth' && typeof credential.email === 'string' && credential.email ? credential.email : undefined;
-    return cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.id), ...(email ? { email } : {}), ...(credential ? { credentialType: credential.type } : {}) });
+    const record = cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.id), ...(email ? { email } : {}), ...(credential ? { credentialType: credential.type } : {}) });
+    // The fingerprint is credential-adjacent and exists for the store's duplicate check, which reads
+    // records returned by `list()`. Keep it readable there and non-enumerable, so spreading a record
+    // or serialising it over HTTP cannot carry it to a management reader.
+    if (connection.credentialFingerprint) Object.defineProperty(record, 'credentialFingerprint', { value: connection.credentialFingerprint, enumerable: false, configurable: true });
+    return record;
   }
 
   async save(input: ConnectionInput, credential: ProviderCredential) {
@@ -544,7 +549,12 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   private withPreview(connection: ConnectionRecord): ConnectionRecord {
     const credential = this.credentials.get(connection.id);
     const email = credential?.type === 'oauth' && typeof credential.email === 'string' && credential.email ? credential.email : undefined;
-    return cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.id), ...(email ? { email } : {}), ...(credential ? { credentialType: credential.type } : {}) });
+    const record = cloneRecord({ ...connection, hasCredential: this.credentials.has(connection.id), ...(email ? { email } : {}), ...(credential ? { credentialType: credential.type } : {}) });
+    // The fingerprint is credential-adjacent and exists for the store's duplicate check, which reads
+    // records returned by `list()`. Keep it readable there and non-enumerable, so spreading a record
+    // or serialising it over HTTP cannot carry it to a management reader.
+    if (connection.credentialFingerprint) Object.defineProperty(record, 'credentialFingerprint', { value: connection.credentialFingerprint, enumerable: false, configurable: true });
+    return record;
   }
 
   async save(input: ConnectionInput, credential: ProviderCredential) {

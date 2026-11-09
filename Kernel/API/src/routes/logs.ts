@@ -27,11 +27,25 @@ export async function handleLogsRoute(context: RouteContext): Promise<boolean> {
   response.flushHeaders();
   response.write(': connected\n\n');
 
+  // A push stream has no pull to slow it down. `write` returning false means the socket buffer is
+  // full; recording that and dropping events until `drain` keeps a stalled browser from growing this
+  // process's memory without bound. A log line is the one thing it is acceptable to lose.
+  let writable = true;
+  response.on('drain', () => { writable = true; });
   const stop = service.onUsageRecorded((record) => {
-    if (response.writableEnded) return;
-    response.write(`data: ${JSON.stringify(record)}\n\n`);
+    if (!writable || response.writableEnded) return;
+    writable = response.write(`data: ${JSON.stringify(record)}\n\n`);
   });
-  const finish = () => stop();
+  // Comment frames keep path proxies from treating an idle stream as dead.
+  const heartbeat = setInterval(() => {
+    if (!writable || response.writableEnded) return;
+    writable = response.write(': keep-alive\n\n');
+  }, 15_000);
+  heartbeat.unref();
+  const finish = () => {
+    clearInterval(heartbeat);
+    stop();
+  };
   signal.addEventListener('abort', finish, { once: true });
   response.on('close', finish);
   return true;

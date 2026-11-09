@@ -57,6 +57,8 @@ function bare(base, method, path, body) {
 
 const MANAGEMENT = [
   ['GET', '/v1/connections'],
+  // A health probe can spend a real provider request, so it is management, not status.
+  ['GET', '/v1/health'],
   ['POST', '/v1/keys', { name: 'probe' }],
   ['PUT', '/v1/settings/require-api-key', { requireApiKey: false }],
 ];

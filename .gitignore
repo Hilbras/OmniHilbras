@@ -12,4 +12,9 @@ dist
 connections.json
 secrets.enc.json
 secrets.key
+# Key hashes, usage metadata, and the per-launch dashboard token. A data directory pointed at the
+# checkout must not make any of them committable.
+api-keys.json
+usage.json
+dashboard-token
 .omnihilbras/

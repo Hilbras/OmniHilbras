@@ -6,7 +6,7 @@
  * the wrong thing.
  */
 
-import { ProviderError, isLoopbackHostname, type ProviderId, isPrivateHostname, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type MessageContent, type Model, type ToolDefinition } from '../core/index.js';
+import { ProviderError, isLoopbackHostname, type ProviderId, isPrivateHostname, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type MessageContent, type Model, type ToolCall, type ToolDefinition } from '../core/index.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
 import { attachRequestId, type RequestScope } from '../core/request-context.js';
@@ -97,6 +97,8 @@ export async function handleEmbeddings(request: IncomingMessage, response: Serve
       attempts: ledger.length,
       latencyMs: Date.now() - startedAt,
       ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+      requestId: scope.id,
+      ledger,
     });
     throw attachRequestId(error, scope);
   }
@@ -110,6 +112,7 @@ export async function handleEmbeddings(request: IncomingMessage, response: Serve
     attempts: responseBody.attempts.length,
     latencyMs: Date.now() - startedAt,
     usage: responseBody.response.usage,
+    requestId: scope.id,
   });
 
   sendJson(response, 200, {
@@ -181,7 +184,7 @@ function finishEmbeddingRequest(body: Record<string, unknown>, model: string, in
 /**
  * `POST /v1/responses`: the Responses API a Codex-style client speaks. It is served by the chat path, so routing,
  * failover, usage and the key gate are the same; only the request is translated in and the reply translated out.
- * Streaming is refused rather than served in a shape the client cannot read.
+ * Streaming is served as Responses events, not as chat chunks.
  */
 export async function handleResponses(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
   const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
@@ -212,6 +215,8 @@ export async function handleResponses(request: IncomingMessage, response: Server
       attempts: ledger.length,
       latencyMs: Date.now() - startedAt,
       ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+      requestId: scope.id,
+      ledger,
     });
     throw attachRequestId(error, scope);
   }
@@ -224,9 +229,19 @@ export async function handleResponses(request: IncomingMessage, response: Server
     attempts: attempts.length,
     latencyMs: Date.now() - startedAt,
     ...(completion.usage ? { usage: completion.usage } : {}),
+    requestId: scope.id,
+    ledger: attempts,
   });
   const text = typeof completion.message.content === 'string' ? completion.message.content : '';
-  sendJson(response, 200, chatToResponsesBody({ id: completion.id, model: completion.model, createdAt: completion.createdAt, content: text, ...(completion.usage ? { usage: completion.usage } : {}) }), origin);
+  const responsesBody = chatToResponsesBody({
+    id: completion.id,
+    model: completion.model,
+    createdAt: completion.createdAt,
+    content: text,
+    ...(completion.message.toolCalls ? { toolCalls: completion.message.toolCalls } : {}),
+    ...(completion.usage ? { usage: completion.usage } : {}),
+  });
+  sendJson(response, 200, { ...responsesBody, gateway: { requestId: scope.id, ...(attempts.length > 1 ? { attempts: attempts.map(toPublicAttempt) } : {}) } }, origin);
 }
 
 /**
@@ -262,6 +277,7 @@ async function streamResponses(input: {
   let createdAt = new Date(streamStartedAt).toISOString();
   let text = '';
   let usage: ChatChunk['usage'];
+  const toolCalls = new Map<number, { id: string; name: string; arguments: string; announced: boolean }>();
   const servingOf = () => outcome.attempts.find((attempt) => attempt.ok);
 
   try {
@@ -273,6 +289,20 @@ async function streamResponses(input: {
         text += chunk.delta.content;
         await writeStreamData(response, `event: response.output_text.delta\ndata: ${JSON.stringify({ type: 'response.output_text.delta', delta: chunk.delta.content })}\n\n`, signal);
       }
+      for (const delta of chunk.delta.toolCalls ?? []) {
+        const call = toolCalls.get(delta.index) ?? { id: delta.id ?? `call_${delta.index}`, name: '', arguments: '', announced: false };
+        if (delta.id) call.id = delta.id;
+        if (delta.function?.name) call.name = delta.function.name;
+        if (!call.announced) {
+          call.announced = true;
+          await writeStreamData(response, `event: response.output_item.added\ndata: ${JSON.stringify({ type: 'response.output_item.added', output_index: delta.index, item: { type: 'function_call', id: `fc_${id}_${delta.index}`, call_id: call.id, name: call.name, arguments: '', status: 'in_progress' } })}\n\n`, signal);
+        }
+        if (delta.function?.arguments) {
+          call.arguments += delta.function.arguments;
+          await writeStreamData(response, `event: response.function_call_arguments.delta\ndata: ${JSON.stringify({ type: 'response.function_call_arguments.delta', output_index: delta.index, delta: delta.function.arguments })}\n\n`, signal);
+        }
+        toolCalls.set(delta.index, call);
+      }
     }
     if (signal.aborted) {
       recordUsage(service, {
@@ -282,12 +312,21 @@ async function streamResponses(input: {
         outcome: 'cancelled',
         attempts: outcome.attempts.length,
         latencyMs: Date.now() - streamStartedAt,
+        requestId: scope.id,
       });
       if (!response.destroyed && !response.writableEnded) response.end();
       return;
     }
-    const completed = chatToResponsesBody({ id, model, createdAt, content: text, ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens } } : {}) });
-    await writeStreamData(response, `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: completed })}\n\n`, signal);
+    const completedCalls: ToolCall[] = [...toolCalls.values()].map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
+    const completed = chatToResponsesBody({
+      id,
+      model,
+      createdAt,
+      content: text,
+      ...(completedCalls.length ? { toolCalls: completedCalls } : {}),
+      ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens } } : {}),
+    });
+    await writeStreamData(response, `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: { ...completed, gateway: { requestId: scope.id } } })}\n\n`, signal);
     recordUsage(service, {
       model,
       providerId: servingOf()?.providerId,
@@ -296,6 +335,7 @@ async function streamResponses(input: {
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
       ...(usage ? { usage } : {}),
+      requestId: scope.id,
     });
     response.end();
   } catch (error) {
@@ -308,6 +348,8 @@ async function streamResponses(input: {
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
       ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+      requestId: scope.id,
+      ledger: outcome.attempts,
     });
     if (!response.destroyed && !signal.aborted) {
       await writeStreamData(response, `event: error\ndata: ${JSON.stringify(toErrorEnvelope(error))}\n\n`, signal).catch(() => undefined);
@@ -510,6 +552,7 @@ async function handleChatRequest(input: {
         outcome: 'cancelled',
         attempts: outcome.attempts.length,
         latencyMs: Date.now() - streamStartedAt,
+        requestId: scope.id,
       });
       if (!response.destroyed && !response.writableEnded) response.end();
       return;
@@ -522,6 +565,7 @@ async function handleChatRequest(input: {
       outcome: 'success',
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
+      requestId: scope.id,
     });
     response.end();
   } catch (error) {
@@ -536,6 +580,7 @@ async function handleChatRequest(input: {
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
       ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+      requestId: scope.id,
     });
     if (!response.destroyed && !signal.aborted) {
       await writeStreamData(response, `event: error\ndata: ${JSON.stringify(toErrorEnvelope(error))}\n\n`, signal).catch(() => undefined);
@@ -545,15 +590,20 @@ async function handleChatRequest(input: {
 }
 
 
-export function toPublicAttempt(attempt: { providerId: string; attempt: number; ok: boolean; latencyMs: number; errorCode?: string }) {
-  return { provider: attempt.providerId, attempt: attempt.attempt, ok: attempt.ok, latencyMs: attempt.latencyMs, ...(attempt.errorCode ? { error: attempt.errorCode } : {}) };
+export function toPublicAttempt(attempt: { providerId: string; connectionId?: string; attempt: number; ok: boolean; latencyMs: number; errorCode?: string }) {
+  return { provider: attempt.providerId, ...(attempt.connectionId ? { connection: attempt.connectionId } : {}), attempt: attempt.attempt, ok: attempt.ok, latencyMs: attempt.latencyMs, ...(attempt.errorCode ? { error: attempt.errorCode } : {}) };
 }
 
 
 /**
- * Turns a Responses API request into the chat request the gateway already serves. `instructions` is the system
- * message; `input` is either a string (one user message) or a list of role/content items. Anything the chat path
- * cannot express is refused by `parseChatRequest`, so both routes share one set of rules.
+ * Turns a Responses API request into the chat request the gateway already serves.
+ *
+ * The Responses wire shape is not chat with different field names: message history uses
+ * `input_text` / `output_text` / `input_image` parts, assistant tool calls arrive as `function_call`
+ * items, tool results as `function_call_output`, tools are flat (`{type:'function', name, parameters}`)
+ * rather than nested under `function`, and the role `developer` is a system message. Passing the
+ * items through to `parseChatRequest` rejected every one of those with a 400, so the route only
+ * worked for a single plain string — the one shape Codex does not send.
  */
 export function responsesToChatBody(body: unknown): Record<string, unknown> {
   if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
@@ -563,12 +613,43 @@ export function responsesToChatBody(body: unknown): Record<string, unknown> {
     messages.push({ role: 'user', content: body.input });
   } else if (Array.isArray(body.input)) {
     for (const item of body.input) {
-      if (!isRecord(item) || typeof item.role !== 'string') throw invalidRequest('Each input item must have a role.');
-      messages.push({ role: item.role, content: item.content });
+      if (!isRecord(item)) throw invalidRequest('Each input item must be an object.');
+      if (item.type === 'function_call_output') {
+        const callId = typeof item.call_id === 'string' ? item.call_id : '';
+        if (!callId) throw invalidRequest('function_call_output items need call_id.');
+        const output = typeof item.output === 'string' ? item.output : JSON.stringify(item.output ?? '');
+        messages.push({ role: 'tool', tool_call_id: callId, content: output });
+        continue;
+      }
+      if (item.type === 'function_call') {
+        const callId = typeof item.call_id === 'string' ? item.call_id : typeof item.id === 'string' ? item.id : '';
+        const name = typeof item.name === 'string' ? item.name : '';
+        if (!callId || !name) throw invalidRequest('function_call items need call_id and name.');
+        messages.push({
+          role: 'assistant',
+          content: null,
+          tool_calls: [{ id: callId, type: 'function', function: { name, arguments: typeof item.arguments === 'string' ? item.arguments : '{}' } }],
+        });
+        continue;
+      }
+      // `developer` is the Responses spelling of a system instruction. Anything else keeps its role
+      // and is validated by the chat parser.
+      const role = item.role === 'developer' ? 'system' : item.role;
+      if (typeof role !== 'string') throw invalidRequest('Each input item must have a role.');
+      messages.push({ role, content: responsesContentToChat(item.content) });
     }
   } else {
     throw invalidRequest('input must be a string or a list of messages.');
   }
+
+  if (isRecord(body.text) && body.text.format !== undefined) {
+    throw invalidRequest('text.format is not supported by the chat path; send the schema as a prompt instruction instead.');
+  }
+  const tools = responsesToolsToChat(body.tools);
+  const toolChoice = body.tool_choice;
+  if (isRecord(toolChoice)) throw invalidRequest('tool_choice must be auto, none or required on this route.');
+  const reasoning = isRecord(body.reasoning) ? body.reasoning.effort : undefined;
+
   return {
     model: body.model,
     messages,
@@ -576,18 +657,75 @@ export function responsesToChatBody(body: unknown): Record<string, unknown> {
     ...(body.temperature === undefined ? {} : { temperature: body.temperature }),
     ...(body.top_p === undefined ? {} : { top_p: body.top_p }),
     ...(body.max_output_tokens === undefined ? {} : { max_tokens: body.max_output_tokens }),
+    ...(tools === undefined ? {} : { tools }),
+    ...(toolChoice === undefined ? {} : { tool_choice: toolChoice }),
+    ...(reasoning === undefined ? {} : { reasoning_effort: reasoning }),
   };
 }
 
+/** Responses content parts to the chat content parts the adapters understand. */
+function responsesContentToChat(content: unknown): unknown {
+  if (typeof content === 'string' || content === null || content === undefined) return content;
+  if (!Array.isArray(content)) throw invalidRequest('Message content must be a string or a content-part array.');
+  return content.map((part) => {
+    if (!isRecord(part)) throw invalidRequest('Message content parts must be objects.');
+    if (part.type === 'input_text' || part.type === 'output_text' || part.type === 'text') {
+      if (typeof part.text !== 'string') throw invalidRequest(`${String(part.type)} parts need text.`);
+      return { type: 'text', text: part.text };
+    }
+    if (part.type === 'input_image') {
+      const url = typeof part.image_url === 'string'
+        ? part.image_url
+        : isRecord(part.image_url) && typeof part.image_url.url === 'string' ? part.image_url.url : undefined;
+      if (!url) throw invalidRequest('input_image parts need image_url.');
+      return { type: 'image_url', image_url: { url } };
+    }
+    throw invalidRequest(`Responses content part ${String(part.type)} is not supported on this route.`);
+  });
+}
+
+/** Responses tools are flat; chat tools nest name/description/parameters under `function`. */
+function responsesToolsToChat(value: unknown): unknown[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0) throw invalidRequest('tools must be a non-empty array.');
+  return value.map((tool) => {
+    if (!isRecord(tool)) throw invalidRequest('Each tool must be an object.');
+    if (isRecord(tool.function)) return tool;
+    if (tool.type !== undefined && tool.type !== 'function') {
+      throw invalidRequest(`Responses tool ${String(tool.type)} is not supported by the chat path.`);
+    }
+    if (typeof tool.name !== 'string' || !tool.name.trim() || !isRecord(tool.parameters)) {
+      throw invalidRequest('Each function tool needs a name and parameters.');
+    }
+    return {
+      type: 'function',
+      function: {
+        name: tool.name,
+        ...(typeof tool.description === 'string' ? { description: tool.description } : {}),
+        parameters: tool.parameters,
+      },
+    };
+  });
+}
+
 /** The Responses shape a client reads: an output list, plus `output_text` for the common single-text case. */
-export function chatToResponsesBody(chat: { id: string; model: string; createdAt: string; content: string; usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } }) {
+export function chatToResponsesBody(chat: { id: string; model: string; createdAt: string; content: string; toolCalls?: readonly ToolCall[]; usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } }) {
+  const output: Array<Record<string, unknown>> = [];
+  // An empty message is meaningful only when the turn produced no tool call; otherwise it is noise the
+  // client would render as an empty assistant bubble beside the call it actually needs.
+  if (chat.content || !chat.toolCalls?.length) {
+    output.push({ type: 'message', id: `msg_${chat.id}`, role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: chat.content, annotations: [] }] });
+  }
+  for (const [index, call] of (chat.toolCalls ?? []).entries()) {
+    output.push({ type: 'function_call', id: `fc_${chat.id}_${index}`, call_id: call.id, name: call.function.name, arguments: call.function.arguments, status: 'completed' });
+  }
   return {
     id: chat.id,
     object: 'response',
     created_at: Math.floor(Date.parse(chat.createdAt) / 1000),
     model: chat.model,
     status: 'completed',
-    output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: chat.content }] }],
+    output,
     output_text: chat.content,
     usage: {
       input_tokens: chat.usage?.inputTokens ?? 0,
@@ -898,6 +1036,11 @@ export async function writeStreamData(response: ServerResponse, data: string, si
     response.once('close', onClose);
     response.once('error', onError);
     signal.addEventListener('abort', onAbort, { once: true });
+    // The state can change between the guard above and these registrations. Without this re-check the
+    // promise has no listener for an abort/close that already happened, and the stream hangs until the
+    // socket is torn down.
+    if (signal.aborted) onAbort();
+    else if (response.destroyed || response.writableEnded) onClose();
   });
 }
 

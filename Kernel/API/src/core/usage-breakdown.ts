@@ -157,10 +157,15 @@ function addToGroup(group: UsageGroup, record: UsageBreakdownRecord): void {
  */
 export function buildUsageBreakdown(
   records: readonly UsageBreakdownRecord[],
-  options: { period: UsagePeriod; now?: Date },
+  options: { period: UsagePeriod; now?: Date; since?: Date; until?: Date },
 ): UsageBreakdown {
   const now = options.now ?? new Date();
-  const { since, bucket } = resolveUsagePeriod(options.period, now);
+  const resolved = resolveUsagePeriod(options.period, now);
+  const bucket = resolved.bucket;
+  // An explicit bound wins over the period, on the timeline as well as on the totals. The route used
+  // to pass only `period`, so a record outside it counted in byProvider/byModel and its bucket never
+  // appeared in the timeline: one record, totals 1, chart sum 0.
+  const since = options.since ?? resolved.since;
 
   const providerGroups = new Map<string, UsageProviderGroup>();
   const modelGroups = new Map<string, UsageModelGroup>();
@@ -204,7 +209,7 @@ export function buildUsageBreakdown(
     const at = Date.parse(record.at);
     return Number.isNaN(at) ? latest : Math.max(latest, at);
   }, Number.NEGATIVE_INFINITY);
-  const end = new Date(Math.max(now.getTime(), Number.isFinite(newest) ? newest : now.getTime()));
+  const end = options.until ?? new Date(Math.max(now.getTime(), Number.isFinite(newest) ? newest : now.getTime()));
   const oldest = records.reduce((earliest, record) => {
     const at = Date.parse(record.at);
     return Number.isNaN(at) ? earliest : Math.min(earliest, at);

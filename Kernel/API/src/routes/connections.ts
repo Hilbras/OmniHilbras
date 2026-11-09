@@ -123,9 +123,10 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
       if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
       assertOnlyFields(body, ['strategy']);
       if (typeof body.strategy !== 'string') throw invalidRequest('strategy must be a string.');
-      await service.setProviderStrategy(providerId, body.strategy).catch((error: unknown) => {
-        throw invalidRequest(error instanceof Error ? error.message : 'The provider strategy could not be saved.');
-      });
+      // Validation lives in the service so the stored value and the in-memory map agree. A store or
+      // disk failure propagates as a 500 instead of being relabelled a client mistake with its raw
+      // message — which used to include a filesystem path.
+      await service.setProviderStrategy(providerId, body.strategy);
       sendJson(response, 200, { providerId, strategy: service.providerStrategy(providerId) }, origin);
       return true;
     }
@@ -253,7 +254,7 @@ function parseConnectionCredential(body: Record<string, unknown>): ProviderCrede
   return { type: 'none' };
 }
 
-export function parseGenericConnectionRequest(body: unknown, providerId: string): { id?: string; providerId: string; name: string; endpoint: string; priority: number; proxyPool: string; enabled?: boolean; modelPolicy?: ModelImportPolicy; credential: ProviderCredential } {
+export function parseGenericConnectionRequest(body: unknown, providerId: string): { id?: string; providerId: string; name: string; endpoint: string; priority: number; proxyPool: string; enabled?: boolean; modelPolicy?: ModelImportPolicy; responsibility?: { owner?: string; purpose?: string }; resilience?: { timeoutMs?: number; maxRetries?: number; requestsPerMinute?: number; hedgeAfterMs?: number }; credential: ProviderCredential } {
   if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
   // `id` is accepted so a caller can add a second connection for a provider that
   // already has one. Omitting it reuses that provider's existing connection.
@@ -276,6 +277,12 @@ export function parseGenericConnectionRequest(body: unknown, providerId: string)
     ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
     ...(body.modelPolicy === undefined ? {} : { modelPolicy: parseModelPolicy(body.modelPolicy) }),
     ...(body.responsibility === undefined ? {} : { responsibility: parseResponsibility(body.responsibility) }),
+    ...(body.resilience === undefined
+      ? {}
+      : (() => {
+          if (!isRecord(body.resilience)) throw invalidRequest('resilience must be an object.');
+          return { resilience: parseResilienceInput(body.resilience) };
+        })()),
     credential: parseConnectionCredential(body),
   };
 }

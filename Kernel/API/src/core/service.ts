@@ -556,6 +556,9 @@ export class GatewayService {
 
   /** Changes a provider's strategy. Routing reads the change on the next request, with no restart. */
   async setProviderStrategy(providerId: string, strategy: string): Promise<void> {
+    if (strategy !== 'priority' && strategy !== 'round-robin' && strategy !== 'fastest') {
+      throw new ProviderError('INVALID_REQUEST', 'The provider strategy must be one of priority, round-robin, fastest.');
+    }
     const store = this.connectionStore as { setStrategy?: (id: string, value: string) => Promise<void> } | undefined;
     if (!store?.setStrategy) throw new ProviderError('CONFIGURATION_ERROR', 'Provider strategies are not stored by this connection store.');
     await store.setStrategy(providerId, strategy);

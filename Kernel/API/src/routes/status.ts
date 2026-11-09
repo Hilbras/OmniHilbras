@@ -6,6 +6,7 @@ import type { RouteContext } from './route-context.js';
 import {
   sendJson,
 } from '../core/http.js';
+import { decodeProviderId } from './connections.js';
 import { gatewayBuild } from '../core/build-info.js';
 
 export async function handleStatusRoute(ctx: RouteContext): Promise<boolean> {
@@ -30,7 +31,7 @@ export async function handleStatusRoute(ctx: RouteContext): Promise<boolean> {
     // enough on a loaded machine that "Test provider" looked permanently stuck.
     const singleHealth = /^\/v1\/health\/([^/]+)$/.exec(url.pathname);
     if (request.method === 'GET' && singleHealth?.[1]) {
-      sendJson(response, 200, { provider: await service.healthForProvider(decodeURIComponent(singleHealth[1]), signal) }, origin);
+      sendJson(response, 200, { provider: await service.healthForProvider(decodeProviderId(singleHealth[1]), signal) }, origin);
       return true;
     }
 

@@ -44,6 +44,26 @@ test('“today” starts at local midnight, so it is the operator’s day and no
   assert.equal(since.getSeconds(), 0);
 });
 
+test('an explicit since drives the timeline, not only the totals', () => {
+  // Measured before the fix: one record from outside the period produced byProvider.requests = 1 and a
+  // timeline whose buckets summed to 0. The chart contradicted the card above it.
+  const now = new Date('2026-10-12T12:00:00.000Z');
+  const records = [record({ at: '2026-09-01T00:00:00.000Z', providerId: 'old' })];
+  const without = buildUsageBreakdown(records, { period: '7d', now });
+  assert.equal(without.byProvider[0].requests, 1);
+  assert.equal(without.timeline.reduce((sum, point) => sum + point.requests, 0), 0, 'the period window still excludes it from the chart');
+
+  const withSince = buildUsageBreakdown(records, { period: '7d', now, since: new Date('2026-08-01T00:00:00.000Z') });
+  assert.equal(withSince.timeline.reduce((sum, point) => sum + point.requests, 0), 1, 'the explicit window is what the chart draws');
+});
+
+test('an explicit until ends the timeline', () => {
+  const now = new Date('2026-10-12T12:00:00.000Z');
+  const records = [record({ at: '2026-09-01T00:00:00.000Z' })];
+  const breakdown = buildUsageBreakdown(records, { period: '7d', now, since: new Date('2026-08-01T00:00:00.000Z'), until: new Date('2026-09-02T00:00:00.000Z') });
+  assert.equal(breakdown.timeline.at(-1).bucketStart.startsWith('2026-09-01'), true, 'the last bucket is inside the requested end');
+});
+
 test('a group with no reported tokens is an absence, not a measured zero', () => {
   const breakdown = buildUsageBreakdown([
     record({ inputTokens: undefined, outputTokens: undefined, providerId: 'unmetered' }),

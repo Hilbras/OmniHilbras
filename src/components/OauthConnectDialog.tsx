@@ -17,6 +17,7 @@ import {
   type GatewayConnection,
   type GatewayOauthSignInStatus,
 } from '../lib/gatewayClient';
+import { safeProviderUrl } from '../lib/safeUrl';
 
 type Props = {
   providerId: string;
@@ -183,9 +184,10 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
   // Point the already-open tab at the provider. Opening a second window here
   // would be blocked, because this runs after the click that granted the gesture.
   const navigateTo = useCallback((authUrl: string) => {
+    const safeUrl = safeProviderUrl(authUrl);
     const opened = signInWindowRef.current;
-    if (opened && !opened.closed) {
-      opened.location.href = authUrl;
+    if (safeUrl && opened && !opened.closed) {
+      opened.location.href = safeUrl;
       signInWindowRef.current = null;
       return true;
     }
@@ -519,7 +521,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
                   ? 'The code is filled in for you. If you are asked to sign in first, sign in there and it will bring you back to this approval.'
                   : 'Sign in on the provider’s page to approve. This tab finishes the connection on its own.'}
               </p>
-              <a href={deviceCode.verificationUrl} target="_blank" rel="noreferrer" className="btn-ghost mt-2 inline-flex !h-7 !px-2.5 !text-[11px]">
+              <a href={safeProviderUrl(deviceCode.verificationUrl)} target="_blank" rel="noreferrer" className="btn-ghost mt-2 inline-flex !h-7 !px-2.5 !text-[11px]">
                 {deviceCode.userCode ? 'Open the code page' : 'Open the approval page'}
                 <ExternalLink className="h-3 w-3" aria-hidden="true" />
               </a>

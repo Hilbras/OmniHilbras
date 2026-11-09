@@ -75,6 +75,7 @@ function stringConstants() {
 function servedPaths() {
   const constants = stringConstants();
   const paths = new Set();
+  const sources = new Map();
   const unresolved = [];
   for (const file of sourceFiles()) {
     const source = stripComments(readFileSync(file, 'utf8'));
@@ -107,10 +108,15 @@ function servedPaths() {
       if (path === undefined) path = constants.get(match[2] ?? match[4]);
       else path = path.replace(/\$\{([A-Za-z_$][\w$]*)\}/g, (_, name) => constants.get(name) ?? `\${${name}}`);
       if (path === undefined || path.includes('${')) unresolved.push(`${file}: ${match[0].trim()}`);
-      else paths.add(path);
+      else {
+        paths.add(path);
+        const texts = sources.get(path) ?? [];
+        if (!texts.includes(source)) texts.push(source);
+        sources.set(path, texts);
+      }
     }
   }
-  return { paths: [...paths].sort(), unresolved };
+  return { paths: [...paths].sort(), sources, unresolved };
 }
 
 /** The routes the spec advertises, as `[method, path]` from its markdown list. */
@@ -169,13 +175,26 @@ test('every route path is text a machine can read, so it can be checked against 
 });
 
 test('every route the spec advertises is actually served', () => {
-  const served = servedPaths().paths;
+  const { paths: served, sources } = servedPaths();
   const phantom = documentedRoutes().filter(([, path]) => !correspondsTo(path, served));
   assert.deepEqual(
     phantom.map(([method, path]) => `${method} ${path}`),
     [],
     'the spec lists routes the code does not serve. A documented route that 404s reads as a bug in ' +
       'the gateway, and the reader has no way to tell it is a leftover.',
+  );
+
+  // A path can be served by several methods. The documented method must be one of the literals the
+  // serving module actually tests — otherwise a spec line saying DELETE is satisfied by a served GET,
+  // and the documented request 405s while this guard stays green.
+  const wrongMethod = documentedRoutes().filter(([method, documented]) => {
+    const texts = [...sources].filter(([servedPath]) => correspondsTo(documented, [servedPath])).flatMap(([, value]) => value);
+    return texts.length > 0 && !texts.some((text) => text.includes(`'${method}'`) || text.includes(`"${method}"`));
+  });
+  assert.deepEqual(
+    wrongMethod.map(([method, path]) => `${method} ${path}`),
+    [],
+    'the spec names a method the serving module never tests for that route.',
   );
 });
 
