@@ -987,7 +987,7 @@ export class GatewayService {
         proxyPool: 'none',
         modelPolicy: 'all',
       }),
-      save: (input, credential, pollSignal) => this.saveConnection(input, credential, pollSignal),
+      save: (input, credential, pollSignal) => this.saveConnection(input, credential, pollSignal, { tolerateDiscoveryFailure: true }),
     });
   }
 
@@ -1033,7 +1033,7 @@ export class GatewayService {
         proxyPool: 'none',
         modelPolicy: 'all',
       }),
-      save: (input, credential, pollSignal) => this.saveConnection(input, credential, pollSignal),
+      save: (input, credential, pollSignal) => this.saveConnection(input, credential, pollSignal, { tolerateDiscoveryFailure: true }),
     });
   }
 
