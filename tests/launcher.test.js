@@ -88,6 +88,20 @@ test('it signals a group only after checking the group is still its own', () => 
   assert.doesNotMatch(source, /process\.kill\(-child\.pid/, 'shutdown signals a group directly, bypassing the helper');
 });
 
+test('the ports it validated reach the servers it spawns', () => {
+  // The launcher used to validate `--port` and `--gateway-port`, record them, announce them and wait on
+  // them — and spawn both servers on their defaults. Every custom port then timed out for 120 s.
+  assert.match(source, /OMNIHILBRAS_PORT: String\(options\.gatewayPort\)/, 'the gateway is not told which port to bind');
+  assert.match(source, /'--port', String\(options\.dashboardPort\)/, 'the dashboard is not told which port to bind');
+  assert.match(source, /env: \{ \.\.\.process\.env, \.\.\.env \}/, 'the child environment is not extended');
+});
+
+test('stderr is captured into the failure tail', () => {
+  // The tail existed to explain a failed start, and the failure text is usually on stderr. It was dropped.
+  assert.match(source, /captureTail\(child\.stderr, label, tails\[label\]\)/, 'stderr is not part of the captured tail');
+  assert.match(source, /function captureTail\(stream, label, lines = \[\]\)/, 'the capture helper still returns a getter instead of the line array');
+});
+
 test('a port is checked before the previous run is stopped', () => {
   // Order is the whole point: a typo in a port must not cost the developer a running server. Read
   // as source because the property *is* the sequence, which no single run can demonstrate.
