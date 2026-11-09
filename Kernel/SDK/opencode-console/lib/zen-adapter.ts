@@ -759,11 +759,13 @@ export class ZenAdapter implements ProviderAdapter {
 
   private authHeaders(credential: ProviderCredential | undefined, extra: Record<string, string> = {}) {
     const value = credential?.type === 'none' ? '' : credential?.value ?? '';
+    const org = credential?.type === 'oauth' ? credential.orgId : undefined;
     return {
       accept: 'application/json',
       'content-type': 'application/json',
       ...extra,
       ...(value ? { Authorization: `Bearer ${value}` } : {}),
+      ...(org ? { 'x-opencode-org-id': org } : {}),
     };
   }
 }
