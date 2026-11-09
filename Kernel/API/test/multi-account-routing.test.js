@@ -73,6 +73,26 @@ test('failover spends the routed connection credential, not the first account ke
   assert.match(outcome.response.message.content, /key-B/);
 });
 
+test('per-connection adapters are memoised by connection, not by provider', async () => {
+  const seen = [];
+  const store = new InMemoryConnectionStore();
+  const service = new GatewayService(registry(seen), store, store, new InMemoryApiKeyStore());
+
+  for (const [name, build] of [
+    ['kimi', (id) => service.kimiCodeAdapter(id)],
+    ['claude', (id) => service.claudeCodeAdapter(id)],
+    ['kiro', (id) => service.kiroAdapter(id)],
+    ['opencode', (id) => service.opencodeConsoleAdapter(id)],
+    ['cline', (id) => service.clineAdapter(id)],
+    ['gemini', (id) => service.geminiWebAdapter(id)],
+    ['chatgpt', (id) => service.chatGptWebAdapter(id)],
+  ]) {
+    const first = build('account-a');
+    assert.equal(build('account-a'), first, `${name}: the same connection must reuse its adapter`);
+    assert.notEqual(build('account-b'), first, `${name}: a second account got the first account's adapter`);
+  }
+});
+
 test('a direct chat on a named connection uses that connection credential', async () => {
   const seen = [];
   const store = new InMemoryConnectionStore();
