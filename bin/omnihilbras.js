@@ -379,7 +379,15 @@ async function main() {
     return child;
   };
 
-  const gateway = spawnOne('gateway', ['dev:gateway'], { OMNIHILBRAS_PORT: String(options.gatewayPort) });
+  const gateway = spawnOne('gateway', ['dev:gateway'], {
+    OMNIHILBRAS_PORT: String(options.gatewayPort),
+    // The gateway's default CORS allowlist names port 5173. A launcher on any other port would proxy
+    // the dashboard's Origin (`localhost:<chosen port>`) and the gateway would refuse every management
+    // call, including the log stream — the dashboard looks connected and every feed is silently dead.
+    ...(process.env.OMNIHILBRAS_CORS_ORIGINS
+      ? {}
+      : { OMNIHILBRAS_CORS_ORIGINS: `http://localhost:${options.dashboardPort},http://127.0.0.1:${options.dashboardPort}` }),
+  });
   // Both the port and the gateway's port reach the dashboard: Vite binds `--port`, and its proxy reads
   // `OMNIHILBRAS_PORT` to find the gateway. Neither was forwarded, so a custom port was awaited and
   // announced while Vite served 5173.

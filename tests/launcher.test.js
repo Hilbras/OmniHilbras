@@ -94,6 +94,9 @@ test('the ports it validated reach the servers it spawns', () => {
   assert.match(source, /OMNIHILBRAS_PORT: String\(options\.gatewayPort\)/, 'the gateway is not told which port to bind');
   assert.match(source, /'--port', String\(options\.dashboardPort\)/, 'the dashboard is not told which port to bind');
   assert.match(source, /env: \{ \.\.\.process\.env, \.\.\.env \}/, 'the child environment is not extended');
+  // The gateway's default CORS list names 5173. Without this, a launcher on 5174 proxies Origin
+  // `localhost:5174` and the gateway refuses every dashboard request with 403.
+  assert.match(source, /OMNIHILBRAS_CORS_ORIGINS: `http:\/\/localhost:\$\{options\.dashboardPort\}/, 'a custom dashboard port is not added to the gateway allowlist');
 });
 
 test('stderr is captured into the failure tail', () => {
