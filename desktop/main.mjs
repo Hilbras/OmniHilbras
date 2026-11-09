@@ -219,7 +219,15 @@ function createWindow() {
           const started = await window.omnihilbras.server.start();
           return { stopped: stopped.state, started: started.state };
         })()`);
-        console.log(`SMOKE ${JSON.stringify({ url: window.webContents.getURL(), title, probe, cycle, text, server: gateway.snapshot() })}`);
+        const feed = await window.webContents.executeJavaScript(`(async () => {
+          await window.omnihilbras.gateway.request('/v1/chat/completions', {
+            method: 'POST',
+            body: JSON.stringify({ model: 'definitely-not-a-model', messages: [{ role: 'user', content: 'hi' }] }),
+          });
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          return document.querySelector('[aria-label="Live requests"]')?.innerText ?? '';
+        })()`);
+        console.log(`SMOKE ${JSON.stringify({ url: window.webContents.getURL(), title, probe, cycle, feed, text, server: gateway.snapshot() })}`);
       } catch (error) {
         console.log(`SMOKE-ERROR ${error instanceof Error ? error.message : String(error)}`);
       }
