@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 2.5.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 2.6.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -585,6 +585,13 @@ output is written to `userData/logs/gateway.log`, rotated at 5 MB with three old
 **Diagnostics** writes `userData/diagnostics/*.json`: versions, platform, ports, state, redacted
 config and the last 200 KB of log. The exporter redacts `sk-…`, bearer tokens and named
 `api_key`/`token`/`secret`/`password` values; it never reads the vault.
+
+**About** is a real page in both the browser and the app: version, gateway build, platform, links, and
+the **Encrypted backup** panel. Export produces an AES-256-GCM envelope (scrypt-derived key) containing
+connections with their provider credentials, provider strategies and the API-key store's hashes.
+Import replaces all of them and requires an explicit confirmation; a wrong passphrase or damaged
+envelope is refused before anything changes. The passphrase is never stored, and API keys are exported
+as hashes — they keep working after import but cannot be shown again.
 
 The renderer never holds the dashboard token and never calls `127.0.0.1` directly. Requests, chat
 streams and the log stream cross a narrow preload bridge (`desktop/preload.cjs`); main attaches the

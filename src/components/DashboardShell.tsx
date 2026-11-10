@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleHelp,
   Gauge,
+  Info,
   KeyRound,
   LayoutDashboard,
   Menu,
@@ -36,7 +37,7 @@ import { PAGE_VERSION } from '../lib/pageVersion';
  * it. `tests/marketing-claims.test.js` pins which entries are still disabled, so this comment going stale
  * fails a test rather than misleading the next reader quietly.
  */
-type DashboardPage = 'home' | 'overview' | 'providers' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings';
+type DashboardPage = 'home' | 'overview' | 'providers' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings' | 'about';
 
 type SidebarItem = {
   label: string;
@@ -68,6 +69,7 @@ const insightItems: SidebarItem[] = [
   // every setting had been an environment variable, so there was nothing to show but a copy of
   // `.env.example`.
   { label: 'Settings', icon: Settings2, to: '/settings', page: 'settings' },
+  { label: 'About', icon: Info, to: '/about', page: 'about' },
 ];
 
 const sidebarStorageKey = 'omnihilbras-sidebar-collapsed';

@@ -29,6 +29,9 @@ export interface ApiKeyStore {
   authenticate(key: string): Promise<ApiKeyRecord | undefined>;
   isEnforced(): Promise<boolean>;
   setEnforced(value: boolean): Promise<boolean>;
+  /** Encrypted-backup support. Optional because an in-memory test store need not offer it. */
+  exportState?(): Promise<ApiKeyBackupState>;
+  importState?(state: ApiKeyBackupState): Promise<void>;
   /**
    * Resolves once nothing this store was asked to write is still in flight.
    *
@@ -47,6 +50,12 @@ export type LocalApiKeyStoreOptions = {
 };
 
 type StoredApiKey = ApiKeyRecord & { keyHash: string };
+
+export type ApiKeyBackupState = {
+  version: number;
+  requireApiKey: boolean;
+  keys: StoredApiKey[];
+};
 
 type ApiKeyFile = {
   version: number;
@@ -252,6 +261,54 @@ export class LocalApiKeyStore implements ApiKeyStore {
   async isEnforced() {
     await this.ensureLoaded();
     return this.enforced;
+  }
+
+  /**
+   * The stored hashes, not the keys.
+   *
+   * The plaintext of a key exists only at creation time, so a backup that claimed to contain "the API
+   * keys" would be lying. It contains what the store actually holds: names, prefixes, hashes and
+   * enforcement state — enough for an import to keep accepting the same keys.
+   */
+  async exportState(): Promise<ApiKeyBackupState> {
+    await this.ensureLoaded();
+    return {
+      version: fileVersion,
+      requireApiKey: this.enforced,
+      keys: [...this.keys.values()].map((key) => ({ ...key })),
+    };
+  }
+
+  /** Replaces every key and the enforcement switch. Validation happens before anything is mutated. */
+  async importState(state: ApiKeyBackupState) {
+    if (!state || state.version !== fileVersion || typeof state.requireApiKey !== 'boolean' || !Array.isArray(state.keys)) {
+      throw new Error('The API-key backup is not readable.');
+    }
+    if (state.keys.length > maxKeys) throw new Error('The API-key backup contains too many keys.');
+    const next = new Map<string, StoredApiKey>();
+    for (const key of state.keys) {
+      if (!key || typeof key.id !== 'string' || typeof key.name !== 'string' || typeof key.keyHash !== 'string'
+        || typeof key.prefix !== 'string' || typeof key.enabled !== 'boolean'
+        || typeof key.createdAt !== 'string' || typeof key.updatedAt !== 'string') {
+        throw new Error('The API-key backup contains an unreadable record.');
+      }
+      next.set(key.id, { ...key });
+    }
+    await this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = new Map(this.keys);
+      const previousEnforced = this.enforced;
+      this.keys = next;
+      this.enforced = state.requireApiKey;
+      try {
+        await this.persist();
+      } catch (error) {
+        this.keys = previous;
+        this.enforced = previousEnforced;
+        await this.persist().catch(() => undefined);
+        throw error;
+      }
+    });
   }
 
   async setEnforced(value: boolean) {

@@ -59,6 +59,7 @@ export type OmniBridge = {
   diagnostics: {
     export: () => Promise<{ path: string }>;
   };
+  appInfo: () => Promise<{ version: string; platform: string; arch: string; packaged: boolean; electron: string; chrome: string; node: string }>;
   server: {
     getState: () => Promise<DesktopServerSnapshot>;
     start: () => Promise<DesktopServerSnapshot>;

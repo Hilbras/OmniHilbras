@@ -1210,6 +1210,25 @@ export function setGatewayRequireApiKey(requireApiKey: boolean, signal?: AbortSi
   }).then((body) => body.requireApiKey);
 }
 
+/** The encrypted envelope; the passphrase never leaves this call and is not stored. */
+export function exportGatewayBackup(passphrase: string, signal?: AbortSignal) {
+  return requestJson<{ backup: unknown }>('/v1/backup/export', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ passphrase }),
+    ...(signal ? { signal } : {}),
+  }).then((body) => body.backup);
+}
+
+export function importGatewayBackup(passphrase: string, backup: unknown, signal?: AbortSignal) {
+  return requestJson<{ connections: number; strategies: number; apiKeys: number; removed: number }>('/v1/backup/import', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ passphrase, backup, confirmReplace: true }),
+    ...(signal ? { signal } : {}),
+  });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

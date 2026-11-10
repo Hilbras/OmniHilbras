@@ -61,6 +61,7 @@ import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
 import { startRequestScope, withRequestScope, type RequestScope } from './request-context.js';
+import { decryptBackup, encryptBackup } from './backup.js';
 import { notSupported } from './capability.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { providerAlias, sharedCatalogProviders } from './provider-alias.js';
@@ -2307,6 +2308,81 @@ export class GatewayService {
 
   setRequireApiKey(value: boolean) {
     return this.apiKeys.setEnforced(value);
+  }
+
+  /**
+   * Everything needed to rebuild this gateway, encrypted under a passphrase.
+   *
+   * Connections carry their decrypted credential on purpose: that is what makes the backup useful, and
+   * the envelope is the only place it travels. The API-key section holds hashes, not plaintext — the
+   * plaintext existed once, at creation, and a backup cannot invent it.
+   */
+  async exportBackup(passphrase: string) {
+    const connections: Array<{ connection: Record<string, unknown>; credential: unknown }> = [];
+    for (const connection of await this.connections.list()) {
+      const credential = await this.secretStore.get(connection.id, connection.providerId);
+      if (!credential) continue;
+      const { credentialFingerprint: _fingerprint, hasCredential: _hasCredential, credentialType: _credentialType, email: _email, ...metadata } = connection as typeof connection & Record<string, unknown>;
+      connections.push({ connection: metadata, credential });
+    }
+    const apiKeys = this.apiKeyStore?.exportState ? await this.apiKeyStore.exportState() : undefined;
+    return encryptBackup({
+      format: 'omnihilbras-gateway-backup',
+      version: 1,
+      createdAt: new Date().toISOString(),
+      connections,
+      strategies: Object.fromEntries(this.providerStrategies),
+      apiKeys,
+    }, passphrase);
+  }
+
+  /**
+   * Replaces connections, strategies and API keys with a decrypted backup.
+   *
+   * Replace, not merge: a backup is a snapshot of one gateway, and merging two snapshots by id leaves
+   * credentials from the old machine attached to records from the new one. The caller has to say yes to
+   * that; the route passes the confirmation through.
+   */
+  async importBackup(passphrase: string, envelope: unknown) {
+    if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'This gateway has no connection store to import into.');
+    const payload = decryptBackup(envelope, passphrase) as {
+      format?: unknown;
+      version?: unknown;
+      connections?: Array<{ connection?: Record<string, unknown>; credential?: unknown }>;
+      strategies?: Record<string, unknown>;
+      apiKeys?: unknown;
+    };
+    if (payload?.format !== 'omnihilbras-gateway-backup' || payload.version !== 1 || !Array.isArray(payload.connections)) {
+      throw new ProviderError('INVALID_REQUEST', 'The backup payload is not a gateway backup.');
+    }
+    for (const entry of payload.connections) {
+      if (!entry?.connection || typeof entry.connection.id !== 'string' || typeof entry.connection.providerId !== 'string' || !entry.credential) {
+        throw new ProviderError('INVALID_REQUEST', 'The backup contains an unreadable connection.');
+      }
+    }
+    const previous = await this.connectionStore.list();
+    for (const connection of previous) await this.connectionStore.remove(connection.id);
+    let imported = 0;
+    for (const entry of payload.connections) {
+      await this.connectionStore.save(entry.connection as never, entry.credential as never);
+      imported += 1;
+    }
+    let strategies = 0;
+    const store = this.connectionStore as { setStrategy?: (providerId: string, strategy: string) => Promise<void> };
+    for (const [providerId, strategy] of Object.entries(payload.strategies ?? {})) {
+      if (strategy !== 'priority' && strategy !== 'round-robin' && strategy !== 'fastest') continue;
+      if (!store.setStrategy) break;
+      await store.setStrategy(providerId, strategy);
+      this.providerStrategies.set(providerId, strategy);
+      strategies += 1;
+    }
+    let keys = 0;
+    if (payload.apiKeys && this.apiKeyStore?.importState) {
+      const state = payload.apiKeys as { keys?: unknown[] };
+      await this.apiKeyStore.importState(payload.apiKeys as never);
+      keys = Array.isArray(state.keys) ? state.keys.length : 0;
+    }
+    return { connections: imported, strategies, apiKeys: keys, removed: previous.length };
   }
 
   /**

@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('omnihilbras', {
   diagnostics: {
     export: () => ipcRenderer.invoke('diagnostics:export'),
   },
+  appInfo: () => ipcRenderer.invoke('app:info'),
   server: {
     getState: () => ipcRenderer.invoke('server:state'),
     start: () => ipcRenderer.invoke('server:start'),

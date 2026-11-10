@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from '
 import { DashboardShell } from './components/DashboardShell';
 import { getProviderById } from './data/providers';
 import { ApiKeysContent } from './pages/ApiKeysPage';
+import { AboutContent } from './pages/AboutPage';
 import { AppHomeContent } from './pages/AppHomePage';
 import { ProviderDetailContent, fallbackProvider } from './pages/ProviderDetailPage';
 import { ProvidersContent } from './pages/ProvidersPage';
@@ -34,6 +35,7 @@ const activePageTitles = {
   usage: 'Usage',
   logs: 'Request log',
   settings: 'Settings',
+  about: 'About',
 } as const;
 
 const pageDescriptions = {
@@ -49,6 +51,7 @@ const pageDescriptions = {
   usage: 'Requests your gateway actually served, and their measured cost',
   logs: 'Requests as the gateway records them, newest first',
   settings: 'The configuration this gateway loaded at startup',
+  about: 'Version, platform, backup and recovery',
 } as const;
 
 function DashboardRoutes() {
@@ -68,7 +71,9 @@ function DashboardRoutes() {
             ? 'logs'
             : location.pathname.startsWith('/settings')
             ? 'settings'
-            : 'overview';
+            : location.pathname.startsWith('/about')
+              ? 'about'
+              : 'overview';
   const provider = isProviderDetail ? getProviderById(location.pathname.split('/').filter(Boolean).at(-1)) : undefined;
   const pageTitle = provider?.name ?? activePageTitles[activePage];
   const pageDescription = provider ? 'Provider connection details' : pageDescriptions[activePage];
@@ -99,6 +104,7 @@ function DashboardRoutes() {
           <Route path="/usage" element={<UsageContent />} />
           <Route path="/logs" element={<LogsContent />} />
           <Route path="/settings" element={<SettingsContent />} />
+          <Route path="/about" element={<AboutContent />} />
           <Route path="*" element={<Navigate to="/providers" replace />} />
         </Routes>
       </div>

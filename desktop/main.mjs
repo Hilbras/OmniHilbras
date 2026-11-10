@@ -330,6 +330,15 @@ function wireIpc() {
   ipcMain.on('window:close', () => window?.close());
   ipcMain.handle('window:is-maximized', () => window?.isMaximized() ?? false);
   ipcMain.handle('diagnostics:export', exportDiagnostics);
+  ipcMain.handle('app:info', () => ({
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    packaged: app.isPackaged,
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    node: process.versions.node,
+  }));
 
   ipcMain.handle('gateway:request', async (_event, request) => {
     try {

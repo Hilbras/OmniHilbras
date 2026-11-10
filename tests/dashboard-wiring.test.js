@@ -71,6 +71,18 @@ test('the Servers page offers first run, diagnostics, and a filtered feed', () =
   assert.match(page, /feedPaused/, 'the request feed cannot be paused');
 });
 
+test('About exists in the web and desktop app, with encrypted backup actions', () => {
+  const app = read('src/dashboardApp.tsx');
+  const shell = read('src/components/DashboardShell.tsx');
+  const about = read('src/pages/AboutPage.tsx');
+  assert.match(app, /path="\/about"/, 'no About route');
+  assert.match(shell, /to: '\/about'/, 'no About nav entry');
+  assert.match(about, /exportGatewayBackup/, 'no backup export');
+  assert.match(about, /importGatewayBackup/, 'no backup import');
+  assert.match(about, /confirmReplace|replaces every connection/, 'import does not warn that it replaces data');
+  assert.match(about, /bridge\.diagnostics\.export/, 'the desktop diagnostics action is missing');
+});
+
 test('the logs route is highlighted and titled', () => {
   const app = read('src/dashboardApp.tsx');
   assert.match(app, /startsWith\('\/logs'\)/, 'the Logs route still falls through to Overview');

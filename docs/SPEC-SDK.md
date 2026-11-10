@@ -271,6 +271,13 @@ The first local gateway exposes:
 - `POST /v1/oauth/opencode-go/start` — begin an OpenCode Console device-flow sign-in that saves under the OpenCode Go provider id.
 - `GET /v1/oauth/opencode-go/session/:id` — poll the OpenCode Go sign-in to completion.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
+- `POST /v1/backup/export` — body `{"passphrase": "..."}`; returns `{"backup": envelope}`. The envelope is
+  AES-256-GCM with a scrypt-derived key and contains connections with their credentials, provider
+  strategies, and the API-key store's hashes and enforcement flag. The passphrase is not stored; a lost
+  passphrase means the backup is unreadable. Management route.
+- `POST /v1/backup/import` — body `{"passphrase": "...", "backup": envelope, "confirmReplace": true}`.
+  **Replaces** every connection, strategy and API key. Returns counts. A missing confirmation is a 400;
+  a wrong passphrase or a damaged envelope is refused before anything is changed. Management route.
 - `POST /v1/web-cookie/tokenharbor/check` — verify a pasted Token Harbor session cookie against
   `tokenharbor.ai` by reading the account profile, and store nothing. A credential check, not a
   completion: it says whether the session is accepted, not whether a model can answer.
