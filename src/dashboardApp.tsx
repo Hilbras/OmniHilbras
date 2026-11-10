@@ -31,6 +31,7 @@ const activePageTitles = {
   home: 'Servers',
   overview: 'Overview',
   providers: 'Providers',
+  models: 'Models',
   routing: 'Routing',
   keys: 'API keys',
   // Added in 1.64.0 with the page itself. `overview` remains only as the fallback for an unrouted path,
@@ -46,6 +47,7 @@ const pageDescriptions = {
   home: 'Gateway lifecycle and live logs',
   overview: 'Your gateway at a glance',
   providers: 'Connect and manage the routes behind your gateway',
+  models: 'One oh/ id routed across saved provider accounts',
   routing: 'Per-connection eligibility, health, and last attempt',
   keys: 'Keys that authorize access to your local gateway',
   // Worded to avoid the phrase the marketing guard forbids across all of `src/`. The guard is a
@@ -84,7 +86,9 @@ function DashboardRoutes() {
     ? 'home'
     : location.pathname.startsWith('/providers')
     ? 'providers'
-    : location.pathname.startsWith('/routing')
+    : location.pathname.startsWith('/models')
+      ? 'models'
+      : location.pathname.startsWith('/routing')
       ? 'routing'
       : location.pathname.startsWith('/keys')
         ? 'keys'
