@@ -447,7 +447,7 @@ export class GatewayService {
     });
     this.timeouts = new TimeoutPolicy();
     this.requests = new RequestExecutor({
-      planRoute: (model, explicitProviderId) => this.planRoute(model, explicitProviderId),
+      planRoute: (model, explicitProviderId, explicitConnectionId) => this.planRoute(model, explicitProviderId, explicitConnectionId),
       afterPlan: () => this.testAfterPlan?.(),
       chat: (providerId, request, signal, scope, connectionId) => this.chat(providerId, request, signal, scope, connectionId),
       streamChat: (providerId, request, signal, scope, connectionId) => this.streamChat(providerId, request, signal, scope, connectionId),
@@ -2822,8 +2822,20 @@ export class GatewayService {
     return this.requests.stream(request, explicitProviderId, signal, scope);
   }
 
-  private async planRoute(model: string, explicitProviderId?: string) {
-    return this.routing.plan({ connections: await this.listConnections(), model, ...(explicitProviderId === undefined ? {} : { explicitProviderId }) });
+  private async planRoute(model: string, explicitProviderId?: string, explicitConnectionId?: string) {
+    const connections = await this.listConnections();
+    if (explicitConnectionId !== undefined && !connections.some((connection) => connection.id === explicitConnectionId)) {
+      throw new ProviderError('INVALID_REQUEST', 'The requested connection does not exist.', {
+        retryable: false,
+        publicMessage: 'The requested connection does not exist.',
+      });
+    }
+    return this.routing.plan({
+      connections,
+      model,
+      ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
+      ...(explicitConnectionId === undefined ? {} : { explicitConnectionId }),
+    });
   }
 
 

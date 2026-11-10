@@ -91,7 +91,7 @@ function isCallerFault(code: string): boolean {
 
 export type RequestExecutorDeps = {
   /** Which providers could serve this model, in preference order. */
-  planRoute: (model: string, explicitProviderId?: string) => Promise<RouteDecision>;
+  planRoute: (model: string, explicitProviderId?: string, explicitConnectionId?: string) => Promise<RouteDecision>;
   /**
    * Test seam, never set in production: runs after a route is planned and before anything is dispatched, so a
    * test can use up a connection's budget in the gap between planning and dispatch. That gap is the only place a
@@ -151,7 +151,7 @@ export class RequestExecutor {
   }
 
   async chat(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayChatOutcome> {
-    const decision = await this.deps.planRoute(request.model, explicitProviderId);
+    const decision = await this.deps.planRoute(request.model, explicitProviderId, request.connectionId);
     await this.deps.afterPlan?.();
     if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
     const attempts: GatewayFailoverAttempt[] = [];
@@ -207,7 +207,7 @@ export class RequestExecutor {
    * That is a decision recorded in code, not an oversight for a reader to infer.
    */
   async embed(request: EmbeddingRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayEmbedOutcome> {
-    const decision = await this.deps.planRoute(request.model, explicitProviderId);
+    const decision = await this.deps.planRoute(request.model, explicitProviderId, request.connectionId);
     if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
     return this.runSequential({
       candidates: decision.candidates,
@@ -484,7 +484,7 @@ export class RequestExecutor {
 
   /** Streaming cannot retry after bytes are sent, so failover only covers the first chunk. */
   async stream(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayStreamOutcome> {
-    const decision = await this.deps.planRoute(request.model, explicitProviderId);
+    const decision = await this.deps.planRoute(request.model, explicitProviderId, request.connectionId);
     if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
     const attempts: GatewayFailoverAttempt[] = [];
     let lastError: unknown;

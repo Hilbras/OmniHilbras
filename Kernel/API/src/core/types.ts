@@ -80,6 +80,11 @@ export type ChatRequest = {
   maxThinkingTokens?: number;
   /** Anchor provider cache breakpoints on the final body. Only adapters that support it act on this. */
   cacheAnchor?: boolean;
+  /**
+   * A saved connection/account named by the caller. When present, routing is narrowed to it and does
+   * not silently fall back to another account of the same provider.
+   */
+  connectionId?: string;
   providerOptions?: Record<string, unknown>;
 };
 
@@ -161,6 +166,8 @@ export type EmbeddingRequest = {
   /** The OpenAI `encoding_format`. Only `float` is supported; see the adapter. */
   readonly encodingFormat?: 'float';
   readonly user?: string;
+  /** A saved connection/account named by the caller; no silent fallback to another account. */
+  readonly connectionId?: string;
 };
 
 export type EmbeddingResponse = {

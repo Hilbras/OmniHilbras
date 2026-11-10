@@ -84,7 +84,9 @@ export async function handleInferenceRoute(ctx: RouteContext): Promise<boolean> 
  */
 export async function handleEmbeddings(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
   const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
-  const embeddingRequest = parseEmbeddingRequest(body);
+  const parsedEmbedding = parseEmbeddingRequest(body);
+  const explicitConnectionId = getExplicitConnectionId(request, body);
+  const embeddingRequest = explicitConnectionId === undefined ? parsedEmbedding : { ...parsedEmbedding, connectionId: explicitConnectionId };
   const explicitProviderId = getExplicitProviderId(request, body);
   const scope = service.startScope(embeddingRequest.model, explicitProviderId);
 
@@ -185,11 +187,15 @@ function finishEmbeddingRequest(body: Record<string, unknown>, model: string, in
     throw invalidRequest('encoding_format must be float; base64 embeddings are not supported.');
   }
   if (body.user !== undefined && typeof body.user !== 'string') throw invalidRequest('user must be a string.');
+  if (body.connection !== undefined && (typeof body.connection !== 'string' || !body.connection.trim())) {
+    throw invalidRequest('connection must be a non-empty string.');
+  }
   return {
     model,
     input,
     ...(dimensions === undefined ? {} : { dimensions }),
     ...(body.user === undefined ? {} : { user: body.user as string }),
+    ...(body.connection === undefined ? {} : { connectionId: (body.connection as string).trim() }),
   };
 }
 
@@ -201,6 +207,8 @@ function finishEmbeddingRequest(body: Record<string, unknown>, model: string, in
 export async function handleResponses(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
   const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
   const chatRequest = parseChatRequest(responsesToChatBody(body));
+  const explicitConnectionId = getExplicitConnectionId(request, body);
+  if (explicitConnectionId !== undefined) chatRequest.connectionId = explicitConnectionId;
   const explicitProviderId = getExplicitProviderId(request, body);
   const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request));
   if (chatRequest.stream) {
@@ -373,6 +381,8 @@ async function streamResponses(input: {
 export async function handleChat(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
   const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
   const chatRequest = parseChatRequest(body);
+  const explicitConnectionId = getExplicitConnectionId(request, body);
+  if (explicitConnectionId !== undefined) chatRequest.connectionId = explicitConnectionId;
   const explicitProviderId = getExplicitProviderId(request, body);
 
   // Created once, here, where a request has been accepted. Everywhere else it is passed down, so
@@ -771,10 +781,15 @@ export function parseChatRequest(body: unknown): ChatRequest {
   const toolChoice = parseToolChoice(body.tool_choice);
   const reasoningEffort = parseReasoningEffort(body.reasoning_effort);
   const providerOptions = body.provider_options === undefined ? undefined : parseProviderOptions(body.provider_options);
+  const connectionId = body.connection === undefined ? undefined : (() => {
+    if (typeof body.connection !== 'string' || !body.connection.trim()) throw invalidRequest('connection must be a non-empty string.');
+    return body.connection.trim();
+  })();
 
   return {
     model: body.model.trim(),
     messages,
+    ...(connectionId === undefined ? {} : { connectionId }),
     ...(stream !== undefined ? { stream } : {}),
     ...(temperature !== undefined ? { temperature } : {}),
     ...(topP !== undefined ? { topP } : {}),
@@ -967,6 +982,18 @@ export function getExplicitProviderId(request: IncomingMessage, body: unknown) {
   if (isRecord(body) && body.provider !== undefined) {
     if (typeof body.provider !== 'string' || !body.provider.trim()) throw invalidRequest('provider must be a non-empty string.');
     return body.provider.trim();
+  }
+  return undefined;
+}
+
+/** A saved account/connection named by the caller; the header wins over the body field. */
+export function getExplicitConnectionId(request: IncomingMessage, body: unknown): string | undefined {
+  const header = request.headers['x-omnihilbras-connection'];
+  if (Array.isArray(header)) throw invalidRequest('x-omnihilbras-connection must be a single value.');
+  if (typeof header === 'string' && header.trim()) return header.trim();
+  if (isRecord(body) && body.connection !== undefined) {
+    if (typeof body.connection !== 'string' || !body.connection.trim()) throw invalidRequest('connection must be a non-empty string.');
+    return body.connection.trim();
   }
   return undefined;
 }

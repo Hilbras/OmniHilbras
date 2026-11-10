@@ -146,7 +146,12 @@ export class RoutingEngine {
     connections: readonly ConnectionRecord[];
     model: string;
     explicitProviderId?: string;
+    /** Narrow routing to one saved account; no silent fallback when it cannot serve. */
+    explicitConnectionId?: string;
   }): Promise<RouteDecision> {
+    const connections = input.explicitConnectionId === undefined
+      ? input.connections
+      : input.connections.filter((connection) => connection.id === input.explicitConnectionId);
     // Before anything is read or written. Two maps are keyed by connection id and only ever grew, so a
     // dashboard that deleted a connection kept its wait and its request window for the life of the process.
     // Measured at 2000 and 3000 stale entries respectively.
@@ -154,13 +159,13 @@ export class RoutingEngine {
 
     const health = this.options.health.registry();
     const alias = this.options.aliasFor?.(input.model.trim());
-    const split = alias ? { model: alias.model, providerId: alias.providerId } : splitProviderPrefix(input.model, input.connections);
+    const split = alias ? { model: alias.model, providerId: alias.providerId } : splitProviderPrefix(input.model, connections);
     const explicitProviderId = input.explicitProviderId ?? split.providerId;
-    const rotation = this.nextBalanceTurn(input.connections);
+    const rotation = this.nextBalanceTurn(connections);
     const decision = resolveRoute({
       // Copied because `resolveRoute` types its input as mutable while nothing here mutates it.
       // The copy is here rather than at every call site so the looseness is paid for once.
-      connections: input.connections.map((connection) => (this.isBalanced(connection) ? { ...connection, balance: true } : connection)),
+      connections: connections.map((connection) => (this.isBalanced(connection) ? { ...connection, balance: true } : connection)),
       model: split.model,
       rotation,
       ...(this.options.familyOf ? { familyOf: this.options.familyOf } : {}),
@@ -174,7 +179,7 @@ export class RoutingEngine {
       // process: the map only ever held the verdict of the last dispatch, and a refused connection
       // produced no further dispatch to correct it.
       rateLimitWaitMs: new Map(
-        input.connections.map((connection) => {
+        connections.map((connection) => {
           const candidate: RouteCandidate = {
             providerId: connection.providerId,
             connectionId: connection.id,
