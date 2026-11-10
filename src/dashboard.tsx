@@ -3,6 +3,16 @@ import DashboardApp from './dashboardApp';
 import { ToastProvider } from './components/Toast';
 import './index.css';
 
+// Apply the reduced-motion preference before the first paint of the dashboard, not only when the
+// Settings page happens to be opened.
+try {
+  if (localStorage.getItem('omnihilbras-reduce-motion') === 'true') {
+    document.documentElement.classList.add('reduce-motion');
+  }
+} catch {
+  // Storage unavailable; the CSS media query still applies.
+}
+
 const root = document.getElementById('root');
 if (!root) throw new Error('#root element missing');
 

@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 2.6.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 2.7.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -592,6 +592,20 @@ connections with their provider credentials, provider strategies and the API-key
 Import replaces all of them and requires an explicit confirmation; a wrong passphrase or damaged
 envelope is refused before anything changes. The passphrase is never stored, and API keys are exported
 as hashes — they keep working after import but cannot be shown again.
+
+**Settings** is workable, not a mirror of `.env.example`: theme and reduced motion are saved in the
+browser; the desktop app persists close-to-tray, start-gateway-on-launch, update-check-on-launch and
+the gateway port (changing the port restarts the gateway); API-key enforcement is toggled through the
+gateway; the resolved startup configuration is shown read-only alongside data/recovery shortcuts.
+
+**Updates** are checked against the signed GitHub release feed on launch and from Settings/About. The
+banner offers Download and Install-and-restart where the platform can replace itself (Windows NSIS,
+signed macOS). A `.deb` cannot, so Linux gets the release page and the reason. A skipped or failed
+check is reported as such.
+
+Route changes replay the 420 ms entrance animation by restarting the class on the existing wrapper;
+the page is not remounted, so its state and effects survive. `prefers-reduced-motion` and the in-app
+Reduce motion setting both disable it.
 
 The renderer never holds the dashboard token and never calls `127.0.0.1` directly. Requests, chat
 streams and the log stream cross a narrow preload bridge (`desktop/preload.cjs`); main attaches the

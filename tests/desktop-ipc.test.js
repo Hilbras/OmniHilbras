@@ -86,7 +86,7 @@ test('updates are checked only by a packaged build, and a skip is never "current
   const pkg = JSON.parse(read('./package.json'));
   assert.match(main, /async function checkForUpdates/, 'there is no update check');
   assert.match(main, /if \(!app\.isPackaged\)/, 'a development build attempts an update check');
-  assert.match(main, /status: 'unavailable'/, 'a failed check is not reported honestly');
+  assert.match(main, /status: 'error'/, 'a failed check is not reported honestly');
   assert.match(main, /Update check skipped/, 'a skipped check is not logged');
   assert.equal(pkg.build.publish?.[0]?.provider, 'github', 'there is no update feed');
 });
@@ -101,6 +101,18 @@ test('packaging targets and the desktop CI matrix cover the three platforms', ()
     assert.match(workflow, new RegExp(os), `desktop CI does not build ${os}`);
   }
   assert.match(workflow, /app:smoke/, 'desktop CI does not smoke the app');
+});
+
+test('desktop settings are persisted and actually applied', () => {
+  const main = read('./desktop/main.mjs');
+  const supervisor = read('./desktop/supervisor.mjs');
+  assert.match(main, /settings:set/, 'no settings write path');
+  assert.match(main, /appSettings\(\)\.closeToTray/, 'close-to-tray is not read when the window closes');
+  assert.match(main, /appSettings\(\)\.autoStartGateway/, 'start-on-launch is not read');
+  assert.match(main, /appSettings\(\)\.checkUpdatesOnLaunch/, 'update-check-on-launch is not read');
+  assert.match(main, /gateway\.setPort/, 'the gateway port cannot change');
+  assert.match(supervisor, /setPort\(port\)/, 'the supervisor has no port setter');
+  assert.match(main, /await gateway\.restart\(\)/, 'a port change does not restart the gateway');
 });
 
 test('the app header is the title bar, with its own controls', () => {

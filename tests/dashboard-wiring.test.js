@@ -83,6 +83,37 @@ test('About exists in the web and desktop app, with encrypted backup actions', (
   assert.match(about, /bridge\.diagnostics\.export/, 'the desktop diagnostics action is missing');
 });
 
+test('page changes replay the entrance without remounting the page', () => {
+  const app = read('src/dashboardApp.tsx');
+  assert.match(app, /function PageTransition/, 'the route wrapper does not animate');
+  assert.match(app, /node\.classList\.remove\('page-enter'\)/, 'the animation is not restarted on navigation');
+  assert.match(app, /\[location\.pathname\]/, 'the animation does not depend on the path');
+  assert.doesNotMatch(app, /key=\{location\.pathname\}/, 'the remount key is back');
+});
+
+test('updates can be downloaded and installed from the UI', () => {
+  const main = read('desktop/main.mjs');
+  const preload = read('desktop/preload.cjs');
+  const banner = read('src/components/UpdateBanner.tsx');
+  const settings = read('src/pages/SettingsPage.tsx');
+  assert.match(main, /downloadUpdate/, 'main has no download action');
+  assert.match(main, /quitAndInstall/, 'main has no install action');
+  assert.match(main, /update:state/, 'update progress is not streamed');
+  assert.match(preload, /updates:/, 'the bridge exposes no update API');
+  assert.match(banner, /Install and restart/, 'the banner cannot install');
+  assert.match(settings, /updateAction\('download'\)|updates\.download/, 'Settings cannot download');
+});
+
+test('Settings persists real desktop and gateway choices', () => {
+  const page = read('src/pages/SettingsPage.tsx');
+  assert.match(page, /bridge\.settings\.set/, 'desktop settings are not persisted');
+  assert.match(page, /gatewayPort/, 'the gateway port is not editable');
+  assert.match(page, /closeToTray/, 'close-to-tray is not configurable');
+  assert.match(page, /autoStartGateway/, 'start-on-launch is not configurable');
+  assert.match(page, /setGatewayRequireApiKey/, 'the API-key gate is not editable');
+  assert.match(page, /reduce-motion/, 'reduced motion is not persisted');
+});
+
 test('the logs route is highlighted and titled', () => {
   const app = read('src/dashboardApp.tsx');
   assert.match(app, /startsWith\('\/logs'\)/, 'the Logs route still falls through to Overview');

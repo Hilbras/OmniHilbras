@@ -31,6 +31,18 @@ contextBridge.exposeInMainWorld('omnihilbras', {
     export: () => ipcRenderer.invoke('diagnostics:export'),
   },
   appInfo: () => ipcRenderer.invoke('app:info'),
+  settings: {
+    get: () => ipcRenderer.invoke('settings:get'),
+    set: (patch) => ipcRenderer.invoke('settings:set', patch),
+  },
+  updates: {
+    getState: () => ipcRenderer.invoke('update:state'),
+    check: () => ipcRenderer.invoke('update:check'),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install'),
+    openRelease: () => ipcRenderer.invoke('update:open-release'),
+    onState: (callback) => subscribe('update:state', callback),
+  },
   server: {
     getState: () => ipcRenderer.invoke('server:state'),
     start: () => ipcRenderer.invoke('server:start'),

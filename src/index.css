@@ -534,6 +534,16 @@
   }
 }
 
+/* The in-app preference, which overrides the OS setting in either direction. */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
 /* ── Motion ─────────────────────────────────────────────────────────────────────
    One place for the timing, so a hover, a dialog and a list entry feel like the same product.
 

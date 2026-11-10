@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
+import { UpdateBanner } from './UpdateBanner';
 import { WindowControls } from './WindowControls';
 import { FailureNotifications } from './FailureNotifications';
 import { dashboardRoutes } from '../lib/routes';
@@ -293,6 +294,7 @@ export function DashboardShell({
     <div className="dashboard-shell min-h-screen bg-bg text-text">
       {/* App-wide announcement of failed requests; renders nothing itself. */}
       <FailureNotifications />
+      <UpdateBanner />
       {mobileOpen && <button type="button" aria-label="Close dashboard navigation" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] lg:hidden" />}
 
       <div className={`fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>

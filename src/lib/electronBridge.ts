@@ -24,8 +24,15 @@ export type DesktopServerSnapshot = {
   logs: DesktopServerLog[];
 };
 
-export type DesktopLogEvent = {
-  at?: string;
+export type UpdateState = {
+  status: 'idle' | 'checking' | 'available' | 'current' | 'downloading' | 'downloaded' | 'installing' | 'error' | 'skipped';
+  version?: string;
+  percent?: number;
+  reason?: string;
+  canInstall?: boolean;
+};
+
+export type DesktopLogEvent = {  at?: string;
   model?: string;
   providerId?: string;
   connectionId?: string;
@@ -45,6 +52,13 @@ type StreamHandlers = {
   onError: (error: Error) => void;
 };
 
+export type DesktopAppSettings = {
+  closeToTray: boolean;
+  autoStartGateway: boolean;
+  checkUpdatesOnLaunch: boolean;
+  gatewayPort: number;
+};
+
 export type OmniBridge = {
   desktop: true;
   /** The smoke run generates an intentional failure; it must not raise a user-visible toast. */
@@ -62,6 +76,18 @@ export type OmniBridge = {
     export: () => Promise<{ path: string }>;
   };
   appInfo: () => Promise<{ version: string; platform: string; arch: string; packaged: boolean; electron: string; chrome: string; node: string }>;
+  settings: {
+    get: () => Promise<DesktopAppSettings>;
+    set: (patch: Partial<DesktopAppSettings>) => Promise<DesktopAppSettings>;
+  };
+  updates: {
+    getState: () => Promise<UpdateState>;
+    check: () => Promise<UpdateState>;
+    download: () => Promise<UpdateState>;
+    install: () => Promise<void>;
+    openRelease: () => Promise<void>;
+    onState: (callback: (state: UpdateState) => void) => () => void;
+  };
   server: {
     getState: () => Promise<DesktopServerSnapshot>;
     start: () => Promise<DesktopServerSnapshot>;

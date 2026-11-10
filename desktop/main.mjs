@@ -49,6 +49,16 @@ function saveUserConfig(patch) {
 
 const userConfig = readUserConfig();
 const preferredPort = Number(process.env.OMNIHILBRAS_PORT) || Number(userConfig.gatewayPort) || 8787;
+
+function appSettings() {
+  const config = readUserConfig();
+  return {
+    closeToTray: config.closeToTray !== false,
+    autoStartGateway: config.autoStartGateway !== false,
+    checkUpdatesOnLaunch: config.checkUpdatesOnLaunch !== false,
+    gatewayPort: Number(config.gatewayPort) || preferredPort,
+  };
+}
 const logFile = join(app.getPath('userData'), 'logs', 'gateway.log');
 const gateway = createGatewaySupervisor({
   projectRoot,
@@ -140,33 +150,79 @@ function createTray() {
  * check is logged with its reason, never reported as "up to date" — the same rule as a provider
  * health check.
  */
-async function checkForUpdates() {
-  if (!app.isPackaged) {
-    gateway.pushLog('stderr', 'Update check skipped: development build.\n');
-    return { status: 'skipped', reason: 'development build' };
-  }
-  try {
-    const { autoUpdater } = await import('electron-updater');
-    autoUpdater.autoDownload = false;
-    autoUpdater.logger = null;
-    const result = await autoUpdater.checkForUpdates();
-    if (!result?.updateInfo) {
-      gateway.pushLog('stdout', 'Update check completed; the feed reported no update.\n');
-      return { status: 'current' };
-    }
+let updater;
+let updateState = { status: 'idle' };
+
+function setUpdateState(next) {
+  updateState = { ...updateState, ...next };
+  send('update:state', updateState);
+}
+
+async function loadUpdater() {
+  if (updater) return updater;
+  if (!app.isPackaged) return undefined;
+  const { autoUpdater } = await import('electron-updater');
+  autoUpdater.autoDownload = false;
+  autoUpdater.logger = null;
+  autoUpdater.on('checking-for-update', () => setUpdateState({ status: 'checking' }));
+  autoUpdater.on('update-available', (info) => {
+    // A .deb cannot replace itself through electron-updater; Windows NSIS and signed macOS can.
+    const canInstall = process.platform !== 'linux';
+    setUpdateState({ status: 'available', version: info.version, canInstall });
     if (Notification.isSupported()) {
       new Notification({
         title: 'OmniHilbras update available',
-        body: `${result.updateInfo.version} is available. Download it from the release page.`,
+        body: canInstall
+          ? `${info.version} is available. Open About to download it.`
+          : `${info.version} is available. Open the release page to install it.`,
       }).show();
     }
-    gateway.pushLog('stdout', `Update available: ${result.updateInfo.version}.\n`);
-    return { status: 'available', version: result.updateInfo.version };
+    gateway.pushLog('stdout', `Update available: ${info.version}.\n`);
+  });
+  autoUpdater.on('update-not-available', () => setUpdateState({ status: 'current' }));
+  autoUpdater.on('download-progress', (progress) => setUpdateState({ status: 'downloading', percent: Math.round(progress.percent) }));
+  autoUpdater.on('update-downloaded', (info) => setUpdateState({ status: 'downloaded', version: info.version, canInstall: process.platform !== 'linux' }));
+  autoUpdater.on('error', (error) => {
+    const reason = error instanceof Error ? error.message : String(error);
+    gateway.pushLog('stderr', `Update error: ${reason}\n`);
+    setUpdateState({ status: 'error', reason });
+  });
+  updater = autoUpdater;
+  return updater;
+}
+
+async function checkForUpdates(manual = false) {
+  if (!app.isPackaged) {
+    setUpdateState({ status: 'skipped', reason: 'development build' });
+    gateway.pushLog('stderr', 'Update check skipped: development build.\n');
+    return updateState;
+  }
+  try {
+    const active = await loadUpdater();
+    setUpdateState({ status: 'checking' });
+    await active.checkForUpdates();
+    return updateState;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     gateway.pushLog('stderr', `Update check unavailable: ${reason}\n`);
-    return { status: 'unavailable', reason };
+    setUpdateState({ status: 'error', reason });
+    if (manual) throw new Error(reason);
+    return updateState;
   }
+}
+
+async function downloadUpdate() {
+  const active = await loadUpdater();
+  if (!active) throw new Error('Updates are only available in an installed build.');
+  setUpdateState({ status: 'downloading', percent: 0 });
+  await active.downloadUpdate();
+  return updateState;
+}
+
+function installUpdate() {
+  if (!updater || updateState.status !== 'downloaded') throw new Error('No downloaded update is ready to install.');
+  setUpdateState({ status: 'installing' });
+  updater.quitAndInstall();
 }
 
 function send(channel, payload) {
@@ -339,6 +395,35 @@ function wireIpc() {
     chrome: process.versions.chrome,
     node: process.versions.node,
   }));
+  ipcMain.handle('update:state', () => updateState);
+  ipcMain.handle('update:check', () => checkForUpdates(true));
+  ipcMain.handle('update:download', () => downloadUpdate());
+  ipcMain.handle('update:install', () => installUpdate());
+  ipcMain.handle('update:open-release', () => {
+    void shell.openExternal('https://github.com/Hilbras/OmniHilbras/releases/latest');
+  });
+  ipcMain.handle('settings:get', () => appSettings());
+  ipcMain.handle('settings:set', async (_event, patch) => {
+    if (!patch || typeof patch !== 'object') throw new Error('Settings must be an object.');
+    const next = {};
+    for (const key of ['closeToTray', 'autoStartGateway', 'checkUpdatesOnLaunch']) {
+      if (key in patch) {
+        if (typeof patch[key] !== 'boolean') throw new Error(`${key} must be true or false.`);
+        next[key] = patch[key];
+      }
+    }
+    if ('gatewayPort' in patch) {
+      const port = Number(patch.gatewayPort);
+      if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('The gateway port must be between 1024 and 65535.');
+      next.gatewayPort = port;
+    }
+    const portChanged = next.gatewayPort !== undefined && next.gatewayPort !== gateway.port;
+    saveUserConfig(next);
+    if (next.gatewayPort !== undefined) gateway.setPort(next.gatewayPort);
+    if (portChanged && gateway.state === 'running') await gateway.restart();
+    rebuildTrayMenu();
+    return appSettings();
+  });
 
   ipcMain.handle('gateway:request', async (_event, request) => {
     try {
@@ -412,6 +497,11 @@ function createWindow() {
   // Quit item, which sets `quitting` first so this handler does not swallow it.
   window.on('close', (event) => {
     if (quitting) return;
+    if (!appSettings().closeToTray) {
+      quitting = true;
+      app.quit();
+      return;
+    }
     event.preventDefault();
     window.hide();
   });
@@ -500,14 +590,16 @@ if (!locked) {
     wireIpc();
     createWindow();
     createTray();
-    try {
-      await gateway.start();
-    } catch {
-      // The window shows the failed state and offers Restart; a startup failure is not a reason to
-      // quit the app and lose the log that explains it.
+    if (appSettings().autoStartGateway) {
+      try {
+        await gateway.start();
+      } catch {
+        // The window shows the failed state and offers Restart; a startup failure is not a reason to
+        // quit the app and lose the log that explains it.
+      }
     }
     broadcastState();
-    setTimeout(() => { void checkForUpdates(); }, 5_000);
+    if (appSettings().checkUpdatesOnLaunch) setTimeout(() => { void checkForUpdates(); }, 5_000);
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
       else showWindow();

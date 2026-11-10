@@ -86,6 +86,11 @@ export class GatewaySupervisor extends EventEmitter {
     return this.options.port;
   }
 
+  /** Change the preferred port for the next start. The caller decides whether to restart. */
+  setPort(port) {
+    this.options.port = port;
+  }
+
   snapshot() {
     return {
       state: this.state,

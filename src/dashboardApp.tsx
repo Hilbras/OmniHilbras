@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { DashboardShell } from './components/DashboardShell';
 import { getProviderById } from './data/providers';
 import { ApiKeysContent } from './pages/ApiKeysPage';
@@ -54,6 +55,24 @@ const pageDescriptions = {
   about: 'Version, platform, backup and recovery',
 } as const;
 
+function PageTransition({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    // Replay the entrance animation without remounting the page. The old `key={pathname}` did replay
+    // it, and it also tore down every page on each navigation; removing the key fixed the teardown but
+    // left the animation on the first mount only. Restarting the animation class is the narrow fix.
+    node.classList.remove('page-enter');
+    void node.offsetWidth;
+    node.classList.add('page-enter');
+  }, [location.pathname]);
+
+  return <div ref={ref} className="page-enter">{children}</div>;
+}
+
 function DashboardRoutes() {
   const location = useLocation();
   const isProviderDetail = location.pathname.startsWith('/providers/');
@@ -81,18 +100,12 @@ function DashboardRoutes() {
   return (
     <DashboardShell activePage={activePage} pageTitle={pageTitle} pageDescription={pageDescription}>
       {/*
-        * **No `key={location.pathname}` here.** It was on this div, and it forced React to unmount
-        * and remount the entire page subtree on every navigation — throwing away the DOM, replaying
-        * the 420 ms `.page-enter` animation from opacity 0, and re-running every page effect. The
-        * animation made the remount look intentional; measured, it was a full teardown on each
-        * route change.
-        *
-        * `Routes` already swaps the matched element when the path changes, which is the render that
-        * was wanted. The `.page-enter` class is kept on the wrapper for the *first* mount of the
-        * dashboard, which is the one place an entrance animation reads as a transition rather than
-        * as lag.
+        * **No pathname `key` on the wrapper.** It used to force a full unmount/remount on
+        * every navigation — DOM torn down, page effects re-run. `PageTransition` instead restarts the
+        * `.page-enter` animation on the same wrapper when the path changes, so the transition plays and
+        * the page keeps its state.
         */}
-      <div className="page-enter">
+      <PageTransition>
         <Routes>
           <Route path="/" element={<AppHomeContent />} />
           <Route path="/providers" element={<ProvidersContent />} />
@@ -107,7 +120,7 @@ function DashboardRoutes() {
           <Route path="/about" element={<AboutContent />} />
           <Route path="*" element={<Navigate to="/providers" replace />} />
         </Routes>
-      </div>
+      </PageTransition>
     </DashboardShell>
   );
 }
