@@ -7,6 +7,7 @@
     "name": "Hilbras",
     "email": "opencode@example.com"
   },
+  "desktopName": "omnihilbras.desktop",
   "homepage": "https://github.com/Hilbras/OmniHilbras",
   "packageManager": "pnpm@12.5.1",
   "type": "module",
@@ -77,6 +78,7 @@
     },
     "files": [
       "desktop/**",
+      "brand/**",
       "dist/**",
       "Kernel/API/dist/**",
       "Kernel/SDK/*/dist/**",
@@ -92,7 +94,8 @@
       "icon": "brand/logo-512.png",
       "category": "Development",
       "executableName": "omnihilbras",
-      "maintainer": "Hilbras <opencode@example.com>"
+      "maintainer": "Hilbras <opencode@example.com>",
+      "syncDesktopName": true
     }
   }
 }

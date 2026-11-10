@@ -2,7 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from '
 import { DashboardShell } from './components/DashboardShell';
 import { getProviderById } from './data/providers';
 import { ApiKeysContent } from './pages/ApiKeysPage';
-import { AppHomePage } from './pages/AppHomePage';
+import { AppHomeContent } from './pages/AppHomePage';
 import { ProviderDetailContent, fallbackProvider } from './pages/ProviderDetailPage';
 import { ProvidersContent } from './pages/ProvidersPage';
 import { RoutingContent } from './pages/RoutingPage';
@@ -89,7 +89,7 @@ function DashboardRoutes() {
         */}
       <div className="page-enter">
         <Routes>
-          <Route path="/" element={<AppHomePage />} />
+          <Route path="/" element={<AppHomeContent />} />
           <Route path="/providers" element={<ProvidersContent />} />
           <Route path="/providers/:providerId" element={<ProviderRoute />} />
           {/* The provider page's own usage tab, a real route so it can be linked to and reloaded. */}

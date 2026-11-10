@@ -28,7 +28,7 @@ const STATE_TONE: Record<DesktopServerSnapshot['state'], string> = {
  * two separate pages in the browser dashboard, and the one fact a desktop app must show — "is the
  * server up, and why not" — was on neither.
  */
-export function AppHomePage() {
+export function AppHomeContent() {
   const bridge = desktopBridge();
   const [snapshot, setSnapshot] = useState<DesktopServerSnapshot | undefined>();
   const [processLogs, setProcessLogs] = useState<DesktopServerLog[]>([]);
@@ -108,7 +108,7 @@ export function AppHomePage() {
   }, [events]);
 
   return (
-    <DashboardShell activePage="home" pageTitle="Servers" pageDescription="Gateway lifecycle and live logs">
+    <>
       <div id="app-home" className="space-y-5">
         <section className="card p-5">
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
@@ -199,6 +199,11 @@ export function AppHomePage() {
           )}
         </section>
       </div>
-    </DashboardShell>
+    </>
   );
+}
+
+/** The standalone page wrapper, for a route that does not already own the shell. */
+export function AppHomePage() {
+  return <DashboardShell activePage="home" pageTitle="Servers" pageDescription="Gateway lifecycle and live logs"><AppHomeContent /></DashboardShell>;
 }

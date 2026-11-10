@@ -50,6 +50,19 @@ test('the log stream uses the gateway URL outside development', () => {
   assert.match(client, /`\$\{gatewayBaseUrl\}\/v1\/logs\/stream`/, 'a build still asks the static host for a gateway stream');
 });
 
+test('the Servers route does not nest a second dashboard shell', () => {
+  const app = read('src/dashboardApp.tsx');
+  const home = read('src/pages/AppHomePage.tsx');
+  assert.match(app, /<Route path="\/" element=\{<AppHomeContent \/>\}/, 'the root route still mounts a full page inside the shell');
+  const content = home.slice(home.indexOf('export function AppHomeContent'), home.indexOf('export function AppHomePage'));
+  assert.doesNotMatch(content, /DashboardShell/, 'AppHomeContent wraps its own DashboardShell');
+});
+
+test('the desktop window carries the brand icon', () => {
+  const main = read('desktop/main.mjs');
+  assert.match(main, /icon: join\(projectRoot, 'brand\/logo-512\.png'\)/, 'the window has no icon');
+});
+
 test('the logs route is highlighted and titled', () => {
   const app = read('src/dashboardApp.tsx');
   assert.match(app, /startsWith\('\/logs'\)/, 'the Logs route still falls through to Overview');

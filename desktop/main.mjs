@@ -195,6 +195,7 @@ function createWindow() {
     minHeight: 640,
     backgroundColor: '#0c0b09',
     title: 'OmniHilbras',
+    icon: join(projectRoot, 'brand/logo-512.png'),
     show: false,
     // The dashboard header is the title bar. macOS keeps its traffic lights (hiddenInset); Linux and
     // Windows get a frameless window with the controls rendered in the header, because a native title
@@ -245,8 +246,7 @@ function createWindow() {
           await new Promise((resolve) => setTimeout(resolve, 800));
           return document.querySelector('[aria-label="Live requests"]')?.innerText ?? '';
         })()`);
-        const controls = await window.webContents.executeJavaScript(`(async () => {
-          const minimize = Boolean(document.querySelector('[aria-label="Minimize window"]'));
+        const controls = await window.webContents.executeJavaScript(`(async () => {          const minimize = Boolean(document.querySelector('[aria-label="Minimize window"]'));
           const maximize = Boolean(document.querySelector('[aria-label="Maximize window"], [aria-label="Restore window"]'));
           const draggable = Boolean(document.querySelector('header.window-drag'));
           const before = await window.omnihilbras.windowControls.isMaximized();
@@ -259,7 +259,8 @@ function createWindow() {
           }
           return { minimize, maximize, draggable, before, after };
         })()`);
-        console.log(`SMOKE ${JSON.stringify({ url: window.webContents.getURL(), title, probe, cycle, controls, feed, text, server: gateway.snapshot() })}`);
+        const shells = await window.webContents.executeJavaScript(`({ shells: document.querySelectorAll('.dashboard-shell').length, serversHeadings: [...document.querySelectorAll('h1,h2')].filter((node) => node.textContent === 'Servers').length })`);
+        console.log(`SMOKE ${JSON.stringify({ url: window.webContents.getURL(), title, probe, cycle, controls, shells, feed, text, server: gateway.snapshot() })}`);
       } catch (error) {
         console.log(`SMOKE-ERROR ${error instanceof Error ? error.message : String(error)}`);
       }
