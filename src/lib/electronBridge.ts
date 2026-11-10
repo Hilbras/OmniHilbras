@@ -75,6 +75,9 @@ export type OmniBridge = {
   diagnostics: {
     export: () => Promise<{ path: string }>;
   };
+  backup: {
+    save: (content: string, filename: string) => Promise<{ saved: boolean; path?: string }>;
+  };
   appInfo: () => Promise<{ version: string; platform: string; arch: string; packaged: boolean; electron: string; chrome: string; node: string }>;
   settings: {
     get: () => Promise<DesktopAppSettings>;

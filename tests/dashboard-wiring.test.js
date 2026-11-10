@@ -114,6 +114,14 @@ test('Settings persists real desktop and gateway choices', () => {
   assert.match(page, /reduce-motion/, 'reduced motion is not persisted');
 });
 
+test('backup export/import survives a real file and a wrapped envelope', () => {
+  const about = read('src/pages/AboutPage.tsx');
+  assert.match(about, /bridge\.backup\.save/, 'the desktop export does not use a save dialog');
+  assert.match(about, /setTimeout\(\(\) => URL\.revokeObjectURL/, 'the browser download revokes its blob immediately');
+  assert.match(about, /parsed\.backup \?\? parsed/, 'a wrapped export response is rejected');
+  assert.match(about, /format !== 'omnihilbras-backup'/, 'the file is not checked before it is sent');
+});
+
 test('the logs route is highlighted and titled', () => {
   const app = read('src/dashboardApp.tsx');
   assert.match(app, /startsWith\('\/logs'\)/, 'the Logs route still falls through to Overview');

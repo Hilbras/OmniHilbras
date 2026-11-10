@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, protocol, session, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, protocol, session, shell, Tray } from 'electron';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join, normalize, sep } from 'node:path';
@@ -395,6 +395,17 @@ function wireIpc() {
     chrome: process.versions.chrome,
     node: process.versions.node,
   }));
+  ipcMain.handle('backup:save', async (_event, payload) => {
+    if (!payload || typeof payload.content !== 'string' || typeof payload.filename !== 'string') throw new Error('The backup could not be written.');
+    const { canceled, filePath } = await dialog.showSaveDialog(window, {
+      title: 'Save encrypted backup',
+      defaultPath: join(app.getPath('downloads'), payload.filename),
+      filters: [{ name: 'OmniHilbras backup', extensions: ['json'] }],
+    });
+    if (canceled || !filePath) return { saved: false };
+    writeFileSync(filePath, payload.content, { mode: 0o600 });
+    return { saved: true, path: filePath };
+  });
   ipcMain.handle('update:state', () => updateState);
   ipcMain.handle('update:check', () => checkForUpdates(true));
   ipcMain.handle('update:download', () => downloadUpdate());

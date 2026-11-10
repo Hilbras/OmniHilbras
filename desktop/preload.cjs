@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('omnihilbras', {
   diagnostics: {
     export: () => ipcRenderer.invoke('diagnostics:export'),
   },
+  backup: {
+    save: (content, filename) => ipcRenderer.invoke('backup:save', { content, filename }),
+  },
   appInfo: () => ipcRenderer.invoke('app:info'),
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),

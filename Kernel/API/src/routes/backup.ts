@@ -1,4 +1,5 @@
 import { invalidRequest, isRecord, readJsonBody, readRequiredString, sendJson } from '../core/http.js';
+import { isProviderError } from '../core/index.js';
 import type { RouteContext } from './route-context.js';
 
 const maxBackupBytes = 25 * 1024 * 1024;
@@ -17,8 +18,14 @@ export async function handleBackupRoute(ctx: RouteContext): Promise<boolean> {
     const body = await readJsonBody(request, 64 * 1024);
     if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
     const passphrase = readRequiredString(body, 'passphrase');
-    const backup = await service.exportBackup(passphrase);
-    sendJson(response, 200, { backup }, origin);
+    try {
+      const backup = await service.exportBackup(passphrase);
+      sendJson(response, 200, { backup }, origin);
+    } catch (error) {
+      // A short or bad passphrase is the caller's input, not a server fault.
+      if (isProviderError(error)) throw error;
+      throw invalidRequest(error instanceof Error ? error.message : 'The backup could not be exported.');
+    }
     return true;
   }
 
@@ -30,8 +37,15 @@ export async function handleBackupRoute(ctx: RouteContext): Promise<boolean> {
     }
     const passphrase = readRequiredString(body, 'passphrase');
     if (!isRecord(body.backup)) throw invalidRequest('backup must be an envelope object.');
-    const result = await service.importBackup(passphrase, body.backup);
-    sendJson(response, 200, result, origin);
+    try {
+      const result = await service.importBackup(passphrase, body.backup);
+      sendJson(response, 200, result, origin);
+    } catch (error) {
+      // A wrong passphrase, a damaged envelope, or an unreadable record is a bad request. Leaving it
+      // to the generic handler made it a 500, which the dashboard showed as a gateway failure.
+      if (isProviderError(error)) throw error;
+      throw invalidRequest(error instanceof Error ? error.message : 'The backup could not be imported.');
+    }
     return true;
   }
 

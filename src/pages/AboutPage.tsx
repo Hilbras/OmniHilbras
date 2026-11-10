@@ -8,6 +8,7 @@ import { useGatewayStatus } from '../lib/useGatewayStatus';
 type AppInfo = Awaited<ReturnType<NonNullable<OmniBridge>['appInfo']>>;
 
 function BackupPanel() {
+  const bridge = desktopBridge();
   const [passphrase, setPassphrase] = useState('');
   const [repeat, setRepeat] = useState('');
   const [busy, setBusy] = useState<'export' | 'import' | undefined>();
@@ -29,13 +30,28 @@ function BackupPanel() {
     setMessage('');
     try {
       const backup = await exportGatewayBackup(passphrase);
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const content = JSON.stringify(backup, null, 2);
+      const filename = `omnihilbras-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      if (bridge) {
+        const saved = await bridge.backup.save(content, filename);
+        if (!saved.saved) {
+          setMessage('Export cancelled.');
+          return;
+        }
+        setMessage(`Encrypted backup saved to ${saved.path}. Keep the passphrase separately; it cannot be recovered.`);
+        return;
+      }
+      const blob = new Blob([content], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `omnihilbras-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.download = filename;
+      document.body.append(anchor);
       anchor.click();
-      URL.revokeObjectURL(url);
+      anchor.remove();
+      // Revoking immediately after `click()` can abort the download before it starts, leaving an empty
+      // file that later fails import. Let the browser take the blob first.
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_500);
       setMessage('Encrypted backup downloaded. Keep the passphrase separately; it cannot be recovered.');
     } catch (error) {
       setFailed(true);
@@ -94,13 +110,19 @@ function BackupPanel() {
           const selected = event.target.files?.[0];
           if (!selected) return;
           try {
-            setFile({ name: selected.name, envelope: JSON.parse(await selected.text()) });
+            const parsed = JSON.parse(await selected.text()) as { backup?: unknown; format?: string };
+            // Accept both the envelope itself and an API response that wrapped it in `backup`.
+            const envelope = (parsed.backup ?? parsed) as { format?: string; version?: number };
+            if (envelope?.format !== 'omnihilbras-backup' || envelope.version !== 1) {
+              throw new Error('not an OmniHilbras backup envelope');
+            }
+            setFile({ name: selected.name, envelope });
             setFailed(false);
             setMessage(`Loaded ${selected.name}.`);
-          } catch {
+          } catch (cause) {
             setFile(undefined);
             setFailed(true);
-            setMessage('That file is not a JSON backup.');
+            setMessage(cause instanceof Error ? `That file is not a readable backup: ${cause.message}` : 'That file is not a readable backup.');
           }
         }} className="block w-full text-[11px] text-muted file:mr-3 file:rounded-md file:border file:border-line file:bg-bg-soft file:px-3 file:py-1.5 file:text-[11px] file:text-text" />
         {file && <p className="muted font-mono text-[10px]">selected: {file.name}</p>}
