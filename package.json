@@ -2,6 +2,12 @@
   "name": "omnihilbras-site",
   "private": true,
   "version": "1.99.0",
+  "description": "Provider-neutral local gateway and desktop dashboard",
+  "author": {
+    "name": "Hilbras",
+    "email": "opencode@example.com"
+  },
+  "homepage": "https://github.com/Hilbras/OmniHilbras",
   "packageManager": "pnpm@12.5.1",
   "type": "module",
   "main": "desktop/main.mjs",
@@ -82,10 +88,11 @@
       "node_modules/**"
     ],
     "linux": {
-      "target": ["dir"],
+      "target": ["dir", "deb"],
       "icon": "brand/logo-512.png",
       "category": "Development",
-      "executableName": "omnihilbras"
+      "executableName": "omnihilbras",
+      "maintainer": "Hilbras <opencode@example.com>"
     }
   }
 }
