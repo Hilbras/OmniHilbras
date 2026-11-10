@@ -1047,7 +1047,7 @@ export function toOpenAIChunk(chunk: ChatChunk) {
 
 
 export function toOpenAIModel(model: Model) {
-  return { id: model.id, object: 'model', owned_by: model.providerId, ...(model.displayName ? { display_name: model.displayName } : {}), ...(model.contextWindow ? { context_window: model.contextWindow } : {}) };
+  return { id: model.id, object: 'model', owned_by: model.providerId, ...(model.displayName ? { display_name: model.displayName } : {}), ...(model.contextWindow ? { context_window: model.contextWindow } : {}), ...(model.virtual ? { virtual: true } : {}), ...(model.providers?.length ? { providers: model.providers } : {}) };
 }
 
 

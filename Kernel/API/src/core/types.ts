@@ -220,6 +220,9 @@ export type Model = {
   inputModalities?: readonly string[];
   outputModalities?: readonly string[];
   pricing?: ModelPricing;
+  /** True for an `oh/` virtual model; its provider list is the set of target accounts. */
+  virtual?: boolean;
+  providers?: string[];
 };
 
 export type ProviderCapability =

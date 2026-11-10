@@ -97,7 +97,7 @@ export function isJsonRequest(request: IncomingMessage) {
 
 export function setCors(response: ServerResponse, origin: string | undefined) {
   if (origin) response.setHeader('access-control-allow-origin', origin);
-  response.setHeader('access-control-allow-headers', 'content-type, x-omnihilbras-provider, x-omnihilbras-dashboard-token, x-omnihilbras-token-saver, authorization, x-api-key, x-goog-api-key');
+  response.setHeader('access-control-allow-headers', 'content-type, x-omnihilbras-provider, x-omnihilbras-connection, x-omnihilbras-dashboard-token, x-omnihilbras-token-saver, authorization, x-api-key, x-goog-api-key');
   response.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   response.setHeader('x-content-type-options', 'nosniff');
   response.setHeader('vary', 'Origin');

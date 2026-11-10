@@ -22,7 +22,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.3.1**
+**Current version: 3.4.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
@@ -206,6 +206,41 @@ priority, limits and usage attribution.
   transport. A connection that names a non-`none` pool is refused with `CONFIGURATION_ERROR` rather than sent
   direct. Remove the pool or use a direct account until transport-level egress lands.
 
+## Virtual models
+
+A virtual model is one public ID that routes to several saved accounts. Every virtual ID starts with
+`oh/`; the prefix is required and keeps it distinct from a provider's own model IDs.
+
+```text
+oh/chat
+  → openai     / gpt-4o
+  → openrouter / openai/gpt-4o
+  → ollama     / llama3.3
+```
+
+Create and manage them at `/dashboard/models`. A card shows the public ID, name, enabled state, strategy,
+targets and provider accounts. Disable the card to stop using the alias without deleting its targets.
+
+Strategies:
+
+- **priority** — lower target priority first; usually a primary plus fallbacks.
+- **round-robin** — rotate the enabled targets in order.
+- **fastest** — prefer the account with a measured faster round trip; unmeasured targets come last.
+
+The gateway resolves an enabled `oh/` model before concrete routing. Each target becomes an ordinary route
+candidate with an upstream model override, so account health, credentials, rate limits, concurrency and auth
+failure behave exactly as they do for a concrete model. A disabled virtual model has no candidates; it does not
+silently fall back to a provider model with the same suffix.
+
+```bash
+curl http://127.0.0.1:8787/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"oh/chat","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+`GET /v1/models` lists enabled virtual models with `virtual: true` and their provider list. The management
+routes are `GET/POST /v1/virtual-models` and `PUT/DELETE /v1/virtual-models/:id`.
+
 ## Token saver
 
 The saver is a separate package, not a mode hidden in the adapter:
@@ -256,6 +291,8 @@ document.
 | Route | Page |
 | --- | --- |
 | `/dashboard/providers` | Provider catalog and connections |
+| `/dashboard/models` | Virtual `oh/` models and multi-account targets |
+| `/dashboard/models` | Virtual `oh/` models and their multi-account targets |
 | `/dashboard/providers/:providerId` | Provider overview |
 | `/dashboard/providers/:providerId/usage` | Usage scoped to that provider |
 | `/dashboard/routing` | Routing order and connection state |

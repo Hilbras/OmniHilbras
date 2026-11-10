@@ -13,6 +13,8 @@ export const dashboardRoutes = {
    * pages were pretending to provide. The nav said they were missing; the pages invented them anyway.
    */
   providers: '/providers',
+  /** Virtual models: one `oh/` id across several saved accounts. */
+  models: '/models',
   routing: '/routing',
   keys: '/keys',
   /**

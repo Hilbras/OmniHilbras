@@ -36,6 +36,13 @@ provider are separate accounts, not one account with aliases.
 - `proxyPool` is not enforced by a transport yet. A non-`none` value is refused rather than sent direct;
   pretending the label isolates egress would be worse than the clear error.
 
+## Virtual models
+
+A virtual model is one public `oh/` id with one or more account/upstream-model targets. `GatewayService.planRoute`
+resolves it before concrete model routing; each target is planned as a one-connection decision so health,
+credentials, rate limit and concurrency stay in the routing engine. `RouteCandidate.model` carries the upstream
+model override, and the request executor sends it instead of the alias. No provider sees `oh/...`.
+
 ---
 
 ## Measured state
@@ -56,11 +63,11 @@ that holds is one a machine re-derives.
 
 | Surface | Lines | Provider ids named | Note |
 | --- | --- | --- | --- |
-| `Kernel/API/src/core/routing.ts` | 445 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
+| `Kernel/API/src/core/routing.ts` | 447 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
 | `Kernel/API/src/core/provider-resolver.ts` | 261 | 1 | enforced by a test that greps the file |
-| `Kernel/API/src/core/request-executor.ts` | 727 | **0** | the failover loop, the attempt ledger, the ordering |
+| `Kernel/API/src/core/request-executor.ts` | 728 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 333 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 3111 | 23 | all twenty-three `.onDemand()` registrations, in one constructor |
+| `Kernel/API/src/core/service.ts` | 3185 | 23 | all twenty-three `.onDemand()` registrations, in one constructor |
 | `Kernel/API/src/core/http.ts` | 314 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 776 | 12 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 358 | 1 | one OpenRouter save shortcut, the generic quota route, and the build stamp |
@@ -68,7 +75,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/routes/api-keys.ts` | 74 | **0** | |
 | `Kernel/API/src/routes/status.ts` | 48 | **0** | `/health`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
-| `Kernel/API/src/server.ts` | 316 | **0** | refuses a half-configured Codex OAuth override at startup |
+| `Kernel/API/src/server.ts` | 318 | **0** | refuses a half-configured Codex OAuth override at startup |
 
 **The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
 provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a

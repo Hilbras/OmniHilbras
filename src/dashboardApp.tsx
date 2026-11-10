@@ -8,6 +8,7 @@ import { TokenSaverContent } from './pages/TokenSaverPage';
 import { AppHomeContent } from './pages/AppHomePage';
 import { ProviderDetailContent, fallbackProvider } from './pages/ProviderDetailPage';
 import { ProvidersContent } from './pages/ProvidersPage';
+import { ModelsContent } from './pages/ModelsPage';
 import { RoutingContent } from './pages/RoutingPage';
 import { UsageContent } from './pages/UsagePage';
 import { LogsContent } from './pages/LogsPage';
@@ -117,6 +118,7 @@ function DashboardRoutes() {
           <Route path="/providers/:providerId" element={<ProviderRoute />} />
           {/* The provider page's own usage tab, a real route so it can be linked to and reloaded. */}
           <Route path="/providers/:providerId/usage" element={<ProviderRoute />} />
+          <Route path="/models" element={<ModelsContent />} />
           <Route path="/routing" element={<RoutingContent />} />
           <Route path="/keys" element={<ApiKeysContent />} />
           <Route path="/usage" element={<UsageContent />} />

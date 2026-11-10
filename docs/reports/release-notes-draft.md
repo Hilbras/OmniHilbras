@@ -1,7 +1,14 @@
-# Release notes draft: 3.3.1
+# Release notes draft: 3.4.0
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.4.0 — virtual models
+
+- Added `oh/` virtual models: one public id routed to several saved accounts and upstream models.
+- Added `/dashboard/models` cards and editor, plus the `/v1/virtual-models` management API.
+- Enabled virtual models appear in `/v1/models` with `virtual: true` and providers.
+- Priority, round-robin and fastest strategies; upstream model override; auth isolation and account limits apply per target.
 
 ## 3.3.1 — GitHub star buttons
 

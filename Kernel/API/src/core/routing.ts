@@ -9,6 +9,8 @@ export type RouteCandidate = {
   connectionId: string;
   priority: number;
   resilience: ResilienceSettings;
+  /** Upstream model to send instead of the public model id (a virtual model target). */
+  model?: string;
 };
 
 export type RouteDecision = {

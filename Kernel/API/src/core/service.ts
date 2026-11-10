@@ -47,7 +47,7 @@ import { KiroSessionStore, importKiroRefreshToken, pollKiroSignInWithClaim, star
 import { createChatGptWebDriver } from '../providers/chatgptWeb.js';
 import { createGeminiWebDriver } from '../providers/geminiWeb.js';
 import { createDuckDuckGoWebDriver } from '../providers/duckduckgoWeb.js';
-import { SlidingWindowRateLimiter, bareModelFor, type RouteCandidate } from './routing.js';
+import { SlidingWindowRateLimiter, bareModelFor, type RouteCandidate, type RouteDecision } from './routing.js';
 import { HealthManager } from './health.js';
 import { ConnectionLatencyLedger } from './connection-latency.js';
 import { TokenRenewal, classifyRenewalFailure } from './token-renewal.js';
@@ -60,6 +60,7 @@ import { localDeployment, type ConnectionSecretStore, type DeploymentConfig } fr
 import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
+import { type VirtualModel, type VirtualModelStore } from './virtual-models.js';
 import {
   compressMessages,
   headroomCompress,
@@ -190,6 +191,8 @@ export type GatewayServiceOptions = {
    * accumulating records, and "records nothing" would stop being a state anyone chose.
    */
   usageStore?: UsageStore;
+  /** Virtual models, when this gateway is wired with persistence. Absent means concrete routing only. */
+  virtualModels?: VirtualModelStore;
   /** Consecutive failures before a connection stops receiving traffic. */
   failureThreshold?: number;
   /** How long an ejected connection waits before one probe request. */
@@ -225,6 +228,9 @@ export class GatewayService {
   private readonly connectionLocks = new Map<string, Promise<void>>();
   /** Absent means the gateway records nothing; see `GatewayServiceOptions.usageStore`. */
   private readonly usageStore?: UsageStore;
+  private readonly virtualModelStore?: VirtualModelStore;
+  /** Round-robin position per virtual model; incremented only when a virtual model is routed. */
+  private readonly virtualRotation = new Map<string, number>();
   private readonly gatewayConfig: GatewayConfig | undefined;
   private readonly tokenSaverConfig?: NonNullable<GatewayServiceOptions['tokenSaver']>;
   private readonly tokenSaverStore?: MemoryCcrStore;
@@ -392,6 +398,7 @@ export class GatewayService {
   ) {
     this.deploymentConfig = deployment;
     this.usageStore = options.usageStore ? this.publishingUsage(options.usageStore) : undefined;
+    this.virtualModelStore = options.virtualModels;
     this.gatewayConfig = options.config;
     this.tokenSaverConfig = options.tokenSaver?.enabled ? options.tokenSaver : undefined;
     this.historyTrim = options.historyTrim && options.historyTrim.maxInputTokens > 0 ? options.historyTrim : undefined;
@@ -446,6 +453,7 @@ export class GatewayService {
       resolveAdapter: (providerId, pendingEndpoint) => this.resolveAdapter(providerId, pendingEndpoint),
       activeAdapters: () => this.activeAdapters(),
       defaultProviderId,
+      ...(this.virtualModelStore === undefined ? {} : { virtualModels: this.virtualModelStore }),
     });
     this.timeouts = new TimeoutPolicy();
     this.requests = new RequestExecutor({
@@ -2879,7 +2887,7 @@ export class GatewayService {
     return this.requests.stream(request, explicitProviderId, signal, scope);
   }
 
-  private async planRoute(model: string, explicitProviderId?: string, explicitConnectionId?: string) {
+  private async planRoute(model: string, explicitProviderId?: string, explicitConnectionId?: string): Promise<RouteDecision> {
     const connections = await this.listConnections();
     if (explicitConnectionId !== undefined && !connections.some((connection) => connection.id === explicitConnectionId)) {
       throw new ProviderError('INVALID_REQUEST', 'The requested connection does not exist.', {
@@ -2887,12 +2895,73 @@ export class GatewayService {
         publicMessage: 'The requested connection does not exist.',
       });
     }
+    if (model.startsWith('oh/')) {
+      const virtual = await this.virtualModelStore?.get(model);
+      if (!virtual) {
+        throw new ProviderError('INVALID_REQUEST', `Virtual model "${model}" does not exist.`, {
+          retryable: false,
+          publicMessage: `Virtual model "${model}" does not exist.`,
+        });
+      }
+      if (!virtual.enabled) return { candidates: [], skipped: [] };
+      return this.planVirtual(virtual, connections, explicitProviderId, explicitConnectionId);
+    }
     return this.routing.plan({
       connections,
       model,
       ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
       ...(explicitConnectionId === undefined ? {} : { explicitConnectionId }),
     });
+  }
+
+  /**
+   * Turns virtual targets into ordinary route candidates.
+   *
+   * Each target is planned as a one-connection decision, so health, credential, model presence, rate
+   * limit and balance stay in the routing engine instead of being re-implemented here. The only thing this
+   * adds is the upstream model override, which the request executor sends instead of the `oh/…` id.
+   */
+  private async planVirtual(
+    virtual: VirtualModel,
+    connections: Awaited<ReturnType<GatewayService['listConnections']>>,
+    explicitProviderId?: string,
+    explicitConnectionId?: string,
+  ): Promise<RouteDecision> {
+    const targets = virtual.targets
+      .filter((target) => target.enabled && (explicitConnectionId === undefined || target.connectionId === explicitConnectionId))
+      .sort((left, right) => left.priority - right.priority);
+    let ordered = targets;
+    if (virtual.strategy === 'round-robin' && targets.length > 1) {
+      const offset = (this.virtualRotation.get(virtual.id) ?? 0) % targets.length;
+      this.virtualRotation.set(virtual.id, offset + 1);
+      ordered = [...targets.slice(offset), ...targets.slice(0, offset)];
+    } else if (virtual.strategy === 'fastest') {
+      ordered = [...targets].sort((left, right) => {
+        const a = this.connectionLatency.get(left.connectionId)?.latencyMs ?? Number.POSITIVE_INFINITY;
+        const b = this.connectionLatency.get(right.connectionId)?.latencyMs ?? Number.POSITIVE_INFINITY;
+        return a - b || left.priority - right.priority;
+      });
+    }
+
+    const candidates: RouteCandidate[] = [];
+    const skipped: RouteDecision['skipped'] = [];
+    for (const target of ordered) {
+      const connection = connections.find((entry) => entry.id === target.connectionId);
+      // A target is a claim about a saved account and a model it lists. If either changed, skip it
+      // rather than inventing a route that the adapter cannot serve.
+      if (!connection || !connection.modelIds.includes(target.upstreamModelId)) continue;
+      const single = await this.routing.plan({
+        connections: [{ ...connection, priority: target.priority, modelIds: [target.upstreamModelId] }],
+        model: target.upstreamModelId,
+        ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
+        ...(explicitConnectionId === undefined ? {} : { explicitConnectionId }),
+      });
+      for (const candidate of single.candidates) {
+        candidates.push({ ...candidate, model: target.upstreamModelId, priority: target.priority });
+      }
+      skipped.push(...single.skipped);
+    }
+    return { candidates, skipped };
   }
 
 
@@ -3025,6 +3094,11 @@ export class GatewayService {
    */
   get usage(): UsageStore | undefined {
     return this.usageStore;
+  }
+
+  /** The virtual-model catalog, or `undefined` when this build has no persisted store. */
+  get virtualModels(): VirtualModelStore | undefined {
+    return this.virtualModelStore;
   }
 
   /** Each finished request's record, as it is written, to a listener. Returns how to stop listening. */

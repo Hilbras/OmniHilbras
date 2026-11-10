@@ -38,7 +38,7 @@ import { PAGE_VERSION } from '../lib/pageVersion';
  * it. `tests/marketing-claims.test.js` pins which entries are still disabled, so this comment going stale
  * fails a test rather than misleading the next reader quietly.
  */
-type DashboardPage = 'home' | 'overview' | 'providers' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings' | 'about' | 'token-saver';
+type DashboardPage = 'home' | 'overview' | 'providers' | 'models' | 'routing' | 'keys' | 'usage' | 'logs' | 'settings' | 'about' | 'token-saver';
 
 type SidebarItem = {
   label: string;
@@ -56,6 +56,7 @@ const primaryItems: SidebarItem[] = [
   // rather than pretending to control a process this window does not own.
   { label: 'Servers', icon: Server, to: '/', page: 'home' },
   { label: 'Providers', icon: Network, to: dashboardRoutes.providers, page: 'providers' },
+  { label: 'Models', icon: Boxes, to: dashboardRoutes.models, page: 'models' },
   { label: 'Routing', icon: RouteIcon, to: dashboardRoutes.routing, page: 'routing' },
   { label: 'API keys', icon: KeyRound, to: dashboardRoutes.keys, page: 'keys' },
 ];

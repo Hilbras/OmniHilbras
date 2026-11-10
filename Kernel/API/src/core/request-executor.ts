@@ -179,9 +179,10 @@ export class RequestExecutor {
    */
   private async dispatchChat(candidate: RouteCandidate, request: ChatRequest, deadline: AbortSignal | undefined, scope: RequestScope | undefined): Promise<ChatResponse> {
     try {
-      return await this.deps.chat(candidate.providerId, request, deadline, scope, candidate.connectionId);
+      const effective = candidate.model ? { ...request, model: candidate.model } : request;
+      return await this.deps.chat(candidate.providerId, effective, deadline, scope, candidate.connectionId);
     } catch (error) {
-      if (error instanceof ProviderError && error.code === 'RATE_LIMITED' && !(typeof error.details === 'object' && error.details !== null && (error.details as { concurrencyLimited?: unknown }).concurrencyLimited === true)) this.noteModelRateLimit(candidate.providerId, request.model, error, candidate.connectionId);
+      if (error instanceof ProviderError && error.code === 'RATE_LIMITED' && !(typeof error.details === 'object' && error.details !== null && (error.details as { concurrencyLimited?: unknown }).concurrencyLimited === true)) this.noteModelRateLimit(candidate.providerId, candidate.model ?? request.model, error, candidate.connectionId);
       throw error;
     }
   }
@@ -216,7 +217,7 @@ export class RequestExecutor {
       lastError: undefined,
       signal,
       scope,
-      dispatch: (candidate, deadline) => this.deps.embed(candidate.providerId, request, deadline, scope, candidate.connectionId),
+      dispatch: (candidate, deadline) => this.deps.embed(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
     });
   }
 

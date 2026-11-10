@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.3.1
+**Status:** Current — release 3.4.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -299,6 +299,15 @@ The first local gateway exposes:
 - `POST /v1/backup/import` — body `{"passphrase": "...", "backup": envelope, "confirmReplace": true}`.
   **Replaces** every connection, strategy and API key. Returns counts. A missing confirmation is a 400;
   a wrong passphrase or a damaged envelope is refused before anything is changed. Management route.
+- `GET /v1/virtual-models` — every persisted virtual model, enabled or disabled. A virtual model id must
+  start with `oh/`; a target names a saved connection and an upstream model that connection lists.
+- `POST /v1/virtual-models` — create. Body `{id, name?, enabled?, strategy?, targets[]}`; `strategy` is
+  `priority`, `round-robin` or `fastest`. Returns `201 {model}`.
+- `PUT /v1/virtual-models/:id` — replace the model. The path id and body id must match; `PATCH` is accepted
+  as the same operation. An enabled model needs at least one enabled target.
+- `DELETE /v1/virtual-models/:id` — remove the mapping; `404` when it does not exist.
+- `GET /v1/models` includes every enabled virtual model with `virtual: true` and `providers`, the target
+  provider ids. The upstream model override is a routing detail; clients send the `oh/` id.
 - `GET /v1/token-saver/stats?period=` — per-saver and per-provider savings from usage records:
   requests with telemetry vs with savings, estimated tokens/bytes saved, ran/skipped counts per saver,
   and provider cache read/write. A request with no compression telemetry is counted but not attributed to

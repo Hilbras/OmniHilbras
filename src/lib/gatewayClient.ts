@@ -216,6 +216,62 @@ export function onGatewayReachabilityChange(listener: (reachable: boolean) => vo
   };
 }
 
+export type GatewayVirtualModelTarget = {
+  connectionId: string;
+  upstreamModelId: string;
+  priority: number;
+  enabled: boolean;
+};
+
+export type GatewayVirtualModel = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  strategy: 'priority' | 'round-robin' | 'fastest';
+  targets: GatewayVirtualModelTarget[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export async function listGatewayVirtualModels(signal?: AbortSignal) {
+  const response = await requestJson<{ data: GatewayVirtualModel[] }>('/v1/virtual-models', { signal });
+  return response.data;
+}
+
+export async function saveGatewayVirtualModel(input: {
+  id: string;
+  name?: string;
+  enabled?: boolean;
+  strategy?: GatewayVirtualModel['strategy'];
+  targets: Array<{ connectionId: string; upstreamModelId: string; priority?: number; enabled?: boolean }>;
+}, signal?: AbortSignal) {
+  return requestJson<{ model: GatewayVirtualModel }>('/v1/virtual-models', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    signal,
+  });
+}
+
+export async function updateGatewayVirtualModel(id: string, input: {
+  name?: string;
+  enabled?: boolean;
+  strategy?: GatewayVirtualModel['strategy'];
+  targets: Array<{ connectionId: string; upstreamModelId: string; priority?: number; enabled?: boolean }>;
+}, signal?: AbortSignal) {
+  return requestJson<{ model: GatewayVirtualModel }>(`/v1/virtual-models/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ id, ...input }),
+    signal,
+  });
+}
+
+export async function removeGatewayVirtualModel(id: string, signal?: AbortSignal) {
+  return requestJson<{ deleted: boolean; id: string }>(`/v1/virtual-models/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    signal,
+  });
+}
+
 export async function listGatewayConnections(signal?: AbortSignal) {
   const body = await requestJson<{ object: 'list'; data: GatewayConnection[] }>('/v1/connections', { signal });
   return body.data;

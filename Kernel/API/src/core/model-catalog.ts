@@ -4,6 +4,7 @@ import { notSupported } from './capability.js';
 import type { ConnectionManager } from './connection-manager.js';
 import type { CredentialManager } from './credential-manager.js';
 import { sharedCatalogProviders } from './provider-alias.js';
+import type { VirtualModelStore } from './virtual-models.js';
 
 /**
  * What this gateway serves, and which provider serves what.
@@ -33,6 +34,8 @@ export type ModelCatalogDeps = {
   activeAdapters: () => Promise<ProviderAdapter[]>;
   /** The provider to fall back to when a model id identifies nothing. */
   defaultProviderId: string;
+  /** Enabled virtual models; they are public model ids too. */
+  virtualModels?: VirtualModelStore;
 };
 
 export type GatewayModelList = {
@@ -74,6 +77,25 @@ export class ModelCatalog {
         } catch (error) {
           // Named, not swallowed: a tier that could not be read must not look like a tier that is empty.
           unavailable.push({ providerId: aliasId, code: isProviderError(error) ? error.code : 'PROVIDER_REQUEST_FAILED' });
+        }
+      }
+      const virtualModels = await this.deps.virtualModels?.list();
+      if (virtualModels) {
+        const providerByConnection = new Map(connections.map((connection) => [connection.id, connection.providerId]));
+        for (const virtual of virtualModels) {
+          if (!virtual.enabled) continue;
+          const providers = [...new Set(virtual.targets
+            .filter((target) => target.enabled)
+            .map((target) => providerByConnection.get(target.connectionId))
+            .filter((providerId): providerId is string => Boolean(providerId)))];
+          models.push({
+            id: virtual.id,
+            modelId: virtual.id,
+            providerId: 'virtual',
+            displayName: virtual.name,
+            virtual: true,
+            ...(providers.length ? { providers } : {}),
+          });
         }
       }
       return { models, unavailable };
