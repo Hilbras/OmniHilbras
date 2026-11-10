@@ -2583,6 +2583,9 @@ model ID. That constrains two behaviors:
   enabled credentialed connection, then the `openai` default. Resolution is
   provider-neutral and reads connection metadata only; it never inspects a model
   name for provider hints.
+- **Account selection.** `x-omnihilbras-connection` (or the `connection` body field) narrows routing
+  to one saved account. An unknown id is `INVALID_REQUEST`; a disabled or credential-less account
+  yields no route. The chain never falls back to another account when one was named.
 - **Long tool results.** A tool message longer than 250 lines is sent to the
   provider with its first 120 and last 60 lines and a marker giving the omitted
   count. A tool message marked `is_error: true`, and any non-text content, is
