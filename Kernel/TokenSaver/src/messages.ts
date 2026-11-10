@@ -3,11 +3,13 @@ import { compressCode } from './code.js';
 import { detectContentKind } from './detect.js';
 import { compressJsonText } from './json.js';
 import { compressLog } from './logs.js';
+import { compressRtk } from './rtk.js';
 import { compressText } from './text.js';
 import type {
   CcrStore,
   CompressionResult,
   CompressionStats,
+  ContentKind,
   ContentPart,
   RouteStats,
   SavableMessage,
@@ -39,7 +41,16 @@ function queryFrom(messages: readonly SavableMessage[]): string {
   return '';
 }
 
-function compressString(text: string, options: Required<Omit<TokenSaverOptions, 'ccr'>>, ccr: CcrStore, query: string) {
+type CompressedString = { result: string; kind: ContentKind; strategy: string };
+
+function compressString(
+  text: string,
+  options: Required<Omit<TokenSaverOptions, 'ccr'>>,
+  ccr: CcrStore,
+  query: string,
+  allowRtk: boolean,
+  toolName: string | undefined,
+): CompressedString | undefined {
   if (text.length < options.minChars) return undefined;
   const kind = detectContentKind(text);
   if (kind === 'json') {
@@ -49,19 +60,23 @@ function compressString(text: string, options: Required<Omit<TokenSaverOptions, 
       ccr,
       reversible: options.reversible,
     });
-    return result ? { result, kind } : undefined;
+    return result ? { result, kind, strategy: kind } : undefined;
+  }
+  if (allowRtk) {
+    const rtk = compressRtk(text, { toolName, ccr, reversible: options.reversible });
+    if (rtk) return { result: rtk.result, kind: rtk.kind, strategy: rtk.filter };
   }
   if (kind === 'log') {
     const result = compressLog(text, { targetRatio: options.targetRatio, ccr, reversible: options.reversible });
-    return result ? { result, kind } : undefined;
+    return result ? { result, kind, strategy: kind } : undefined;
   }
   if (kind === 'code') {
     if (!options.compressCode) return undefined;
     const result = compressCode(text, { targetRatio: options.targetRatio, ccr, reversible: options.reversible });
-    return result ? { result, kind } : undefined;
+    return result ? { result, kind, strategy: kind } : undefined;
   }
   const result = compressText(text, { targetRatio: options.targetRatio, ccr, reversible: options.reversible, query });
-  return result ? { result, kind } : undefined;
+  return result ? { result, kind, strategy: kind } : undefined;
 }
 
 /**
@@ -87,14 +102,21 @@ export function compressMessages(
       index < protectedFrom
       && (message.role === 'tool' || message.role === 'assistant' || (message.role === 'system' && config.compressSystem) || (message.role === 'user' && config.compressUsers));
     if (!shouldCompress) return message;
+    const allowRtk = message.role === 'tool' || message.role === 'assistant';
+    const toolName = typeof message.name === 'string' ? message.name : undefined;
 
     const compressPart = (part: string): string => {
       const before = estimateTokens(part);
-      const compressed = compressString(part, config, ccr, query);
+      const compressed = compressString(part, config, ccr, query, allowRtk, toolName);
       if (!compressed) return part;
       const after = estimateTokens(compressed.result);
       if (after >= before) return part;
-      routes.push({ kind: compressed.kind, originalTokens: before, compressedTokens: after, strategy: compressed.kind, ...(compressed.kind === 'json' ? { ccrId: undefined } : {}) });
+      routes.push({
+        kind: compressed.kind,
+        originalTokens: before,
+        compressedTokens: after,
+        strategy: compressed.strategy,
+      });
       return compressed.result;
     };
 

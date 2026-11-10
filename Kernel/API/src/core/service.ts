@@ -2473,12 +2473,13 @@ export class GatewayService {
         const afterBytes = Buffer.byteLength(JSON.stringify(compressed.value), 'utf8');
         const savers: SaverTelemetry['savers'] = {};
         for (const route of compressed.stats.routes) {
-          const entry = savers[route.kind] ?? { kind: route.kind, requests: 0, tokensSaved: 0, bytesBefore: 0, bytesAfter: 0 };
+          const id = route.strategy || route.kind;
+          const entry = savers[id] ?? { kind: route.kind, requests: 0, tokensSaved: 0, bytesBefore: 0, bytesAfter: 0 };
           entry.requests += 1;
           entry.tokensSaved += Math.max(0, route.originalTokens - route.compressedTokens);
           entry.bytesBefore += beforeBytes;
           entry.bytesAfter += afterBytes;
-          savers[route.kind] = entry;
+          savers[id] = entry;
         }
         const telemetry: SaverTelemetry = {
           totalTokensSaved: compressed.stats.savedTokens,

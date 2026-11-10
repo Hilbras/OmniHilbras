@@ -612,6 +612,12 @@ discarded. `estimateTokens` is a bytes/4 estimate, not a provider tokenizer.
 
 `pnpm test:token-saver` runs its suite. Design and limits: `Kernel/TokenSaver/README.md`.
 
+Specialized tool-output filters are ported from the old RTK pipeline: git diff/status/log, build
+output, grep, find, tree, ls, search-list, read-numbered, dedup-log and smart-truncate. They run
+ahead of the generic compressors for tool/assistant content, with the old caps (10 MiB raw,
+500-byte minimum, per-filter row limits) and CCR retrieval for every lossy rewrite. JSON keeps the
+JSON-aware path.
+
 Gateway integration is opt-in:
 
 ```bash

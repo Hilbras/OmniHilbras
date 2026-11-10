@@ -30,13 +30,13 @@ provider-neutral adapters). Old code is reference, not a drop-in: paths and prov
 
 ## Phase 2 — RTK specialized filters
 
-- [ ] Port into `Kernel/TokenSaver`: git diff, git status, git log, build output, grep, find, tree,
+- [x] Port into `Kernel/TokenSaver`: git diff, git status, git log, build output, grep, find, tree,
       ls, search-list, read-numbered, dedup-log, smart-truncate.
-- [ ] Port autodetect with the old 1024-byte detection window, 500-byte minimum, 10 MiB raw cap and
+- [x] Port autodetect with the old 1024-byte detection window, 500-byte minimum, 10 MiB raw cap and
       per-filter caps (10 matches/file, 10 files/dir, 20 dirs, 200 log/tree lines).
-- [ ] Route them ahead of the generic JSON/log/text compressors; keep JSON-aware behaviour for JSON.
-- [ ] Keep CCR retrieval for every lossy filter.
-- [ ] Tests: one fixture per filter, autodetect ordering, caps, retrieval, no-op on non-matching input.
+- [x] Route them ahead of the generic JSON/log/text compressors; keep JSON-aware behaviour for JSON.
+- [x] Keep CCR retrieval for every lossy filter.
+- [x] Tests: one fixture per filter, autodetect ordering, caps, retrieval, no-op on non-matching input.
 
 ## Phase 3 — Output and context limits
 
