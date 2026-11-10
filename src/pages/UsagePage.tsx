@@ -495,7 +495,7 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
             />
           </section>
 
-          <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="Tokens and cost">
+          <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Tokens and cost">
             {/* The dash is the point. A provider that reports no usage is not a provider that used zero, so
                 both token figures are gated on `tokensUnmeasured` rather than printed as `0`. */}
             <SummaryCard
@@ -509,6 +509,13 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
               label="Output tokens"
               value={totals?.tokensUnmeasured ? '—' : formatTokens(totals?.outputTokens)}
               detail={totals?.tokensUnmeasured ? 'no provider reported usage' : 'measured'}
+              icon={Cpu}
+              tone="border-line bg-bg-soft text-text"
+            />
+            <SummaryCard
+              label="Cached input"
+              value={totals?.tokensUnmeasured ? '—' : `${formatTokens(totals?.cacheReadTokens ?? 0)} read / ${formatTokens(totals?.cacheWriteTokens ?? 0)} write`}
+              detail={totals?.tokensUnmeasured ? 'no provider reported usage' : 'billed at cache rates'}
               icon={Cpu}
               tone="border-line bg-bg-soft text-text"
             />

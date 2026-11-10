@@ -83,6 +83,12 @@ export type TokenUsage = {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  /** Whether inputTokens already includes cache read/write. Omitted means true. */
+  cacheTokensIncluded?: boolean;
+  reasoningTokens?: number;
+  estimated?: boolean;
 };
 
 /**

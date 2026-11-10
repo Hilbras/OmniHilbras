@@ -76,7 +76,7 @@ type ClaudeOrOpenAiResponse = {
     message?: { role?: string; content?: string | null };
     finish_reason?: string | null;
   }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; input_tokens?: number; output_tokens?: number };
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; input_tokens?: number; output_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; completion_tokens_details?: { reasoning_tokens?: number } };
 };
 
 type StreamChunkShape = {
@@ -88,8 +88,8 @@ type StreamChunkShape = {
   index?: number;
   delta?: { type?: string; text?: string; stop_reason?: string | null; partial_json?: string };
   content_block?: { type?: string; id?: string; name?: string; input?: unknown };
-  message?: { usage?: { input_tokens?: number; output_tokens?: number } };
-  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; input_tokens?: number; output_tokens?: number };
+  message?: { usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } };
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; completion_tokens_details?: { reasoning_tokens?: number } };
   choices?: Array<{
     delta?: { role?: string; content?: string | null; tool_calls?: Array<{ index?: number; id?: string; type?: string; function?: { name?: string; arguments?: string } }> };
     finish_reason?: string | null;
@@ -558,13 +558,19 @@ function normalizeClaudeStopReason(reason: string | null | undefined): FinishRea
   return 'stop';
 }
 
-function normalizeUsage(usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; input_tokens?: number; output_tokens?: number }): TokenUsage {
+function normalizeUsage(usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; completion_tokens_details?: { reasoning_tokens?: number } }): TokenUsage {
   const input = typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : usage.input_tokens;
   const output = typeof usage.completion_tokens === 'number' ? usage.completion_tokens : usage.output_tokens;
+  const cacheRead = usage.cache_read_input_tokens === undefined ? usage.prompt_tokens_details?.cached_tokens : usage.cache_read_input_tokens;
+  const cacheWrite = usage.cache_creation_input_tokens;
   return {
     ...(typeof input === 'number' ? { inputTokens: input } : {}),
     ...(typeof output === 'number' ? { outputTokens: output } : {}),
     ...(typeof usage.total_tokens === 'number' ? { totalTokens: usage.total_tokens } : {}),
+    ...(cacheRead === undefined ? {} : { cacheReadTokens: cacheRead }),
+    ...(cacheWrite === undefined ? {} : { cacheWriteTokens: cacheWrite }),
+    ...(usage.cache_read_input_tokens === undefined && usage.cache_creation_input_tokens === undefined ? {} : { cacheTokensIncluded: false }),
+    ...(usage.completion_tokens_details?.reasoning_tokens === undefined ? {} : { reasoningTokens: usage.completion_tokens_details.reasoning_tokens }),
   };
 }
 

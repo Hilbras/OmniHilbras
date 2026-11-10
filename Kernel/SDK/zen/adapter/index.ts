@@ -234,7 +234,7 @@ type ResponsesPayload = {
   }>;
   output_text?: string;
   incomplete_details?: { reason?: string } | null;
-  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; input_tokens_details?: { cached_tokens?: number }; output_tokens_details?: { reasoning_tokens?: number } };
 };
 
 function responsesFinishReason(payload: ResponsesPayload): FinishReason {
@@ -277,6 +277,8 @@ function responsesUsage(usage: ResponsesPayload['usage']): TokenUsage | undefine
     ...(usage.input_tokens === undefined ? {} : { inputTokens: usage.input_tokens }),
     ...(usage.output_tokens === undefined ? {} : { outputTokens: usage.output_tokens }),
     ...(usage.total_tokens === undefined ? {} : { totalTokens: usage.total_tokens }),
+    ...(usage.input_tokens_details?.cached_tokens === undefined ? {} : { cacheReadTokens: usage.input_tokens_details.cached_tokens }),
+    ...(usage.output_tokens_details?.reasoning_tokens === undefined ? {} : { reasoningTokens: usage.output_tokens_details.reasoning_tokens }),
   };
 }
 
@@ -289,7 +291,7 @@ type MessagesPayload = {
   model?: string;
   content?: Array<{ type?: string; text?: string; id?: string; name?: string; input?: unknown }>;
   stop_reason?: string;
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
 };
 
 function messagesFinishReason(reason: string | undefined): FinishReason {
@@ -326,7 +328,13 @@ function toMessagesChatResponse(payload: MessagesPayload, requestedModel: string
     message: { role: 'assistant', content: text },
     finishReason: messagesFinishReason(payload.stop_reason),
     usage: payload.usage
-      ? { inputTokens: payload.usage.input_tokens, outputTokens: payload.usage.output_tokens }
+      ? {
+        inputTokens: payload.usage.input_tokens,
+        outputTokens: payload.usage.output_tokens,
+        ...(payload.usage.cache_read_input_tokens === undefined ? {} : { cacheReadTokens: payload.usage.cache_read_input_tokens }),
+        ...(payload.usage.cache_creation_input_tokens === undefined ? {} : { cacheWriteTokens: payload.usage.cache_creation_input_tokens }),
+        ...(payload.usage.cache_read_input_tokens === undefined && payload.usage.cache_creation_input_tokens === undefined ? {} : { cacheTokensIncluded: false }),
+      }
       : undefined,
   };
 }

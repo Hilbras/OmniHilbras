@@ -164,7 +164,7 @@ function refusalReason(data: TokenRefusal | undefined): string | undefined {
   return `${reason}${code}`;
 }
 
-type CodexEvent = { type?: string; response?: { id?: string; model?: string; status?: string; incomplete_details?: { reason?: string }; usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number }; error?: { message?: string } }; item_id?: string; delta?: string; text?: string; error?: { message?: string }; };
+type CodexEvent = { type?: string; response?: { id?: string; model?: string; status?: string; incomplete_details?: { reason?: string }; usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; input_tokens_details?: { cached_tokens?: number }; output_tokens_details?: { reasoning_tokens?: number } }; error?: { message?: string } }; item_id?: string; delta?: string; text?: string; error?: { message?: string }; };
 
 export function codexAuthorizeUrl(input: { clientId: string; redirectUri: string; state: string; codeChallenge: string }) {
   const url = new URL(CODEX.authorizationUrl);
@@ -437,9 +437,9 @@ function tokenCredential(data: TokenPayload, now = Date.now(), fallbackRefreshTo
   return { type: 'oauth', value: data.access_token, ...((data.refresh_token ?? fallbackRefreshToken) ? { refreshToken: data.refresh_token ?? fallbackRefreshToken } : {}), ...(typeof data.expires_in === 'number' ? { expiresAt: new Date(now + data.expires_in * 1000).toISOString() } : {}), ...(accountId ? { accountId } : {}) };
 }
 
-function usageFrom(usage: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | undefined): TokenUsage | undefined {
+function usageFrom(usage: { input_tokens?: number; output_tokens?: number; total_tokens?: number; input_tokens_details?: { cached_tokens?: number }; output_tokens_details?: { reasoning_tokens?: number } } | undefined): TokenUsage | undefined {
   if (!usage) return undefined;
-  return { ...(usage.input_tokens === undefined ? {} : { inputTokens: usage.input_tokens }), ...(usage.output_tokens === undefined ? {} : { outputTokens: usage.output_tokens }), ...(usage.total_tokens === undefined ? {} : { totalTokens: usage.total_tokens }) };
+  return { ...(usage.input_tokens === undefined ? {} : { inputTokens: usage.input_tokens }), ...(usage.output_tokens === undefined ? {} : { outputTokens: usage.output_tokens }), ...(usage.total_tokens === undefined ? {} : { totalTokens: usage.total_tokens }), ...(usage.input_tokens_details?.cached_tokens === undefined ? {} : { cacheReadTokens: usage.input_tokens_details.cached_tokens }), ...(usage.output_tokens_details?.reasoning_tokens === undefined ? {} : { reasoningTokens: usage.output_tokens_details.reasoning_tokens }) };
 }
 
 export function codexFinishReason(status: string | undefined): FinishReason { return status === 'incomplete' ? 'length' : status === 'completed' ? 'stop' : 'other'; }

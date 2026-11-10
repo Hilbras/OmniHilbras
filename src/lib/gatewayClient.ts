@@ -843,6 +843,10 @@ export type GatewayUsageRecord = {
   latencyMs: number;
   inputTokens?: number;
   outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
+  tokensEstimated?: boolean;
 };
 
 export type GatewayUsageTotals = {
@@ -852,6 +856,9 @@ export type GatewayUsageTotals = {
   cancelled: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
   /**
    * True when **no** record carried token counts.
    *
@@ -877,6 +884,9 @@ export type GatewayUsageGroup = {
   cancelled: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
   /** Records in this group that reported tokens. Zero means the sums are an absence, not a measured zero. */
   tokensMeasured: number;
   costUsd: number;

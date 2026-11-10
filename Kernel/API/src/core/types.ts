@@ -89,6 +89,8 @@ export type TokenUsage = {
   cacheWriteTokens?: number;
   /** Provider-reported reasoning/thinking tokens, when separate from output. */
   reasoningTokens?: number;
+  /** Whether `inputTokens` already includes cache read/write. Omitted means true. */
+  cacheTokensIncluded?: boolean;
   /** True when the gateway had to estimate rather than receive a provider measurement. */
   estimated?: boolean;
 };

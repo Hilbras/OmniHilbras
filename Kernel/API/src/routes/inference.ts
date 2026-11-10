@@ -6,7 +6,7 @@
  * the wrong thing.
  */
 
-import { ProviderError, isLoopbackHostname, type ProviderId, isPrivateHostname, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type MessageContent, type Model, type ToolCall, type ToolDefinition } from '../core/index.js';
+import { ProviderError, canonicalizeUsage, isLoopbackHostname, type ProviderId, isPrivateHostname, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type MessageContent, type Model, type ToolCall, type ToolDefinition } from '../core/index.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
 import { attachRequestId, type RequestScope } from '../core/request-context.js';
@@ -406,6 +406,9 @@ function recordUsage(
 ): void {
   const store = service.usage;
   if (!store) return;
+  // One convention at the recording boundary: input includes cache, cache read/write are subsets. Adapters
+  // report their provider's own shape; the store must not.
+  const usage = canonicalizeUsage(input.usage);
   // **No requirement that a provider was reached.** The first version returned early when `providerId` was
   // missing, which silently dropped every request that ended before a route was tried — a client that
   // disconnected during startup, or a request nothing could serve. Measured: 30 such requests produced **zero**
@@ -423,12 +426,12 @@ function recordUsage(
       attempts: input.attempts,
       latencyMs: Math.max(0, Math.round(input.latencyMs)),
       ...(input.errorCode ? { errorCode: input.errorCode } : {}),
-      ...(input.usage?.inputTokens !== undefined ? { inputTokens: input.usage.inputTokens } : {}),
-      ...(input.usage?.outputTokens !== undefined ? { outputTokens: input.usage.outputTokens } : {}),
-      ...(input.usage?.cacheReadTokens !== undefined ? { cacheReadTokens: input.usage.cacheReadTokens } : {}),
-      ...(input.usage?.cacheWriteTokens !== undefined ? { cacheWriteTokens: input.usage.cacheWriteTokens } : {}),
-      ...(input.usage?.reasoningTokens !== undefined ? { reasoningTokens: input.usage.reasoningTokens } : {}),
-      ...(input.usage?.estimated === true ? { tokensEstimated: true } : {}),
+      ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
+      ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
+      ...(usage?.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+      ...(usage?.cacheWriteTokens !== undefined ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
+      ...(usage?.reasoningTokens !== undefined ? { reasoningTokens: usage.reasoningTokens } : {}),
+      ...(usage?.estimated === true ? { tokensEstimated: true } : {}),
       ...(input.requestId ? { requestId: input.requestId } : {}),
       ...(input.ledger && input.ledger.length > 0 ? { path: input.ledger.map(toUsageAttempt) } : {}),
     }),

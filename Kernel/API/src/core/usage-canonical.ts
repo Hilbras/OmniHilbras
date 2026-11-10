@@ -7,6 +7,7 @@ export type RawUsage = {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   reasoningTokens?: number;
+  cacheTokensIncluded?: boolean;
   prompt_tokens?: number;
   completion_tokens?: number;
   input_tokens?: number;
@@ -66,9 +67,11 @@ export function canonicalizeUsage(raw: RawUsage | undefined): TokenUsage | undef
     ?? raw.input_tokens
     ?? raw.promptTokenCount,
   );
-  // Claude-shaped input excludes cache; the fields are present. OpenAI/Gemini already include it.
+  // Claude-shaped wire input excludes cache; OpenAI/Gemini already include it. A normalized adapter that
+  // lost the wire shape sets `cacheTokensIncluded: false` explicitly.
   const claudeShaped = raw.cache_read_input_tokens !== undefined || raw.cache_creation_input_tokens !== undefined;
-  const inputTokens = claudeShaped ? baseInput + cacheRead + cacheWrite : baseInput;
+  const foldCache = raw.cacheTokensIncluded === false || (raw.cacheTokensIncluded === undefined && claudeShaped);
+  const inputTokens = foldCache ? baseInput + cacheRead + cacheWrite : baseInput;
   const outputTokens = num(raw.outputTokens ?? raw.completion_tokens ?? raw.output_tokens ?? raw.candidatesTokenCount);
   const reasoningTokens = num(
     raw.reasoningTokens
@@ -84,6 +87,7 @@ export function canonicalizeUsage(raw: RawUsage | undefined): TokenUsage | undef
     totalTokens: inputTokens + outputTokens,
     cacheReadTokens: cacheRead,
     cacheWriteTokens: cacheWrite,
+    ...(raw.cacheTokensIncluded === false ? { cacheTokensIncluded: false } : {}),
     ...(reasoningTokens > 0 ? { reasoningTokens } : {}),
     ...(raw.estimated === true ? { estimated: true } : {}),
   };

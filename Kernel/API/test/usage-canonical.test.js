@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { canonicalizeUsage } from '../dist/src/core/usage-canonical.js';
+import { requestCostUsd } from '../dist/src/core/usage-pricing.js';
+import { summarizeUsage } from '../dist/src/core/usage-store.js';
 
 /**
  * One convention: input includes cache; cache read/write are subsets.
@@ -56,10 +58,42 @@ test('Responses nested details are read without double counting', () => {
   assert.equal(usage.reasoningTokens, 11);
 });
 
+test('a normalized Claude adapter can mark that input excludes cache', () => {
+  assert.deepEqual(canonicalizeUsage({ inputTokens: 100, outputTokens: 20, cacheReadTokens: 900, cacheWriteTokens: 50, cacheTokensIncluded: false }), {
+    inputTokens: 1050,
+    outputTokens: 20,
+    totalTokens: 1070,
+    cacheReadTokens: 900,
+    cacheWriteTokens: 50,
+    cacheTokensIncluded: false,
+  });
+});
+
 test('no reported tokens is an absence, not a zero', () => {
   assert.equal(canonicalizeUsage(undefined), undefined);
   assert.equal(canonicalizeUsage({}), undefined);
   assert.equal(canonicalizeUsage({ estimated: true }), undefined);
+});
+
+test('cache tokens are priced at their own rates', () => {
+  const cost = requestCostUsd({
+    inputTokens: 1_000,
+    outputTokens: 100,
+    cacheReadTokens: 10_000,
+    cacheWriteTokens: 2_000,
+    pricing: { inputPer1M: 10, outputPer1M: 30, cacheReadPer1M: 1, cacheWritePer1M: 5 },
+  });
+  // 0.01 + 0.003 + 0.01 + 0.01
+  assert.equal(cost, 0.033);
+});
+
+test('summaries carry cache and reasoning totals', () => {
+  const totals = summarizeUsage([
+    { id: '1', at: new Date().toISOString(), model: 'm', outcome: 'success', attempts: 1, latencyMs: 1, inputTokens: 100, outputTokens: 10, cacheReadTokens: 80, cacheWriteTokens: 5, reasoningTokens: 3 },
+  ]);
+  assert.equal(totals.cacheReadTokens, 80);
+  assert.equal(totals.cacheWriteTokens, 5);
+  assert.equal(totals.reasoningTokens, 3);
 });
 
 test('an estimate is preserved as a label', () => {

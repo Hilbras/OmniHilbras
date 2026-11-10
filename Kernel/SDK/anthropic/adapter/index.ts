@@ -30,6 +30,8 @@ type AnthropicMessageResponse = {
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
   };
 };
 
@@ -46,7 +48,7 @@ type AnthropicStreamEvent = {
   message?: {
     id?: string;
     model?: string;
-    usage?: { input_tokens?: number; output_tokens?: number };
+    usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
   };
   index?: number;
   content_block?: AnthropicContentBlock;
@@ -56,7 +58,7 @@ type AnthropicStreamEvent = {
     partial_json?: string;
     stop_reason?: string | null;
   };
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
   error?: { type?: string; message?: string };
 };
 
@@ -132,6 +134,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     let sawPayload = false;
     let sawFinishReason = false;
     let sawMessageStop = false;
+    let streamUsage: TokenUsage | undefined;
 
     for await (const event of parseSseStream(events)) {
       const payload = parseSseJson<AnthropicStreamEvent>(event, this.id);
@@ -151,6 +154,9 @@ export class AnthropicAdapter implements ProviderAdapter {
       if (payload.type === 'message_start') {
         responseId = payload.message?.id ?? responseId;
         responseModel = payload.message?.model ?? responseModel;
+        // A stream reports its input and cache counts once, on `message_start`; `message_delta` carries only the
+        // output count. Dropping this chunk dropped every cache figure from a streamed response.
+        streamUsage = payload.message?.usage ? normalizeUsage(payload.message.usage) : undefined;
         continue;
       }
 
@@ -188,7 +194,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       if (payload.type === 'message_delta') {
         const finishReason = payload.delta?.stop_reason ? normalizeFinishReason(payload.delta.stop_reason) : undefined;
         if (finishReason) sawFinishReason = true;
-        const usage = payload.usage ? normalizeUsage(payload.usage) : undefined;
+        const usage = payload.usage ? { ...(streamUsage ?? {}), ...normalizeUsage(payload.usage) } : streamUsage;
         if (finishReason || usage) {
           yield {
             id: responseId,
@@ -392,8 +398,14 @@ function normalizeFinishReason(reason: string | null | undefined): FinishReason 
   return reason ? 'other' : 'other';
 }
 
-function normalizeUsage(usage: { input_tokens?: number; output_tokens?: number }): TokenUsage {
-  return { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens };
+function normalizeUsage(usage: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }): TokenUsage {
+  return {
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    ...(usage.cache_read_input_tokens === undefined ? {} : { cacheReadTokens: usage.cache_read_input_tokens }),
+    ...(usage.cache_creation_input_tokens === undefined ? {} : { cacheWriteTokens: usage.cache_creation_input_tokens }),
+    ...(usage.cache_read_input_tokens === undefined && usage.cache_creation_input_tokens === undefined ? {} : { cacheTokensIncluded: false }),
+  };
 }
 
 function invalidResponse(providerId: string, message: string) {

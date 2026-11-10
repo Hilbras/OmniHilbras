@@ -203,7 +203,7 @@ type OpenAIResponse = {
   model?: string;
   created?: number;
   choices?: OpenAIChoice[];
-  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; completion_tokens_details?: { reasoning_tokens?: number } };
 };
 
 type OpenAIStreamChunk = OpenAIResponse & {
@@ -759,11 +759,13 @@ function normalizeFinishReason(reason: string | null | undefined): FinishReason 
   return reason === 'length' || reason === 'tool_calls' || reason === 'content_filter' ? reason : 'stop';
 }
 
-function normalizeUsage(usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }): TokenUsage {
+function normalizeUsage(usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; completion_tokens_details?: { reasoning_tokens?: number } }): TokenUsage {
   return {
     ...(typeof usage.prompt_tokens === 'number' ? { inputTokens: usage.prompt_tokens } : {}),
     ...(typeof usage.completion_tokens === 'number' ? { outputTokens: usage.completion_tokens } : {}),
     ...(typeof usage.total_tokens === 'number' ? { totalTokens: usage.total_tokens } : {}),
+    ...(usage.prompt_tokens_details?.cached_tokens === undefined ? {} : { cacheReadTokens: usage.prompt_tokens_details.cached_tokens }),
+    ...(usage.completion_tokens_details?.reasoning_tokens === undefined ? {} : { reasoningTokens: usage.completion_tokens_details.reasoning_tokens }),
   };
 }
 

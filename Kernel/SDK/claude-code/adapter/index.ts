@@ -95,7 +95,7 @@ type AnthropicMessage = {
   role?: string;
   content?: AnthropicContentBlock[];
   stop_reason?: string | null;
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
 };
 
 type AnthropicResponse = {
@@ -103,7 +103,7 @@ type AnthropicResponse = {
   model?: string;
   content?: AnthropicContentBlock[];
   stop_reason?: string | null;
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
   error?: { message?: string; type?: string };
 };
 
@@ -115,7 +115,7 @@ type AnthropicStreamEvent = {
   error?: { type?: string; message?: string };
   delta?: { type?: string; text?: string; stop_reason?: string | null; partial_json?: string };
   content_block?: { type?: string; id?: string; name?: string };
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
 };
 
 type TokenResponse = {
@@ -573,10 +573,13 @@ function normalizeStopReason(reason: string | null | undefined): FinishReason {
   return 'stop';
 }
 
-function normalizeUsage(usage: { input_tokens?: number; output_tokens?: number }): TokenUsage {
+function normalizeUsage(usage: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }): TokenUsage {
   return {
     ...(typeof usage.input_tokens === 'number' ? { inputTokens: usage.input_tokens } : {}),
     ...(typeof usage.output_tokens === 'number' ? { outputTokens: usage.output_tokens } : {}),
+    ...(typeof usage.cache_read_input_tokens === 'number' ? { cacheReadTokens: usage.cache_read_input_tokens } : {}),
+    ...(typeof usage.cache_creation_input_tokens === 'number' ? { cacheWriteTokens: usage.cache_creation_input_tokens } : {}),
+    ...(typeof usage.cache_read_input_tokens === 'number' || typeof usage.cache_creation_input_tokens === 'number' ? { cacheTokensIncluded: false } : {}),
     ...(typeof usage.input_tokens === 'number' || typeof usage.output_tokens === 'number'
       ? { totalTokens: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0) }
       : {}),

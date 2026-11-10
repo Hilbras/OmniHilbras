@@ -33,6 +33,8 @@ type GeminiResponse = {
     promptTokenCount?: number;
     candidatesTokenCount?: number;
     totalTokenCount?: number;
+    cachedContentTokenCount?: number;
+    thoughtsTokenCount?: number;
   };
 };
 
@@ -366,6 +368,8 @@ function normalizeUsage(usage: NonNullable<GeminiResponse['usageMetadata']>): To
     inputTokens: usage.promptTokenCount,
     outputTokens: usage.candidatesTokenCount,
     totalTokens: usage.totalTokenCount,
+    ...(usage.cachedContentTokenCount === undefined ? {} : { cacheReadTokens: usage.cachedContentTokenCount }),
+    ...(usage.thoughtsTokenCount === undefined ? {} : { reasoningTokens: usage.thoughtsTokenCount }),
   };
 }
 
