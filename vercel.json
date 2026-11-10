@@ -2,11 +2,14 @@
   "buildCommand": "pnpm build:landing",
   "outputDirectory": "dist-landing",
   "framework": "vite",
-  "cleanUrls": true,
   "rewrites": [
-    {
-      "source": "/home",
-      "destination": "/"
-    }
+    { "source": "/home", "destination": "/" },
+    { "source": "/download", "destination": "/site/download.html" },
+    { "source": "/docs", "destination": "/site/docs.html" },
+    { "source": "/pricing", "destination": "/site/pricing.html" },
+    { "source": "/about", "destination": "/site/about.html" },
+    { "source": "/changelog", "destination": "/site/changelog.html" },
+    { "source": "/security", "destination": "/site/security.html" },
+    { "source": "/privacy", "destination": "/site/privacy.html" }
   ]
 }

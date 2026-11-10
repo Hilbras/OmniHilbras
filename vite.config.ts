@@ -38,13 +38,13 @@ function dashboardFallback(): Plugin {
           return;
         }
         if (rawPath === '/download' || rawPath === '/download/') {
-          request.url = '/download.html';
+          request.url = '/site/download.html';
           next();
           return;
         }
         const marketingPage = rawPath.replace(/^\/+|\/+$/g, '');
         if ((marketingPages as readonly string[]).includes(marketingPage)) {
-          request.url = `/${marketingPage}.html`;
+          request.url = `/site/${marketingPage}.html`;
           next();
           return;
         }
@@ -372,13 +372,13 @@ export default defineConfig({
         // The marketing site and the dashboard. Every dashboard view is a route
         // inside the dashboard SPA, served under /dashboard.
         main: new URL('./index.html', import.meta.url).pathname,
-        download: new URL('./download.html', import.meta.url).pathname,
-        docs: new URL('./docs.html', import.meta.url).pathname,
-        about: new URL('./about.html', import.meta.url).pathname,
-        pricing: new URL('./pricing.html', import.meta.url).pathname,
-        changelog: new URL('./changelog.html', import.meta.url).pathname,
-        security: new URL('./security.html', import.meta.url).pathname,
-        privacy: new URL('./privacy.html', import.meta.url).pathname,
+        download: new URL('./site/download.html', import.meta.url).pathname,
+        docs: new URL('./site/docs.html', import.meta.url).pathname,
+        about: new URL('./site/about.html', import.meta.url).pathname,
+        pricing: new URL('./site/pricing.html', import.meta.url).pathname,
+        changelog: new URL('./site/changelog.html', import.meta.url).pathname,
+        security: new URL('./site/security.html', import.meta.url).pathname,
+        privacy: new URL('./site/privacy.html', import.meta.url).pathname,
         dashboard: new URL('./dashboard.html', import.meta.url).pathname,
       },
     },
