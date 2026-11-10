@@ -299,8 +299,9 @@ The first local gateway exposes:
   `OMNIHILBRAS_CAVEMAN` and `OMNIHILBRAS_PONYTAIL` append one system instruction (idempotently) and are
   reported as `ran` with no invented input saving. `OMNIHILBRAS_HEADROOM_URL` posts `{messages, model}` to
   `{url}/v1/compress` and accepts `{messages, tokens_saved?}`; a reported delta with less than 5% message
-  shrink is rejected as phantom savings. `OMNIHILBRAS_PXPIPE_URL` is Anthropic-only and posts
-  `{messages, model, options}` to `{url}/v1/transform`, accepting
+  shrink is rejected as phantom savings. `OMNIHILBRAS_PXPIPE_URL` runs only for adapters that advertise
+  Anthropic image context (currently `anthropic`) and posts `{messages, model, options}` to
+  `{url}/v1/transform`, accepting
   `{messages, applied, reason?, imageCount?, imageTokens?}`. Both time out and fail open: any error leaves
   the conversation untouched and records `state: "skipped"` with a reason. `x-omnihilbras-token-saver: off`
   opts out of all of them for one request.

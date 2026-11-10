@@ -2512,7 +2512,7 @@ export class GatewayService {
    * then a long tool result is shortened unless the client opted this request out. The order matters: the empty
    * results added in the first step are short and are left alone by the second.
    */
-  private async preparedMessages(request: ChatRequest, scope: RequestScope | undefined, providerId: string): Promise<ChatRequest['messages']> {
+  private async preparedMessages(request: ChatRequest, scope: RequestScope | undefined, allowImageContext: boolean): Promise<ChatRequest['messages']> {
     const complete = completeToolRounds(request.messages);
     if (scope?.tokenSaver === false) return complete;
     if (scope && this.compressionCache.has(scope.id)) return this.compressionCache.get(scope.id)!.messages;
@@ -2584,8 +2584,8 @@ export class GatewayService {
         }
       }
 
-      // PXPIPE turns bulky text into images; only an Anthropic-shaped request can carry them.
-      if (this.pxpipe && providerId === 'anthropic') {
+      // PXPIPE turns bulky text into images; only an adapter that carries Anthropic image context can take them.
+      if (this.pxpipe && allowImageContext) {
         const beforeBytes = size();
         const result = await pxpipeCompress(messages, request.model, this.pxpipe);
         messages = result.messages as SavableMessage[];
@@ -2715,13 +2715,13 @@ export class GatewayService {
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    return adapter.chat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: await this.preparedMessages(request, scope, providerId) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+    return adapter.chat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: await this.preparedMessages(request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
   }
 
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    yield* adapter.streamChat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: await this.preparedMessages(request, scope, providerId) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+    yield* adapter.streamChat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: await this.preparedMessages(request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
   }
 
   /**

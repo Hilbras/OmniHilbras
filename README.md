@@ -644,8 +644,9 @@ records that they ran rather than a fictional input saving. External savers are 
 and leave the conversation untouched on any error; `OMNIHILBRAS_HEADROOM_TIMEOUT_MS`,
 `OMNIHILBRAS_HEADROOM_USERS`, `OMNIHILBRAS_PXPIPE_TIMEOUT_MS` and `OMNIHILBRAS_PXPIPE_MIN_CHARS` tune them.
 A Headroom response that reports a token delta while the messages shrank by less than 5% is rejected as
-phantom savings. PXPIPE only runs for the `anthropic` provider and expects
-`POST {url}/v1/transform` returning `{messages, applied, imageCount?, imageTokens?}`.
+phantom savings. PXPIPE only runs for an adapter that advertises Anthropic image context (currently the
+`anthropic` adapter) and expects `POST {url}/v1/transform` returning
+`{messages, applied, imageCount?, imageTokens?}`.
 
 History trimming is independent of content compression: it keeps a request out of the model only when the
 whole conversation is over the threshold, stubbing old turns behind a retrieval marker while preserving the

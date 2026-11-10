@@ -354,6 +354,12 @@ export type ProviderAdapter = {
    * Absent means the provider claims no family, and a bare name is not routed to it on a guess.
    */
   readonly modelFamily?: string;
+  /**
+   * Whether this adapter accepts Anthropic-shaped image context. PXPIPE turns bulky text into images;
+   * an adapter without this flag would receive a request it cannot carry, so the gateway asks the
+   * adapter rather than naming a provider id in the core.
+   */
+  readonly imageContext?: boolean;
   listModels?: (context?: ProviderRequestContext) => Promise<readonly Model[]>;
   chat?: (request: ChatRequest, context?: ProviderRequestContext) => Promise<ChatResponse>;
   streamChat?: (request: ChatRequest, context?: ProviderRequestContext) => AsyncIterable<ChatChunk>;

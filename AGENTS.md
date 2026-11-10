@@ -277,9 +277,10 @@ publishable package, because a consumer who installed one must not acquire a com
 development server. `npm link` puts it on your `PATH`, pointed at this checkout.
 
 **The optional external savers fail open, and that is asserted.** Headroom (`OMNIHILBRAS_HEADROOM_URL`)
-and PXPIPE (`OMNIHILBRAS_PXPIPE_URL`, Anthropic-only) time out and leave the conversation untouched on any
-error; PXPIPE is off for every other provider. A broken proxy must not cost a request, and
-`Kernel/TokenSaver/test/external.test.js` and `Kernel/API/test/token-external-savers.test.js` prove it.
+and PXPIPE (`OMNIHILBRAS_PXPIPE_URL`, only for adapters that advertise Anthropic image context) time out
+and leave the conversation untouched on any error; PXPIPE is skipped for every other adapter. A broken
+proxy must not cost a request, and `Kernel/TokenSaver/test/external.test.js` and
+`Kernel/API/test/token-external-savers.test.js` prove it.
 
 It adopts three things from the reference launcher (`9router`'s `cli.js`), each learned the hard way there:
 readiness is a **TCP connect, not a sleep**, so the page never loads before the gateway answers; the spinner

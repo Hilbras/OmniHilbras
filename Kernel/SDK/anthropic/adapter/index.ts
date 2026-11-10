@@ -71,6 +71,8 @@ export class AnthropicAdapter implements ProviderAdapter {
   readonly capabilities: ProviderCapabilities = { chat: true, streaming: true, models: true };
   /** Serves the `claude` model family, so a bare `claude-*` name is routed here. */
   readonly modelFamily = 'claude';
+  /** PXPIPE's image context is Anthropic-shaped; the gateway asks this flag, not the provider id. */
+  readonly imageContext = true;
   private readonly baseUrl: string;
   private readonly apiVersion: string;
   private readonly defaultMaxTokens: number;

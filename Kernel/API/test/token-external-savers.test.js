@@ -22,6 +22,7 @@ const shortened = [
 function adapter(id, captured) {
   return {
     id, name: id, capabilities: { chat: true, streaming: false, models: true, embeddings: false },
+    ...(id === 'anthropic' ? { imageContext: true } : {}),
     async listModels() { return [{ id: 'm', providerId: id }]; },
     async healthCheck() { return { status: 'healthy', checkedAt: new Date().toISOString(), latencyMs: 1, verified: 'credential' }; },
     async chat(request) {
