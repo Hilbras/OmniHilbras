@@ -21,6 +21,7 @@
     "app:check": "pnpm build:gateway && pnpm build:frontend && node scripts/app-smoke.mjs",
     "app:size": "node scripts/app-size.mjs",
     "app:build": "pnpm build && electron-builder --dir",
+    "app:exe": "pnpm build && electron-builder --win nsis --config.nsis.packElevateHelper=false --config.win.signExecutable=false",
     "app:pack": "pnpm build && electron-builder",
     "build": "pnpm build:sdk && pnpm build:gateway && pnpm build:frontend",
     "build:frontend": "vite build",
