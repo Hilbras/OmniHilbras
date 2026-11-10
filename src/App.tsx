@@ -516,8 +516,8 @@ function App() {
                   OmniHilbras is the intelligent gateway between your applications and the model providers you choose. One clean endpoint, smarter routing, fewer surprises.
                 </motion.p>
                 <motion.div variants={revealItem} className="mt-8 flex flex-wrap items-center justify-center gap-3">
-                  <a href="#start" className="btn-gold">
-                    Start routing
+                  <a href="/download" className="btn-gold">
+                    Get started
                     <ArrowRight className="h-4 w-4" aria-hidden="true" />
                   </a>
                   <a href="#how-it-works" className="btn-ghost">

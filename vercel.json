@@ -1,5 +1,6 @@
 {
   "buildCommand": "pnpm build:landing",
   "outputDirectory": "dist-landing",
-  "framework": "vite"
+  "framework": "vite",
+  "cleanUrls": true
 }

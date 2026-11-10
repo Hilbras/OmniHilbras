@@ -27,6 +27,12 @@ function dashboardFallback(): Plugin {
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
         const [rawPath = '', rawSearch = ''] = (request.url ?? '').split('?');
+        // `/download` is a real page with a clean URL in production; the dev server serves its shell.
+        if (rawPath === '/download' || rawPath === '/download/') {
+          request.url = '/download.html';
+          next();
+          return;
+        }
         const legacy = legacyRoutes[rawPath];
         if (legacy) {
           response.statusCode = 302;
@@ -351,6 +357,7 @@ export default defineConfig({
         // The marketing site and the dashboard. Every dashboard view is a route
         // inside the dashboard SPA, served under /dashboard.
         main: new URL('./index.html', import.meta.url).pathname,
+        download: new URL('./download.html', import.meta.url).pathname,
         dashboard: new URL('./dashboard.html', import.meta.url).pathname,
       },
     },

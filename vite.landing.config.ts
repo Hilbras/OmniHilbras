@@ -18,7 +18,10 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       ...baseConfig.build?.rollupOptions,
-      input: { main: new URL('./index.html', import.meta.url).pathname },
+      input: {
+        main: new URL('./index.html', import.meta.url).pathname,
+        download: new URL('./download.html', import.meta.url).pathname,
+      },
     },
   },
 });

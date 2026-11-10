@@ -51,10 +51,7 @@ export function Navbar() {
         </div>
 
         <div className="ml-auto flex items-center gap-2.5">
-          <a href="/dashboard" className="btn-quiet hidden xl:inline-flex">
-            Open dashboard
-          </a>
-          <a href="#start" className="btn-gold hidden sm:inline-flex">
+          <a href="/download" className="btn-gold hidden sm:inline-flex">
             Get started
             <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
           </a>
@@ -91,7 +88,7 @@ export function Navbar() {
                   {link.label}
                 </a>
               ))}
-              <a href="#start" onClick={closeMenu} className="btn-gold mt-3 w-full">
+              <a href="/download" onClick={closeMenu} className="btn-gold mt-3 w-full">
                 Get started
                 <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
               </a>

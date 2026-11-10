@@ -11,7 +11,7 @@ const footerGroups = [
   {
     title: 'Build',
     links: [
-      ['#start', 'Get started'],
+      ['/download', 'Get started'],
       ['#docs', 'API reference'],
       ['#observability', 'Observability'],
     ],
@@ -34,7 +34,7 @@ export function Footer() {
           <p className="muted mt-3 text-[13px] leading-relaxed">
             One intelligent route between your applications and every model provider.
           </p>
-          <a href="#start" className="btn-gold mt-5 !px-3.5 !py-2 !text-[13px]">
+          <a href="/download" className="btn-gold mt-5 !px-3.5 !py-2 !text-[13px]">
             Start building
           </a>
         </div>
