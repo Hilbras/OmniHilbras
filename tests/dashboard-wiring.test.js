@@ -63,6 +63,14 @@ test('the desktop window carries the brand icon', () => {
   assert.match(main, /icon: join\(projectRoot, 'brand\/logo-512\.png'\)/, 'the window has no icon');
 });
 
+test('the Servers page offers first run, diagnostics, and a filtered feed', () => {
+  const page = read('src/pages/AppHomePage.tsx');
+  assert.match(page, /No provider connections yet/, 'an empty vault has no first-run guidance');
+  assert.match(page, /diagnostics\.export/, 'there is no diagnostics export');
+  assert.match(page, /feedFilter/, 'the request feed has no filter');
+  assert.match(page, /feedPaused/, 'the request feed cannot be paused');
+});
+
 test('the logs route is highlighted and titled', () => {
   const app = read('src/dashboardApp.tsx');
   assert.match(app, /startsWith\('\/logs'\)/, 'the Logs route still falls through to Overview');

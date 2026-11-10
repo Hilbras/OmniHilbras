@@ -264,6 +264,9 @@ pnpm analyze        # per-page bundle cost, attributed per package
 pnpm verify         # release gate: version, brand, typecheck, test, SPEC, build, bundle budget
 pnpm release:audit  # every tag: pushed, released on GitHub, published to npm
 pnpm app:dev        # desktop app, gateway owned by Electron main
+pnpm app:smoke      # drive the real binary: shell, IPC, stop/start, feed
+pnpm app:check      # build and run the same smoke test
+pnpm app:size       # packaged size split
 pnpm app:build      # unpacked desktop build
 pnpm app:pack       # desktop installers
 ```

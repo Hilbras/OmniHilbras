@@ -20,6 +20,7 @@ export type DesktopServerSnapshot = {
   pid?: number;
   startedAt?: string;
   lastError?: string;
+  restarts?: number;
   logs: DesktopServerLog[];
 };
 
@@ -54,6 +55,9 @@ export type OmniBridge = {
     close: () => void;
     isMaximized: () => Promise<boolean>;
     onMaximized: (callback: (maximized: boolean) => void) => () => void;
+  };
+  diagnostics: {
+    export: () => Promise<{ path: string }>;
   };
   server: {
     getState: () => Promise<DesktopServerSnapshot>;

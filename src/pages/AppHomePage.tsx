@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CircleAlert, CircleCheck, Copy, Play, RotateCcw, Server, Square, Terminal } from 'lucide-react';
+import { CircleAlert, CircleCheck, Copy, FileWarning, Play, RotateCcw, Server, Square, Terminal } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { DashboardShell } from '../components/DashboardShell';
-import { openGatewayLogStream, type GatewayLogEvent } from '../lib/gatewayClient';
+import { listGatewayConnections, openGatewayLogStream, type GatewayLogEvent } from '../lib/gatewayClient';
 import { desktopBridge, type DesktopServerLog, type DesktopServerSnapshot } from '../lib/electronBridge';
 
 const MAX_PROCESS_LINES = 200;
@@ -37,6 +38,11 @@ export function AppHomeContent() {
   const [busy, setBusy] = useState<'start' | 'stop' | 'restart' | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [copied, setCopied] = useState(false);
+  const [connections, setConnections] = useState<number | undefined>(undefined);
+  const [diagnostics, setDiagnostics] = useState<string | undefined>();
+  const [feedFilter, setFeedFilter] = useState<'all' | 'success' | 'failure'>('all');
+  const [feedPaused, setFeedPaused] = useState(false);
+  const navigate = useNavigate();
   const terminalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -63,16 +69,44 @@ export function AppHomeContent() {
 
   useEffect(() => {
     const close = openGatewayLogStream(
-      (event) => setEvents((current) => [event, ...current].slice(0, MAX_EVENTS)),
+      (event) => {
+        if (feedPaused) return;
+        setEvents((current) => [event, ...current].slice(0, MAX_EVENTS));
+      },
       setStreamConnected,
     );
     return close;
-  }, []);
+  }, [feedPaused]);
 
   useEffect(() => {
     const node = terminalRef.current;
     if (node) node.scrollTop = node.scrollHeight;
   }, [processLogs]);
+
+  useEffect(() => {
+    if (!bridge || snapshot?.state !== 'running') return;
+    let active = true;
+    listGatewayConnections()
+      .then((list) => {
+        if (active) setConnections(list.length);
+      })
+      .catch(() => {
+        if (active) setConnections(undefined);
+      });
+    return () => {
+      active = false;
+    };
+  }, [bridge, snapshot?.state]);
+
+  const exportDiagnostics = useCallback(async () => {
+    if (!bridge) return;
+    try {
+      const result = await bridge.diagnostics.export();
+      setDiagnostics(result.path);
+    } catch (cause) {
+      setDiagnostics(cause instanceof Error ? cause.message : 'Diagnostics could not be exported.');
+    }
+  }, [bridge]);
 
   const run = useCallback(async (action: 'start' | 'stop' | 'restart') => {
     if (!bridge) return;
@@ -106,6 +140,10 @@ export function AppHomeContent() {
     for (const event of events) if (event.outcome) counts[event.outcome] += 1;
     return counts;
   }, [events]);
+  const visibleEvents = useMemo(
+    () => (feedFilter === 'all' ? events : events.filter((event) => event.outcome === feedFilter)),
+    [events, feedFilter],
+  );
 
   return (
     <>
@@ -124,6 +162,8 @@ export function AppHomeContent() {
                 <p className="muted mt-1 text-xs">
                   {snapshot ? `127.0.0.1:${snapshot.port}` : 'Managed by pnpm dev:gateway in the browser dashboard'}
                   {snapshot?.pid ? ` · pid ${snapshot.pid}` : ''}
+                  {snapshot?.restarts ? ` · ${snapshot.restarts} restart${snapshot.restarts === 1 ? '' : 's'}` : ''}
+                  {snapshot?.startedAt ? ` · up since ${timeOf(snapshot.startedAt)}` : ''}
                 </p>
                 {snapshot?.lastError && (
                   <p className="mt-2 flex items-start gap-1.5 text-[11px] text-danger"><CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{snapshot.lastError}</p>
@@ -148,9 +188,14 @@ export function AppHomeContent() {
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
                 {busy === 'restart' ? 'Restarting' : 'Restart'}
               </button>
+              <button type="button" onClick={() => void exportDiagnostics()} disabled={!bridge} className="btn-ghost !px-3 !py-2 !text-xs disabled:cursor-not-allowed disabled:opacity-40">
+                <FileWarning className="h-3.5 w-3.5" aria-hidden="true" />
+                Diagnostics
+              </button>
             </div>
           </div>
           {error && <p role="alert" className="mt-3 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-[11px] text-danger">{error}</p>}
+          {diagnostics && <p className="mt-3 rounded-lg border border-line bg-bg-soft/60 px-3 py-2 font-mono text-[10px] text-muted">diagnostics: {diagnostics}</p>}
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="rounded-lg border border-line bg-bg-soft/50 p-3"><p className="muted text-[10px] uppercase tracking-wide">Served</p><p className="mt-1 font-mono text-lg">{requestCounts.success}</p></div>
             <div className="rounded-lg border border-line bg-bg-soft/50 p-3"><p className="muted text-[10px] uppercase tracking-wide">Failed</p><p className="mt-1 font-mono text-lg text-danger">{requestCounts.failure}</p></div>
@@ -158,6 +203,17 @@ export function AppHomeContent() {
             <div className="rounded-lg border border-line bg-bg-soft/50 p-3"><p className="muted text-[10px] uppercase tracking-wide">Feed</p><p className={`mt-1 flex items-center gap-1.5 text-xs font-semibold ${streamConnected ? 'text-success' : 'text-muted'}`}>{streamConnected ? <CircleCheck className="h-3.5 w-3.5" aria-hidden="true" /> : <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />}{streamConnected ? 'live' : 'unavailable'}</p></div>
           </div>
         </section>
+
+        {connections === 0 && (
+          <section className="card border-gold/30 p-5" aria-label="First run">
+            <h2 className="text-sm font-semibold">No provider connections yet</h2>
+            <p className="muted mt-1 text-xs leading-relaxed">
+              The gateway is running. Add a provider to route your first request. The gateway URL is
+              <code className="mx-1 font-mono">http://127.0.0.1:{snapshot?.port ?? 8787}/v1</code>.
+            </p>
+            <Link to="/providers" className="btn-gold mt-3 inline-flex !px-3 !py-2 !text-xs">Add your first provider</Link>
+          </section>
+        )}
 
         <section className="card overflow-hidden" aria-labelledby="process-log-title">
           <div className="flex items-center justify-between gap-3 border-b border-line p-4">
@@ -180,19 +236,35 @@ export function AppHomeContent() {
         </section>
 
         <section className="card overflow-hidden" aria-label="Live requests">
-          <div className="flex items-center justify-between gap-3 border-b border-line p-4">
-            <h2 className="text-sm font-semibold">Live requests</h2>
-            <span className="muted font-mono text-[10px]">{streamConnected ? 'streaming' : 'no stream'}</span>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line p-4">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold">Live requests</h2>
+              <span className="muted font-mono text-[10px]">{streamConnected ? 'streaming' : 'no stream'}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              {(['all', 'success', 'failure'] as const).map((value) => (
+                <button key={value} type="button" onClick={() => setFeedFilter(value)} className={`rounded-md border px-2 py-1 text-[10px] capitalize ${feedFilter === value ? 'border-gold/40 bg-gold-soft text-gold-text' : 'border-line text-muted hover:text-text'}`}>
+                  {value === 'all' ? `All (${events.length})` : value}
+                </button>
+              ))}
+              <button type="button" onClick={() => setFeedPaused((value) => !value)} className={`ml-1 rounded-md border px-2 py-1 text-[10px] ${feedPaused ? 'border-gold/40 bg-gold-soft text-gold-text' : 'border-line text-muted hover:text-text'}`}>
+                {feedPaused ? 'Resume' : 'Pause'}
+              </button>
+            </div>
           </div>
-          {events.length === 0 ? (
-            <p className="muted px-4 py-8 text-center text-xs">Finished requests appear here as the gateway records them.</p>
+          {visibleEvents.length === 0 ? (
+            <p className="muted px-4 py-8 text-center text-xs">
+              {events.length === 0 ? 'Finished requests appear here as the gateway records them.' : `No ${feedFilter} requests in this feed.`}
+            </p>
           ) : (
             <ul className="divide-y divide-line font-mono text-[11px]">
-              {events.map((event, index) => (
-                <li key={`${event.requestId ?? event.at ?? index}-${index}`} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-2">
-                  <span className="muted">{timeOf(event.at)}</span>
-                  <span className="truncate">{event.model ?? '—'} · {event.providerId ?? 'no provider'} · {event.attempts ?? '?'} {(event.attempts ?? 0) === 1 ? 'attempt' : 'attempts'}{event.errorCode ? ` · ${event.errorCode}` : ''}</span>
-                  <span className={event.outcome === 'success' ? 'text-ok' : event.outcome === 'failure' ? 'text-danger' : 'muted'}>{event.outcome ?? '—'} · {event.latencyMs ?? '?'} ms</span>
+              {visibleEvents.map((event, index) => (
+                <li key={`${event.requestId ?? event.at ?? index}-${index}`}>
+                  <button type="button" onClick={() => navigate('/logs')} className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-2 text-left hover:bg-bg-soft/60">
+                    <span className="muted">{timeOf(event.at)}</span>
+                    <span className="truncate">{event.model ?? '—'} · {event.providerId ?? 'no provider'} · {event.attempts ?? '?'} {(event.attempts ?? 0) === 1 ? 'attempt' : 'attempts'}{event.errorCode ? ` · ${event.errorCode}` : ''}</span>
+                    <span className={event.outcome === 'success' ? 'text-ok' : event.outcome === 'failure' ? 'text-danger' : 'muted'}>{event.outcome ?? '—'} · {event.latencyMs ?? '?'} ms</span>
+                  </button>
                 </li>
               ))}
             </ul>

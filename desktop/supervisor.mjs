@@ -1,6 +1,8 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { dirname } from 'node:path';
 
 /**
  * Owns the gateway child process for the desktop app.
@@ -20,6 +22,8 @@ const DEFAULT_LOG_LINES = 500;
 const STOP_GRACE_MS = 8_000;
 const RESTART_BACKOFF_MS = [1_000, 5_000, 15_000, 30_000, 60_000];
 const MAX_RESTARTS = 5;
+const LOG_MAX_BYTES = 5 * 1024 * 1024;
+const LOG_KEEP = 3;
 
 function portIsFree(port, host) {
   return new Promise((resolve) => {
@@ -105,9 +109,35 @@ export class GatewaySupervisor extends EventEmitter {
   pushLog(stream, chunk) {
     for (const line of chunk.toString().split('\n')) {
       if (!line.trim()) continue;
-      this.logs.push({ at: new Date().toISOString(), stream, line });
+      const entry = { at: new Date().toISOString(), stream, line };
+      this.logs.push(entry);
       if (this.logs.length > this.options.logLines) this.logs.shift();
-      this.emit('log', this.logs[this.logs.length - 1]);
+      this.appendToFile(entry);
+      this.emit('log', entry);
+    }
+  }
+
+  appendToFile(entry) {
+    if (!this.options.logFile) return;
+    try {
+      mkdirSync(dirname(this.options.logFile), { recursive: true });
+      try {
+        if (statSync(this.options.logFile).size > LOG_MAX_BYTES) {
+          for (let index = LOG_KEEP - 1; index >= 1; index -= 1) {
+            try {
+              renameSync(`${this.options.logFile}.${index}`, `${this.options.logFile}.${index + 1}`);
+            } catch {
+              // A missing rotation file is normal.
+            }
+          }
+          renameSync(this.options.logFile, `${this.options.logFile}.1`);
+        }
+      } catch {
+        // No file yet.
+      }
+      appendFileSync(this.options.logFile, `${entry.at} [${entry.stream}] ${entry.line}\n`, { mode: 0o600 });
+    } catch {
+      // Logging must never take the server down.
     }
   }
 

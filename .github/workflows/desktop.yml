@@ -1,0 +1,52 @@
+name: desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: --linux deb
+            artifact: release/*.deb
+          - os: windows-latest
+            target: --win nsis
+            artifact: release/*.exe
+          - os: macos-latest
+            target: --mac dmg
+            artifact: release/*.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Smoke (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm app:smoke
+      - name: Package
+        run: pnpm exec electron-builder ${{ matrix.target }}
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omnihilbras-${{ runner.os }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error

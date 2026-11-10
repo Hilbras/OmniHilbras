@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, protocol, shell, Tray } from 'electron';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, protocol, session, shell, Tray } from 'electron';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join, normalize, sep } from 'node:path';
+import { dirname, join, normalize, sep } from 'node:path';
 import { createGatewayClient } from './gateway-ipc.mjs';
+import { redact } from './redact.mjs';
 import { createGatewaySupervisor } from './supervisor.mjs';
 
 /**
@@ -45,6 +46,7 @@ function saveUserConfig(patch) {
 
 const userConfig = readUserConfig();
 const preferredPort = Number(process.env.OMNIHILBRAS_PORT) || Number(userConfig.gatewayPort) || 8787;
+const logFile = join(app.getPath('userData'), 'logs', 'gateway.log');
 const gateway = createGatewaySupervisor({
   projectRoot,
   cwd: app.isPackaged ? process.resourcesPath : projectRoot,
@@ -52,6 +54,7 @@ const gateway = createGatewaySupervisor({
   host: '127.0.0.1',
   port: preferredPort,
   readinessTimeoutMs: 40_000,
+  logFile,
   // 8787 is the default, not a requirement. Another local gateway must not stop this app opening.
   fallbackToFreePort: true,
   // A crash is a restart, not a dead app. Five consecutive crashes then stop trying.
@@ -105,6 +108,11 @@ function rebuildTrayMenu() {
         rebuildTrayMenu();
       },
     },
+    {
+      label: 'Check for updates…',
+      enabled: app.isPackaged,
+      click: () => void checkForUpdates(),
+    },
     { type: 'separator' },
     {
       label: 'Quit',
@@ -122,12 +130,84 @@ function createTray() {
   rebuildTrayMenu();
 }
 
+/**
+ * Updates are a claim, not a background habit.
+ *
+ * Only a packaged build checks; a development run has no `app-update.yml` and would throw. A skipped
+ * check is logged with its reason, never reported as "up to date" — the same rule as a provider
+ * health check.
+ */
+async function checkForUpdates() {
+  if (!app.isPackaged) {
+    gateway.pushLog('stderr', 'Update check skipped: development build.\n');
+    return { status: 'skipped', reason: 'development build' };
+  }
+  try {
+    const { autoUpdater } = await import('electron-updater');
+    autoUpdater.autoDownload = false;
+    autoUpdater.logger = null;
+    const result = await autoUpdater.checkForUpdates();
+    if (!result?.updateInfo) {
+      gateway.pushLog('stdout', 'Update check completed; the feed reported no update.\n');
+      return { status: 'current' };
+    }
+    if (Notification.isSupported()) {
+      new Notification({
+        title: 'OmniHilbras update available',
+        body: `${result.updateInfo.version} is available. Download it from the release page.`,
+      }).show();
+    }
+    gateway.pushLog('stdout', `Update available: ${result.updateInfo.version}.\n`);
+    return { status: 'available', version: result.updateInfo.version };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    gateway.pushLog('stderr', `Update check unavailable: ${reason}\n`);
+    return { status: 'unavailable', reason };
+  }
+}
+
 function send(channel, payload) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, payload);
 }
 
 function broadcastState() {
   send('server:state', gateway.snapshot());
+}
+
+async function exportDiagnostics() {
+  const directory = join(app.getPath('userData'), 'diagnostics');
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  let logText = '';
+  try {
+    logText = readFileSync(logFile, 'utf8');
+  } catch {
+    // A first run has no log file yet.
+  }
+  const snapshot = gateway.snapshot();
+  const file = join(directory, `diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    app: {
+      version: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: process.platform,
+      arch: process.arch,
+      packaged: app.isPackaged,
+    },
+    paths: {
+      userData: app.getPath('userData'),
+      data: join(app.getPath('userData'), 'data'),
+      logs: dirname(logFile),
+    },
+    config: readUserConfig(),
+    server: { ...snapshot, logs: snapshot.logs.slice(-50) },
+    logTail: redact(logText).slice(-200_000),
+  };
+  writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+  shell.showItemInFolder(file);
+  return { path: file };
 }
 
 gateway.on('state', broadcastState);
@@ -177,6 +257,19 @@ function isInside(root, candidate) {
   return normalized === root || normalized.startsWith(`${root}${sep}`);
 }
 
+const CSP = [
+  "default-src 'self' app:",
+  "script-src 'self' app:",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com data:",
+  "img-src 'self' data: https:",
+  "connect-src 'self' app:",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'none'",
+].join('; ');
+
 async function serveApp(request) {
   const url = new URL(request.url);
   let pathname = decodeURIComponent(url.pathname);
@@ -188,7 +281,14 @@ async function serveApp(request) {
   if (!isInside(distRoot, file)) return new Response('Not found', { status: 404 });
   try {
     const body = await readFile(file);
-    return new Response(body, { headers: { 'content-type': mimeFor(file) } });
+    return new Response(body, {
+      headers: {
+        'content-type': mimeFor(file),
+        'content-security-policy': CSP,
+        'x-content-type-options': 'nosniff',
+        'referrer-policy': 'no-referrer',
+      },
+    });
   } catch {
     return new Response('Not found', { status: 404 });
   }
@@ -226,6 +326,7 @@ function wireIpc() {
   });
   ipcMain.on('window:close', () => window?.close());
   ipcMain.handle('window:is-maximized', () => window?.isMaximized() ?? false);
+  ipcMain.handle('diagnostics:export', exportDiagnostics);
 
   ipcMain.handle('gateway:request', async (_event, request) => {
     try {
@@ -290,6 +391,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      devTools: !app.isPackaged,
     },
   });
   window.once('ready-to-show', () => window.show());
@@ -307,6 +409,11 @@ function createWindow() {
     // Provider links belong in the user's browser, never in a second Electron window with a preload.
     if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url);
     return { action: 'deny' };
+  });
+  window.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith(APP_ORIGIN)) return;
+    event.preventDefault();
+    if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url);
   });
   window.loadURL(DEV_URL).catch((error) => {
     window.loadURL(`data:text/html,<pre>OmniHilbras failed to load: ${String(error.message)}</pre>`);
@@ -373,6 +480,10 @@ if (!locked) {
 
   app.whenReady().then(async () => {
     protocol.handle(APP_SCHEME, serveApp);
+    // The dashboard needs no browser permission: no camera, microphone, notifications, clipboard read,
+    // geolocation or MIDI. Refusing all of them is smaller than an allowlist and cannot drift.
+    session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+    session.defaultSession.setPermissionCheckHandler(() => false);
     wireIpc();
     createWindow();
     createTray();
@@ -383,6 +494,7 @@ if (!locked) {
       // quit the app and lose the log that explains it.
     }
     broadcastState();
+    setTimeout(() => { void checkForUpdates(); }, 5_000);
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
       else showWindow();

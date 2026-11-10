@@ -572,15 +572,32 @@ pnpm app:pack      # installers
 ## Desktop app
 
 `pnpm app:dev` opens the Electron app. Electron's main process owns the gateway: Start, Stop and
-Restart are on the **Servers** page, which is the app's home, together with the gateway's stdout and
-stderr and the live request feed. Stopping the app stops the gateway; a second launch focuses the
-existing window.
+Restart are on the **Servers** page, which is the app's home, together with the gateway's stdout,
+stderr and the live request feed. Closing the window hides the app to the tray; the tray can reopen
+it, start or stop the gateway, toggle **Start at login**, check for updates, and quit. A second
+launch focuses the existing window.
+
+The gateway prefers port 8787 but does not require it: if the port is busy the app chooses a free
+one and persists it in `userData/config.json`. A crash restarts the gateway with backoff (1 s, 5 s,
+15 s, then larger); after five consecutive crashes it stays failed with the reason on screen. Server
+output is written to `userData/logs/gateway.log`, rotated at 5 MB with three old files.
+
+**Diagnostics** writes `userData/diagnostics/*.json`: versions, platform, ports, state, redacted
+config and the last 200 KB of log. The exporter redacts `sk-…`, bearer tokens and named
+`api_key`/`token`/`secret`/`password` values; it never reads the vault.
 
 The renderer never holds the dashboard token and never calls `127.0.0.1` directly. Requests, chat
 streams and the log stream cross a narrow preload bridge (`desktop/preload.cjs`); main attaches the
 token and an allowlisted origin. The packaged dashboard is served from `app://omnihilbras` out of
-`dist/`, so there is no Vite server in the app. The browser dashboard still works exactly as before
-with `pnpm dev`.
+`dist/` with a strict CSP, all permission requests denied, navigation away from the app blocked, and
+DevTools disabled. The browser dashboard still works exactly as before with `pnpm dev`.
+
+`pnpm app:smoke` drives the real binary in an isolated user-data directory: it asserts one shell,
+window controls, the IPC probe, stop/start, a request-feed event, and no orphan port. Linux CI runs it
+under `xvfb-run`; `.github/workflows/desktop.yml` builds `.deb`, `.exe` and `.dmg` on their native
+runners. Signing is read from `CSC_LINK`/`CSC_KEY_PASSWORD` and Apple credentials; unsigned builds
+still succeed and say so. `pnpm app:size` prints the asar, unpacked, runtime and installed-artifact
+split.
 
 `pnpm verify` is what CI runs on every push and pull request. `version:check` exists because the
 README advertised `0.2.0` while the project was at `1.12.2` — a hundred minor versions, unnoticed.

@@ -3,6 +3,24 @@
 Six workstreams for turning the Electron app from "runs here" into something installable and
 trustworthy. Local tree is canonical; no push, tag, or release.
 
+## Result
+
+Implemented locally: free-port fallback with persistence, crash restart with backoff, Windows
+`taskkill`, tray/close-to-tray/start-at-login, `app:smoke`, first-run callout, persisted rotating
+gateway logs, redacted diagnostics export, CSP, denied permissions, navigation blocking, packaged
+DevTools off, dev sandbox detection, feed filters/pause/click-through, restart count/uptime,
+`app:size`, Windows/macOS targets, guarded update check and the desktop CI matrix.
+
+External blockers, not code defects:
+
+- **NSIS `.exe` installer** still needs Wine on this Linux host (or the Windows CI runner). The
+  runnable `win-unpacked`/zip builds without it.
+- **macOS `.dmg` and signing** need macOS and certificates; the CI workflow has the targets and
+  secret hooks but was not executed here.
+- **Updates** are disabled in development and unsigned packaged builds; a skipped check is logged
+  as skipped, never as current.
+- **`origin/main` divergence** remains a release blocker and is deliberately not rewritten.
+
 ## 1. Desktop lifecycle
 
 - [ ] Free-port fallback: if 8787 is held, choose the next free loopback port, persist it in

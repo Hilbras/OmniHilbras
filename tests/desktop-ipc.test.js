@@ -64,6 +64,45 @@ test('the app smoke script drives the real binary', () => {
   assert.match(script, /nested dashboard shell/, 'the smoke does not check for the duplicated shell');
 });
 
+test('the packaged renderer is locked down', () => {
+  const main = read('./desktop/main.mjs');
+  assert.match(main, /content-security-policy/, 'no CSP on app:// responses');
+  assert.match(main, /setPermissionRequestHandler\([\s\S]*?callback\(false\)/, 'permission requests are not denied');
+  assert.match(main, /will-navigate/, 'navigation away from app:// is not blocked');
+  assert.match(main, /devTools: !app\.isPackaged/, 'DevTools stay enabled in packaged builds');
+  assert.match(read('./dashboard.html'), /src="\/theme-boot\.js"/, 'the inline theme script is back, which the CSP blocks');
+  assert.doesNotMatch(read('./dashboard.html'), /<script>/, 'an inline script would be blocked by the CSP');
+});
+
+test('development start degrades the sandbox only when the helper is broken', () => {
+  const runner = read('./scripts/run-electron.mjs');
+  assert.match(runner, /chrome-sandbox/, 'the runner never checks the sandbox helper');
+  assert.match(runner, /args\.push\('--no-sandbox'\)/, 'there is no fallback for a broken helper');
+  assert.match(runner, /sandboxIsConfigured\(\)/, 'the fallback is unconditional');
+});
+
+test('updates are checked only by a packaged build, and a skip is never "current"', () => {
+  const main = read('./desktop/main.mjs');
+  const pkg = JSON.parse(read('./package.json'));
+  assert.match(main, /async function checkForUpdates/, 'there is no update check');
+  assert.match(main, /if \(!app\.isPackaged\)/, 'a development build attempts an update check');
+  assert.match(main, /status: 'unavailable'/, 'a failed check is not reported honestly');
+  assert.match(main, /Update check skipped/, 'a skipped check is not logged');
+  assert.equal(pkg.build.publish?.[0]?.provider, 'github', 'there is no update feed');
+});
+
+test('packaging targets and the desktop CI matrix cover the three platforms', () => {
+  const pkg = JSON.parse(read('./package.json'));
+  assert.ok(pkg.build.linux.target.includes('deb'));
+  assert.ok(pkg.build.win.target.includes('nsis'));
+  assert.ok(pkg.build.mac.target.includes('dmg'));
+  const workflow = read('./.github/workflows/desktop.yml');
+  for (const os of ['ubuntu-latest', 'windows-latest', 'macos-latest']) {
+    assert.match(workflow, new RegExp(os), `desktop CI does not build ${os}`);
+  }
+  assert.match(workflow, /app:smoke/, 'desktop CI does not smoke the app');
+});
+
 test('the app header is the title bar, with its own controls', () => {
   const main = read('./desktop/main.mjs');
   const preload = read('./desktop/preload.cjs');

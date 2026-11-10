@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:net';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -135,8 +135,22 @@ test('an unexpected exit is restarted with backoff', async () => {
   }
 });
 
-test('restart attempts stop at the configured limit', async () => {
+test('server output is persisted to the log file', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-log-'));
+  const logFile = join(directory, 'gateway.log');
   const port = await freePort();
+  const supervisor = supervisorFor(port, { logFile });
+  try {
+    await supervisor.start();
+    const content = await readFile(logFile, 'utf8');
+    assert.match(content, /\[stdout\] fake gateway ready/, 'the gateway output never reached the file');
+  } finally {
+    await supervisor.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('restart attempts stop at the configured limit', async () => {  const port = await freePort();
   const supervisor = supervisorFor(port, {
     autoRestart: true,
     maxRestarts: 1,

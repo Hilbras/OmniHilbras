@@ -15,10 +15,11 @@
   "scripts": {
     "dev": "vite",
     "dev:gateway": "pnpm --filter @omnihilbras/kernel-api dev",
-    "app:dev": "pnpm build:gateway && pnpm build:frontend && electron .",
-    "app:start": "electron .",
+    "app:dev": "pnpm build:gateway && pnpm build:frontend && node scripts/run-electron.mjs",
+    "app:start": "node scripts/run-electron.mjs",
     "app:smoke": "node scripts/app-smoke.mjs",
     "app:check": "pnpm build:gateway && pnpm build:frontend && node scripts/app-smoke.mjs",
+    "app:size": "node scripts/app-size.mjs",
     "app:build": "pnpm build && electron-builder --dir",
     "app:pack": "pnpm build && electron-builder",
     "build": "pnpm build:sdk && pnpm build:gateway && pnpm build:frontend",
@@ -44,6 +45,7 @@
   "dependencies": {
     "@omnihilbras/kernel-api": "workspace:*",
     "@xyflow/react": "^12.12.0",
+    "electron-updater": "^6.8.11",
     "lucide-react": "^1.47.0",
     "motion": "^13.4.1",
     "react": "^19.3.0",
@@ -92,7 +94,10 @@
       "node_modules/**"
     ],
     "linux": {
-      "target": ["dir", "deb"],
+      "target": [
+        "dir",
+        "deb"
+      ],
       "icon": "brand/logo-512.png",
       "category": "Development",
       "executableName": "omnihilbras",
@@ -100,10 +105,27 @@
       "syncDesktopName": true
     },
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "brand/logo-512.png",
       "executableName": "omnihilbras"
     },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "brand/logo-512.png",
+      "category": "public.app-category.developer-tools"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Hilbras",
+        "repo": "OmniHilbras"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,

@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('omnihilbras', {
     isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
     onMaximized: (callback) => subscribe('window:maximized', callback),
   },
+  diagnostics: {
+    export: () => ipcRenderer.invoke('diagnostics:export'),
+  },
   server: {
     getState: () => ipcRenderer.invoke('server:state'),
     start: () => ipcRenderer.invoke('server:start'),
