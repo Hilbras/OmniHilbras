@@ -129,6 +129,14 @@ test('installing an update stops the gateway and is not deferred by the quit gua
   assert.match(main, /if \(installingUpdate\) \{/, 'the ordinary quit guard still defers the update quit');
 });
 
+test('a .deb update is checked and handed to the system installer', () => {
+  const main = read('./desktop/main.mjs');
+  assert.match(main, /endsWith\('\.deb'\)/, 'the update feed is not checked for a .deb');
+  assert.match(main, /createHash\('sha512'\)/, 'a downloaded .deb is installed without verifying its checksum');
+  assert.match(main, /shell\.openPath\(pendingDebPath\)/, 'the .deb is not handed to the system package installer');
+  assert.match(main, /installMethod: debUpdate \? 'deb' : 'auto'/, 'the UI cannot distinguish the .deb path');
+});
+
 test('desktop and web share one vault directory', () => {
   const main = read('./desktop/main.mjs');
   assert.match(main, /OMNIHILBRAS_DATA_DIR: sharedDataDir/, 'the desktop app still uses its own data directory');

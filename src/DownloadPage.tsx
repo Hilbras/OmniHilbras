@@ -28,7 +28,7 @@ const platforms = [
     href: `${RELEASES}/download/OmniHilbras-linux-amd64.AppImage`,
     secondary: { label: 'Or download the .deb', href: `${RELEASES}/download/OmniHilbras-linux-amd64.deb` },
     available: true,
-    note: 'The AppImage updates itself from Settings. The .deb is for apt and must be upgraded manually.',
+    note: 'The AppImage updates itself from Settings. The .deb can also be downloaded from the app; the system installer asks for administrator permission.',
   },
   {
     id: 'macos',

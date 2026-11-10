@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, protocol, session, shell, Tray } from 'electron';
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { readFile } from 'node:fs/promises';
 import { dirname, join, normalize, sep } from 'node:path';
@@ -169,6 +170,9 @@ function createTray() {
  */
 let updater;
 let updateState = { status: 'idle' };
+/** The `.deb` selected from the update feed, and the file after it has been verified. */
+let pendingDebFile;
+let pendingDebPath = '';
 
 /** Windows NSIS, signed macOS and Linux AppImage can replace themselves; a .deb cannot. */
 function canSelfUpdate() {
@@ -195,11 +199,22 @@ async function loadUpdater() {
   autoUpdater.logger = null;
   autoUpdater.on('checking-for-update', () => setUpdateState({ status: 'checking' }));
   autoUpdater.on('update-available', (info) => {
-    // A .deb cannot replace itself through electron-updater. A Windows NSIS build, a signed macOS
-    // bundle, and a Linux AppImage can. `APPIMAGE` is set by the AppImage runtime itself, so a .deb
-    // install and an AppImage install of the same code take different paths.
-    const canInstall = canSelfUpdate();
-    setUpdateState({ status: 'available', version: info.version, canInstall });
+    // A .deb cannot be replaced by electron-updater itself, but the app can download it and hand it to
+    // the system package manager. That is the only honest path for a system package: the install still
+    // needs the administrator permission the system requires.
+    const files = Array.isArray(info.files) ? info.files : [];
+    pendingDebFile = process.platform === 'linux' && !process.env.APPIMAGE
+      ? files.find((file) => typeof file?.url === 'string' && file.url.endsWith('.deb'))
+      : undefined;
+    pendingDebPath = '';
+    const debUpdate = Boolean(pendingDebFile);
+    const canInstall = canSelfUpdate() || debUpdate;
+    setUpdateState({
+      status: 'available',
+      version: info.version,
+      canInstall,
+      installMethod: debUpdate ? 'deb' : 'auto',
+    });
     if (Notification.isSupported()) {
       new Notification({
         title: 'OmniHilbras update available',
@@ -210,7 +225,11 @@ async function loadUpdater() {
     }
     gateway.pushLog('stdout', `Update available: ${info.version}.\n`);
   });
-  autoUpdater.on('update-not-available', () => setUpdateState({ status: 'current' }));
+  autoUpdater.on('update-not-available', () => {
+    pendingDebFile = undefined;
+    pendingDebPath = '';
+    setUpdateState({ status: 'current' });
+  });
   autoUpdater.on('download-progress', (progress) => setUpdateState({ status: 'downloading', percent: Math.round(progress.percent) }));
   autoUpdater.on('update-downloaded', (info) => setUpdateState({ status: 'downloaded', version: info.version, canInstall: canSelfUpdate() }));
   autoUpdater.on('error', (error) => {
@@ -242,9 +261,32 @@ async function checkForUpdates(manual = false) {
   }
 }
 
+async function downloadDebUpdate() {
+  if (!pendingDebFile) throw new Error('The update feed did not list a .deb for this release.');
+  const version = updateState.version;
+  if (!version) throw new Error('The update feed did not name a version.');
+  if (typeof pendingDebFile.sha512 !== 'string' || pendingDebFile.sha512.length === 0) {
+    throw new Error('The update feed did not provide a checksum for the .deb.');
+  }
+  const url = new URL(pendingDebFile.url, `https://github.com/Hilbras/OmniHilbras/releases/download/v${version}/`).toString();
+  setUpdateState({ status: 'downloading', percent: 0 });
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`The .deb download failed with HTTP ${response.status}.`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  setUpdateState({ status: 'downloading', percent: 85 });
+  const digest = createHash('sha512').update(buffer).digest('base64');
+  if (digest !== pendingDebFile.sha512) throw new Error('The downloaded .deb did not match its checksum.');
+  const target = join(app.getPath('temp'), `OmniHilbras-${version}-amd64.deb`);
+  writeFileSync(target, buffer);
+  pendingDebPath = target;
+  setUpdateState({ status: 'downloaded', canInstall: true, installMethod: 'deb' });
+  return updateState;
+}
+
 async function downloadUpdate() {
   const active = await loadUpdater();
   if (!active) throw new Error('Updates are only available in an installed build.');
+  if (updateState.installMethod === 'deb') return downloadDebUpdate();
   setUpdateState({ status: 'downloading', percent: 0 });
   await active.downloadUpdate();
   return updateState;
@@ -252,6 +294,28 @@ async function downloadUpdate() {
 
 async function installUpdate() {
   if (!updater || updateState.status !== 'downloaded') throw new Error('No downloaded update is ready to install.');
+  if (updateState.installMethod === 'deb') {
+    if (!pendingDebPath) throw new Error('The downloaded .deb is no longer available.');
+    setUpdateState({ status: 'installing' });
+    installingUpdate = true;
+    quitting = true;
+    try {
+      await stopLogForwarding();
+      await gateway.stop();
+    } catch {
+      // The package manager is still the right next step; a supervisor that already stopped is fine.
+    }
+    const failure = await shell.openPath(pendingDebPath);
+    if (failure) {
+      installingUpdate = false;
+      quitting = false;
+      throw new Error(`The system package installer could not be opened: ${failure}`);
+    }
+    // The package manager owns the next step. It will ask for the administrator password because a
+    // .deb writes into system paths; the app cannot bypass that and should not pretend to.
+    app.quit();
+    return;
+  }
   setUpdateState({ status: 'installing' });
   // Stop the gateway before the installer takes over the app directory. The ordinary quit path does
   // this from `before-quit`, but quitting for an update must not be deferred by that handler or the

@@ -1,7 +1,14 @@
-# Release notes draft: 3.1.0
+# Release notes draft: 3.2.0
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.2.0 — .deb updates from the app
+
+- A Linux `.deb` install can now download its update, verify the checksum, and open the system installer
+  from Settings. The package manager still asks for administrator permission; a system package cannot
+  bypass that.
+- AppImage, Windows and macOS keep the direct install path.
 
 ## 3.1.0 — Linux AppImage updates
 

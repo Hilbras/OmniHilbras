@@ -207,13 +207,13 @@ export function SettingsContent() {
         </div>
       </Section>
 
-      <Section icon={<RefreshCw className="h-4 w-4 text-gold-text" aria-hidden="true" />} title="Updates" description="The app checks the signed release feed. Download and install appear only where the platform can replace itself.">
+      <Section icon={<RefreshCw className="h-4 w-4 text-gold-text" aria-hidden="true" />} title="Updates" description="The app checks the release feed. Windows, signed macOS and the Linux AppImage install from here; a .deb downloads and opens the system installer.">
         <KeyValue label="Status" value={update ? `${update.status}${update.version ? ` · ${update.version}` : ''}${typeof update.percent === 'number' ? ` · ${update.percent}%` : ''}` : 'not checked'} />
         {update?.reason && <KeyValue label="Reason" value={update.reason} />}
         <div className="flex flex-wrap gap-2 py-3">
           <button type="button" onClick={() => void updateAction('check')} disabled={!bridge || Boolean(saving)} className="btn-ghost !px-3 !py-2 !text-xs disabled:opacity-40">Check now</button>
           {update?.canInstall && update.status === 'available' && <button type="button" onClick={() => void updateAction('download')} disabled={Boolean(saving)} className="btn-gold !px-3 !py-2 !text-xs">Download</button>}
-          {update?.canInstall && update.status === 'downloaded' && <button type="button" onClick={() => void updateAction('install')} disabled={Boolean(saving)} className="btn-gold !px-3 !py-2 !text-xs">Install and restart</button>}
+          {update?.canInstall && update.status === 'downloaded' && <button type="button" onClick={() => void updateAction('install')} disabled={Boolean(saving)} className="btn-gold !px-3 !py-2 !text-xs">{update.installMethod === 'deb' ? 'Open installer' : 'Install and restart'}</button>}
           {!update?.canInstall && (update?.status === 'available' || update?.status === 'error') && <button type="button" onClick={() => void bridge?.updates.openRelease()} className="btn-ghost !px-3 !py-2 !text-xs">Release page</button>}
         </div>
       </Section>

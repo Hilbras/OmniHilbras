@@ -55,9 +55,11 @@ export function UpdateBanner() {
           <p className="muted mt-1 text-[11px] leading-relaxed">
             {state.status === 'error'
               ? state.reason
-              : state.canInstall
-                ? 'Download, install, and restart into the new version.'
-                : 'This build cannot replace itself. Download the release for your platform.'}
+              : state.installMethod === 'deb'
+                ? 'Download the .deb, then open the system installer. It will ask for administrator permission.'
+                : state.canInstall
+                  ? 'Download, install, and restart into the new version.'
+                  : 'This build cannot replace itself. Download the release for your platform.'}
           </p>
         </div>
         <button type="button" aria-label="Dismiss update" onClick={() => setDismissed(true)} className="muted rounded-md p-1 hover:text-text"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>
@@ -72,7 +74,7 @@ export function UpdateBanner() {
           <button type="button" onClick={() => void run('download')} className="btn-gold !px-3 !py-1.5 !text-[11px]"><Download className="h-3.5 w-3.5" aria-hidden="true" />Download</button>
         )}
         {state.canInstall && state.status === 'downloaded' && (
-          <button type="button" onClick={() => void run('install')} className="btn-gold !px-3 !py-1.5 !text-[11px]"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Install and restart</button>
+          <button type="button" onClick={() => void run('install')} className="btn-gold !px-3 !py-1.5 !text-[11px]"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />{state.installMethod === 'deb' ? 'Open installer' : 'Install and restart'}</button>
         )}
         {(!state.canInstall || state.status === 'error') && (
           <button type="button" onClick={() => void bridge.updates.openRelease()} className="btn-ghost !px-3 !py-1.5 !text-[11px]"><ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />Release page</button>

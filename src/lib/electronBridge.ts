@@ -30,6 +30,8 @@ export type UpdateState = {
   percent?: number;
   reason?: string;
   canInstall?: boolean;
+  /** `deb` means the downloaded file is handed to the system package manager, not auto-installed. */
+  installMethod?: 'auto' | 'deb';
 };
 
 export type DesktopLogEvent = {  at?: string;

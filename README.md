@@ -22,7 +22,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.1.0**
+**Current version: 3.2.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
@@ -70,7 +70,8 @@ https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-maco
 ```
 
 The Windows and macOS builds are not code-signed yet. SmartScreen or Gatekeeper may ask you to confirm the
-first launch. The AppImage is the Linux build that can update itself; install the `.deb` with:
+first launch. The AppImage updates itself without administrator rights. The `.deb` can be downloaded from the
+app and opened in the system installer, which still asks for administrator permission; install it with:
 
 ```bash
 sudo apt install ./OmniHilbras-linux-amd64.deb
@@ -267,8 +268,8 @@ The desktop shell owns the local gateway so the app can start and stop it withou
   not a dead app; five consecutive crashes stop trying.
 - **Logs** stream into the dashboard over the preload bridge.
 - **Release-feed updates** — the app checks the GitHub release feed, downloads an installer, and can install
-  and restart. Windows NSIS, signed macOS and the Linux AppImage can replace themselves; a `.deb` cannot, and
-  says so.
+  and restart. Windows NSIS, signed macOS and the Linux AppImage replace themselves; a `.deb` downloads and
+  opens the system installer, which asks for administrator permission.
 - **Encrypted backup** import and export through the About/Settings surfaces.
 
 The renderer never holds the dashboard token and never calls `127.0.0.1` directly. Requests, chat streams and
