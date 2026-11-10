@@ -15,6 +15,7 @@ const platforms = [
     detail: 'Windows 10/11 · x64',
     action: 'Download for Windows',
     href: `${RELEASES}/download/OmniHilbras-Setup.exe`,
+    secondary: null,
     available: true,
     note: 'NSIS installer. The build is not code-signed yet, so SmartScreen may ask you to confirm.',
   },
@@ -22,11 +23,12 @@ const platforms = [
     id: 'linux',
     icon: Terminal,
     name: 'Linux',
-    detail: 'Debian / Ubuntu · amd64',
-    action: 'Download .deb',
-    href: `${RELEASES}/download/OmniHilbras-linux-amd64.deb`,
+    detail: 'AppImage or Debian · amd64',
+    action: 'Download AppImage',
+    href: `${RELEASES}/download/OmniHilbras-linux-amd64.AppImage`,
+    secondary: { label: 'Or download the .deb', href: `${RELEASES}/download/OmniHilbras-linux-amd64.deb` },
     available: true,
-    note: 'Install with `sudo apt install ./OmniHilbras-linux-amd64.deb`. The gateway and dashboard run locally.',
+    note: 'The AppImage updates itself from Settings. The .deb is for apt and must be upgraded manually.',
   },
   {
     id: 'macos',
@@ -35,6 +37,7 @@ const platforms = [
     detail: 'Apple silicon and Intel',
     action: 'Open release page',
     href: RELEASES,
+    secondary: null,
     available: false,
     note: 'The macOS build is produced on a macOS CI runner. Open the release page for the available builds.',
   },
@@ -80,7 +83,7 @@ export default function DownloadPage() {
           </div>
 
           <div className="mt-10 grid gap-4 md:grid-cols-3">
-            {platforms.map(({ id, icon: Icon, name, detail, action, href, available, note }) => {
+            {platforms.map(({ id, icon: Icon, name, detail, action, href, secondary, available, note }) => {
               const primary = detected === id;
               return (
                 <article key={id} className={`card lift flex flex-col p-6 ${primary ? 'border-gold/50' : ''}`}>
@@ -101,6 +104,11 @@ export default function DownloadPage() {
                     {available ? <Download className="h-4 w-4" aria-hidden="true" /> : <ArrowUpRight className="h-4 w-4" aria-hidden="true" />}
                     {action}
                   </a>
+                  {secondary && (
+                    <a href={secondary.href} className="muted mt-3 text-center text-[11px] transition-colors hover:text-gold-text">
+                      {secondary.label}
+                    </a>
+                  )}
                 </article>
               );
             })}

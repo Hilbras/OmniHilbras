@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "3.0.5",
+  "version": "3.1.0",
   "description": "Provider-neutral local gateway and desktop dashboard",
   "author": {
     "name": "Hilbras",
@@ -100,7 +100,8 @@
     "linux": {
       "target": [
         "dir",
-        "deb"
+        "deb",
+        "AppImage"
       ],
       "icon": "brand/logo-512.png",
       "category": "Development",

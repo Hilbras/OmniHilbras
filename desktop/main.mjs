@@ -169,6 +169,11 @@ function createTray() {
  */
 let updater;
 let updateState = { status: 'idle' };
+
+/** Windows NSIS, signed macOS and Linux AppImage can replace themselves; a .deb cannot. */
+function canSelfUpdate() {
+  return process.platform !== 'linux' || Boolean(process.env.APPIMAGE);
+}
 function setUpdateState(next) {
   updateState = { ...updateState, ...next };
   send('update:state', updateState);
@@ -190,8 +195,10 @@ async function loadUpdater() {
   autoUpdater.logger = null;
   autoUpdater.on('checking-for-update', () => setUpdateState({ status: 'checking' }));
   autoUpdater.on('update-available', (info) => {
-    // A .deb cannot replace itself through electron-updater; Windows NSIS and signed macOS can.
-    const canInstall = process.platform !== 'linux';
+    // A .deb cannot replace itself through electron-updater. A Windows NSIS build, a signed macOS
+    // bundle, and a Linux AppImage can. `APPIMAGE` is set by the AppImage runtime itself, so a .deb
+    // install and an AppImage install of the same code take different paths.
+    const canInstall = canSelfUpdate();
     setUpdateState({ status: 'available', version: info.version, canInstall });
     if (Notification.isSupported()) {
       new Notification({
@@ -205,7 +212,7 @@ async function loadUpdater() {
   });
   autoUpdater.on('update-not-available', () => setUpdateState({ status: 'current' }));
   autoUpdater.on('download-progress', (progress) => setUpdateState({ status: 'downloading', percent: Math.round(progress.percent) }));
-  autoUpdater.on('update-downloaded', (info) => setUpdateState({ status: 'downloaded', version: info.version, canInstall: process.platform !== 'linux' }));
+  autoUpdater.on('update-downloaded', (info) => setUpdateState({ status: 'downloaded', version: info.version, canInstall: canSelfUpdate() }));
   autoUpdater.on('error', (error) => {
     const reason = error instanceof Error ? error.message : String(error);
     gateway.pushLog('stderr', `Update error: ${reason}\n`);

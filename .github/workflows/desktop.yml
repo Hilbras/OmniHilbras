@@ -16,8 +16,10 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            target: --linux deb
-            artifact: release/*.deb
+            target: --linux deb AppImage
+            artifact: |
+              release/*.deb
+              release/*.AppImage
           - os: windows-latest
             target: --win nsis
             artifact: release/*.exe

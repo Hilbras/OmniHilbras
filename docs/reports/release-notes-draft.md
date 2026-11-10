@@ -1,7 +1,13 @@
-# Release notes draft: 3.0.5
+# Release notes draft: 3.1.0
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.1.0 — Linux AppImage updates
+
+- Linux releases now include `OmniHilbras-linux-amd64.AppImage`.
+- The AppImage can download and install its own updates; the `.deb` remains a manual install.
+- Download page and README list the AppImage as the primary Linux build.
 
 ## 3.0.5 — notifications below the header
 

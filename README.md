@@ -22,7 +22,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.0.5**
+**Current version: 3.1.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
@@ -57,19 +57,20 @@ Download the latest installer from [the download page](https://omnihilbras.hilbr
 | Platform | Package |
 | --- | --- |
 | Windows 10/11 x64 | `OmniHilbras-Setup.exe` |
-| Debian / Ubuntu amd64 | `OmniHilbras-linux-amd64.deb` |
+| Linux x64 | `OmniHilbras-linux-amd64.AppImage` (self-updating) or `OmniHilbras-linux-amd64.deb` |
 | macOS | `OmniHilbras-macos.dmg` (built on macOS CI) |
 
 Stable direct links:
 
 ```text
 https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-Setup.exe
+https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-linux-amd64.AppImage
 https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-linux-amd64.deb
 https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-macos.dmg
 ```
 
 The Windows and macOS builds are not code-signed yet. SmartScreen or Gatekeeper may ask you to confirm the
-first launch. Linux users install with:
+first launch. The AppImage is the Linux build that can update itself; install the `.deb` with:
 
 ```bash
 sudo apt install ./OmniHilbras-linux-amd64.deb
@@ -266,7 +267,8 @@ The desktop shell owns the local gateway so the app can start and stop it withou
   not a dead app; five consecutive crashes stop trying.
 - **Logs** stream into the dashboard over the preload bridge.
 - **Release-feed updates** — the app checks the GitHub release feed, downloads an installer, and can install
-  and restart. Windows NSIS and signed macOS can replace themselves; a `.deb` cannot, and says so.
+  and restart. Windows NSIS, signed macOS and the Linux AppImage can replace themselves; a `.deb` cannot, and
+  says so.
 - **Encrypted backup** import and export through the About/Settings surfaces.
 
 The renderer never holds the dashboard token and never calls `127.0.0.1` directly. Requests, chat streams and
