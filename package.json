@@ -44,9 +44,15 @@
     "verify": "pnpm version:check && pnpm test:brand && pnpm typecheck && pnpm test && node Kernel/API/test/spec-success-criteria.mjs && pnpm build && pnpm analyze:check",
     "test:brand": "BRAND_STRICT=1 node --test tests/brand-assets.test.js",
     "brand": "node scripts/generate-brand.mjs",
-    "release:audit": "node scripts/audit-release-trail.mjs"
+    "release:audit": "node scripts/audit-release-trail.mjs",
+    "build:android": "vite build --config vite.android.config.ts && node scripts/finalize-android.mjs",
+    "android:add": "pnpm build:android && cap add android",
+    "android:sync": "pnpm build:android && cap sync android",
+    "android:apk": "pnpm android:sync && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
     "@omnihilbras/kernel-api": "workspace:*",
     "@xyflow/react": "^12.12.0",
     "electron-updater": "^6.8.11",
@@ -59,6 +65,7 @@
     "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.6.2",
     "@types/pngjs": "^6.0.5",

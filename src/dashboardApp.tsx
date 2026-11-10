@@ -14,8 +14,8 @@ import { UsageContent } from './pages/UsagePage';
 import { LogsContent } from './pages/LogsPage';
 import { SettingsContent } from './pages/SettingsPage';
 
-/** Public path the dashboard is served under. Every route hangs off it. */
-const dashboardBase = '/dashboard';
+/** Public path the dashboard is served under. Android bundles it at the app root. */
+const dashboardBase = import.meta.env.VITE_ANDROID === '1' ? '' : '/dashboard';
 
 function ProviderRoute() {
   const { providerId } = useParams();

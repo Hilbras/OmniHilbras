@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">OmniHilbras</string>
+    <string name="title_activity_main">OmniHilbras</string>
+    <string name="package_name">com.hilbras.omnihilbras</string>
+    <string name="custom_url_scheme">com.hilbras.omnihilbras</string>
+</resources>

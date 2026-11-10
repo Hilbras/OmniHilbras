@@ -144,7 +144,11 @@ export type GatewayApiKeyList = {
 // per-launch dashboard token attached. In a production build there is no such proxy, so the gateway URL is used.
 const gatewayBaseUrl = import.meta.env.DEV && typeof window !== 'undefined'
   ? normalizeGatewayBaseUrl(window.location.origin)
-  : normalizeGatewayBaseUrl(import.meta.env.VITE_GATEWAY_URL ?? 'http://127.0.0.1:8787');
+  : normalizeGatewayBaseUrl(
+      (typeof globalThis !== 'undefined' ? (globalThis as { __OMNIHILBRAS_GATEWAY_URL__?: unknown }).__OMNIHILBRAS_GATEWAY_URL__ : undefined) as string
+        ?? import.meta.env.VITE_GATEWAY_URL
+        ?? 'http://127.0.0.1:8787',
+    );
 
 /**
  * The gateway's base URL, for callers that need to reach it outside `requestJson`.

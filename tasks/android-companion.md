@@ -1,6 +1,6 @@
 # Plan: Android companion app
 
-**Status:** in progress
+**Status:** in progress — debug Android shell and APK built; pairing/Keystore and remote gateway profile still open
 
 ## Decision
 
