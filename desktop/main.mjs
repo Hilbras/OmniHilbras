@@ -24,6 +24,9 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 const projectRoot = app.getAppPath();
+// `--user-data-dir` controls Chromium, not `app.getPath('userData')`. A smoke run must not write
+// gateway usage, config or logs into the installed app's directory, so it sets this explicitly.
+if (process.env.OMNIHILBRAS_USER_DATA) app.setPath('userData', process.env.OMNIHILBRAS_USER_DATA);
 const distRoot = join(projectRoot, 'dist');
 const configPath = join(app.getPath('userData'), 'config.json');
 

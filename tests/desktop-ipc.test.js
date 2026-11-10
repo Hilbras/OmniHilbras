@@ -60,7 +60,7 @@ test('the app keeps running in the tray and owns its lifecycle', () => {
 test('the app smoke script drives the real binary', () => {
   const script = read('./scripts/app-smoke.mjs');
   assert.match(script, /OMNIHILBRAS_SMOKE: '1'/, 'the smoke run does not enable smoke mode');
-  assert.match(script, /user-data-dir/, 'the smoke run can collide with an installed instance');
+  assert.match(script, /OMNIHILBRAS_USER_DATA: userData/, 'the smoke run shares the installed app data directory');
   assert.match(script, /nested dashboard shell/, 'the smoke does not check for the duplicated shell');
 });
 

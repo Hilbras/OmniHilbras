@@ -24,7 +24,7 @@ const args = packaged
 const output = await new Promise((resolve, reject) => {
   const child = spawn(binary, args, {
     cwd: root,
-    env: { ...process.env, OMNIHILBRAS_SMOKE: '1' },
+    env: { ...process.env, OMNIHILBRAS_SMOKE: '1', OMNIHILBRAS_USER_DATA: userData },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let text = '';

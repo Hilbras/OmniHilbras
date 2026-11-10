@@ -38,9 +38,10 @@ export function FailureNotifications() {
       if (recent.current.has(key)) return;
       recent.current.set(key, now);
       const who = event.providerId ?? 'The gateway';
+      const what = event.model ? ` (${event.model})` : '';
       const why = event.errorCode ? ` — ${event.errorCode}` : '';
       const after = event.attempts > 1 ? `, after ${event.attempts} attempts` : '';
-      notify(`${who} request failed${after}${why}`, 'error');
+      notify(`${who}${what} request failed${after}${why}`, 'error');
     }, (connected) => {
       // The feed can be unavailable for a real reason (built dashboard, refused origin, gateway down).
       // Saying so once is the difference between "quiet" and "silent".
