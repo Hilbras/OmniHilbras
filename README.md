@@ -22,7 +22,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.4.0**
+**Current version: 3.5.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
@@ -328,6 +328,18 @@ The desktop shell owns the local gateway so the app can start and stop it withou
 The renderer never holds the dashboard token and never calls `127.0.0.1` directly. Requests, chat streams and
 logs cross a narrow preload bridge. The packaged dashboard is served from `app://omnihilbras` out of `dist/`
 with a strict CSP, all permission requests denied, navigation away from the app blocked, and DevTools disabled.
+
+## Android companion
+
+A debug Android shell lives under `android/`. It is a Capacitor WebView for the existing dashboard, not a
+gateway on the phone. On first launch it asks for a gateway URL and a device API key, then stores both in
+Android Keystore.
+
+- Local debug: `adb reverse tcp:8787 tcp:8787`, then pair with `http://127.0.0.1:8787`.
+- Remote: use an HTTPS private tunnel or reverse proxy; plain HTTP to a non-loopback host is rejected.
+- Build: `pnpm build:android` then `pnpm android:apk`; output is
+  `android/app/build/outputs/apk/debug/app-debug.apk`.
+- QR pairing, release signing and physical-device verification are still open. See [`android/README.md`](./android/README.md).
 
 ## Configuration
 

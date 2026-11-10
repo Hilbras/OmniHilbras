@@ -23,6 +23,18 @@ Debug APK:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+## Pairing
+
+The app opens a setup screen when no device credential is stored. Enter:
+
+- **Gateway URL** — `https://…` through a private tunnel, or `http://127.0.0.1:8787` with `adb reverse`.
+- **Device API key** — create one in the desktop dashboard under **API keys**, and turn on key enforcement.
+
+The key is encrypted with Android Keystore through the `SecureStore` plugin. The provider vault is never
+copied to Android.
+
+QR pairing is not implemented yet; manual entry is the current pairing path.
+
 ## Run against this computer
 
 For a USB-connected debug device, reverse the gateway port so the app's loopback URL reaches the desktop:
@@ -33,16 +45,15 @@ adb reverse tcp:8787 tcp:8787
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The app opens the dashboard at its root. The gateway must allow the app's origin and, when API-key enforcement
-is on, the dashboard needs a device token. That pairing flow is **not implemented yet**; this shell is the
-debug foundation.
+For a remote device, put the gateway behind a private HTTPS path (for example Tailscale Serve) and enter that
+URL. The default CORS list includes the Capacitor origin `https://localhost`; add any other origin explicitly.
 
 ## Current limits
 
-- No QR pairing.
-- No Android Keystore token storage.
-- No release signing.
-- Remote HTTPS is accepted by the client, but the gateway still needs a trusted tunnel/reverse proxy and a
-  device-key flow before a non-loopback build is usable.
+- QR pairing is deferred.
+- Release signing is deferred; the APK is a debug build.
+- Runtime verification on a physical device is still required.
+- The dashboard pages are the existing dashboard, so providers, models, routing, usage and logs are wired to
+  the same gateway API; mobile layout needs device verification.
 
 Do not bind the gateway to `0.0.0.0` as a shortcut.

@@ -1,10 +1,11 @@
 import { createRoot } from 'react-dom/client';
-import DashboardApp from './dashboardApp';
+import { Capacitor } from '@capacitor/core';
 import { ToastProvider } from './components/Toast';
+import { AndroidSetup } from './AndroidSetup';
+import { SecureStore } from './lib/secureStore';
 import './index.css';
 
-// Apply the reduced-motion preference before the first paint of the dashboard, not only when the
-// Settings page happens to be opened.
+// Apply the reduced-motion preference before the first paint of the dashboard.
 try {
   if (localStorage.getItem('omnihilbras-reduce-motion') === 'true') {
     document.documentElement.classList.add('reduce-motion');
@@ -16,14 +17,42 @@ try {
 const root = document.getElementById('root');
 if (!root) throw new Error('#root element missing');
 
-// The toast provider wraps the whole app: every page reports the outcome of an action the same way,
-// rather than each one growing its own banner above the fold.
-//
-// **Both** entries need this. The site (`main.tsx`) and the dashboard (`dashboard.tsx`) are separate
-// React roots — this one is what loads `/dashboard/providers`, so wrapping only the other left every
-// provider page throwing `useToast must be used inside ToastProvider` at first render.
-createRoot(root).render(
-  <ToastProvider>
-    <DashboardApp />
-  </ToastProvider>,
-);
+const reactRoot = createRoot(root);
+
+function renderDashboard() {
+  void import('./dashboardApp').then(({ default: DashboardApp }) => {
+    reactRoot.render(
+      <ToastProvider>
+        <DashboardApp />
+      </ToastProvider>,
+    );
+  });
+}
+
+async function boot() {
+  if (!Capacitor.isNativePlatform()) {
+    renderDashboard();
+    return;
+  }
+  try {
+    const saved = await SecureStore.get({ key: 'gateway' });
+    if (saved.value) {
+      const config = JSON.parse(saved.value) as { baseUrl?: string; token?: string };
+      if (config.baseUrl) (globalThis as { __OMNIHILBRAS_GATEWAY_URL__?: string }).__OMNIHILBRAS_GATEWAY_URL__ = config.baseUrl;
+      if (config.token) (globalThis as { __OMNIHILBRAS_GATEWAY_TOKEN__?: string }).__OMNIHILBRAS_GATEWAY_TOKEN__ = config.token;
+      if (config.baseUrl && config.token) {
+        renderDashboard();
+        return;
+      }
+    }
+  } catch {
+    // An unreadable SecureStore is treated as an unpaired device, not a crash loop.
+  }
+  reactRoot.render(
+    <ToastProvider>
+      <AndroidSetup onPaired={renderDashboard} />
+    </ToastProvider>,
+  );
+}
+
+void boot();

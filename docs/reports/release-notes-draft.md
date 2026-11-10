@@ -1,7 +1,15 @@
-# Release notes draft: 3.4.0
+# Release notes draft: 3.5.0
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.5.0 — Android companion debug shell
+
+- Added a Capacitor Android shell with a dashboard-only build and debug APK.
+- Android setup accepts a gateway URL and device API key, stored through an Android Keystore-backed plugin.
+- Remote gateway URLs must be HTTPS; plain HTTP remains loopback-only.
+- Added the Capacitor origin to the default CORS allowlist.
+- QR pairing, release signing and physical-device verification remain open.
 
 ## 3.4.0 — virtual models
 

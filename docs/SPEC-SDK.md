@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.4.0
+**Status:** Current — release 3.5.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -1803,7 +1803,8 @@ it is the right trade.
 ### A refusal is not an outage
 
 The gateway answers **`403 CORS_ORIGIN_DENIED`** when a request carries an `Origin` that is not
-on its allowlist (`http://localhost:5173` and `http://127.0.0.1:5173` are). The browser cannot
+on its allowlist (`http://localhost:5173`, `http://127.0.0.1:5173`, the Vite fallback ports
+`5174`, and the Android shell origin `https://localhost` are). The browser cannot
 read that response, so from the dashboard it is indistinguishable from a dead server — and the
 badge said `Gateway offline`, which points the user at restarting a server that is running
 perfectly and refusing correctly.

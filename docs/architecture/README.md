@@ -24,6 +24,13 @@ The gateway is one of three consumers in this repository:
 The dashboard and desktop app never call a provider directly. They call the gateway, which is the only
 component that knows a provider's wire format.
 
+## Android companion
+
+`android/` is a Capacitor WebView for the dashboard, not a second gateway. The app pairs with a gateway URL and
+a device API key; the key is encrypted by an Android Keystore-backed `SecureStore` plugin. Remote URLs must be
+HTTPS; plain HTTP is limited to loopback and `adb reverse`. The provider vault never leaves the desktop. QR
+pairing and release signing are deferred.
+
 ## Accounts
 
 `GatewayConnection` is the account record. It already carries its own id, encrypted credential, model list,
