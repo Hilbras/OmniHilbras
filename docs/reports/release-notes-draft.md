@@ -1,7 +1,13 @@
-# Release notes draft: 3.0.3
+# Release notes draft: 3.0.4
 
-Status: documentation-only release. The previous runtime release was `v3.0.2`; this file records both the
-3.0.2 changes and the documentation rewrite that followed.
+Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
+GitHub release is the canonical source.
+
+## 3.0.4 — test every saved connection
+
+- The provider page's Test button now probes every saved connection instead of only the first one and
+  reports each result on its own row.
+- No gateway route changed.
 
 ## 3.0.3 — documentation
 
