@@ -339,6 +339,7 @@ Android Keystore.
 - Remote: use an HTTPS private tunnel or reverse proxy; plain HTTP to a non-loopback host is rejected.
 - Build: `pnpm build:android` then `pnpm android:apk`; output is
   `android/app/build/outputs/apk/debug/app-debug.apk`.
+- Latest debug APK: `https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-android-debug.apk`.
 - QR pairing, release signing and physical-device verification are still open. See [`android/README.md`](./android/README.md).
 
 ## Configuration

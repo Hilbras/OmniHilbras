@@ -23,6 +23,12 @@ Debug APK:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+Latest debug download:
+
+```text
+https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-android-debug.apk
+```
+
 ## Pairing
 
 The app opens a setup screen when no device credential is stored. Enter:
