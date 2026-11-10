@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, protocol, session, shell, Tray } from 'electron';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { readFile } from 'node:fs/promises';
 import { dirname, join, normalize, sep } from 'node:path';
 import { createGatewayClient } from './gateway-ipc.mjs';
@@ -49,6 +50,20 @@ function saveUserConfig(patch) {
 
 const userConfig = readUserConfig();
 const preferredPort = Number(process.env.OMNIHILBRAS_PORT) || Number(userConfig.gatewayPort) || 8787;
+// The CLI and the web dashboard use this directory. The desktop app used its own `userData/data`,
+// which made an exported backup imported in the other surface look like it did nothing: they were
+// two vaults. Share the store, and migrate a pre-existing desktop-only store once when the shared
+// one is empty.
+const sharedDataDir = join(process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), '.config'), 'omnihilbras');
+const legacyDataDir = join(app.getPath('userData'), 'data');
+if (!existsSync(join(sharedDataDir, 'connections.json')) && existsSync(join(legacyDataDir, 'connections.json'))) {
+  try {
+    mkdirSync(sharedDataDir, { recursive: true, mode: 0o700 });
+    cpSync(legacyDataDir, sharedDataDir, { recursive: true, errorOnExist: false, force: false });
+  } catch {
+    // A failed migration must not stop the app; the legacy directory is left untouched.
+  }
+}
 
 function appSettings() {
   const config = readUserConfig();
@@ -74,7 +89,7 @@ const gateway = createGatewaySupervisor({
   autoRestart: true,
   maxRestarts: 5,
   env: {
-    OMNIHILBRAS_DATA_DIR: join(app.getPath('userData'), 'data'),
+    OMNIHILBRAS_DATA_DIR: sharedDataDir,
     OMNIHILBRAS_CORS_ORIGINS: 'http://localhost:5173,http://127.0.0.1:5173',
   },
 });

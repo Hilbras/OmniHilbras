@@ -2367,6 +2367,15 @@ export class GatewayService {
       await this.connectionStore.save(entry.connection as never, entry.credential as never);
       imported += 1;
     }
+    // Read back what the store actually holds. A save that resolves but writes nothing is the failure
+    // mode that looks exactly like "import did nothing"; the counts must describe the store, not a loop.
+    const persisted = new Set((await this.connectionStore.list()).map((connection) => connection.id));
+    const missing = payload.connections
+      .map((entry) => entry.connection?.id)
+      .filter((id): id is string => typeof id === 'string' && !persisted.has(id));
+    if (missing.length > 0) {
+      throw new ProviderError('CONFIGURATION_ERROR', `The connection store did not persist: ${missing.join(', ')}.`);
+    }
     let strategies = 0;
     const store = this.connectionStore as { setStrategy?: (providerId: string, strategy: string) => Promise<void> };
     for (const [providerId, strategy] of Object.entries(payload.strategies ?? {})) {

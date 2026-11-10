@@ -121,6 +121,13 @@ test('the updater resolves both CJS interop shapes', () => {
   assert.match(main, /electron-updater did not expose autoUpdater/, 'a missing updater is not reported');
 });
 
+test('desktop and web share one vault directory', () => {
+  const main = read('./desktop/main.mjs');
+  assert.match(main, /OMNIHILBRAS_DATA_DIR: sharedDataDir/, 'the desktop app still uses its own data directory');
+  assert.match(main, /\.config.*omnihilbras|`omnihilbras`/, 'the shared directory is not the CLI default');
+  assert.match(main, /legacyDataDir/, 'there is no migration from the old desktop-only store');
+});
+
 test('the app header is the title bar, with its own controls', () => {
   const main = read('./desktop/main.mjs');
   const preload = read('./desktop/preload.cjs');
