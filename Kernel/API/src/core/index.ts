@@ -13,6 +13,7 @@ export * from './secret-store.js';
 export * from './tool-compress.js';
 export * from './tool-messages.js';
 export * from './types.js';
+export * from './usage-canonical.js';
 
 /**
  * Shared provider machinery, kept here because no provider owns it.

@@ -399,7 +399,7 @@ function recordUsage(
     attempts: number;
     latencyMs: number;
     errorCode?: string;
-    usage?: { inputTokens?: number; outputTokens?: number };
+    usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number; estimated?: boolean };
     requestId?: string;
     ledger?: readonly GatewayFailoverAttempt[];
   },
@@ -425,6 +425,10 @@ function recordUsage(
       ...(input.errorCode ? { errorCode: input.errorCode } : {}),
       ...(input.usage?.inputTokens !== undefined ? { inputTokens: input.usage.inputTokens } : {}),
       ...(input.usage?.outputTokens !== undefined ? { outputTokens: input.usage.outputTokens } : {}),
+      ...(input.usage?.cacheReadTokens !== undefined ? { cacheReadTokens: input.usage.cacheReadTokens } : {}),
+      ...(input.usage?.cacheWriteTokens !== undefined ? { cacheWriteTokens: input.usage.cacheWriteTokens } : {}),
+      ...(input.usage?.reasoningTokens !== undefined ? { reasoningTokens: input.usage.reasoningTokens } : {}),
+      ...(input.usage?.estimated === true ? { tokensEstimated: true } : {}),
       ...(input.requestId ? { requestId: input.requestId } : {}),
       ...(input.ledger && input.ledger.length > 0 ? { path: input.ledger.map(toUsageAttempt) } : {}),
     }),

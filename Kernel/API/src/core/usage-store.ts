@@ -85,6 +85,11 @@ export type UsageRecord = {
    */
   inputTokens?: number;
   outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
+  /** True when these numbers are an estimate, not a provider measurement. */
+  tokensEstimated?: boolean;
 };
 
 /** What a caller wants out. Every field is optional; the default is everything, newest first. */
@@ -105,6 +110,9 @@ export type UsageTotals = {
   cancelled: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
   /** True when **no** record carried token counts, so the token totals are an absence and not a zero. */
   tokensUnmeasured: boolean;
 };
@@ -169,6 +177,9 @@ export function summarizeUsage(records: readonly UsageRecord[]): UsageTotals {
   let cancelled = 0;
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
+  let reasoningTokens = 0;
   let metered = 0;
 
   for (const record of records) {
@@ -182,6 +193,9 @@ export function summarizeUsage(records: readonly UsageRecord[]): UsageTotals {
       metered += 1;
       inputTokens += record.inputTokens ?? 0;
       outputTokens += record.outputTokens ?? 0;
+      cacheReadTokens += record.cacheReadTokens ?? 0;
+      cacheWriteTokens += record.cacheWriteTokens ?? 0;
+      reasoningTokens += record.reasoningTokens ?? 0;
     }
   }
 
@@ -192,6 +206,9 @@ export function summarizeUsage(records: readonly UsageRecord[]): UsageTotals {
     cancelled,
     inputTokens,
     outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    reasoningTokens,
     tokensUnmeasured: metered === 0,
   };
 }
@@ -427,6 +444,10 @@ function normalizeRecord(record: UsageRecord): UsageRecord {
     latencyMs: record.latencyMs,
     ...(typeof record.inputTokens === 'number' ? { inputTokens: record.inputTokens } : {}),
     ...(typeof record.outputTokens === 'number' ? { outputTokens: record.outputTokens } : {}),
+    ...(typeof record.cacheReadTokens === 'number' ? { cacheReadTokens: record.cacheReadTokens } : {}),
+    ...(typeof record.cacheWriteTokens === 'number' ? { cacheWriteTokens: record.cacheWriteTokens } : {}),
+    ...(typeof record.reasoningTokens === 'number' ? { reasoningTokens: record.reasoningTokens } : {}),
+    ...(record.tokensEstimated === true ? { tokensEstimated: true } : {}),
     ...(typeof record.requestId === 'string' ? { requestId: record.requestId } : {}),
     ...(Array.isArray(record.path) ? { path: record.path.map(normalizeAttempt) } : {}),
   };

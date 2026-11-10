@@ -43,6 +43,9 @@ export type UsageGroup = {
   cancelled: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
   /** Records in this group that reported tokens. Zero means the sums are an absence, not a measured zero. */
   tokensMeasured: number;
   costUsd: number;
@@ -122,6 +125,9 @@ function emptyGroup(): UsageGroup {
     cancelled: 0,
     inputTokens: 0,
     outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
     tokensMeasured: 0,
     costUsd: 0,
     pricedRequests: 0,
@@ -140,6 +146,9 @@ function addToGroup(group: UsageGroup, record: UsageBreakdownRecord): void {
     group.tokensMeasured += 1;
     group.inputTokens += record.inputTokens ?? 0;
     group.outputTokens += record.outputTokens ?? 0;
+    group.cacheReadTokens += record.cacheReadTokens ?? 0;
+    group.cacheWriteTokens += record.cacheWriteTokens ?? 0;
+    group.reasoningTokens += record.reasoningTokens ?? 0;
   }
 
   const cost = requestCostUsd(record);

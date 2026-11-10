@@ -83,6 +83,14 @@ export type TokenUsage = {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  /** Input tokens served from a provider cache. Billed at the cache-read rate. */
+  cacheReadTokens?: number;
+  /** Input tokens written to a provider cache. Billed at the cache-write rate. */
+  cacheWriteTokens?: number;
+  /** Provider-reported reasoning/thinking tokens, when separate from output. */
+  reasoningTokens?: number;
+  /** True when the gateway had to estimate rather than receive a provider measurement. */
+  estimated?: boolean;
 };
 
 /**

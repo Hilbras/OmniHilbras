@@ -47,6 +47,8 @@ export type PriceableUsage = {
   /** Cache reads and writes bill at their own rates and are reported separately by some providers. */
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** Provider-reported reasoning tokens, carried for display and aggregation. */
+  reasoningTokens?: number;
   pricing?: ModelPricing;
 };
 
