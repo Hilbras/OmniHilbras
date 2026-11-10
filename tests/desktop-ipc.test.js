@@ -115,6 +115,12 @@ test('desktop settings are persisted and actually applied', () => {
   assert.match(main, /await gateway\.restart\(\)/, 'a port change does not restart the gateway');
 });
 
+test('the updater resolves both CJS interop shapes', () => {
+  const main = read('./desktop/main.mjs');
+  assert.match(main, /module\.autoUpdater \?\? module\.default\?\.autoUpdater/, 'autoUpdater is destructured from one shape only');
+  assert.match(main, /electron-updater did not expose autoUpdater/, 'a missing updater is not reported');
+});
+
 test('the app header is the title bar, with its own controls', () => {
   const main = read('./desktop/main.mjs');
   const preload = read('./desktop/preload.cjs');

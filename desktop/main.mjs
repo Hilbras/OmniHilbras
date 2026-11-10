@@ -161,7 +161,12 @@ function setUpdateState(next) {
 async function loadUpdater() {
   if (updater) return updater;
   if (!app.isPackaged) return undefined;
-  const { autoUpdater } = await import('electron-updater');
+  const module = await import('electron-updater');
+  // CJS interop differs between Electron, bundlers and Node: the updater can be a named export or
+  // hang off `default`. Destructuring the named binding produced `undefined` and then the first
+  // assignment (`autoUpdater.autoDownload = false`) threw.
+  const autoUpdater = module.autoUpdater ?? module.default?.autoUpdater;
+  if (!autoUpdater) throw new Error('electron-updater did not expose autoUpdater.');
   autoUpdater.autoDownload = false;
   autoUpdater.logger = null;
   autoUpdater.on('checking-for-update', () => setUpdateState({ status: 'checking' }));
