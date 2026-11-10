@@ -18,6 +18,14 @@ function subscribe(channel, callback) {
 
 contextBridge.exposeInMainWorld('omnihilbras', {
   desktop: true,
+  platform: process.platform,
+  windowControls: {
+    minimize: () => ipcRenderer.send('window:minimize'),
+    toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),
+    close: () => ipcRenderer.send('window:close'),
+    isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+    onMaximized: (callback) => subscribe('window:maximized', callback),
+  },
   server: {
     getState: () => ipcRenderer.invoke('server:state'),
     start: () => ipcRenderer.invoke('server:start'),

@@ -134,6 +134,15 @@ function wireIpc() {
     }
   });
 
+  ipcMain.on('window:minimize', () => window?.minimize());
+  ipcMain.on('window:toggle-maximize', () => {
+    if (!window) return;
+    if (window.isMaximized()) window.unmaximize();
+    else window.maximize();
+  });
+  ipcMain.on('window:close', () => window?.close());
+  ipcMain.handle('window:is-maximized', () => window?.isMaximized() ?? false);
+
   ipcMain.handle('gateway:request', async (_event, request) => {
     try {
       return await gatewayClient.request(request ?? {});
@@ -176,6 +185,8 @@ function wireIpc() {
   });
 }
 
+const isMac = process.platform === 'darwin';
+
 function createWindow() {
   window = new BrowserWindow({
     width: 1320,
@@ -185,6 +196,10 @@ function createWindow() {
     backgroundColor: '#0c0b09',
     title: 'OmniHilbras',
     show: false,
+    // The dashboard header is the title bar. macOS keeps its traffic lights (hiddenInset); Linux and
+    // Windows get a frameless window with the controls rendered in the header, because a native title
+    // bar above the app's own navigation was two bars saying the same thing.
+    ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
     webPreferences: {
       preload: join(projectRoot, 'desktop/preload.cjs'),
       contextIsolation: true,
@@ -193,6 +208,9 @@ function createWindow() {
     },
   });
   window.once('ready-to-show', () => window.show());
+  const sendMaximized = () => send('window:maximized', window?.isMaximized() ?? false);
+  window.on('maximize', sendMaximized);
+  window.on('unmaximize', sendMaximized);
   window.webContents.setWindowOpenHandler(({ url }) => {
     // Provider links belong in the user's browser, never in a second Electron window with a preload.
     if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url);
@@ -227,7 +245,21 @@ function createWindow() {
           await new Promise((resolve) => setTimeout(resolve, 800));
           return document.querySelector('[aria-label="Live requests"]')?.innerText ?? '';
         })()`);
-        console.log(`SMOKE ${JSON.stringify({ url: window.webContents.getURL(), title, probe, cycle, feed, text, server: gateway.snapshot() })}`);
+        const controls = await window.webContents.executeJavaScript(`(async () => {
+          const minimize = Boolean(document.querySelector('[aria-label="Minimize window"]'));
+          const maximize = Boolean(document.querySelector('[aria-label="Maximize window"], [aria-label="Restore window"]'));
+          const draggable = Boolean(document.querySelector('header.window-drag'));
+          const before = await window.omnihilbras.windowControls.isMaximized();
+          window.omnihilbras.windowControls.toggleMaximize();
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          const after = await window.omnihilbras.windowControls.isMaximized();
+          if (after) {
+            window.omnihilbras.windowControls.toggleMaximize();
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          }
+          return { minimize, maximize, draggable, before, after };
+        })()`);
+        console.log(`SMOKE ${JSON.stringify({ url: window.webContents.getURL(), title, probe, cycle, controls, feed, text, server: gateway.snapshot() })}`);
       } catch (error) {
         console.log(`SMOKE-ERROR ${error instanceof Error ? error.message : String(error)}`);
       }

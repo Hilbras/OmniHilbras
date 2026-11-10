@@ -46,6 +46,15 @@ type StreamHandlers = {
 
 export type OmniBridge = {
   desktop: true;
+  /** `process.platform`, so the header can keep macOS traffic lights and draw its own controls elsewhere. */
+  platform: string;
+  windowControls: {
+    minimize: () => void;
+    toggleMaximize: () => void;
+    close: () => void;
+    isMaximized: () => Promise<boolean>;
+    onMaximized: (callback: (maximized: boolean) => void) => () => void;
+  };
   server: {
     getState: () => Promise<DesktopServerSnapshot>;
     start: () => Promise<DesktopServerSnapshot>;

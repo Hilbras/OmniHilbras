@@ -812,3 +812,15 @@
     animation: none !important;
   }
 }
+
+/*
+ * The desktop window has no native title bar: the dashboard header is the drag region. Electron only
+ * honours this on the frameless window, so the browser dashboard is unaffected.
+ */
+.window-drag {
+  -webkit-app-region: drag;
+}
+
+.window-no-drag {
+  -webkit-app-region: no-drag;
+}

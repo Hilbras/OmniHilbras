@@ -45,3 +45,15 @@ test('the shell does not leave the gateway running after quit hooks', () => {
   const main = read('./desktop/main.mjs');
   assert.match(main, /before-quit[\s\S]*gateway\.stop\(\)/, 'nothing stops the gateway on quit');
 });
+
+test('the app header is the title bar, with its own controls', () => {
+  const main = read('./desktop/main.mjs');
+  const preload = read('./desktop/preload.cjs');
+  const controls = read('./src/components/WindowControls.tsx');
+  assert.match(main, /titleBarStyle: 'hiddenInset'/, 'macOS lost its traffic lights');
+  assert.match(main, /frame: false/, 'Linux/Windows still draw a native title bar above the navigation');
+  assert.match(preload, /windowControls/, 'the header has no way to minimize, maximize, or close');
+  assert.match(controls, /window-no-drag/, 'a control sits inside the drag region and cannot be clicked');
+  assert.match(controls, /bridge\.platform === 'darwin'/, 'macOS would get a second set of window controls');
+  assert.match(read('./src/components/DashboardShell.tsx'), /window-drag/, 'the header is not draggable');
+});

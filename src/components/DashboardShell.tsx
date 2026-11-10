@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
+import { WindowControls } from './WindowControls';
 import { FailureNotifications } from './FailureNotifications';
 import { dashboardRoutes } from '../lib/routes';
 import { useGatewayStatus } from '../lib/useGatewayStatus';
@@ -313,13 +314,13 @@ export function DashboardShell({
         * whether it is written as a Tailwind utility here or as a class defined in `src/index.css`.
         */}
       <div className={`min-h-screen min-w-0 transition-[padding] duration-200 ${collapsed ? 'lg:pl-[76px]' : 'lg:pl-[252px]'}`}>
-        <header className="dashboard-header sticky top-0 z-30 flex min-h-[72px] items-center justify-between gap-4 border-b border-line/80 bg-bg px-4 sm:px-6 lg:px-8">
+        <header className="dashboard-header window-drag sticky top-0 z-30 flex min-h-[72px] items-center justify-between gap-4 border-b border-line/80 bg-bg px-4 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
-            <button type="button" onClick={() => setMobileOpen(true)} aria-label="Open dashboard navigation" className="muted grid h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text lg:hidden"><Menu className="h-5 w-5" aria-hidden="true" /></button>
+            <button type="button" onClick={() => setMobileOpen(true)} aria-label="Open dashboard navigation" className="window-no-drag muted grid h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text lg:hidden"><Menu className="h-5 w-5" aria-hidden="true" /></button>
             <div className="min-w-0"><p className="mono-label hidden sm:block">Workspace / Local instance</p><h1 className="truncate text-lg font-semibold tracking-tight sm:mt-0.5 sm:text-xl">{pageTitle}</h1><p className="muted hidden truncate text-xs sm:block">{pageDescription}</p></div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <div className="window-no-drag flex shrink-0 items-center gap-2 sm:gap-3">
             {/*
               This used to read "All systems operational", unconditionally, in the header of every page.
               The sidebar badge 120 lines below this one was carefully built to ask the gateway rather
@@ -338,6 +339,7 @@ export function DashboardShell({
             <Link to={dashboardRoutes.providers} aria-label="Go to providers" className="muted hidden h-9 w-9 place-items-center rounded-lg hover:bg-bg-soft hover:text-gold-text sm:grid"><Gauge className="h-[17px] w-[17px]" aria-hidden="true" /></Link>
             <ThemeToggle />
             <span className="grid h-8 w-8 place-items-center rounded-full border border-gold/30 bg-gold-soft text-[10px] font-bold text-gold-text" aria-label="Local workspace">OH</span>
+            <WindowControls />
           </div>
         </header>
 
