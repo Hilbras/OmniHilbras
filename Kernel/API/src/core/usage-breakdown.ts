@@ -227,7 +227,11 @@ export function buildUsageBreakdown(
 
   // Every bucket in the span exists, so a quiet hour draws as zero rather than collapsing the axis.
   const timeline: UsageTimelinePoint[] = [];
-  for (let cursor = bucketOf(start, bucket).start; cursor.getTime() <= end.getTime(); cursor = nextBucket(cursor, bucket)) {
+  // An explicit `until` is an exclusive bound: a bucket that starts exactly at it is outside the
+  // requested window. The default end is `now`, which is usually inside the current bucket, so that
+  // bucket must stay.
+  const endExclusive = options.until !== undefined;
+  for (let cursor = bucketOf(start, bucket).start; endExclusive ? cursor.getTime() < end.getTime() : cursor.getTime() <= end.getTime(); cursor = nextBucket(cursor, bucket)) {
     timeline.push(ensure(cursor));
     if (timeline.length > maxTimelineBuckets) break;
   }

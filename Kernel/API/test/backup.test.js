@@ -89,8 +89,8 @@ test('an API-key store exports hashes and re-imports them so the same key still 
     assert.equal(matched?.name, 'laptop');
     assert.equal(await target.isEnforced(), false);
   } finally {
-    await rm(first, { recursive: true, force: true });
-    await rm(second, { recursive: true, force: true });
+    await rm(first, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    await rm(second, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -102,6 +102,6 @@ test('an unreadable API-key backup is refused before anything changes', async ()
     await assert.rejects(() => store.importState({ version: 99, requireApiKey: true, keys: [] }), /not readable/);
     assert.equal((await store.authenticate(created.key))?.name, 'keep-me');
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
