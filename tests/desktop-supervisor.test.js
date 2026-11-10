@@ -93,6 +93,69 @@ test('a child that never answers /health is stopped and reported as a failure', 
   }
 });
 
+test('a busy preferred port falls back instead of refusing to open the app', async () => {
+  const preferred = await freePort();
+  const holder = createServer();
+  await new Promise((resolve, reject) => {
+    holder.once('error', reject);
+    holder.listen(preferred, '127.0.0.1', resolve);
+  });
+  const supervisor = supervisorFor(preferred, { fallbackToFreePort: true });
+  try {
+    const state = await supervisor.start();
+    assert.equal(state.state, 'running');
+    assert.notEqual(state.port, preferred, 'the app stayed on the occupied port');
+    assert.equal(state.port, supervisor.port);
+  } finally {
+    await supervisor.stop();
+    await new Promise((resolve) => holder.close(resolve));
+  }
+});
+
+test('an unexpected exit is restarted with backoff', async () => {
+  const port = await freePort();
+  const supervisor = supervisorFor(port, {
+    autoRestart: true,
+    maxRestarts: 2,
+    restartBackoffMs: [50],
+    env: { FAKE_CRASH_AFTER_MS: '150' },
+  });
+  try {
+    await supervisor.start();
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      if (supervisor.restarts >= 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(supervisor.restarts >= 1, 'the gateway was not restarted');
+    assert.ok(['running', 'starting', 'restarting'].includes(supervisor.state), `unexpected state ${supervisor.state}`);
+    assert.match(supervisor.logs.map((entry) => entry.line).join('\n'), /Restarting in/);
+  } finally {
+    await supervisor.stop();
+  }
+});
+
+test('restart attempts stop at the configured limit', async () => {
+  const port = await freePort();
+  const supervisor = supervisorFor(port, {
+    autoRestart: true,
+    maxRestarts: 1,
+    restartBackoffMs: [20],
+    env: { FAKE_CRASH_AFTER_MS: '80' },
+  });
+  try {
+    await supervisor.start();
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline && supervisor.state !== 'failed') {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(supervisor.state, 'failed');
+    assert.match(supervisor.lastError, /Restart limit reached/);
+  } finally {
+    await supervisor.stop();
+  }
+});
+
 test('restart stops the old process and starts a new one', async () => {
   const port = await freePort();
   const supervisor = supervisorFor(port);

@@ -12,3 +12,5 @@ const server = createServer((request, response) => {
 });
 server.listen(port, host, () => console.log(`fake gateway ready on ${port}`));
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
+const crashAfter = Number(process.env.FAKE_CRASH_AFTER_MS);
+if (crashAfter > 0) setTimeout(() => process.exit(1), crashAfter);

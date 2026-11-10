@@ -14,10 +14,12 @@ import { createServer } from 'node:net';
  * supervisor is testable with a plain Node fixture and the packaged app can use Electron's Node.
  */
 
-export const STATES = ['stopped', 'starting', 'running', 'stopping', 'failed'];
+export const STATES = ['stopped', 'starting', 'restarting', 'running', 'stopping', 'failed'];
 
 const DEFAULT_LOG_LINES = 500;
 const STOP_GRACE_MS = 8_000;
+const RESTART_BACKOFF_MS = [1_000, 5_000, 15_000, 30_000, 60_000];
+const MAX_RESTARTS = 5;
 
 function portIsFree(port, host) {
   return new Promise((resolve) => {
@@ -25,6 +27,17 @@ function portIsFree(port, host) {
     server.once('error', () => resolve(false));
     server.once('listening', () => server.close(() => resolve(true)));
     server.listen(port, host);
+  });
+}
+
+function freePort(host) {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, host, () => {
+      const { port } = server.address();
+      server.close(() => resolve(port));
+    });
   });
 }
 
@@ -46,6 +59,10 @@ export class GatewaySupervisor extends EventEmitter {
       readinessTimeoutMs: 30_000,
       readinessPollMs: 250,
       logLines: DEFAULT_LOG_LINES,
+      fallbackToFreePort: false,
+      autoRestart: false,
+      maxRestarts: MAX_RESTARTS,
+      restartBackoffMs: RESTART_BACKOFF_MS,
       ...options,
     };
     if (!this.options.projectRoot) throw new Error('projectRoot is required');
@@ -56,6 +73,13 @@ export class GatewaySupervisor extends EventEmitter {
     this.logs = [];
     this.lastError = undefined;
     this.startedAt = undefined;
+    this.restarts = 0;
+    this.restartTimer = undefined;
+    this.expectedExit = false;
+  }
+
+  get port() {
+    return this.options.port;
   }
 
   snapshot() {
@@ -66,6 +90,7 @@ export class GatewaySupervisor extends EventEmitter {
       pid: this.child?.pid,
       startedAt: this.startedAt,
       lastError: this.lastError,
+      restarts: this.restarts,
       logs: [...this.logs],
     };
   }
@@ -86,11 +111,29 @@ export class GatewaySupervisor extends EventEmitter {
     }
   }
 
-  async start() {
+  /**
+   * The port this launch will use. 8787 is the documented default, not a requirement: another local
+   * gateway, or anything else on that port, must not stop the app from opening. A fallback port is
+   * announced through the snapshot so the renderer and IPC client follow it.
+   */
+  async resolvePort() {
+    if (await portIsFree(this.options.port, this.options.host)) return this.options.port;
+    if (!this.options.fallbackToFreePort) return this.options.port;
+    const fallback = await freePort(this.options.host);
+    this.pushLog('stdout', `Port ${this.options.port} is in use; using ${fallback}.\n`);
+    this.options.port = fallback;
+    return fallback;
+  }
+
+  async start(automatic = false) {
     if (this.state === 'running' || this.state === 'starting') return this.snapshot();
+    if (this.state === 'restarting' && !automatic) return this.snapshot();
     if (this.state === 'stopping') throw new Error('The gateway is still stopping.');
     this.lastError = undefined;
+    this.expectedExit = false;
+    if (!automatic) this.restarts = 0;
 
+    await this.resolvePort();
     if (!(await portIsFree(this.options.port, this.options.host))) {
       const message = `Port ${this.options.port} is already in use.`;
       this.setState('failed', message);
@@ -133,11 +176,11 @@ export class GatewaySupervisor extends EventEmitter {
 
     exited.then(({ code, signal }) => {
       if (this.child !== child) return;
-      const expected = this.state === 'stopping' || this.state === 'stopped';
+      const expected = this.expectedExit || this.state === 'stopping' || this.state === 'stopped';
       this.child = undefined;
       this.startedAt = undefined;
       if (expected) return;
-      this.setState('failed', `The gateway exited (code ${code ?? signal ?? 'unknown'}).`);
+      this.scheduleRestart(`The gateway exited (code ${code ?? signal ?? 'unknown'}).`);
     });
 
     const deadline = Date.now() + this.options.readinessTimeoutMs;
@@ -160,24 +203,56 @@ export class GatewaySupervisor extends EventEmitter {
     throw new Error(message);
   }
 
+  scheduleRestart(reason) {
+    if (!this.options.autoRestart) {
+      this.setState('failed', reason);
+      return;
+    }
+    if (this.restarts >= this.options.maxRestarts) {
+      this.setState('failed', `${reason} Restart limit reached.`);
+      return;
+    }
+    const delay = this.options.restartBackoffMs[Math.min(this.restarts, this.options.restartBackoffMs.length - 1)];
+    this.restarts += 1;
+    this.setState('restarting', `${reason} Restarting in ${Math.round(delay / 1000)}s (${this.restarts}/${this.options.maxRestarts}).`);
+    this.pushLog('stderr', `${reason} Restarting in ${Math.round(delay / 1000)}s.\n`);
+    clearTimeout(this.restartTimer);
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = undefined;
+      this.start(true).catch((error) => {
+        this.setState('failed', error instanceof Error ? error.message : String(error));
+      });
+    }, delay);
+  }
+
   async stop() {
+    clearTimeout(this.restartTimer);
+    this.restartTimer = undefined;
+    this.expectedExit = true;
     const child = this.child;
     if (!child) {
       if (this.state !== 'failed') this.setState('stopped');
       return this.snapshot();
     }
     this.setState('stopping');
-    child.kill('SIGTERM');
+    const platform = this.options.platform ?? process.platform;
+    if (platform === 'win32') {
+      // `child.kill()` on Windows terminates only the process we spawned. `taskkill /T` reaches the
+      // tree, which is what a packaged gateway can become once a provider helper is involved.
+      const killer = nodeSpawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      await new Promise((resolve) => killer.once('exit', resolve));
+    } else {
+      child.kill('SIGTERM');
+    }
     const exited = await Promise.race([
       this.childExit.then(() => true),
       sleep(STOP_GRACE_MS).then(() => false),
     ]);
-    if (!exited) {
-      child.kill('SIGKILL');
-      await this.childExit.catch(() => undefined);
-    }
+    if (!exited) child.kill('SIGKILL');
+    await this.childExit.catch(() => undefined);
     this.child = undefined;
     this.startedAt = undefined;
+    this.restarts = 0;
     this.setState('stopped');
     return this.snapshot();
   }
@@ -191,3 +266,4 @@ export class GatewaySupervisor extends EventEmitter {
 export function createGatewaySupervisor(options) {
   return new GatewaySupervisor(options);
 }
+

@@ -46,6 +46,24 @@ test('the shell does not leave the gateway running after quit hooks', () => {
   assert.match(main, /before-quit[\s\S]*gateway\.stop\(\)/, 'nothing stops the gateway on quit');
 });
 
+test('the app keeps running in the tray and owns its lifecycle', () => {
+  const main = read('./desktop/main.mjs');
+  const supervisor = read('./desktop/supervisor.mjs');
+  assert.match(main, /fallbackToFreePort: true/, 'a busy default port stops the app from opening');
+  assert.match(main, /autoRestart: true/, 'a gateway crash leaves the app dead');
+  assert.match(main, /new Tray\(/, 'there is no tray icon');
+  assert.match(main, /setLoginItemSettings/, 'start at login is not wired');
+  assert.match(main, /event\.preventDefault\(\);\s*\n\s*window\.hide\(\)/, 'closing the window quits instead of hiding to tray');
+  assert.match(supervisor, /taskkill/, 'Windows does not kill the process tree');
+});
+
+test('the app smoke script drives the real binary', () => {
+  const script = read('./scripts/app-smoke.mjs');
+  assert.match(script, /OMNIHILBRAS_SMOKE: '1'/, 'the smoke run does not enable smoke mode');
+  assert.match(script, /user-data-dir/, 'the smoke run can collide with an installed instance');
+  assert.match(script, /nested dashboard shell/, 'the smoke does not check for the duplicated shell');
+});
+
 test('the app header is the title bar, with its own controls', () => {
   const main = read('./desktop/main.mjs');
   const preload = read('./desktop/preload.cjs');

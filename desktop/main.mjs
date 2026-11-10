@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, protocol, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, protocol, shell, Tray } from 'electron';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join, normalize, sep } from 'node:path';
 import { createGatewayClient } from './gateway-ipc.mjs';
@@ -23,24 +24,103 @@ protocol.registerSchemesAsPrivileged([
 
 const projectRoot = app.getAppPath();
 const distRoot = join(projectRoot, 'dist');
+const configPath = join(app.getPath('userData'), 'config.json');
+
+function readUserConfig() {
+  try {
+    return JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveUserConfig(patch) {
+  const next = { ...readUserConfig(), ...patch };
+  try {
+    writeFileSync(configPath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  } catch {
+    // A read-only home still lets the app run for this session; the port is announced on screen.
+  }
+}
+
+const userConfig = readUserConfig();
+const preferredPort = Number(process.env.OMNIHILBRAS_PORT) || Number(userConfig.gatewayPort) || 8787;
 const gateway = createGatewaySupervisor({
   projectRoot,
   cwd: app.isPackaged ? process.resourcesPath : projectRoot,
   entry: join(projectRoot, 'Kernel/API/dist/src/main.js'),
   host: '127.0.0.1',
-  port: Number(process.env.OMNIHILBRAS_PORT) || 8787,
+  port: preferredPort,
   readinessTimeoutMs: 40_000,
+  // 8787 is the default, not a requirement. Another local gateway must not stop this app opening.
+  fallbackToFreePort: true,
+  // A crash is a restart, not a dead app. Five consecutive crashes then stop trying.
+  autoRestart: true,
+  maxRestarts: 5,
   env: {
     OMNIHILBRAS_DATA_DIR: join(app.getPath('userData'), 'data'),
     OMNIHILBRAS_CORS_ORIGINS: 'http://localhost:5173,http://127.0.0.1:5173',
   },
 });
-const gatewayClient = createGatewayClient({ host: '127.0.0.1', port: Number(process.env.OMNIHILBRAS_PORT) || 8787 });
+const gatewayClient = createGatewayClient({ host: '127.0.0.1', port: () => gateway.port });
+saveUserConfig({ gatewayPort: gateway.port });
 
 let window;
+let tray;
+let quitting = false;
 let logSubscription;
 let logAbort;
 const streamControllers = new Map();
+
+function showWindow() {
+  if (!window) {
+    createWindow();
+    return;
+  }
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+function rebuildTrayMenu() {
+  if (!tray) return;
+  const state = gateway.snapshot();
+  const running = state.state === 'running';
+  const openAtLogin = app.isPackaged ? app.getLoginItemSettings().openAtLogin : false;
+  tray.setToolTip(`OmniHilbras — ${state.state} on 127.0.0.1:${state.port}`);
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open OmniHilbras', click: showWindow },
+    { type: 'separator' },
+    { label: `Gateway: ${state.state} · 127.0.0.1:${state.port}`, enabled: false },
+    { label: 'Start gateway', enabled: running || state.state === 'starting' ? false : true, click: () => void gateway.start().catch(() => undefined) },
+    { label: 'Stop gateway', enabled: running || state.state === 'restarting', click: () => void gateway.stop() },
+    { type: 'separator' },
+    {
+      label: 'Start at login',
+      type: 'checkbox',
+      checked: openAtLogin,
+      enabled: app.isPackaged,
+      click: (item) => {
+        app.setLoginItemSettings({ openAtLogin: item.checked });
+        rebuildTrayMenu();
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => {
+        quitting = true;
+        app.quit();
+      },
+    },
+  ]));
+}
+
+function createTray() {
+  tray = new Tray(nativeImage.createFromPath(join(projectRoot, 'brand/logo-32.png')));
+  tray.on('click', showWindow);
+  rebuildTrayMenu();
+}
 
 function send(channel, payload) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, payload);
@@ -51,6 +131,10 @@ function broadcastState() {
 }
 
 gateway.on('state', broadcastState);
+gateway.on('state', (state) => {
+  if (state.state === 'running') saveUserConfig({ gatewayPort: state.port });
+  rebuildTrayMenu();
+});
 gateway.on('log', (entry) => send('server:log', entry));
 
 async function startLogForwarding() {
@@ -209,6 +293,13 @@ function createWindow() {
     },
   });
   window.once('ready-to-show', () => window.show());
+  // Close-to-tray: the gateway keeps serving and the tray icon is the way back. Quit is the tray's
+  // Quit item, which sets `quitting` first so this handler does not swallow it.
+  window.on('close', (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    window.hide();
+  });
   const sendMaximized = () => send('window:maximized', window?.isMaximized() ?? false);
   window.on('maximize', sendMaximized);
   window.on('unmaximize', sendMaximized);
@@ -284,6 +375,7 @@ if (!locked) {
     protocol.handle(APP_SCHEME, serveApp);
     wireIpc();
     createWindow();
+    createTray();
     try {
       await gateway.start();
     } catch {
@@ -293,16 +385,20 @@ if (!locked) {
     broadcastState();
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      else showWindow();
     });
   });
 
-  app.on('window-all-closed', () => app.quit());
-  let quitting = false;
+  // The app lives in the tray. Closing the last window hides it; only the tray's Quit exits.
+  // This handler exists to stop Electron's default "quit when the last window closes".
+  app.on('window-all-closed', () => undefined);
+  let quittingSeen = false;
   app.on('before-quit', (event) => {
     // `before-quit` is synchronous, so an un-awaited stop is a race: Electron can exit before the
     // gateway sees SIGTERM, leaving the port held. The first quit is deferred until the child is gone.
-    if (quitting) return;
+    if (quittingSeen) return;
     event.preventDefault();
+    quittingSeen = true;
     quitting = true;
     void (async () => {
       await stopLogForwarding();

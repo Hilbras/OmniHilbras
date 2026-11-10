@@ -17,6 +17,8 @@
     "dev:gateway": "pnpm --filter @omnihilbras/kernel-api dev",
     "app:dev": "pnpm build:gateway && pnpm build:frontend && electron .",
     "app:start": "electron .",
+    "app:smoke": "node scripts/app-smoke.mjs",
+    "app:check": "pnpm build:gateway && pnpm build:frontend && node scripts/app-smoke.mjs",
     "app:build": "pnpm build && electron-builder --dir",
     "app:pack": "pnpm build && electron-builder",
     "build": "pnpm build:sdk && pnpm build:gateway && pnpm build:frontend",

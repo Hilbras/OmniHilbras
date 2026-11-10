@@ -40,7 +40,8 @@ export function assertGatewayPath(path) {
 }
 
 export function createGatewayClient({ host = '127.0.0.1', port }) {
-  const base = `http://${host}:${port}`;
+  const portOf = typeof port === 'function' ? port : () => port;
+  const base = () => `http://${host}:${portOf()}`;
 
   const headersFor = async (extra = {}) => {
     const token = await readToken();
@@ -60,7 +61,7 @@ export function createGatewayClient({ host = '127.0.0.1', port }) {
     async request({ method = 'GET', path, body } = {}) {
       const upper = String(method).toUpperCase();
       if (!ALLOWED_METHODS.has(upper)) throw new Error(`Gateway method ${method} is not allowed.`);
-      const response = await fetch(`${base}${assertGatewayPath(path)}`, {
+      const response = await fetch(`${base()}${assertGatewayPath(path)}`, {
         method: upper,
         headers: await headersFor(body === undefined ? {} : { 'content-type': 'application/json' }),
         ...(body === undefined ? {} : { body }),
@@ -73,7 +74,7 @@ export function createGatewayClient({ host = '127.0.0.1', port }) {
      * A chat stream. Chunks arrive as text; the renderer keeps the SSE parser it already had.
      */
     async streamChat({ path = '/v1/chat/completions', body, signal } = {}) {
-      const response = await fetch(`${base}${assertGatewayPath(path)}`, {
+      const response = await fetch(`${base()}${assertGatewayPath(path)}`, {
         method: 'POST',
         headers: await headersFor({ 'content-type': 'application/json', accept: 'text/event-stream' }),
         body,
@@ -89,7 +90,7 @@ export function createGatewayClient({ host = '127.0.0.1', port }) {
 
     /** Subscribe to `/v1/logs/stream`; returns a function that closes the subscription. */
     async subscribeLogs(onEvent, { signal } = {}) {
-      const response = await fetch(`${base}/v1/logs/stream`, {
+      const response = await fetch(`${base()}/v1/logs/stream`, {
         headers: await headersFor({ accept: 'text/event-stream' }),
         signal,
       });
