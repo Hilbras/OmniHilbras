@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { motion, MotionConfig, useReducedMotion, useScroll, useSpring, type Variants } from 'motion/react';
+import { motion, MotionConfig, type Variants } from 'motion/react';
 import {
   Activity,
   ArrowRight,
@@ -24,6 +24,7 @@ import { Footer } from './components/Footer';
 import { Navbar } from './components/Navbar';
 import { ParticleBackground } from './components/ParticleBackground';
 import { RoutePreview } from './components/RoutePreview';
+import { ScrollProgress } from './components/ScrollProgress';
 
 const revealContainer: Variants = {
   hidden: {},
@@ -41,15 +42,6 @@ const revealCard: Variants = {
 };
 
 const viewport = { once: true, amount: 0.16 } as const;
-
-/** A thin gold line that follows the reading position; transform-only, so it stays off the main thread. */
-function ScrollProgress() {
-  const reduceMotion = useReducedMotion();
-  const { scrollYProgress } = useScroll();
-  const scaleX = useSpring(scrollYProgress, { stiffness: 120, damping: 30, restDelta: 0.001 });
-  if (reduceMotion) return null;
-  return <motion.div aria-hidden="true" style={{ scaleX }} className="fixed inset-x-0 top-0 z-[60] h-[2px] origin-left bg-gold" />;
-}
 
 const providers = ['OpenAI', 'Anthropic', 'Google', 'Mistral', 'Groq', 'Ollama', 'OpenRouter', 'DeepSeek'] as const;
 

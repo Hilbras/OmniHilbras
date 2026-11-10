@@ -1,2 +1,7 @@
 User-agent: *
 Allow: /
+Disallow: /dashboard
+Disallow: /api/
+
+Sitemap: https://omnihilbras.hilbras.com/sitemap.xml
+Host: https://omnihilbras.hilbras.com

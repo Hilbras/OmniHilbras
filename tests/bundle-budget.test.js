@@ -69,10 +69,10 @@ test('the animated icon is a leaf, so the dynamic import is a real boundary', ()
 test('motion is imported from exactly one file on the dashboard side', () => {
   // The rule is "one lazy boundary", not "motion is banned". A second file importing it directly
   // would be a second place to keep honest, which is the duplication this repository keeps paying
-  // for. The marketing page is allowed its own (`App.tsx`, `Navbar.tsx`) — it is a different entry
-  // and has no first-paint budget to protect.
+  // for. The marketing page is allowed its own (`App.tsx`, `Navbar.tsx`, and the shared scroll
+  // indicator) — it is a different entry and has no first-paint budget to protect.
   const owners = [];
-  const candidates = ['src/components/ThemeAnimatedIcon.tsx', 'src/App.tsx', 'src/components/Navbar.tsx'];
+  const candidates = ['src/components/ThemeAnimatedIcon.tsx', 'src/App.tsx', 'src/components/Navbar.tsx', 'src/components/ScrollProgress.tsx'];
   for (const file of candidates) {
     const source = read(file);
     if (/from\s*['"]motion\/react['"]/.test(source)) owners.push(file);

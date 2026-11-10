@@ -3,18 +3,29 @@ const footerGroups = [
     title: 'Explore',
     links: [
       ['/home', 'Home'],
-      ['#product', 'Product'],
-      ['#how-it-works', 'How it works'],
-      ['#docs', 'Documentation'],
+      ['/home#product', 'Product'],
+      ['/docs', 'Documentation'],
+      ['/download', 'Download'],
       ['/dashboard', 'Dashboard'],
+    ],
+  },
+  {
+    title: 'Company',
+    links: [
+      ['/about', 'About'],
+      ['/pricing', 'Pricing'],
+      ['/changelog', 'Changelog'],
+      ['/security', 'Security'],
+      ['/privacy', 'Privacy'],
     ],
   },
   {
     title: 'Build',
     links: [
       ['/download', 'Get started'],
-      ['#docs', 'API reference'],
-      ['#observability', 'Observability'],
+      ['/docs', 'API reference'],
+      ['/home#observability', 'Observability'],
+      ['https://github.com/Hilbras/OmniHilbras', 'GitHub'],
     ],
   },
 ] as const;

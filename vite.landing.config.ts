@@ -21,6 +21,12 @@ export default defineConfig({
       input: {
         main: new URL('./index.html', import.meta.url).pathname,
         download: new URL('./download.html', import.meta.url).pathname,
+        docs: new URL('./docs.html', import.meta.url).pathname,
+        about: new URL('./about.html', import.meta.url).pathname,
+        pricing: new URL('./pricing.html', import.meta.url).pathname,
+        changelog: new URL('./changelog.html', import.meta.url).pathname,
+        security: new URL('./security.html', import.meta.url).pathname,
+        privacy: new URL('./privacy.html', import.meta.url).pathname,
       },
     },
   },

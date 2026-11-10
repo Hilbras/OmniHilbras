@@ -3,6 +3,7 @@ import { version } from 'virtual:omnihilbras-version';
 import { Footer } from './components/Footer';
 import { Navbar } from './components/Navbar';
 import { ParticleBackground } from './components/ParticleBackground';
+import { ScrollProgress } from './components/ScrollProgress';
 
 const RELEASES = 'https://github.com/Hilbras/OmniHilbras/releases/latest';
 
@@ -53,6 +54,7 @@ export default function DownloadPage() {
 
   return (
     <div className="page-enter min-h-screen overflow-x-clip">
+      <ScrollProgress />
       <ParticleBackground />
       <Navbar />
 
@@ -62,7 +64,7 @@ export default function DownloadPage() {
         <div className="relative mx-auto max-w-5xl px-5 pb-16 pt-14 sm:pb-24 sm:pt-20">
           <a href="/home" className="muted inline-flex items-center gap-1.5 text-xs transition-colors hover:text-gold-text">
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            Back to the landing page
+            Back to home
           </a>
 
           <div className="mx-auto mt-8 max-w-3xl text-center">

@@ -5,10 +5,10 @@ import { ThemeToggle } from './ThemeToggle';
 
 const links = [
   { href: '/home', label: 'Home' },
-  { href: '#product', label: 'Product' },
-  { href: '#how-it-works', label: 'How it works' },
-  { href: '#docs', label: 'Docs' },
-  { href: '/dashboard', label: 'Dashboard' },
+  { href: '/home#product', label: 'Product' },
+  { href: '/docs', label: 'Docs' },
+  { href: '/pricing', label: 'Pricing' },
+  { href: '/about', label: 'About' },
 ] as const;
 
 export function Navbar() {

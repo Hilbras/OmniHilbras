@@ -10,6 +10,9 @@ import { dashboardTokenPath } from './Kernel/API/src/core/dashboard-token';
 /** Routes that must reach the dashboard SPA instead of a missing file. */
 const dashboardPrefix = '/dashboard';
 
+/** Marketing pages whose clean URL needs the dev server to serve the matching HTML shell. */
+const marketingPages = ['docs', 'about', 'pricing', 'changelog', 'security', 'privacy'] as const;
+
 /** Old entry files, mapped to the route that replaced them. */
 const legacyRoutes: Record<string, (search: URLSearchParams) => string> = {
   '/dashboard.html': () => '/dashboard/providers',
@@ -36,6 +39,12 @@ function dashboardFallback(): Plugin {
         }
         if (rawPath === '/download' || rawPath === '/download/') {
           request.url = '/download.html';
+          next();
+          return;
+        }
+        const marketingPage = rawPath.replace(/^\/+|\/+$/g, '');
+        if ((marketingPages as readonly string[]).includes(marketingPage)) {
+          request.url = `/${marketingPage}.html`;
           next();
           return;
         }
@@ -364,6 +373,12 @@ export default defineConfig({
         // inside the dashboard SPA, served under /dashboard.
         main: new URL('./index.html', import.meta.url).pathname,
         download: new URL('./download.html', import.meta.url).pathname,
+        docs: new URL('./docs.html', import.meta.url).pathname,
+        about: new URL('./about.html', import.meta.url).pathname,
+        pricing: new URL('./pricing.html', import.meta.url).pathname,
+        changelog: new URL('./changelog.html', import.meta.url).pathname,
+        security: new URL('./security.html', import.meta.url).pathname,
+        privacy: new URL('./privacy.html', import.meta.url).pathname,
         dashboard: new URL('./dashboard.html', import.meta.url).pathname,
       },
     },
