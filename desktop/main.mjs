@@ -23,13 +23,6 @@ protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ]);
 
-// A development window otherwise matches the installed `omnihilbras.desktop` entry and inherits its
-// icon (and an old one after a logo change). A distinct desktop name keeps the running checkout's
-// window icon coming from `brand/logo-512.png`.
-if (!app.isPackaged && process.platform === 'linux' && typeof app.setDesktopName === 'function') {
-  app.setDesktopName('omnihilbras-dev.desktop');
-}
-
 const projectRoot = app.getAppPath();
 // `--user-data-dir` controls Chromium, not `app.getPath('userData')`. A smoke run must not write
 // gateway usage, config or logs into the installed app's directory, so it sets this explicitly.
