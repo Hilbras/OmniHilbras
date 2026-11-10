@@ -4,6 +4,9 @@
   "framework": "vite",
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/home", "destination": "/index.html" }
+    {
+      "source": "/home",
+      "destination": "/"
+    }
   ]
 }
