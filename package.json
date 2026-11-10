@@ -96,6 +96,17 @@
       "executableName": "omnihilbras",
       "maintainer": "Hilbras <opencode@example.com>",
       "syncDesktopName": true
+    },
+    "win": {
+      "target": ["nsis"],
+      "icon": "brand/logo-512.png",
+      "executableName": "omnihilbras"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "OmniHilbras"
     }
   }
 }
