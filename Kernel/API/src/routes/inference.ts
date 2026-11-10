@@ -409,6 +409,7 @@ function recordUsage(
   // One convention at the recording boundary: input includes cache, cache read/write are subsets. Adapters
   // report their provider's own shape; the store must not.
   const usage = canonicalizeUsage(input.usage);
+  const compression = service.takeCompressionTelemetry(input.requestId);
   // **No requirement that a provider was reached.** The first version returned early when `providerId` was
   // missing, which silently dropped every request that ended before a route was tried — a client that
   // disconnected during startup, or a request nothing could serve. Measured: 30 such requests produced **zero**
@@ -432,6 +433,7 @@ function recordUsage(
       ...(usage?.cacheWriteTokens !== undefined ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
       ...(usage?.reasoningTokens !== undefined ? { reasoningTokens: usage.reasoningTokens } : {}),
       ...(usage?.estimated === true ? { tokensEstimated: true } : {}),
+      ...(compression ? { compression } : {}),
       ...(input.requestId ? { requestId: input.requestId } : {}),
       ...(input.ledger && input.ledger.length > 0 ? { path: input.ledger.map(toUsageAttempt) } : {}),
     }),

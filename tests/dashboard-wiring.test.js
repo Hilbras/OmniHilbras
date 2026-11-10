@@ -122,6 +122,16 @@ test('backup export/import survives a real file and a wrapped envelope', () => {
   assert.match(about, /format !== 'omnihilbras-backup'/, 'the file is not checked before it is sent');
 });
 
+test('the Token Saver page is wired to the stats route', () => {
+  const app = read('src/dashboardApp.tsx');
+  const shell = read('src/components/DashboardShell.tsx');
+  const page = read('src/pages/TokenSaverPage.tsx');
+  assert.match(app, /path="\/token-saver"/, 'no Token Saver route');
+  assert.match(shell, /to: '\/token-saver'/, 'no Token Saver nav entry');
+  assert.match(page, /getGatewayTokenSaverStats/, 'the page does not read the stats route');
+  assert.match(page, /requestsWithSavings/, 'the page does not distinguish savings from telemetry');
+});
+
 test('the logs route is highlighted and titled', () => {
   const app = read('src/dashboardApp.tsx');
   assert.match(app, /startsWith\('\/logs'\)/, 'the Logs route still falls through to Overview');

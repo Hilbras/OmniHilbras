@@ -4,6 +4,7 @@ import { DashboardShell } from './components/DashboardShell';
 import { getProviderById } from './data/providers';
 import { ApiKeysContent } from './pages/ApiKeysPage';
 import { AboutContent } from './pages/AboutPage';
+import { TokenSaverContent } from './pages/TokenSaverPage';
 import { AppHomeContent } from './pages/AppHomePage';
 import { ProviderDetailContent, fallbackProvider } from './pages/ProviderDetailPage';
 import { ProvidersContent } from './pages/ProvidersPage';
@@ -37,6 +38,7 @@ const activePageTitles = {
   logs: 'Request log',
   settings: 'Settings',
   about: 'About',
+  'token-saver': 'Token Saver',
 } as const;
 
 const pageDescriptions = {
@@ -53,6 +55,7 @@ const pageDescriptions = {
   logs: 'Requests as the gateway records them, newest first',
   settings: 'The configuration this gateway loaded at startup',
   about: 'Version, platform, backup and recovery',
+  'token-saver': 'Measured savings from context compression',
 } as const;
 
 function PageTransition({ children }: { children: ReactNode }) {
@@ -92,7 +95,9 @@ function DashboardRoutes() {
             ? 'settings'
             : location.pathname.startsWith('/about')
               ? 'about'
-              : 'overview';
+              : location.pathname.startsWith('/token-saver')
+                ? 'token-saver'
+                : 'overview';
   const provider = isProviderDetail ? getProviderById(location.pathname.split('/').filter(Boolean).at(-1)) : undefined;
   const pageTitle = provider?.name ?? activePageTitles[activePage];
   const pageDescription = provider ? 'Provider connection details' : pageDescriptions[activePage];
@@ -118,6 +123,7 @@ function DashboardRoutes() {
           <Route path="/logs" element={<LogsContent />} />
           <Route path="/settings" element={<SettingsContent />} />
           <Route path="/about" element={<AboutContent />} />
+          <Route path="/token-saver" element={<TokenSaverContent />} />
           <Route path="*" element={<Navigate to="/providers" replace />} />
         </Routes>
       </PageTransition>

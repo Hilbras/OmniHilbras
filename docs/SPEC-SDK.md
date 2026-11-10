@@ -278,6 +278,9 @@ The first local gateway exposes:
 - `POST /v1/backup/import` — body `{"passphrase": "...", "backup": envelope, "confirmReplace": true}`.
   **Replaces** every connection, strategy and API key. Returns counts. A missing confirmation is a 400;
   a wrong passphrase or a damaged envelope is refused before anything is changed. Management route.
+- `GET /v1/token-saver/stats?period=` — per-saver and per-provider savings from usage records:
+  requests with telemetry vs with savings, estimated tokens/bytes saved, and provider cache read/write.
+  A request with no compression telemetry is counted but not attributed to a saver. Management route.
 - `GET /v1/token-saver/:id` — returns `{"id","content"}` for the original behind a
   `<<token-saver:<id> ...>>` marker. Only ids in the gateway's bounded in-memory store resolve; a miss is
   a 404, never a fabricated empty prompt. Management route. Compression itself is opt-in with

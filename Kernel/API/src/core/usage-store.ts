@@ -46,6 +46,12 @@ export type UsageAttempt = {
   errorCode?: string;
 };
 
+export type UsageCompression = {
+  totalTokensSaved: number;
+  totalBytesSaved: number;
+  savers: Record<string, { kind: string; requests: number; tokensSaved: number; bytesBefore: number; bytesAfter: number }>;
+};
+
 export type UsageRecord = {
   /** Monotonic within a store; the stable id a UI row keys on. */
   id: string;
@@ -90,6 +96,8 @@ export type UsageRecord = {
   reasoningTokens?: number;
   /** True when these numbers are an estimate, not a provider measurement. */
   tokensEstimated?: boolean;
+  /** What the token saver did to the prompt, when it changed anything. No prompt content is stored. */
+  compression?: UsageCompression;
 };
 
 /** What a caller wants out. Every field is optional; the default is everything, newest first. */
@@ -448,6 +456,21 @@ function normalizeRecord(record: UsageRecord): UsageRecord {
     ...(typeof record.cacheWriteTokens === 'number' ? { cacheWriteTokens: record.cacheWriteTokens } : {}),
     ...(typeof record.reasoningTokens === 'number' ? { reasoningTokens: record.reasoningTokens } : {}),
     ...(record.tokensEstimated === true ? { tokensEstimated: true } : {}),
+    ...(record.compression && typeof record.compression === 'object'
+      ? {
+          compression: {
+            totalTokensSaved: Math.max(0, Number(record.compression.totalTokensSaved) || 0),
+            totalBytesSaved: Math.max(0, Number(record.compression.totalBytesSaved) || 0),
+            savers: Object.fromEntries(Object.entries(record.compression.savers ?? {}).map(([id, entry]) => [id, {
+              kind: String(entry.kind),
+              requests: Math.max(0, Number(entry.requests) || 0),
+              tokensSaved: Math.max(0, Number(entry.tokensSaved) || 0),
+              bytesBefore: Math.max(0, Number(entry.bytesBefore) || 0),
+              bytesAfter: Math.max(0, Number(entry.bytesAfter) || 0),
+            }])),
+          },
+        }
+      : {}),
     ...(typeof record.requestId === 'string' ? { requestId: record.requestId } : {}),
     ...(Array.isArray(record.path) ? { path: record.path.map(normalizeAttempt) } : {}),
   };

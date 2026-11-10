@@ -129,6 +129,12 @@ export type { GatewayFailoverAttempt, GatewayChatOutcome, GatewayStreamOutcome, 
  */
 export type CredentialSource = ConnectionSecretStore;
 
+export type SaverTelemetry = {
+  totalTokensSaved: number;
+  totalBytesSaved: number;
+  savers: Record<string, { kind: string; requests: number; tokensSaved: number; bytesBefore: number; bytesAfter: number }>;
+};
+
 export type GatewayServiceOptions = {
   /**
    * The gateway's own configuration.
@@ -187,6 +193,8 @@ export class GatewayService {
   private readonly gatewayConfig: GatewayConfig | undefined;
   private readonly tokenSaverConfig?: NonNullable<GatewayServiceOptions['tokenSaver']>;
   private readonly tokenSaverStore?: MemoryCcrStore;
+  private readonly compressionTelemetry = new Map<string, SaverTelemetry>();
+  private readonly compressionCache = new Map<string, { messages: ChatRequest['messages']; telemetry?: SaverTelemetry }>();
   private readonly transport: HttpTransport;
   private readonly clineAdapters = new Map<string, ProviderAdapter>();
   private readonly clinepassAdapters = new Map<string, ProviderAdapter>();
@@ -2450,7 +2458,9 @@ export class GatewayService {
   private preparedMessages(request: ChatRequest, scope: RequestScope | undefined): ChatRequest['messages'] {
     const complete = completeToolRounds(request.messages);
     if (scope?.tokenSaver === false) return complete;
+    if (scope && this.compressionCache.has(scope.id)) return this.compressionCache.get(scope.id)!.messages;
     if (this.tokenSaverConfig && this.tokenSaverStore) {
+      const beforeBytes = Buffer.byteLength(JSON.stringify(complete), 'utf8');
       const compressed = compressMessages(complete as SavableMessage[], {
         targetRatio: this.tokenSaverConfig.targetRatio,
         protectRecent: this.tokenSaverConfig.protectRecent,
@@ -2460,15 +2470,52 @@ export class GatewayService {
         ccr: this.tokenSaverStore,
       });
       if (compressed.stats.savedTokens > 0) {
+        const afterBytes = Buffer.byteLength(JSON.stringify(compressed.value), 'utf8');
+        const savers: SaverTelemetry['savers'] = {};
+        for (const route of compressed.stats.routes) {
+          const entry = savers[route.kind] ?? { kind: route.kind, requests: 0, tokensSaved: 0, bytesBefore: 0, bytesAfter: 0 };
+          entry.requests += 1;
+          entry.tokensSaved += Math.max(0, route.originalTokens - route.compressedTokens);
+          entry.bytesBefore += beforeBytes;
+          entry.bytesAfter += afterBytes;
+          savers[route.kind] = entry;
+        }
+        const telemetry: SaverTelemetry = {
+          totalTokensSaved: compressed.stats.savedTokens,
+          totalBytesSaved: Math.max(0, beforeBytes - afterBytes),
+          savers,
+        };
+        if (scope) {
+          this.compressionTelemetry.set(scope.id, telemetry);
+          this.compressionCache.set(scope.id, { messages: compressed.value as ChatRequest['messages'], telemetry });
+          while (this.compressionCache.size > 500) {
+            const oldest = this.compressionCache.keys().next().value;
+            if (oldest === undefined) break;
+            this.compressionCache.delete(oldest);
+            this.compressionTelemetry.delete(oldest);
+          }
+        }
         console.log(`[token-saver] request ${scope?.id ?? 'unscoped'} saved ~${compressed.stats.savedTokens} tokens (${Math.round(compressed.stats.savedRatio * 100)}%)`);
         return compressed.value as ChatRequest['messages'];
       }
+      if (scope) this.compressionCache.set(scope.id, { messages: complete });
       return complete;
     }
     const compressed = compressToolResults(complete);
     const saved = toolResultBytes(complete) - toolResultBytes(compressed);
     if (saved > 0) console.log(`[token-saver] request ${scope?.id ?? 'unscoped'} saved ${saved} bytes of tool output`);
     return compressed;
+  }
+
+  /** Removes and returns the telemetry for one request, so a retry path cannot double-count it. */
+  takeCompressionTelemetry(requestId: string | undefined): SaverTelemetry | undefined {
+    if (!requestId) return undefined;
+    const telemetry = this.compressionTelemetry.get(requestId);
+    if (telemetry) {
+      this.compressionTelemetry.delete(requestId);
+      this.compressionCache.delete(requestId);
+    }
+    return telemetry;
   }
 
   /** The original behind a `<<token-saver:id>>` marker, for the retrieval route. */

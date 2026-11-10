@@ -981,6 +981,23 @@ export function openGatewayLogStream(onEvent: (event: GatewayLogEvent) => void, 
   return () => source.close();
 }
 
+export type GatewayTokenSaverStats = {
+  period: string;
+  since?: string;
+  requests: number;
+  requestsWithTelemetry: number;
+  requestsWithSavings: number;
+  totalTokensSaved: number;
+  totalBytesSaved: number;
+  cache: { read: number; write: number };
+  savers: Array<{ id: string; kind: string; requests: number; requestsWithSavings: number; tokensSaved: number; bytesSaved: number }>;
+  byProvider: Array<{ providerId: string; requests: number; tokensSaved: number; bytesSaved: number }>;
+};
+
+export function getGatewayTokenSaverStats(period = '7d', signal?: AbortSignal) {
+  return requestJson<GatewayTokenSaverStats>(`/v1/token-saver/stats?period=${encodeURIComponent(period)}`, { signal });
+}
+
 export function getGatewayUsage(query?: { period?: string; provider?: string; outcome?: 'success' | 'failure' | 'cancelled'; limit?: number; offset?: number }, signal?: AbortSignal) {
   const params = new URLSearchParams();
   if (query?.period) params.set('period', query.period);
