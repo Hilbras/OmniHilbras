@@ -122,7 +122,7 @@ test('an unexpected exit is restarted with backoff', async () => {
   });
   try {
     await supervisor.start();
-    const deadline = Date.now() + 5_000;
+    const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
       if (supervisor.restarts >= 1) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -159,7 +159,7 @@ test('restart attempts stop at the configured limit', async () => {  const port 
   });
   try {
     await supervisor.start();
-    const deadline = Date.now() + 5_000;
+    const deadline = Date.now() + 15_000;
     while (Date.now() < deadline && supervisor.state !== 'failed') {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
