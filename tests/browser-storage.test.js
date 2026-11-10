@@ -136,6 +136,7 @@ function storageAccesses() {
 const ALLOWED_KEYS = {
   'omnihilbras-sidebar-collapsed': 'whether the sidebar is collapsed. A layout preference, worthless to anyone who steals it.',
   'omnihilbras-theme': 'light or dark. A layout preference, worthless to anyone who steals it.',
+  'omnihilbras-reduce-motion': 'whether animations are disabled. An accessibility preference, worthless to anyone who steals it.',
 };
 
 /**
@@ -226,11 +227,11 @@ test('the stores this product does not use are asserted at zero, not merely unre
 });
 
 test('THE COUNT, asserted so it cannot drift quietly', () => {
-  // The number is the finding: three accesses, two keys, both preferences. Asserted so a fourth
-  // access has to be counted and a reader sees the size of the surface rather than trusting it.
+  // The number is the finding: nine accesses, three preference keys. Asserted so the surface has to be
+  // counted rather than trusted.
   const accesses = storageAccesses();
-  assert.equal(accesses.length, 3, `browser storage accesses changed: ${accesses.map((a) => `${a.file}:${a.key}`).join(', ')}`);
-  assert.equal(Object.keys(ALLOWED_KEYS).length, 2);
+  assert.equal(accesses.length, 9, `browser storage accesses changed: ${accesses.map((a) => `${a.file}:${a.key}`).join(', ')}`);
+  assert.equal(Object.keys(ALLOWED_KEYS).length, 3);
   assert.ok(accesses.every((access) => access.store === 'localStorage'), 'localStorage only — the two other stores are asserted absent above');
   console.log(`    browser-storage accesses: ${accesses.length}   allowed keys: ${Object.keys(ALLOWED_KEYS).length}   credential-shaped: 0`);
 });

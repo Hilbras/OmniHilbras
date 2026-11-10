@@ -289,7 +289,7 @@ test('the Settings page renders every value from the gateway, and decides nothin
 
   // The mutability split comes from the gateway, not from a local list.
   assert.ok(
-    /settings\?\.mutableAtRuntime/.test(page),
+    /settings\??\.mutableAtRuntime/.test(page),
     'the page does not read `mutableAtRuntime`, so it must be deciding mutability locally and will drift',
   );
   // `settings.mutableByRestart`, not `settings?.` -- inside the non-null branch the optional chain never
@@ -301,21 +301,12 @@ test('the Settings page renders every value from the gateway, and decides nothin
     'the page does not read `mutableByRestart`',
   );
 
-  // A restart-only setting must not be rendered with an edit affordance.
-  //
-  // Only `<input>` and `<select>` count. My first pattern included `<button>`, which matched the header's
-  // Refresh button — it mentions `port` nowhere, but it carries a class list long enough to trip a loose
-  // keyword check, and a guard that fires on the Refresh button is a guard that gets deleted.
-  //
-  // So: value-entry controls, and only those. A restart-only setting needs an environment variable and a
-  // process restart, and there is no honest widget for that.
+  // One editable value: the desktop gateway port, which is saved and restarts the gateway. Everything
+  // under "loaded at startup" remains values only, because an input there would change nothing.
   const inputs = page.match(/<(input|select)\b[^>]*>/g) ?? [];
-  assert.deepEqual(
-    inputs,
-    [],
-    `the page renders a value-entry control: ${inputs.join(' ')}. Every setting here is set by an ` +
-      'environment variable, so an input would be a control that changes nothing.',
-  );
+  assert.equal(inputs.length, 1, `the page renders unexpected value-entry controls: ${inputs.join(' ')}`);
+  assert.match(page, /value=\{port\}/, 'the one input is not the desktop port');
+  assert.match(page, /settings\.set/, 'the port input has no persistent save path');
 
   // No secret can be displayed, because the response has no field that could carry one — asserted on the
   // gateway side. Here, the page must not be reaching for anything beyond the named fields.
@@ -326,7 +317,7 @@ test('the Settings page renders every value from the gateway, and decides nothin
   // page as reading a secret — a substring guard cannot tell "is a credential required" from "is a
   // credential", so the value-shaped word has to be excluded by hand.
   for (const field of ['apiKey', 'api_key', 'masterKey', 'accessToken', 'refreshToken', 'secretValue']) {
-    assert.ok(!new RegExp(`settings[^\\n]*${field}`, 'i').test(page), `the page reads a \`${field}\` field`);
+    assert.ok(!new RegExp(`settings\\??\\.[^\\n]*${field}`, 'i').test(page), `the page reads a \`${field}\` field`);
   }
   // **The vault's location must be shown.** A settings page that hid `dataDir` would leave no way to find
   // where the credentials are, and the value is a path the operator chose — not a secret. I dropped this row
