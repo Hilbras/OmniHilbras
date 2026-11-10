@@ -49,25 +49,33 @@ const CANVAS = 64;
  * byte-identical, and every maskable assertion passed. The number is now declared once and both derive from
  * it, so they cannot disagree.
  */
-const MASKABLE_SCALE = 0.78;
+const MASKABLE_SCALE = 0.62;
 
 /**
- * The mark, in canvas units. Copied from `public/favicon.svg` unchanged in shape — this is the identity that
- * already ships, and the task is to make every other size and format say the same thing.
+ * The mark, in canvas units.
+ *
+ * A hexagonal gateway shell (the O) around an H monogram, both built from convex facets. Every shape is a
+ * polygon because the raster writer shares the same point-in-polygon test as the SVG writer, so a 16 px
+ * favicon and a 512 px icon are provably the same drawing. Alternating gold facets make the ring read as a
+ * routed shell rather than a flat outline; the bright H uses the negative space as its own counter.
  */
-const KITE = [
-  [32, 10],
-  [42, 22],
-  [32, 54],
-  [22, 22],
-];
-
-/** The lit inner facet: the same kite narrowed, on its right side. */
-const FACET = [
-  [32, 10],
-  [36, 24],
-  [32, 54],
-  [28, 24],
+const MARK = [
+  // Segments of the hexagonal ring, clockwise from the top-right.
+  { fill: 'gold', points: [[32, 5], [54, 18.5], [45, 24.5], [32, 17]] },
+  { fill: 'bright', points: [[54, 18.5], [54, 45.5], [45, 39.5], [45, 24.5]] },
+  { fill: 'gold', points: [[54, 45.5], [32, 59], [32, 47], [45, 39.5]] },
+  { fill: 'bright', points: [[32, 59], [10, 45.5], [19, 39.5], [32, 47]] },
+  { fill: 'gold', points: [[10, 45.5], [10, 18.5], [19, 24.5], [19, 39.5]] },
+  { fill: 'bright', points: [[10, 18.5], [32, 5], [32, 17], [19, 24.5]] },
+  // The H, inside the ring's negative space.
+  { fill: 'bright', points: [[24, 23], [28, 23], [28, 41], [24, 41]] },
+  { fill: 'bright', points: [[36, 23], [40, 23], [40, 41], [36, 41]] },
+  { fill: 'bright', points: [[28, 30], [36, 30], [36, 34], [28, 34]] },
+  // A node at each cardinal point, so the shell reads as connected rather than closed.
+  { fill: 'gold', points: [[32, 1.5], [34.5, 4], [32, 6.5], [29.5, 4]] },
+  { fill: 'gold', points: [[32, 57.5], [34.5, 60], [32, 62.5], [29.5, 60]] },
+  { fill: 'gold', points: [[7.5, 32], [10, 29.5], [12.5, 32], [10, 34.5]] },
+  { fill: 'gold', points: [[51.5, 32], [54, 29.5], [56.5, 32], [54, 34.5]] },
 ];
 
 /**
@@ -192,8 +200,9 @@ function svg({ tokens, size = CANVAS, plate = true, maskable = false }) {
         : `  <rect width="${size}" height="${size}" rx="16" fill="${tokens.bg}"/>`,
     );
   }
-  parts.push(`  <polygon points="${points(KITE)}" fill="${gold}"/>`);
-  parts.push(`  <polygon points="${points(FACET)}" fill="${bright}" opacity=".8"/>`);
+  for (const shape of MARK) {
+    parts.push(`  <polygon points="${points(shape.points)}" fill="${shape.fill === 'bright' ? bright : gold}"/>`);
+  }
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="OmniHilbras">`,
     ...parts,
@@ -249,8 +258,10 @@ function sample(palette, x, y, size, { maskable }) {
   const ux = 32 + (cx - 32) / scale;
   const uy = 32 + (cy - 32) / scale;
 
-  if (inside(FACET, ux, uy)) return palette.facet;
-  if (inside(KITE, ux, uy)) return palette.gold;
+  for (let index = MARK.length - 1; index >= 0; index -= 1) {
+    const shape = MARK[index];
+    if (inside(shape.points, ux, uy)) return shape.fill === 'bright' ? palette.facet : palette.gold;
+  }
   return palette.bg;
 }
 

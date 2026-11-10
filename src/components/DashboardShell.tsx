@@ -181,7 +181,7 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse, status }: {
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           <span className="relative grid h-8 w-8 shrink-0 place-items-center rounded-[10px] border border-gold/25 bg-gold-soft text-lg text-gold-text" aria-hidden="true">
-            <span className={collapsed ? 'transition-opacity group-hover:opacity-0' : ''}>◈</span>
+            <img src="/favicon.svg" alt="" className="h-5 w-5" />
             {collapsed && <PanelLeftOpen className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />}
           </span>
           {!collapsed && <span>Omni<span className="muted font-normal">Hilbras</span></span>}

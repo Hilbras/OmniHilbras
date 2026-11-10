@@ -1,5 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OmniHilbras">
   <rect width="64" height="64" fill="#0c0b09"/>
-  <polygon points="32,14.84 39.8,24.2 32,49.16 24.2,24.2" fill="#e2bd52"/>
-  <polygon points="32,14.84 35.12,25.76 32,49.16 28.88,25.76" fill="#f3d789" opacity=".8"/>
+  <polygon points="32,15.26 45.64,23.63 40.06,27.35 32,22.7" fill="#e2bd52"/>
+  <polygon points="45.64,23.63 45.64,40.37 40.06,36.65 40.06,27.35" fill="#f3d789"/>
+  <polygon points="45.64,40.37 32,48.74 32,41.3 40.06,36.65" fill="#e2bd52"/>
+  <polygon points="32,48.74 18.36,40.37 23.94,36.65 32,41.3" fill="#f3d789"/>
+  <polygon points="18.36,40.37 18.36,23.63 23.94,27.35 23.94,36.65" fill="#e2bd52"/>
+  <polygon points="18.36,23.63 32,15.26 32,22.7 23.94,27.35" fill="#f3d789"/>
+  <polygon points="27.04,26.42 29.52,26.42 29.52,37.58 27.04,37.58" fill="#f3d789"/>
+  <polygon points="34.48,26.42 36.96,26.42 36.96,37.58 34.48,37.58" fill="#f3d789"/>
+  <polygon points="29.52,30.76 34.48,30.76 34.48,33.24 29.52,33.24" fill="#f3d789"/>
+  <polygon points="32,13.09 33.55,14.64 32,16.19 30.45,14.64" fill="#e2bd52"/>
+  <polygon points="32,47.81 33.55,49.36 32,50.91 30.45,49.36" fill="#e2bd52"/>
+  <polygon points="16.81,32 18.36,30.45 19.91,32 18.36,33.55" fill="#e2bd52"/>
+  <polygon points="44.09,32 45.64,30.45 47.19,32 45.64,33.55" fill="#e2bd52"/>
 </svg>

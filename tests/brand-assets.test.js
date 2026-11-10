@@ -231,8 +231,8 @@ test("the plate is the stylesheet's dark background, and the mark is its gold", 
   const [gr, gg, gb] = rgb(tokens.gold);
   const [fr, fg, fb] = rgb(tokens.goldBright);
 
-  // The plate: a point on the plate that the kite cannot reach.
-  const plate = png.at(256, 30);
+  // The plate: a point inside the hexagonal ring's hole, left of the H.
+  const plate = png.at(168, 256);
   assert.ok(near(plate[0], br) && near(plate[1], bg) && near(plate[2], bb),
     `the plate is rgb(${plate.slice(0, 3)}) but --bg is rgb(${br}, ${bg}, ${bb})`);
   assert.equal(plate[3], 255, 'the plate must be opaque');
@@ -376,13 +376,13 @@ test('the shipped public/favicon.svg draws the same mark as brand/logo.svg', () 
   const a = shapes(shipped).map(normaliseShape);
   const b = shapes(generated).map(normaliseShape);
   assert.ok(a.length > 0 && b.length > 0, 'a favicon or logo drew no shapes');
-  assert.equal(a.length, 2, `expected the kite and its facet, got ${a.length} shapes`);
+  assert.ok(a.length >= 10, `expected the faceted ring and H, got ${a.length} shapes`);
   assert.deepEqual(a, b, 'public/favicon.svg no longer draws the same mark as brand/logo.svg');
 
   // The plate and the facet's opacity are part of the drawing too.
   for (const [name, svg] of [['public/favicon.svg', shipped], ['brand/logo.svg', generated]]) {
     assert.match(svg, /rx="16"/, `${name} lost the rounded plate`);
-    assert.match(svg, /opacity="\.8"/, `${name} lost the facet's opacity`);
+    assert.equal((svg.match(/<polygon /g) ?? []).length, a.length, `${name} has a different number of facets`);
   }
 });
 
