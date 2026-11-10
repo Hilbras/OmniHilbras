@@ -60,6 +60,7 @@ import { localDeployment, type ConnectionSecretStore, type DeploymentConfig } fr
 import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
+import { compressMessages, MemoryCcrStore, type SavableMessage } from '@omnihilbras/token-saver';
 import { startRequestScope, withRequestScope, type RequestScope } from './request-context.js';
 import { decryptBackup, encryptBackup } from './backup.js';
 import { notSupported } from './capability.js';
@@ -154,6 +155,16 @@ export type GatewayServiceOptions = {
   recoveryCooldownMs?: number;
   /** Injectable clock for the rate limiter and recovery cooldown. */
   now?: () => number;
+  /** Opt-in standalone context compression. Absent means the legacy tool-result shortener only. */
+  tokenSaver?: {
+    enabled: boolean;
+    targetRatio: number;
+    protectRecent: number;
+    compressUsers: boolean;
+    compressCode: boolean;
+    reversible: boolean;
+    ccrLimit: number;
+  };
   /** Shared transport, so provider and OAuth requests use one configured client. */
   transport?: HttpTransport;
   /**
@@ -174,6 +185,8 @@ export class GatewayService {
   /** Absent means the gateway records nothing; see `GatewayServiceOptions.usageStore`. */
   private readonly usageStore?: UsageStore;
   private readonly gatewayConfig: GatewayConfig | undefined;
+  private readonly tokenSaverConfig?: NonNullable<GatewayServiceOptions['tokenSaver']>;
+  private readonly tokenSaverStore?: MemoryCcrStore;
   private readonly transport: HttpTransport;
   private readonly clineAdapters = new Map<string, ProviderAdapter>();
   private readonly clinepassAdapters = new Map<string, ProviderAdapter>();
@@ -327,6 +340,8 @@ export class GatewayService {
     this.deploymentConfig = deployment;
     this.usageStore = options.usageStore ? this.publishingUsage(options.usageStore) : undefined;
     this.gatewayConfig = options.config;
+    this.tokenSaverConfig = options.tokenSaver?.enabled ? options.tokenSaver : undefined;
+    this.tokenSaverStore = this.tokenSaverConfig ? new MemoryCcrStore(this.tokenSaverConfig.ccrLimit) : undefined;
     // Kept, not just read: the ChatGPT Web driver is built lazily on first use, long after
     // the constructor has returned, so the override has to outlive this call.
     this.options = options;
@@ -2435,10 +2450,30 @@ export class GatewayService {
   private preparedMessages(request: ChatRequest, scope: RequestScope | undefined): ChatRequest['messages'] {
     const complete = completeToolRounds(request.messages);
     if (scope?.tokenSaver === false) return complete;
+    if (this.tokenSaverConfig && this.tokenSaverStore) {
+      const compressed = compressMessages(complete as SavableMessage[], {
+        targetRatio: this.tokenSaverConfig.targetRatio,
+        protectRecent: this.tokenSaverConfig.protectRecent,
+        compressUsers: this.tokenSaverConfig.compressUsers,
+        compressCode: this.tokenSaverConfig.compressCode,
+        reversible: this.tokenSaverConfig.reversible,
+        ccr: this.tokenSaverStore,
+      });
+      if (compressed.stats.savedTokens > 0) {
+        console.log(`[token-saver] request ${scope?.id ?? 'unscoped'} saved ~${compressed.stats.savedTokens} tokens (${Math.round(compressed.stats.savedRatio * 100)}%)`);
+        return compressed.value as ChatRequest['messages'];
+      }
+      return complete;
+    }
     const compressed = compressToolResults(complete);
     const saved = toolResultBytes(complete) - toolResultBytes(compressed);
     if (saved > 0) console.log(`[token-saver] request ${scope?.id ?? 'unscoped'} saved ${saved} bytes of tool output`);
     return compressed;
+  }
+
+  /** The original behind a `<<token-saver:id>>` marker, for the retrieval route. */
+  retrieveTokenSaverContext(id: string): string | undefined {
+    return this.tokenSaverStore?.get(id)?.content;
   }
 
   /**

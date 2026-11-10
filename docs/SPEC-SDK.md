@@ -278,6 +278,10 @@ The first local gateway exposes:
 - `POST /v1/backup/import` — body `{"passphrase": "...", "backup": envelope, "confirmReplace": true}`.
   **Replaces** every connection, strategy and API key. Returns counts. A missing confirmation is a 400;
   a wrong passphrase or a damaged envelope is refused before anything is changed. Management route.
+- `GET /v1/token-saver/:id` — returns `{"id","content"}` for the original behind a
+  `<<token-saver:<id> ...>>` marker. Only ids in the gateway's bounded in-memory store resolve; a miss is
+  a 404, never a fabricated empty prompt. Management route. Compression itself is opt-in with
+  `OMNIHILBRAS_TOKEN_SAVER=1`; `x-omnihilbras-token-saver: off` disables it for one request.
 - `POST /v1/web-cookie/tokenharbor/check` — verify a pasted Token Harbor session cookie against
   `tokenharbor.ai` by reading the account profile, and store nothing. A credential check, not a
   completion: it says whether the session is accepted, not whether a model can answer.

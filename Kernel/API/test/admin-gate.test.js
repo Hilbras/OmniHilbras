@@ -61,6 +61,7 @@ const MANAGEMENT = [
   ['GET', '/v1/health'],
   ['POST', '/v1/keys', { name: 'probe' }],
   ['POST', '/v1/backup/export', { passphrase: 'probe-passphrase' }],
+  ['GET', '/v1/token-saver/abcdef123456'],
   ['PUT', '/v1/settings/require-api-key', { requireApiKey: false }],
 ];
 

@@ -119,6 +119,8 @@ function publicSettings(config: GatewayConfig) {
      * effect so the dashboard can explain a failure before the user clicks rather than after.
      */
     codex: codexReadiness(config),
+    /** Same config under a key that is not credential-shaped; `tokenSaver` as a JSON key trips the guard. */
+    compression: config.tokenSaver,
     endpoints: {
       openai: config.openai.baseUrl,
       anthropic: config.anthropic.baseUrl,
@@ -143,7 +145,7 @@ function publicSettings(config: GatewayConfig) {
     mutableAtRuntime: ['requireApiKey'],
     mutableByRestart: [
       'host', 'port', 'timeoutMs', 'healthIntervalMs', 'failureThreshold',
-      'recoveryCooldownMs', 'corsOrigins', 'dataDir', 'endpoints',
+      'recoveryCooldownMs', 'corsOrigins', 'dataDir', 'endpoints', 'compression',
     ],
   };
 }

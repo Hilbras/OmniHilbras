@@ -23,6 +23,15 @@ export type GatewayConfig = {
   recoveryCooldownMs: number;
   corsOrigins: string[];
   dataDir: string;
+  tokenSaver: {
+    enabled: boolean;
+    targetRatio: number;
+    protectRecent: number;
+    compressUsers: boolean;
+    compressCode: boolean;
+    reversible: boolean;
+    ccrLimit: number;
+  };
   codex: {
     clientId?: string;
     redirectUri?: string;
@@ -89,6 +98,15 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
     recoveryCooldownMs: parseNonNegativeInteger(env.OMNIHILBRAS_RECOVERY_COOLDOWN_MS, 30_000, 'OMNIHILBRAS_RECOVERY_COOLDOWN_MS', 3_600_000),
     corsOrigins: parseCorsOrigins(env.OMNIHILBRAS_CORS_ORIGINS),
     dataDir: env.OMNIHILBRAS_DATA_DIR?.trim() || defaultConnectionDirectory(env),
+    tokenSaver: {
+      enabled: ['1', 'true', 'on', 'yes'].includes((env.OMNIHILBRAS_TOKEN_SAVER ?? '').trim().toLowerCase()),
+      targetRatio: parseRatio(env.OMNIHILBRAS_TOKEN_SAVER_RATIO, 0.5),
+      protectRecent: parseNonNegativeInteger(env.OMNIHILBRAS_TOKEN_SAVER_PROTECT_RECENT, 4, 'OMNIHILBRAS_TOKEN_SAVER_PROTECT_RECENT', 100),
+      compressUsers: ['1', 'true', 'on', 'yes'].includes((env.OMNIHILBRAS_TOKEN_SAVER_USERS ?? '').trim().toLowerCase()),
+      compressCode: ['1', 'true', 'on', 'yes'].includes((env.OMNIHILBRAS_TOKEN_SAVER_CODE ?? '').trim().toLowerCase()),
+      reversible: !['0', 'false', 'off', 'no'].includes((env.OMNIHILBRAS_TOKEN_SAVER_REVERSIBLE ?? 'true').trim().toLowerCase()),
+      ccrLimit: parseNonNegativeInteger(env.OMNIHILBRAS_TOKEN_SAVER_CCR_LIMIT, 500, 'OMNIHILBRAS_TOKEN_SAVER_CCR_LIMIT', 10_000),
+    },
     codex: {
       clientId: env.OMNIHILBRAS_CODEX_CLIENT_ID?.trim() || undefined,
       redirectUri: env.OMNIHILBRAS_CODEX_REDIRECT_URI?.trim() || undefined,
@@ -174,6 +192,7 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
   const store = connectionStore ?? new LocalConnectionStore({ directory: config.dataDir, fallback: environmentSecretStore, masterKey: parseMasterKey(env.OMNIHILBRAS_MASTER_KEY) });
   const keys = apiKeyStore ?? new LocalApiKeyStore({ directory: config.dataDir });
   return new GatewayService(createProviderRegistry(config), store, store, keys, {
+    tokenSaver: config.tokenSaver,
     failureThreshold: config.failureThreshold,
     recoveryCooldownMs: config.recoveryCooldownMs,
     // **Wired here in 1.64.0, and it had never been.** `GatewayServiceOptions.usageStore` is optional by
@@ -195,6 +214,13 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
 
 function providerEnvKey(providerId: string) {
   return `${providerId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
+}
+
+function parseRatio(value: string | undefined, fallback: number) {
+  if (value === undefined || value.trim() === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`Expected a ratio between 0.05 and 0.95, got "${value}".`);
+  return Math.min(0.95, Math.max(0.05, parsed));
 }
 
 function parseInteger(value: string | undefined, fallback: number, name: string) {

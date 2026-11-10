@@ -311,6 +311,9 @@ importers:
       '@omnihilbras/sdk-zen':
         specifier: workspace:*
         version: link:../SDK/zen
+      '@omnihilbras/token-saver':
+        specifier: workspace:*
+        version: link:../TokenSaver
       playwright-core:
         specifier: 1.62.1
         version: 1.62.1

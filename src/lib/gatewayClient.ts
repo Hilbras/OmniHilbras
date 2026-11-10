@@ -1002,6 +1002,16 @@ export type GatewaySettings = {
   recoveryCooldownMs: number;
   corsOrigins: string[];
   dataDir: string;
+  /** Opt-in standalone context saver, as loaded at startup. */
+  compression?: {
+    enabled: boolean;
+    targetRatio: number;
+    protectRecent: number;
+    compressUsers: boolean;
+    compressCode: boolean;
+    reversible: boolean;
+    ccrLimit: number;
+  };
   endpoints: {
     openai: string;
     anthropic: string;

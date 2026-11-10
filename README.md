@@ -11,7 +11,7 @@ every provider, with API keys, routing, and per-connection reliability.
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
 
-**Current version: 2.8.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
+**Current version: 2.9.0** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
 [npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
 [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
 
@@ -611,6 +611,22 @@ code bodies are not removed unless `compressCode` is explicitly enabled; a rewri
 discarded. `estimateTokens` is a bytes/4 estimate, not a provider tokenizer.
 
 `pnpm test:token-saver` runs its suite. Design and limits: `Kernel/TokenSaver/README.md`.
+
+Gateway integration is opt-in:
+
+```bash
+OMNIHILBRAS_TOKEN_SAVER=1 omnihilbras
+# optional: OMNIHILBRAS_TOKEN_SAVER_RATIO=0.5
+#           OMNIHILBRAS_TOKEN_SAVER_PROTECT_RECENT=4
+#           OMNIHILBRAS_TOKEN_SAVER_USERS=1
+#           OMNIHILBRAS_TOKEN_SAVER_CODE=1
+#           OMNIHILBRAS_TOKEN_SAVER_REVERSIBLE=true
+#           OMNIHILBRAS_TOKEN_SAVER_CCR_LIMIT=500
+```
+
+When on, the gateway compresses provider-bound messages before routing, logs estimated savings, and
+serves the original behind a marker at `GET /v1/token-saver/:id`. `x-omnihilbras-token-saver: off`
+disables it for one request. When off, the original gateway tool-result shortener is used unchanged.
 
 **Settings** is workable, not a mirror of `.env.example`: theme and reduced motion are saved in the
 browser; the desktop app persists close-to-tray, start-gateway-on-launch, update-check-on-launch and

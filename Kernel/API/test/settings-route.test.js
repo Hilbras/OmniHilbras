@@ -118,7 +118,7 @@ test('it never serves a credential, whatever the configuration holds', async (t)
   // else derived from the machine.
   const allowed = new Set([
     'host', 'port', 'localOnly', 'timeoutMs', 'healthIntervalMs', 'failureThreshold', 'recoveryCooldownMs',
-    'corsOrigins', 'dataDir', 'endpoints', 'codex', 'build', 'mutableAtRuntime', 'mutableByRestart',
+    'corsOrigins', 'dataDir', 'endpoints', 'codex', 'build', 'compression', 'mutableAtRuntime', 'mutableByRestart',
   ]);
   const keys = Object.keys(JSON.parse(raw).settings ?? {});
   const extra = keys.filter((key) => !allowed.has(key));
