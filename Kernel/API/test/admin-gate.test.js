@@ -137,7 +137,9 @@ test('the prefix list and the router agree, so a new management route cannot be 
   // another is a route whose protection depends on which check runs first.
   // `/v1/responses` joins the inference surface for the same reason as `/v1/embeddings`: it is gated through
   // `isPublicLlmRoute`, not the prefix list, and `responses-route.test.js` proves that gate refuses it without a key.
-  const excluded = new Set(['/v1/models', '/v1/chat', '/v1/embeddings', '/v1/responses']);
+  // `/v1/messages/count_tokens` is part of the inference surface too: `handleInferenceRoute` gates it
+  // through `isPublicLlmRoute`, and `token-caps.test.js` proves it refuses an unauthenticated caller.
+  const excluded = new Set(['/v1/models', '/v1/chat', '/v1/embeddings', '/v1/responses', '/v1/messages']);
   for (const prefix of served) {
     if (excluded.has(prefix)) continue;
     assert.ok(
