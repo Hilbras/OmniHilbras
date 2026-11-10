@@ -260,6 +260,7 @@ omnihilbras         # both of the above in one terminal (needs `npm link` once)
 pnpm typecheck
 pnpm test           # SDK then gateway
 pnpm build
+pnpm build:landing  # marketing-only Vercel build
 pnpm analyze        # per-page bundle cost, attributed per package
 pnpm verify         # release gate: version, brand, typecheck, test, SPEC, build, bundle budget
 pnpm release:audit  # every tag: pushed, released on GitHub, published to npm

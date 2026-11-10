@@ -2,912 +2,355 @@
   <img src="./brand/wordmark.svg" alt="OmniHilbras" width="360" />
 </p>
 
-A self-hosted, local-first AI gateway: one OpenAI-compatible endpoint in front of
-every provider, with API keys, routing, and per-connection reliability.
+<p align="center">
+  <strong>One local endpoint for every model provider.</strong><br />
+  A local-first AI gateway, dashboard and desktop app with routing, failover, token accounting and measured token saving.
+</p>
 
-[![npm](https://img.shields.io/npm/v/@hilbras/omnihilbras)](https://www.npmjs.com/package/@hilbras/omnihilbras)
-[![npm downloads](https://img.shields.io/npm/dm/@hilbras/omnihilbras)](https://www.npmjs.com/package/@hilbras/omnihilbras)
-[![CI](https://github.com/Hilbras/OmniHilbras/actions/workflows/verify.yml/badge.svg)](https://github.com/Hilbras/OmniHilbras/actions/workflows/verify.yml)
-[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](./tsconfig.json)
+<p align="center">
+  <a href="https://github.com/Hilbras/OmniHilbras/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Hilbras/OmniHilbras" /></a>
+  <a href="https://github.com/Hilbras/OmniHilbras/actions/workflows/verify.yml"><img alt="CI" src="https://github.com/Hilbras/OmniHilbras/actions/workflows/verify.yml/badge.svg" /></a>
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue" />
+  <img alt="TypeScript strict" src="https://img.shields.io/badge/TypeScript-strict-3178C6" />
+</p>
 
-**Current version: 3.0.2** · [GitHub](https://github.com/Hilbras/OmniHilbras) ·
-[npm](https://www.npmjs.com/package/@hilbras/omnihilbras) ·
-[Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [License](./LICENSE)
+<p align="center">
+  <a href="https://omnihilbras.hilbras.com/download">Download</a> ·
+  <a href="https://omnihilbras.hilbras.com/docs">Documentation</a> ·
+  <a href="https://omnihilbras.hilbras.com/changelog">Changelog</a> ·
+  <a href="./docs/SPEC-SDK.md">Gateway specification</a> ·
+  <a href="./CONTRIBUTING.md">Contributing</a>
+</p>
 
-```bash
-npm i @hilbras/omnihilbras
+**Current version: 3.0.3**
+
+OmniHilbras sits between your application and the model providers you already use. It gives every client one
+OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
+each request. The same repository ships the gateway, the React dashboard, the marketing site and the Electron
+desktop app.
+
+> **Publishing status:** the npm package is legacy. Kernel/API is private while the Kernel restructure is in
+> progress, so the supported install paths are the desktop app and a build from source. See
+> [`AGENTS.md`](./AGENTS.md) for the release rules that apply today.
+
+## Why OmniHilbras
+
+- **One API, many providers.** Point any OpenAI-compatible client at loopback. Provider-specific wire formats
+  stay inside their adapters; the gateway core stays provider-neutral.
+- **Local by default.** The gateway binds to `127.0.0.1`, credentials live in an encrypted local vault, and
+  provider keys never enter browser storage.
+- **Failover instead of silent failure.** Connections carry a priority and a health state. A request skips an
+  unhealthy, rate-limited or credential-less connection and records which one failed.
+- **Measured, not invented.** Usage records carry tokens, cache reads and writes, request IDs and the ordered
+  attempts. A value that was not measured is shown as unmeasured, never as zero.
+- **Token saving you can audit.** Compression, history trimming and cache anchoring are separate, reversible
+  savers with per-request telemetry in `GET /v1/token-saver/stats`.
+- **Desktop and web.** The desktop app owns the gateway lifecycle, logs and updates; the browser dashboard
+  remains available for development.
+
+## Install
+
+### Desktop app
+
+Download the latest installer from [the download page](https://omnihilbras.hilbras.com/download):
+
+| Platform | Package |
+| --- | --- |
+| Windows 10/11 x64 | `OmniHilbras-Setup.exe` |
+| Debian / Ubuntu amd64 | `OmniHilbras-linux-amd64.deb` |
+| macOS | `OmniHilbras-macos.dmg` (built on macOS CI) |
+
+Stable direct links:
+
+```text
+https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-Setup.exe
+https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-linux-amd64.deb
+https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-macos.dmg
 ```
 
-The dashboard is one React Router app mounted at `/dashboard`:
+The Windows and macOS builds are not code-signed yet. SmartScreen or Gatekeeper may ask you to confirm the
+first launch. Linux users install with:
 
-- `/dashboard/providers`
-- `/dashboard/providers/:providerId`
-- `/dashboard/providers/:providerId/usage`
-- `/dashboard/routing`
-- `/dashboard/keys`
-- `/dashboard/usage`
-- `/dashboard/settings`
+```bash
+sudo apt install ./OmniHilbras-linux-amd64.deb
+```
 
-A provider page carries two tabs: its overview, and `/dashboard/providers/:providerId/usage` — the usage view
-scoped to that provider's recorded requests. The tab follows the **connection**, so a card that shares another
-provider's credential (`clinepass` under `cline`) shows the usage its requests are actually recorded under.
+### From source
 
-That tab also carries the **account allowance** when the provider publishes one, read over
-`GET /v1/connections/:id/quota`. It is a different measurement from a different source — the provider
-answering about its own subscription, rather than records OmniHilbras wrote — so the two are never merged
-into one figure. Most providers publish no allowance at all, and say so: several decide entitlement per
-request and reveal it only by refusing a call. "This provider does not say" is rendered as a sentence, never
-as a zero, because an unanswerable question and an exhausted account are different facts.
+Requirements: Node.js 24+, pnpm 12.5.1.
 
-**Request log** is a real page at `/dashboard/logs`, fed by `GET /v1/logs/stream`. `Usage` and
-`Settings` were both disabled for the whole life of the project for the same reason — **there was
-nothing to show** — and both are now real: `Usage` over `GET /v1/usage`, `Settings` over the
-configuration the gateway actually loaded.
+```bash
+pnpm install
+pnpm dev            # marketing site + dashboard on :5173
+pnpm dev:gateway    # local gateway on 127.0.0.1:8787
+```
 
-`Settings` is the one page you might expect to be a form and is not. Every setting is an environment
-variable, so there is nothing to submit; what the page shows is the configuration **this process** resolved,
-after defaults and validation, plus which values need a restart. It is a read of real state, not a copy of
-`.env.example`.
+The desktop app has its own commands:
 
-`/` lands on Providers, because there is no Overview page. An earlier one was a mockup with no data source
-behind a range selector that changed a hardcoded number, and it was deleted rather than kept.
+```bash
+pnpm app:dev        # build the gateway and dashboard, then open Electron
+pnpm app:check      # build and drive the real binary through its smoke test
+pnpm app:pack       # build installers for the current platform
+```
 
-Navigation is client-side, so switching views never reloads the document. The
-marketing page stays at `/`. A static host must send every `/dashboard/*` request
-to `dashboard.html`; `public/_redirects` covers Netlify and Cloudflare Pages, and
-the equivalent rule for other servers is:
+## Architecture
+
+```text
+┌──────────────────────────────┐
+│  Desktop app (Electron)      │  window controls, tray, gateway lifecycle,
+│  desktop/                    │  logs, updates, encrypted backup
+└──────────────┬───────────────┘
+               │ app:// + narrow preload bridge
+┌──────────────▼───────────────┐
+│  Dashboard + marketing site  │  React Router under /dashboard
+│  src/                        │  static pages under /home and /site/
+└──────────────┬───────────────┘
+               │ HTTP / SSE, loopback
+┌──────────────▼───────────────┐
+│  Kernel/API                  │  routing, health, retries, usage, keys,
+│  gateway service             │  token-saver orchestration, OAuth routes
+└───────┬──────────────┬───────┘
+        │              │
+┌───────▼───────┐ ┌────▼──────────────────────────┐
+│ Kernel/       │ │ Kernel/SDK/<provider>/        │
+│ TokenSaver    │ │ one adapter package per provider│
+└───────────────┘ └───────────────────────────────┘
+```
+
+The important boundary is **the gateway core does not speak provider wire formats**. A provider is an adapter
+and a registration. The shared machinery each adapter needs is vendored into that package's `lib/`; there is no
+shared SDK core to drift away from them.
+
+### Repository map
+
+| Path | Responsibility |
+| --- | --- |
+| `Kernel/API/` | Gateway, routes, routing, health, usage, vault, token-saver integration |
+| `Kernel/SDK/<provider>/` | Provider adapter and vendored runtime types |
+| `Kernel/TokenSaver/` | Standalone, reversible context compressor and saver telemetry |
+| `src/` | React dashboard and marketing pages |
+| `site/` | Static entry files for Home, Download, Docs and legal pages |
+| `desktop/` | Electron main process, preload bridge and supervisor |
+| `docs/` | Specification, architecture notes, reports and tools |
+| `tests/` | Repository-wide guards, brand, security and documentation checks |
+
+## Gateway
+
+The gateway listens on `127.0.0.1:8787` by default. It refuses a non-loopback host unless deployment
+configuration explicitly changes the threat model.
+
+### Core routes
+
+| Route | Purpose |
+| --- | --- |
+| `POST /v1/chat/completions` | Chat, streaming and tool calls through the selected provider |
+| `POST /v1/responses` | OpenAI Responses API shape |
+| `GET /v1/models` | Saved models of enabled, credentialed connections |
+| `POST /v1/messages/count_tokens` | Explicit bytes/4 estimate, marked as estimated |
+| `POST /v1/embeddings` | Embeddings where the provider supports them |
+| `GET /health` | Gateway and provider health, including the reason for each unavailable provider |
+| `GET /v1/usage` | Recorded usage, paged and filterable |
+| `GET /v1/token-saver/stats` | Per-saver savings, skips and cache figures |
+| `GET /v1/settings` | The configuration this process actually loaded |
+
+Management routes use the admin key when enforcement is on. The full route contract, including OAuth callbacks,
+backup import/export and every rejection shape, is in [`docs/SPEC-SDK.md`](./docs/SPEC-SDK.md).
+
+### Quick request
+
+```bash
+curl http://127.0.0.1:8787/v1/chat/completions \
+  -H "Authorization: Bearer $OMNIHILBRAS_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "auto",
+    "messages": [{ "role": "user", "content": "Hello" }]
+  }'
+```
+
+`model: "auto"` lets the gateway resolve a saved connection. A concrete model id is routed to the connection
+that lists it, then to an explicit `x-omnihilbras-provider` header or body field if one is present. The routing
+order is deterministic: priority, health, credential, rate limit, then failover.
+
+## Providers
+
+Provider integrations live under `Kernel/SDK/`. The gateway supports API-key providers, OAuth providers,
+web-session providers, local runtimes such as Ollama, and generic OpenAI-compatible endpoints.
+
+- **API key:** the credential is stored in the local encrypted vault.
+- **OAuth:** the gateway owns the sign-in session and saves the resulting credential. The desktop app opens the
+  provider page in your default browser.
+- **Web session:** a pasted cookie is verified against the provider before it is stored.
+- **Local:** no credential is required; the connection is saved with `credential: "none"`, not an invented key.
+- **Custom endpoint:** any OpenAI-compatible base URL with optional model and chat paths.
+
+Provider cards are catalog metadata. A card shows `—` metrics and `No connections` until a real connection
+exists; it never invents a measurement. See the provider notes in the [gateway specification](./docs/SPEC-SDK.md)
+for auth-specific behavior and standing warnings.
+
+## Token saver
+
+The saver is a separate package, not a mode hidden in the adapter:
+
+- **RTK filters** recognize git, build, grep, find, tree, ls, search and log output shapes.
+- **Generic compression** preserves valid JSON, error rows and retrievable originals.
+- **History trimming** stubs whole old turns above a threshold while keeping the system prompt, the first user
+  ask, the recent window and error-bearing tool results.
+- **Output and thinking caps** clamp requests before routing; Anthropic re-clamps its own thinking budget.
+- **`count_tokens`** is an estimate with an explicit `estimated` field; no provider tokenizer is bundled.
+- **Cache anchoring** re-anchors Anthropic cache breakpoints on the final body, after the savers run.
+- **Optional external savers** — Headroom and PXPIPE — are fail-open, time out, and report `ran` or `skipped`
+  with a reason. PXPIPE only runs for adapters that advertise Anthropic image context.
+
+Every lossy rewrite that stores an original is reversible through `GET /v1/token-saver/:id`. Cache reads and
+writes are accounted for separately from prompt tokens, and cached input is priced as cached input.
+
+Configuration:
+
+```bash
+OMNIHILBRAS_TOKEN_SAVER=1
+# OMNIHILBRAS_TOKEN_SAVER_RATIO=0.5
+# OMNIHILBRAS_TOKEN_SAVER_PROTECT_RECENT=4
+# OMNIHILBRAS_TOKEN_SAVER_USERS=1
+# OMNIHILBRAS_TOKEN_SAVER_CODE=1
+# OMNIHILBRAS_TOKEN_SAVER_REVERSIBLE=true
+# OMNIHILBRAS_TOKEN_SAVER_CCR_LIMIT=500
+
+OMNIHILBRAS_HISTORY_TRIM_TOKENS=120000
+OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT=8
+OMNIHILBRAS_MAX_OUTPUT_TOKENS=8192
+OMNIHILBRAS_THINKING_BUDGET=4096
+OMNIHILBRAS_CACHE_ANCHOR=1
+```
+
+External savers are opt-in by URL. A request never depends on them:
+
+```bash
+OMNIHILBRAS_HEADROOM_URL=http://127.0.0.1:8788
+OMNIHILBRAS_PXPIPE_URL=http://127.0.0.1:8789
+```
+
+## Dashboard
+
+The dashboard is one React Router app mounted at `/dashboard`. Client-side navigation never reloads the
+document.
+
+| Route | Page |
+| --- | --- |
+| `/dashboard/providers` | Provider catalog and connections |
+| `/dashboard/providers/:providerId` | Provider overview |
+| `/dashboard/providers/:providerId/usage` | Usage scoped to that provider |
+| `/dashboard/routing` | Routing order and connection state |
+| `/dashboard/keys` | Gateway API keys |
+| `/dashboard/usage` | Requests, tokens, cache and cost |
+| `/dashboard/logs` | Live request log |
+| `/dashboard/settings` | Loaded configuration and desktop settings |
+
+There is no Overview page: the earlier one had no data source and was removed rather than kept. `/dashboard`
+redirects to providers.
+
+A static host must send every `/dashboard/*` request to `dashboard.html`. `public/_redirects` covers Netlify and
+Cloudflare Pages; the equivalent nginx rule is:
 
 ```nginx
 location /dashboard { try_files $uri /dashboard.html; }
 ```
 
-All dashboard surfaces use the local gateway when it is running. OpenRouter is the
-first provider with a live connection flow: the dashboard sends a candidate key
-only to the loopback gateway, which validates it against OpenRouter and stores it
-in an encrypted local vault. The connection dialog also lets you choose whether
-Save imports free models or all text models; model IDs are persisted separately
-from the credential. Codex signs in with no configuration: it uses the public
-Codex CLI OAuth client and its registered loopback callback, opening that port
-only while a sign-in is in flight. Set `OMNIHILBRAS_CODEX_CLIENT_ID` and its
-matching `OMNIHILBRAS_CODEX_REDIRECT_URI` together to use your own OAuth client
-instead. Either way the credential is a ChatGPT subscription session rather than
-an inference-scoped API key, which is stated on the Codex card. Other providers can
-be added with a base URL through `PUT /v1/connections/:id`.
+## Desktop app
 
-The providers page groups cards as **OAuth Providers**, **API Key Providers**,
-**Free Tier Providers**, **Web Session Providers**, **Local Providers**, and
-**Custom Endpoints**. A card is catalog metadata: it shows `—` metrics and
-`No connections` until a real connection exists behind it.
+The desktop shell owns the local gateway so the app can start and stop it without a terminal.
 
-## Searching Models
+- **Frameless on Windows/Linux**, with the dashboard header as the title bar and custom window controls.
+  macOS keeps its traffic lights.
+- **Gateway lifecycle** — start, stop, restart, port changes and a bounded restart policy. A crash is a restart,
+  not a dead app; five consecutive crashes stop trying.
+- **Logs** stream into the dashboard over the preload bridge.
+- **Release-feed updates** — the app checks the GitHub release feed, downloads an installer, and can install
+  and restart. Windows NSIS and signed macOS can replace themselves; a `.deb` cannot, and says so.
+- **Encrypted backup** import and export through the About/Settings surfaces.
 
-**On a provider page**, a search box sits directly above the model list. It matches
-the full model ID and the name after the vendor prefix, so `claude-sonnet` finds
-`anthropic/claude-sonnet-5` in a list of 458. The header shows how many of the
-total are listed, and **Test all** tests what you are looking at — the button
-reads `Test 8 shown` when a filter is active — rather than the whole catalog.
+The renderer never holds the dashboard token and never calls `127.0.0.1` directly. Requests, chat streams and
+logs cross a narrow preload bridge. The packaged dashboard is served from `app://omnihilbras` out of `dist/`
+with a strict CSP, all permission requests denied, navigation away from the app blocked, and DevTools disabled.
 
-Beside it, a result filter narrows the list to **All / Untested / Passed /
-Failed** with a count on each, and a sort orders by name, fastest, or slowest.
-Untested models sort last, since they have no latency to compare.
+## Configuration
 
-**On the providers page**, the same search also spans providers. It reports which
-providers serve a model and says whether each is actually serving it — `serving`,
-`saved · needs attention`, or `not connected`. A saved connection is never shown
-as "not connected", because that hides a credential you have actually saved.
+The gateway is configured by environment variables. The full list is in [`docs/SPEC-SDK.md`](./docs/SPEC-SDK.md);
+the ones most people change:
 
-Only imported models are searchable, so connect a provider first.
-
-## Why a Model Can Fail Here And Work Elsewhere
-
-A model test is one small real request, and several things can make that request
-fail for reasons that have nothing to do with the model being broken.
-
-**Reasoning models.** This was a real bug with two separate halves, both fixed.
-
-The test originally asked for at most 16 tokens. Reasoning models spend their budget
-on chain-of-thought before answering, so they returned `finish_reason: length` with
-**no content at all** — and the test only checked that the envelope was well formed,
-so it recorded a green `Ping` badge for a model that had answered nothing. The budget
-is now 1024 tokens. Cost is bounded by what a model actually generates, not by the
-cap.
-
-The bigger half: **a reasoning-only reply is a working connection.** A model that
-spends its whole budget thinking and emits no text has still proved it works. That
-was being reported as a failure, which is why such models looked broken here and
-behaved in other clients. When the content is empty but the response carries
-reasoning — under `reasoning`, `reasoning_content`, `thinking`, or
-`thinking_content` — the test now passes and the row is labelled `reasoning only`.
-
-Measured on the free tier: three models that failed or returned nothing at a
-96-token budget answer cleanly at 1024, and
-`nvidia/nemotron-3-nano-omni-...-reasoning` succeeds on 4 of 5 requests, failing only
-when the provider omits `choices` entirely.
-
-**Free-tier rate limits.** A `:free` model answers `429` when the shared free quota
-is spent, which is a provider limit and not a fault in the gateway.
-
-**Providers that do not speak one API shape.** OpenCode Zen routes different models to
-different endpoints: GPT models from `/zen/v1/responses`, Claude and Qwen from `/zen/v1/messages`,
-the rest from `/zen/v1/chat/completions`. The gateway picks the lane per model and refuses the two
-shapes it does not implement (Gemini's own path and the Jev decision model) by name.
-
-**Account state, or model access.** Cline answers `402 Payment Required` when the
-account has no credits. OpenCode Zen answers a bare `403` with an empty body for
-some individual models: from one key on the correct endpoint, `space-bunny-free`
-answers while `nemotron-3-ultra-free`, `mimo-v2.6-flash-free` and
-`ling-3.0-flash-fin-free` are all refused — and Zen lists every one of them as
-free. Zen documents that admins can disable individual models for a workspace, and
-its Nemotron free models are NVIDIA trial endpoints. That refusal happens at the
-provider and is not something this gateway can change.
-
-When a provider refuses without saying why, the dashboard says so explicitly —
-`HTTP 403 with an empty response body` — rather than showing nothing.
-
-When a test fails, the failure reason is shown on the row. The result filter's
-**Failed** tab isolates them, and a bulk run reports the count.
-
-## Several Connections Per Provider
-
-A provider can hold more than one connection — two Cline accounts, a spare
-OpenRouter key. Each has its own credential, stored encrypted and keyed by
-connection rather than by provider, so adding a second never disturbs the first.
-
-`PUT /v1/connections/:providerId` updates that provider's existing connection.
-Pass an `id` in the body to add another one alongside it:
-
-```bash
-curl -X PUT http://127.0.0.1:8787/v1/connections/opencode \
-  -H 'content-type: application/json' \
-  -d '{"id":"opencode-backup","apiKey":"...","name":"Backup account","endpoint":"https://opencode.ai/zen/v1"}'
-```
-
-Health is reported per provider rather than per connection, so a page shows one
-health figure for a provider even when it has several connections. The accounts
-panel above it is per connection: each row carries its own measured latency, a
-switch at its far edge (`PUT /v1/connections/:id/enabled`, so a disabled account
-keeps its credential and models and simply stops taking traffic — the row goes
-dark while it is off) and **Edit**, which re-authenticates a signed-in account
-or replaces an API key in place. The switch is also in the Connections card, so
-either one works; both read the state back from the gateway.
-
-Adding a credential that is already saved does not create a second row. The
-gateway fingerprints each credential inside the vault and compares it within the
-provider that owns it: an API key that is already stored comes back as the
-existing account with `duplicate: "identical"`, and the same sign-in again renews
-that account with `duplicate: "updated"`. A genuinely different credential is the
-only thing that becomes a new account.
-
-## OpenCode Zen
-
-OpenCode Zen is a hosted gateway from the OpenCode team. Get a key at
-`opencode.ai/auth`, then add **OpenCode Zen** from its provider page. The gateway
-serves it through the generic OpenAI-compatible path at
-`https://opencode.ai/zen/v1`, and the model catalog imports without a credential
-because OpenCode publishes it.
-
-**OpenCode Go** is the same gateway on the OpenCode team's monthly plan: same three
-API shapes, same model lanes, at `opencode.ai/zen/go` and with its own key — its own
-card, its own `ocg/` prefix, and a Usage tab reading `/zen/go/v1/usage`, which reports
-rolling, weekly and monthly meters. Both lanes are one adapter with a different base,
-so a fix to one is a fix to both.
-
-The credential check reads the OpenCode model listing **with the key**. That endpoint is
-public without one, but it answers `401 Invalid credential` for a bad one, so
-passing the key turns the read into a real check that costs no tokens — which is how
-an expired Zen key is now reported instead of showing "Credential check 100%" while
-every model failed.
-
-Zen routes different models to different API shapes, and the gateway picks the right
-one per model: `/zen/v1/responses` for GPT, Grok and Muse; `/zen/v1/messages` for
-Claude and Qwen; `/zen/v1/chat/completions` for the rest. Two shapes are not
-implemented and are refused by name — Gemini, which Zen serves from its own path,
-and Jev, a decision model.
-
-Two things to expect. **Paid models need credits** — Zen charges per request, and
-without a balance they answer `402`. **Free models are gated by a request contract** — a
-streaming request, a declared tool, a session header and a client version — and the
-gateway sends all four, streaming upstream and decoding the answer, because there is
-no non-streaming path. From a datacenter network the upstream still answers `403`
-("OpenCode's free tier can only be used from within OpenCode"), which is a network
-restriction rather than a credential problem; the error says so, so nobody rotates a
-key that already works. `OMNIHILBRAS_ZEN_USER_AGENT` overrides the user-agent part of the
-contract that drifts.
-
-Zen also returns an empty body to a caller holding a key and a real explanation to one
-that is not, so a refusal in the dashboard reads as a bare status code. Re-issue the
-request unauthenticated to see what Zen actually said.
-
-One trap: Zen's `mimo-v2.6-flash-free` and OpenRouter's `xiaomi/mimo-v2.6-flash` are
-different models from different vendors, and the ids are close enough to mix up. The
-OpenRouter one answers on a paid route; the Zen one does not.
-
-## Claude Code, and the subscription it signs in with
-
-**Claude Code** is a separate card from **Anthropic**, and the difference is the credential, not the
-endpoint. Both reach `api.anthropic.com`; the Anthropic card takes an API key metered per token, while
-the Claude Code card signs in with an OAuth grant for a Claude **subscription**.
-
-Open the Claude Code provider page and choose **Add connection**. The gateway mints a PKCE pair, opens
-`claude.ai/oauth/authorize` in a new tab, and waits while you approve the request. Claude redirects your
-browser back to the gateway's own callback, which exchanges the code and saves the connection — there is
-nothing to paste, and the code is never shown back to the browser.
-
-The sign-in is authorization-code with PKCE, so the verifier is minted by the gateway and **never leaves
-the session**; it is not in the URL you open, and it is not in the status the page polls. The session id
-rides in the redirect path, which is what ties a callback to its verifier even though Claude repeats the
-code after a `#` rather than echoing a clean `state`. `claude.ai/oauth/authorize` answers a server-side
-fetch with a Cloudflare challenge rather than a code, which is the whole reason this flow needs a
-browser rather than an API call.
-
-**Read the card's notice before you connect.** Anthropic's consumer terms do not permit using a Claude
-subscription for third-party API access, so the dialog asks you to acknowledge that before it starts
-anything. If you have an Anthropic API key, the **Anthropic** card is the metered path that Anthropic's
-terms cover.
-
-## Nous Research
-
-Nous Portal serves an OpenAI-compatible API at
-`https://inference-api.nousresearch.com/v1`, keyed from
-`portal.nousresearch.com/api-keys`. Two facts about it shape how the gateway
-talks to it, both taken from the reference project's own measurements:
-
-- **Its model catalog is public.** `/v1/models` answers without a credential, so
-  "the catalog loaded" proves nothing about the key — a wrong key reads as valid.
-  The gateway therefore proves a Nous key with a **one-token inference request**
-  to a free model, chosen from the public catalog at check time — the reference
-  project pinned `poolside/laguna-xs-2.1:free`, and by November 2026 that id
-  answered `404 Model not found`, which turned every check into "the key could
-  not be verified". Validating never spends paid credits. A 401 or 403 means the
-  key was refused; a 404 means the probe model rotated; any other status says the
-  key could not be verified rather than that it is bad.
-- **The catalog is not all chat models.** Embeddings and image-only entries are
-  listed beside the text ones, so the import keeps only entries whose output
-  modalities include text — an entry that states no modalities is kept, because
-  silence is not evidence.
-
-**Two ways in, and both are real.** `Use an API key` saves a Portal key through
-the ordinary connection route. `Add connection` runs Nous's **device sign-in**
-(`portal.nousresearch.com`, `hermes-cli`): it shows a code, the user approves it,
-and the gateway exchanges the grant for an **agent key** — the bearer the
-inference host accepts. The sign-in also carries a refresh token, so an expired
-session is renewed and re-minted on use rather than asking the user to sign in
-again; the fresh credential is written back to that account. Both paths end as
-the same bearer, so nothing downstream distinguishes them, and a mint that fails
-leaves the access token as the bearer rather than discarding a working sign-in.
-
-Because the health check really sends a request, the card labels it **Route
-health** rather than **Credential check** — that is the stronger of the two
-claims, and it is the honest one here. Prices from the catalog are converted
-from per-token to per-1M, and a zero price stays a zero, so the free models are
-visibly free. Nous publishes no account-quota endpoint, so the Usage tab says it
-is not supported rather than showing an empty balance.
-
-## Web Cookie providers, and the warning that comes with them
-
-The **Web Cookie Providers** group holds providers with no API — for most of them you export a
-session from your own browser and OmniHilbras drives the web app to get an answer out of it. **Duck.ai**
-is in the group but needs neither: it answers signed-out visitors, and the gateway solves its anti-bot
-challenge directly.
-
-**ChatGPT Web** and **Gemini Web** are implemented, and they work the same way: a real browser
-loads the provider's page, types the prompt, and the answer is read out of the response the page
-makes for itself. Two things you should weigh before using either:
-
-- **The credential is your whole account, not a token.** A `__Secure-next-auth.session-token` is a
-  live session for everything you can do on OpenAI; Gemini's `__Secure-1PSID` is the same for your
-  Google account. Every other credential in this gateway is scoped to inference; these are not.
-- **Neither provider's terms permit automating its web app.** The flow exists because a real
-  browser is used so the page can run its own anti-automation challenges.
-
-The cards say both before you paste anything, and nothing is stored until you acknowledge it. Only
-the provider's own cookies are kept out of your export.
-
-**What is verified, and what is not.** ChatGPT Web has been run end to end against a real account.
-Gemini Web's logic — the cookie, the `StreamGenerate` parse, the model table, the refusals — is
-covered by tests, but **no turn has been run against a live Google session**, so its page selectors
-and its answer capture are unverified. If its mode menu does not confirm a model, it refuses to send
-rather than answering with a different one.
-
-### ChatGPT Web needs a browser
-
-It is installed on demand rather than with the rest of the workspace:
-
-```bash
-npx playwright install chromium
-```
-
-Without it, both web-cookie providers say so by name rather than failing as a provider error.
-
-**ChatGPT Web works.** A real turn returns a real answer in about 20–40 seconds:
-
-```bash
-curl -s -X POST http://127.0.0.1:8787/v1/chat/completions \
-  -H 'content-type: application/json' -H 'Origin: http://localhost:5173' \
-  -H 'x-omnihilbras-provider: chatgpt-web' \
-  -d '{"model":"gpt-5.6-luna-free","messages":[{"role":"user","content":"Reply with the single word: working"}]}'
-# -> 200, content: "working"
-```
-
-It is **not perfectly reliable** — a fetch inside the page can fail on the network, and gets
-one retry. Attachments are not supported; a text-only turn is the whole of it.
-
-### Duck.ai needs no cookie, and no browser
-
-**Duck.ai** is in this group, and it is the odd one out: it needs **no account and no cookie**.
-It serves a free model lineup to signed-out visitors behind an anti-bot challenge, and the gateway
-solves that challenge with `node:vm` — so the connection is stored with no credential at all, and
-there is no browser, no DevTools step, and nothing for you to paste.
-
-It works over HTTP rather than by driving a page, which makes it faster than the other two and
-means there is no browser to install. A real turn was run end to end while it was built, and it
-answered `port-ok`:
-
-```bash
-curl -s -X POST http://127.0.0.1:8787/v1/chat/completions \
-  -H 'content-type: application/json' -H 'Origin: http://localhost:5173' \
-  -H 'x-omnihilbras-provider: duckduckgo-web' \
-  -d '{"model":"gpt-5.4-mini","messages":[{"role":"user","content":"Reply with the single word: working"}]}'
-```
-
-Two things are worth knowing before you rely on it. **The free lineup is a courtesy, not a
-contract** — duck.ai can rate-limit or withdraw it, and a refusal carrying HTTP 418 means backing
-off for a few minutes, not fixing a key: the same request was measured failing 43 seconds after a
-success and working 4.9 minutes later. And a cookie is **accepted but never required** — paste one
-if you want your browser session sent along, and Check will tell you the endpoint answered and
-served a solvable challenge, which is the only thing it can honestly establish about a cookie the
-service does not read.
-
-Two earlier notes here were wrong and are corrected in the spec: the 403 was **not** the
-network, it was Playwright's default headless user agent containing `HeadlessChrome`; and
-the model ids were invented twice, first as `gpt-5.2` and then as `auto`, which is not a
-model a client can ask for but the string the *page* is given when an account is free.
-
-**All 13 models are offered, whatever the plan.** Five GPT-5.6 Sol rungs, two Luna free, six
-for GPT-5.5. The plan is reported in the connect dialog but does not narrow the list: a free
-account that can use a model should be able to see it. The effort rungs collapse to one request
-because ChatGPT picks the effort itself, and `pro` is a different model string with the
-thinking hint deliberately withheld.
-
-**DeepSeek Web works the same way, and its request path has no browser in it at all.**
-chat.deepseek.com is an HTTP API behind a session token, so a turn is a `fetch` with a bearer
-credential. A browser is used once, to read the `userToken` out of your own signed-in
-localStorage. Every completion is gated by DeepSeek's proof of work — a 23-round Keccak
-variant of SHA3-256 that the platform cannot compute — which OmniHilbras solves in a bounded
-search.
-
-**Qwen Web has a catalog and a card.** Its models endpoint answers a guest with 1M-context
-Qwen3.7-Plus, Qwen3.8-Max and Qwen3.8-Omni-Flash, and the chat endpoint is a plain
-unobfuscated `POST /api/v2/chat/completions`. The card offers a probe rather than pretending a
-turn will work: Alibaba's TMD anti-bot can return a captcha that has to be rendered in a browser.
-
-**Token Harbor Web is the one to think twice about.** Token Harbor is itself a gateway, and its
-terms **prohibit** constructing a proxy over it — which is what a web-cookie card is. Their
-documented path is the **TokenHarbor** API-key card (`https://tokenharbor.ai/v1`, OpenAI-compatible,
-free on the `:free` models), and that card is the one to prefer. The web card exists because the
-session route was asked for with the trade stated: it drives `tokenharbor.ai/chat` with a Supabase
-session cookie (`sb-auth-auth-token`), whose turn is `POST /api/direct-chat/sessions` and then
-`POST /api/direct-chat/stream` — a named-event SSE body (`chunk`, `thinking`, `done`) rather than
-OpenAI's. The card carries `riskSeverity: 'high'` and says so before you paste anything. **No live
-turn has been recorded here**, because a real one needs a signed-in session.
-
-**Signing in is one button.** It opens chatgpt.com in a window on the machine running
-OmniHilbras, you sign in with your own password and second factor, and the session is read
-straight out of that browser — including the Cloudflare clearance a copied cookie tends to
-lose. Pasting a cookie by hand is still there, collapsed, for a gateway with no display to open
-a window on. Afterwards the browser profile is the fast path and the stored cookies are only
-used if it is not signed in, so a rotating clearance is not overwritten by a stale copy.
-
-**"Check cookie" opens chatgpt.com and really checks.** Expiry, cookie presence and browser
-availability are all local, and none of them can tell a working session from a revoked one — so
-a check that only parsed would be a button that accepts a dead session. The parser accepts the
-Cookie header the dialog tells you to paste, and reassembles the session token from the
-numbered chunks a browser splits it into.
-
-The turn is made through ChatGPT's own request path — its Sentinel requirements, its
-proof-of-work and Turnstile tokens, its request client — with the module found by scanning
-the page's assets for semantic markers. Driving the composer does not work: it posts a
-request the page never completes.
-
-## Kiro, and why it carries a warning
-
-**Kiro's terms prohibit third-party proxy and harness use**, and this gateway is one. The
-Kiro card says so on the card, again on its page, and once more in the sign-in dialog —
-where nothing is sent to your AWS account until you tick the box. If that trade is not one
-you want to make, don't connect it.
-
-Kiro offers **six** ways in, and the dialog asks first: AWS Builder ID, your company's IAM
-Identity Center start URL, Google, GitHub, an imported refresh token, or a pasted API key.
-The risk warning above gates all six — nothing reaches Kiro or AWS until you tick the box.
-
-Two of them have a catch worth knowing. A company start URL is checked against
-`*.awsapps.com` before it is sent anywhere, because it becomes part of an OAuth grant.
-Social sign-in **cannot come back automatically**: the registered redirect is a `kiro://`
-scheme, so the browser hands the code to the Kiro desktop app and you paste it back.
-
-Once signed in, Kiro is not an OpenAI-compatible endpoint at all: it is CodeWhisperer's
-streaming service, taking a `conversationState` envelope and answering with a **binary** AWS
-eventstream. Kiro meters credits rather than tokens, so a call reports what it cost instead
-of a token count it does not publish. And which models you can use depends on your plan —
-Kiro answers `Invalid model` for an id your account does not carry, and the dashboard says
-exactly that rather than showing a bare failure.
-
-## Filtering models
-
-Every provider page filters its model list by search, price, modality, context window and
-test result, and sorts by name, price, latency or context. Prices are shown per 1M tokens
-whatever the provider quotes, and each row carries the badges the provider actually
-published — a price, a context size, `Vision` or `Text`.
-
-The filters are only as honest as the data behind them. A model with **no published price
-is unknown, not free**, and gets its own filter. A provider that publishes no modalities
-is not assumed to lack them, and a filter that could never match is not offered at all —
-so a minimal catalog like Cline shows search, result and sort, and nothing else.
-
-A card's provider id always resolves to that provider — its own endpoint, its own name —
-and an id that resolves to nothing resolves to the neutral custom option rather than to any
-named vendor, so a key can never be sent to a company you did not name.
-
-When a provider refuses a request, the dashboard shows the provider's own words. A `403`
-is reported as a refusal rather than an authentication failure, because treating it as one
-ejected the whole connection and took every working model with it.
-
-**An API key cannot reach them; a Console sign-in can.** The free Zen models are gated on
-the credential, not on the address. With an API key, or the `public` sentinel, every lane
-returns `403`, under every header combination, on Node and Bun alike.
-
-The **OpenCode Console** card in OAuth Providers signs in with the device flow the
-OpenCode client runs for itself, and those models then answer at zero cost. The code
-arrives pre-filled; if OpenCode asks you to log in first, signing in returns you to the
-approval. Two header names are involved, and mixing them up costs you the whole model list:
-OpenCode's config endpoint needs `x-org-id` and answers `400 org_required` without it,
-while inference uses `x-opencode-org-id`. Approval and the token exchange are also
-single-shot — the sign-in is claimed before the token is requested, so a second poll
-cannot spend a dead code and report a failure over a success. If a connection ever saves
-with no models, `POST /v1/connections/:id/models/refresh` re-reads the catalog without
-another sign-in. A session
-also changes the endpoints: the catalog is served from `/inference/openai/v1`,
-`/inference/anthropic/v1` and `/inference/google/v1beta`, with the lanes read from the
-account's own config rather than hardcoded. Those lanes return real billing answers where
-`/zen/v1` returns a bare `402`.
-
-That also corrects two earlier claims in this file's history: the block is not an
-egress-IP matter, and it is not a provider-relay quirk. 9router's Proxy Pool is offered
-for a reason this project has not established, but it is not what makes the models work.
-See `docs/SPEC-SDK.md` for the measured matrix and the authenticated lane table.
-
-## Cline Sign-In
-
-Cline is reached through an OAuth authorization-code flow instead of a pasted API
-key. On its provider page, **Add connection** opens the sign-in in your browser
-and waits there — there is normally nothing to paste.
-
-The gateway starts the sign-in and hands back a session. Cline redirects the
-browser to `GET /v1/oauth/cline/callback/:sessionId` on the gateway's own loopback
-address, where the gateway exchanges the code, proves the token against Cline with
-a real request, imports the model catalog, and saves the connection encrypted in
-the local vault. The dashboard learns the outcome by polling
-`GET /v1/oauth/cline/session/:id`, so the flow finishes on its own.
-
-The session id rides in the redirect path rather than in an OAuth `state`,
-because Cline's sign-in is handed to WorkOS AuthKit, which never echoes a
-caller-supplied `state` back. A session is used once, so a replayed or forged
-callback cannot put a code into your vault.
-
-An expired access token is renewed automatically before use, and the renewed
-token is written back to the vault. If a sign-in cannot be renewed, the provider
-tells you to sign in again instead of failing quietly.
-
-A paste field is still available in the same dialog for the case where the
-provider does not hand the code to a browser redirect. It accepts a callback URL,
-a `code#state` pair, or a bare code, and takes the same route to a saved
-connection.
-
-Cline serves its API under `https://api.cline.bot/api/v1`, and its model catalog
-is public while `/api/v1/users/me` is the endpoint that actually checks a token —
-so a sign-in is proved against the account endpoint and the catalog is only ever
-read. If a sign-in is refused, the callback page reports what Cline said.
-
-## ClinePass
-
-ClinePass is Cline's paid model tier, and it is **the same account as Cline** — not a
-second credential. Cline's own auth registry registers `cline-pass` as an alias of its
-`cline` handler, reusing the identical stored credential, and its CLI opens a sign-in
-for it. So ClinePass lives in the **OAuth** group and is signed into by **signing into
-Cline**: it shares the one saved connection, and its models are the `cline-pass/` slice
-of Cline's catalog.
-
-What differs is the model prefix and whether your account's subscription covers a given
-model — and that is decided server-side, at request time, with no endpoint that answers
-"is this subscription current". So a green check here proves your Cline sign-in is live
-and **nothing about entitlement**: do not read it as "this connection can run every
-model the card lists". If a request is refused, the card reports what Cline said.
-
-## Releases
-
-The version tracks the size of the change. Every release is tagged on GitHub and
-published to npm as `@hilbras/omnihilbras`.
-
-| Change | Bump | Example |
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| Big — breaking API, removed or renamed public surface, behavior a consumer must adapt to | `x.0.0` | `0.2.0` → `1.0.0` |
-| Medium — new capability, route, option, or page; backward compatible | `0.x.0` | `0.2.0` → `0.3.0` |
-| Small — fix, refinement, docs, or internal cleanup | `0.0.x` | `0.2.0` → `0.2.1` |
+| `OMNIHILBRAS_HOST` | `127.0.0.1` | Loopback host; non-loopback values are refused in local mode |
+| `OMNIHILBRAS_PORT` | `8787` | Gateway port |
+| `OMNIHILBRAS_DATA_DIR` | XDG config | Connections, vault, usage and settings |
+| `OMNIHILBRAS_REQUIRE_API_KEY` | — | Require an admin/LLM key for management and inference |
+| `OMNIHILBRAS_TOKEN_SAVER` | off | Enable local context compression |
+| `OMNIHILBRAS_MAX_OUTPUT_TOKENS` | none | Hard output cap |
+| `OMNIHILBRAS_THINKING_BUDGET` | none | Thinking-budget cap where supported |
+| `OMNIHILBRAS_HISTORY_TRIM_TOKENS` | none | Trim whole old turns above this estimate |
+| `OMNIHILBRAS_CACHE_ANCHOR` | off | Re-anchor provider cache breakpoints |
+| `OMNIHILBRAS_HEADROOM_URL` | none | Optional external compressor |
+| `OMNIHILBRAS_PXPIPE_URL` | none | Optional Anthropic image-context hook |
 
-A release is all **three** of: a tag on `main`, a GitHub release for that tag, and a version on npm.
-`pnpm release:audit` checks all three for every tag in two network calls and exits non-zero on a new
-gap; it runs daily in `.github/workflows/release-audit.yml`, because the rule had been enforced by a
-`for` loop pasted into `AGENTS.md` and that is how `v1.60.0` and `v1.72.0` were tagged and never
-published for thirty releases. The two facts knowable from the checkout alone — every tag is on `main`,
-and every tag's own `package.json` states the version the tag names — are asserted by
-`tests/release-trail.test.js` inside `pnpm verify`. Five historical gaps, covering 21 versions, are recorded with their reasons in `knownGaps`; republishing
-them is not the fix, because npm publishes forward.
+Secrets are read from the environment or the encrypted vault. A credential must never be committed, pasted into
+an issue, or written to browser storage.
 
-`@hilbras/omnihilbras` is this project. It is unrelated to `@hilbras/sdk`, which
-is a separate package under the same npm scope.
+## Security and privacy
 
-## Scripts
+- **Loopback by default.** `OMNIHILBRAS_HOST` is validated as a loopback address more than once, so a typo or a
+  second code path cannot widen the listener silently.
+- **Encrypted vault.** Provider credentials are written atomically with owner-only permissions; the vault is
+  encrypted at rest. Backups use AES-256-GCM with a scrypt-derived key and are unreadable without the passphrase.
+- **No credential in browser storage.** Every `localStorage`/`sessionStorage` key is on a two-entry allowlist;
+  `sessionStorage`, `document.cookie` writes, IndexedDB and the Cache API are asserted at zero.
+- **No secret-shaped string in the tree.** `tests/no-secrets.test.js` scans tracked files for credential shapes
+  on every push.
+- **Fail closed on bad configuration.** A malformed cap, URL or master key is a startup error, not a silent
+  fallback.
+- **Optional services fail open.** Headroom and PXPIPE time out and leave the request untouched; a skipped saver
+  is reported as skipped, not as a saving.
+
+The full threat model and known limits are in [`SECURITY.md`](./SECURITY.md).
+
+## Development
 
 ```bash
 pnpm install
-pnpm dev
-pnpm dev:gateway
-pnpm build
+pnpm dev              # marketing + dashboard on :5173
+pnpm dev:gateway      # gateway on :8787
 pnpm typecheck
-pnpm test
-pnpm verify        # release gate: version, brand, typecheck, test, SPEC, build, bundle budget
-pnpm analyze       # what each page downloads, attributed to the package that shipped it
-pnpm analyze:check # the same, failing if the dashboard pulls the animation library again
-pnpm version:check # one version, stated once — fails if the copies disagree
-pnpm version:fix   # rewrite the derived copies from package.json
-pnpm release:audit # every tag: on main, released on GitHub, published to npm
-omnihilbras        # the gateway and the dashboard together, in one terminal
-./scripts/dev.sh   # the same thing, for before you have run `npm link`
-pnpm app:dev       # desktop app: builds, starts the app, starts the gateway
-pnpm app:build     # unpacked desktop build in release/linux-unpacked
-pnpm app:pack      # installers
+pnpm test             # SDK, gateway, token-saver and repository guards
+pnpm build
+pnpm analyze          # per-page bundle cost, attributed per package
+pnpm verify           # version, brand, typecheck, test, SPEC guard, build, bundle budget
+pnpm release:audit    # every tag: pushed, released on GitHub, published to npm
 ```
 
-## Desktop app
+`pnpm verify` is the release gate. It is the same command CI runs, in the order that fails fastest.
 
-`pnpm app:dev` opens the Electron app. Electron's main process owns the gateway: Start, Stop and
-Restart are on the **Servers** page, which is the app's home, together with the gateway's stdout,
-stderr and the live request feed. Closing the window hides the app to the tray; the tray can reopen
-it, start or stop the gateway, toggle **Start at login**, check for updates, and quit. A second
-launch focuses the existing window.
+### Tests are guards, not decoration
 
-The gateway prefers port 8787 but does not require it: if the port is busy the app chooses a free
-one and persists it in `userData/config.json`. A crash restarts the gateway with backoff (1 s, 5 s,
-15 s, then larger); after five consecutive crashes it stays failed with the reason on screen. Server
-output is written to `userData/logs/gateway.log`, rotated at 5 MB with three old files.
+The repository has a large test suite, but the important part is what the guards assert: provider cards do not
+invent measurements, credentials never reach browser storage, every served gateway route has a SPEC line, every
+tag is on `main`, every rendered provider mark is committed, and an update feed missing `latest.yml` fails instead
+of looking healthy.
 
-**Diagnostics** writes `userData/diagnostics/*.json`: versions, platform, ports, state, redacted
-config and the last 200 KB of log. The exporter redacts `sk-…`, bearer tokens and named
-`api_key`/`token`/`secret`/`password` values; it never reads the vault.
+A guard is not considered real until it has been made to fail on the thing it forbids. Several tests in this
+repository record the mutation that first proved them blind; keep that habit when adding one.
 
-**About** is a real page in both the browser and the app: version, gateway build, platform, links, and
-the **Encrypted backup** panel. Export produces an AES-256-GCM envelope (scrypt-derived key) containing
-connections with their provider credentials, provider strategies and the API-key store's hashes.
-Import replaces all of them and requires an explicit confirmation; a wrong passphrase or damaged
-envelope is refused before anything changes. The passphrase is never stored, and API keys are exported
-as hashes — they keep working after import but cannot be shown again.
+## Documentation
 
-## Token saver
+| Document | What it covers |
+| --- | --- |
+| [`docs/SPEC-SDK.md`](./docs/SPEC-SDK.md) | Gateway routes, provider contract, rejection shapes and success criteria |
+| [`docs/architecture/README.md`](./docs/architecture/README.md) | Measured architecture, layer boundaries and provider-specific surface |
+| [`docs/architecture/embeddings-plan.md`](./docs/architecture/embeddings-plan.md) | Embeddings design and dispatch rules |
+| [`docs/reports/`](./docs/reports/) | Performance, reliability, release readiness and provider test reports |
+| [`docs/tools.md`](./docs/tools.md) | How to run one-off probes without committing them |
+| [`CONTRIBUTING.md`](./CONTRIBUTING.md) | The rules a change must satisfy |
+| [`SECURITY.md`](./SECURITY.md) | Reporting, threat model and known limits |
+| [`AGENTS.md`](./AGENTS.md) | Working agreement, release checklist and repository boundaries |
 
-`Kernel/TokenSaver` is a standalone TypeScript context compressor. It routes JSON, logs, search output,
-prose and (opt-in) code to separate compressors, keeps the last turns untouched, and stores every lossy
-rewrite in a bounded CCR store with a retrieval marker. It is provider-neutral and has no dependency on
-the gateway or the SDKs; integration is a later opt-in.
+## License
 
-```ts
-import { compressMessages, MemoryCcrStore, retrieve } from '@omnihilbras/token-saver';
-const store = new MemoryCcrStore(200);
-const result = compressMessages(messages, { protectRecent: 4, ccr: store });
-```
-
-Invariants: JSON output still parses and keeps error rows; logs keep FATAL/ERROR with stack context;
-code bodies are not removed unless `compressCode` is explicitly enabled; a rewrite that is not smaller is
-discarded. `estimateTokens` is a bytes/4 estimate, not a provider tokenizer.
-
-`pnpm test:token-saver` runs its suite. Design and limits: `Kernel/TokenSaver/README.md`.
-
-Specialized tool-output filters are ported from the old RTK pipeline: git diff/status/log, build
-output, grep, find, tree, ls, search-list, read-numbered, dedup-log and smart-truncate. They run
-ahead of the generic compressors for tool/assistant content, with the old caps (10 MiB raw,
-500-byte minimum, per-filter row limits) and CCR retrieval for every lossy rewrite. JSON keeps the
-JSON-aware path.
-
-Gateway integration is opt-in:
-
-```bash
-OMNIHILBRAS_TOKEN_SAVER=1 omnihilbras
-# optional: OMNIHILBRAS_TOKEN_SAVER_RATIO=0.5
-#           OMNIHILBRAS_TOKEN_SAVER_PROTECT_RECENT=4
-#           OMNIHILBRAS_TOKEN_SAVER_USERS=1
-#           OMNIHILBRAS_TOKEN_SAVER_CODE=1
-#           OMNIHILBRAS_TOKEN_SAVER_REVERSIBLE=true
-#           OMNIHILBRAS_TOKEN_SAVER_CCR_LIMIT=500
-OMNIHILBRAS_MAX_OUTPUT_TOKENS=8192      # optional hard cap on output tokens
-OMNIHILBRAS_THINKING_BUDGET=4096        # optional thinking-budget cap where supported
-OMNIHILBRAS_HISTORY_TRIM_TOKENS=120000  # optional: trim whole old turns above this estimate
-OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT=8  # messages kept verbatim by the trim
-OMNIHILBRAS_CACHE_ANCHOR=1              # re-anchor provider cache breakpoints on the final body
-OMNIHILBRAS_CAVEMAN=full                # optional output-shaping prompt: lite|full|ultra|wenyan-lite|wenyan|wenyan-ultra
-OMNIHILBRAS_PONYTAIL=lite               # optional output-shaping prompt: lite|full|ultra
-OMNIHILBRAS_HEADROOM_URL=http://127.0.0.1:8788   # optional external compressor, fail-open
-OMNIHILBRAS_PXPIPE_URL=http://127.0.0.1:8789     # optional Anthropic-only image-context hook, fail-open
-```
-
-Output-shaping prompts are appended to the system message once; they save output tokens, so their telemetry
-records that they ran rather than a fictional input saving. External savers are opt-in by URL, time out,
-and leave the conversation untouched on any error; `OMNIHILBRAS_HEADROOM_TIMEOUT_MS`,
-`OMNIHILBRAS_HEADROOM_USERS`, `OMNIHILBRAS_PXPIPE_TIMEOUT_MS` and `OMNIHILBRAS_PXPIPE_MIN_CHARS` tune them.
-A Headroom response that reports a token delta while the messages shrank by less than 5% is rejected as
-phantom savings. PXPIPE only runs for an adapter that advertises Anthropic image context (currently the
-`anthropic` adapter) and expects `POST {url}/v1/transform` returning
-`{messages, applied, imageCount?, imageTokens?}`.
-
-History trimming is independent of content compression: it keeps a request out of the model only when the
-whole conversation is over the threshold, stubbing old turns behind a retrieval marker while preserving the
-system prompt, the first user ask, the recent window and error-bearing tool results. Cache anchoring only
-acts in adapters that have a cache concept (currently Anthropic), and it runs after the savers so a trimmed
-body gets fresh breakpoints rather than a stale prefix.
-
-When on, the gateway compresses provider-bound messages before routing, logs estimated savings, and
-serves the original behind a marker at `GET /v1/token-saver/:id`. `x-omnihilbras-token-saver: off`
-disables it for one request. When off, the original gateway tool-result shortener is used unchanged.
-
-**Settings** is workable, not a mirror of `.env.example`: theme and reduced motion are saved in the
-browser; the desktop app persists close-to-tray, start-gateway-on-launch, update-check-on-launch and
-the gateway port (changing the port restarts the gateway); API-key enforcement is toggled through the
-gateway; the resolved startup configuration is shown read-only alongside data/recovery shortcuts.
-
-**Updates** are checked against the signed GitHub release feed on launch and from Settings/About. The
-banner offers Download and Install-and-restart where the platform can replace itself (Windows NSIS,
-signed macOS). A `.deb` cannot, so Linux gets the release page and the reason. A skipped or failed
-check is reported as such.
-
-Route changes replay the 420 ms entrance animation by restarting the class on the existing wrapper;
-the page is not remounted, so its state and effects survive. `prefers-reduced-motion` and the in-app
-Reduce motion setting both disable it.
-
-The renderer never holds the dashboard token and never calls `127.0.0.1` directly. Requests, chat
-streams and the log stream cross a narrow preload bridge (`desktop/preload.cjs`); main attaches the
-token and an allowlisted origin. The packaged dashboard is served from `app://omnihilbras` out of
-`dist/` with a strict CSP, all permission requests denied, navigation away from the app blocked, and
-DevTools disabled. The browser dashboard still works exactly as before with `pnpm dev`.
-
-`pnpm app:smoke` drives the real binary in an isolated user-data directory: it asserts one shell,
-window controls, the IPC probe, stop/start, a request-feed event, and no orphan port. Linux CI runs it
-under `xvfb-run`; `.github/workflows/desktop.yml` builds `.deb`, `.exe` and `.dmg` on their native
-runners. Signing is read from `CSC_LINK`/`CSC_KEY_PASSWORD` and Apple credentials; unsigned builds
-still succeed and say so. `pnpm app:size` prints the asar, unpacked, runtime and installed-artifact
-split.
-
-`pnpm verify` is what CI runs on every push and pull request. `version:check` exists because the
-README advertised `0.2.0` while the project was at `1.12.2` — a hundred minor versions, unnoticed.
-
-**`pnpm analyze` answers "why is the dashboard heavy" with numbers.** Rollup reports rendered bytes
-per module, so the script attributes what each page loads to the package that shipped it. It exists
-because that question was first answered by grepping a built chunk for a library's symbol names — a
-heuristic dressed as a measurement. Measured, the dashboard was loading **284 KB of `motion`**
-(`motion-dom` + `framer-motion`) for one icon flip in the theme toggle, because `DashboardShell`
-imports it. The animated half now lives in `ThemeAnimatedIcon.tsx` and is fetched on intent — a hover
-or focus on the toggle — so a dashboard page load downloads none of it, and `pnpm analyze:check`
-runs last in `pnpm verify` so it cannot come back quietly. `tests/bundle-budget.test.js` asserts the
-source side of the same rule in two seconds, before anything is built.
-
-`omnihilbras` starts the gateway, waits until its port answers, then starts the dashboard, and stops both
-when either exits. The wait is the point: starting the dashboard first means the opening page load reaches
-a gateway that is not listening yet, and every card reads "not connected" with nothing saying why. Run
-`npm link` once to put the command on your `PATH`; `./scripts/dev.sh` is the same launcher for before then.
-`--port`, `--gateway-port` and `--no-browser` move the ports and stop the browser opening. A second run
-replaces the first rather than colliding with it, and a port held by anything else is refused rather than
-taken.
-
-## Architecture
-
-See [`docs/architecture/README.md`](docs/architecture/README.md) for how the gateway, the SDK and
-the provider adapters are separated, measured against the tree rather than described aspirationally.
-The short version: the organisation principle is
-
-> **The Core provides capabilities; providers provide integrations.**
-
-and the two numbers worth knowing are that `routing.ts` contains **zero** provider ids, while the
-twelve in `service.ts` are clustered in a single factory rather than scattered.
-
-## Local Gateway
-
-The first backend slice lives in `Kernel/API` and uses the shared SDK in
-`Kernel/SDK`.
-
-```bash
-pnpm dev:gateway
-```
-
-The local server binds to `127.0.0.1:8787` by default. Configure fallback
-credentials through environment variables; they are read server-side and are
-never logged. OpenRouter keys entered in the dashboard are validated by the
-gateway through `GET https://openrouter.ai/api/v1/key` on both **Check** and
-**Save**, then encrypted with AES-256-GCM in the local connection vault. The
-browser never writes them to `localStorage` or sends them directly to
-OpenRouter.
-
-Connection metadata and encrypted credentials are stored separately under
-`$XDG_CONFIG_HOME/omnihilbras` (or `~/.config/omnihilbras`) by default. Set
-`OMNIHILBRAS_DATA_DIR` to choose another local directory. A generated local
-key file is created with mode `0600`; set `OMNIHILBRAS_MASTER_KEY` to a strict
-32-byte base64 or 64-character hex value for an externally managed key. The
-local vault protects data at rest from casual disclosure, but a compromised
-same-user process can access a locally stored key.
-
-Local mode rejects non-loopback binds and wildcard CORS. The dashboard origins
-allowed by default are `http://localhost:5173` and `http://127.0.0.1:5173`; add
-an exact development origin with `OMNIHILBRAS_CORS_ORIGINS` when needed.
-
-```bash
-OPENAI_API_KEY=...
-ANTHROPIC_API_KEY=...
-GEMINI_API_KEY=...
-OPENROUTER_API_KEY=...
-OMNIHILBRAS_COMPATIBLE_API_KEY=...
-# Optional local connection settings:
-OMNIHILBRAS_DATA_DIR=...
-OMNIHILBRAS_MASTER_KEY=...
-# Optional reliability tuning (per-connection budgets are set in the dashboard):
-OMNIHILBRAS_HEALTH_INTERVAL_MS=60000
-OMNIHILBRAS_FAILURE_THRESHOLD=3
-OMNIHILBRAS_RECOVERY_COOLDOWN_MS=30000
-# Optional custom OpenAI-compatible paths:
-OMNIHILBRAS_COMPATIBLE_MODELS_PATH=/models
-OMNIHILBRAS_COMPATIBLE_CHAT_PATH=/chat/completions
-```
-
-Available routes (the full table, with request/response shapes, is `docs/SPEC-SDK.md`):
-
-- `GET /health`
-- `GET /v1/health/:providerId`
-- `GET /v1/models`
-- `POST /v1/chat/completions` (JSON, or `stream: true` for SSE)
-- `POST /v1/embeddings`
-- `POST /v1/responses` (Codex-style clients; JSON or Responses SSE)
-- `GET /v1/connections`
-- `PUT /v1/connections/:id`
-- `DELETE /v1/connections/:id`
-- `POST /v1/connections/:id/models`
-- `PUT /v1/connections/:id/resilience`
-- `PUT /v1/connections/:id/enabled`
-- `GET /v1/connections/:id/quota`
-- `POST /v1/connections/openrouter/check`
-- `PUT /v1/connections/openrouter`
-- `GET /v1/routing`
-- `GET /v1/usage`
-- `GET /v1/logs/stream`
-- `GET /v1/settings`
-- `PUT /v1/settings/require-api-key`
-- `GET /v1/keys`, `POST /v1/keys`, `PATCH /v1/keys/:id`, `DELETE /v1/keys/:id`
-- `/v1/oauth/*` and `/v1/web-cookie/*` for interactive sign-in and cookie imports
-
-## API Keys
-
-The **API keys** dashboard page issues keys for clients that call this gateway
-(CLI tools, IDE extensions, scripts). Each key is shown exactly once in the
-create dialog; the gateway keeps only a SHA-256 hash in
-`$XDG_CONFIG_HOME/omnihilbras/api-keys.json` (mode `0600`), so a key cannot be
-displayed again and a lost key must be replaced.
-
-```bash
-# create a key (the response contains the only copy of the secret)
-curl -X POST http://127.0.0.1:8787/v1/keys \
-  -H 'content-type: application/json' \
-  -d '{"name":"CLI tools"}'
-
-# call the gateway
-curl http://127.0.0.1:8787/v1/models \
-  -H "Authorization: Bearer ohk_..."
-```
-
-Keys are accepted as `Authorization: Bearer <key>`, `x-api-key: <key>`, or
-`x-goog-api-key: <key>` so existing OpenAI, Anthropic, and Gemini clients work
-unchanged. They are never read from the query string.
-
-### Pointing a code agent at the gateway
-
-A client needs three values and nothing else: the base URL, the key, and a model
-ID. Point the agent at `http://127.0.0.1:8787/v1`, paste the key as its API key,
-and pick any model from `GET /v1/models`.
-
-The model list is the saved connection catalog, not the provider's full
-inventory, so agents only see models you actually imported (your 21 free
-OpenRouter models, for example) and never a paid model you did not choose.
-Requests are routed to the connection that owns the requested model, so no
-provider header is required. `x-omnihilbras-provider: <id>` still overrides that
-choice when you want to pin a route.
-
-`POST /v1/chat/completions` accepts `stream: true` and OpenAI-style `tools`, so
-streaming and tool-calling agents work. `/v1/models` needs the key while
-enforcement is on.
-
-Enforcement is **on by default** and applies to `GET /v1/models` and
-`POST /v1/chat/completions`. Requests from an allowlisted dashboard origin stay
-exempt so the dashboard can keep testing models; every other client must present
-a valid, unpaused key. The toggle on the API keys page, or
-`PUT /v1/settings/require-api-key`, turns enforcement off. Pausing or deleting
-a key takes effect on the next request.
-
-## Connection Reliability
-
-Each connection carries its own retry, timeout, rate-limit, and hedge budget,
-editable under **Reliability** on the provider page or through
-`PUT /v1/connections/:id/resilience`:
-
-```json
-{ "maxRetries": 2, "timeoutMs": 25000, "requestsPerMinute": 60, "hedgeAfterMs": 400 }
-```
-
-- **`maxRetries`** (0–5, default 1) — extra attempts on the same connection.
-- **`timeoutMs`** (0–600000, default 0 = shared default) — per-request deadline,
-  enforced by the gateway so a provider that ignores cancellation still cannot
-  hang a request.
-- **`requestsPerMinute`** (0–100000, default 0 = unlimited) — sliding window per
-  connection. Exceeding it hands the request to the next route.
-- **`hedgeAfterMs`** (0–30000, default 0 = off) — if this connection has not
-  answered in time, the next eligible connection is raced against it and the
-  first reply wins. The loser is cancelled, so its tokens are normally not
-  billed. Nothing is sent when no other connection can serve the model, so a
-  single connection never pays the extra cost.
-
-A retryable failure (timeout, rate limit, provider unavailable) spends the retry
-budget, then falls through to the next connection by priority. Auth failures and
-invalid requests are never retried — repeating them cannot help. Streaming
-fails over only before the first chunk is sent; a mid-stream failure is reported
-rather than silently restarting.
-
-Measured on a deliberately slow local endpoint racing OpenRouter, with hedging
-off the request took 2550 ms, and with a 400 ms hedge it took 1267–1773 ms and
-was served by OpenRouter while the slow route was cancelled.
-
-After `OMNIHILBRAS_FAILURE_THRESHOLD` consecutive failures (default 3) a
-connection is ejected from routing. It rejoins automatically after a 30 second
-cooldown, so a recovered provider returns without a restart. Background health
-polling (`OMNIHILBRAS_HEALTH_INTERVAL_MS`, default 60000) marks unhealthy
-providers independently of live traffic.
-
-When failover actually engages, a non-streaming response carries the attempt
-trace so a client can see what happened:
-
-```json
-"gateway": { "attempts": [
-  { "provider": "openrouter", "attempt": 1, "ok": false, "error": "PROVIDER_TIMEOUT" },
-  { "provider": "backup", "attempt": 1, "ok": true, "latencyMs": 812 }
-] }
-```
-
-`GET /v1/routing` reports live state: per-connection budgets, recent failures
-and successes, ejection, last latency, the last error, and `rateLimitWaitMs` —
-the wait routing last recorded for that connection. Absent means no request has
-asked about its limit yet; `0` means it was asked and is free. A connection over
-its limit is skipped with reason `rate-limited` and is reported as such, so the
-Routing page does not describe it as eligible.
-
-A connection that hits its limit recovers when its window slides. The skip
-decision asks the limiter at planning time rather than reading the last recorded
-verdict, because a verdict nothing can revise is a latch, not a rate limit.
-
-OpenRouter model import is controlled by the dialog toggle and defaults to
-free mode when an API client omits the policy. Free mode keeps only discovered
-models whose OpenRouter `pricing.prompt` and
-`pricing.completion` values are zero; disabled mode imports all text models
-returned by OpenRouter. Manually added model IDs are tracked separately and
-remain in the catalog when the connection is re-saved with either policy. The
-model endpoint accepts validated model IDs for adding custom entries later.
-
-Provider **Test provider** checks one provider's live adapter health through
-`GET /v1/health/:providerId`. Each model **Test** button sends one real, bounded chat
-completion through `POST /v1/chat/completions` using the saved gateway credential. The test
-prompt is fixed and limited to 1024 output tokens, but it can still consume provider quota or
-credits.
-
-Use the `x-omnihilbras-provider` header to select a configured provider, for
-example `x-omnihilbras-provider: anthropic`.
+MIT. See [`LICENSE`](./LICENSE).

@@ -1,5 +1,11 @@
 # Implementation Plan: OmniHilbras Provider SDK and Local Gateway
 
+> **Historical plan.** The task list below is the original pre-restructure plan and is kept as a record.
+> The current architecture is described in [`docs/architecture/README.md`](../docs/architecture/README.md)
+> and the route contract in [`docs/SPEC-SDK.md`](../docs/SPEC-SDK.md). The current release is **3.0.3**;
+> the SDK is one private package per provider under `Kernel/SDK/`, the gateway is `Kernel/API`, and
+> publishing is suspended while the restructure is in progress.
+
 ## Overview
 
 Build a publishable TypeScript SDK with provider-neutral contracts and four initial adapters, then expose those adapters through a local HTTP gateway. The SDK remains independent from the React dashboard and is designed for reuse by a future cloud gateway.

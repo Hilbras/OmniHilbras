@@ -50,8 +50,17 @@ packages.
 
 ```bash
 pnpm install
-pnpm verify        # version:check → test:brand → typecheck → test → SPEC guard → build → analyze:check
+pnpm dev              # marketing site + dashboard
+pnpm dev:gateway      # local gateway
+pnpm app:dev          # desktop app
+pnpm build:landing    # landing-only Vercel build
+pnpm verify           # version:check → brand → typecheck → test → SPEC → build → analyze:check
 ```
+
+`pnpm verify` is the release gate. CI runs the same command; a change that passes locally must pass there.
+
+The documentation map is [`docs/README.md`](./docs/README.md). The product overview is [`README.md`](./README.md).
+A change that alters behavior must update both the relevant reference page and the product-facing description.
 
 A test that cannot fail is a comment. In this repository a guard is only considered real once someone has
 **reverted the code it guards and watched it go red** — that is recorded in the release notes for every guard

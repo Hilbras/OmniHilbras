@@ -10,8 +10,9 @@ That opens a private advisory visible only to the maintainers. If the option is 
 open an issue that says only "security report available on request" with no detail — that is enough for me to
 message you privately and nothing more.
 
-Please include: what you did, what you expected, what happened, and the version — `npm ls @hilbras/omnihilbras`,
-or the `version` field in `package.json` if you are running from a checkout.
+Please include: what you did, what you expected, what happened, and the version — the About page in the
+desktop app, the package version in the dashboard, or the `version` field in `package.json` if you are
+running from a checkout.
 
 (There is deliberately no `OMNIHILBRAS_VERSION` env var and no version header on responses. I checked before
 writing this and the version lives in exactly one place per package.json, which is what `pnpm version:check`

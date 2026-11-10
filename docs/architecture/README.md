@@ -11,6 +11,19 @@ The principle the project is organised around:
 A new provider should be an adapter and a registration. It should not require edits to routing,
 execution, health, or the SDK core.
 
+## Delivery surfaces
+
+The gateway is one of three consumers in this repository:
+
+- `Kernel/API` is the HTTP gateway and composition root. It owns routing, health, retries, usage, the vault
+  and the token-saver order.
+- `Kernel/TokenSaver` is a standalone package. It can be used without the gateway and is tested on its own.
+- `src/` is the dashboard and marketing site. `site/` holds the static HTML entries for the public pages;
+  `desktop/` owns the Electron lifecycle, preload bridge and update runtime.
+
+The dashboard and desktop app never call a provider directly. They call the gateway, which is the only
+component that knows a provider's wire format.
+
 ---
 
 ## Measured state

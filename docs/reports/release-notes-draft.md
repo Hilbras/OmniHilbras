@@ -1,58 +1,61 @@
-# Draft release notes: 1.78.0
+# Release notes draft: 3.0.3
 
-Not tagged, pushed or published. For review. Covers the 37 commits since `v1.77.2`.
+Status: documentation-only release. The previous runtime release was `v3.0.2`; this file records both the
+3.0.2 changes and the documentation rewrite that followed.
 
-Minor bump (`1.78.0`). The SDK's public runtime exports were compared against the published `1.77.2` package: 143 names
-before, 148 after, none removed, five added (`KIRO_SOCIAL_DEVICE`, `gatedTools`, `pollKiroSocialDeviceSignIn`,
-`retryAfterMs`, `startKiroSocialDeviceSignIn`). Existing imports keep working.
+## 3.0.3 — documentation
 
-## Security
+- Rewrote `README.md` as a product overview: install, architecture, gateway routes, providers, token saver,
+  dashboard, desktop, configuration, security and development.
+- Added `docs/README.md` as the documentation index.
+- Updated the gateway specification's status and module map for the Kernel restructure.
+- Updated the architecture overview with the current delivery surfaces.
+- Updated contributing commands and the security reporting path.
+- Moved the marketing HTML entries under `site/`; the project root now contains only `index.html` and
+  `dashboard.html`.
+- No runtime behavior changed in this release.
 
-The dashboard is recognised by a per-launch token, not by its `Origin` header alone. The gateway writes a random token to
-`dashboard-token` in the state directory (mode 0600) at each start. The Vite dev server reads it and adds it to the
-`/v1` requests it forwards, so the browser never holds it. A forged `Origin` with no token is refused with 401.
-Production builds have no such proxy and call the gateway directly, so they have no per-launch token. See SECURITY.md.
+## 3.0.2 — desktop update and sign-in fixes
 
-The gateway refuses requests whose `Host` is not a loopback name, with 421. This closes DNS rebinding into the local gateway.
+## Desktop app
 
-The SDK's transport accepts an optional `checkDestination` hook. The gateway supplies one that refuses a remote provider
-hostname resolving to a private or loopback address. This is partial. The name is resolved by the check, then again by the
-connection, so a DNS server that answers differently each time can still get through. Closing that needs a connection-level
-lookup and is tracked as open.
+- The Windows and Linux installers are built with stable artifact names:
+  `OmniHilbras-Setup.exe` and `OmniHilbras-linux-amd64.deb`.
+- A tagged desktop build now attaches the installers, blockmaps and update metadata (`latest*.yml`) to the
+  GitHub release.
+- Update install stops the gateway first and bypasses the ordinary deferred-quit path, so the installer does
+  not race a process that still holds the app directory.
+- `autoInstallOnAppQuit` is off: an update installs only from the explicit **Install and restart** action.
+- Provider sign-in opens in the default browser through `shell:open-external`. The desktop shell still denies
+  `window.open`; the bridge exists so a sign-in does not require a second click on a fallback link.
+- The mobile navigation is an overlay below the header, not an in-flow panel that pushes the page down.
 
-Storage, OAuth callbacks and API-key revocation were audited and tested. No defect was found in them.
+## Gateway and token saver
 
-## Changed behaviour
+- Cache-aware token accounting across the gateway and provider adapters: cache reads and writes are kept
+  separate from prompt tokens and priced as cache.
+- Token Saver: RTK filters, reversible compression, per-saver telemetry, history trimming, output and
+  thinking caps, `count_tokens`, Anthropic cache anchoring, and optional Headroom/PXPIPE savers.
+- Optional external savers fail open, time out, and report `ran` or `skipped` with a reason.
+- The gateway remains provider-neutral; PXPIPE is gated by an adapter capability, not a provider id.
 
-- **OpenCode Console:** an account with several workspaces is no longer saved silently with the first one. The sign-in
-  lists the workspaces and saves the one you pick, through `POST /v1/oauth/opencode-console/session/:id/workspace`.
-- **Provider-prefixed model ids:** the model list carries `qualifiedId`, such as `opencode-console/mimo-v2.6-flash`, and a
-  request with that prefix is routed to that provider. The prefix is used only when it names a connected provider, so ids
-  such as `qwen/qwen3.8-27b:free` keep working. Bare names are unchanged.
-- **Zen free tier:** free-tier requests now declare the file-search tools `bash`, `glob`, `grep` and `read`, not a single
-  placeholder. The single placeholder was refused by the gate; this request was measured to be accepted.
-- **Usage records:** each record can carry `requestId` and `path`, the ordered connections tried with their outcomes. A
-  failover shows which connection failed. Both fields are optional, and older `usage.json` files still load.
-- **Usage page:** the recent-requests list is paged at 10 rows. Totals still cover every retained record.
-- **429 responses:** the provider's `Retry-After` wait is attached to the error as `details.retryAfterMs`. The gateway does
-  not yet use it to delay its own retry.
+## Dashboard, marketing and documentation
 
-## Fixes
+- Marketing pages: Home, Download, Docs, Pricing, About, Changelog, Security and Privacy.
+- `site/` holds the static HTML entries; clean URLs are served by rewrites.
+- Each page has a unique title, description, canonical URL, Open Graph/Twitter tags and JSON-LD.
+- `sitemap.xml`, `robots.txt`, `manifest.webmanifest` and a 1200×630 Open Graph image are published.
+- The README is now a product overview; engineering references live under `docs/`.
 
-- The save path trims a pasted API key.
-- The bulk API key box has autofill off.
-- Connect dialogs return focus to the control that opened them when closed.
-- Saved generic providers are treated as active, so their health check finds them.
+## Upgrade
 
-## Migration
+- Windows: the app downloads `OmniHilbras-Setup.exe` from the latest release and installs it from Settings →
+  Updates.
+- macOS: the `.dmg` is built on macOS CI; installation follows the same update path where the build is signed.
+- Linux: a `.deb` cannot replace itself. The app links to the release page; install the new package with
+  `sudo apt install ./OmniHilbras-linux-amd64.deb`.
 
-No migration is needed for consumers of the SDK. Dashboard users keep the same workflow, because the dev server adds the
-token. Anyone who calls the gateway's management routes directly, outside the dashboard, now needs the token or an API
-key, because an allowed `Origin` alone is no longer enough.
+## Verification
 
-## Not in this release
-
-- Honouring `Retry-After` in the executor.
-- The DNS-rebinding race (see Security).
-- Per-adapter fixtures for authenticated streams, errors and tool calls, which need provider credentials.
-- A concurrency cap for inference requests. Measured to degrade under load, not to fail, at 400 concurrent requests.
+`pnpm verify` is the release gate. The desktop workflow builds Windows, Linux and macOS and attaches the
+installers and update metadata to the tag release.

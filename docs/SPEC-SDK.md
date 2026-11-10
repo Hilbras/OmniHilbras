@@ -1,34 +1,52 @@
-# Spec: OmniHilbras Provider SDK and Local Gateway
+# Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Approved for initial implementation
+**Status:** Current — release 3.0.3
+
+This document is the contract behind the gateway and its provider packages. It is intentionally more
+specific than the [README](../README.md): a route, an error code or a provider boundary written here is
+something the tree is expected to serve, and the repository has guards that fail when the two disagree.
+
+The original “first vertical slice” plan is history. The project is now organised as one gateway, one
+standalone token saver, and one private package per provider; the capability table below describes that
+shape rather than the pre-restructure `sdk-core` plan.
+
+## Current module map
+
+| Module | Responsibility | Depends on |
+| --- | --- | --- |
+| `Kernel/API` | Local HTTP gateway, route dispatch, routing, health, retries, usage, vault, API keys, token-saver integration | `Kernel/SDK/*`, `Kernel/TokenSaver` |
+| `Kernel/SDK/<provider>` | One provider package: adapter, vendored runtime types and transport | — |
+| `Kernel/TokenSaver` | Standalone reversible compressor, RTK filters, history trimming, CCR store | — |
+| `src` | React dashboard and marketing pages | `Kernel/API` HTTP surface |
+| `site` | Static HTML entries for Home, Download, Docs and legal pages | Vite |
+| `desktop` | Electron main process, preload bridge, supervisor and update runtime | `Kernel/API`, `src` |
+
+Build order is dependency order, enforced by `pnpm build`:
+
+```text
+Kernel/SDK/* → Kernel/TokenSaver → Kernel/API → dashboard/desktop
+```
+
+Publishing is suspended while the Kernel restructure is in progress. `Kernel/API` and the provider
+packages are private; the desktop installers and a build from source are the supported distribution paths.
 
 ## Objective
 
-Build a provider-neutral TypeScript SDK and a local-first HTTP gateway for OmniHilbras. Each provider can use its native authentication and wire protocol, while the gateway exposes a stable internal contract and a small OpenAI-compatible HTTP surface for clients.
+Expose one provider-neutral gateway for the providers an operator has connected, while keeping each
+provider's native authentication and wire protocol inside its adapter. A new provider should be an adapter
+and a registration, not an edit to routing or request execution.
 
-The first vertical slice must prove the architecture with native OpenAI, Anthropic, and Gemini adapters plus a generic OpenAI-compatible adapter. These are reference implementations, not a provider allowlist: a provider with a different protocol gets its own adapter without changing the gateway core.
+## Capability map
 
-## Capability Map
-
-| Module ID | Responsibility | Depends on |
-| --- | --- | --- |
-| `sdk-core` | Normalized request/response types, provider contract, transport, streaming, errors, registry, secret boundary | — |
-| `provider-openai` | Native OpenAI authentication, models, chat, streaming, and health | `sdk-core` |
-| `provider-anthropic` | Native Anthropic Messages API conversion and streaming | `sdk-core` |
-| `provider-gemini` | Native Gemini generate/stream API conversion and models | `sdk-core` |
-| `provider-openai-compatible` | Configurable adapter for providers exposing an OpenAI-like API | `sdk-core` |
-| `provider-openrouter` | OpenAI-compatible data APIs plus authenticated key validation | `sdk-core` |
-| `gateway-local` | Loopback HTTP server, health, model listing, chat, and SSE streaming | `sdk-core` and provider adapters |
-| `dashboard-integration` | Replace preview provider actions with local gateway calls | `gateway-local` |
-| `gateway-cloud` | Authentication, tenancy, remote secret storage, and hosted deployment | `gateway-local`; later phase |
-
-Build order:
-
-```text
-sdk-core → provider-openai-compatible → provider-openai → provider-anthropic
-        → provider-gemini → gateway-local → dashboard-integration
-        → gateway-cloud
-```
+| Capability | Where it lives |
+| --- | --- |
+| Normalized request, response and stream types | each `Kernel/SDK/<provider>/lib/` package |
+| Provider contract, registry and transport | `Kernel/API` core + provider adapters |
+| Routing, health, retries and hedging | `Kernel/API/src/core/` |
+| OpenAI-compatible HTTP surface | `Kernel/API/src/routes/inference.ts` |
+| Token saving and cache-aware accounting | `Kernel/TokenSaver` + `Kernel/API` usage store |
+| Dashboard and marketing | `src/`, `site/` |
+| Desktop lifecycle and updates | `desktop/` |
 
 ## Technical Assumptions
 
