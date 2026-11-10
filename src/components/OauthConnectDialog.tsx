@@ -18,6 +18,7 @@ import {
   type GatewayOauthSignInStatus,
 } from '../lib/gatewayClient';
 import { safeProviderUrl } from '../lib/safeUrl';
+import { desktopBridge } from '../lib/electronBridge';
 
 type Props = {
   providerId: string;
@@ -185,9 +186,19 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
   // would be blocked, because this runs after the click that granted the gesture.
   const navigateTo = useCallback((authUrl: string) => {
     const safeUrl = safeProviderUrl(authUrl);
+    if (!safeUrl) return false;
     const opened = signInWindowRef.current;
-    if (safeUrl && opened && !opened.closed) {
+    if (opened && !opened.closed) {
       opened.location.href = safeUrl;
+      signInWindowRef.current = null;
+      return true;
+    }
+    // In the desktop app `window.open('about:blank')` is denied by the window-open handler; the
+    // browser is the only correct place for a provider sign-in, so open it directly instead of
+    // making the user click a second "Open" link.
+    const bridge = desktopBridge();
+    if (bridge) {
+      void bridge.openExternal(safeUrl);
       signInWindowRef.current = null;
       return true;
     }

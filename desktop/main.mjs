@@ -433,6 +433,27 @@ function wireIpc() {
   ipcMain.handle('update:open-release', () => {
     void shell.openExternal('https://github.com/Hilbras/OmniHilbras/releases/latest');
   });
+  /**
+   * Opens a provider sign-in page in the user's browser.
+   *
+   * `window.open('about:blank')` is denied by the window-open handler on purpose: a second Electron
+   * window would carry a preload and this app's privileges. The renderer therefore cannot navigate a
+   * tab it opened, and the old flow waited for the user to click an "Open" link. This bridge lets the
+   * sign-in start from the click that chose the provider, with no second click.
+   */
+  ipcMain.handle('shell:open-external', async (_event, url) => {
+    if (typeof url !== 'string') throw new Error('A URL string is required.');
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error('That sign-in URL is not valid.');
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error('Only http and https links can be opened.');
+    }
+    await shell.openExternal(parsed.toString());
+  });
   ipcMain.handle('settings:get', () => appSettings());
   ipcMain.handle('settings:set', async (_event, patch) => {
     if (!patch || typeof patch !== 'object') throw new Error('Settings must be an object.');

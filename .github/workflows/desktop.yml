@@ -59,3 +59,4 @@ jobs:
             release/latest*.yml
             release/*.blockmap
           fail_on_unmatched_files: false
+          generate_release_notes: true

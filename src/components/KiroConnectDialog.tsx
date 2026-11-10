@@ -13,6 +13,7 @@ import {
 } from '../lib/kiroAuth';
 import type { GatewayConnection } from '../lib/gatewayClient';
 import { safeProviderUrl } from '../lib/safeUrl';
+import { desktopBridge } from '../lib/electronBridge';
 
 /**
  * Connecting to Kiro.
@@ -116,10 +117,19 @@ export function KiroConnectDialog({ providerName, riskNotice, signInWindow, onCo
    */
   const navigateTo = useCallback((authUrl: string) => {
     const safeUrl = safeProviderUrl(authUrl);
+    if (!safeUrl) return false;
     const opened = signInWindowRef.current;
-    if (safeUrl && opened && !opened.closed) {
+    if (opened && !opened.closed) {
       opened.location.href = safeUrl;
       // One-shot: a retry should not silently re-navigate a tab the user has since used.
+      signInWindowRef.current = null;
+      return true;
+    }
+    // The desktop shell denies `window.open`; open the provider page in the user's browser instead
+    // of making them click the fallback link.
+    const bridge = desktopBridge();
+    if (bridge) {
+      void bridge.openExternal(safeUrl);
       signInWindowRef.current = null;
       return true;
     }

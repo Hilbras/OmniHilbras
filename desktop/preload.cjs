@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('omnihilbras', {
     save: (content, filename) => ipcRenderer.invoke('backup:save', { content, filename }),
   },
   appInfo: () => ipcRenderer.invoke('app:info'),
+  openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (patch) => ipcRenderer.invoke('settings:set', patch),
