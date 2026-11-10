@@ -18,6 +18,7 @@ function subscribe(channel, callback) {
 
 contextBridge.exposeInMainWorld('omnihilbras', {
   desktop: true,
+  smokeMode: process.argv.includes('--omnihilbras-smoke'),
   platform: process.platform,
   windowControls: {
     minimize: () => ipcRenderer.send('window:minimize'),

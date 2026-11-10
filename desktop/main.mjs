@@ -404,6 +404,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       devTools: !app.isPackaged,
+      ...(process.env.OMNIHILBRAS_SMOKE === '1' ? { additionalArguments: ['--omnihilbras-smoke'] } : {}),
     },
   });
   window.once('ready-to-show', () => window.show());

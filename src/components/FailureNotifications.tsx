@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { openGatewayLogStream, type GatewayLogEvent } from '../lib/gatewayClient';
+import { desktopBridge } from '../lib/electronBridge';
 import { useToast } from './Toast';
 
 /**
@@ -26,6 +27,9 @@ export function FailureNotifications() {
   const recent = useRef(new Map<string, number>());
 
   useEffect(() => {
+    // The smoke run generates one deliberate failure to prove the feed works. It must not raise a
+    // notification on the user's desktop, where the window is briefly visible.
+    if (desktopBridge()?.smokeMode) return;
     const COLLAPSE_MS = 1500;
     let announcedDown = false;
     return openGatewayLogStream((event: GatewayLogEvent) => {

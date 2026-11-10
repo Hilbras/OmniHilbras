@@ -47,6 +47,8 @@ type StreamHandlers = {
 
 export type OmniBridge = {
   desktop: true;
+  /** The smoke run generates an intentional failure; it must not raise a user-visible toast. */
+  smokeMode?: boolean;
   /** `process.platform`, so the header can keep macOS traffic lights and draw its own controls elsewhere. */
   platform: string;
   windowControls: {
