@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { motion, MotionConfig, type Variants } from 'motion/react';
+import { motion, MotionConfig, useReducedMotion, useScroll, useSpring, type Variants } from 'motion/react';
 import {
   Activity,
   ArrowRight,
@@ -41,6 +41,15 @@ const revealCard: Variants = {
 };
 
 const viewport = { once: true, amount: 0.16 } as const;
+
+/** A thin gold line that follows the reading position; transform-only, so it stays off the main thread. */
+function ScrollProgress() {
+  const reduceMotion = useReducedMotion();
+  const { scrollYProgress } = useScroll();
+  const scaleX = useSpring(scrollYProgress, { stiffness: 120, damping: 30, restDelta: 0.001 });
+  if (reduceMotion) return null;
+  return <motion.div aria-hidden="true" style={{ scaleX }} className="fixed inset-x-0 top-0 z-[60] h-[2px] origin-left bg-gold" />;
+}
 
 const providers = ['OpenAI', 'Anthropic', 'Google', 'Mistral', 'Groq', 'Ollama', 'OpenRouter', 'DeepSeek'] as const;
 
@@ -193,7 +202,7 @@ function ProductSection() {
         className="mt-10 grid gap-4 md:grid-cols-3"
       >
         {features.map(({ icon: Icon, label, title, body, detail }) => (
-          <motion.article key={title} variants={revealCard} className="card group relative overflow-hidden p-6">
+          <motion.article key={title} variants={revealCard} className="card lift group relative overflow-hidden p-6">
             <div className="mb-8 flex items-center justify-between">
               <span className="grid h-10 w-10 place-items-center rounded-xl border border-gold/25 bg-gold-soft text-gold-text">
                 <Icon className="h-5 w-5" aria-hidden="true" />
@@ -261,7 +270,7 @@ function HowItWorks() {
           className="grid gap-4 md:grid-cols-3"
         >
           {steps.map(({ number, icon: Icon, title, body }, index) => (
-            <motion.article key={number} variants={revealCard} className="card relative p-6">
+            <motion.article key={number} variants={revealCard} className="card lift relative p-6">
               <div className="mb-8 flex items-center justify-between">
                 <span className="font-mono text-3xl font-bold text-gold/80">{number}</span>
                 <span className="grid h-9 w-9 place-items-center rounded-full border border-line-strong text-gold-text">
@@ -491,12 +500,13 @@ function App() {
   return (
     <MotionConfig reducedMotion="user">
       <div className="page-enter min-h-screen overflow-x-clip">
+        <ScrollProgress />
         <ParticleBackground />
         <Navbar />
 
         <main id="main">
           <section className="relative overflow-hidden border-b border-line/70">
-            <div aria-hidden="true" className="bg-glow absolute inset-x-0 top-0 h-[620px] opacity-70" />
+            <div aria-hidden="true" className="bg-glow slow-drift absolute inset-x-0 top-0 h-[620px] opacity-70" />
             <div aria-hidden="true" className="grid-wash absolute inset-x-0 top-0 h-[620px] opacity-35" />
             <div className="relative mx-auto max-w-6xl px-5 pb-16 pt-16 sm:pb-24 sm:pt-24">
               <motion.div

@@ -514,6 +514,39 @@
   }
 }
 
+/* Cross-document navigation between the landing, download and dashboard shells. */
+@view-transition {
+  navigation: auto;
+}
+
+@keyframes slow-drift {
+  from {
+    transform: translate3d(-1%, -1%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(1%, 1%, 0) scale(1.04);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lift {
+    transition:
+      transform var(--motion-base) var(--motion-ease),
+      border-color var(--motion-base) var(--motion-ease),
+      box-shadow var(--motion-base) var(--motion-ease);
+  }
+
+  .lift:hover {
+    transform: translateY(-4px);
+    border-color: color-mix(in srgb, var(--gold) 38%, var(--line));
+    box-shadow: 0 18px 48px color-mix(in srgb, var(--glow) 80%, transparent);
+  }
+
+  .slow-drift {
+    animation: slow-drift 20s ease-in-out infinite alternate;
+  }
+}
+
 .page-enter {
   animation: page-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }

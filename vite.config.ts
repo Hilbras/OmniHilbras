@@ -27,7 +27,13 @@ function dashboardFallback(): Plugin {
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
         const [rawPath = '', rawSearch = ''] = (request.url ?? '').split('?');
-        // `/download` is a real page with a clean URL in production; the dev server serves its shell.
+        // `/home` and `/download` are real pages with clean URLs in production; the dev server
+        // serves their shells for the same paths.
+        if (rawPath === '/home' || rawPath === '/home/') {
+          request.url = '/index.html';
+          next();
+          return;
+        }
         if (rawPath === '/download' || rawPath === '/download/') {
           request.url = '/download.html';
           next();

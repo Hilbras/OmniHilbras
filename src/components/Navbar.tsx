@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { ThemeToggle } from './ThemeToggle';
 
 const links = [
+  { href: '/home', label: 'Home' },
   { href: '#product', label: 'Product' },
   { href: '#how-it-works', label: 'How it works' },
   { href: '#docs', label: 'Docs' },
@@ -29,7 +30,7 @@ export function Navbar() {
         <a href="#main" className="skip-link btn-gold">
           Skip to content
         </a>
-        <a href="#main" className="flex shrink-0 items-center gap-2.5 text-[15px] font-semibold tracking-tight">
+        <a href="/home" className="flex shrink-0 items-center gap-2.5 text-[15px] font-semibold tracking-tight">
           <span className="text-xl leading-none text-gold" aria-hidden="true">
             ◈
           </span>

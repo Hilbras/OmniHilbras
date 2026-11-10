@@ -2,6 +2,7 @@ const footerGroups = [
   {
     title: 'Explore',
     links: [
+      ['/home', 'Home'],
       ['#product', 'Product'],
       ['#how-it-works', 'How it works'],
       ['#docs', 'Documentation'],
@@ -23,7 +24,7 @@ export function Footer() {
     <footer className="relative border-t border-line">
       <div className="mx-auto grid max-w-6xl gap-10 px-5 py-12 sm:grid-cols-2 lg:grid-cols-4">
         <div className="max-w-xs">
-          <a href="#main" className="flex items-center gap-2.5 text-[15px] font-semibold tracking-tight">
+          <a href="/home" className="flex items-center gap-2.5 text-[15px] font-semibold tracking-tight">
             <span className="text-xl leading-none text-gold" aria-hidden="true">
               ◈
             </span>

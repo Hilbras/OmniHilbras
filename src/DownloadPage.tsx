@@ -60,7 +60,7 @@ export default function DownloadPage() {
         <div aria-hidden="true" className="bg-glow absolute inset-x-0 top-0 h-[560px] opacity-70" />
         <div aria-hidden="true" className="grid-wash absolute inset-x-0 top-0 h-[560px] opacity-35" />
         <div className="relative mx-auto max-w-5xl px-5 pb-16 pt-14 sm:pb-24 sm:pt-20">
-          <a href="/" className="muted inline-flex items-center gap-1.5 text-xs transition-colors hover:text-gold-text">
+          <a href="/home" className="muted inline-flex items-center gap-1.5 text-xs transition-colors hover:text-gold-text">
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
             Back to the landing page
           </a>
@@ -81,7 +81,7 @@ export default function DownloadPage() {
             {platforms.map(({ id, icon: Icon, name, detail, action, href, available, note }) => {
               const primary = detected === id;
               return (
-                <article key={id} className={`card flex flex-col p-6 ${primary ? 'border-gold/50' : ''}`}>
+                <article key={id} className={`card lift flex flex-col p-6 ${primary ? 'border-gold/50' : ''}`}>
                   <div className="flex items-center justify-between gap-3">
                     <span className="grid h-11 w-11 place-items-center rounded-xl border border-gold/25 bg-gold-soft text-gold-text">
                       <Icon className="h-5 w-5" aria-hidden="true" />
