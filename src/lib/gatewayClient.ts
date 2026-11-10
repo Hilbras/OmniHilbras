@@ -159,12 +159,33 @@ export function gatewayOrigin() {
   return gatewayBaseUrl;
 }
 
+/**
+ * A device key injected by the Android shell at runtime.
+ *
+ * The shell must put it in Keystore-backed storage and set this value before the dashboard mounts; this
+ * module never writes it to localStorage or a cookie. A browser build has no value and keeps using the
+ * gateway's local-mode behavior.
+ */
+function gatewayDeviceToken(): string | undefined {
+  if (typeof globalThis === 'undefined') return undefined;
+  const value = (globalThis as { __OMNIHILBRAS_GATEWAY_TOKEN__?: unknown }).__OMNIHILBRAS_GATEWAY_TOKEN__;
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function gatewayAuthHeaders(): Record<string, string> {
+  const token = gatewayDeviceToken();
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
 function normalizeGatewayBaseUrl(value: string) {
   try {
     const url = new URL(value);
     const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
     const loopback = hostname === 'localhost' || hostname === '::1' || isLoopbackIpv4(hostname);
-    if (!loopback || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') return '';
+    // A remote gateway is only acceptable over HTTPS. Plain HTTP to a non-loopback host would put the
+    // device key and every request on the wire in clear text.
+    const secureRemote = url.protocol === 'https:';
+    if ((!loopback && !secureRemote) || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') return '';
     return url.origin;
   } catch {
     return '';
@@ -468,7 +489,7 @@ export async function streamGatewayChat(
       method: 'POST',
       cache: 'no-store',
       credentials: 'omit',
-      headers: { 'content-type': 'application/json', accept: 'text/event-stream', 'x-omnihilbras-provider': request.providerId },
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream', ...gatewayAuthHeaders(), 'x-omnihilbras-provider': request.providerId },
       body: JSON.stringify({
         model: request.model,
         messages: request.messages,
@@ -682,7 +703,7 @@ async function sendWithoutStreaming(
     method: 'POST',
     cache: 'no-store',
     credentials: 'omit',
-    headers: { 'content-type': 'application/json', accept: 'application/json', 'x-omnihilbras-provider': request.providerId },
+    headers: { 'content-type': 'application/json', accept: 'application/json', ...gatewayAuthHeaders(), 'x-omnihilbras-provider': request.providerId },
     body: JSON.stringify({
       model: request.model,
       messages: request.messages,
@@ -1420,7 +1441,7 @@ export async function requestJson<T>(path: string, init: RequestInit = {}) {
     if (body === undefined) throw new GatewayRequestError(`The gateway returned a ${result.status} response that is not JSON.`, { status: result.status });
     return body as T;
   }
-  if (!gatewayBaseUrl) throw new Error('Gateway URL must target a loopback address.');
+  if (!gatewayBaseUrl) throw new Error('Gateway URL must target a loopback address or HTTPS.');
   let response: Response;
   try {
     response = await fetch(`${gatewayBaseUrl}${path}`, {
@@ -1428,7 +1449,7 @@ export async function requestJson<T>(path: string, init: RequestInit = {}) {
       credentials: 'omit',
       redirect: 'error',
       ...init,
-      headers: { accept: 'application/json', ...init.headers },
+      headers: { accept: 'application/json', ...gatewayAuthHeaders(), ...init.headers },
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
