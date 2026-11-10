@@ -6,27 +6,26 @@ provider-neutral adapters). Old code is reference, not a drop-in: paths and prov
 
 ## Phase 0 — Cache-aware token accounting (P0 correctness)
 
-- [ ] Extend `TokenUsage` with `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, and an
+- [x] Extend `TokenUsage` with `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, and an
       `estimated` marker.
-- [ ] Extend `UsageRecord`, `UsageTotals`, `UsageBreakdownGroup`, `PriceableUsage`, and dashboard types.
-- [ ] Add `canonicalizeUsage` for OpenAI, Claude, Gemini and Responses shapes: fold Claude cache into
+- [x] Extend `UsageRecord`, `UsageTotals`, `UsageBreakdownGroup`, `PriceableUsage`, and dashboard types.
+- [x] Add `canonicalizeUsage` for OpenAI, Claude, Gemini and Responses shapes: fold Claude cache into
       prompt, keep cache read/write, pass OpenAI/Gemini already-inclusive prompt through, recompute total,
       and stay idempotent.
-- [ ] Propagate cache fields through the 25 vendored SDK `TokenUsage` types and their usage normalizers.
-- [ ] Price cache read/write from the existing pricing fields; stop charging cached input at full rate.
-- [ ] Tests: each wire shape, idempotence, missing usage (unmeasured, not zero), cache cost.
+- [x] Propagate cache fields through the 25 vendored SDK `TokenUsage` types and their usage normalizers.
+- [x] Price cache read/write from the existing pricing fields; stop charging cached input at full rate.
+- [x] Tests: each wire shape, idempotence, missing usage (unmeasured, not zero), cache cost.
 
 ## Phase 1 — Savings telemetry and stats
 
-- [ ] Add per-request compression telemetry: saver id, bytes before/after, estimated tokens saved,
+- [x] Add per-request compression telemetry: saver id, bytes before/after, estimated tokens saved,
       units, detail/reason, cache read/create.
-- [ ] Persist it on the usage record (`meta`-equivalent, no prompts or credentials) and expose it in
+- [x] Persist it on the usage record (`meta`-equivalent, no prompts or credentials) and expose it in
       `GET /v1/usage`.
-- [ ] Add `GET /v1/token-saver/stats?period=` with per-saver, per-provider, requests-with-telemetry,
-      savings, cost avoided, and provider cache figures.
-- [ ] Dashboard: Token Saver page with period selector, per-saver table, “ran but matched nothing” vs
-      disabled, and cache read/write.
-- [ ] Tests: aggregation across periods, pending/new rows, absent telemetry distinguished from zero.
+- [x] Add `GET /v1/token-saver/stats?period=` with per-saver, per-provider, requests-with-telemetry,
+      savings, provider cache figures. Cost avoided is deferred (see Non-goals).
+- [x] Dashboard: Token Saver page with period selector, per-saver table, ran/skipped, and cache read/write.
+- [x] Tests: aggregation across periods, pending/new rows, absent telemetry distinguished from zero.
 
 ## Phase 2 — RTK specialized filters
 
@@ -56,18 +55,18 @@ provider-neutral adapters). Old code is reference, not a drop-in: paths and prov
 
 ## Phase 5 — Optional output-shaping and external savers
 
-- [ ] Port Caveman and Ponytail system-prompt injection with off/level settings and telemetry.
-- [ ] Add a Headroom adapter (external/URL, fail-open, phantom-savings guard) behind config.
-- [ ] Add PXPIPE image-context hook (Claude-format only) behind config.
-- [ ] Each external saver: timeout, off switch, per-request opt-out, honest “ran/skipped” telemetry.
-- [ ] Tests: disabled means untouched; failure falls through; no request depends on the external service.
+- [x] Port Caveman and Ponytail system-prompt injection with off/level settings and telemetry.
+- [x] Add a Headroom adapter (external/URL, fail-open, phantom-savings guard) behind config.
+- [x] Add PXPIPE image-context hook (Claude-format only) behind config.
+- [x] Each external saver: timeout, off switch, per-request opt-out, honest “ran/skipped” telemetry.
+- [x] Tests: disabled means untouched; failure falls through; no request depends on the external service.
 
 ## Phase 6 — Wiring and documentation
 
-- [ ] Single saver order in the gateway: RTK/specialized → generic/local → Headroom → PXPIPE →
+- [x] Single saver order in the gateway: RTK/specialized → generic/local → Headroom → PXPIPE →
       history trim → cache anchor.
-- [ ] Settings page exposes every saver, cap and threshold; `/v1/settings` reports what is loaded.
-- [ ] README, `docs/SPEC-SDK.md`, architecture counts and AGENTS updated.
+- [x] Settings page exposes every saver, cap and threshold; `/v1/settings` reports what is loaded.
+- [x] README, `docs/SPEC-SDK.md`, architecture counts and AGENTS updated.
 - [ ] `pnpm verify` green; token-saver and gateway suites cover every new saver.
 
 ## Non-goals / decisions
@@ -78,3 +77,6 @@ provider-neutral adapters). Old code is reference, not a drop-in: paths and prov
 - External Headroom/PXPIPE are optional; the gateway must work with them absent.
 - Old `addBufferToUsage` is not imported verbatim: inflating reported usage by 2000 tokens is a false
   measurement. Any safety buffer is applied to context decisions, not to reported provider usage.
+- Cost avoided is not reported by `/v1/token-saver/stats`: putting a dollar figure on every saver would
+  require a provider/model price for each request, and an invented one is worse than the honest
+  token/byte totals the endpoint already reports.

@@ -69,13 +69,13 @@ export function TokenSaverContent() {
       <section className="card overflow-hidden" aria-label="Savings by saver">
         <div className="flex items-center gap-2 border-b border-line p-4"><BarChart3 className="h-4 w-4 text-muted" aria-hidden="true" /><h2 className="text-sm font-semibold">By saver</h2></div>
         {!stats || stats.savers.length === 0 ? (
-          <p className="muted px-4 py-8 text-center text-xs">{loading ? 'Loading…' : 'No compression telemetry in this period. Enable OMNIHILBRAS_TOKEN_SAVER and send a request with tool output.'}</p>
+          <p className="muted px-4 py-8 text-center text-xs">{loading ? 'Loading…' : 'No compression telemetry in this period. Enable a saver and send a request with tool output.'}</p>
         ) : (
           <table className="w-full text-left text-[11px]">
-            <thead className="muted border-b border-line text-[10px] uppercase tracking-wide"><tr><th className="px-4 py-2">Saver</th><th className="px-4 py-2">Requests</th><th className="px-4 py-2">Saved</th><th className="px-4 py-2">Bytes</th></tr></thead>
+            <thead className="muted border-b border-line text-[10px] uppercase tracking-wide"><tr><th className="px-4 py-2">Saver</th><th className="px-4 py-2">Saved / requests</th><th className="px-4 py-2">Ran / skipped</th><th className="px-4 py-2">Saved</th><th className="px-4 py-2">Bytes</th></tr></thead>
             <tbody className="divide-y divide-line font-mono">
               {stats.savers.map((saver) => (
-                <tr key={saver.id}><td className="px-4 py-2">{saver.id} <span className="muted">· {saver.kind}</span></td><td className="px-4 py-2">{saver.requestsWithSavings} / {saver.requests}</td><td className="px-4 py-2">{formatTokens(saver.tokensSaved)}</td><td className="px-4 py-2">{formatBytes(saver.bytesSaved)}</td></tr>
+                <tr key={saver.id}><td className="px-4 py-2">{saver.id} <span className="muted">· {saver.kind}</span></td><td className="px-4 py-2">{saver.requestsWithSavings} / {saver.requests}</td><td className="px-4 py-2">{saver.ran ?? saver.requests} / {saver.skipped ?? 0}</td><td className="px-4 py-2">{formatTokens(saver.tokensSaved)}</td><td className="px-4 py-2">{formatBytes(saver.bytesSaved)}</td></tr>
               ))}
             </tbody>
           </table>

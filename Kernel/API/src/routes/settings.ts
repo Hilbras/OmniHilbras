@@ -127,6 +127,11 @@ function publicSettings(config: GatewayConfig) {
     ...(config.historyTrim === undefined ? {} : { historyTrim: config.historyTrim }),
     /** Whether provider cache breakpoints are re-anchored on the final body. */
     cacheAnchor: config.cacheAnchor === true,
+    ...(config.caveman ? { caveman: config.caveman } : {}),
+    ...(config.ponytail ? { ponytail: config.ponytail } : {}),
+    // The URL may carry credentials in userinfo; readiness and timing are what the dashboard needs.
+    ...(config.headroom ? { headroom: { enabled: true, ...(config.headroom.timeoutMs ? { timeoutMs: config.headroom.timeoutMs } : {}) } } : {}),
+    ...(config.pxpipe ? { pxpipe: { enabled: true, ...(config.pxpipe.timeoutMs ? { timeoutMs: config.pxpipe.timeoutMs } : {}), ...(config.pxpipe.minChars ? { minChars: config.pxpipe.minChars } : {}) } } : {}),
     endpoints: {
       openai: config.openai.baseUrl,
       anthropic: config.anthropic.baseUrl,
@@ -151,7 +156,7 @@ function publicSettings(config: GatewayConfig) {
     mutableAtRuntime: ['requireApiKey'],
     mutableByRestart: [
       'host', 'port', 'timeoutMs', 'healthIntervalMs', 'failureThreshold',
-      'recoveryCooldownMs', 'corsOrigins', 'dataDir', 'endpoints', 'compression', 'maxOutputTokensCap', 'thinkingBudgetCap', 'historyTrim', 'cacheAnchor',
+      'recoveryCooldownMs', 'corsOrigins', 'dataDir', 'endpoints', 'compression', 'maxOutputTokensCap', 'thinkingBudgetCap', 'historyTrim', 'cacheAnchor', 'caveman', 'ponytail', 'headroom', 'pxpipe',
     ],
   };
 }

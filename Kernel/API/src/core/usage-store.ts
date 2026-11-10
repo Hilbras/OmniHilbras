@@ -49,7 +49,15 @@ export type UsageAttempt = {
 export type UsageCompression = {
   totalTokensSaved: number;
   totalBytesSaved: number;
-  savers: Record<string, { kind: string; requests: number; tokensSaved: number; bytesBefore: number; bytesAfter: number }>;
+  savers: Record<string, {
+    kind: string;
+    requests: number;
+    tokensSaved: number;
+    bytesBefore: number;
+    bytesAfter: number;
+    state?: 'ran' | 'skipped';
+    detail?: string;
+  }>;
 };
 
 export type UsageRecord = {
@@ -467,6 +475,8 @@ function normalizeRecord(record: UsageRecord): UsageRecord {
               tokensSaved: Math.max(0, Number(entry.tokensSaved) || 0),
               bytesBefore: Math.max(0, Number(entry.bytesBefore) || 0),
               bytesAfter: Math.max(0, Number(entry.bytesAfter) || 0),
+              ...(entry.state === 'ran' || entry.state === 'skipped' ? { state: entry.state } : {}),
+              ...(typeof entry.detail === 'string' ? { detail: entry.detail.slice(0, 200) } : {}),
             }])),
           },
         }

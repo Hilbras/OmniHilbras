@@ -60,7 +60,7 @@ test('the stats route aggregates per saver, provider and cache', async (t) => {
   assert.equal(body.requestsWithSavings, 1);
   assert.equal(body.totalTokensSaved, 500);
   assert.equal(body.cache.read, 40);
-  assert.deepEqual(body.savers[0], { id: 'log', kind: 'log', requests: 1, requestsWithSavings: 1, tokensSaved: 500, bytesSaved: 2_000 });
+  assert.deepEqual(body.savers[0], { id: 'log', kind: 'log', requests: 1, requestsWithSavings: 1, ran: 1, skipped: 0, tokensSaved: 500, bytesSaved: 2_000 });
   assert.equal(body.byProvider[0].providerId, 'openai');
   assert.equal(body.byProvider[0].tokensSaved, 500);
 });

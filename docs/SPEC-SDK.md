@@ -282,8 +282,9 @@ The first local gateway exposes:
   **Replaces** every connection, strategy and API key. Returns counts. A missing confirmation is a 400;
   a wrong passphrase or a damaged envelope is refused before anything is changed. Management route.
 - `GET /v1/token-saver/stats?period=` — per-saver and per-provider savings from usage records:
-  requests with telemetry vs with savings, estimated tokens/bytes saved, and provider cache read/write.
-  A request with no compression telemetry is counted but not attributed to a saver. Management route.
+  requests with telemetry vs with savings, estimated tokens/bytes saved, ran/skipped counts per saver,
+  and provider cache read/write. A request with no compression telemetry is counted but not attributed to
+  a saver. Management route.
 - `GET /v1/token-saver/:id` — returns `{"id","content"}` for the original behind a
   `<<token-saver:<id> ...>>` marker. Only ids in the gateway's bounded in-memory store resolve; a miss is
   a 404, never a fabricated empty prompt. Management route. Compression itself is opt-in with
@@ -294,6 +295,15 @@ The first local gateway exposes:
   `OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT` messages and `is_error` tool results; the original is retrievable
   from the same store. With `OMNIHILBRAS_CACHE_ANCHOR=1`, adapters that support provider cache breakpoints
   re-anchor them on the final body after the savers run. `/v1/settings` reports both.
+- **Prompt shaping and external savers** are opt-in configuration, not routes.
+  `OMNIHILBRAS_CAVEMAN` and `OMNIHILBRAS_PONYTAIL` append one system instruction (idempotently) and are
+  reported as `ran` with no invented input saving. `OMNIHILBRAS_HEADROOM_URL` posts `{messages, model}` to
+  `{url}/v1/compress` and accepts `{messages, tokens_saved?}`; a reported delta with less than 5% message
+  shrink is rejected as phantom savings. `OMNIHILBRAS_PXPIPE_URL` is Anthropic-only and posts
+  `{messages, model, options}` to `{url}/v1/transform`, accepting
+  `{messages, applied, reason?, imageCount?, imageTokens?}`. Both time out and fail open: any error leaves
+  the conversation untouched and records `state: "skipped"` with a reason. `x-omnihilbras-token-saver: off`
+  opts out of all of them for one request.
 - `POST /v1/web-cookie/tokenharbor/check` — verify a pasted Token Harbor session cookie against
   `tokenharbor.ai` by reading the account profile, and store nothing. A credential check, not a
   completion: it says whether the session is accepted, not whether a model can answer.

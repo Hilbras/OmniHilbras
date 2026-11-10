@@ -9,6 +9,7 @@ import { assertPublicDestination } from './destination-check.js';
 import { LocalUsageStore } from './usage-store.js';
 import { defaultConnectionDirectory, LocalConnectionStore, parseMasterKey, type ConnectionStore } from './connections.js';
 import { GatewayService } from './service.js';
+import { CAVEMAN_LEVELS, PONYTAIL_LEVELS, type CavemanLevel, type PonytailLevel } from '@omnihilbras/token-saver';
 import { localDeployment, type DeploymentConfig } from './runtime.js';
 
 export type GatewayConfig = {
@@ -40,6 +41,13 @@ export type GatewayConfig = {
   historyTrim?: { maxInputTokens: number; keepRecent: number };
   /** Re-anchor provider cache breakpoints on the final body. */
   cacheAnchor?: boolean;
+  /** Output-shaping prompt levels. */
+  caveman?: { level: CavemanLevel };
+  ponytail?: { level: PonytailLevel };
+  /** Optional external compressor. */
+  headroom?: { url: string; timeoutMs?: number; compressUserMessages?: boolean };
+  /** Optional Anthropic-only image-context hook. */
+  pxpipe?: { url: string; timeoutMs?: number; minChars?: number };
   codex: {
     clientId?: string;
     redirectUri?: string;
@@ -96,6 +104,10 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
   const compatibleId = env.OMNIHILBRAS_COMPATIBLE_PROVIDER_ID ?? 'openai-compatible';
   const compatibleCredential = env[providerEnvKey(compatibleId)]
     ?? env.OMNIHILBRAS_COMPATIBLE_API_KEY;
+  const caveman = parseChoice(env.OMNIHILBRAS_CAVEMAN, CAVEMAN_LEVELS, 'OMNIHILBRAS_CAVEMAN');
+  const ponytail = parseChoice(env.OMNIHILBRAS_PONYTAIL, PONYTAIL_LEVELS, 'OMNIHILBRAS_PONYTAIL');
+  const headroomUrl = parseOptionalUrl(env.OMNIHILBRAS_HEADROOM_URL, 'OMNIHILBRAS_HEADROOM_URL');
+  const pxpipeUrl = parseOptionalUrl(env.OMNIHILBRAS_PXPIPE_URL, 'OMNIHILBRAS_PXPIPE_URL');
 
   return {
     host,
@@ -112,6 +124,22 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
       ? { historyTrim: { maxInputTokens: parseOptionalLimit(env.OMNIHILBRAS_HISTORY_TRIM_TOKENS, 1_000, 10_000_000)!, keepRecent: parseNonNegativeInteger(env.OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT, 8, 'OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT', 200) } }
       : {}),
     ...(['1', 'true', 'on', 'yes'].includes((env.OMNIHILBRAS_CACHE_ANCHOR ?? '').trim().toLowerCase()) ? { cacheAnchor: true } : {}),
+    ...(caveman ? { caveman: { level: caveman } } : {}),
+    ...(ponytail ? { ponytail: { level: ponytail } } : {}),
+    ...(headroomUrl ? {
+      headroom: {
+        url: headroomUrl,
+        ...(parseOptionalLimit(env.OMNIHILBRAS_HEADROOM_TIMEOUT_MS, 100, 600_000) === undefined ? {} : { timeoutMs: parseOptionalLimit(env.OMNIHILBRAS_HEADROOM_TIMEOUT_MS, 100, 600_000)! }),
+        ...(['1', 'true', 'on', 'yes'].includes((env.OMNIHILBRAS_HEADROOM_USERS ?? '').trim().toLowerCase()) ? { compressUserMessages: true } : {}),
+      },
+    } : {}),
+    ...(pxpipeUrl ? {
+      pxpipe: {
+        url: pxpipeUrl,
+        ...(parseOptionalLimit(env.OMNIHILBRAS_PXPIPE_TIMEOUT_MS, 100, 600_000) === undefined ? {} : { timeoutMs: parseOptionalLimit(env.OMNIHILBRAS_PXPIPE_TIMEOUT_MS, 100, 600_000)! }),
+        ...(parseOptionalLimit(env.OMNIHILBRAS_PXPIPE_MIN_CHARS, 1_000, 10_000_000) === undefined ? {} : { minChars: parseOptionalLimit(env.OMNIHILBRAS_PXPIPE_MIN_CHARS, 1_000, 10_000_000)! }),
+      },
+    } : {}),
     tokenSaver: {
       enabled: ['1', 'true', 'on', 'yes'].includes((env.OMNIHILBRAS_TOKEN_SAVER ?? '').trim().toLowerCase()),
       targetRatio: parseRatio(env.OMNIHILBRAS_TOKEN_SAVER_RATIO, 0.5),
@@ -211,6 +239,10 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     ...(config.thinkingBudgetCap ? { thinkingBudgetCap: config.thinkingBudgetCap } : {}),
     ...(config.historyTrim ? { historyTrim: config.historyTrim } : {}),
     ...(config.cacheAnchor ? { cacheAnchor: config.cacheAnchor } : {}),
+    ...(config.caveman ? { caveman: config.caveman } : {}),
+    ...(config.ponytail ? { ponytail: config.ponytail } : {}),
+    ...(config.headroom ? { headroom: config.headroom } : {}),
+    ...(config.pxpipe ? { pxpipe: config.pxpipe } : {}),
     failureThreshold: config.failureThreshold,
     recoveryCooldownMs: config.recoveryCooldownMs,
     // **Wired here in 1.64.0, and it had never been.** `GatewayServiceOptions.usageStore` is optional by
@@ -266,6 +298,26 @@ function parseNonNegativeInteger(value: string | undefined, fallback: number, na
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > maximum) throw new Error(`${name} must be an integer from 0 to ${maximum}.`);
   return parsed;
+}
+
+function parseChoice<T extends string>(value: string | undefined, choices: readonly T[], name: string): T | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  const normalized = value.trim().toLowerCase() as T;
+  if (!choices.includes(normalized)) throw new Error(`${name} must be one of ${choices.join(', ')}.`);
+  return normalized;
+}
+
+/** An external saver URL. A malformed URL is a configuration error, not a request-time surprise. */
+function parseOptionalUrl(value: string | undefined, name: string): string | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error(`${name} must be an http:// or https:// URL.`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error(`${name} must be an http:// or https:// URL.`);
+  return value.trim().replace(/\/$/, '');
 }
 
 function parseCorsOrigins(value: string | undefined) {

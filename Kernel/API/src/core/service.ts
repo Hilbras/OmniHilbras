@@ -60,7 +60,18 @@ import { localDeployment, type ConnectionSecretStore, type DeploymentConfig } fr
 import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
-import { compressMessages, MemoryCcrStore, trimHistory, type SavableMessage } from '@omnihilbras/token-saver';
+import {
+  compressMessages,
+  headroomCompress,
+  injectCaveman,
+  injectPonytail,
+  MemoryCcrStore,
+  pxpipeCompress,
+  trimHistory,
+  type CavemanLevel,
+  type PonytailLevel,
+  type SavableMessage,
+} from '@omnihilbras/token-saver';
 import { startRequestScope, withRequestScope, type RequestScope } from './request-context.js';
 import { decryptBackup, encryptBackup } from './backup.js';
 import { notSupported } from './capability.js';
@@ -132,7 +143,16 @@ export type CredentialSource = ConnectionSecretStore;
 export type SaverTelemetry = {
   totalTokensSaved: number;
   totalBytesSaved: number;
-  savers: Record<string, { kind: string; requests: number; tokensSaved: number; bytesBefore: number; bytesAfter: number }>;
+  savers: Record<string, {
+    kind: string;
+    requests: number;
+    tokensSaved: number;
+    bytesBefore: number;
+    bytesAfter: number;
+    /** Whether the saver ran or was skipped, and why. A skipped saver is still reported. */
+    state?: 'ran' | 'skipped';
+    detail?: string;
+  }>;
 };
 
 export type GatewayServiceOptions = {
@@ -144,6 +164,13 @@ export type GatewayServiceOptions = {
   historyTrim?: { maxInputTokens: number; keepRecent: number };
   /** Re-anchor provider cache breakpoints on the final body. Anthropic-shaped adapters honour it. */
   cacheAnchor?: boolean;
+  /** Output-shaping prompt, appended to the system message. */
+  caveman?: { level: CavemanLevel };
+  ponytail?: { level: PonytailLevel };
+  /** Optional external compressor. Failures leave the conversation untouched. */
+  headroom?: { url: string; timeoutMs?: number; compressUserMessages?: boolean };
+  /** Optional Anthropic-only image-context hook. Failures leave the conversation untouched. */
+  pxpipe?: { url: string; timeoutMs?: number; minChars?: number };
   /**
    * The gateway's own configuration.
    *
@@ -205,6 +232,10 @@ export class GatewayService {
   private readonly thinkingBudgetCap?: number;
   private readonly historyTrim?: { maxInputTokens: number; keepRecent: number };
   private readonly cacheAnchor?: boolean;
+  private readonly caveman?: { level: CavemanLevel };
+  private readonly ponytail?: { level: PonytailLevel };
+  private readonly headroom?: { url: string; timeoutMs?: number; compressUserMessages?: boolean };
+  private readonly pxpipe?: { url: string; timeoutMs?: number; minChars?: number };
   private readonly compressionTelemetry = new Map<string, SaverTelemetry>();
   private readonly compressionCache = new Map<string, { messages: ChatRequest['messages']; telemetry?: SaverTelemetry }>();
   private readonly transport: HttpTransport;
@@ -372,6 +403,10 @@ export class GatewayService {
     this.maxOutputTokensCap = options.maxOutputTokensCap && options.maxOutputTokensCap > 0 ? options.maxOutputTokensCap : undefined;
     this.thinkingBudgetCap = options.thinkingBudgetCap && options.thinkingBudgetCap > 0 ? options.thinkingBudgetCap : undefined;
     this.cacheAnchor = options.cacheAnchor === true;
+    this.caveman = options.caveman;
+    this.ponytail = options.ponytail;
+    this.headroom = options.headroom;
+    this.pxpipe = options.pxpipe;
     // Kept, not just read: the ChatGPT Web driver is built lazily on first use, long after
     // the constructor has returned, so the override has to outlive this call.
     this.options = options;
@@ -2477,19 +2512,37 @@ export class GatewayService {
    * then a long tool result is shortened unless the client opted this request out. The order matters: the empty
    * results added in the first step are short and are left alone by the second.
    */
-  private preparedMessages(request: ChatRequest, scope: RequestScope | undefined): ChatRequest['messages'] {
+  private async preparedMessages(request: ChatRequest, scope: RequestScope | undefined, providerId: string): Promise<ChatRequest['messages']> {
     const complete = completeToolRounds(request.messages);
     if (scope?.tokenSaver === false) return complete;
     if (scope && this.compressionCache.has(scope.id)) return this.compressionCache.get(scope.id)!.messages;
     const store = this.tokenSaverStore;
-    if (store && (this.tokenSaverConfig || this.historyTrim)) {
-      let messages = complete as ChatRequest['messages'];
+    const saversActive = Boolean(this.tokenSaverConfig || this.historyTrim || this.headroom || this.pxpipe || this.caveman || this.ponytail);
+    if (saversActive) {
+      let messages = complete as SavableMessage[];
       const savers: SaverTelemetry['savers'] = {};
       let totalTokensSaved = 0;
       let totalBytesSaved = 0;
-      const beforeBytes = Buffer.byteLength(JSON.stringify(messages), 'utf8');
-      if (this.tokenSaverConfig) {
-        const compressed = compressMessages(messages as SavableMessage[], {
+      const record = (
+        id: string,
+        kind: string,
+        state: 'ran' | 'skipped',
+        figure: { tokensSaved?: number; bytesBefore?: number; bytesAfter?: number; detail?: string } = {},
+      ) => {
+        const entry = savers[id] ?? { kind, requests: 0, tokensSaved: 0, bytesBefore: 0, bytesAfter: 0, state };
+        entry.requests += 1;
+        entry.state = state;
+        if (figure.detail) entry.detail = figure.detail;
+        entry.tokensSaved += Math.max(0, figure.tokensSaved ?? 0);
+        entry.bytesBefore += Math.max(0, figure.bytesBefore ?? 0);
+        entry.bytesAfter += Math.max(0, figure.bytesAfter ?? 0);
+        savers[id] = entry;
+      };
+      const size = () => Buffer.byteLength(JSON.stringify(messages), 'utf8');
+
+      if (this.tokenSaverConfig && store) {
+        const beforeBytes = size();
+        const compressed = compressMessages(messages, {
           targetRatio: this.tokenSaverConfig.targetRatio,
           protectRecent: this.tokenSaverConfig.protectRecent,
           compressUsers: this.tokenSaverConfig.compressUsers,
@@ -2497,53 +2550,103 @@ export class GatewayService {
           reversible: this.tokenSaverConfig.reversible,
           ccr: store,
         });
-        messages = compressed.value as ChatRequest['messages'];
+        messages = compressed.value as SavableMessage[];
         if (compressed.stats.savedTokens > 0) {
-          const afterBytes = Buffer.byteLength(JSON.stringify(messages), 'utf8');
+          const afterBytes = size();
           for (const route of compressed.stats.routes) {
-            const id = route.strategy || route.kind;
-            const entry = savers[id] ?? { kind: route.kind, requests: 0, tokensSaved: 0, bytesBefore: 0, bytesAfter: 0 };
-            entry.requests += 1;
-            entry.tokensSaved += Math.max(0, route.originalTokens - route.compressedTokens);
-            entry.bytesBefore += beforeBytes;
-            entry.bytesAfter += afterBytes;
-            savers[id] = entry;
+            record(route.strategy || route.kind, route.kind, 'ran', {
+              tokensSaved: Math.max(0, route.originalTokens - route.compressedTokens),
+              bytesBefore: beforeBytes,
+              bytesAfter: afterBytes,
+            });
           }
           totalTokensSaved = compressed.stats.savedTokens;
           totalBytesSaved = Math.max(0, beforeBytes - afterBytes);
         }
       }
-      if (this.historyTrim) {
-        const trim = trimHistory(messages as SavableMessage[], {
+
+      if (this.headroom) {
+        const beforeBytes = size();
+        const result = await headroomCompress(messages, request.model, this.headroom);
+        messages = result.messages as SavableMessage[];
+        const savedBytes = Math.max(0, beforeBytes - result.bytesAfter);
+        if (result.applied) {
+          const tokensSaved = Math.ceil(savedBytes / 4);
+          record('headroom', 'text', 'ran', { tokensSaved, bytesBefore: beforeBytes, bytesAfter: result.bytesAfter });
+          totalTokensSaved += tokensSaved;
+          totalBytesSaved += savedBytes;
+        } else {
+          record('headroom', 'text', 'skipped', {
+            bytesBefore: beforeBytes,
+            bytesAfter: result.bytesAfter,
+            detail: result.detail ? `${result.reason}: ${result.detail}` : result.reason,
+          });
+        }
+      }
+
+      // PXPIPE turns bulky text into images; only an Anthropic-shaped request can carry them.
+      if (this.pxpipe && providerId === 'anthropic') {
+        const beforeBytes = size();
+        const result = await pxpipeCompress(messages, request.model, this.pxpipe);
+        messages = result.messages as SavableMessage[];
+        const savedBytes = Math.max(0, beforeBytes - result.bytesAfter);
+        if (result.applied) {
+          const tokensSaved = Math.ceil(savedBytes / 4);
+          record('pxpipe', 'text', 'ran', {
+            tokensSaved,
+            bytesBefore: beforeBytes,
+            bytesAfter: result.bytesAfter,
+            ...(result.detail ? { detail: result.detail } : {}),
+          });
+          totalTokensSaved += tokensSaved;
+          totalBytesSaved += savedBytes;
+        } else {
+          record('pxpipe', 'text', 'skipped', {
+            bytesBefore: beforeBytes,
+            bytesAfter: result.bytesAfter,
+            detail: result.detail ? `${result.reason}: ${result.detail}` : result.reason,
+          });
+        }
+      }
+
+      if (this.caveman) {
+        const beforeBytes = size();
+        messages = injectCaveman(messages, this.caveman.level);
+        record('caveman', 'prompt', 'ran', { bytesBefore: beforeBytes, bytesAfter: size(), detail: this.caveman.level });
+      }
+      if (this.ponytail) {
+        const beforeBytes = size();
+        messages = injectPonytail(messages, this.ponytail.level);
+        record('ponytail', 'prompt', 'ran', { bytesBefore: beforeBytes, bytesAfter: size(), detail: this.ponytail.level });
+      }
+
+      if (this.historyTrim && store) {
+        const trim = trimHistory(messages, {
           maxInputTokens: this.historyTrim.maxInputTokens,
           keepRecent: this.historyTrim.keepRecent,
           ccr: store,
           reversible: this.tokenSaverConfig?.reversible,
         });
         if (trim.trimmed > 0) {
-          const beforeTrimBytes = Buffer.byteLength(JSON.stringify(messages), 'utf8');
-          messages = trim.messages as ChatRequest['messages'];
-          const afterTrimBytes = Buffer.byteLength(JSON.stringify(messages), 'utf8');
+          const beforeTrimBytes = size();
+          messages = trim.messages;
+          const afterTrimBytes = size();
           const tokensSaved = Math.max(0, trim.originalTokens - trim.trimmedTokens);
-          const entry = savers['history-trim'] ?? { kind: 'text', requests: 0, tokensSaved: 0, bytesBefore: 0, bytesAfter: 0 };
-          entry.requests += 1;
-          entry.tokensSaved += tokensSaved;
-          entry.bytesBefore += beforeTrimBytes;
-          entry.bytesAfter += afterTrimBytes;
-          savers['history-trim'] = entry;
+          record('history-trim', 'text', 'ran', { tokensSaved, bytesBefore: beforeTrimBytes, bytesAfter: afterTrimBytes });
           totalTokensSaved += tokensSaved;
           totalBytesSaved += Math.max(0, beforeTrimBytes - afterTrimBytes);
         }
       }
-      const telemetry: SaverTelemetry | undefined = totalTokensSaved > 0
+
+      const telemetry: SaverTelemetry | undefined = Object.keys(savers).length > 0
         ? { totalTokensSaved, totalBytesSaved, savers }
         : undefined;
       if (scope) {
         if (telemetry) {
           this.compressionTelemetry.set(scope.id, telemetry);
-          this.compressionCache.set(scope.id, { messages, telemetry });
+          this.compressionCache.set(scope.id, { messages: messages as ChatRequest['messages'], telemetry });
         } else {
-          this.compressionCache.set(scope.id, { messages });
+          this.compressionCache.set(scope.id, { messages: messages as ChatRequest['messages'] });
         }
         while (this.compressionCache.size > 500) {
           const oldest = this.compressionCache.keys().next().value;
@@ -2553,7 +2656,7 @@ export class GatewayService {
         }
       }
       if (telemetry) console.log(`[token-saver] request ${scope?.id ?? 'unscoped'} saved ~${totalTokensSaved} tokens`);
-      return messages;
+      return messages as ChatRequest['messages'];
     }
     const compressed = compressToolResults(complete);
     const saved = toolResultBytes(complete) - toolResultBytes(compressed);
@@ -2612,13 +2715,13 @@ export class GatewayService {
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    return adapter.chat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: this.preparedMessages(request, scope) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+    return adapter.chat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: await this.preparedMessages(request, scope, providerId) }), await this.contextForRequest(providerId, connectionId, signal, scope));
   }
 
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    yield* adapter.streamChat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: this.preparedMessages(request, scope) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+    yield* adapter.streamChat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: await this.preparedMessages(request, scope, providerId) }), await this.contextForRequest(providerId, connectionId, signal, scope));
   }
 
   /**

@@ -237,6 +237,9 @@ export function SettingsContent() {
             <KeyValue label="Thinking cap" value={settings.thinkingBudgetCap ? `${settings.thinkingBudgetCap} tokens` : 'none'} />
             <KeyValue label="History trim" value={settings.historyTrim ? `over ${settings.historyTrim.maxInputTokens} tokens · keep last ${settings.historyTrim.keepRecent}` : 'off'} />
             <KeyValue label="Cache anchor" value={settings.cacheAnchor ? 'on' : 'off'} />
+            <KeyValue label="Prompt style" value={[settings.caveman ? `caveman ${settings.caveman.level}` : '', settings.ponytail ? `ponytail ${settings.ponytail.level}` : ''].filter(Boolean).join(' · ') || 'off'} />
+            <KeyValue label="Headroom" value={settings.headroom?.enabled ? `on${settings.headroom.timeoutMs ? ` · ${settings.headroom.timeoutMs} ms` : ''}` : 'off'} />
+            <KeyValue label="PXPIPE" value={settings.pxpipe?.enabled ? `on${settings.pxpipe.minChars ? ` · min ${settings.pxpipe.minChars} chars` : ''}` : 'off'} />
             <KeyValue label="Mutable at runtime" value={settings.mutableAtRuntime.join(', ') || '—'} />
             <KeyValue label="OpenAI-compatible" value={`${settings.endpoints.compatible.name} · ${settings.endpoints.compatible.baseUrl}`} />
             <KeyValue label="Mutable by restart" value={settings.mutableByRestart.join(', ') || '—'} />

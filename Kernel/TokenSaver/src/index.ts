@@ -4,6 +4,16 @@ export { compressLog } from './logs.js';
 export { compressText } from './text.js';
 export { compressCode } from './code.js';
 export { trimHistory } from './history.js';
+export {
+  CAVEMAN_LEVELS,
+  CAVEMAN_PROMPTS,
+  PONYTAIL_LEVELS,
+  PONYTAIL_PROMPTS,
+  injectCaveman,
+  injectPonytail,
+  injectSystemPrompt,
+} from './prompt.js';
+export { headroomCompress, pxpipeCompress } from './external.js';
 export { detectContentKind } from './detect.js';
 export { compressRtk } from './rtk.js';
 export { autoDetectFilter } from './filters/autodetect.js';
@@ -42,3 +52,5 @@ export type {
 } from './types.js';
 export type { RtkFilterId } from './filters/constants.js';
 export type { RtkOptions, RtkResult } from './rtk.js';
+export type { CavemanLevel, PonytailLevel } from './prompt.js';
+export type { ExternalSaverResult, HeadroomOptions, PxpipeOptions } from './external.js';

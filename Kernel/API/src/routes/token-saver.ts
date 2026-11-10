@@ -25,7 +25,7 @@ export async function handleTokenSaverRoute(ctx: RouteContext): Promise<boolean>
     const period = periodParam as UsagePeriod;
     const { since } = resolveUsagePeriod(period, new Date());
     const records = await service.usage?.list({ ...(since ? { since: since.toISOString() } : {}) }) ?? [];
-    const savers = new Map<string, { id: string; kind: string; requests: number; requestsWithSavings: number; tokensSaved: number; bytesSaved: number }>();
+    const savers = new Map<string, { id: string; kind: string; requests: number; requestsWithSavings: number; ran: number; skipped: number; tokensSaved: number; bytesSaved: number }>();
     const providers = new Map<string, { providerId: string; requests: number; tokensSaved: number; bytesSaved: number }>();
     let requestsWithTelemetry = 0;
     let requestsWithSavings = 0;
@@ -50,8 +50,10 @@ export async function handleTokenSaverRoute(ctx: RouteContext): Promise<boolean>
       provider.bytesSaved += compression.totalBytesSaved;
       providers.set(providerId, provider);
       for (const [id, entry] of Object.entries(compression.savers)) {
-        const saver = savers.get(id) ?? { id, kind: entry.kind, requests: 0, requestsWithSavings: 0, tokensSaved: 0, bytesSaved: 0 };
+        const saver = savers.get(id) ?? { id, kind: entry.kind, requests: 0, requestsWithSavings: 0, ran: 0, skipped: 0, tokensSaved: 0, bytesSaved: 0 };
         saver.requests += 1;
+        if (entry.state === 'skipped') saver.skipped += 1;
+        else saver.ran += 1;
         if (entry.tokensSaved > 0) saver.requestsWithSavings += 1;
         saver.tokensSaved += entry.tokensSaved;
         saver.bytesSaved += Math.max(0, entry.bytesBefore - entry.bytesAfter);

@@ -633,7 +633,19 @@ OMNIHILBRAS_THINKING_BUDGET=4096        # optional thinking-budget cap where sup
 OMNIHILBRAS_HISTORY_TRIM_TOKENS=120000  # optional: trim whole old turns above this estimate
 OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT=8  # messages kept verbatim by the trim
 OMNIHILBRAS_CACHE_ANCHOR=1              # re-anchor provider cache breakpoints on the final body
+OMNIHILBRAS_CAVEMAN=full                # optional output-shaping prompt: lite|full|ultra|wenyan-lite|wenyan|wenyan-ultra
+OMNIHILBRAS_PONYTAIL=lite               # optional output-shaping prompt: lite|full|ultra
+OMNIHILBRAS_HEADROOM_URL=http://127.0.0.1:8788   # optional external compressor, fail-open
+OMNIHILBRAS_PXPIPE_URL=http://127.0.0.1:8789     # optional Anthropic-only image-context hook, fail-open
 ```
+
+Output-shaping prompts are appended to the system message once; they save output tokens, so their telemetry
+records that they ran rather than a fictional input saving. External savers are opt-in by URL, time out,
+and leave the conversation untouched on any error; `OMNIHILBRAS_HEADROOM_TIMEOUT_MS`,
+`OMNIHILBRAS_HEADROOM_USERS`, `OMNIHILBRAS_PXPIPE_TIMEOUT_MS` and `OMNIHILBRAS_PXPIPE_MIN_CHARS` tune them.
+A Headroom response that reports a token delta while the messages shrank by less than 5% is rejected as
+phantom savings. PXPIPE only runs for the `anthropic` provider and expects
+`POST {url}/v1/transform` returning `{messages, applied, imageCount?, imageTokens?}`.
 
 History trimming is independent of content compression: it keeps a request out of the model only when the
 whole conversation is over the threshold, stubbing old turns behind a retrieval marker while preserving the

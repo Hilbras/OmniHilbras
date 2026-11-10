@@ -53,6 +53,12 @@ function compressString(
 ): CompressedString | undefined {
   if (text.length < options.minChars) return undefined;
   const kind = detectContentKind(text);
+  // RTK's specialized filters run before the generic per-kind compressor: a tool output that names a
+  // known command shape is better shortened by that shape's filter than by a generic ratio.
+  if (allowRtk) {
+    const rtk = compressRtk(text, { toolName, ccr, reversible: options.reversible });
+    if (rtk) return { result: rtk.result, kind: rtk.kind, strategy: rtk.filter };
+  }
   if (kind === 'json') {
     const result = compressJsonText(text, {
       maxStringChars: options.maxStringChars,
@@ -61,10 +67,6 @@ function compressString(
       reversible: options.reversible,
     });
     return result ? { result, kind, strategy: kind } : undefined;
-  }
-  if (allowRtk) {
-    const rtk = compressRtk(text, { toolName, ccr, reversible: options.reversible });
-    if (rtk) return { result: rtk.result, kind: rtk.kind, strategy: rtk.filter };
   }
   if (kind === 'log') {
     const result = compressLog(text, { targetRatio: options.targetRatio, ccr, reversible: options.reversible });

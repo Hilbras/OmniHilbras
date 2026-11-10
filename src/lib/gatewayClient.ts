@@ -990,7 +990,7 @@ export type GatewayTokenSaverStats = {
   totalTokensSaved: number;
   totalBytesSaved: number;
   cache: { read: number; write: number };
-  savers: Array<{ id: string; kind: string; requests: number; requestsWithSavings: number; tokensSaved: number; bytesSaved: number }>;
+  savers: Array<{ id: string; kind: string; requests: number; requestsWithSavings: number; ran?: number; skipped?: number; tokensSaved: number; bytesSaved: number }>;
   byProvider: Array<{ providerId: string; requests: number; tokensSaved: number; bytesSaved: number }>;
 };
 
@@ -1043,6 +1043,10 @@ export type GatewaySettings = {
   thinkingBudgetCap?: number;
   historyTrim?: { maxInputTokens: number; keepRecent: number };
   cacheAnchor?: boolean;
+  caveman?: { level: string };
+  ponytail?: { level: string };
+  headroom?: { enabled: boolean; timeoutMs?: number };
+  pxpipe?: { enabled: boolean; timeoutMs?: number; minChars?: number };
   endpoints: {
     openai: string;
     anthropic: string;
