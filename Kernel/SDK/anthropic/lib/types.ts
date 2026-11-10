@@ -76,6 +76,7 @@ export type ChatRequest = {
   toolChoice?: 'auto' | 'none' | 'required';
   /** How much a thinking model reasons before answering. Absent leaves the provider's default. */
   reasoningEffort?: 'low' | 'medium' | 'high';
+  maxThinkingTokens?: number;
   providerOptions?: Record<string, unknown>;
 };
 

@@ -136,6 +136,10 @@ export type SaverTelemetry = {
 };
 
 export type GatewayServiceOptions = {
+  /** 0/undefined means no cap. Applied to every chat request before routing. */
+  maxOutputTokensCap?: number;
+  /** 0/undefined means no cap. Applied to adapters that take a thinking budget. */
+  thinkingBudgetCap?: number;
   /**
    * The gateway's own configuration.
    *
@@ -193,6 +197,8 @@ export class GatewayService {
   private readonly gatewayConfig: GatewayConfig | undefined;
   private readonly tokenSaverConfig?: NonNullable<GatewayServiceOptions['tokenSaver']>;
   private readonly tokenSaverStore?: MemoryCcrStore;
+  private readonly maxOutputTokensCap?: number;
+  private readonly thinkingBudgetCap?: number;
   private readonly compressionTelemetry = new Map<string, SaverTelemetry>();
   private readonly compressionCache = new Map<string, { messages: ChatRequest['messages']; telemetry?: SaverTelemetry }>();
   private readonly transport: HttpTransport;
@@ -350,6 +356,8 @@ export class GatewayService {
     this.gatewayConfig = options.config;
     this.tokenSaverConfig = options.tokenSaver?.enabled ? options.tokenSaver : undefined;
     this.tokenSaverStore = this.tokenSaverConfig ? new MemoryCcrStore(this.tokenSaverConfig.ccrLimit) : undefined;
+    this.maxOutputTokensCap = options.maxOutputTokensCap && options.maxOutputTokensCap > 0 ? options.maxOutputTokensCap : undefined;
+    this.thinkingBudgetCap = options.thinkingBudgetCap && options.thinkingBudgetCap > 0 ? options.thinkingBudgetCap : undefined;
     // Kept, not just read: the ChatGPT Web driver is built lazily on first use, long after
     // the constructor has returned, so the override has to outlive this call.
     this.options = options;
@@ -2541,16 +2549,30 @@ export class GatewayService {
     return adapter.quota(await this.credentials.contextForProvider(connectionId, signal, scope));
   }
 
+  private withRequestLimits(request: ChatRequest): ChatRequest {
+    const maxOutputTokens = this.maxOutputTokensCap === undefined
+      ? request.maxOutputTokens
+      : Math.min(request.maxOutputTokens ?? this.maxOutputTokensCap, this.maxOutputTokensCap);
+    const maxThinkingTokens = this.thinkingBudgetCap === undefined
+      ? request.maxThinkingTokens
+      : Math.min(request.maxThinkingTokens ?? this.thinkingBudgetCap, this.thinkingBudgetCap);
+    return {
+      ...request,
+      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+      ...(maxThinkingTokens === undefined ? {} : { maxThinkingTokens }),
+    };
+  }
+
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    return adapter.chat({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: this.preparedMessages(request, scope) }, await this.contextForRequest(providerId, connectionId, signal, scope));
+    return adapter.chat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: this.preparedMessages(request, scope) }), await this.contextForRequest(providerId, connectionId, signal, scope));
   }
 
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    yield* adapter.streamChat({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: this.preparedMessages(request, scope) }, await this.contextForRequest(providerId, connectionId, signal, scope));
+    yield* adapter.streamChat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: this.preparedMessages(request, scope) }), await this.contextForRequest(providerId, connectionId, signal, scope));
   }
 
   /**

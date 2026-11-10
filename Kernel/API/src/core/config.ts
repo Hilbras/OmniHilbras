@@ -32,6 +32,10 @@ export type GatewayConfig = {
     reversible: boolean;
     ccrLimit: number;
   };
+  /** 0/undefined means no cap. Applied before every adapter. */
+  maxOutputTokensCap?: number;
+  /** 0/undefined means no cap. Applied to adapters that take a thinking budget. */
+  thinkingBudgetCap?: number;
   codex: {
     clientId?: string;
     redirectUri?: string;
@@ -98,6 +102,8 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
     recoveryCooldownMs: parseNonNegativeInteger(env.OMNIHILBRAS_RECOVERY_COOLDOWN_MS, 30_000, 'OMNIHILBRAS_RECOVERY_COOLDOWN_MS', 3_600_000),
     corsOrigins: parseCorsOrigins(env.OMNIHILBRAS_CORS_ORIGINS),
     dataDir: env.OMNIHILBRAS_DATA_DIR?.trim() || defaultConnectionDirectory(env),
+    ...(parseOptionalLimit(env.OMNIHILBRAS_MAX_OUTPUT_TOKENS, 1, 1_000_000) !== undefined ? { maxOutputTokensCap: parseOptionalLimit(env.OMNIHILBRAS_MAX_OUTPUT_TOKENS, 1, 1_000_000) } : {}),
+    ...(parseOptionalLimit(env.OMNIHILBRAS_THINKING_BUDGET, 1024, 1_000_000) !== undefined ? { thinkingBudgetCap: parseOptionalLimit(env.OMNIHILBRAS_THINKING_BUDGET, 1024, 1_000_000) } : {}),
     tokenSaver: {
       enabled: ['1', 'true', 'on', 'yes'].includes((env.OMNIHILBRAS_TOKEN_SAVER ?? '').trim().toLowerCase()),
       targetRatio: parseRatio(env.OMNIHILBRAS_TOKEN_SAVER_RATIO, 0.5),
@@ -193,6 +199,8 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
   const keys = apiKeyStore ?? new LocalApiKeyStore({ directory: config.dataDir });
   return new GatewayService(createProviderRegistry(config), store, store, keys, {
     tokenSaver: config.tokenSaver,
+    ...(config.maxOutputTokensCap ? { maxOutputTokensCap: config.maxOutputTokensCap } : {}),
+    ...(config.thinkingBudgetCap ? { thinkingBudgetCap: config.thinkingBudgetCap } : {}),
     failureThreshold: config.failureThreshold,
     recoveryCooldownMs: config.recoveryCooldownMs,
     // **Wired here in 1.64.0, and it had never been.** `GatewayServiceOptions.usageStore` is optional by
@@ -216,8 +224,20 @@ function providerEnvKey(providerId: string) {
   return `${providerId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
 }
 
-function parseRatio(value: string | undefined, fallback: number) {
-  if (value === undefined || value.trim() === '') return fallback;
+/**
+ * An optional positive limit. Absent or empty means "not configured"; malformed input is an error rather
+ * than a silent fallback, because a cap that silently disappears is worse than no cap.
+ */
+function parseOptionalLimit(value: string | undefined, minimum: number, maximum: number): number | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`Expected an integer between ${minimum} and ${maximum}, got "${value}".`);
+  }
+  return parsed;
+}
+
+function parseRatio(value: string | undefined, fallback: number) {  if (value === undefined || value.trim() === '') return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) throw new Error(`Expected a ratio between 0.05 and 0.95, got "${value}".`);
   return Math.min(0.95, Math.max(0.05, parsed));

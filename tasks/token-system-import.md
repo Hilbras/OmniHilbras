@@ -40,11 +40,11 @@ provider-neutral adapters). Old code is reference, not a drop-in: paths and prov
 
 ## Phase 3 — Output and context limits
 
-- [ ] Add `maxOutputTokensCap` and `thinkingBudgetCap` to config/runtime, applied before adapters and
+- [x] Add `maxOutputTokensCap` and `thinkingBudgetCap` to config/runtime, applied before adapters and
       re-clamped in adapters that compute their own ceiling.
-- [ ] Add `POST /v1/messages/count_tokens` (char/4 estimate including system/tools, marked estimated).
-- [ ] Expose both in `/v1/settings`; do not claim exact tokenizer accuracy.
-- [ ] Tests: cap clamp, thinking clamp, count endpoint shape and estimate.
+- [x] Add `POST /v1/messages/count_tokens` (char/4 estimate including system/tools, marked estimated).
+- [x] Expose both in `/v1/settings`; do not claim exact tokenizer accuracy.
+- [x] Tests: cap clamp, thinking clamp, count endpoint shape and estimate.
 
 ## Phase 4 — History trimming and cache anchoring
 

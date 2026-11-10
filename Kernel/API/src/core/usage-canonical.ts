@@ -72,7 +72,9 @@ export function canonicalizeUsage(raw: RawUsage | undefined): TokenUsage | undef
   const claudeShaped = raw.cache_read_input_tokens !== undefined || raw.cache_creation_input_tokens !== undefined;
   const foldCache = raw.cacheTokensIncluded === false || (raw.cacheTokensIncluded === undefined && claudeShaped);
   const inputTokens = foldCache ? baseInput + cacheRead + cacheWrite : baseInput;
-  const outputTokens = num(raw.outputTokens ?? raw.completion_tokens ?? raw.output_tokens ?? raw.candidatesTokenCount);
+  const outputRaw = raw.outputTokens ?? raw.completion_tokens ?? raw.output_tokens ?? raw.candidatesTokenCount;
+  const hasOutput = outputRaw !== undefined;
+  const outputTokens = num(outputRaw);
   const reasoningTokens = num(
     raw.reasoningTokens
     ?? raw.reasoning_tokens
@@ -83,7 +85,7 @@ export function canonicalizeUsage(raw: RawUsage | undefined): TokenUsage | undef
   if (inputTokens === 0 && outputTokens === 0 && cacheRead === 0 && cacheWrite === 0) return undefined;
   return {
     inputTokens,
-    outputTokens,
+    ...(hasOutput ? { outputTokens } : {}),
     totalTokens: inputTokens + outputTokens,
     cacheReadTokens: cacheRead,
     cacheWriteTokens: cacheWrite,

@@ -44,6 +44,18 @@ export async function handleInferenceRoute(ctx: RouteContext): Promise<boolean> 
       return true;
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/messages/count_tokens') {
+      const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
+      const counted = isRecord(body) ? JSON.stringify({ model: body.model, system: body.system, messages: body.messages, tools: body.tools }) : '';
+      sendJson(response, 200, {
+        // Anthropic-shaped count endpoint. It is an estimate, and the field says so; no tokenizer is
+        // bundled, so claiming an exact count would be false.
+        input_tokens: Math.ceil(Buffer.byteLength(counted, 'utf8') / 4),
+        estimated: true,
+      }, origin);
+      return true;
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/chat/completions') {
       await handleChat(request, response, service, options, origin, signal);
       return true;
@@ -1073,7 +1085,8 @@ export function isPublicLlmRoute(method: string | undefined, pathname: string) {
   return (method === 'GET' && pathname === '/v1/models')
     || (method === 'POST' && pathname === '/v1/chat/completions')
     || (method === 'POST' && pathname === '/v1/responses')
-    || (method === 'POST' && pathname === '/v1/embeddings');
+    || (method === 'POST' && pathname === '/v1/embeddings')
+    || (method === 'POST' && pathname === '/v1/messages/count_tokens');
 }
 
 /** Accepts the same headers OpenAI, Anthropic, and Gemini clients already send. */

@@ -233,6 +233,8 @@ export function SettingsContent() {
             <KeyValue label="Failure threshold" value={String(settings.failureThreshold)} />
             <KeyValue label="Recovery cooldown" value={`${settings.recoveryCooldownMs} ms`} />
             <KeyValue label="Context saver" value={settings.compression ? `${settings.compression.enabled ? 'on' : 'off'} · ratio ${settings.compression.targetRatio} · keep last ${settings.compression.protectRecent}` : 'not reported'} />
+            <KeyValue label="Output cap" value={settings.maxOutputTokensCap ? `${settings.maxOutputTokensCap} tokens` : 'none'} />
+            <KeyValue label="Thinking cap" value={settings.thinkingBudgetCap ? `${settings.thinkingBudgetCap} tokens` : 'none'} />
             <KeyValue label="Mutable at runtime" value={settings.mutableAtRuntime.join(', ') || '—'} />
             <KeyValue label="OpenAI-compatible" value={`${settings.endpoints.compatible.name} · ${settings.endpoints.compatible.baseUrl}`} />
             <KeyValue label="Mutable by restart" value={settings.mutableByRestart.join(', ') || '—'} />

@@ -1039,6 +1039,8 @@ export type GatewaySettings = {
     reversible: boolean;
     ccrLimit: number;
   };
+  maxOutputTokensCap?: number;
+  thinkingBudgetCap?: number;
   endpoints: {
     openai: string;
     anthropic: string;

@@ -628,6 +628,8 @@ OMNIHILBRAS_TOKEN_SAVER=1 omnihilbras
 #           OMNIHILBRAS_TOKEN_SAVER_CODE=1
 #           OMNIHILBRAS_TOKEN_SAVER_REVERSIBLE=true
 #           OMNIHILBRAS_TOKEN_SAVER_CCR_LIMIT=500
+OMNIHILBRAS_MAX_OUTPUT_TOKENS=8192      # optional hard cap on output tokens
+OMNIHILBRAS_THINKING_BUDGET=4096        # optional thinking-budget cap where supported
 ```
 
 When on, the gateway compresses provider-bound messages before routing, logs estimated savings, and

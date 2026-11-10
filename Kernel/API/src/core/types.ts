@@ -76,6 +76,8 @@ export type ChatRequest = {
   toolChoice?: 'auto' | 'none' | 'required';
   /** How much a thinking model reasons before answering. Absent leaves the provider's default. */
   reasoningEffort?: 'low' | 'medium' | 'high';
+  /** Provider budget cap for thinking tokens, where the provider takes one. */
+  maxThinkingTokens?: number;
   providerOptions?: Record<string, unknown>;
 };
 

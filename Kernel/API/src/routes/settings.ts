@@ -121,6 +121,8 @@ function publicSettings(config: GatewayConfig) {
     codex: codexReadiness(config),
     /** Same config under a key that is not credential-shaped; `tokenSaver` as a JSON key trips the guard. */
     compression: config.tokenSaver,
+    ...(config.maxOutputTokensCap === undefined ? {} : { maxOutputTokensCap: config.maxOutputTokensCap }),
+    ...(config.thinkingBudgetCap === undefined ? {} : { thinkingBudgetCap: config.thinkingBudgetCap }),
     endpoints: {
       openai: config.openai.baseUrl,
       anthropic: config.anthropic.baseUrl,
@@ -145,7 +147,7 @@ function publicSettings(config: GatewayConfig) {
     mutableAtRuntime: ['requireApiKey'],
     mutableByRestart: [
       'host', 'port', 'timeoutMs', 'healthIntervalMs', 'failureThreshold',
-      'recoveryCooldownMs', 'corsOrigins', 'dataDir', 'endpoints', 'compression',
+      'recoveryCooldownMs', 'corsOrigins', 'dataDir', 'endpoints', 'compression', 'maxOutputTokensCap', 'thinkingBudgetCap',
     ],
   };
 }

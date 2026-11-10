@@ -269,7 +269,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     if (request.stop !== undefined) body.stop_sequences = request.stop;
     if (request.tools !== undefined) body.tools = request.tools.map(toAnthropicTool);
     if (request.toolChoice !== undefined) body.tool_choice = toAnthropicToolChoice(request.toolChoice);
-    if (request.reasoningEffort !== undefined) body.thinking = toAnthropicThinking(request.reasoningEffort, Number(body.max_tokens));
+    if (request.reasoningEffort !== undefined) body.thinking = toAnthropicThinking(request.reasoningEffort, Number(body.max_tokens), request.maxThinkingTokens);
     return body;
   }
 
@@ -356,9 +356,10 @@ function contentToText(content: MessageContent) {
  */
 const thinkingShare: Record<'low' | 'medium' | 'high', number> = { low: 0.2, medium: 0.5, high: 0.8 };
 
-function toAnthropicThinking(effort: 'low' | 'medium' | 'high', maxTokens: number) {
+function toAnthropicThinking(effort: 'low' | 'medium' | 'high', maxTokens: number, cap?: number) {
   const budget = Math.max(1024, Math.floor(maxTokens * thinkingShare[effort]));
-  return { type: 'enabled', budget_tokens: Math.min(budget, maxTokens - 1) };
+  const capped = cap === undefined ? budget : Math.min(budget, cap);
+  return { type: 'enabled', budget_tokens: Math.max(1024, Math.min(capped, maxTokens - 1)) };
 }
 
 /** A replayed thinking block goes first, with the signature Anthropic issued, or it is refused. */
