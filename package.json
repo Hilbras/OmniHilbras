@@ -105,6 +105,7 @@
       "icon": "brand/logo-512.png",
       "category": "Development",
       "executableName": "omnihilbras",
+      "artifactName": "OmniHilbras-linux-amd64.${ext}",
       "maintainer": "Hilbras <opencode@example.com>",
       "syncDesktopName": true
     },
@@ -113,7 +114,8 @@
         "nsis"
       ],
       "icon": "brand/logo-512.png",
-      "executableName": "omnihilbras"
+      "executableName": "omnihilbras",
+      "artifactName": "OmniHilbras-Setup.${ext}"
     },
     "mac": {
       "target": [
@@ -121,7 +123,8 @@
         "zip"
       ],
       "icon": "brand/logo-512.png",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "artifactName": "OmniHilbras-macos.${ext}"
     },
     "publish": [
       {

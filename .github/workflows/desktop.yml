@@ -7,7 +7,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -48,3 +48,14 @@ jobs:
           name: omnihilbras-${{ runner.os }}
           path: ${{ matrix.artifact }}
           if-no-files-found: error
+      # `latest*.yml` is what electron-updater reads. A release without it makes every installed
+      # app fail its update check with "Cannot find latest yml in the latest release artifacts".
+      - name: Attach assets to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ matrix.artifact }}
+            release/latest*.yml
+            release/*.blockmap
+          fail_on_unmatched_files: false
