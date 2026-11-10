@@ -13,6 +13,8 @@ const links = [
 
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const path = typeof window === 'undefined' ? '/home' : window.location.pathname.replace(/\/+$/, '') || '/home';
+  const isActive = (href: string) => href === path || (href === '/home' && path === '/');
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -44,7 +46,8 @@ export function Navbar() {
             <a
               key={link.href}
               href={link.href}
-              className="rounded-lg px-2.5 py-1.5 text-sm text-muted transition-colors hover:text-gold-text"
+              aria-current={isActive(link.href) ? 'page' : undefined}
+              className={`rounded-lg px-2.5 py-1.5 text-sm transition-colors hover:text-gold-text ${isActive(link.href) ? 'text-gold-text' : 'text-muted'}`}
             >
               {link.label}
             </a>
@@ -84,7 +87,8 @@ export function Navbar() {
                   key={link.href}
                   href={link.href}
                   onClick={closeMenu}
-                  className="rounded-lg px-2 py-2.5 text-sm text-muted transition-colors hover:bg-surface hover:text-gold-text"
+                  aria-current={isActive(link.href) ? 'page' : undefined}
+                  className={`rounded-lg px-2 py-2.5 text-sm transition-colors hover:bg-surface hover:text-gold-text ${isActive(link.href) ? 'text-gold-text' : 'text-muted'}`}
                 >
                   {link.label}
                 </a>
