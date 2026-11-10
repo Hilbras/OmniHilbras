@@ -3,4 +3,5 @@ packages:
   - Kernel/API
   - Kernel/TokenSaver
 allowBuilds:
+  electron: true
   electron-winstaller: true
