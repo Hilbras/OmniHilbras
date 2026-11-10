@@ -630,7 +630,16 @@ OMNIHILBRAS_TOKEN_SAVER=1 omnihilbras
 #           OMNIHILBRAS_TOKEN_SAVER_CCR_LIMIT=500
 OMNIHILBRAS_MAX_OUTPUT_TOKENS=8192      # optional hard cap on output tokens
 OMNIHILBRAS_THINKING_BUDGET=4096        # optional thinking-budget cap where supported
+OMNIHILBRAS_HISTORY_TRIM_TOKENS=120000  # optional: trim whole old turns above this estimate
+OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT=8  # messages kept verbatim by the trim
+OMNIHILBRAS_CACHE_ANCHOR=1              # re-anchor provider cache breakpoints on the final body
 ```
+
+History trimming is independent of content compression: it keeps a request out of the model only when the
+whole conversation is over the threshold, stubbing old turns behind a retrieval marker while preserving the
+system prompt, the first user ask, the recent window and error-bearing tool results. Cache anchoring only
+acts in adapters that have a cache concept (currently Anthropic), and it runs after the savers so a trimmed
+body gets fresh breakpoints rather than a stale prefix.
 
 When on, the gateway compresses provider-bound messages before routing, logs estimated savings, and
 serves the original behind a marker at `GET /v1/token-saver/:id`. `x-omnihilbras-token-saver: off`

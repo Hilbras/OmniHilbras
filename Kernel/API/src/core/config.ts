@@ -36,6 +36,10 @@ export type GatewayConfig = {
   maxOutputTokensCap?: number;
   /** 0/undefined means no cap. Applied to adapters that take a thinking budget. */
   thinkingBudgetCap?: number;
+  /** Threshold history trimming in estimated input tokens. */
+  historyTrim?: { maxInputTokens: number; keepRecent: number };
+  /** Re-anchor provider cache breakpoints on the final body. */
+  cacheAnchor?: boolean;
   codex: {
     clientId?: string;
     redirectUri?: string;
@@ -104,6 +108,10 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
     dataDir: env.OMNIHILBRAS_DATA_DIR?.trim() || defaultConnectionDirectory(env),
     ...(parseOptionalLimit(env.OMNIHILBRAS_MAX_OUTPUT_TOKENS, 1, 1_000_000) !== undefined ? { maxOutputTokensCap: parseOptionalLimit(env.OMNIHILBRAS_MAX_OUTPUT_TOKENS, 1, 1_000_000) } : {}),
     ...(parseOptionalLimit(env.OMNIHILBRAS_THINKING_BUDGET, 1024, 1_000_000) !== undefined ? { thinkingBudgetCap: parseOptionalLimit(env.OMNIHILBRAS_THINKING_BUDGET, 1024, 1_000_000) } : {}),
+    ...(parseOptionalLimit(env.OMNIHILBRAS_HISTORY_TRIM_TOKENS, 1_000, 10_000_000) !== undefined
+      ? { historyTrim: { maxInputTokens: parseOptionalLimit(env.OMNIHILBRAS_HISTORY_TRIM_TOKENS, 1_000, 10_000_000)!, keepRecent: parseNonNegativeInteger(env.OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT, 8, 'OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT', 200) } }
+      : {}),
+    ...(['1', 'true', 'on', 'yes'].includes((env.OMNIHILBRAS_CACHE_ANCHOR ?? '').trim().toLowerCase()) ? { cacheAnchor: true } : {}),
     tokenSaver: {
       enabled: ['1', 'true', 'on', 'yes'].includes((env.OMNIHILBRAS_TOKEN_SAVER ?? '').trim().toLowerCase()),
       targetRatio: parseRatio(env.OMNIHILBRAS_TOKEN_SAVER_RATIO, 0.5),
@@ -201,6 +209,8 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     tokenSaver: config.tokenSaver,
     ...(config.maxOutputTokensCap ? { maxOutputTokensCap: config.maxOutputTokensCap } : {}),
     ...(config.thinkingBudgetCap ? { thinkingBudgetCap: config.thinkingBudgetCap } : {}),
+    ...(config.historyTrim ? { historyTrim: config.historyTrim } : {}),
+    ...(config.cacheAnchor ? { cacheAnchor: config.cacheAnchor } : {}),
     failureThreshold: config.failureThreshold,
     recoveryCooldownMs: config.recoveryCooldownMs,
     // **Wired here in 1.64.0, and it had never been.** `GatewayServiceOptions.usageStore` is optional by

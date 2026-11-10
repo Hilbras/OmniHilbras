@@ -123,6 +123,10 @@ function publicSettings(config: GatewayConfig) {
     compression: config.tokenSaver,
     ...(config.maxOutputTokensCap === undefined ? {} : { maxOutputTokensCap: config.maxOutputTokensCap }),
     ...(config.thinkingBudgetCap === undefined ? {} : { thinkingBudgetCap: config.thinkingBudgetCap }),
+    /** Whole-turn trimming: when it is configured and what it preserves. */
+    ...(config.historyTrim === undefined ? {} : { historyTrim: config.historyTrim }),
+    /** Whether provider cache breakpoints are re-anchored on the final body. */
+    cacheAnchor: config.cacheAnchor === true,
     endpoints: {
       openai: config.openai.baseUrl,
       anthropic: config.anthropic.baseUrl,
@@ -147,7 +151,7 @@ function publicSettings(config: GatewayConfig) {
     mutableAtRuntime: ['requireApiKey'],
     mutableByRestart: [
       'host', 'port', 'timeoutMs', 'healthIntervalMs', 'failureThreshold',
-      'recoveryCooldownMs', 'corsOrigins', 'dataDir', 'endpoints', 'compression', 'maxOutputTokensCap', 'thinkingBudgetCap',
+      'recoveryCooldownMs', 'corsOrigins', 'dataDir', 'endpoints', 'compression', 'maxOutputTokensCap', 'thinkingBudgetCap', 'historyTrim', 'cacheAnchor',
     ],
   };
 }

@@ -288,6 +288,12 @@ The first local gateway exposes:
   `<<token-saver:<id> ...>>` marker. Only ids in the gateway's bounded in-memory store resolve; a miss is
   a 404, never a fabricated empty prompt. Management route. Compression itself is opt-in with
   `OMNIHILBRAS_TOKEN_SAVER=1`; `x-omnihilbras-token-saver: off` disables it for one request.
+- **History trimming and cache anchoring** are opt-in configuration, not routes. With
+  `OMNIHILBRAS_HISTORY_TRIM_TOKENS` set, the gateway stubs whole old turns once the estimated input
+  exceeds it, preserving the system prompt, the first user message, the last
+  `OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT` messages and `is_error` tool results; the original is retrievable
+  from the same store. With `OMNIHILBRAS_CACHE_ANCHOR=1`, adapters that support provider cache breakpoints
+  re-anchor them on the final body after the savers run. `/v1/settings` reports both.
 - `POST /v1/web-cookie/tokenharbor/check` — verify a pasted Token Harbor session cookie against
   `tokenharbor.ai` by reading the account profile, and store nothing. A credential check, not a
   completion: it says whether the session is accepted, not whether a model can answer.
@@ -2553,6 +2559,13 @@ model ID. That constrains two behaviors:
   count. A tool message marked `is_error: true`, and any non-text content, is
   sent whole. A client that needs every line of a result for one request sends
   `x-omnihilbras-token-saver: off`.
+- **History trimming.** Opt-in with `OMNIHILBRAS_HISTORY_TRIM_TOKENS`. Above the threshold, whole old turns
+  are replaced by a retrieval marker; the system prompt, the first user ask, the last
+  `OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT` messages and error-bearing tool results are kept. The turn count
+  does not change: the provider still sees the same roles.
+- **Cache anchoring.** Opt-in with `OMNIHILBRAS_CACHE_ANCHOR=1`. Adapters with provider cache breakpoints
+  (currently Anthropic) re-anchor the last system block, last tool and last assistant turn on the final body,
+  after the savers run.
 - **Assistant reasoning.** An assistant message may carry `reasoning_content`. It is kept with that turn and
   sent back to OpenAI-compatible providers as `reasoning_content`, which a thinking model such as DeepSeek
   requires on a multi-turn tool round.

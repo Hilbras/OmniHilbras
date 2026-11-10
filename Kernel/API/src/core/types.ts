@@ -78,6 +78,8 @@ export type ChatRequest = {
   reasoningEffort?: 'low' | 'medium' | 'high';
   /** Provider budget cap for thinking tokens, where the provider takes one. */
   maxThinkingTokens?: number;
+  /** Anchor provider cache breakpoints on the final body. Only adapters that support it act on this. */
+  cacheAnchor?: boolean;
   providerOptions?: Record<string, unknown>;
 };
 

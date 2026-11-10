@@ -60,7 +60,7 @@ import { localDeployment, type ConnectionSecretStore, type DeploymentConfig } fr
 import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
-import { compressMessages, MemoryCcrStore, type SavableMessage } from '@omnihilbras/token-saver';
+import { compressMessages, MemoryCcrStore, trimHistory, type SavableMessage } from '@omnihilbras/token-saver';
 import { startRequestScope, withRequestScope, type RequestScope } from './request-context.js';
 import { decryptBackup, encryptBackup } from './backup.js';
 import { notSupported } from './capability.js';
@@ -140,6 +140,10 @@ export type GatewayServiceOptions = {
   maxOutputTokensCap?: number;
   /** 0/undefined means no cap. Applied to adapters that take a thinking budget. */
   thinkingBudgetCap?: number;
+  /** Threshold history trimming. Runs after content compression, before dispatch. */
+  historyTrim?: { maxInputTokens: number; keepRecent: number };
+  /** Re-anchor provider cache breakpoints on the final body. Anthropic-shaped adapters honour it. */
+  cacheAnchor?: boolean;
   /**
    * The gateway's own configuration.
    *
@@ -199,6 +203,8 @@ export class GatewayService {
   private readonly tokenSaverStore?: MemoryCcrStore;
   private readonly maxOutputTokensCap?: number;
   private readonly thinkingBudgetCap?: number;
+  private readonly historyTrim?: { maxInputTokens: number; keepRecent: number };
+  private readonly cacheAnchor?: boolean;
   private readonly compressionTelemetry = new Map<string, SaverTelemetry>();
   private readonly compressionCache = new Map<string, { messages: ChatRequest['messages']; telemetry?: SaverTelemetry }>();
   private readonly transport: HttpTransport;
@@ -355,9 +361,17 @@ export class GatewayService {
     this.usageStore = options.usageStore ? this.publishingUsage(options.usageStore) : undefined;
     this.gatewayConfig = options.config;
     this.tokenSaverConfig = options.tokenSaver?.enabled ? options.tokenSaver : undefined;
-    this.tokenSaverStore = this.tokenSaverConfig ? new MemoryCcrStore(this.tokenSaverConfig.ccrLimit) : undefined;
+    this.historyTrim = options.historyTrim && options.historyTrim.maxInputTokens > 0 ? options.historyTrim : undefined;
+    // History trimming needs the retrieval store even when content compression is off: a trimmed turn
+    // that cannot be recovered is a dropped turn.
+    this.tokenSaverStore = this.tokenSaverConfig
+      ? new MemoryCcrStore(this.tokenSaverConfig.ccrLimit)
+      : this.historyTrim
+        ? new MemoryCcrStore(500)
+        : undefined;
     this.maxOutputTokensCap = options.maxOutputTokensCap && options.maxOutputTokensCap > 0 ? options.maxOutputTokensCap : undefined;
     this.thinkingBudgetCap = options.thinkingBudgetCap && options.thinkingBudgetCap > 0 ? options.thinkingBudgetCap : undefined;
+    this.cacheAnchor = options.cacheAnchor === true;
     // Kept, not just read: the ChatGPT Web driver is built lazily on first use, long after
     // the constructor has returned, so the override has to outlive this call.
     this.options = options;
@@ -2467,48 +2481,79 @@ export class GatewayService {
     const complete = completeToolRounds(request.messages);
     if (scope?.tokenSaver === false) return complete;
     if (scope && this.compressionCache.has(scope.id)) return this.compressionCache.get(scope.id)!.messages;
-    if (this.tokenSaverConfig && this.tokenSaverStore) {
-      const beforeBytes = Buffer.byteLength(JSON.stringify(complete), 'utf8');
-      const compressed = compressMessages(complete as SavableMessage[], {
-        targetRatio: this.tokenSaverConfig.targetRatio,
-        protectRecent: this.tokenSaverConfig.protectRecent,
-        compressUsers: this.tokenSaverConfig.compressUsers,
-        compressCode: this.tokenSaverConfig.compressCode,
-        reversible: this.tokenSaverConfig.reversible,
-        ccr: this.tokenSaverStore,
-      });
-      if (compressed.stats.savedTokens > 0) {
-        const afterBytes = Buffer.byteLength(JSON.stringify(compressed.value), 'utf8');
-        const savers: SaverTelemetry['savers'] = {};
-        for (const route of compressed.stats.routes) {
-          const id = route.strategy || route.kind;
-          const entry = savers[id] ?? { kind: route.kind, requests: 0, tokensSaved: 0, bytesBefore: 0, bytesAfter: 0 };
-          entry.requests += 1;
-          entry.tokensSaved += Math.max(0, route.originalTokens - route.compressedTokens);
-          entry.bytesBefore += beforeBytes;
-          entry.bytesAfter += afterBytes;
-          savers[id] = entry;
-        }
-        const telemetry: SaverTelemetry = {
-          totalTokensSaved: compressed.stats.savedTokens,
-          totalBytesSaved: Math.max(0, beforeBytes - afterBytes),
-          savers,
-        };
-        if (scope) {
-          this.compressionTelemetry.set(scope.id, telemetry);
-          this.compressionCache.set(scope.id, { messages: compressed.value as ChatRequest['messages'], telemetry });
-          while (this.compressionCache.size > 500) {
-            const oldest = this.compressionCache.keys().next().value;
-            if (oldest === undefined) break;
-            this.compressionCache.delete(oldest);
-            this.compressionTelemetry.delete(oldest);
+    const store = this.tokenSaverStore;
+    if (store && (this.tokenSaverConfig || this.historyTrim)) {
+      let messages = complete as ChatRequest['messages'];
+      const savers: SaverTelemetry['savers'] = {};
+      let totalTokensSaved = 0;
+      let totalBytesSaved = 0;
+      const beforeBytes = Buffer.byteLength(JSON.stringify(messages), 'utf8');
+      if (this.tokenSaverConfig) {
+        const compressed = compressMessages(messages as SavableMessage[], {
+          targetRatio: this.tokenSaverConfig.targetRatio,
+          protectRecent: this.tokenSaverConfig.protectRecent,
+          compressUsers: this.tokenSaverConfig.compressUsers,
+          compressCode: this.tokenSaverConfig.compressCode,
+          reversible: this.tokenSaverConfig.reversible,
+          ccr: store,
+        });
+        messages = compressed.value as ChatRequest['messages'];
+        if (compressed.stats.savedTokens > 0) {
+          const afterBytes = Buffer.byteLength(JSON.stringify(messages), 'utf8');
+          for (const route of compressed.stats.routes) {
+            const id = route.strategy || route.kind;
+            const entry = savers[id] ?? { kind: route.kind, requests: 0, tokensSaved: 0, bytesBefore: 0, bytesAfter: 0 };
+            entry.requests += 1;
+            entry.tokensSaved += Math.max(0, route.originalTokens - route.compressedTokens);
+            entry.bytesBefore += beforeBytes;
+            entry.bytesAfter += afterBytes;
+            savers[id] = entry;
           }
+          totalTokensSaved = compressed.stats.savedTokens;
+          totalBytesSaved = Math.max(0, beforeBytes - afterBytes);
         }
-        console.log(`[token-saver] request ${scope?.id ?? 'unscoped'} saved ~${compressed.stats.savedTokens} tokens (${Math.round(compressed.stats.savedRatio * 100)}%)`);
-        return compressed.value as ChatRequest['messages'];
       }
-      if (scope) this.compressionCache.set(scope.id, { messages: complete });
-      return complete;
+      if (this.historyTrim) {
+        const trim = trimHistory(messages as SavableMessage[], {
+          maxInputTokens: this.historyTrim.maxInputTokens,
+          keepRecent: this.historyTrim.keepRecent,
+          ccr: store,
+          reversible: this.tokenSaverConfig?.reversible,
+        });
+        if (trim.trimmed > 0) {
+          const beforeTrimBytes = Buffer.byteLength(JSON.stringify(messages), 'utf8');
+          messages = trim.messages as ChatRequest['messages'];
+          const afterTrimBytes = Buffer.byteLength(JSON.stringify(messages), 'utf8');
+          const tokensSaved = Math.max(0, trim.originalTokens - trim.trimmedTokens);
+          const entry = savers['history-trim'] ?? { kind: 'text', requests: 0, tokensSaved: 0, bytesBefore: 0, bytesAfter: 0 };
+          entry.requests += 1;
+          entry.tokensSaved += tokensSaved;
+          entry.bytesBefore += beforeTrimBytes;
+          entry.bytesAfter += afterTrimBytes;
+          savers['history-trim'] = entry;
+          totalTokensSaved += tokensSaved;
+          totalBytesSaved += Math.max(0, beforeTrimBytes - afterTrimBytes);
+        }
+      }
+      const telemetry: SaverTelemetry | undefined = totalTokensSaved > 0
+        ? { totalTokensSaved, totalBytesSaved, savers }
+        : undefined;
+      if (scope) {
+        if (telemetry) {
+          this.compressionTelemetry.set(scope.id, telemetry);
+          this.compressionCache.set(scope.id, { messages, telemetry });
+        } else {
+          this.compressionCache.set(scope.id, { messages });
+        }
+        while (this.compressionCache.size > 500) {
+          const oldest = this.compressionCache.keys().next().value;
+          if (oldest === undefined) break;
+          this.compressionCache.delete(oldest);
+          this.compressionTelemetry.delete(oldest);
+        }
+      }
+      if (telemetry) console.log(`[token-saver] request ${scope?.id ?? 'unscoped'} saved ~${totalTokensSaved} tokens`);
+      return messages;
     }
     const compressed = compressToolResults(complete);
     const saved = toolResultBytes(complete) - toolResultBytes(compressed);
@@ -2560,6 +2605,7 @@ export class GatewayService {
       ...request,
       ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
       ...(maxThinkingTokens === undefined ? {} : { maxThinkingTokens }),
+      ...(this.cacheAnchor ? { cacheAnchor: true } : {}),
     };
   }
 

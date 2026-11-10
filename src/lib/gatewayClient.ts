@@ -1041,6 +1041,8 @@ export type GatewaySettings = {
   };
   maxOutputTokensCap?: number;
   thinkingBudgetCap?: number;
+  historyTrim?: { maxInputTokens: number; keepRecent: number };
+  cacheAnchor?: boolean;
   endpoints: {
     openai: string;
     anthropic: string;

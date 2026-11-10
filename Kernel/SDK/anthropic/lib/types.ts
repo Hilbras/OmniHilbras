@@ -77,6 +77,8 @@ export type ChatRequest = {
   /** How much a thinking model reasons before answering. Absent leaves the provider's default. */
   reasoningEffort?: 'low' | 'medium' | 'high';
   maxThinkingTokens?: number;
+  /** Re-anchor cache breakpoints on the final body. Set by the gateway after the savers run. */
+  cacheAnchor?: boolean;
   providerOptions?: Record<string, unknown>;
 };
 

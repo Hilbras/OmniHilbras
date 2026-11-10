@@ -11,6 +11,8 @@ export type SavableMessage = {
   toolCalls?: unknown;
   toolCallId?: string;
   name?: string;
+  /** Tool result flag carried by the gateway; trimmed history must preserve it. */
+  isError?: boolean;
   [key: string]: unknown;
 };
 

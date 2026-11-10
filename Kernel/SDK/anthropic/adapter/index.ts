@@ -270,6 +270,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     if (request.tools !== undefined) body.tools = request.tools.map(toAnthropicTool);
     if (request.toolChoice !== undefined) body.tool_choice = toAnthropicToolChoice(request.toolChoice);
     if (request.reasoningEffort !== undefined) body.thinking = toAnthropicThinking(request.reasoningEffort, Number(body.max_tokens), request.maxThinkingTokens);
+    if (request.cacheAnchor === true) anchorCache(body);
     return body;
   }
 
@@ -349,7 +350,53 @@ function contentToText(content: MessageContent) {
   return content.filter((part) => part.type === 'text').map((part) => part.text).join('');
 }
 
-/** Anthropic names a required tool call `any`; the other two choices carry the same meaning under the same names. */
+const CACHE_CONTROL = { type: 'ephemeral' } as const;
+
+/**
+ * Re-anchor cache breakpoints on the final Anthropic body.
+ *
+ * The last system block, the last tool and the last assistant turn are the stable prefix. Anchoring
+ * after compression matters: a marker inserted before a cache breakpoint changes every byte after it,
+ * and a stale anchor costs a full prefix rewrite.
+ */
+function anchorCache(body: Record<string, unknown>) {
+  for (const message of (body.messages as Array<Record<string, unknown>> | undefined) ?? []) {
+    for (const block of (message.content as Array<Record<string, unknown>> | undefined) ?? []) delete block.cache_control;
+  }
+  if (typeof body.system === 'string') {
+    body.system = [{ type: 'text', text: body.system, cache_control: { ...CACHE_CONTROL } }];
+  } else if (Array.isArray(body.system) && body.system.length > 0) {
+    for (const block of body.system as Array<Record<string, unknown>>) delete block.cache_control;
+    (body.system[body.system.length - 1] as Record<string, unknown>).cache_control = { ...CACHE_CONTROL };
+  }
+  if (Array.isArray(body.tools) && body.tools.length > 0) {
+    for (const tool of body.tools as Array<Record<string, unknown>>) delete tool.cache_control;
+    (body.tools[body.tools.length - 1] as Record<string, unknown>).cache_control = { ...CACHE_CONTROL };
+  }
+  const messages = body.messages as Array<Record<string, unknown>> | undefined;
+  if (!messages) return;
+  let anchored = false;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]!.role !== 'assistant') continue;
+    anchored = markLastBlock(messages[index]!);
+  }
+  if (!anchored) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (markLastBlock(messages[index]!)) break;
+    }
+  }
+}
+
+function markLastBlock(message: Record<string, unknown>): boolean {
+  const blocks = message.content as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(blocks) || blocks.length === 0) return false;
+  const last = blocks[blocks.length - 1]!;
+  if (!['text', 'tool_result', 'tool_use', 'image'].includes(String(last.type))) return false;
+  last.cache_control = { ...CACHE_CONTROL };
+  return true;
+}
+
+/**
 /**
  * Anthropic takes a token budget rather than an effort name. The budget grows with the effort, and stays below the
  * output limit, because Anthropic refuses a thinking budget that leaves no room for the answer.

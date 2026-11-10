@@ -48,11 +48,11 @@ provider-neutral adapters). Old code is reference, not a drop-in: paths and prov
 
 ## Phase 4 — History trimming and cache anchoring
 
-- [ ] Add threshold-based history trimming: estimate the final body, stub whole old tool/assistant
+- [x] Add threshold-based history trimming: estimate the final body, stub whole old tool/assistant
       blocks above a configurable threshold, keep the first user ask, recent turns, system and errors.
-- [ ] Emit telemetry for trimmed turns and estimated before/after.
-- [ ] Anchor Claude cache breakpoints after every saver, on the final body.
-- [ ] Tests: threshold boundary, first-user/recent/error preservation, no trim below threshold, anchors.
+- [x] Emit telemetry for trimmed turns and estimated before/after.
+- [x] Anchor Claude cache breakpoints after every saver, on the final body.
+- [x] Tests: threshold boundary, first-user/recent/error preservation, no trim below threshold, anchors.
 
 ## Phase 5 — Optional output-shaping and external savers
 

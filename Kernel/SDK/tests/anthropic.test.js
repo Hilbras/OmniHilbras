@@ -208,3 +208,36 @@ test('an assistant turn\'s thinking block and its signature are sent back to Ant
   const toolUseAt = assistant.content.findIndex((block) => block.type === 'tool_use');
   assert.ok(toolUseAt > 0, 'the tool use follows the thinking block');
 });
+
+test('a cache anchor lands on the stable prefix: last system block, last tool and last assistant turn', async () => {
+  const transport = createTransport();
+  const adapter = new AnthropicAdapter({ transport });
+  const request = {
+    model: 'claude-sonnet-4',
+    messages: [
+      { role: 'system', content: 'Be concise.' },
+      { role: 'user', content: 'run it' },
+      { role: 'assistant', content: 'calling the tool' },
+      { role: 'tool', toolCallId: 'toolu_1', content: 'ok' },
+    ],
+    tools: [
+      { name: 'first', parameters: { type: 'object' } },
+      { name: 'second', parameters: { type: 'object' } },
+    ],
+    cacheAnchor: true,
+  };
+  await adapter.chat(request, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  const body = JSON.parse(transport.calls[0].body);
+  assert.deepEqual(body.system, [{ type: 'text', text: 'Be concise.', cache_control: { type: 'ephemeral' } }]);
+  assert.equal('cache_control' in body.tools[0], false, 'only the last tool is anchored');
+  assert.deepEqual(body.tools[1].cache_control, { type: 'ephemeral' });
+  const assistant = body.messages.find((message) => message.role === 'assistant');
+  assert.deepEqual(assistant.content.at(-1).cache_control, { type: 'ephemeral' });
+
+  const plainTransport = createTransport();
+  const plain = new AnthropicAdapter({ transport: plainTransport });
+  await plain.chat({ ...request, cacheAnchor: false }, { credential: { type: 'api-key', value: 'sk-ant-test' } });
+  const unaanchored = JSON.parse(plainTransport.calls[0].body);
+  assert.equal(typeof unaanchored.system, 'string', 'without the flag the body keeps its usual shape');
+  assert.equal(JSON.stringify(unaanchored).includes('cache_control'), false, 'no marker is invented');
+});

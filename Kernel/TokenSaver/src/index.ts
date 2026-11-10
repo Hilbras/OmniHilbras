@@ -3,6 +3,7 @@ export { compressJsonText, compressJsonValue } from './json.js';
 export { compressLog } from './logs.js';
 export { compressText } from './text.js';
 export { compressCode } from './code.js';
+export { trimHistory } from './history.js';
 export { detectContentKind } from './detect.js';
 export { compressRtk } from './rtk.js';
 export { autoDetectFilter } from './filters/autodetect.js';
