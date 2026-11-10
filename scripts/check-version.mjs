@@ -36,7 +36,16 @@ const fixed = [];
  */
 for (const manifest of ['Kernel/API/package.json']) {
   const found = JSON.parse(read(manifest)).version;
-  if (found !== version) problems.push(`${manifest} is ${found}, expected ${version}`);
+  if (found !== version) {
+    if (fix) {
+      const parsed = JSON.parse(read(manifest));
+      parsed.version = version;
+      write(manifest, `${JSON.stringify(parsed, null, 2)}\n`);
+      fixed.push(`${manifest} → ${version}`);
+    } else {
+      problems.push(`${manifest} is ${found}, expected ${version}`);
+    }
+  }
 }
 
 /**
