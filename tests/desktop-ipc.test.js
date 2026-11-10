@@ -121,6 +121,14 @@ test('the updater resolves both CJS interop shapes', () => {
   assert.match(main, /electron-updater did not expose autoUpdater/, 'a missing updater is not reported');
 });
 
+test('installing an update stops the gateway and is not deferred by the quit guard', () => {
+  const main = read('./desktop/main.mjs');
+  assert.match(main, /autoUpdater\.autoInstallOnAppQuit = false/, 'an update can install as a side effect of a normal quit');
+  assert.match(main, /installingUpdate = true/, 'the update quit is not distinguished from a normal quit');
+  assert.match(main, /await gateway\.stop\(\)/, 'the installer can race a gateway that still holds files');
+  assert.match(main, /if \(installingUpdate\) \{/, 'the ordinary quit guard still defers the update quit');
+});
+
 test('desktop and web share one vault directory', () => {
   const main = read('./desktop/main.mjs');
   assert.match(main, /OMNIHILBRAS_DATA_DIR: sharedDataDir/, 'the desktop app still uses its own data directory');

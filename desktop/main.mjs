@@ -99,6 +99,8 @@ saveUserConfig({ gatewayPort: gateway.port });
 let window;
 let tray;
 let quitting = false;
+/** A downloaded update is replacing the app; `before-quit` must not defer that quit. */
+let installingUpdate = false;
 let logSubscription;
 let logAbort;
 const streamControllers = new Map();
@@ -167,7 +169,6 @@ function createTray() {
  */
 let updater;
 let updateState = { status: 'idle' };
-
 function setUpdateState(next) {
   updateState = { ...updateState, ...next };
   send('update:state', updateState);
@@ -183,6 +184,9 @@ async function loadUpdater() {
   const autoUpdater = module.autoUpdater ?? module.default?.autoUpdater;
   if (!autoUpdater) throw new Error('electron-updater did not expose autoUpdater.');
   autoUpdater.autoDownload = false;
+  // The update is installed only from the explicit "Install and restart" action, not as a side effect
+  // of the user quitting for another reason.
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.logger = null;
   autoUpdater.on('checking-for-update', () => setUpdateState({ status: 'checking' }));
   autoUpdater.on('update-available', (info) => {
@@ -239,10 +243,21 @@ async function downloadUpdate() {
   return updateState;
 }
 
-function installUpdate() {
+async function installUpdate() {
   if (!updater || updateState.status !== 'downloaded') throw new Error('No downloaded update is ready to install.');
   setUpdateState({ status: 'installing' });
-  updater.quitAndInstall();
+  // Stop the gateway before the installer takes over the app directory. The ordinary quit path does
+  // this from `before-quit`, but quitting for an update must not be deferred by that handler or the
+  // installer can race a process that still holds the files it replaces.
+  installingUpdate = true;
+  quitting = true;
+  try {
+    await stopLogForwarding();
+    await gateway.stop();
+  } catch {
+    // The installer is still the right next step; a supervisor that already stopped is fine.
+  }
+  updater.quitAndInstall(false, true);
 }
 
 function send(channel, payload) {
@@ -666,6 +681,10 @@ if (!locked) {
     // `before-quit` is synchronous, so an un-awaited stop is a race: Electron can exit before the
     // gateway sees SIGTERM, leaving the port held. The first quit is deferred until the child is gone.
     if (quittingSeen) return;
+    if (installingUpdate) {
+      quittingSeen = true;
+      return;
+    }
     event.preventDefault();
     quittingSeen = true;
     quitting = true;
