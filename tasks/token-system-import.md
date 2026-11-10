@@ -67,7 +67,7 @@ provider-neutral adapters). Old code is reference, not a drop-in: paths and prov
       history trim → cache anchor.
 - [x] Settings page exposes every saver, cap and threshold; `/v1/settings` reports what is loaded.
 - [x] README, `docs/SPEC-SDK.md`, architecture counts and AGENTS updated.
-- [ ] `pnpm verify` green; token-saver and gateway suites cover every new saver.
+- [x] `pnpm verify` green; token-saver and gateway suites cover every new saver.
 
 ## Non-goals / decisions
 
