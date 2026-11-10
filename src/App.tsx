@@ -12,6 +12,7 @@ import {
   Copy,
   Fingerprint,
   Gauge,
+  Star,
   LockKeyhole,
   Network,
   Server,
@@ -524,6 +525,10 @@ function App() {
                   </a>
                   <a href="#how-it-works" className="btn-ghost">
                     See how it works
+                  </a>
+                  <a href="https://github.com/Hilbras/OmniHilbras" target="_blank" rel="noreferrer" className="btn-ghost">
+                    <Star className="h-4 w-4" aria-hidden="true" />
+                    Star on GitHub
                   </a>
                 </motion.div>
                 <motion.div variants={revealItem} className="muted mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 font-mono text-[10px] uppercase tracking-[0.12em]">

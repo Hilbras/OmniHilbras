@@ -1,7 +1,11 @@
-# Release notes draft: 3.3.0
+# Release notes draft: 3.3.1
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.3.1 — GitHub star buttons
+
+- Added a GitHub star action to the navbar and the hero.
 
 ## 3.3.0 — explicit account isolation
 

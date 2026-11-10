@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, Menu, X } from 'lucide-react';
+import { ArrowUpRight, Menu, Star, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -53,6 +53,16 @@ export function Navbar() {
         </div>
 
         <div className="ml-auto flex items-center gap-2.5">
+          <a
+            href="https://github.com/Hilbras/OmniHilbras"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Star OmniHilbras on GitHub"
+            className="btn-ghost hidden sm:inline-flex"
+          >
+            <Star className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden md:inline">Star</span>
+          </a>
           <a href="/download" className="btn-gold hidden sm:inline-flex">
             Get started
             <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
@@ -106,6 +116,10 @@ export function Navbar() {
                 <a href="/download" onClick={closeMenu} className="btn-gold mt-3 w-full">
                   Get started
                   <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+                </a>
+                <a href="https://github.com/Hilbras/OmniHilbras" target="_blank" rel="noreferrer" onClick={closeMenu} className="btn-ghost mt-2 w-full">
+                  <Star className="h-4 w-4" aria-hidden="true" />
+                  Star on GitHub
                 </a>
               </div>
             </motion.div>
