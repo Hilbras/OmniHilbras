@@ -1,7 +1,12 @@
-# Release notes draft: 3.0.4
+# Release notes draft: 3.0.5
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.0.5 — notifications below the header
+
+- Toasts no longer cover the navbar, theme switch or window controls; they sit below the 72 px header.
+- No gateway route changed.
 
 ## 3.0.4 — test every saved connection
 

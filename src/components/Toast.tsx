@@ -99,7 +99,7 @@ function ToastViewport({ toasts, onDismiss }: { toasts: readonly Toast[]; onDism
       // than `assertive`: an error must be surfaced, but interrupting the user mid-word is its own fault.
       aria-live="polite"
       aria-atomic="false"
-      className="pointer-events-none fixed inset-x-0 top-3 z-[70] flex flex-col items-center gap-2 px-3 sm:inset-x-auto sm:right-4 sm:top-4 sm:items-end"
+      className="pointer-events-none fixed inset-x-0 top-20 z-[70] flex flex-col items-center gap-2 px-3 sm:inset-x-auto sm:right-4 sm:top-20 sm:items-end"
     >
       {toasts.map((toast) => {
         const { container, Icon } = TONE_STYLES[toast.tone];
