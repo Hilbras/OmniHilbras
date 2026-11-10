@@ -36,4 +36,5 @@ if (gatewayOnly) {
   for (const entry of readdirSync(sdkRoot, { withFileTypes: true })) {
     if (entry.isDirectory()) rmSync(join(sdkRoot, entry.name, 'dist'), { recursive: true, force: true });
   }
+  rmSync(join(root, 'Kernel', 'TokenSaver', 'dist'), { recursive: true, force: true });
 }

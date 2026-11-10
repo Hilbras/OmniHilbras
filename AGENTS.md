@@ -267,6 +267,7 @@ pnpm app:dev        # desktop app, gateway owned by Electron main
 pnpm app:smoke      # drive the real binary: shell, IPC, stop/start, feed
 pnpm app:check      # build and run the same smoke test
 pnpm app:size       # packaged size split
+pnpm test:token-saver  # standalone context compressor suite
 pnpm app:build      # unpacked desktop build
 pnpm app:pack       # desktop installers
 ```

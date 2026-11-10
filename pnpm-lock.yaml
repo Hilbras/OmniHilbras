@@ -472,6 +472,12 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  Kernel/TokenSaver:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
 packages:
 
   '@electron-internal/extract-zip@1.0.8':

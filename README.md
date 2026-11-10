@@ -593,6 +593,25 @@ Import replaces all of them and requires an explicit confirmation; a wrong passp
 envelope is refused before anything changes. The passphrase is never stored, and API keys are exported
 as hashes — they keep working after import but cannot be shown again.
 
+## Token saver
+
+`Kernel/TokenSaver` is a standalone TypeScript context compressor. It routes JSON, logs, search output,
+prose and (opt-in) code to separate compressors, keeps the last turns untouched, and stores every lossy
+rewrite in a bounded CCR store with a retrieval marker. It is provider-neutral and has no dependency on
+the gateway or the SDKs; integration is a later opt-in.
+
+```ts
+import { compressMessages, MemoryCcrStore, retrieve } from '@omnihilbras/token-saver';
+const store = new MemoryCcrStore(200);
+const result = compressMessages(messages, { protectRecent: 4, ccr: store });
+```
+
+Invariants: JSON output still parses and keeps error rows; logs keep FATAL/ERROR with stack context;
+code bodies are not removed unless `compressCode` is explicitly enabled; a rewrite that is not smaller is
+discarded. `estimateTokens` is a bytes/4 estimate, not a provider tokenizer.
+
+`pnpm test:token-saver` runs its suite. Design and limits: `Kernel/TokenSaver/README.md`.
+
 **Settings** is workable, not a mirror of `.env.example`: theme and reduced motion are saved in the
 browser; the desktop app persists close-to-tray, start-gateway-on-launch, update-check-on-launch and
 the gateway port (changing the port restarts the gateway); API-key enforcement is toggled through the

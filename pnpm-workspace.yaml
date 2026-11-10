@@ -1,5 +1,6 @@
 packages:
   - Kernel/SDK/*
   - Kernel/API
+  - Kernel/TokenSaver
 allowBuilds:
   electron-winstaller: true
