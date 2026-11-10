@@ -33,18 +33,16 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Electron 45 has no postinstall script; the binary is fetched by its own installer. The Linux
+      # smoke run needs it, and `pnpm install` alone leaves `node_modules/electron/dist` empty.
+      - name: Install Electron binary
+        run: node node_modules/electron/install.js
       - run: pnpm build
       - name: Smoke (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a pnpm app:smoke
       - name: Package
         run: pnpm exec electron-builder ${{ matrix.target }} --publish never
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - uses: actions/upload-artifact@v4
         with:
           name: omnihilbras-${{ runner.os }}
