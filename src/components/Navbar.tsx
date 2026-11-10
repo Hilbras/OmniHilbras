@@ -33,9 +33,7 @@ export function Navbar() {
           Skip to content
         </a>
         <a href="/home" className="flex shrink-0 items-center gap-2.5 text-[15px] font-semibold tracking-tight">
-          <span className="text-xl leading-none text-gold" aria-hidden="true">
-            ◈
-          </span>
+          <img src="/favicon.svg" alt="" width={28} height={28} className="h-7 w-7 shrink-0" />
           <span>
             Omni<span className="muted font-normal">Hilbras</span>
           </span>
@@ -74,31 +72,44 @@ export function Navbar() {
 
       <AnimatePresence>
         {mobileOpen && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="overflow-hidden border-t border-line bg-bg-soft/95 lg:hidden"
-          >
-            <div className="mx-auto flex max-w-6xl flex-col px-5 py-3">
-              {links.map((link) => (
-                <a
-                  key={link.href}
-                  href={link.href}
-                  onClick={closeMenu}
-                  aria-current={isActive(link.href) ? 'page' : undefined}
-                  className={`rounded-lg px-2 py-2.5 text-sm transition-colors hover:bg-surface hover:text-gold-text ${isActive(link.href) ? 'text-gold-text' : 'text-muted'}`}
-                >
-                  {link.label}
+          <>
+            <motion.div
+              key="nav-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.16 }}
+              onClick={closeMenu}
+              aria-hidden="true"
+              className="fixed inset-x-0 top-16 bottom-0 z-40 bg-black/50 lg:hidden"
+            />
+            <motion.div
+              key="nav-menu"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              className="absolute inset-x-0 top-full z-50 max-h-[calc(100dvh-4rem)] overflow-y-auto border-b border-line bg-bg shadow-2xl lg:hidden"
+            >
+              <div className="mx-auto flex max-w-6xl flex-col px-5 py-3">
+                {links.map((link) => (
+                  <a
+                    key={link.href}
+                    href={link.href}
+                    onClick={closeMenu}
+                    aria-current={isActive(link.href) ? 'page' : undefined}
+                    className={`rounded-lg px-2 py-2.5 text-sm transition-colors hover:bg-surface hover:text-gold-text ${isActive(link.href) ? 'text-gold-text' : 'text-muted'}`}
+                  >
+                    {link.label}
+                  </a>
+                ))}
+                <a href="/download" onClick={closeMenu} className="btn-gold mt-3 w-full">
+                  Get started
+                  <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
                 </a>
-              ))}
-              <a href="/download" onClick={closeMenu} className="btn-gold mt-3 w-full">
-                Get started
-                <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-              </a>
-            </div>
-          </motion.div>
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     </header>

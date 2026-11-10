@@ -36,9 +36,7 @@ export function Footer() {
       <div className="mx-auto grid max-w-6xl gap-10 px-5 py-12 sm:grid-cols-2 lg:grid-cols-4">
         <div className="max-w-xs">
           <a href="/home" className="flex items-center gap-2.5 text-[15px] font-semibold tracking-tight">
-            <span className="text-xl leading-none text-gold" aria-hidden="true">
-              ◈
-            </span>
+            <img src="/favicon.svg" alt="" width={28} height={28} className="h-7 w-7 shrink-0" />
             <span>
               Omni<span className="muted font-normal">Hilbras</span>
             </span>
