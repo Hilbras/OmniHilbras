@@ -322,6 +322,7 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
     const base = {
       period,
       ...(providerId ? { provider: providerId } : {}),
+      ...(connectionId ? { connection: connectionId } : {}),
     };
     // Two reads, deliberately. The cards, cost and charts describe the window; the outcome filter
     // lives in the table and must not rewrite them. One request with `outcome` made "Failed 0" appear
@@ -346,7 +347,7 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
         setError(cause instanceof Error ? cause.message : 'The gateway did not answer.');
       })
       .finally(() => setLoading(false));
-  }, [filter, page, period, providerId]);
+  }, [filter, page, period, providerId, connectionId]);
 
   useEffect(() => {
     const controller = new AbortController();

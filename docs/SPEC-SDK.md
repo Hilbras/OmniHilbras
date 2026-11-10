@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.2.0
+**Status:** Current — release 3.3.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -2586,6 +2586,11 @@ model ID. That constrains two behaviors:
 - **Account selection.** `x-omnihilbras-connection` (or the `connection` body field) narrows routing
   to one saved account. An unknown id is `INVALID_REQUEST`; a disabled or credential-less account
   yields no route. The chain never falls back to another account when one was named.
+- **Account limits.** `resilience.requestsPerMinute` and `resilience.maxConcurrentRequests` are enforced
+  per connection. A concurrency refusal is `RATE_LIMITED`, is not a provider failure, and does not cool
+  the model for another account. Authentication failures are terminal for that route.
+- **Egress.** `proxyPool` is accepted as metadata but this build has no proxy transport. A non-`none`
+  pool is refused with `CONFIGURATION_ERROR`; it is never silently sent direct.
 - **Long tool results.** A tool message longer than 250 lines is sent to the
   provider with its first 120 and last 60 lines and a marker giving the omitted
   count. A tool message marked `is_error: true`, and any non-text content, is

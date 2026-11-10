@@ -22,7 +22,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.2.0**
+**Current version: 3.3.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
@@ -189,6 +189,22 @@ web-session providers, local runtimes such as Ollama, and generic OpenAI-compati
 Provider cards are catalog metadata. A card shows `—` metrics and `No connections` until a real connection
 exists; it never invents a measurement. See the provider notes in the [gateway specification](./docs/SPEC-SDK.md)
 for auth-specific behavior and standing warnings.
+
+## Accounts
+
+A saved connection is an account. One provider may have several, each with its own credential, model list,
+priority, limits and usage attribution.
+
+- **Explicit selection.** `x-omnihilbras-connection: <id>` or the `connection` body field narrows routing to
+  that account. An unknown id is `INVALID_REQUEST`; a disabled or credential-less account gets no route. The
+  chain never silently replaces a named account.
+- **Independent limits.** `resilience.requestsPerMinute` and `resilience.maxConcurrentRequests` are keyed by
+  account. A concurrency refusal is not a provider failure and does not cool the model for another account.
+- **Authentication isolation.** `AUTHENTICATION_FAILED` is terminal for that account. It is not retried on
+  the next account, because a dead credential is a fact about one account.
+- **Network isolation is not claimed until enforced.** `proxyPool` is stored, but this build has no proxy
+  transport. A connection that names a non-`none` pool is refused with `CONFIGURATION_ERROR` rather than sent
+  direct. Remove the pool or use a direct account until transport-level egress lands.
 
 ## Token saver
 

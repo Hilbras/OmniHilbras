@@ -26,8 +26,8 @@ function adapter(captured, failAuth = false) {
 async function serviceWith({ failAuth = false, secondEnabled = true } = {}) {
   const captured = [];
   const store = new InMemoryConnectionStore();
-  const save = (id, priority, enabled = true) => store.save({
-    id, providerId: 'p', name: id, endpoint: 'https://p.example/v1', priority, proxyPool: 'none', enabled, modelIds: ['m'],
+  const save = (id, priority, enabled = true, resilience) => store.save({
+    id, providerId: 'p', name: id, endpoint: 'https://p.example/v1', priority, proxyPool: 'none', enabled, modelIds: ['m'], ...(resilience ? { resilience } : {}),
   }, { type: 'api-key', value: 'key' });
   await save('first', 1);
   await save('second', 2, secondEnabled);
@@ -70,4 +70,59 @@ test('an authentication failure stops at that account instead of trying the next
     (error) => error instanceof ProviderError && error.code === 'AUTHENTICATION_FAILED',
   );
   assert.equal(captured.length, 1, 'the second account must receive zero dispatches after an auth failure');
+});
+
+test('one account at its concurrency limit refuses without blocking another account', async () => {
+  let releaseFirst;
+  const gate = new Promise((resolve) => { releaseFirst = resolve; });
+  const captured = [];
+  const store = new InMemoryConnectionStore();
+  const save = (id, priority, resilience) => store.save({
+    id, providerId: 'p', name: id, endpoint: 'https://p.example/v1', priority, proxyPool: 'none', enabled: true, modelIds: ['m'], ...(resilience ? { resilience } : {}),
+  }, { type: 'api-key', value: 'key' });
+  await save('limited', 1, { maxConcurrentRequests: 1 });
+  await save('other', 2);
+  let calls = 0;
+  const registry = new ProviderRegistry().register({
+    id: 'p', name: 'P', capabilities: { chat: true, streaming: false, models: true, embeddings: false },
+    async listModels() { return [{ id: 'm', providerId: 'p' }]; },
+    async healthCheck() { return { status: 'healthy', checkedAt: new Date().toISOString(), latencyMs: 1, verified: 'credential' }; },
+    async chat(request) {
+      captured.push(request);
+      if (calls++ === 0) await gate;
+      return { id: 'r', providerId: 'p', model: request.model, createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'ok' }, finishReason: 'stop' };
+    },
+  });
+  const service = new GatewayService(registry, store, store, new InMemoryApiKeyStore(), {});
+
+  const first = service.chatWithFailover(request('limited'));
+  while (captured.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+  await assert.rejects(
+    () => service.chatWithFailover(request('limited')),
+    (error) => error instanceof ProviderError && error.code === 'RATE_LIMITED',
+  );
+  const other = await service.chatWithFailover(request('other'));
+  assert.equal(other.attempts[0].connectionId, 'other', 'a saturated account must not block another account');
+
+  releaseFirst();
+  await first;
+  const afterRelease = await service.chatWithFailover(request('limited'));
+  assert.equal(afterRelease.attempts[0].connectionId, 'limited', 'the slot must be reusable after completion');
+});
+
+test('an account naming a proxy pool is refused instead of sent direct', async () => {
+  const captured = [];
+  const store = new InMemoryConnectionStore();
+  await store.save({
+    id: 'proxied', providerId: 'p', name: 'proxied', endpoint: 'https://p.example/v1', priority: 1,
+    proxyPool: 'corporate', enabled: true, modelIds: ['m'],
+  }, { type: 'api-key', value: 'key' });
+  const registry = new ProviderRegistry().register(adapter(captured));
+  const service = new GatewayService(registry, store, store, new InMemoryApiKeyStore(), {});
+
+  await assert.rejects(
+    () => service.chatWithFailover(request('proxied')),
+    (error) => error instanceof ProviderError && error.code === 'CONFIGURATION_ERROR' && /proxy pool/i.test(error.message),
+  );
+  assert.equal(captured.length, 0, 'a request naming an unenforceable proxy must not fall back to a direct send');
 });

@@ -93,7 +93,7 @@ export type ConnectionRecordLike = {
   modelPolicy: string;
   modelIds: string[];
   customModelIds: string[];
-  resilience: { timeoutMs: number; maxRetries: number; requestsPerMinute: number; hedgeAfterMs: number };
+  resilience: { timeoutMs: number; maxRetries: number; requestsPerMinute: number; maxConcurrentRequests?: number; hedgeAfterMs: number };
   createdAt: string;
   updatedAt: string;
 };

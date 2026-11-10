@@ -181,7 +181,7 @@ export class RequestExecutor {
     try {
       return await this.deps.chat(candidate.providerId, request, deadline, scope, candidate.connectionId);
     } catch (error) {
-      if (error instanceof ProviderError && error.code === 'RATE_LIMITED') this.noteModelRateLimit(candidate.providerId, request.model, error, candidate.connectionId);
+      if (error instanceof ProviderError && error.code === 'RATE_LIMITED' && !(typeof error.details === 'object' && error.details !== null && (error.details as { concurrencyLimited?: unknown }).concurrencyLimited === true)) this.noteModelRateLimit(candidate.providerId, request.model, error, candidate.connectionId);
       throw error;
     }
   }

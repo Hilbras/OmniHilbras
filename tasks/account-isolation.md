@@ -1,6 +1,6 @@
 # Plan: explicit multi-account isolation
 
-**Status:** in progress — Phases 1–3 implemented; Phase 4 next
+**Status:** implemented — Phases 1–4 and 6; Phase 5 guard implemented, transport deferred; `pnpm verify` pending
 
 ## Context
 
@@ -65,14 +65,15 @@ isolation.
 `proxyPool` is currently stored and shown but not enforced by any transport. This phase must not pretend
 otherwise.
 
-- Define a per-account egress configuration; if credentials are needed, keep them in the vault, never in
-  the connection record.
-- Thread the selected egress through `ProviderRequestContext` and the vendored transports, including
-  streaming and OAuth renewal.
-- Record the egress name on the attempt and usage record.
-- If a transport cannot enforce egress, refuse the connection rather than silently sending it direct.
-- Tests: a proxied account uses the proxy; a direct account does not; a proxy failure fails that
-  account only; no credential appears in logs or usage.
+**Implemented guard:** a connection whose `proxyPool` is not `none` is refused with
+`CONFIGURATION_ERROR` before dispatch. It is never sent through the direct transport while claiming an
+egress identity.
+
+**Deferred, with reason:** actual proxied egress requires per-account proxy selection through every
+vendored SDK transport (fetch, streaming, OAuth renewal, web-session challenges). That is a transport
+feature, not a routing flag, and must not be faked in the gateway. The plan remains to thread a resolved
+egress through `ProviderRequestContext` and record it on the attempt; until then the refusal above is the
+honest behavior.
 
 ## Phase 6 — usage, observability and release
 

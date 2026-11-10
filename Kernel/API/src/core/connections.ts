@@ -108,6 +108,8 @@ export type ResilienceSettings = {
   maxRetries: number;
   /** Requests allowed per minute. 0 disables the limit for this connection. */
   requestsPerMinute: number;
+  /** Requests allowed in flight at once. 0 or absent disables the limit for this connection. */
+  maxConcurrentRequests?: number;
   /**
    * Delay before a second connection is raced against the first. 0 disables
    * hedging. The hedge is only sent when another candidate can serve the model,
@@ -160,6 +162,7 @@ export const resilienceLimits = {
   timeoutMs: { min: 0, max: 600_000 },
   maxRetries: { min: 0, max: 5 },
   requestsPerMinute: { min: 0, max: 100_000 },
+  maxConcurrentRequests: { min: 0, max: 1_000 },
   hedgeAfterMs: { min: 0, max: 30_000 },
 } as const;
 
@@ -927,11 +930,13 @@ export function normalizeResilienceSettings(value: Partial<ResilienceSettings>):
   const timeoutMs = read('timeoutMs', 'timeoutMs');
   const maxRetries = read('maxRetries', 'maxRetries');
   const requestsPerMinute = read('requestsPerMinute', 'requestsPerMinute');
+  const maxConcurrentRequests = read('maxConcurrentRequests', 'maxConcurrentRequests');
   const hedgeAfterMs = read('hedgeAfterMs', 'hedgeAfterMs');
   return {
     timeoutMs: timeoutMs ?? defaultResilienceSettings.timeoutMs,
     maxRetries: maxRetries ?? defaultResilienceSettings.maxRetries,
     requestsPerMinute: requestsPerMinute ?? defaultResilienceSettings.requestsPerMinute,
+    ...(maxConcurrentRequests === undefined ? {} : { maxConcurrentRequests }),
     hedgeAfterMs: hedgeAfterMs ?? defaultResilienceSettings.hedgeAfterMs,
   };
 }

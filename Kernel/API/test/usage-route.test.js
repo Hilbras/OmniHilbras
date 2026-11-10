@@ -97,6 +97,17 @@ test('a successful chat request produces one truthful record', async (t) => {
   assert.equal(body.totals.tokensUnmeasured, false);
 });
 
+test('usage can be filtered by account', async (t) => {
+  const gw = await gateway();
+  t.after(gw.close);
+  assert.equal((await gw.post()).status, 200);
+
+  const matching = await (await gw.getUsage('?connection=conn-p')).json();
+  assert.equal(matching.totals.requests, 1);
+  const other = await (await gw.getUsage('?connection=another-account')).json();
+  assert.equal(other.totals.requests, 0, 'one account filter must not include another account\'s records');
+});
+
 test('a failed request records the provider error code and no tokens it never received', async (t) => {
   const gw = await gateway({ provider: provider({ failWith: Object.assign(new Error('upstream 503'), { code: 'PROVIDER_UNAVAILABLE' }) }) });
   t.after(gw.close);

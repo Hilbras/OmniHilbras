@@ -1,7 +1,16 @@
-# Release notes draft: 3.2.0
+# Release notes draft: 3.3.0
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.3.0 — explicit account isolation
+
+- Provider page calls each saved connection an account and shows its email.
+- `x-omnihilbras-connection` narrows routing to one account; unknown and disabled accounts are refused.
+- Authentication failures stop at that account; they never retry on another.
+- Per-account `maxConcurrentRequests` and existing `requestsPerMinute` are independent.
+- Usage can be filtered by account, and the provider Usage tab has an account selector.
+- A named `proxyPool` is refused because this build has no proxy transport; it is never sent direct.
 
 ## 3.2.0 — .deb updates from the app
 

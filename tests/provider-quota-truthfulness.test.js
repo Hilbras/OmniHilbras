@@ -65,7 +65,7 @@ test('the panel is asked for the connection, not the card', () => {
   // A card that shares another provider's credential records under the owner; asking the card for a
   // quota would either 404 or read someone else's balance.
   const detail = read('src/pages/ProviderDetailPage.tsx');
-  assert.match(detail, /connectionId=\{connection\?\.id\}/, 'the panel is asked for the card rather than the connection behind it');
+  assert.match(detail, /connectionId=\{usageConnectionId\}/, 'the panel is asked for the card rather than the account behind it');
   assert.match(page, /providerId && connectionId \?/, 'the panel renders without a connection to read');
 });
 

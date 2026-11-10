@@ -224,7 +224,7 @@ function ModelRow({ model, prefix, facets, onCopy, onTest, testing, disabled, te
 
 function isValidResilience(value: GatewayResilience) {
   const inRange = (input: number, min: number, max: number) => Number.isInteger(input) && input >= min && input <= max;
-  return inRange(value.hedgeAfterMs, 0, 30_000) && inRange(value.maxRetries, 0, 5) && inRange(value.timeoutMs, 0, 600_000) && inRange(value.requestsPerMinute, 0, 100_000);
+  return inRange(value.hedgeAfterMs, 0, 30_000) && inRange(value.maxRetries, 0, 5) && inRange(value.timeoutMs, 0, 600_000) && inRange(value.requestsPerMinute, 0, 100_000) && inRange(value.maxConcurrentRequests ?? 0, 0, 1_000);
 }
 
 /** Narrows the model list to a test result. */
@@ -244,7 +244,7 @@ const modelSortOptions: ReadonlyArray<{ value: ModelFilterState['sort']; label: 
 ];
 
 /** The documented defaults, used when a record arrives without a resilience block. */
-const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, requestsPerMinute: 0, hedgeAfterMs: 0 };
+const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, requestsPerMinute: 0, maxConcurrentRequests: 0, hedgeAfterMs: 0 };
 
 /**
  * OAuth providers the gateway can actually complete a sign-in for today.
@@ -306,11 +306,12 @@ function ResiliencePanel({ connection, routingState, onSave, strategy, onStrateg
             : strategy === 'fastest'
               ? 'Accounts at the same priority are tried quickest-measured first. A reading comes from the requests each account has served, so a new account competes once it has answered one; an account with no reading is never treated as fast. Priority is still respected, and the others remain fallbacks.'
               : 'The first connection by priority serves requests and the others are fallbacks.'}</p>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <label className="block"><span className="mono-label mb-1.5 block">Hedge after (ms)</span><input type="number" min={0} max={30000} step={100} value={draft.hedgeAfterMs} onChange={(event) => setDraft((current) => ({ ...current, hedgeAfterMs: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
             <label className="block"><span className="mono-label mb-1.5 block">Retries</span><input type="number" min={0} max={5} value={draft.maxRetries} onChange={(event) => setDraft((current) => ({ ...current, maxRetries: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
             <label className="block"><span className="mono-label mb-1.5 block">Timeout (ms)</span><input type="number" min={0} max={600000} step={1000} value={draft.timeoutMs} onChange={(event) => setDraft((current) => ({ ...current, timeoutMs: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
             <label className="block"><span className="mono-label mb-1.5 block">Requests / min</span><input type="number" min={0} max={100000} value={draft.requestsPerMinute} onChange={(event) => setDraft((current) => ({ ...current, requestsPerMinute: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
+            <label className="block"><span className="mono-label mb-1.5 block">In flight</span><input type="number" min={0} max={1000} value={draft.maxConcurrentRequests ?? 0} onChange={(event) => setDraft((current) => ({ ...current, maxConcurrentRequests: Number(event.target.value) }))} className="input !py-2 !text-xs" /></label>
           </div>
           <p className="muted text-[11px] leading-relaxed">{draft.hedgeAfterMs > 0
             ? `If this connection has not answered in ${draft.hedgeAfterMs} ms, the next eligible connection is raced against it and the first reply wins. The loser is cancelled, so its tokens are usually not billed.`
@@ -436,6 +437,8 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   const [connectionProbeResults, setConnectionProbeResults] = useState<Record<string, { healthy: boolean; latencyMs?: number }>>({});
   const [refreshingModels, setRefreshingModels] = useState(false);
   const [connection, setConnection] = useState<GatewayConnection | undefined>();
+  /** Which account the Usage tab is filtered to; undefined means every account of the provider. */
+  const [usageConnectionId, setUsageConnectionId] = useState<string | undefined>();
   /**
    * The save dialog's seed for that account, memoized: the dialog reseeds from `initialConnection` when
    * its identity changes, so a fresh object on every render would empty the fields being typed into.
@@ -525,6 +528,10 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     // report "No connection" on a fresh load, however it was added.
     void loadConnection();
   }, [provider.id]);
+
+  useEffect(() => {
+    setUsageConnectionId(connection?.id);
+  }, [connection?.id]);
 
   // Reload when the gateway comes back, for the same reason as the list: a page that failed
   // to load makes no further requests, so nothing else would ever notice the change.
@@ -1238,7 +1245,23 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
           owner. So the filter follows the connection, not the card, or `clinepass` would show an empty tab while
           its requests sit under `cline`. `ProviderRecord.connectionProviderId` exists for exactly this.
         */
-        <UsageContent providerId={provider.connectionProviderId ?? provider.id} connectionId={connection?.id} />
+        <div>
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <label htmlFor="usage-account" className="mono-label">Account</label>
+            <select
+              id="usage-account"
+              value={usageConnectionId ?? ''}
+              onChange={(event) => setUsageConnectionId(event.target.value || undefined)}
+              className="input !w-auto !py-2 !text-xs"
+            >
+              <option value="">All accounts</option>
+              {connections.map((item) => (
+                <option key={item.id} value={item.id}>{item.name}{item.email ? ` · ${item.email}` : ''}</option>
+              ))}
+            </select>
+          </div>
+          <UsageContent providerId={provider.connectionProviderId ?? provider.id} connectionId={usageConnectionId} />
+        </div>
       ) : (
         <>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">

@@ -32,6 +32,8 @@ export type GatewayResilience = {
   maxRetries: number;
   /** Requests allowed per minute. 0 disables the limit. */
   requestsPerMinute: number;
+  /** Requests allowed in flight at once. 0 or absent disables the limit. */
+  maxConcurrentRequests?: number;
   /**
    * Delay before a second connection is raced against the first. 0 disables
    * hedging. Only sent when another connection can serve the same model.
@@ -998,12 +1000,13 @@ export function getGatewayTokenSaverStats(period = '7d', signal?: AbortSignal) {
   return requestJson<GatewayTokenSaverStats>(`/v1/token-saver/stats?period=${encodeURIComponent(period)}`, { signal });
 }
 
-export function getGatewayUsage(query?: { period?: string; provider?: string; outcome?: 'success' | 'failure' | 'cancelled'; limit?: number; offset?: number }, signal?: AbortSignal) {
+export function getGatewayUsage(query?: { period?: string; provider?: string; connection?: string; outcome?: 'success' | 'failure' | 'cancelled'; limit?: number; offset?: number }, signal?: AbortSignal) {
   const params = new URLSearchParams();
   if (query?.period) params.set('period', query.period);
   // The gateway filters by the recorded `providerId`; a provider page passes the id its records are written
   // under, which is the connection owner for a card that shares another provider's credential.
   if (query?.provider) params.set('provider', query.provider);
+  if (query?.connection) params.set('connection', query.connection);
   if (query?.outcome) params.set('outcome', query.outcome);
   if (query?.limit !== undefined) params.set('limit', String(query.limit));
   if (query?.offset !== undefined) params.set('offset', String(query.offset));

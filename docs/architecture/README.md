@@ -24,6 +24,18 @@ The gateway is one of three consumers in this repository:
 The dashboard and desktop app never call a provider directly. They call the gateway, which is the only
 component that knows a provider's wire format.
 
+## Accounts
+
+`GatewayConnection` is the account record. It already carries its own id, encrypted credential, model list,
+priority, `requestsPerMinute`, optional `maxConcurrentRequests` and `proxyPool` name. Multiple rows for one
+provider are separate accounts, not one account with aliases.
+
+- Routing narrows to `x-omnihilbras-connection` when supplied; unknown and disabled accounts are refused.
+- `UsageRecord.connectionId` is the account attribution; the Usage tab filters by it.
+- `AUTHENTICATION_FAILED` is terminal for the named route.
+- `proxyPool` is not enforced by a transport yet. A non-`none` value is refused rather than sent direct;
+  pretending the label isolates egress would be worse than the clear error.
+
 ---
 
 ## Measured state
@@ -48,11 +60,11 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/provider-resolver.ts` | 261 | 1 | enforced by a test that greps the file |
 | `Kernel/API/src/core/request-executor.ts` | 727 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 333 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 3042 | 23 | all twenty-three `.onDemand()` registrations, in one constructor |
+| `Kernel/API/src/core/service.ts` | 3111 | 23 | all twenty-three `.onDemand()` registrations, in one constructor |
 | `Kernel/API/src/core/http.ts` | 314 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 776 | 12 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 358 | 1 | one OpenRouter save shortcut, the generic quota route, and the build stamp |
-| `Kernel/API/src/routes/inference.ts` | 1107 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and the auth gate |
+| `Kernel/API/src/routes/inference.ts` | 1134 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and the auth gate |
 | `Kernel/API/src/routes/api-keys.ts` | 74 | **0** | |
 | `Kernel/API/src/routes/status.ts` | 48 | **0** | `/health`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |

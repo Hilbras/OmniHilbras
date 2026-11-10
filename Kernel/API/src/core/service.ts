@@ -238,6 +238,8 @@ export class GatewayService {
   private readonly pxpipe?: { url: string; timeoutMs?: number; minChars?: number };
   private readonly compressionTelemetry = new Map<string, SaverTelemetry>();
   private readonly compressionCache = new Map<string, { messages: ChatRequest['messages']; telemetry?: SaverTelemetry }>();
+  /** In-flight requests by saved account, for `maxConcurrentRequests`. */
+  private readonly inFlight = new Map<string, number>();
   private readonly transport: HttpTransport;
   private readonly clineAdapters = new Map<string, ProviderAdapter>();
   private readonly clinepassAdapters = new Map<string, ProviderAdapter>();
@@ -2715,13 +2717,53 @@ export class GatewayService {
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    return adapter.chat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: await this.preparedMessages(request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+    const release = await this.acquireConcurrency(connectionId);
+    try {
+      return await adapter.chat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: await this.preparedMessages(request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+    } finally {
+      release();
+    }
   }
 
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    yield* adapter.streamChat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: await this.preparedMessages(request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+    const release = await this.acquireConcurrency(connectionId);
+    try {
+      yield* adapter.streamChat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: await this.preparedMessages(request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+    } finally {
+      release();
+    }
+  }
+
+  /**
+   * Reserves one in-flight slot for the selected account, or refuses before a request is dispatched.
+   *
+   * The slot belongs to the connection, not the provider: two accounts of one vendor have independent
+   * concurrency. A refusal is not a provider failure; nothing was sent.
+   */
+  private async acquireConcurrency(connectionId?: string): Promise<() => void> {
+    if (!connectionId) return () => {};
+    const connection = (await this.connections.list()).find((entry) => entry.id === connectionId);
+    const limit = connection?.resilience.maxConcurrentRequests ?? 0;
+    if (!limit) return () => {};
+    const active = this.inFlight.get(connectionId) ?? 0;
+    if (active >= limit) {
+      throw new ProviderError('RATE_LIMITED', 'The account is at its concurrency limit.', {
+        retryable: false,
+        details: { concurrencyLimited: true },
+        publicMessage: 'This account is at its concurrency limit. Wait for an in-flight request to finish.',
+      });
+    }
+    this.inFlight.set(connectionId, active + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const now = this.inFlight.get(connectionId) ?? 1;
+      if (now <= 1) this.inFlight.delete(connectionId);
+      else this.inFlight.set(connectionId, now - 1);
+    };
   }
 
   /**
@@ -2740,7 +2782,12 @@ export class GatewayService {
   async embed(providerId: string, request: EmbeddingRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<EmbeddingResponse> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (adapter.capabilities.embeddings !== true || typeof adapter.embed !== 'function') throw notSupported(adapter, 'embeddings');
-    return adapter.embed({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId) }, await this.contextForRequest(providerId, connectionId, signal, scope));
+    const release = await this.acquireConcurrency(connectionId);
+    try {
+      return await adapter.embed({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId) }, await this.contextForRequest(providerId, connectionId, signal, scope));
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -2753,6 +2800,16 @@ export class GatewayService {
    */
   private async contextForRequest(providerId: string, connectionId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<ProviderRequestContext> {
     if (!connectionId || connectionId.startsWith('unmanaged:')) return this.credentials.contextForProvider(providerId, signal, scope);
+    const saved = (await this.connections.list()).find((connection) => connection.id === connectionId);
+    if (saved && saved.proxyPool !== 'none') {
+      // Refusing is the honest outcome. Sending through the direct transport while the account says
+      // it is isolated would leak the request from the wrong network identity, which is worse than a
+      // clear configuration error.
+      throw new ProviderError('CONFIGURATION_ERROR', `Connection ${connectionId} names proxy pool "${saved.proxyPool}", but this gateway build cannot enforce proxied egress.`, {
+        retryable: false,
+        publicMessage: 'This account names a proxy pool, but this build cannot enforce proxied egress. Remove the proxy pool or use a direct account.',
+      });
+    }
     const canonical = providerAlias(providerId);
     if (canonical && canonical !== providerId) {
       // A shared card's routed connection is the alias record, which deliberately holds no token of
