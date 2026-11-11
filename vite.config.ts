@@ -5,7 +5,7 @@ import { PNG } from 'pngjs';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { dashboardTokenPath } from './Kernel/API/src/core/dashboard-token';
+import { dashboardTokenPath } from './Kernel/API/src/core/dashboard-token.js';
 
 /** Routes that must reach the dashboard SPA instead of a missing file. */
 const dashboardPrefix = '/dashboard';
