@@ -132,7 +132,7 @@ function DetailStat({ label, value, icon: Icon, tone = 'muted' }: { label: strin
   return <div className="rounded-xl border border-line bg-bg-soft/70 p-3.5"><Icon className={`h-4 w-4 ${toneClass}`} aria-hidden="true" /><p className="muted mt-3 text-[10px] uppercase tracking-[0.1em]">{label}</p><p className="mt-1 truncate font-mono text-sm font-semibold">{value}</p></div>;
 }
 
-function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest, onEdit, onToggleEnabled, togglingEnabled }: { provider: ProviderRecord; connection?: GatewayConnection; healthy: boolean; pingMs?: number; testing: boolean; onTest: () => void; onEdit: () => void; onToggleEnabled?: () => void; togglingEnabled?: boolean }) {
+function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest, onEdit, onReconnect, onToggleEnabled, togglingEnabled }: { provider: ProviderRecord; connection?: GatewayConnection; healthy: boolean; pingMs?: number; testing: boolean; onTest: () => void; onEdit: () => void; onReconnect?: () => void; onToggleEnabled?: () => void; togglingEnabled?: boolean }) {
   const connectionName = connection?.name ?? provider.name;
   const endpoint = connection?.endpoint ?? provider.endpoint;
   const priority = connection?.priority ?? 1;
@@ -159,6 +159,7 @@ function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest,
         </div>
       </div>
       <div className="flex flex-wrap shrink-0 items-center gap-2">
+        {onReconnect && <button type="button" onClick={onReconnect} className="btn-ghost !px-3 !py-2 !text-xs"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Reconnect</button>}
         <button type="button" onClick={() => onTest()} disabled={testing} className="btn-ghost !px-3 !py-2 !text-xs">{testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testing ? 'Testing' : 'Test account'}</button>
         <button type="button" onClick={onEdit} className="btn-quiet !px-2 !py-2 text-xs"><SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />Edit</button>
         {/* On the far side of the row from the account's identity, the same place the accounts panel
@@ -1323,6 +1324,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
                   // Edit targets this row, not "add one": the row a person clicks is the account they
                   // mean, and it used to open the add-a-connection dialog instead.
                   onEdit={() => openEditConnection(item)}
+                  onReconnect={isOauth && oauthFlowAvailable ? () => openAddConnection() : undefined}
                   onToggleEnabled={() => void toggleConnectionEnabled(item)}
                   togglingEnabled={togglingConnectionId === item.id}
                 />
