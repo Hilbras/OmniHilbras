@@ -50,7 +50,10 @@ function saveUserConfig(patch) {
 }
 
 const userConfig = readUserConfig();
-const preferredPort = Number(process.env.OMNIHILBRAS_PORT) || Number(userConfig.gatewayPort) || 20137;
+const savedPort = Number(userConfig.gatewayPort);
+// Migrate the pre-3.11.1 default (8787) to the new far port so an upgraded install does not keep
+// serving on the old port, which conflicts with the dev gateway.
+const preferredPort = Number(process.env.OMNIHILBRAS_PORT) || (savedPort === 8787 ? 20137 : savedPort) || 20137;
 // The CLI and the web dashboard use this directory. The desktop app used its own `userData/data`,
 // which made an exported backup imported in the other surface look like it did nothing: they were
 // two vaults. Share the store, and migrate a pre-existing desktop-only store once when the shared
@@ -72,7 +75,7 @@ function appSettings() {
     closeToTray: config.closeToTray !== false,
     autoStartGateway: config.autoStartGateway !== false,
     checkUpdatesOnLaunch: config.checkUpdatesOnLaunch !== false,
-    gatewayPort: Number(config.gatewayPort) || preferredPort,
+    gatewayPort: (Number(config.gatewayPort) === 8787 ? 20137 : Number(config.gatewayPort)) || preferredPort,
   };
 }
 const logFile = join(app.getPath('userData'), 'logs', 'gateway.log');
