@@ -188,11 +188,12 @@ test('a model that is not free is refused by name, without asking the service', 
   assert.deepEqual(fake.calls, [], 'a refused model must not spend a request');
 });
 
-test('a forced tool call is refused, because prose cannot honour it', async () => {
+test('a forced tool call is stated in the prompt rather than refused', async () => {
   const fake = driver();
   const adapter = new DuckDuckGoWebAdapter({ driver: fake });
-  await assert.rejects(() => adapter.chat(request({ toolChoice: 'required' })), /force a tool call/);
-  assert.deepEqual(fake.calls, []);
+  await adapter.chat(request({ toolChoice: 'required', tools: [{ name: 'read_file', parameters: { type: 'object' } }] }));
+  assert.equal(fake.calls.length, 1);
+  assert.match(fake.calls[0].messages[0].content, /must call at least one tool/i);
 });
 
 test('an unreadable catalog does not refuse the turn — the service decides', async () => {
@@ -249,11 +250,11 @@ test('a provider error from the driver is passed through unchanged', () => {
   assert.equal(normalizeDuckDuckGoWebError(original, 'duckduckgo-web'), original);
 });
 
-test('the adapter does not claim to stream', async () => {
-  // The answer is assembled from the service's stream and handed back once. Presenting that as a stream would
-  // claim tokens arriving over time when none do — the same rule `gemini-web` follows.
+test('the adapter accepts a stream as one completed chunk', async () => {
+  // The answer is assembled from the service's stream and handed back once, but the capability flag is true:
+  // an agent that asks for streaming must not be refused before it can receive a tool call.
   const adapter = new DuckDuckGoWebAdapter({ driver: driver() });
-  assert.equal(adapter.capabilities.streaming, false);
+  assert.equal(adapter.capabilities.streaming, true);
   const chunks = [];
   for await (const chunk of adapter.streamChat(request())) chunks.push(chunk);
   assert.equal(chunks.length, 1);

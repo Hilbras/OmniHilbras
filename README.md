@@ -22,7 +22,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.8.0**
+**Current version: 3.9.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
@@ -184,9 +184,9 @@ web-session providers, local runtimes such as Ollama, and generic OpenAI-compati
   provider page in your default browser.
 - **Web session:** a pasted cookie is verified against the provider before it is stored. Cards exist for
   ChatGPT Web, Qwen Web, DeepSeek Web, Token Harbor Web, Gemini Web, Duck.ai, Grok Web and Perplexity Web;
-  Grok and Perplexity forward real streams, DeepSeek returns one completed chunk, and the rest declare
-  `streaming: false` and say so in the spec. DeepSeek Web also supports prompt-level DSML tool rounds,
-  image attachments and bounded session reuse, which is what makes it usable by a coding agent.
+  Grok and Perplexity forward real streams, DeepSeek and Duck.ai return one completed chunk, and the
+  rest declare `streaming: false` and say so in the spec. DeepSeek Web and Duck.ai both support
+  prompt-level DSML tool rounds; DeepSeek also supports images and bounded session reuse.
 - **Local:** no credential is required; the connection is saved with `credential: "none"`, not an invented key.
 - **Custom endpoint:** any OpenAI-compatible base URL with optional model and chat paths.
 

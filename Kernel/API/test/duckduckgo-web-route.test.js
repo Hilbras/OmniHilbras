@@ -177,7 +177,7 @@ test('the connect stores a pasted cookie under the same provider id', async (t) 
 test('the adapter routes a saved keyless connection to the driver', async (t) => {
   // The end of the path the card promises: a connection stored with no secret is still routable, and the turn
   // reaches the adapter rather than being dropped by `hasCredential` in `RoutingEngine`.
-  const driver = { ...fakeDriver(), async ask({ messages }) { return { text: messages[0].content, model: 'gpt-5.4-mini' }; } };
+  const driver = { ...fakeDriver(), async ask() { return { text: 'answered without a credential', model: 'gpt-5.4-mini' }; } };
   const service = new GatewayService(new ProviderRegistry(), new InMemorySecretStore({}), new InMemoryConnectionStore(), new InMemoryApiKeyStore(), {
     failureThreshold: 1_000,
     duckDuckGoWebDriver: driver,

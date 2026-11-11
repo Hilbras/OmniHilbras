@@ -2,7 +2,7 @@
 
 > **Historical plan.** The task list below is the original pre-restructure plan and is kept as a record.
 > The current architecture is described in [`docs/architecture/README.md`](../docs/architecture/README.md)
-> and the route contract in [`docs/SPEC-SDK.md`](../docs/SPEC-SDK.md). The current release is **3.8.0**;
+> and the route contract in [`docs/SPEC-SDK.md`](../docs/SPEC-SDK.md). The current release is **3.9.0**;
 > the SDK is one private package per provider under `Kernel/SDK/`, the gateway is `Kernel/API`, and
 > publishing is suspended while the restructure is in progress.
 

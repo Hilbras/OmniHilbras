@@ -1,7 +1,15 @@
-# Release notes draft: 3.8.0
+# Release notes draft: 3.9.0
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.9.0 — Duck.ai agent tool rounds
+
+- Duck.ai now supports prompt-level DSML tool calls in non-streaming and streaming turns, with `finish_reason: "tool_calls"` and multi-round tool-result replay.
+- `stream: true` is accepted as one completed chunk, so an agent is not refused before it can receive a tool call.
+- Long Duck.ai histories use the same bounded compaction and explicit truncation markers.
+- The provider check is real on both sides: `/v1/health/deepseek-web` and `/v1/health/duckduckgo-web` both answer `healthy` with `verified: "credential"`.
+- No image field was added for Duck.ai: its chat endpoint exposes no upload payload, so claiming image support would be a fabrication.
 
 ## 3.8.0 — DeepSeek Web full agent
 

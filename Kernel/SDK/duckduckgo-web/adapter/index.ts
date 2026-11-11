@@ -7,6 +7,9 @@ import type {
   MessageContent,
   Model,
   ProviderAdapter,
+  ToolCall,
+  ToolCallDelta,
+  ToolDefinition,
   ProviderCredential,
   ProviderHealth,
   ProviderRequestContext,
@@ -260,6 +263,111 @@ export function buildDuckDuckGoWebPayload(input: {
 }
 
 /* ------------------------------------------------------------------ *
+ * Prompt-level tools
+ * ------------------------------------------------------------------ */
+
+const DUCK_TOOLS_INSTRUCTION = `[SYSTEM INSTRUCTION: TOOLS AVAILABLE]
+You have access to the following tools:
+{{TOOLS}}
+
+When you need to execute a tool, write your response in this exact format (do not add spaces inside tag delimiters):
+<||DSML|| calls>
+<||DSML|| invoke name="tool_name">
+<||DSML|| parameter name="arg_name" string="true">value</||DSML|| parameter>
+</||DSML|| invoke>
+</||DSML|| calls>`;
+
+export function normalizeDuckDuckGoDsml(text: string): string {
+  if (!text) return '';
+  return text.replace(/｜/g, '|').replace(/<\s*(\/?)\s*\|*[\s|]*DSML[\s|]*\|*\s*/gi, '<$1||DSML|| ');
+}
+
+export function parseDuckDuckGoDsml(text: string): { content: string; toolCalls: ToolCall[] } | null {
+  if (!text) return null;
+  const normalized = normalizeDuckDuckGoDsml(text);
+  if (!/<\|+DSML\|+\s*invoke\b/i.test(normalized)) return null;
+  const firstTag = normalized.match(/<\|+DSML\|+\s*(?:calls|tool_calls|invoke)[^>]*>/i);
+  const content = firstTag ? normalized.slice(0, firstTag.index).trim() : '';
+  const toolCalls: ToolCall[] = [];
+  const invokeRegex = /<\|+DSML\|+\s*invoke\b([^>]*)>([\s\S]*?)(?:<\/\|+DSML\|+\s*invoke[^>]*>|(?=<\|+DSML\|+\s*invoke\b)|<\/\|+DSML\|+\s*(?:calls|tool_calls)[^>]*>|$)/gi;
+  let invoke: RegExpExecArray | null;
+  while ((invoke = invokeRegex.exec(normalized)) !== null) {
+    const name = /\bname=["']?([^"'\s>]+)["']?/i.exec(invoke[1] ?? '')?.[1];
+    if (!name) continue;
+    const args: Record<string, unknown> = {};
+    const paramRegex = /<\|+DSML\|+\s*parameter\b([^>]*)>([\s\S]*?)(?:<\/\|+DSML\|+\s*parameter[^>]*>|(?=<\|+DSML\|+\s*parameter\b)|<\/\|+DSML\|+\s*invoke[^>]*>|$)/gi;
+    let param: RegExpExecArray | null;
+    while ((param = paramRegex.exec(invoke[2] ?? '')) !== null) {
+      const paramName = /\bname=["']?([^"'\s>]+)["']?/i.exec(param[1] ?? '')?.[1];
+      if (!paramName) continue;
+      const rawValue = param[2]?.trim() ?? '';
+      if (/\bstring\s*=\s*["']?true["']?/i.test(param[1] ?? '')) {
+        args[paramName] = rawValue;
+        continue;
+      }
+      try {
+        args[paramName] = JSON.parse(rawValue);
+      } catch {
+        args[paramName] = rawValue;
+      }
+    }
+    toolCalls.push({
+      id: `call_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
+      type: 'function',
+      function: { name, arguments: JSON.stringify(args) },
+    });
+  }
+  return toolCalls.length ? { content, toolCalls } : null;
+}
+
+function formatDuckToolCalls(toolCalls: readonly ToolCall[]): string {
+  const calls = toolCalls.map((toolCall) => {
+    let args: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(toolCall.function.arguments);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) args = parsed as Record<string, unknown>;
+    } catch {
+      args = { raw: toolCall.function.arguments };
+    }
+    return `<||DSML|| invoke name="${toolCall.function.name}">\n${Object.entries(args)
+      .map(([name, value]) => `<||DSML|| parameter name="${name}" string="true">${typeof value === 'string' ? value : JSON.stringify(value)}</||DSML|| parameter>`)
+      .join('\n')}\n</||DSML|| invoke>`;
+  });
+  return `<||DSML|| calls>\n${calls.join('\n')}\n</||DSML|| calls>`;
+}
+
+export function buildDuckDuckGoWebPrompt(
+  messages: readonly { role: string; content: MessageContent; name?: string; toolCallId?: string; toolCalls?: readonly ToolCall[]; isError?: boolean }[],
+  tools: readonly ToolDefinition[] = [],
+  toolChoice: ChatRequest['toolChoice'] = 'auto',
+): string {
+  const parts: string[] = [];
+  if (tools.length > 0) {
+    const instruction = DUCK_TOOLS_INSTRUCTION.replace('{{TOOLS}}', JSON.stringify(tools, null, 2));
+    parts.push(toolChoice === 'required' ? `${instruction}\n\nYou must call at least one tool before answering.` : instruction);
+  }
+  const entries = messages.map((message) => ({
+    message,
+    content: messageText(message.content),
+    calls: message.toolCalls?.length ? formatDuckToolCalls(message.toolCalls) : '',
+  }));
+  const large = entries.reduce((sum, entry) => sum + entry.content.length + entry.calls.length, 0) > 60_000;
+  const threshold = Math.max(0, entries.length - 12);
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]!;
+    let content = entry.content;
+    if (large && index < threshold) {
+      if (entry.message.role === 'tool' && content.length > 1200) content = `${content.slice(0, 1200)}\n...[truncated ${content.length - 1200} characters for context limit]...`;
+      else if (content.length > 3000) content = `${content.slice(0, 3000)}\n...[truncated ${content.length - 3000} characters for context limit]...`;
+    }
+    if (entry.message.role === 'tool') parts.push(`[TOOL RESULT for ${entry.message.name || entry.message.toolCallId || 'tool'}]:${entry.message.isError ? ' [ERROR]' : ''}\n${content}`);
+    else if (entry.calls) parts.push(`${entry.message.role.toUpperCase()}${content ? `: ${content}` : ''}\n${entry.calls}`);
+    else parts.push(`${entry.message.role.toUpperCase()}: ${content}`);
+  }
+  return parts.join('\n\n').trim();
+}
+
+/* ------------------------------------------------------------------ *
  * The driver, as the adapter sees it
  * ------------------------------------------------------------------ */
 
@@ -314,10 +422,11 @@ export class DuckDuckGoWebAdapter implements ProviderAdapter {
   readonly id: string;
   readonly name = 'Duck.ai';
   /**
-   * Streaming is not implemented and saying otherwise would be false: this adapter reads the service's SSE
-   * and hands back the assembled answer, so no token arrives "over time" as far as a caller is concerned.
+   * One completed chunk, not token-by-token. The upstream is SSE, but the driver reads it whole before
+   * returning; advertising `false` would make an agent's `stream: true` request fail with NOT_SUPPORTED even
+   * though the answer and tool call are available.
    */
-  readonly capabilities = { chat: true, streaming: false, models: true } as const;
+  readonly capabilities = { chat: true, streaming: true, models: true } as const;
 
   private readonly driver: DuckDuckGoWebDriver;
 
@@ -369,13 +478,6 @@ export class DuckDuckGoWebAdapter implements ProviderAdapter {
    */
   private async refuseUnsupported(request: ChatRequest, signal?: AbortSignal): Promise<string> {
     const requested = request.model || DUCKDUCKGO_WEB.defaultModel;
-    if (request.toolChoice === 'required') {
-      throw new ProviderError('NOT_SUPPORTED', 'Duck.ai cannot be told to force a tool call.', {
-        providerId: this.id,
-        publicMessage: 'Duck.ai answers in prose and has no way to force a tool call. Send `tool_choice: "auto"` or omit it.',
-      });
-    }
-
     let free: DuckDuckGoWebModel[] = [];
     try {
       free = freeDuckDuckGoWebModels(await this.driver.catalog({ timeoutMs: DUCKDUCKGO_WEB.catalogTimeoutMs, ...(signal ? { signal } : {}) }));
@@ -399,36 +501,51 @@ export class DuckDuckGoWebAdapter implements ProviderAdapter {
     const model = await this.refuseUnsupported(request, context.signal);
     const cookieHeader = duckDuckGoWebCookieHeader(context.credential);
     const createdAt = new Date().toISOString();
+    const tools = request.toolChoice === 'none' ? [] : request.tools ?? [];
+    const prompt = buildDuckDuckGoWebPrompt(request.messages, tools, request.toolChoice);
 
     try {
       const { text, model: answered } = await this.driver.ask({
         ...(cookieHeader ? { cookieHeader } : {}),
         model,
-        messages: request.messages.map((message) => ({ role: message.role, content: messageText(message.content) })),
+        messages: [{ role: 'user', content: prompt }],
         timeoutMs: DUCKDUCKGO_WEB.chatTimeoutMs,
         ...(context.signal ? { signal: context.signal } : {}),
       });
+      const parsed = tools.length ? parseDuckDuckGoDsml(text) : null;
+      const content = parsed ? parsed.content : text;
       return {
         id: `duckduckgo-web-${Date.parse(createdAt)}`,
         providerId: this.id,
         model: answered || model,
         createdAt,
-        message: { role: 'assistant', content: text },
-        finishReason: 'stop',
+        message: {
+          role: 'assistant',
+          content: parsed && !content ? null : content,
+          ...(parsed?.toolCalls.length ? { toolCalls: parsed.toolCalls } : {}),
+        },
+        finishReason: parsed?.toolCalls.length ? 'tool_calls' : 'stop',
       };
     } catch (error) {
       throw normalizeDuckDuckGoWebError(error, this.id);
     }
   }
 
-  /** There is no stream. The whole answer is yielded once, honestly, rather than pretending. */
+  /** One completed chunk, carrying a tool call when the model made one. */
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
     const response = await this.chat(request, context);
+    const content = messageText(response.message.content);
+    const toolCalls: ToolCallDelta[] | undefined = response.message.toolCalls?.map((toolCall, index) => ({
+      index,
+      id: toolCall.id,
+      type: 'function',
+      function: { name: toolCall.function.name, arguments: toolCall.function.arguments },
+    }));
     yield {
       id: response.id,
       providerId: response.providerId,
       model: response.model,
-      delta: { role: 'assistant', content: messageText(response.message.content) },
+      delta: { role: 'assistant', ...(content ? { content } : {}), ...(toolCalls?.length ? { toolCalls } : {}) },
       finishReason: response.finishReason,
     };
   }

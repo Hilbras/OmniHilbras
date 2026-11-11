@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.8.0
+**Status:** Current — release 3.9.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -1183,13 +1183,13 @@ yield one chunk. The current web-cookie set is:
 | DeepSeek Web | HTTP; answer read to `FINISHED` then returned | one completed chunk |
 | Token Harbor Web | SSE upstream, read whole then returned | `NOT_SUPPORTED` |
 | Gemini Web | browser page; answer arrives complete | `NOT_SUPPORTED` |
-| Duck.ai | HTTP challenge; answer arrives complete | `NOT_SUPPORTED` |
+| Duck.ai | HTTP challenge; answer read whole | one completed chunk |
 | Grok Web | NDJSON token frames | real chunks |
 | Perplexity Web | SSE markdown blocks | real chunks |
 
 Grok and Perplexity stream because their upstream really sends incremental content.
-DeepSeek Web accepts a stream request but returns one completed chunk after checking
-`FINISHED`, because a cut-off body must not be presented as a short answer. The other five
+DeepSeek Web and Duck.ai accept a stream request but return one completed chunk. DeepSeek checks
+`FINISHED` first, because a cut-off body must not be presented as a short answer. The other four
 web-cookie providers return `NOT_SUPPORTED`. A client that needs incremental chunks must
 select Grok, Perplexity, or a non-web-cookie provider that declares the capability.
 

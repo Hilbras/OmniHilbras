@@ -5764,3 +5764,10 @@ independently of the React app" is now measured over every provider manifest, an
 - Prompt compaction after 60,000 characters; the newest turn is never truncated.
 - Bounded chat-session reuse, 15 minutes and 100 entries, keyed by a userToken hash.
 - Tests cover tool parsing/rounds, image upload and URL safety, session reuse and compaction.
+
+## 3.9.0 — Duck.ai agent tool rounds
+
+- Added prompt-level DSML tool calls to Duck.ai, with tool-result replay, `finish_reason: "tool_calls"`, and a one-chunk streaming path.
+- Added bounded compaction for long Duck.ai histories.
+- Verified the provider check endpoint is healthy for both `deepseek-web` and `duckduckgo-web`.
+- Duck.ai image input is explicitly not claimed: the chat payload has no upload field.
