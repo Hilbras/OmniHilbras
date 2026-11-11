@@ -1,6 +1,6 @@
 # Web-cookie port: Perplexity Web and Grok Web
 
-Status: in progress. Target release: `3.7.0`.
+Status: complete — released as `v3.7.0`.
 
 ## Why
 
@@ -157,10 +157,10 @@ Saving a credential is a write, so it must be proven before it is stored:
 - [x] `pnpm version:check` reports `3.7.0`; update `package.json`,
       `Kernel/API/package.json`, `android/app/build.gradle`, README, SPEC
       status, `tasks/plan.md` and the release-notes draft.
-- [ ] Build the Android debug APK and verify `versionName 3.7.0`.
-- [ ] Commit, tag `v3.7.0`, push `main`, create the GitHub release, attach the
+- [x] Build the Android debug APK and verify `versionName 3.7.0`.
+- [x] Commit, tag `v3.7.0`, push `main`, create the GitHub release, attach the
       APK, and let the desktop workflow attach Linux/Windows/macOS assets.
-- [ ] Confirm `gh run view` success and list the release assets.
+- [x] Confirm `gh run view` success and list the release assets.
 
 ## Verification commands
 
