@@ -233,7 +233,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // sign-in on one side does not reach the other — the same split as `minimax-code`/`minimax-code-global`.
   // 48-49 added `agentrouter` and `aion-labs`; 50-51 added `grok-web` and `perplexity-web`.
   // All are catalog metadata, so the merge property still holds for them without a new case.
-  assert.equal(providerCatalog.length, 52, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerCatalog.length, 53, `the catalog now has ${providerCatalog.length} cards`);
   const connected = mergeGatewayConnections(providerCatalog, [connection()], health());
   assert.equal(connected.length, providerCatalog.length, 'a merge must not add or drop a card');
   console.log(`    cards: ${providerCatalog.length}   fields that may change on a merge: 5   that may not: 2`);

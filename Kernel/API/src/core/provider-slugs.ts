@@ -80,6 +80,7 @@ export const PROVIDER_SLUGS: Readonly<Record<string, string>> = {
   kimi: 'km',
   deepseek: 'ds',
   qwen: 'qn',
+  'qwen-token-plan': 'qtp',
   grok: 'gk',
   openai: 'oa',
   anthropic: 'an',
