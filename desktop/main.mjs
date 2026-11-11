@@ -50,7 +50,7 @@ function saveUserConfig(patch) {
 }
 
 const userConfig = readUserConfig();
-const preferredPort = Number(process.env.OMNIHILBRAS_PORT) || Number(userConfig.gatewayPort) || 8787;
+const preferredPort = Number(process.env.OMNIHILBRAS_PORT) || Number(userConfig.gatewayPort) || 20137;
 // The CLI and the web dashboard use this directory. The desktop app used its own `userData/data`,
 // which made an exported backup imported in the other surface look like it did nothing: they were
 // two vaults. Share the store, and migrate a pre-existing desktop-only store once when the shared
@@ -91,7 +91,7 @@ const gateway = createGatewaySupervisor({
   maxRestarts: 5,
   env: {
     OMNIHILBRAS_DATA_DIR: sharedDataDir,
-    OMNIHILBRAS_CORS_ORIGINS: 'http://localhost:5173,http://127.0.0.1:5173',
+    OMNIHILBRAS_CORS_ORIGINS: 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:20137,http://127.0.0.1:20137,http://localhost:20138,http://127.0.0.1:20138',
   },
 });
 const gatewayClient = createGatewayClient({ host: '127.0.0.1', port: () => gateway.port });

@@ -338,7 +338,7 @@ export default defineConfig({
     fullReloadForInvalidatableModules(),
     dashboardFallback(), gatewayProxy(), logoPolarity(), react(), tailwindcss(), repoVersion()],
   server: {
-    port: 5173,
+    port: 20138,
     /**
      * Full reload for the modules Fast Refresh cannot handle.
      *
