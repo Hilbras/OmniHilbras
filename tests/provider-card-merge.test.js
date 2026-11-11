@@ -71,8 +71,8 @@ test('with nothing to report, the cards come back untouched', () => {
 });
 
 test('a healthy provider never claims the user just used it', () => {
-  // The finding, as a property. `requests` and `lastUsed` have no source in the input, so they must
-  // keep the catalog's placeholders no matter how healthy the provider is.
+  // When a connection carries no usage counter yet, the card keeps the catalog's placeholders —
+  // a health poll is not usage, and there is nothing to report until a turn has actually served.
   const [card] = mergeGatewayConnections(providerCatalog, [connection()], health('healthy', 92));
   assert.equal(card.lastUsed, 'never', `lastUsed became ${JSON.stringify(card.lastUsed)} — nothing here measures usage`);
   assert.equal(card.requests, '0', `requests became ${JSON.stringify(card.requests)} — the gateway keeps no request counter to report`);
@@ -88,7 +88,7 @@ test('an unhealthy provider does not claim usage either', () => {
 
 test('every field the merge changes is traceable to the connection or the health reading', () => {
   const before = providerCatalog.find((card) => card.id === 'openrouter');
-  const after = mergeGatewayConnections(providerCatalog, [connection({ endpoint: 'https://proxy.example/v1' })], health('healthy', 137)).find((entry) => entry.id === 'openrouter');
+  const after = mergeGatewayConnections(providerCatalog, [connection({ endpoint: 'https://proxy.example/v1', requestCount: 7, lastUsed: '2026-11-12T10:00:00.000Z' })], health('healthy', 137)).find((entry) => entry.id === 'openrouter');
   const changed = Object.keys(after).filter((key) => JSON.stringify(after[key]) !== JSON.stringify(before[key]));
 
   // Measured, so allowed to change — and the value must be the input's value, not something shaped
@@ -100,6 +100,8 @@ test('every field the merge changes is traceable to the connection or the health
   assert.ok(changed.includes('status'), 'a saved, credentialed, healthy connection is connected');
   assert.equal(after.status, 'connected');
   assert.equal(after.endpoint, 'https://proxy.example/v1', 'the connection’s own endpoint is used verbatim');
+  assert.equal(after.requests, '7', 'the connection\'s requestCount is stringified verbatim');
+  assert.equal(after.lastUsed, '2026-11-12T10:00:00.000Z', 'the connection\'s lastUsed is passed through verbatim');
 
   // `health` *is* on the measured side — it is the poll's verdict rendered as a bar — so it changes to
   // 100 here. I first asserted it could not, having carried the degraded case's expectation across by
@@ -146,13 +148,17 @@ const MEASURED_FIELDS = {
   // The number of connections the gateway reported for this provider. Not derived, not a guess: it is
   // `connections.filter(...).length` from the same list the detail page renders.
   accountCount: 'the count of connection records the gateway returned for the provider',
+  // Usage tracking that now exists in the gateway: per-connection requestCount + lastUsed, set only
+  // when the connection actually carries them. Never from health.
+  requests: 'the connection requestCount, stringified',
+  lastUsed: 'the connection lastUsed ISO timestamp',
 };
 
 test('the merge changes only measured fields, whatever they are called', () => {
   const before = providerCatalog.find((card) => card.id === 'openrouter');
   const after = mergeGatewayConnections(
     providerCatalog,
-    [connection({ endpoint: 'https://proxy.example/v1' })],
+    [connection({ endpoint: 'https://proxy.example/v1', requestCount: 7, lastUsed: '2026-11-12T10:00:00.000Z' })],
     health('healthy', 137),
   ).find((entry) => entry.id === 'openrouter');
   const changed = Object.keys(after).filter((key) => JSON.stringify(after[key]) !== JSON.stringify(before[key]));
@@ -178,7 +184,7 @@ test('every changed value is one of the inputs, not something shaped like it', (
   // carry a fabricated value. So each permitted field is compared against the input it claims to come from.
   const after = mergeGatewayConnections(
     providerCatalog,
-    [connection({ endpoint: 'https://proxy.example/v1' })],
+    [connection({ endpoint: 'https://proxy.example/v1', requestCount: 7, lastUsed: '2026-11-12T10:00:00.000Z' })],
     health('healthy', 137),
   ).find((entry) => entry.id === 'openrouter');
   const conn = connection({ endpoint: 'https://proxy.example/v1' });

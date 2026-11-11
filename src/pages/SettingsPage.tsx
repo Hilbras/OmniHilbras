@@ -8,6 +8,7 @@ import {
   type GatewaySettings,
 } from '../lib/gatewayClient';
 import { desktopBridge, type DesktopAppSettings, type UpdateState } from '../lib/electronBridge';
+import { z } from 'zod';
 
 /**
  * Settings that are real.
@@ -20,6 +21,8 @@ import { desktopBridge, type DesktopAppSettings, type UpdateState } from '../lib
 
 const THEME_KEY = 'omnihilbras-theme';
 const REDUCE_KEY = 'omnihilbras-reduce-motion';
+
+const portSchema = z.coerce.number().int().min(1, 'Port must be 1–65535').max(65535, 'Port must be 1–65535');
 
 function Toggle({ label, detail, checked, disabled, onChange }: { label: string; detail?: string; checked: boolean; disabled?: boolean; onChange: (next: boolean) => void }) {
   return (
@@ -60,6 +63,8 @@ export function SettingsContent() {
   const [notice, setNotice] = useState<string | undefined>();
   const [failed, setFailed] = useState(false);
   const [port, setPort] = useState('');
+  const [portError, setPortError] = useState<string | undefined>();
+  const [testing, setTesting] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
     try {
       const stored = localStorage.getItem(THEME_KEY);
@@ -200,9 +205,15 @@ export function SettingsContent() {
         <Toggle label="Check for updates on launch" detail="Checks five seconds after startup. A skipped or failed check is reported honestly." checked={preferences?.checkUpdatesOnLaunch ?? true} disabled={!bridge || Boolean(saving)} onChange={(next) => void saveDesktop({ checkUpdatesOnLaunch: next }, 'Update check on launch')} />
         <div className="flex flex-wrap items-end gap-2 py-3">
           <label className="text-[11px] font-medium">Gateway port
-            <input value={port} onChange={(event) => setPort(event.target.value.replace(/[^0-9]/g, ''))} inputMode="numeric" disabled={!bridge} className="input mt-1 block !h-9 !w-32 !rounded-lg !border-line !bg-surface-2 !px-2 !font-mono !text-xs" />
+            <input value={port} onChange={(event) => {
+            const next = event.target.value.replace(/[^0-9]/g, '');
+            setPort(next);
+            const parsed = portSchema.safeParse(next);
+            setPortError(parsed.success ? undefined : parsed.error.issues[0]?.message);
+          }} inputMode="numeric" disabled={!bridge} className="input mt-1 block !h-9 !w-32 !rounded-lg !border-line !bg-surface-2 !px-2 !font-mono !text-xs" />
           </label>
-          <button type="button" onClick={() => void saveDesktop({ gatewayPort: Number(port) }, 'Gateway port')} disabled={!bridge || Boolean(saving) || Number(port) === preferences?.gatewayPort} className="btn-ghost !px-3 !py-2 !text-xs disabled:opacity-40"><Save className="h-3.5 w-3.5" aria-hidden="true" />{saving === 'Gateway port' ? 'Restarting' : 'Apply and restart'}</button>
+          <button type="button" onClick={() => void saveDesktop({ gatewayPort: Number(port) }, 'Gateway port')} disabled={!bridge || Boolean(saving) || Boolean(portError) || Number(port) === preferences?.gatewayPort} className="btn-ghost !px-3 !py-2 !text-xs disabled:opacity-40"><Save className="h-3.5 w-3.5" aria-hidden="true" />{saving === 'Gateway port' ? 'Restarting' : 'Apply and restart'}</button>
+          {portError && <span className="text-[10px] text-danger">{portError}</span>}
           <span className="muted text-[10px]">Changing this restarts the gateway on the new port.</span>
         </div>
       </Section>
@@ -220,6 +231,15 @@ export function SettingsContent() {
 
       <Section icon={<ShieldCheck className="h-4 w-4 text-gold-text" aria-hidden="true" />} title="Gateway access" description="The one gateway setting that can change without a restart.">
         <Toggle label="Require an API key" detail="When on, every LLM and management request must present a key created on the API keys page." checked={requireApiKey ?? true} disabled={loading || Boolean(saving)} onChange={(next) => void toggleRequireApiKey(next)} />
+        <div className="flex items-center gap-2 py-3">
+          <button type="button" onClick={async () => {
+            setTesting(true);
+            try { await loadGateway(); flash('Gateway connection OK.'); }
+            catch (e) { flash(e instanceof Error ? e.message : 'Gateway unreachable.', true); }
+            finally { setTesting(false); }
+          }} disabled={Boolean(saving) || testing} className="btn-ghost !px-3 !py-2 !text-xs disabled:opacity-40">Test connection</button>
+          <span className="muted text-[10px]">Re-reads the gateway to confirm it answers.</span>
+        </div>
       </Section>
 
       <Section icon={<ClockIcon />} title="Loaded at startup" description={loading ? 'Reading the configuration this process resolved.' : 'These come from the environment. Change them in the launch configuration and restart the gateway.'}>
