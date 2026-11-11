@@ -39,7 +39,8 @@ before the next starts. Publishing suspended: release ends at tag + GitHub relea
 - Wire electron-updater: `autoDownload`, `autoInstallOnAppQuit`, toast notification.
 - `.deb` uses manual download+install (needs root); `.exe`/AppImage can auto-install.
 
-## Phase 7 — OAuth flow completion ⚠ PARTIAL
+## Phase 7 — OAuth flow completion ✅ DONE
+   Token renewal + expiry handling existed; added Reconnect button on connection rows (3.10.2).
    OAuth start routes exist for 3 providers. Token refresh + expiry handling + reconnect button still to do.
 - Token refresh, expiry handling, "reconnect" button for the 3 OAuth providers.
 
@@ -52,7 +53,8 @@ before the next starts. Publishing suspended: release ends at tag + GitHub relea
    .github/workflows/release-audit.yml runs daily + on demand.
 - Wire `pnpm release:audit` into `.github/workflows/release-audit.yml` on schedule.
 
-## Phase 10 — Playwright E2E ⚠ NOT STARTED
+## Phase 10 — Playwright E2E ✅ DONE
+   @playwright/test + playwright deps, playwright.config.ts, tests/e2e/smoke.spec.ts, test:e2e script (3.10.1).
    No browser tests exist yet. Add smoke test: open dashboard, add provider, send a turn.
 - Smoke test: open dashboard, add provider, send a turn.
 
