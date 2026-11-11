@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "3.10.0",
+  "version": "3.10.1",
   "description": "Provider-neutral local gateway and desktop dashboard",
   "author": {
     "name": "Hilbras",
@@ -48,7 +48,8 @@
     "build:android": "vite build --config vite.android.config.ts && node scripts/finalize-android.mjs",
     "android:add": "pnpm build:android && cap add android",
     "android:sync": "pnpm build:android && cap sync android",
-    "android:apk": "pnpm android:sync && cd android && ./gradlew assembleDebug"
+    "android:apk": "pnpm android:sync && cd android && ./gradlew assembleDebug",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",
@@ -66,6 +67,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.6.0",
+    "@playwright/test": "^1.65.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.6.2",
     "@types/pngjs": "^6.0.5",
@@ -74,6 +76,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^45.2.3",
     "electron-builder": "^26.18.0",
+    "playwright": "^1.65.0",
     "pngjs": "^7.0.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.0",
