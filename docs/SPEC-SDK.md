@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.6.0
+**Status:** Current — release 3.7.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -339,6 +339,16 @@ The first local gateway exposes:
 - `POST /v1/web-cookie/tokenharbor/connect` — store the session cookie as a connection after it is
   verified. Accepts the whole `Cookie:` header or the `sb-auth-auth-token` value alone, rejoins its
   numbered chunks, and honours `freeOnly`.
+- `POST /v1/web-cookie/grok/check` — check the pasted `sso` cookie against
+  `grok.com/rest/app-chat/conversations/new` with the web client's browser-fingerprint headers, storing
+  nothing. A `401`/`403` is a dead session; a `400`/`429` means the credential was accepted and the
+  deliberately small probe body or the rate limit refused the turn.
+- `POST /v1/web-cookie/grok/connect` — store the Grok Web subscription after the check accepts it. The
+  credential is a live subscription session, not an inference key; the card carries that warning.
+- `POST /v1/web-cookie/perplexity/check` — check the pasted `__Secure-next-auth.session-token` against
+  `perplexity.ai/rest/sse/perplexity_ask`, storing nothing.
+- `POST /v1/web-cookie/perplexity/connect` — store the Perplexity Web session after the check accepts it.
+  The seven `pplx-*` ids are the old registry's catalog; a turn is SSE and the adapter forwards real chunks.
 - `POST /v1/web-cookie/gemini/check` — open `gemini.google.com` in a browser with the pasted
   `__Secure-1PSID`/`__Secure-1PSIDTS` cookies and report whether the session is signed in, storing nothing.
   It costs a page load because a local check cannot tell a working session from a revoked one, and it is a
@@ -1160,6 +1170,27 @@ riskSeverity: 'high',
 
 `riskSeverity: 'high'` is what separates "this provider's terms forbid it" from "this
 credential is your account". Rendering both identically would understate the second.
+
+**Streaming is a capability, not a transport fact.** The gateway checks
+`capabilities.streaming` before calling `streamChat`; an adapter that declares it false
+returns `NOT_SUPPORTED` for a `stream: true` request even if it has a method that could
+yield one chunk. The current web-cookie set is:
+
+| Provider | Upstream | `stream: true` |
+| --- | --- | --- |
+| ChatGPT Web | browser page; answer arrives complete | `NOT_SUPPORTED` |
+| Qwen Web | probe only; no chat adapter | `NOT_SUPPORTED` |
+| DeepSeek Web | HTTP; answer arrives complete | `NOT_SUPPORTED` |
+| Token Harbor Web | SSE upstream, read whole then returned | `NOT_SUPPORTED` |
+| Gemini Web | browser page; answer arrives complete | `NOT_SUPPORTED` |
+| Duck.ai | HTTP challenge; answer arrives complete | `NOT_SUPPORTED` |
+| Grok Web | NDJSON token frames | real chunks |
+| Perplexity Web | SSE markdown blocks | real chunks |
+
+The two new adapters stream because their upstream really sends incremental content.
+The existing six do not, and their `streamChat` methods that yield a completed answer once
+are not presented as token streams. A client that needs streaming must select one of the
+two providers above, or a non-web-cookie provider that declares the capability.
 
 **Nothing is stored before the warning is acknowledged**, and the pasted blob is cleared on
 failure. A whole-account session sitting in a textarea next to an error message is how one
@@ -2878,7 +2909,7 @@ measurement, and `Kernel/API/test/spec-success-criteria.mjs` fails if any stops 
       `build` script; every `Kernel/SDK/<provider>/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **157 files** in `Kernel/SDK/` — 25 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url` and `bounded-map` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 24: it measures providers, this counts files.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **163 files** in `Kernel/SDK/` — 27 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url` and `bounded-map` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 26: it measures providers, this counts files.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

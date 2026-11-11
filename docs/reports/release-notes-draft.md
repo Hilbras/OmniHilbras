@@ -1,7 +1,15 @@
-# Release notes draft: 3.6.0
+# Release notes draft: 3.7.0
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.7.0 — Perplexity Web and Grok Web
+
+- Added `perplexity-web`: the seven `pplx-*` modes over Perplexity's SSE ask endpoint, with reasoning/search blocks, citation cleanup and a bounded follow-up session cache.
+- Added `grok-web`: the twelve old-registry Grok modes over the web conversation NDJSON endpoint, with the model-mode map and browser-fingerprint headers.
+- Both are API-key cards under **Web Cookie Providers**, with high-severity whole-account session warnings, committed logos, check/connect routes and model-prefix ids `pw/` and `gw/`.
+- Both adapters forward real streaming chunks. The existing six web-cookie providers remain explicitly non-streaming; `stream: true` returns `NOT_SUPPORTED`, and the spec table says which provider produces chunks.
+- Checks run before saves: a rejected cookie is not stored, and a 400/429 from the deliberately small probe means the cookie was accepted rather than dead.
 
 ## 3.6.0 — live host load and two more free-tier providers
 

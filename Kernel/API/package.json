@@ -1,6 +1,6 @@
 {
   "name": "@omnihilbras/kernel-api",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -23,6 +23,8 @@
     "@omnihilbras/sdk-deepseek-web": "workspace:*",
     "@omnihilbras/sdk-duckduckgo-web": "workspace:*",
     "@omnihilbras/sdk-gemini": "workspace:*",
+    "@omnihilbras/sdk-grok-web": "workspace:*",
+    "@omnihilbras/sdk-perplexity-web": "workspace:*",
     "@omnihilbras/sdk-gemini-web": "workspace:*",
     "@omnihilbras/sdk-kilocode": "workspace:*",
     "@omnihilbras/sdk-kimi-code": "workspace:*",

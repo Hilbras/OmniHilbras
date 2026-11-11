@@ -284,6 +284,9 @@ importers:
       '@omnihilbras/sdk-gemini-web':
         specifier: workspace:*
         version: link:../SDK/gemini-web
+      '@omnihilbras/sdk-grok-web':
+        specifier: workspace:*
+        version: link:../SDK/grok-web
       '@omnihilbras/sdk-kilocode':
         specifier: workspace:*
         version: link:../SDK/kilocode
@@ -308,6 +311,9 @@ importers:
       '@omnihilbras/sdk-openrouter':
         specifier: workspace:*
         version: link:../SDK/openrouter
+      '@omnihilbras/sdk-perplexity-web':
+        specifier: workspace:*
+        version: link:../SDK/perplexity-web
       '@omnihilbras/sdk-qoder':
         specifier: workspace:*
         version: link:../SDK/qoder
@@ -412,6 +418,12 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  Kernel/SDK/grok-web:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   Kernel/SDK/kilocode:
     devDependencies:
       typescript:
@@ -455,6 +467,12 @@ importers:
         version: 5.9.3
 
   Kernel/SDK/openrouter:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/perplexity-web:
     devDependencies:
       typescript:
         specifier: ^5.9.3

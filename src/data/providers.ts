@@ -47,6 +47,8 @@ export const providerLogoMap = {
   groq: '/providers/groq.svg',
   xai: '/providers/xai.svg',
   grok: '/providers/grok.svg',
+  'grok-web': '/providers/grok-web.png',
+  'perplexity-web': '/providers/perplexity-web.png',
   nvidia: '/providers/nvidia.svg',
   // Added 1.90.0 with the Qoder, Kilo Code, and MiniMax Code OAuth cards.
   qoder: '/providers/qoder.png',
@@ -871,6 +873,54 @@ export const providerCatalog: ProviderRecord[] = [
      */
     riskNotice:
       'Duck.ai needs no account and no cookie — the connection is stored with no credential at all, so there is no signed-in session for OmniHilbras to act as. What you are agreeing to is automated use of a service that serves signed-out visitors for free. It can rate-limit or withdraw that at any time, and a refusal here (HTTP 418) means backing off, not a broken key. If you have an account with Duck.ai, connect through their own client instead.',
+    riskSeverity: 'high',
+  },
+  {
+    id: 'grok-web',
+    name: 'Grok Web',
+    description:
+      'grok.com through the sso cookie a signed-in subscription holds. The web conversation endpoint, its model modes and the browser-fingerprint headers; not the xAI API key.',
+    category: 'Web session',
+    group: 'web-cookie',
+    status: 'available',
+    auth: 'Session cookie',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#1da1f2',
+    initial: 'G',
+    logo: providerLogoMap['grok-web'],
+    endpoint: 'https://grok.com',
+    apiKeysUrl: 'https://grok.com/',
+    modelList: [],
+    riskNotice:
+      'This is a live session for your Grok subscription, not an inference token. Anyone holding the sso cookie can act as your account until it expires or you sign out, and grok.com’s terms may not permit automated access. OmniHilbras sends only the cookie and the web client’s own headers to grok.com. Use the xAI API-key Grok card if you want the supported path.',
+    riskSeverity: 'high',
+  },
+  {
+    id: 'perplexity-web',
+    name: 'Perplexity Web',
+    description:
+      'perplexity.ai through the NextAuth session a signed-in Pro/Max account holds. The ask endpoint, its SSE blocks and the free and paid pplx models; not an API key.',
+    category: 'Web session',
+    group: 'web-cookie',
+    status: 'available',
+    auth: 'Session cookie',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#20808d',
+    initial: 'P',
+    logo: providerLogoMap['perplexity-web'],
+    endpoint: 'https://www.perplexity.ai',
+    apiKeysUrl: 'https://www.perplexity.ai/',
+    modelList: [],
+    riskNotice:
+      'This is a live session for your Perplexity account, not a token scoped to inference. Anyone holding __Secure-next-auth.session-token can use the account until it expires or you sign out, and driving the web ask endpoint may conflict with Perplexity’s terms. OmniHilbras stores the cookie in the local vault and sends it only to perplexity.ai.',
     riskSeverity: 'high',
   },
   {

@@ -235,6 +235,65 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     check: { path: '/v1/web-cookie/duckduckgo/check', field: 'cookieHeader' },
     planNote: 'Only the free lineup is served without a subscription. The list is read from each model\'s own `accessTier` and changes with duck.ai, so it is reported at connect time rather than written on the card.',
   },
+
+  'grok-web': {
+    id: 'grok-web',
+    name: 'Grok Web',
+    website: 'https://grok.com',
+    credentialName: 'sso',
+    /**
+     * `sso` is a session cookie, and the request that proves it is the same
+     * conversation endpoint a turn uses. The guide therefore points at the
+     * Application panel and the request header, not a console one-liner: a
+     * console command cannot read an HttpOnly cookie and would look like being
+     * signed out.
+     */
+    extractionSteps: [
+      {
+        label: 'The sso cookie',
+        body: 'With grok.com open and signed in: F12 → Application → Storage → Cookies → https://grok.com. Copy the value of `sso`. If it is not readable there, use the Network tab: F12 → Network → reload → click a request to grok.com → Headers → Request Headers → Cookie, and copy that whole line.',
+      },
+      {
+        label: 'What happens next',
+        body: 'Check sends a small turn to the same web conversation endpoint with the browser-fingerprint headers the page sends. A 401 or 403 means the subscription session is dead; a 400 or 429 means the cookie was accepted and the tiny probe body or the rate limit refused the turn. Nothing is stored until you press Save.',
+      },
+    ],
+    paste: {
+      path: '/v1/web-cookie/grok/connect',
+      field: 'cookieHeader',
+      placeholder: 'sso=… or the whole Cookie header',
+      sectionLabel: 'Or paste the sso cookie instead',
+      fieldLabel: 'sso cookie',
+    },
+    check: { path: '/v1/web-cookie/grok/check', field: 'cookieHeader' },
+    planNote: 'The subscription decides which modes are available. The card lists the twelve web modes; the page’s picker is the authority when a mode is withdrawn.',
+  },
+
+  'perplexity-web': {
+    id: 'perplexity-web',
+    name: 'Perplexity Web',
+    website: 'https://www.perplexity.ai',
+    credentialName: '__Secure-next-auth.session-token',
+    extractionSteps: [
+      {
+        label: 'The session cookie',
+        body: 'With perplexity.ai open and signed in: F12 → Application → Storage → Cookies → https://www.perplexity.ai. Copy the value of `__Secure-next-auth.session-token`. Or use F12 → Network → reload → a request to perplexity.ai → Headers → Request Headers → Cookie and copy the whole line.',
+      },
+      {
+        label: 'What happens next',
+        body: 'Check sends a minimal ask request and stores nothing. A 401 or 403 is a dead session; a 400 or 429 means the cookie was accepted and the probe body or the rate limit was refused. Save stores the session only after the check accepts it. The seven pplx modes are the old registry’s catalog; the page’s own picker remains the authority.',
+      },
+    ],
+    paste: {
+      path: '/v1/web-cookie/perplexity/connect',
+      field: 'cookieHeader',
+      placeholder: '__Secure-next-auth.session-token=…; other=…',
+      sectionLabel: 'Or paste the session cookie instead',
+      fieldLabel: 'Perplexity session cookie',
+    },
+    check: { path: '/v1/web-cookie/perplexity/check', field: 'cookieHeader' },
+    planNote: 'The free `pplx-auto` mode is the default. Pro/Max modes depend on the subscription; the seven ids are the old registry’s catalog, not a promise that every account can select all of them.',
+  },
 };
 
 export function webSessionDescriptor(providerId: string): WebSessionDescriptor | undefined {

@@ -321,6 +321,8 @@ const NOT_YET_CONTRACTED = {
   'minimax-code': 'It signs in by an RFC 8628 device flow with PKCE and chats in Claude Messages format, which the generic OpenAI-shaped harness does not model; the sign-in is covered by the gateway flow test.',
   qoder: 'Its chat is COSY-signed, so a contract run needs the gateway signer injected and a scripted signed SSE envelope; the encode path is unit-tested and the sign-in is covered by the gateway flow test.',
   codebuddy: 'Its chat is stream-only (a non-stream request is refused with HTTP 400 / code 11101), so the generic harness\'s non-stream path cannot run it, and every request carries four freshly generated X-Conversation-* headers. Both are pinned in codebuddy.test.js, and its sign-in is covered by the gateway flow test.',
+  'perplexity-web': 'Its ask endpoint answers only a signed-in NextAuth session and its SSE vocabulary is named blocks rather than OpenAI deltas; the block/delta parse is pinned in perplexity-web.test.js, and the gateway route is covered by web-cookie-grok-perplexity.test.js.',
+  'grok-web': 'Its conversation endpoint answers NDJSON token frames only to a signed-in grok.com subscription and requires a generated browser fingerprint; the parser and header shape are pinned in grok-web.test.js, and the gateway route is covered by web-cookie-grok-perplexity.test.js.',
 };
 
 test('an adapter that can tell when a credential expired never throws and never guesses', () => {

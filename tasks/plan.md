@@ -2,7 +2,7 @@
 
 > **Historical plan.** The task list below is the original pre-restructure plan and is kept as a record.
 > The current architecture is described in [`docs/architecture/README.md`](../docs/architecture/README.md)
-> and the route contract in [`docs/SPEC-SDK.md`](../docs/SPEC-SDK.md). The current release is **3.6.0**;
+> and the route contract in [`docs/SPEC-SDK.md`](../docs/SPEC-SDK.md). The current release is **3.7.0**;
 > the SDK is one private package per provider under `Kernel/SDK/`, the gateway is `Kernel/API`, and
 > publishing is suspended while the restructure is in progress.
 
@@ -274,7 +274,7 @@ written, while the plan continued to read as finished:
 
 | Risk | Claimed mitigation | Measured |
 | --- | --- | --- |
-| Provider APIs change independently (**High**) | pin response fixtures per adapter | **6 of 24 adapters** (157 `.ts` files in `Kernel/SDK/`, 25 provider folders, one shared base `openai-compatible` and helpers nested in them, none counted as adapters) — `kiro-stream.bin` plus `openrouter`, `cline` and `opencode-console` (1.48.0), and `zen` (its public model listing, shape and keys only). The rest have a stated reason, and **most of those need a credential this machine does not have**. `clinepass` is the one whose capture would *duplicate* rather than fill a gap — it shares Cline's host and wire format, so the bytes it would pin are the bytes `cline-models.json` already pins. The count is printed by `fixture-coverage.test.js`, so it cannot go stale again without a test failing. |
+| Provider APIs change independently (**High**) | pin response fixtures per adapter | **6 of 26 adapters** (163 `.ts` files in `Kernel/SDK/`, 27 provider folders, one shared base `openai-compatible` and helpers nested in them, none counted as adapters) — `kiro-stream.bin` plus `openrouter`, `cline` and `opencode-console` (1.48.0), and `zen` (its public model listing, shape and keys only). The rest have a stated reason, and **most of those need a credential this machine does not have**. `clinepass` is the one whose capture would *duplicate* rather than fill a gap — it shares Cline's host and wire format, so the bytes it would pin are the bytes `cline-models.json` already pins. The count is printed by `fixture-coverage.test.js`, so it cannot go stale again without a test failing. |
 | Streaming formats differ (**High**) | test event boundaries explicitly | real: frame-level assertions across the adapter tests |
 | Secrets leak through logs/errors (**High**) | redaction helpers and tests that scan errors/log output | real: error-output scanning tests exist |
 | Gateway becomes coupled to one provider | no provider IDs in shared service logic | real: 12 files carry a zero-provider-id invariant test |

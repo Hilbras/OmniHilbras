@@ -5742,3 +5742,10 @@ independently of the React app" is now measured over every provider manifest, an
   OpenAI-compatible fallback, with the vendors' own marks and their documented base URLs. Neither
   card claims a model count before the gateway reads one; Aion's public model list is documented as
   proving the route, not a key.
+
+## 3.7.0 — Perplexity Web and Grok Web
+
+- Ported the two missing old-tree web-cookie providers. Perplexity keeps its SSE block parser, citation cleanup, model map and bounded backend session cache; Grok keeps the NDJSON token stream, model-mode map and browser-fingerprint headers.
+- Added `/v1/web-cookie/perplexity/{check,connect}` and `/v1/web-cookie/grok/{check,connect}`. A refused cookie is not stored; a 400 or 429 from the tiny probe is an accepted credential refusing the probe body or a rate limit.
+- Added cards, descriptors and the `pw`/`gw` model prefixes. Logos were already committed.
+- Streaming is explicit: the two new adapters declare `streaming: true` and forward chunks; the existing six stay false, with a spec table that says so.

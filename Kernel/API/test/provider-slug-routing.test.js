@@ -33,6 +33,8 @@ test('the requested OAuth and subscription slugs are the short ones', () => {
       'agnes-ai': providerSlug('agnes-ai'),
       agentrouter: providerSlug('agentrouter'),
       'aion-labs': providerSlug('aion-labs'),
+      'grok-web': providerSlug('grok-web'),
+      'perplexity-web': providerSlug('perplexity-web'),
     },
     {
       codex: 'cd',
@@ -49,6 +51,8 @@ test('the requested OAuth and subscription slugs are the short ones', () => {
       'agnes-ai': 'ag',
       agentrouter: 'agr',
       'aion-labs': 'aio',
+      'grok-web': 'gw',
+      'perplexity-web': 'pw',
     },
   );
 });

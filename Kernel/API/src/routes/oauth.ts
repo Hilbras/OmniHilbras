@@ -537,6 +537,32 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/grok/check') {
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      sendJson(response, 200, await service.checkGrokWeb(readRequiredString(body, 'cookieHeader'), signal), origin);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/grok/connect') {
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      const connection = await service.connectGrokWeb(readRequiredString(body, 'cookieHeader'), signal, body.addAccount === true);
+      sendJson(response, 201, { connection }, origin);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/perplexity/check') {
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      sendJson(response, 200, await service.checkPerplexityWeb(readRequiredString(body, 'cookieHeader'), signal), origin);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/perplexity/connect') {
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      const connection = await service.connectPerplexityWeb(readRequiredString(body, 'cookieHeader'), signal, body.addAccount === true);
+      sendJson(response, 201, { connection }, origin);
+      return true;
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/web-cookie/qwen/check') {
       // A probe, not a connect, and it stores nothing. The open question is whether Alibaba's
       // bot-protection gate applies to an authenticated request, and that cannot be answered

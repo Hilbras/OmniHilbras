@@ -194,7 +194,7 @@ test('a new provider id is one edit away from a web-session id, and stays distin
   }
   assert.deepEqual(
     pairs.map(([, derived]) => derived).sort(),
-    ['clinepass', 'deepseek-web', 'gemini-web', 'kimi-code', 'minimax-code-global', 'opencode-console', 'opencode-go', 'qwen-web', 'tokenharbor-web'],
+    ['clinepass', 'deepseek-web', 'gemini-web', 'grok-web', 'kimi-code', 'minimax-code-global', 'opencode-console', 'opencode-go', 'qwen-web', 'tokenharbor-web'],
     'the near-miss ids are exactly the ones expected, so this stays a measurement and not a tautology',
   );
 });

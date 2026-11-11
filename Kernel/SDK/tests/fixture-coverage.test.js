@@ -140,6 +140,11 @@ const NO_CAPTURE_YET = {
    * and the per-turn headers are pinned there as *behaviour* rather than as a frozen payload.
    */
   'duckduckgo-web': 'not excused for cost or a credential — a signed-out turn was spent to port it; a capture would pin a rotating challenge hash and a per-deploy x-fe-version alongside the body, so the durable contract is asserted against the measured shapes instead',
+  // The two 3.7.0 ports have the same gap as the other web sessions: the only
+  // captureable bytes need a signed-in subscription, and the old project's executors
+  // are the source of the frame shapes. Their tests replay those frames explicitly.
+  'perplexity-web': 'the only captureable body is a live ask SSE stream from a signed-in Perplexity account; this machine has no such session, so the block and delta shapes are replayed from the old executor\'s measured parser fixture in `perplexity-web.test.js`',
+  'grok-web': 'the only captureable body is a live conversation NDJSON stream from a signed-in grok.com subscription; this machine has no such session, so the token/modelResponse/fingerprint frames are replayed from the old executor\'s measured fixture in `grok-web.test.js`',
   codex: 'a real Responses SSE capture requires an approved Codex account and locally configured OAuth client; no live sign-in was authorized, so request and terminal-frame behavior is covered by scripted tests without claiming a provider capture',
 };
 

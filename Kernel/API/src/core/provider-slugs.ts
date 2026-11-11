@@ -47,6 +47,8 @@ export const PROVIDER_SLUGS: Readonly<Record<string, string>> = {
   'qwen-web': 'qw',
   'deepseek-web': 'dsw',
   'tokenharbor-web': 'thw',
+  'grok-web': 'gw',
+  'perplexity-web': 'pw',
   'gemini-web': 'gmw',
   'duckduckgo-web': 'ddw',
   // ── Free tier ─────────────────────────────────────────────────────────────

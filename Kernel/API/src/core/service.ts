@@ -11,6 +11,8 @@ import { ClinePassAdapter } from '@omnihilbras/sdk-clinepass';
 import { deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter } from '@omnihilbras/sdk-deepseek-web';
 import { DuckDuckGoWebAdapter, duckduckgoWebProviderId, DUCKDUCKGO_WEB, normalizeDuckDuckGoWebCookie, freeDuckDuckGoWebModels, type DuckDuckGoWebDriver } from '@omnihilbras/sdk-duckduckgo-web';
 import { GeminiWebAdapter, geminiWebProviderId, GEMINI_WEB_MODELS, normalizeGeminiWebCookie, geminiWebCookiePresent, type GeminiWebDriver } from '@omnihilbras/sdk-gemini-web';
+import { GrokWebAdapter, grokWebCredential, grokWebProviderId } from '@omnihilbras/sdk-grok-web';
+import { PerplexityWebAdapter, perplexityWebCredential, perplexityWebProviderId } from '@omnihilbras/sdk-perplexity-web';
 import { createKiloCodeAdapter } from '@omnihilbras/sdk-kilocode';
 import { KIMI_CODE, KimiCodeAdapter } from '@omnihilbras/sdk-kimi-code';
 import { KiroAdapter, kiroCredentialFromApiKey, kiroProviderId } from '@omnihilbras/sdk-kiro';
@@ -284,6 +286,8 @@ export class GatewayService {
   /** DeepSeek Web, built once so its access-token cache is shared across requests. */
   private deepSeek?: DeepSeekWebAdapter;
   private tokenHarborWeb?: TokenHarborWebAdapter;
+  private grokWeb?: GrokWebAdapter;
+  private perplexityWeb?: PerplexityWebAdapter;
   private readonly kiroAdapters = new Map<string, ProviderAdapter>();
   /** Why the last model discovery failed, when it was tolerated rather than fatal. */
   private lastDiscoveryNote?: string;
@@ -504,7 +508,9 @@ export class GatewayService {
       .onDemand(geminiWebProviderId, ({ providerId, connection }) => this.geminiWebAdapter(connection?.id ?? providerId))
       .onDemand(duckduckgoWebProviderId, () => this.duckDuckGoWebAdapter())
       .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter())
-      .onDemand(tokenHarborWebProviderId, () => this.tokenHarborWebAdapter());
+      .onDemand(tokenHarborWebProviderId, () => this.tokenHarborWebAdapter())
+      .onDemand(grokWebProviderId, () => this.grokWebAdapter())
+      .onDemand(perplexityWebProviderId, () => this.perplexityWebAdapter());
     this.credentialLifecycle = new CredentialLifecycle({
       adapterFor: (providerId) => { try { return this.registry.get(providerId); } catch { return undefined; } },
       now,
@@ -2035,6 +2041,66 @@ export class GatewayService {
         priority: 1,
         proxyPool: 'none',
         modelPolicy: freeOnly ? 'free' : 'all',
+      },
+      credential,
+      signal,
+    );
+  }
+
+  grokWebAdapter(): GrokWebAdapter {
+    this.grokWeb ??= new GrokWebAdapter();
+    return this.grokWeb;
+  }
+
+  /** Checks the sso cookie without storing it; 401/403 is a dead session, not a bad probe. */
+  async checkGrokWeb(cookie: string, signal?: AbortSignal) {
+    await this.grokWebAdapter().validateCredential(grokWebCredential(cookie), { signal });
+    return { verified: true };
+  }
+
+  /** Saves a Grok Web subscription only after the cookie was accepted. */
+  async connectGrokWeb(cookie: string, signal?: AbortSignal, addAccount = false) {
+    const credential = grokWebCredential(cookie);
+    await this.grokWebAdapter().validateCredential(credential, { signal });
+    return this.saveConnection(
+      {
+        id: addAccount ? `${grokWebProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : grokWebProviderId,
+        providerId: grokWebProviderId,
+        name: 'Grok Web',
+        endpoint: 'https://grok.com',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      },
+      credential,
+      signal,
+    );
+  }
+
+  perplexityWebAdapter(): PerplexityWebAdapter {
+    this.perplexityWeb ??= new PerplexityWebAdapter();
+    return this.perplexityWeb;
+  }
+
+  /** Checks the Perplexity session without storing it; a 400 from the tiny probe still proves the cookie. */
+  async checkPerplexityWeb(cookie: string, signal?: AbortSignal) {
+    await this.perplexityWebAdapter().validateCredential(perplexityWebCredential(cookie), { signal });
+    return { verified: true };
+  }
+
+  /** Saves a Perplexity Web session only after the cookie was accepted. */
+  async connectPerplexityWeb(cookie: string, signal?: AbortSignal, addAccount = false) {
+    const credential = perplexityWebCredential(cookie);
+    await this.perplexityWebAdapter().validateCredential(credential, { signal });
+    return this.saveConnection(
+      {
+        id: addAccount ? `${perplexityWebProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : perplexityWebProviderId,
+        providerId: perplexityWebProviderId,
+        name: 'Perplexity Web',
+        endpoint: 'https://www.perplexity.ai',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
       },
       credential,
       signal,
