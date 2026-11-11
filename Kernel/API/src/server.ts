@@ -15,6 +15,7 @@ import { handleUsageRoute } from './routes/usage.js';
 import { handleLogsRoute } from './routes/logs.js';
 import { handleSettingsRoute } from './routes/settings.js';
 import { handleVirtualModelsRoute } from './routes/virtual-models.js';
+import { handleMcpRoute } from './routes/mcp.js';
 import type { RouteContext } from './routes/route-context.js';
 import type { ApiKeyStore } from './core/api-keys.js';
 import type { ConnectionStore } from './core/connections.js';
@@ -63,6 +64,7 @@ const routes = [
   handleLogsRoute,
   handleSettingsRoute,
   handleVirtualModelsRoute,
+  handleMcpRoute,
   // Last, because it carries the authentication gate for the LLM surface and must not shadow
   // anything above.
   handleInferenceRoute,
