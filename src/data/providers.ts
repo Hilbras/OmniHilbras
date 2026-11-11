@@ -1200,7 +1200,8 @@ export const providerCatalog: ProviderRecord[] = [
     color: '#6f7cff',
     initial: 'Q',
     logo: providerLogoMap.qwen,
-    endpoint: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    endpoint: 'https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1',
+    apiKeysUrl: 'https://console.qwencloud.com/',
     modelList: [],
   },
   {
