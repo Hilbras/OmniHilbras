@@ -119,6 +119,8 @@ export type RequestExecutorDeps = {
   /** Refuses an attempt that would exceed the connection's per-minute limit. */
   enforceRateLimit: (candidate: RouteCandidate) => void;
   recordSuccess: (providerId: string, latencyMs: number, at: string, connectionId?: string) => void;
+  /** Stamps a successful turn against the connection that served it. */
+  recordUsage?: (connectionId: string) => void;
   recordFailure: (providerId: string, code: string, reason: string, connectionId?: string) => void;
   /** A rate limit on one model: cools that model on that provider, with the provider's reset time when it gave one. */
   recordModelRateLimit?: (providerId: string, modelId: string, input: { retryAfterMs?: number }, connectionId?: string) => void;
@@ -306,6 +308,7 @@ export class RequestExecutor {
           // Keyed by the connection as well as the provider: latency is a property of the account that
           // served the request, and two accounts of one vendor are not equally fast.
           this.deps.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString(), candidate.connectionId);
+          if (candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordUsage?.(candidate.connectionId);
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: true, latencyMs });
           return { response, attempts };
         } catch (error) {
@@ -407,7 +410,8 @@ export class RequestExecutor {
           // belongs to the request we are no longer waiting on.
           if (abandoned.has(candidate)) return outcome;
           if (outcome.ok) {
-            this.deps.recordSuccess(candidate.providerId, outcome.latencyMs, new Date().toISOString());
+            this.deps.recordSuccess(candidate.providerId, outcome.latencyMs, new Date().toISOString(), candidate.connectionId);
+            if (candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordUsage?.(candidate.connectionId);
           } else {
             if (!isCallerFault(code ?? 'PROVIDER_REQUEST_FAILED')) this.deps.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.', candidate.connectionId);
           }
@@ -573,7 +577,8 @@ export class RequestExecutor {
               // skips whatever follows it, which is exactly why my first attempt at this fix — an
               // `if (completed)` *after* the loop — was dead code, and the test that guards it said so.
               if (next.done) {
-                executor.deps.recordSuccess(candidate.providerId, Date.now() - startedAt, new Date().toISOString());
+                executor.deps.recordSuccess(candidate.providerId, Date.now() - startedAt, new Date().toISOString(), candidate.connectionId);
+                if (candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) executor.deps.recordUsage?.(candidate.connectionId);
                 return;
               }
               yield next.value;

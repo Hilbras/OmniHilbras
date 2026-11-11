@@ -81,6 +81,10 @@ export type GatewayConnection = {
   responsibility?: { owner?: string; purpose?: string };
   createdAt: string;
   updatedAt: string;
+  /** How many turns this connection has successfully served. */
+  requestCount?: number;
+  /** ISO timestamp of the last successfully served turn. */
+  lastUsed?: string;
 };
 
 export type GatewayRoutingState = {

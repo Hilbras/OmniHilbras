@@ -477,6 +477,7 @@ export class GatewayService {
       recordFailure: (providerId, code, reason, connectionId) => this.healthManager.recordFailure(providerId, code, reason, connectionId),
       recordModelRateLimit: (providerId, modelId, input, connectionId) => this.healthManager.recordModelRateLimit(providerId, modelId, input, connectionId),
       recordRateLimitUse: (connectionId) => this.rateLimiter.record(connectionId),
+      recordUsage: (connectionId) => { void this.connectionStore?.recordUsage(connectionId).catch(() => undefined); },
     });
     this.providers = new ProviderResolver(registry)
       .onDemand('cline', ({ connection }) => this.clineAdapter(connection?.id ?? 'cline'), { validateOnSave: true })

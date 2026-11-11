@@ -78,12 +78,10 @@ export function mergeGatewayConnections(providers: ProviderRecord[], connections
       // Measured: the models the connection actually imported.
       models: modelIds.length > 0 ? `${modelIds.length} models · ${connection.modelPolicy === 'free' ? 'free import' : 'all import'}` : connection.hasCredential ? 'No imported models' : '—',
       modelList: modelIds,
-      // `lastUsed` and `requests` are deliberately **not** set. Nothing in this gateway measures either
-      // one, so the catalog's placeholders are the honest value. They used to be:
-      //   lastUsed: liveHealthy ? 'just now' : 'saved locally'
-      // which reported a health poll as if it were usage, and left `requests` a permanent `0` for a
-      // counter that does not exist. If you add real usage tracking, set them here — and set them from
-      // the tracking, not from health.
+      // Usage tracking now exists in the gateway (per-connection requestCount + lastUsed). Set these
+      // from the tracking, never from health — a health poll is not usage.
+      ...(connection.requestCount === undefined ? {} : { requests: String(connection.requestCount) }),
+      ...(connection.lastUsed === undefined ? {} : { lastUsed: connection.lastUsed }),
     } satisfies ProviderRecord;
   });
 }

@@ -77,6 +77,10 @@ export type ConnectionRecord = {
   responsibility?: ConnectionResponsibility;
   createdAt: string;
   updatedAt: string;
+  /** How many turns this connection has successfully served. Undefined until the first. */
+  requestCount?: number;
+  /** ISO timestamp of the last successfully served turn. Undefined until the first. */
+  lastUsed?: string;
   /** The account identity the credential carries (an OAuth email), when it has one. */
   email?: string;
   /** The kind of credential this connection holds — for the account row's badge. Never the value. */
@@ -208,6 +212,8 @@ export interface ConnectionStore extends ConnectionCredentialStore {
   /** The vault-local fingerprint of a credential, for recognising one that is already saved. */
   credentialFingerprint(providerId: string, credential: ProviderCredential): Promise<string>;
   remove(connectionId: string): Promise<boolean>;
+  /** Increments the connection’s successful-turn counter and stamps lastUsed. */
+  recordUsage(connectionId: string): Promise<void>;
 }
 
 export type LocalConnectionStoreOptions = {
@@ -388,6 +394,13 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     this.connections.delete(connectionId);
     this.credentials.delete(connectionId);
     return true;
+  }
+
+  async recordUsage(connectionId: string) {
+    const record = this.connections.get(connectionId);
+    if (!record) return;
+    record.requestCount = (record.requestCount ?? 0) + 1;
+    record.lastUsed = new Date().toISOString();
   }
 
   private findIdForProvider(providerId: ProviderId) {
@@ -758,6 +771,25 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
         throw error;
       }
       return true;
+    });
+  }
+
+  async recordUsage(connectionId: string) {
+    await this.withMutation(async () => {
+      await this.ensureLoaded();
+      const record = this.connections.get(connectionId);
+      if (!record) return;
+      const previous = record.requestCount;
+      const previousLastUsed = record.lastUsed;
+      record.requestCount = (record.requestCount ?? 0) + 1;
+      record.lastUsed = new Date().toISOString();
+      try {
+        await this.persistMetadata();
+      } catch (error) {
+        record.requestCount = previous;
+        record.lastUsed = previousLastUsed;
+        throw error;
+      }
     });
   }
 
