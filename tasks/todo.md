@@ -5771,3 +5771,7 @@ independently of the React app" is now measured over every provider manifest, an
 - Added bounded compaction for long Duck.ai histories.
 - Verified the provider check endpoint is healthy for both `deepseek-web` and `duckduckgo-web`.
 - Duck.ai image input is explicitly not claimed: the chat payload has no upload field.
+
+## 3.9.1 — TokenHarbor Web cookie copy fix
+
+- Fixed the console snippet so Supabase session chunks are joined in numeric order (`sb-auth-auth-token`, then `.0`, `.1`, ...), matching the gateway parser. The previous `localeCompare` sort placed the base cookie after `.0` and could reassemble a truncated session.
