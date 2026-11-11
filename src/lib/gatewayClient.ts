@@ -1043,6 +1043,54 @@ export function openGatewayLogStream(onEvent: (event: GatewayLogEvent) => void, 
       offState();
     };
   }
+  // EventSource cannot carry an Authorization header. A paired Android device and a remote browser use
+  // the token-bearing fetch stream below; development keeps the Vite proxy because it attaches the
+  // per-launch dashboard token.
+  const token = gatewayDeviceToken();
+  if (token && gatewayBaseUrl) {
+    const controller = new AbortController();
+    let closed = false;
+    const consume = async () => {
+      const response = await fetch(`${gatewayBaseUrl}/v1/logs/stream`, {
+        headers: { accept: 'text/event-stream', ...gatewayAuthHeaders() },
+        signal: controller.signal,
+        cache: 'no-store',
+      });
+      if (!response.ok || !response.body) {
+        onState(false);
+        return;
+      }
+      onState(true);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (!closed) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          for (const line of frame.split('\n')) {
+            if (!line.startsWith('data:')) continue;
+            try {
+              onEvent(JSON.parse(line.slice(5).trim()) as GatewayLogEvent);
+            } catch {
+              // A keep-alive or partial line is not a record.
+            }
+          }
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+      if (!closed) onState(false);
+    };
+    void consume().catch(() => { if (!closed) onState(false); });
+    return () => {
+      closed = true;
+      controller.abort();
+    };
+  }
   // In development the relative URL is required: EventSource cannot carry the per-launch dashboard
   // token, and the Vite proxy attaches it. In a build there is no proxy, so a relative URL reaches
   // the static host instead of the gateway — the feed used to be dead in production for that reason.
