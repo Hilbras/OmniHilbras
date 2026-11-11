@@ -25,6 +25,23 @@ export type GatewayHealth = {
   providers: GatewayProviderHealth[];
 };
 
+/** One live host sample from `GET /v1/system`; the machine running the gateway, not a provider. */
+export type GatewaySystemStats = {
+  sampledAt: string;
+  cpu: {
+    percent: number;
+    cores: number;
+    loadAverage: [number, number, number];
+  };
+  memory: {
+    totalBytes: number;
+    usedBytes: number;
+    freeBytes: number;
+    percent: number;
+  };
+  uptimeSeconds: number;
+};
+
 export type GatewayResilience = {
   /** Per-request budget in ms. 0 uses the shared default. */
   timeoutMs: number;
@@ -203,6 +220,11 @@ function isLoopbackIpv4(hostname: string) {
 
 export async function getGatewayHealth(signal?: AbortSignal) {
   return requestJson<GatewayHealth>('/health', { signal });
+}
+
+/** Live CPU and memory of the gateway host. */
+export async function getGatewaySystemStats(signal?: AbortSignal) {
+  return requestJson<GatewaySystemStats>('/v1/system', { signal });
 }
 
 /**

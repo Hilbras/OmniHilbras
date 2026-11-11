@@ -171,7 +171,9 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // options were counted by numbers whose provenance stopped five entries earlier — the drift this
   // comment exists to prevent, inside the comment. The assertions are unchanged; the entries that
   // explain them are now present.
-  assert.equal(providerCatalog.length, 48, `the catalog now has ${providerCatalog.length} cards`);
-  assert.equal(providerOptions.length, 29, `the dialog now offers ${providerOptions.length} options`);
+  // Cards 48 -> 50 in 3.7.0 (`agentrouter`, `aion-labs`), both keyed and both in `free-tier`, so the
+  // dialog gains two options: 29 -> 31.
+  assert.equal(providerCatalog.length, 50, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerOptions.length, 31, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

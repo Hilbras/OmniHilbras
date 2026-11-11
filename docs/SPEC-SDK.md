@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.5.1
+**Status:** Current — release 3.6.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -209,6 +209,7 @@ The first local gateway exposes:
 - `GET /v1/logs/stream` — a server-sent event stream of each finished request, as it is recorded. Each event is the usage record's fields: time, model, provider, connection, outcome, error code, attempt count and request id. It carries no message content, prompt or credential. Management route: requires a key when management enforcement is on.
 - `PUT /v1/providers/:providerId/strategy` — set how a provider's connections share traffic: `priority` (the default, the first connection by priority serves), `round-robin` (connections at one priority take turns), or `fastest` (prefer the lowest measured latency). Body `{"strategy": "round-robin"}`; any other value is a 400. Management route: requires a key when management enforcement is on. `GET /v1/routing` reports each set strategy under `strategies`.
 - `PUT /v1/connections/:id` — save or update a connection. Credentials are stated as **`apiKey`**, or as **`credential: "none"`** for a provider that needs no key at all: the two are mutually exclusive and the gateway refuses a body that carries both, an unknown `credential` value, or neither — a missing key is still an error, so "no credential" cannot be reached by forgetting. Before 1.86.0 the route called the API-key parser unconditionally, which made every keyless provider unsavable; Ollama is the card that exercises this. A discovered **model metadata map** (display name, context window, modalities, and per-1M prices) is preserved across a save that does not supply one, and replaced by one that does; it was silently dropped on every save before 1.62.0. An **`id`** names the account to write, which is how **Edit** updates one row instead of adding a second; omitting it reuses the provider's existing connection. The response carries **`duplicate`** when the credential is already saved — `identical` for an API key that is already stored (the existing account comes back and nothing is written) and `updated` for the same sign-in again (it renews the account that holds it) — so a client can say which account this is rather than appearing to add a twin. The check compares a vault-local **fingerprint** of the credential within the provider that owns it, so two accounts of one vendor stay distinct and a shared card (`clinepass` → `cline`) is recognised under its owner.
+- `GET /v1/system` — live CPU and memory of the machine running the gateway. CPU is measured over a short interval (two counter reads, not a boot-average), and memory is host total/free, not a provider or gateway-process figure: `cpu.percent`, `cpu.cores`, `cpu.loadAverage`, `memory.totalBytes`, `memory.usedBytes`, `memory.freeBytes`, `memory.percent`, `uptimeSeconds`, and `sampledAt`. It carries no hostname, credential or request content. Management route: requires a key when management enforcement is on.
 - `GET /v1/routing` — live routing state: budgets, recent failures and successes, ejection, last latency, last error, and `rateLimitWaitMs` (absent when never checked, `0` when checked and free).
 
   Routing holds two maps keyed by connection id — the recorded waits behind `rateLimitWaitMs`, and the
@@ -2131,11 +2132,17 @@ The endpoint is checked before the card is written, not after:
 | --- | --- | --- | --- |
 | NaraRouter | `https://router.bynara.id/v1` | `GET /v1/models` | `401 A valid API key is required.` |
 | TokenHarbor | `https://tokenharbor.ai/v1` | `GET /v1/models` | `401 Invalid or revoked API key. Rotate your key at …` |
+| AgentRouter | `https://agentrouter.org/v1` | `GET /v1/models` | `401 unauthorized client detected, contact support for assistance` |
+| Aion Labs | `https://api.aionlabs.ai/v1` | `GET /v1/models` | `200` with a public model list; chat still requires a bearer key |
 
 A `401` with a JSON error body is the useful result: it shows the route exists, the service
 is live, and it wants a bearer key, which is what the generic on-demand adapter sends. A
 `404` or an HTML page means the guessed path is wrong and the base URL needs finding first.
 NaraRouter's site root returns HTML and `/api/v1` 404s, so only `/v1` is the API.
+
+Aion Labs is the exception to that reading: its `200` proves the host and path, not the key,
+because the catalog is public. The card therefore claims no credential health until a real
+request is made; the generic adapter's model-list health check is not evidence about a key here.
 
 A card never borrows another provider's logo. There is a `tokenrouter` asset in
 `public/providers` belonging to a different, unrelated service, and `tokenharbor` uses the

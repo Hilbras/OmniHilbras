@@ -325,7 +325,9 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 40-47 from the free-tier wave: `agnes-ai`, `nous`, `beatapi`, `kiraai`, `vengetic`, `anyrouter`,
   // `zro` and `unorouter` — one key over an OpenAI-compatible path each, catalog cards and no adapter
   // work; three of the eight have no documented API surface and say so on the card.
-  assert.equal(all.length, 48, `the catalog now has ${all.length} cards`);
+  // 48-49 from 3.7.0: `agentrouter` and `aion-labs`, both keyed API cards in Free Tier Providers,
+  // each with the vendor's own mark and no adapter work.
+  assert.equal(all.length, 50, `the catalog now has ${all.length} cards`);
   // Fifteen cards claim OAuth, but the gateway serves twelve start routes: `clinepass` shares `cline`'s,
   // and `claude-code` and `codex` sign in through `server.ts` routes this scan reads too — the counts of
   // claims and routes do not coincide, which is why both are asserted rather than one derived.

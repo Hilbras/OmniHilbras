@@ -8,6 +8,7 @@ import {
 } from '../core/http.js';
 import { decodeProviderId } from './connections.js';
 import { gatewayBuild } from '../core/build-info.js';
+import { readHostSystemStats } from '../core/system-stats.js';
 
 export async function handleStatusRoute(ctx: RouteContext): Promise<boolean> {
   const { request, response, url, service, origin, signal } = ctx;
@@ -23,6 +24,13 @@ export async function handleStatusRoute(ctx: RouteContext): Promise<boolean> {
       // operator makes when something looks wrong. "Which build is this" is exactly that question,
       // and answering it only from the settings route means the person debugging cannot reach it.
       sendJson(response, 200, { service: 'omnihilbras-gateway', build: gatewayBuild(), ...(await service.health(signal)) }, origin);
+      return true;
+    }
+
+    // The machine's own load, not the providers'. The Servers page already answers "is the gateway
+    // up"; this answers "what is it running on", which is the other half of a server screen.
+    if (request.method === 'GET' && url.pathname === '/v1/system') {
+      sendJson(response, 200, await readHostSystemStats(), origin);
       return true;
     }
 

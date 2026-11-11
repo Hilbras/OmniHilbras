@@ -80,7 +80,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/routes/connections.ts` | 358 | 1 | one OpenRouter save shortcut, the generic quota route, and the build stamp |
 | `Kernel/API/src/routes/inference.ts` | 1134 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and the auth gate |
 | `Kernel/API/src/routes/api-keys.ts` | 74 | **0** | |
-| `Kernel/API/src/routes/status.ts` | 48 | **0** | `/health`, `/v1/routing`, and the build stamp |
+| `Kernel/API/src/routes/status.ts` | 56 | **0** | `/health`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
 | `Kernel/API/src/server.ts` | 318 | **0** | refuses a half-configured Codex OAuth override at startup |
 

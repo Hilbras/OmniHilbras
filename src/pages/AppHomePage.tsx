@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CircleAlert, CircleCheck, Copy, FileWarning, Play, RotateCcw, Server, Square, Terminal } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { DashboardShell } from '../components/DashboardShell';
-import { listGatewayConnections, openGatewayLogStream, type GatewayLogEvent } from '../lib/gatewayClient';
+import { getGatewaySystemStats, listGatewayConnections, openGatewayLogStream, type GatewayLogEvent, type GatewaySystemStats } from '../lib/gatewayClient';
 import { desktopBridge, type DesktopServerLog, type DesktopServerSnapshot } from '../lib/electronBridge';
 
 const MAX_PROCESS_LINES = 200;
@@ -22,6 +22,44 @@ const STATE_TONE: Record<DesktopServerSnapshot['state'], string> = {
   failed: 'border-danger/25 bg-danger/10 text-danger',
 };
 
+function formatBytes(value: number | undefined) {
+  if (value === undefined || !Number.isFinite(value)) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
+}
+
+/** One measured host resource, with its bar and the detail that makes the number checkable. */
+function ResourceMeter({ label, percent, detail }: { label: string; percent: number | undefined; detail: string }) {
+  const value = percent !== undefined && Number.isFinite(percent) ? Math.min(100, Math.max(0, percent)) : undefined;
+  const tone = value === undefined ? 'bg-line' : value >= 90 ? 'bg-danger' : value >= 75 ? 'bg-gold' : 'bg-success';
+  return (
+    <div className="rounded-lg border border-line bg-bg-soft/50 p-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="muted text-[10px] uppercase tracking-wide">{label}</span>
+        <span className="font-mono text-sm">{value === undefined ? '—' : `${value.toFixed(1)}%`}</span>
+      </div>
+      <div
+        className="mt-2 h-2 overflow-hidden rounded-full bg-bg-soft"
+        role="progressbar"
+        aria-label={`${label} usage`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={value === undefined ? 0 : Math.round(value)}
+        aria-valuetext={value === undefined ? 'unavailable' : `${value.toFixed(1)} percent`}
+      >
+        <div className={`h-full rounded-full ${tone} transition-[width] duration-500`} style={{ width: `${value ?? 0}%` }} />
+      </div>
+      <p className="muted mt-2 text-[11px]">{detail}</p>
+    </div>
+  );
+}
+
 /**
  * The desktop main page: the gateway's lifecycle and the two logs that explain it.
  *
@@ -32,6 +70,8 @@ const STATE_TONE: Record<DesktopServerSnapshot['state'], string> = {
 export function AppHomeContent() {
   const bridge = desktopBridge();
   const [snapshot, setSnapshot] = useState<DesktopServerSnapshot | undefined>();
+  const [systemStats, setSystemStats] = useState<GatewaySystemStats | undefined>();
+  const [systemError, setSystemError] = useState<string | undefined>();
   const [processLogs, setProcessLogs] = useState<DesktopServerLog[]>([]);
   const [events, setEvents] = useState<GatewayLogEvent[]>([]);
   const [streamConnected, setStreamConnected] = useState(false);
@@ -66,6 +106,28 @@ export function AppHomeContent() {
       offLog();
     };
   }, [bridge]);
+
+  useEffect(() => {
+    let active = true;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const next = await getGatewaySystemStats();
+        if (!active) return;
+        setSystemStats(next);
+        setSystemError(undefined);
+      } catch (cause) {
+        if (active) setSystemError(cause instanceof Error ? cause.message : 'Host statistics are unavailable.');
+      } finally {
+        if (active) timer = window.setTimeout(() => void poll(), 2_000);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     const close = openGatewayLogStream(
@@ -202,6 +264,33 @@ export function AppHomeContent() {
             <div className="rounded-lg border border-line bg-bg-soft/50 p-3"><p className="muted text-[10px] uppercase tracking-wide">Cancelled</p><p className="mt-1 font-mono text-lg">{requestCounts.cancelled}</p></div>
             <div className="rounded-lg border border-line bg-bg-soft/50 p-3"><p className="muted text-[10px] uppercase tracking-wide">Feed</p><p className={`mt-1 flex items-center gap-1.5 text-xs font-semibold ${streamConnected ? 'text-success' : 'text-muted'}`}>{streamConnected ? <CircleCheck className="h-3.5 w-3.5" aria-hidden="true" /> : <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />}{streamConnected ? 'live' : 'unavailable'}</p></div>
           </div>
+        </section>
+
+        <section className="card p-5" aria-labelledby="host-resources-title">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 id="host-resources-title" className="text-sm font-semibold">Host resources</h2>
+              <p className="muted mt-1 text-xs">
+                CPU and memory of the machine running the gateway{systemStats ? ` · sampled ${timeOf(systemStats.sampledAt)}` : ''}.
+              </p>
+            </div>
+            <span className={`rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase ${systemError ? 'border-danger/25 bg-danger/10 text-danger' : systemStats ? 'border-success/25 bg-success/10 text-success' : 'border-line bg-bg-soft text-muted'}`}>
+              {systemError ? 'stale' : systemStats ? 'live' : 'waiting'}
+            </span>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <ResourceMeter
+              label="CPU"
+              percent={systemStats?.cpu.percent}
+              detail={systemStats ? `${systemStats.cpu.cores} cores · load ${systemStats.cpu.loadAverage.map((value) => value.toFixed(2)).join(' / ')}` : 'Waiting for the gateway to answer.'}
+            />
+            <ResourceMeter
+              label="Memory"
+              percent={systemStats?.memory.percent}
+              detail={systemStats ? `${formatBytes(systemStats.memory.usedBytes)} of ${formatBytes(systemStats.memory.totalBytes)} used` : 'Waiting for the gateway to answer.'}
+            />
+          </div>
+          {systemError && <p className="mt-3 text-[11px] text-danger">{systemError}</p>}
         </section>
 
         {connections === 0 && (

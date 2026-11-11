@@ -54,6 +54,8 @@ export const PROVIDER_SLUGS: Readonly<Record<string, string>> = {
   // The subscription lane of the same product: `ocg`, the alias the reference project uses.
   'opencode-go': 'ocg',
   'agnes-ai': 'ag',
+  agentrouter: 'agr',
+  'aion-labs': 'aio',
   nous: 'ns',
   beatapi: 'bt',
   kiraai: 'ka',

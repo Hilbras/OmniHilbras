@@ -5731,3 +5731,14 @@ independently of the React app" is now measured over every provider manifest, an
   priority 2 must not outrank a deliberate priority 1); **an unmeasured account sorts last** (unknown is
   not fast); and a provider not set to `fastest` keeps its order untouched. The account row now shows
   the measured round trip, or "unmeasured" — never a fabricated 0 ms.
+
+## 3.6.0 — live host load, and two more free-tier cards
+
+- **The Servers page now measures the host.** `GET /v1/system` samples CPU counters 120 ms apart
+  rather than reporting a boot average, and returns host memory, cores, load average and uptime.
+  The page polls every two seconds and says `stale` when the gateway stops answering; it never
+  keeps a bar moving on invented numbers.
+- **AgentRouter and Aion Labs are in Free Tier Providers.** Both are catalog cards over the generic
+  OpenAI-compatible fallback, with the vendors' own marks and their documented base URLs. Neither
+  card claims a model count before the gateway reads one; Aion's public model list is documented as
+  proving the route, not a key.

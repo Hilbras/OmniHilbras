@@ -22,7 +22,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.5.1**
+**Current version: 3.6.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
@@ -290,6 +290,7 @@ document.
 
 | Route | Page |
 | --- | --- |
+| `/dashboard` | Gateway lifecycle, live host CPU/memory, server output and request feed |
 | `/dashboard/providers` | Provider catalog and connections |
 | `/dashboard/models` | Virtual `oh/` models and multi-account targets |
 | `/dashboard/models` | Virtual `oh/` models and their multi-account targets |

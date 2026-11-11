@@ -1,7 +1,16 @@
-# Release notes draft: 3.5.1
+# Release notes draft: 3.6.0
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.6.0 — live host load and two more free-tier providers
+
+- Added `GET /v1/system`: a measured CPU percentage over a short interval, plus host memory and uptime.
+- The Servers page polls it every two seconds and shows CPU and memory bars with cores, load average and used/total memory.
+- The route is management-gated, so a paired Android device or remote browser can read the gateway host's load.
+- The sample contains no hostname, credential or request content.
+- Added AgentRouter and Aion Labs to **Free Tier Providers**. Both are API-key cards with their vendors' own marks and OpenAI-compatible endpoints: `https://agentrouter.org/v1` and `https://api.aionlabs.ai/v1`.
+- Aion Labs advertises a free daily credit allowance at 15 requests and 20,000 tokens per minute; AgentRouter advertises free developer credits with a capacity-dependent model list. Neither card claims a model count before the gateway reads one.
 
 ## 3.5.1 — Android pairing verified
 

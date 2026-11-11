@@ -31,6 +31,8 @@ test('the requested OAuth and subscription slugs are the short ones', () => {
       'codebuddy-cn': providerSlug('codebuddy-cn'),
       'opencode-console': providerSlug('opencode-console'),
       'agnes-ai': providerSlug('agnes-ai'),
+      agentrouter: providerSlug('agentrouter'),
+      'aion-labs': providerSlug('aion-labs'),
     },
     {
       codex: 'cd',
@@ -45,6 +47,8 @@ test('the requested OAuth and subscription slugs are the short ones', () => {
       'codebuddy-cn': 'cb',
       'opencode-console': 'opc',
       'agnes-ai': 'ag',
+      agentrouter: 'agr',
+      'aion-labs': 'aio',
     },
   );
 });

@@ -73,6 +73,7 @@ test('a route module claims only its own routes', async () => {
     { method: 'GET', path: '/v1/models', owner: 'inference' },
     { method: 'GET', path: '/health', owner: 'status' },
     { method: 'GET', path: '/v1/routing', owner: 'status' },
+    { method: 'GET', path: '/v1/system', owner: 'status' },
     { method: 'DELETE', path: '/v1/connections/anything', owner: 'connections' },
     { method: 'PATCH', path: '/v1/keys/anything', owner: 'api-keys' },
   ];
