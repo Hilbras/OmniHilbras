@@ -65,6 +65,8 @@ URL. The default CORS list includes the Capacitor origin `https://localhost`; ad
 
 - QR pairing is deferred.
 - Release signing is deferred; the APK is a debug build.
+- **Read-only device scopes are deferred.** API keys have no scope model yet, so the pairing key is a full
+  management key. Treat the debug APK as a trusted-device build until scoped keys land.
 - Physical-device testing is still recommended before calling the APK production-ready.
 
 Do not bind the gateway to `0.0.0.0` as a shortcut.

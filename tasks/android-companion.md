@@ -1,6 +1,6 @@
 # Plan: Android companion app
 
-**Status:** complete — debug APK, Keystore pairing and emulator verification of Providers, Models, Routing, Usage and Logs; QR pairing and release signing explicitly deferred
+**Status:** complete for the debug companion — APK, Keystore pairing and emulator verification pass; QR pairing, release signing and read-only device scopes are explicitly deferred
 
 ## Decision
 
