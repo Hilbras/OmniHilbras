@@ -140,7 +140,7 @@ test('the prefix list and the router agree, so a new management route cannot be 
   // `isPublicLlmRoute`, not the prefix list, and `responses-route.test.js` proves that gate refuses it without a key.
   // `/v1/messages/count_tokens` is part of the inference surface too: `handleInferenceRoute` gates it
   // through `isPublicLlmRoute`, and `token-caps.test.js` proves it refuses an unauthenticated caller.
-  const excluded = new Set(['/v1/models', '/v1/chat', '/v1/embeddings', '/v1/responses', '/v1/messages']);
+  const excluded = new Set(['/v1/models', '/v1/chat', '/v1/embeddings', '/v1/images', '/v1/responses', '/v1/messages']);
   for (const prefix of served) {
     if (excluded.has(prefix)) continue;
     assert.ok(

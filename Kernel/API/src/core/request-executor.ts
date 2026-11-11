@@ -1,4 +1,4 @@
-import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse } from './index.js';;
+import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse } from './index.js';;
 import { noCandidateMessage, type RouteCandidate, type RouteDecision } from './routing.js';
 import { RetryPolicy } from './retry-policy.js';
 import { HedgePolicy } from './hedge-policy.js';
@@ -66,6 +66,11 @@ export type GatewayEmbedOutcome = {
   attempts: GatewayFailoverAttempt[];
 };
 
+export type GatewayImageOutcome = {
+  response: ImageResponse;
+  attempts: GatewayFailoverAttempt[];
+};
+
 export type GatewayStreamOutcome = {
   chunks: AsyncIterable<ChatChunk>;
   attempts: GatewayFailoverAttempt[];
@@ -114,6 +119,7 @@ export type RequestExecutorDeps = {
    * here only.
    */
   embed: (providerId: string, request: EmbeddingRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string) => Promise<EmbeddingResponse>;
+  image: (providerId: string, request: ImageRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string) => Promise<ImageResponse>;
   /** Applies a per-attempt deadline and never leaks its timer. */
   withDeadline: <T>(signal: AbortSignal | undefined, timeoutMs: number, providerId: string, run: (signal: AbortSignal | undefined) => Promise<T>) => Promise<T>;
   /** Refuses an attempt that would exceed the connection's per-minute limit. */
@@ -220,6 +226,20 @@ export class RequestExecutor {
       signal,
       scope,
       dispatch: (candidate, deadline) => this.deps.embed(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
+    });
+  }
+
+  async image(request: ImageRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayImageOutcome> {
+    const decision = await this.deps.planRoute(request.model, explicitProviderId, request.connectionId);
+    if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
+    return this.runSequential({
+      candidates: decision.candidates,
+      attempts: [],
+      racedProviders: new Set(),
+      lastError: undefined,
+      signal,
+      scope,
+      dispatch: (candidate, deadline) => this.deps.image(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
     });
   }
 

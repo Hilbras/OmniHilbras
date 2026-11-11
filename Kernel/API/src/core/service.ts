@@ -4,7 +4,7 @@ import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
 import { NousAdapter } from '@omnihilbras/sdk-nous';
 import { ZenAdapter, ZEN_GO_BASE_URL } from '@omnihilbras/sdk-zen';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
-import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext, type ModelPricing } from './index.js';
+import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext, type ModelPricing } from './index.js';
 import { ChatGptWebAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, type ChatGptWebDriver } from '@omnihilbras/sdk-chatgpt-web';
 import { CLAUDE_CODE, ClaudeCodeAdapter, claudeCodeProviderId } from '@omnihilbras/sdk-claude-code';
 import { ClinePassAdapter } from '@omnihilbras/sdk-clinepass';
@@ -78,7 +78,7 @@ import {
 import { startRequestScope, withRequestScope, type RequestScope } from './request-context.js';
 import { decryptBackup, encryptBackup } from './backup.js';
 import { notSupported } from './capability.js';
-import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayStreamOutcome } from './request-executor.js';
+import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayImageOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { providerAlias, sharedCatalogProviders } from './provider-alias.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
@@ -132,7 +132,7 @@ const renewalWindowMs = 30 * 60_000;
  * Re-exported rather than moved: the types now live with the loop that produces them, but every
  * existing importer of `service.js` keeps working without learning a second path for the same type.
  */
-export type { GatewayFailoverAttempt, GatewayChatOutcome, GatewayStreamOutcome, GatewayEmbedOutcome } from './request-executor.js';
+export type { GatewayFailoverAttempt, GatewayChatOutcome, GatewayStreamOutcome, GatewayEmbedOutcome, GatewayImageOutcome } from './request-executor.js';
 
 /**
  * The credential surface the service needs, keyed by connection id.
@@ -466,6 +466,7 @@ export class GatewayService {
       chat: (providerId, request, signal, scope, connectionId) => this.chat(providerId, request, signal, scope, connectionId),
       streamChat: (providerId, request, signal, scope, connectionId) => this.streamChat(providerId, request, signal, scope, connectionId),
       embed: (providerId, request, signal, scope, connectionId) => this.embed(providerId, request, signal, scope, connectionId),
+      image: (providerId, request, signal, scope, connectionId) => this.image(providerId, request, signal, scope, connectionId),
       withDeadline: (signal, timeoutMs, providerId, run) => this.withDeadline(signal, timeoutMs, providerId, run),
       enforceRateLimit: (candidate) => this.enforceRateLimit(candidate),
       recordSuccess: (providerId, latencyMs, at, connectionId) => {
@@ -2865,6 +2866,17 @@ export class GatewayService {
     }
   }
 
+  async image(providerId: string, request: ImageRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<ImageResponse> {
+    const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
+    if (adapter.capabilities.images !== true || typeof adapter.image !== 'function') throw notSupported(adapter, 'images');
+    const release = await this.acquireConcurrency(connectionId);
+    try {
+      return await adapter.image({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId) }, await this.contextForRequest(providerId, connectionId, signal, scope));
+    } finally {
+      release();
+    }
+  }
+
   /**
    * The credential and policy for the account a route selected.
    *
@@ -2947,6 +2959,10 @@ export class GatewayService {
    */
   async embedWithFailover(request: EmbeddingRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayEmbedOutcome> {
     return this.requests.embed(request, explicitProviderId, signal, scope);
+  }
+
+  async imageWithFailover(request: ImageRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayImageOutcome> {
+    return this.requests.image(request, explicitProviderId, signal, scope);
   }
 
   /** Streaming cannot retry after bytes are sent, so failover only covers the first chunk. */

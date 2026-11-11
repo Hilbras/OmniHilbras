@@ -6,7 +6,7 @@
  * the wrong thing.
  */
 
-import { ProviderError, canonicalizeUsage, isLoopbackHostname, type ProviderId, isPrivateHostname, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type MessageContent, type Model, type ToolCall, type ToolDefinition } from '../core/index.js';
+import { ProviderError, canonicalizeUsage, isLoopbackHostname, type ProviderId, isPrivateHostname, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type MessageContent, type Model, type ToolCall, type ToolDefinition } from '../core/index.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
 import { attachRequestId, type RequestScope } from '../core/request-context.js';
@@ -68,6 +68,11 @@ export async function handleInferenceRoute(ctx: RouteContext): Promise<boolean> 
 
     if (request.method === 'POST' && url.pathname === '/v1/embeddings') {
       await handleEmbeddings(request, response, service, options, origin, signal);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/images/generations') {
+      await handleImages(request, response, service, options, origin, signal);
       return true;
     }
 
@@ -150,6 +155,99 @@ export async function handleEmbeddings(request: IncomingMessage, response: Serve
       : undefined,
     gateway: { requestId: scope.id, ...(responseBody.attempts.length > 1 ? { attempts: responseBody.attempts.map(toPublicAttempt) } : {}) },
   }, origin);
+}
+
+/**
+ * `POST /v1/images/generations`, in OpenAI's shape.
+ */
+export async function handleImages(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
+  const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
+  const parsedImage = parseImageRequest(body);
+  const explicitConnectionId = getExplicitConnectionId(request, body);
+  const imageRequest = explicitConnectionId === undefined ? parsedImage : { ...parsedImage, connectionId: explicitConnectionId };
+  const explicitProviderId = getExplicitProviderId(request, body);
+  const scope = service.startScope(imageRequest.model, explicitProviderId);
+
+  const startedAt = Date.now();
+  let responseBody: { response: ImageResponse; attempts: GatewayFailoverAttempt[] };
+  try {
+    responseBody = await service.imageWithFailover(imageRequest, explicitProviderId, signal, scope);
+  } catch (error) {
+    const details = error instanceof ProviderError ? error.details : undefined;
+    const ledger: GatewayFailoverAttempt[] =
+      typeof details === 'object' && details !== null && Array.isArray((details as { attempts?: unknown }).attempts)
+        ? ((details as { attempts: GatewayFailoverAttempt[] }).attempts)
+        : [];
+    const cancelled = signal.aborted || (error instanceof ProviderError && error.code === 'CANCELLED');
+    recordUsage(service, {
+      model: imageRequest.model,
+      providerId: ledger[ledger.length - 1]?.providerId,
+      connectionId: ledger[ledger.length - 1]?.connectionId,
+      outcome: cancelled ? 'cancelled' : 'failure',
+      attempts: ledger.length,
+      latencyMs: Date.now() - startedAt,
+      ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+      requestId: scope.id,
+      ledger,
+    });
+    throw attachRequestId(error, scope);
+  }
+
+  const serving = responseBody.attempts.find((attempt) => attempt.ok);
+  recordUsage(service, {
+    model: responseBody.response.model,
+    providerId: responseBody.response.providerId,
+    connectionId: serving?.connectionId,
+    outcome: 'success',
+    attempts: responseBody.attempts.length,
+    latencyMs: Date.now() - startedAt,
+    requestId: scope.id,
+  });
+
+  sendJson(response, 200, {
+    created: Math.floor(new Date(responseBody.response.createdAt).getTime() / 1000),
+    data: responseBody.response.data.map((item) => ({
+      ...(item.url !== undefined ? { url: item.url } : {}),
+      ...(item.b64Json !== undefined ? { b64_json: item.b64Json } : {}),
+      ...(item.revisedPrompt !== undefined ? { revised_prompt: item.revisedPrompt } : {}),
+    })),
+    provider: responseBody.response.providerId,
+    gateway: { requestId: scope.id, ...(responseBody.attempts.length > 1 ? { attempts: responseBody.attempts.map(toPublicAttempt) } : {}) },
+  }, origin);
+}
+
+/**
+ * Parses an OpenAI `/v1/images/generations` body.
+ */
+export function parseImageRequest(body: unknown): ImageRequest {
+  if (typeof body !== 'object' || body === null) throw invalidRequest('Request body must be a JSON object.');
+  const record = body as Record<string, unknown>;
+  const model = record.model;
+  if (typeof model !== 'string' || !model.trim()) throw invalidRequest('model must be a non-empty string.');
+  const prompt = record.prompt;
+  if (typeof prompt !== 'string' || !prompt.trim()) throw invalidRequest('prompt must be a non-empty string.');
+  const request: ImageRequest = { model: model.trim(), prompt: prompt.trim() };
+  if (record.n !== undefined) {
+    if (typeof record.n !== 'number' || !Number.isInteger(record.n) || record.n < 1) throw invalidRequest('n must be a positive integer.');
+    (request as { n?: number }).n = record.n;
+  }
+  if (record.size !== undefined) {
+    if (typeof record.size !== 'string') throw invalidRequest('size must be a string.');
+    (request as { size?: string }).size = record.size;
+  }
+  if (record.quality !== undefined) {
+    if (typeof record.quality !== 'string') throw invalidRequest('quality must be a string.');
+    (request as { quality?: string }).quality = record.quality;
+  }
+  if (record.response_format !== undefined) {
+    if (record.response_format !== 'url' && record.response_format !== 'b64_json') throw invalidRequest('response_format must be url or b64_json.');
+    (request as { responseFormat?: 'url' | 'b64_json' }).responseFormat = record.response_format as 'url' | 'b64_json';
+  }
+  if (record.user !== undefined) {
+    if (typeof record.user !== 'string') throw invalidRequest('user must be a string.');
+    (request as { user?: string }).user = record.user;
+  }
+  return request;
 }
 
 /**
@@ -1115,6 +1213,7 @@ export function isPublicLlmRoute(method: string | undefined, pathname: string) {
     || (method === 'POST' && pathname === '/v1/chat/completions')
     || (method === 'POST' && pathname === '/v1/responses')
     || (method === 'POST' && pathname === '/v1/embeddings')
+    || (method === 'POST' && pathname === '/v1/images/generations')
     || (method === 'POST' && pathname === '/v1/messages/count_tokens');
 }
 

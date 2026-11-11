@@ -300,6 +300,7 @@ The first local gateway exposes:
 - `POST /v1/backup/import` — body `{"passphrase": "...", "backup": envelope, "confirmReplace": true}`.
   **Replaces** every connection, strategy and API key. Returns counts. A missing confirmation is a 400;
   a wrong passphrase or a damaged envelope is refused before anything is changed. Management route.
+- `POST /v1/images/generations` — generate images, OpenAI shape `{model, prompt, n?, size?, quality?, response_format?, user?}`; returns `{created, data:[{url?, b64_json?, revised_prompt?}], provider, gateway}`. Authenticated like the LLM surface.
 - `GET /v1/virtual-models` — every persisted virtual model, enabled or disabled. A virtual model id must
   start with `oh/`; a target names a saved connection and an upstream model that connection lists.
 - `POST /v1/virtual-models` — create. Body `{id, name?, enabled?, strategy?, targets[]}`; `strategy` is

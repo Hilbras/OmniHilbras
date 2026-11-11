@@ -164,6 +164,30 @@ export type EmbeddingResponse = {
   usage?: TokenUsage;
 };
 
+export type ImageData = {
+  url?: string;
+  b64Json?: string;
+  revisedPrompt?: string;
+};
+
+export type ImageRequest = {
+  readonly model: string;
+  readonly prompt: string;
+  readonly n?: number;
+  readonly size?: string;
+  readonly quality?: string;
+  readonly responseFormat?: 'url' | 'b64_json';
+  readonly user?: string;
+};
+
+export type ImageResponse = {
+  id: string;
+  providerId: ProviderId;
+  model: string;
+  createdAt: string;
+  data: readonly ImageData[];
+};
+
 export type ChatChunk = {
   id: string;
   providerId: ProviderId;
@@ -363,6 +387,7 @@ export type ProviderAdapter = {
    * act on.
    */
   embed?: (request: EmbeddingRequest, context?: ProviderRequestContext) => Promise<EmbeddingResponse>;
+  image?: (request: ImageRequest, context?: ProviderRequestContext) => Promise<ImageResponse>;
   /**
    * Reads what the account has left, when the provider meters its accounts.
    *

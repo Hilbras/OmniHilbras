@@ -29,7 +29,7 @@ export class OpenAIAdapter extends OpenAICompatibleAdapter {
        * `/embeddings`, which is accurate and names the model — better than a gateway that refused
        * every model on the provider's behalf.
        */
-      capabilities: { embeddings: true },
+      capabilities: { embeddings: true, images: true },
       headers: {
         ...(options.organization ? { 'OpenAI-Organization': options.organization } : {}),
         ...(options.project ? { 'OpenAI-Project': options.project } : {}),

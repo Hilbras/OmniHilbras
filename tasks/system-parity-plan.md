@@ -34,6 +34,7 @@ Goal: close the system-level gaps between the current OmniHilbras (gateway + das
 - Routes `/v1/images/*`, `/v1/audio/*`, `/v1/embeddings`, search endpoint.
 - Dashboard: media test panels.
 - Test: each handler streams/returns correctly with a mock upstream.
+- **Slice 1 (image generation) — DONE (v3.13.0):** `POST /v1/images/generations`, openai adapter `image()`, failover via `imageWithFailover`, NOT_SUPPORTED on chat-only providers, spec line + 5 tests.
 
 ### Phase 6 — MCP server
 - `/api/mcp` (or `/v1/mcp`) exposing tools/resources over MCP protocol.

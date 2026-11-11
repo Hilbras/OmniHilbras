@@ -2,7 +2,7 @@ import { ProviderError } from './errors.js';
 import { parseSseJson, parseSseStream } from './streaming.js';
 import { FetchHttpTransport, type HttpTransport } from './transport.js';
 import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from './url.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from './types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, ImageRequest, ImageResponse, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from './types.js';
 
 export type OpenAICompatibleAuth = {
   header?: string;
@@ -262,6 +262,46 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       createdAt: new Date((typeof payload.created === 'number' ? payload.created : Date.now() / 1000) * 1000).toISOString(),
       data: vectors,
       ...(payload.usage ? { usage: normalizeUsage(payload.usage) } : {}),
+    };
+  }
+
+  async image(request: ImageRequest, context: ProviderRequestContext = {}): Promise<ImageResponse> {
+    if (!this.capabilities.images) {
+      throw new ProviderError('NOT_SUPPORTED', `${this.name} does not support images.`, {
+        providerId: this.id,
+        publicMessage: `${this.name} does not support images.`,
+      });
+    }
+    const body: Record<string, unknown> = { model: request.model, prompt: request.prompt };
+    if (request.n !== undefined) body.n = request.n;
+    if (request.size !== undefined) body.size = request.size;
+    if (request.quality !== undefined) body.quality = request.quality;
+    if (request.responseFormat !== undefined) body.response_format = request.responseFormat;
+    if (request.user !== undefined) body.user = request.user;
+
+    const response = await this.transport.request<{ created?: number; data?: Array<{ url?: string; b64_json?: string; revised_prompt?: string }> }>({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url('/images/generations'),
+      headers: this.requestHeaders(context.credential, 'application/json'),
+      body: JSON.stringify(body),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    const rows = response.data?.data;
+    if (!Array.isArray(rows)) throw invalidResponse(this.id, 'Provider image response is missing data.');
+
+    const data = rows.map((row) => ({
+      ...(row.url !== undefined ? { url: row.url } : {}),
+      ...(row.b64_json !== undefined ? { b64Json: row.b64_json } : {}),
+      ...(row.revised_prompt !== undefined ? { revisedPrompt: row.revised_prompt } : {}),
+    }));
+
+    return {
+      id: `image-${request.model}`,
+      providerId: this.id,
+      model: request.model,
+      createdAt: new Date((typeof response.data?.created === 'number' ? response.data.created : Date.now() / 1000) * 1000).toISOString(),
+      data,
     };
   }
 
