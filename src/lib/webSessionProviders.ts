@@ -141,7 +141,7 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
       {
         label: 'Or the console',
         body: 'With tokenharbor.ai open and signed in, open F12 → Console, paste this line and press Enter. It copies the session cookies (the chunks in order, plus cf_clearance) to your clipboard. This only works when the cookie is not HttpOnly; if nothing is copied, use one of the steps above.',
-        snippet: "copy(document.cookie.split('; ').filter((c) => c.startsWith('sb-auth-auth-token') || c.startsWith('cf_clearance')).sort((a, b) => { const an = a.split('=')[0], bn = b.split('=')[0]; const ai = an === 'sb-auth-auth-token' ? 0 : an.startsWith('sb-auth-auth-token.') ? Number(an.slice('sb-auth-auth-token'.length + 1)) + 1 : NaN; const bi = bn === 'sb-auth-auth-token' ? 0 : bn.startsWith('sb-auth-auth-token.') ? Number(bn.slice('sb-auth-auth-token'.length + 1)) + 1 : NaN; if (!Number.isFinite(ai) || !Number.isFinite(bi)) return an.localeCompare(bn); return ai - bi; }).join('; '))",
+        snippet: "(function(){const v=document.cookie.split('; ').filter((c) => c.startsWith('sb-auth-auth-token') || c.startsWith('cf_clearance')).sort((a,b)=>{const an=a.split('=')[0],bn=b.split('=')[0];const ai=an==='sb-auth-auth-token'?0:an.startsWith('sb-auth-auth-token.')?Number(an.slice('sb-auth-auth-token'.length+1))+1:NaN;const bi=bn==='sb-auth-auth-token'?0:bn.startsWith('sb-auth-auth-token.')?Number(bn.slice('sb-auth-auth-token'.length+1))+1:NaN;if(!Number.isFinite(ai)||!Number.isFinite(bi))return an.localeCompare(bn);return ai-bi;}).join('; ');try{copy(v)}catch(e){}console.log(v);prompt('Copy this session cookie:',v);return v;})()",
       },
       {
         label: 'What happens next',

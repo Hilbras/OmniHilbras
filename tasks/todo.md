@@ -5775,3 +5775,7 @@ independently of the React app" is now measured over every provider manifest, an
 ## 3.9.1 — TokenHarbor Web cookie copy fix
 
 - Fixed the console snippet so Supabase session chunks are joined in numeric order (`sb-auth-auth-token`, then `.0`, `.1`, ...), matching the gateway parser. The previous `localeCompare` sort placed the base cookie after `.0` and could reassemble a truncated session.
+
+## 3.9.2 — TokenHarbor Web copy fallback
+
+- Made the browser console snippet log the value and show a prompt dialog, so it can be copied even when `copy()` is unavailable or blocked.
