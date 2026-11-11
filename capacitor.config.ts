@@ -14,7 +14,9 @@ const config: CapacitorConfig = {
     allowMixedContent: false,
   },
   server: {
-    androidScheme: 'https',
+    // The local bundle is served over http://localhost so a loopback gateway (adb reverse) is not
+    // blocked as mixed content. A remote gateway URL must still be HTTPS.
+    androidScheme: 'http',
   },
 };
 

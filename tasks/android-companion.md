@@ -1,6 +1,6 @@
 # Plan: Android companion app
 
-**Status:** in progress — Phase 1–3 done (manual pairing, not QR); Phase 4 uses the existing dashboard and needs device verification; Phase 5 debug APK built, signing deferred
+**Status:** complete — debug APK, Keystore pairing and emulator verification of Providers, Models, Routing, Usage and Logs; QR pairing and release signing explicitly deferred
 
 ## Decision
 

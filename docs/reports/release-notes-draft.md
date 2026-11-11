@@ -1,7 +1,13 @@
-# Release notes draft: 3.5.0
+# Release notes draft: 3.5.1
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.5.1 — Android pairing verified
+
+- Keystore pairing worked on an Android 35 emulator.
+- Providers, Models, Routing, Usage and Logs loaded through `adb reverse` with no overflow.
+- Loopback HTTP is allowed by a network-security config; remote URLs remain HTTPS-only.
 
 ## 3.5.0 — Android companion debug shell
 

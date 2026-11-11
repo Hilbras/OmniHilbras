@@ -54,12 +54,17 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 For a remote device, put the gateway behind a private HTTPS path (for example Tailscale Serve) and enter that
 URL. The default CORS list includes the Capacitor origin `https://localhost`; add any other origin explicitly.
 
+## Verified
+
+- Emulator: Android 35, app installed and launched.
+- Pairing screen rendered; gateway URL and device key entered through the dashboard inputs.
+- `adb reverse tcp:8787 tcp:8787` connected the WebView to the desktop gateway.
+- Providers, Models, Routing, Usage and Request log loaded with no horizontal overflow.
+
 ## Current limits
 
 - QR pairing is deferred.
 - Release signing is deferred; the APK is a debug build.
-- Runtime verification on a physical device is still required.
-- The dashboard pages are the existing dashboard, so providers, models, routing, usage and logs are wired to
-  the same gateway API; mobile layout needs device verification.
+- Physical-device testing is still recommended before calling the APK production-ready.
 
 Do not bind the gateway to `0.0.0.0` as a shortcut.
