@@ -1,5 +1,5 @@
 import { ProviderError } from '../lib/errors.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderId, ProviderRequestContext } from '../lib/types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderId, ProviderRequestContext, ToolCall, ToolCallDelta, ToolDefinition } from '../lib/types.js';
 import { MAX_DEEPSEEK_POW_DIFFICULTY, findDeepSeekPowNonce } from '../lib/deepseek-pow.js';
 
 /**
@@ -89,9 +89,219 @@ export function allDeepSeekWebModels(): string[] {
   return DEEPSEEK_WEB_MODELS.map((model) => model.id);
 }
 
+const DSML_TOOLS_INSTRUCTION = `[SYSTEM INSTRUCTION: TOOLS AVAILABLE]
+You have access to the following tools:
+{{TOOLS}}
+
+When you need to execute a tool, write your response in this exact format (do not add spaces inside tag delimiters):
+<||DSML|| calls>
+<||DSML|| invoke name="tool_name">
+<||DSML|| parameter name="arg_name" string="true">value</||DSML|| parameter>
+</||DSML|| invoke>
+</||DSML|| calls>`;
+
+/**
+ * Normalizes the DSML tags a DeepSeek model may emit.
+ *
+ * The model sometimes uses fullwidth vertical bars, spacing around the bars, or lower-case
+ * tags. The canonical form is what the parser and the reply history use.
+ */
+export function normalizeDeepSeekDsml(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/｜/g, '|')
+    .replace(/<\s*(\/?)\s*\|*[\s|]*DSML[\s|]*\|*\s*/gi, '<$1||DSML|| ');
+}
+
+/**
+ * Parses the prompt-level tool protocol used by DeepSeek's chat page.
+ *
+ * This is not native function calling: the model is asked to emit a DSML block, and the
+ * adapter turns it back into OpenAI tool calls. Parsing is deliberately strict about the
+ * invoke name and tolerant about whitespace, because a partial tag must not become a tool
+ * call with an empty name.
+ */
+export function parseDeepSeekDsml(text: string): { content: string; toolCalls: ToolCall[] } | null {
+  if (!text) return null;
+  const normalized = normalizeDeepSeekDsml(text);
+  if (!/<\|+DSML\|+\s*invoke\b/i.test(normalized)) return null;
+
+  const firstTag = normalized.match(/<\|+DSML\|+\s*(?:calls|tool_calls|invoke)[^>]*>/i);
+  const content = firstTag ? normalized.slice(0, firstTag.index).trim() : '';
+  const toolCalls: ToolCall[] = [];
+  const invokeRegex = /<\|+DSML\|+\s*invoke\b([^>]*)>([\s\S]*?)(?:<\/\|+DSML\|+\s*invoke[^>]*>|(?=<\|+DSML\|+\s*invoke\b)|<\/\|+DSML\|+\s*(?:calls|tool_calls)[^>]*>|$)/gi;
+  let invoke: RegExpExecArray | null;
+  while ((invoke = invokeRegex.exec(normalized)) !== null) {
+    const attrs = invoke[1] ?? '';
+    const name = /\bname=["']?([^"'\s>]+)["']?/i.exec(attrs)?.[1];
+    if (!name) continue;
+    const body = invoke[2] ?? '';
+    const args: Record<string, unknown> = {};
+    const paramRegex = /<\|+DSML\|+\s*parameter\b([^>]*)>([\s\S]*?)(?:<\/\|+DSML\|+\s*parameter[^>]*>|(?=<\|+DSML\|+\s*parameter\b)|<\/\|+DSML\|+\s*invoke[^>]*>|$)/gi;
+    let param: RegExpExecArray | null;
+    while ((param = paramRegex.exec(body)) !== null) {
+      const paramAttrs = param[1] ?? '';
+      const paramName = /\bname=["']?([^"'\s>]+)["']?/i.exec(paramAttrs)?.[1];
+      if (!paramName) continue;
+      const rawValue = param[2]?.trim() ?? '';
+      const forcedString = /\bstring\s*=\s*["']?true["']?/i.test(paramAttrs);
+      if (forcedString) {
+        args[paramName] = rawValue;
+        continue;
+      }
+      try {
+        args[paramName] = JSON.parse(rawValue);
+      } catch {
+        args[paramName] = rawValue;
+      }
+    }
+    toolCalls.push({
+      id: `call_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
+      type: 'function',
+      function: { name, arguments: JSON.stringify(args) },
+    });
+  }
+  if (toolCalls.length === 0) return null;
+  return { content, toolCalls };
+}
+
+function formatToolCalls(toolCalls: readonly ToolCall[]): string {
+  const calls = toolCalls.map((toolCall) => {
+    let args: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(toolCall.function.arguments);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) args = parsed as Record<string, unknown>;
+    } catch {
+      args = { raw: toolCall.function.arguments };
+    }
+    const params = Object.entries(args)
+      .map(([name, value]) => `<||DSML|| parameter name="${name}" string="true">${typeof value === 'string' ? value : JSON.stringify(value)}</||DSML|| parameter>`)
+      .join('\n');
+    return `<||DSML|| invoke name="${toolCall.function.name}">\n${params}\n</||DSML|| invoke>`;
+  });
+  return `<||DSML|| calls>\n${calls.join('\n')}\n</||DSML|| calls>`;
+}
+
+/**
+ * Builds the one flat prompt the endpoint accepts, with tool replay and bounded history.
+ *
+ * This is intentionally separate from `flattenToPrompt`: that function is the simple
+ * text-only contract covered by older tests. An agent turn needs assistant tool calls and
+ * tool results in the transcript, and those do not exist in the text-only shape.
+ */
+export function buildDeepSeekPrompt(messages: readonly ChatMessage[], tools: readonly ToolDefinition[] = [], toolChoice: ChatRequest['toolChoice'] = 'auto'): string {
+  const parts: string[] = [];
+  if (tools.length > 0) {
+    const instruction = DSML_TOOLS_INSTRUCTION.replace('{{TOOLS}}', JSON.stringify(tools, null, 2));
+    parts.push(toolChoice === 'required' ? `${instruction}\n\nYou must call at least one tool before answering.` : instruction);
+  }
+
+  const text = messages.map((message) => {
+    const content = messageText(message.content);
+    const calls = message.toolCalls?.length ? formatToolCalls(message.toolCalls) : '';
+    return { message, content, calls };
+  });
+  const totalLength = text.reduce((sum, item) => sum + item.content.length + item.calls.length, 0);
+  const isLarge = totalLength > 60_000;
+  const recentThreshold = Math.max(0, messages.length - 12);
+
+  for (let index = 0; index < text.length; index += 1) {
+    const { message, calls } = text[index]!;
+    let content = text[index]!.content;
+    // The newest window is never truncated, and the current user turn must survive verbatim.
+    if (isLarge && index < recentThreshold) {
+      if (message.role === 'tool') {
+        if (content.length > 1200) content = `${content.slice(0, 1200)}\n...[truncated ${content.length - 1200} characters for context limit]...`;
+      } else if (content.length > 3000) {
+        content = `${content.slice(0, 3000)}\n...[truncated ${content.length - 3000} characters for context limit]...`;
+      }
+    }
+    if (message.role === 'system') {
+      parts.push(`SYSTEM: ${content}`);
+    } else if (message.role === 'tool') {
+      parts.push(`[TOOL RESULT for ${message.name || message.toolCallId || 'tool'}]:${message.isError ? ' [ERROR]' : ''}\n${content}`);
+    } else if (calls) {
+      parts.push(`${message.role.toUpperCase()}${content ? `: ${content}` : ''}\n${calls}`);
+    } else {
+      parts.push(`${message.role.toUpperCase()}: ${content}`);
+    }
+  }
+  return parts.join('\n\n').trim();
+}
+
 function lookupModel(id: string) {
   const wanted = id.trim().toLowerCase();
   return DEEPSEEK_WEB_MODELS.find((model) => model.id.toLowerCase() === wanted);
+}
+
+export const MAX_DEEPSEEK_IMAGE_BYTES = 8 * 1024 * 1024;
+export const MAX_DEEPSEEK_IMAGES = 4;
+
+type DeepSeekImage = { bytes: Uint8Array; mimeType: string; filename: string };
+
+const IMAGE_MIME = /^image\/(png|jpe?g|webp|gif)$/i;
+
+export function parseDeepSeekDataImage(url: string): DeepSeekImage | null {
+  const match = /^data:([^;]+);base64,(.+)$/i.exec(url);
+  if (!match) return null;
+  const mimeType = match[1]!.toLowerCase();
+  if (!IMAGE_MIME.test(mimeType)) return null;
+  // Base64 expands by 4/3; reject before allocating the decoded buffer.
+  if (Math.ceil((match[2]!.length * 3) / 4) > MAX_DEEPSEEK_IMAGE_BYTES) {
+    throw fail('INVALID_REQUEST', `DeepSeek Web accepts images up to ${MAX_DEEPSEEK_IMAGE_BYTES / (1024 * 1024)} MB.`);
+  }
+  let bytes: Uint8Array;
+  try {
+    const binary = atob(match[2]!);
+    bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  } catch {
+    throw fail('INVALID_REQUEST', 'That image data URI is not valid base64.');
+  }
+  if (bytes.byteLength > MAX_DEEPSEEK_IMAGE_BYTES) {
+    throw fail('INVALID_REQUEST', `DeepSeek Web accepts images up to ${MAX_DEEPSEEK_IMAGE_BYTES / (1024 * 1024)} MB.`);
+  }
+  return { bytes, mimeType, filename: `image.${imageExtension(mimeType)}` };
+}
+
+function imageExtension(mimeType: string): string {
+  if (/jpe?g/i.test(mimeType)) return 'jpg';
+  if (/webp/i.test(mimeType)) return 'webp';
+  if (/gif/i.test(mimeType)) return 'gif';
+  return 'png';
+}
+
+/** Remote images are https-only and must not target the local machine or a private range. */
+export function isDeepSeekImageUrlAllowed(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:') return false;
+  const host = url.hostname.toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return false;
+  if (host === '::1' || host === '[::1]' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80')) return false;
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!ipv4) return true;
+  const octets = ipv4.slice(1).map(Number);
+  if (octets.some((octet) => octet > 255)) return false;
+  const [a, b] = octets as [number, number, number, number];
+  return !(a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168));
+}
+
+export function extractDeepSeekImageUrls(messages: readonly ChatMessage[]): string[] {
+  const urls: string[] = [];
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (!part || part.type !== 'image_url') continue;
+      const candidate = part.imageUrl?.url ?? (part as { image_url?: { url?: string } }).image_url?.url;
+      if (typeof candidate === 'string' && candidate) urls.push(candidate);
+    }
+  }
+  return urls;
 }
 
 /**
@@ -237,6 +447,19 @@ function bodyRefusal(json: unknown): string | undefined {
 
 type AccessToken = { token: string; expiresAt: number };
 
+const SESSION_TTL_MS = 15 * 60_000;
+const SESSION_MAX = 100;
+
+/** FNV-1a over the credential, so the cache is not keyed by a secret in plain sight. */
+function sessionCacheKey(userToken: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < userToken.length; index += 1) {
+    hash ^= userToken.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16);
+}
+
 export class DeepSeekWebAdapter implements ProviderAdapter {
   readonly id = deepseekWebProviderId;
   readonly name = 'DeepSeek Web';
@@ -254,6 +477,8 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
   private readonly fetchImpl: typeof fetch;
   /** Keyed by userToken, because the access token is per-account and lasts about an hour. */
   private readonly accessTokens = new Map<string, AccessToken>();
+  /** Session ids, keyed by a hash of the userToken; never by the raw credential. */
+  private readonly sessions = new Map<string, { id: string; at: number }>();
 
   constructor(options: { now?: () => number; fetch?: typeof fetch } = {}) {
     this.now = options.now ?? (() => Date.now());
@@ -376,6 +601,112 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
   }
 
   /**
+   * Reuses a session for a bounded window. The old proxy created one on every turn; a
+   * coding agent sends many turns, and session creation is its own rate-limited endpoint.
+   * The key is a hash, so the raw userToken is not held in a second map.
+   */
+  private async reuseOrCreateSession(
+    userToken: string,
+    accessToken: string,
+    signal: AbortSignal | undefined,
+    onAuthFailure: () => void,
+  ): Promise<string> {
+    const key = sessionCacheKey(userToken);
+    const cached = this.sessions.get(key);
+    if (cached && this.now() - cached.at < SESSION_TTL_MS) return cached.id;
+    const id = await this.createSession(accessToken, signal, onAuthFailure);
+    this.sessions.set(key, { id, at: this.now() });
+    if (this.sessions.size > SESSION_MAX) {
+      for (const [candidate, entry] of this.sessions) {
+        if (this.now() - entry.at >= SESSION_TTL_MS) this.sessions.delete(candidate);
+      }
+      while (this.sessions.size > SESSION_MAX) {
+        const oldest = [...this.sessions.entries()].sort((left, right) => left[1].at - right[1].at)[0];
+        if (!oldest) break;
+        this.sessions.delete(oldest[0]);
+      }
+    }
+    return id;
+  }
+
+  private async loadImage(url: string, signal: AbortSignal | undefined): Promise<DeepSeekImage> {
+    const dataImage = parseDeepSeekDataImage(url);
+    if (dataImage) return dataImage;
+    if (!isDeepSeekImageUrlAllowed(url)) {
+      throw fail('INVALID_REQUEST', 'Image URLs must use https and must not point at localhost or a private network.');
+    }
+    const timeout = AbortSignal.timeout(15_000);
+    const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, { signal: requestSignal, redirect: 'error' });
+    } catch (error) {
+      throw fail('PROVIDER_REQUEST_FAILED', `DeepSeek Web could not fetch the image: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!response.ok) throw fail('PROVIDER_REQUEST_FAILED', `The image URL answered HTTP ${response.status}.`);
+    const length = Number(response.headers.get('content-length') ?? 0);
+    if (length > MAX_DEEPSEEK_IMAGE_BYTES) {
+      throw fail('INVALID_REQUEST', `DeepSeek Web accepts images up to ${MAX_DEEPSEEK_IMAGE_BYTES / (1024 * 1024)} MB.`);
+    }
+    const mimeType = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
+    if (!IMAGE_MIME.test(mimeType)) throw fail('INVALID_REQUEST', 'The image URL did not return a PNG, JPEG, WebP or GIF.');
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > MAX_DEEPSEEK_IMAGE_BYTES) {
+      throw fail('INVALID_REQUEST', `DeepSeek Web accepts images up to ${MAX_DEEPSEEK_IMAGE_BYTES / (1024 * 1024)} MB.`);
+    }
+    return { bytes, mimeType, filename: `image.${imageExtension(mimeType)}` };
+  }
+
+  private async uploadImage(
+    image: DeepSeekImage,
+    accessToken: string,
+    sessionId: string,
+    signal: AbortSignal | undefined,
+    onAuthFailure: () => void,
+  ): Promise<string> {
+    const form = new FormData();
+    form.append('file', new Blob([image.bytes.buffer as ArrayBuffer], { type: image.mimeType }), image.filename);
+    const headers = {
+      ...FINGERPRINT_HEADERS,
+      Authorization: `Bearer ${accessToken}`,
+      Referer: `${WEB_ORIGIN}/a/chat/s/${sessionId}`,
+    };
+    const response = await this.fetchImpl(`${API_BASE}/v0/file/upload_file`, {
+      method: 'POST',
+      headers,
+      body: form,
+      ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) throw refusalFor(response.status, 'uploading an image', onAuthFailure);
+    const biz = unwrap(await response.json(), 'image upload');
+    const fileId = biz.id ?? biz.file_id;
+    if (typeof fileId !== 'string' || !fileId) throw fail('PROVIDER_REQUEST_FAILED', 'DeepSeek uploaded the image but returned no file id.');
+
+    // The upload endpoint can answer before the file is readable. Poll briefly; a readiness
+    // failure is not fatal because the completion endpoint will report an unusable id.
+    for (let poll = 0; poll < 4; poll += 1) {
+      try {
+        const status = await this.fetchImpl(`${API_BASE}/v0/file/fetch_files?file_ids=${encodeURIComponent(fileId)}`, {
+          headers,
+          ...(signal ? { signal } : {}),
+        });
+        if (status.ok) {
+          const files = unwrap(await status.json(), 'image status').files;
+          if (Array.isArray(files)) {
+            const record = files.find((item) => item && typeof item === 'object' && (item as { id?: unknown }).id === fileId) as { status?: unknown } | undefined;
+            const state = typeof record?.status === 'string' ? record.status.toUpperCase() : '';
+            if (state && !['PENDING', 'UPLOADING', 'PROCESSING'].includes(state)) break;
+          }
+        }
+      } catch (error) {
+        if (error instanceof ProviderError) throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    return fileId;
+  }
+
+  /**
    * Reports whether the saved credential still works.
    *
    * Without this the provider's health is reported as `Health checks are not supported.` and
@@ -411,19 +742,34 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
     const userToken = userTokenFromCredential(context.credential);
     const accessToken = await this.accessToken(userToken, context.signal);
     // One eviction for the whole flow: whichever of the three mid-flight endpoints answers 401,
-    // the cached access token is now known bad and the next attempt must not reuse it.
-    const onAuthFailure = () => this.accessTokens.delete(userToken);
-    const sessionId = await this.createSession(accessToken, context.signal, onAuthFailure);
+    // the cached access token and session are now known bad and the next attempt must not reuse
+    // them.
+    const sessionKey = sessionCacheKey(userToken);
+    const onAuthFailure = () => {
+      this.accessTokens.delete(userToken);
+      this.sessions.delete(sessionKey);
+    };
+    const sessionId = await this.reuseOrCreateSession(userToken, accessToken, context.signal, onAuthFailure);
+
+    const imageUrls = extractDeepSeekImageUrls(request.messages);
+    if (imageUrls.length > MAX_DEEPSEEK_IMAGES) {
+      throw fail('INVALID_REQUEST', `DeepSeek Web accepts at most ${MAX_DEEPSEEK_IMAGES} images in one turn.`);
+    }
+    const refFileIds: string[] = [];
+    for (const imageUrl of imageUrls) {
+      const image = await this.loadImage(imageUrl, context.signal);
+      refFileIds.push(await this.uploadImage(image, accessToken, sessionId, context.signal, onAuthFailure));
+    }
+
     const pow = await this.proofOfWork(accessToken, context.signal, onAuthFailure);
 
     /**
-     * The endpoint takes one flat `prompt`, not a message array.
-     *
-     * History is flattened into it: a system turn is prefixed as an instruction and earlier
-     * turns are labelled, because there is nowhere else to put them. Dropping them silently
-     * would answer the last line and look like it had read the rest.
+     * The endpoint takes one flat `prompt`, not a message array. `buildDeepSeekPrompt`
+     * carries tool calls and tool results as well as ordinary turns, and bounds older
+     * history; dropping either would make a coding agent answer as if it had never run.
      */
-    const prompt = flattenToPrompt(request.messages.map((message) => ({ role: message.role, text: messageText(message.content) })));
+    const tools = request.toolChoice === 'none' ? [] : request.tools ?? [];
+    const prompt = buildDeepSeekPrompt(request.messages, tools, request.toolChoice);
 
     const response = await this.fetchImpl(COMPLETION_URL, {
       method: 'POST',
@@ -439,7 +785,7 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
         parent_message_id: null,
         model_type: model.expert ? 'expert' : 'default',
         prompt,
-        ref_file_ids: [],
+        ref_file_ids: refFileIds,
         thinking_enabled: model.thinking,
         search_enabled: model.search,
         preempt: false,
@@ -450,9 +796,6 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
     if (!response.ok) throw refusalFor(response.status, 'answering the completion', () => this.accessTokens.delete(userToken));
 
     const answer = decodeDeepSeekAnswer(await readBodyCapped(response, context.signal));
-    if (!answer.content) {
-      throw fail('PROVIDER_REQUEST_FAILED', 'DeepSeek answered, but the stream carried no text. Its response format may have changed.');
-    }
     // A body that closes without `response/status: "FINISHED"` was cut off mid-generation — an
     // expired session, a dropped connection, an anti-bot challenge. Reporting the fragment as a
     // complete answer with `finish_reason: stop` is the worst version of this: it looks like a
@@ -464,20 +807,26 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
       );
     }
 
+    const parsed = tools.length > 0 ? parseDeepSeekDsml(answer.content) : null;
+    if (!parsed && !answer.content) {
+      throw fail('PROVIDER_REQUEST_FAILED', 'DeepSeek answered, but the stream carried no text. Its response format may have changed.');
+    }
+    const content = parsed ? parsed.content : answer.content;
     const message: ChatMessage = {
       role: 'assistant',
-      content: answer.content,
+      content: parsed && !content ? null : content,
       ...(answer.reasoning ? { reasoning: answer.reasoning } : {}),
+      ...(parsed?.toolCalls.length ? { toolCalls: parsed.toolCalls } : {}),
     };
     const promptTokens = Math.ceil(prompt.length / 4);
-    const completionTokens = answer.usage > 0 ? answer.usage : Math.ceil(answer.content.length / 4);
+    const completionTokens = answer.usage > 0 ? answer.usage : Math.ceil((content.length + (parsed?.toolCalls.reduce((sum, call) => sum + call.function.arguments.length, 0) ?? 0)) / 4);
     return {
       id: `chatcmpl-${Math.floor(this.now() / 1000)}-${Math.random().toString(36).slice(2, 8)}`,
       providerId: this.id,
       model: model.id,
       createdAt: new Date(this.now()).toISOString(),
       message,
-      finishReason: 'stop' satisfies FinishReason,
+      finishReason: (parsed?.toolCalls.length ? 'tool_calls' : 'stop') satisfies FinishReason,
       usage: {
         inputTokens: promptTokens,
         outputTokens: completionTokens,
@@ -496,14 +845,22 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
    */
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
     const response = await this.chat(request, context);
+    const content = messageText(response.message.content);
+    const toolCalls: ToolCallDelta[] | undefined = response.message.toolCalls?.map((toolCall, index) => ({
+      index,
+      id: toolCall.id,
+      type: 'function',
+      function: { name: toolCall.function.name, arguments: toolCall.function.arguments },
+    }));
     yield {
       id: response.id,
       providerId: response.providerId,
       model: response.model,
       delta: {
         role: 'assistant',
-        content: messageText(response.message.content),
+        ...(content ? { content } : {}),
         ...(response.message.reasoning ? { reasoning: response.message.reasoning } : {}),
+        ...(toolCalls?.length ? { toolCalls } : {}),
       },
       finishReason: response.finishReason,
       ...(response.usage ? { usage: response.usage } : {}),

@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.7.1
+**Status:** Current — release 3.8.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -1711,6 +1711,34 @@ answer is bound to the target path and carries its own expiry.
 **The endpoint takes one flat `prompt`, not messages.** History is flattened with the turns
 labelled, because a bare join of `["You are terse.", "2+2?"]` loses which was which and the
 instruction is the part that gets lost.
+
+**Agent turns use prompt-level DSML, not a native tools field.** When `tools` are present the
+prompt asks for this exact block:
+
+```text
+<||DSML|| calls>
+<||DSML|| invoke name="tool_name">
+<||DSML|| parameter name="arg">value</||DSML|| parameter>
+</||DSML|| invoke>
+</||DSML|| calls>
+```
+
+The adapter parses fullwidth bars and arbitrary whitespace back into OpenAI `tool_calls`,
+sets `finish_reason: "tool_calls"`, and replays assistant calls plus tool results into the
+next prompt. A tool round is therefore a real multi-turn agent loop, but it is **not native
+function calling** and the schema prompt is part of the token cost.
+
+**Images use the web upload route, not a data URL in the prompt.** `image_url` parts are
+allowed only as `data:image/...` or `https:`, capped at four images and 8 MB each. Remote
+URLs must not target localhost, link-local, private or metadata ranges. The adapter uploads
+to `/api/v0/file/upload_file`, polls `file/fetch_files` briefly, and sends the ids in
+`ref_file_ids`; the old project's `/file/upload` path is an HTML page, not the route.
+
+**Long histories are bounded.** Past 60,000 characters, turns older than the last 12 are
+compacted: tool results at 1,200 characters and ordinary turns at 3,000, with an explicit
+truncation marker. The newest turn is never truncated. Chat sessions are reused for 15
+minutes, keyed by a hash of the userToken rather than the raw credential, with a 100-entry
+cap and deletion on 401/403.
 
 The SSE answer arrives in two frame shapes and both are read:
 

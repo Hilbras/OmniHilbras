@@ -5756,3 +5756,11 @@ independently of the React app" is now measured over every provider manifest, an
 - Restored token accounting from `accumulated_token_usage` and marked the mixed prompt/usage figure estimated.
 - Fixed reasoning to use the contract's `reasoning` field and emit OpenAI `reasoning_content` from the completion serializer.
 - Rejected pasted HTTP request lines and restored the generic refusal-in-body reader from the old shared module.
+
+## 3.8.0 — DeepSeek Web full agent
+
+- Prompt-level DSML tool rounds: parse into `tool_calls`, set `finish_reason: "tool_calls"`, and replay assistant calls plus tool results into the next prompt.
+- Safe image attachments: data URI or https-only, private/loopback/metadata blocked, 8 MB each and four per turn, uploaded through `/file/upload_file` into `ref_file_ids`.
+- Prompt compaction after 60,000 characters; the newest turn is never truncated.
+- Bounded chat-session reuse, 15 minutes and 100 entries, keyed by a userToken hash.
+- Tests cover tool parsing/rounds, image upload and URL safety, session reuse and compaction.

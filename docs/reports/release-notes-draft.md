@@ -1,7 +1,16 @@
-# Release notes draft: 3.7.1
+# Release notes draft: 3.8.0
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.8.0 — DeepSeek Web full agent
+
+- DeepSeek Web now parses prompt-level DSML into OpenAI `tool_calls`, in both non-streaming and streaming turns, with multi-round tool-result replay.
+- Added image attachments: data URIs and safe `https:` URLs, 8 MB each, four per turn, uploaded through `/api/v0/file/upload_file` and referenced in `ref_file_ids`.
+- Long histories are compacted after 60,000 characters while the newest turn stays intact.
+- Chat sessions are reused for 15 minutes, keyed by a userToken hash and bounded at 100 entries.
+- Image-URL fetches reject localhost, link-local, private and metadata ranges.
+- The adapter keeps the audited pure-JS PoW solver; the old project's opaque WASM binary was not imported.
 
 ## 3.7.1 — DeepSeek Web parity fixes
 
