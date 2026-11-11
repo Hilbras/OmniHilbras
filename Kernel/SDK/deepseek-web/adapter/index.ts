@@ -1,5 +1,5 @@
 import { ProviderError } from '../lib/errors.js';
-import type { ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderId, ProviderRequestContext } from '../lib/types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderId, ProviderRequestContext } from '../lib/types.js';
 import { MAX_DEEPSEEK_POW_DIFFICULTY, findDeepSeekPowNonce } from '../lib/deepseek-pow.js';
 
 /**
@@ -109,6 +109,14 @@ export function parseDeepSeekUserToken(raw: string): string {
       publicMessage: 'Paste the userToken from chat.deepseek.com.',
     });
   }
+  // A pasted request line is the commonest mistake and reads as a nonsense credential,
+  // so it is refused with a message that says what to copy.
+  if (/^(GET|POST|PUT|HEAD|OPTIONS|DELETE|PATCH)\s+\//i.test(trimmed)) {
+    throw new ProviderError('INVALID_REQUEST', 'That is a request line, not a userToken. Copy the value of localStorage\'s userToken only.', {
+      providerId: deepseekWebProviderId,
+      publicMessage: 'That is a request line, not a userToken. Copy the value of localStorage\'s userToken only.',
+    });
+  }
   if (trimmed.startsWith('{')) {
     /**
      * The wrapper is `{"value":"…","__version":N}` — and **signed out it is
@@ -193,6 +201,8 @@ function fail(code: ProviderError['code'], message: string): ProviderError {
 
 /** DeepSeek wraps every response in `{ code, msg, data: { biz_data } }` and `code !== 0` means trouble. */
 function unwrap(json: unknown, what: string): Record<string, unknown> {
+  const refusal = bodyRefusal(json);
+  if (refusal) throw fail('PROVIDER_REQUEST_FAILED', `DeepSeek refused the ${what}: ${refusal}`);
   const body = (json ?? {}) as { code?: unknown; msg?: unknown; data?: { biz_data?: Record<string, unknown>; biz_msg?: string } };
   if (typeof body.code === 'number' && body.code !== 0) {
     const message = typeof body.msg === 'string' && body.msg ? body.msg : (body.data?.biz_msg ?? `error code ${body.code}`);
@@ -203,17 +213,42 @@ function unwrap(json: unknown, what: string): Record<string, unknown> {
   return biz;
 }
 
+/**
+ * The refusal shapes other web providers use, accepted here too.
+ *
+ * DeepSeek's own errors are the `{ code, data: { biz_data } }` shape below, but a
+ * proxy or a changed web route can answer `{ success: false, data: { code } }` or
+ * `{ ret: [...] }`. The old implementation read both; dropping that reader made
+ * those answers look like an empty success.
+ */
+function bodyRefusal(json: unknown): string | undefined {
+  if (!json || typeof json !== 'object') return undefined;
+  const record = json as { success?: unknown; ret?: unknown; code?: unknown; details?: unknown; data?: { code?: unknown; details?: unknown } };
+  if (record.success !== false) {
+    const ret = Array.isArray(record.ret) ? record.ret : undefined;
+    return ret && ret.length > 0 ? `refused: ${ret.join(', ')}` : undefined;
+  }
+  const code = record.data?.code ?? record.code;
+  const details = record.data?.details ?? record.details;
+  return [typeof code === 'string' ? code : undefined, typeof details === 'string' ? details : undefined]
+    .filter(Boolean)
+    .join(' — ') || 'refused';
+}
+
 type AccessToken = { token: string; expiresAt: number };
 
 export class DeepSeekWebAdapter implements ProviderAdapter {
   readonly id = deepseekWebProviderId;
   readonly name = 'DeepSeek Web';
   /**
-   * Streaming is not claimed. The upstream answer is an SSE stream, but every artifact this
-   * provider was built against describes a completed turn, and presenting a whole answer as
-   * a stream would imply tokens arriving over time when none were observed doing so.
+   * Streaming is served as one completed chunk, not token-by-token.
+   *
+   * DeepSeek's answer must be read to `FINISHED` before it can be trusted — a body that closes
+   * early is a cut-off answer, not a short one — so the old executor decoded the whole turn and
+   * replayed it as role/content/stop chunks. That is what this advertises: a stream request works,
+   * and the spec says the content arrives at once rather than pretending it arrived incrementally.
    */
-  readonly capabilities = { chat: true, streaming: false, models: true } as const;
+  readonly capabilities = { chat: true, streaming: true, models: true } as const;
 
   private readonly now: () => number;
   private readonly fetchImpl: typeof fetch;
@@ -432,8 +467,10 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
     const message: ChatMessage = {
       role: 'assistant',
       content: answer.content,
-      ...(answer.reasoning ? { reasoningContent: answer.reasoning } : {}),
+      ...(answer.reasoning ? { reasoning: answer.reasoning } : {}),
     };
+    const promptTokens = Math.ceil(prompt.length / 4);
+    const completionTokens = answer.usage > 0 ? answer.usage : Math.ceil(answer.content.length / 4);
     return {
       id: `chatcmpl-${Math.floor(this.now() / 1000)}-${Math.random().toString(36).slice(2, 8)}`,
       providerId: this.id,
@@ -441,6 +478,35 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
       createdAt: new Date(this.now()).toISOString(),
       message,
       finishReason: 'stop' satisfies FinishReason,
+      usage: {
+        inputTokens: promptTokens,
+        outputTokens: completionTokens,
+        totalTokens: promptTokens + completionTokens,
+        // The prompt side is a bytes/4 estimate; DeepSeek's accumulated usage is the provider's
+        // own count for the output side. Marking the record estimated keeps the dashboard from
+        // presenting a mixed figure as a measured one.
+        estimated: true,
+      },
+    };
+  }
+
+  /**
+   * One chunk, because the upstream answer is checked to `FINISHED` before it is returned.
+   * See the capability note above; this is the same trade the old executor made.
+   */
+  async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
+    const response = await this.chat(request, context);
+    yield {
+      id: response.id,
+      providerId: response.providerId,
+      model: response.model,
+      delta: {
+        role: 'assistant',
+        content: messageText(response.message.content),
+        ...(response.message.reasoning ? { reasoning: response.message.reasoning } : {}),
+      },
+      finishReason: response.finishReason,
+      ...(response.usage ? { usage: response.usage } : {}),
     };
   }
 }
@@ -527,12 +593,14 @@ export function flattenToPrompt(messages: ReadonlyArray<{ role: string; text: st
  * a body that closes without `FINISHED` was cut off mid-generation, and reporting that as a
  * clean answer is the same fault as not reading the stream at all.
  */
-export function decodeDeepSeekAnswer(body: string): { content: string; reasoning: string; finished: boolean } {
+export function decodeDeepSeekAnswer(body: string): { content: string; reasoning: string; finished: boolean; usage: number } {
   let content = '';
   let reasoning = '';
   // Which side an untyped append belongs to, from the last fragment or response that said so.
   let currentPath: 'thinking' | 'content' = 'content';
   let finished = false;
+  // The provider reports accumulated token usage in a metadata batch, never as text.
+  let usage = 0;
 
   const append = (text: string) => {
     if (!text) return;
@@ -580,9 +648,10 @@ export function decodeDeepSeekAnswer(body: string): { content: string; reasoning
 
     // A whole response: it declares the path and carries its own fragments.
     if (value && typeof value === 'object' && !Array.isArray(value) && 'response' in (value as Record<string, unknown>)) {
-      const response = (value as { response: { thinking_enabled?: unknown; fragments?: unknown } }).response;
+      const response = (value as { response: { thinking_enabled?: unknown; fragments?: unknown; accumulated_token_usage?: unknown } }).response;
       if (response.thinking_enabled === true) currentPath = 'thinking';
       else if (response.thinking_enabled === false) currentPath = 'content';
+      if (typeof response.accumulated_token_usage === 'number' && response.accumulated_token_usage > 0) usage = response.accumulated_token_usage;
       if (Array.isArray(response.fragments)) for (const fragment of response.fragments) takeFragment(fragment, false);
     }
 
@@ -596,6 +665,7 @@ export function decodeDeepSeekAnswer(body: string): { content: string; reasoning
     if (path === 'response' && Array.isArray(value)) {
       for (const entry of value as Array<{ p?: unknown; v?: unknown }>) {
         if (entry?.p === 'response' && (entry.v as { thinking_enabled?: unknown } | undefined)?.thinking_enabled === true) currentPath = 'thinking';
+        if (entry?.p === 'accumulated_token_usage' && typeof entry.v === 'number' && entry.v > 0) usage = entry.v;
       }
       continue;
     }
@@ -615,7 +685,7 @@ export function decodeDeepSeekAnswer(body: string): { content: string; reasoning
    * The provider contract's exact-equality assertion is what found it, and it found it because the
    * hostile fixture ends in a single space — a part that looks like nothing and is the whole point.
    */
-  return { content, reasoning, finished };
+  return { content, reasoning, finished, usage };
 }
 
 /**

@@ -5749,3 +5749,10 @@ independently of the React app" is now measured over every provider manifest, an
 - Added `/v1/web-cookie/perplexity/{check,connect}` and `/v1/web-cookie/grok/{check,connect}`. A refused cookie is not stored; a 400 or 429 from the tiny probe is an accepted credential refusing the probe body or a rate limit.
 - Added cards, descriptors and the `pw`/`gw` model prefixes. Logos were already committed.
 - Streaming is explicit: the two new adapters declare `streaming: true` and forward chunks; the existing six stay false, with a spec table that says so.
+
+## 3.7.1 — DeepSeek Web parity fixes
+
+- Restored stream support as one completed chunk, the same honest shape the old executor used: the answer must reach `FINISHED` before it is returned.
+- Restored token accounting from `accumulated_token_usage` and marked the mixed prompt/usage figure estimated.
+- Fixed reasoning to use the contract's `reasoning` field and emit OpenAI `reasoning_content` from the completion serializer.
+- Rejected pasted HTTP request lines and restored the generic refusal-in-body reader from the old shared module.

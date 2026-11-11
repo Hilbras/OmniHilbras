@@ -21,10 +21,12 @@ test('the two ported adapters declare streaming and implement it', () => {
   assert.equal(typeof new PerplexityWebAdapter().streamChat, 'function');
 });
 
-test('the existing web-cookie adapters that assemble the answer keep streaming false', () => {
+test('an adapter that accepts a stream says so, and one that does not stays false', () => {
   // Token Harbor's upstream is SSE, but the adapter reads the whole body before returning.
   // Declaring true would make the gateway call a stream that has no chunk boundaries.
   // Token Harbor omits the key entirely; the gateway treats anything but `true` as not streamable.
   assert.notEqual(new TokenHarborWebAdapter().capabilities.streaming, true);
-  assert.equal(new DeepSeekWebAdapter().capabilities.streaming, false);
+  // DeepSeek accepts a stream request and replays the completed answer as one chunk.
+  assert.equal(new DeepSeekWebAdapter().capabilities.streaming, true);
+  assert.equal(typeof new DeepSeekWebAdapter().streamChat, 'function');
 });

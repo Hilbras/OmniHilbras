@@ -1012,6 +1012,7 @@ export function toOpenAICompletion(response: ChatResponse) {
       message: {
         role: 'assistant',
         content: response.message.content,
+        ...(response.message.reasoning ? { reasoning_content: response.message.reasoning } : {}),
         ...(response.message.toolCalls?.length ? { tool_calls: response.message.toolCalls.map((toolCall) => ({ id: toolCall.id, type: 'function', function: toolCall.function })) } : {}),
       },
       finish_reason: response.finishReason,
@@ -1037,6 +1038,7 @@ export function toOpenAIChunk(chunk: ChatChunk) {
       delta: {
         ...(chunk.delta.role ? { role: chunk.delta.role } : {}),
         ...(chunk.delta.content !== undefined ? { content: chunk.delta.content } : {}),
+        ...(chunk.delta.reasoning ? { reasoning_content: chunk.delta.reasoning } : {}),
         ...(chunk.delta.toolCalls?.length ? { tool_calls: chunk.delta.toolCalls.map((toolCall) => ({ index: toolCall.index, ...(toolCall.id ? { id: toolCall.id } : {}), type: 'function', function: { ...(toolCall.function?.name ? { name: toolCall.function.name } : {}), arguments: toolCall.function?.arguments ?? '' } })) } : {}),
       },
       finish_reason: chunk.finishReason ?? null,

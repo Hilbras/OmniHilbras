@@ -186,6 +186,8 @@ export type ChatChunk = {
   delta: {
     role?: ChatRole;
     content?: string;
+    /** Reasoning text when a thinking model emits it before the answer. */
+    reasoning?: string;
     toolCalls?: readonly ToolCallDelta[];
   };
   finishReason?: FinishReason;

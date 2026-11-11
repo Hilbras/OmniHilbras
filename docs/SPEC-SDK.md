@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.7.0
+**Status:** Current — release 3.7.1
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -1180,17 +1180,18 @@ yield one chunk. The current web-cookie set is:
 | --- | --- | --- |
 | ChatGPT Web | browser page; answer arrives complete | `NOT_SUPPORTED` |
 | Qwen Web | probe only; no chat adapter | `NOT_SUPPORTED` |
-| DeepSeek Web | HTTP; answer arrives complete | `NOT_SUPPORTED` |
+| DeepSeek Web | HTTP; answer read to `FINISHED` then returned | one completed chunk |
 | Token Harbor Web | SSE upstream, read whole then returned | `NOT_SUPPORTED` |
 | Gemini Web | browser page; answer arrives complete | `NOT_SUPPORTED` |
 | Duck.ai | HTTP challenge; answer arrives complete | `NOT_SUPPORTED` |
 | Grok Web | NDJSON token frames | real chunks |
 | Perplexity Web | SSE markdown blocks | real chunks |
 
-The two new adapters stream because their upstream really sends incremental content.
-The existing six do not, and their `streamChat` methods that yield a completed answer once
-are not presented as token streams. A client that needs streaming must select one of the
-two providers above, or a non-web-cookie provider that declares the capability.
+Grok and Perplexity stream because their upstream really sends incremental content.
+DeepSeek Web accepts a stream request but returns one completed chunk after checking
+`FINISHED`, because a cut-off body must not be presented as a short answer. The other five
+web-cookie providers return `NOT_SUPPORTED`. A client that needs incremental chunks must
+select Grok, Perplexity, or a non-web-cookie provider that declares the capability.
 
 **Nothing is stored before the warning is acknowledged**, and the pasted blob is cleared on
 failure. A whole-account session sitting in a textarea next to an error message is how one

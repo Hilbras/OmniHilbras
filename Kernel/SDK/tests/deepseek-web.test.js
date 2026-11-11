@@ -121,6 +121,13 @@ test('an empty paste says what to paste', () => {
   assert.throws(() => parseDeepSeekUserToken('   '), /Paste the userToken/);
 });
 
+test('a pasted request line is rejected as the wrong kind of value', () => {
+  assert.throws(
+    () => parseDeepSeekUserToken('GET /api/v0/chat/completion HTTP/1.1'),
+    (error) => error.code === 'INVALID_REQUEST' && /request line/.test(error.publicMessage),
+  );
+});
+
 test('the signed-out placeholder is refused, and named', () => {
   // chat.deepseek.com stores `{"value":null,"__version":N}` when nobody is signed in. Falling
   // through to "treat the raw string as the token" turned that into a credential that looked
@@ -223,7 +230,7 @@ test('a stream with no fragments yields nothing rather than throwing', () => {
   // `finished: false`, and that is correct rather than a gap: no FINISHED was ever sent, so the
   // stream genuinely did not complete. An empty body that never finished is not a short answer.
   for (const body of ['data: [DONE]\n\n', '', 'data: not json\n\n']) {
-    assert.deepEqual(decodeDeepSeekAnswer(body), { content: '', reasoning: '', finished: false });
+    assert.deepEqual(decodeDeepSeekAnswer(body), { content: '', reasoning: '', finished: false, usage: 0 });
   }
 });
 
@@ -354,7 +361,9 @@ test('"FINISHED" is a status word and is never written onto the answer', () => {
 
 test('a token batch is metadata, not text', () => {
   const body = 'data: {"p":"response","o":"BATCH","v":[{"p":"accumulated_token_usage","v":60}]}\n';
-  assert.equal(decodeDeepSeekAnswer(body).content, '');
+  const answer = decodeDeepSeekAnswer(body);
+  assert.equal(answer.content, '');
+  assert.equal(answer.usage, 60, 'the accumulated token count is carried, not discarded as text');
 });
 
 test('a stream that never finished is reported, so a cut-off answer is not a clean stop', () => {
@@ -421,4 +430,12 @@ test('the adapter returns the whole answer when the stream finished', async () =
   const response = await adapter.chat({ model: 'deepseek-chat', messages: [{ role: 'user', content: 'Count from 1 to 5' }] }, { credential: { type: 'api-key', value: 'user-token' } });
   assert.equal(response.message.content, '1, 2, 3, 4, 5');
   assert.equal(response.finishReason, 'stop');
+  assert.equal(response.usage?.outputTokens, 60, 'DeepSeek accumulated usage becomes output tokens');
+  assert.equal(response.usage?.estimated, true, 'the prompt side is an estimate, so the record says so');
+
+  const chunks = [];
+  for await (const chunk of adapter.streamChat({ model: 'deepseek-chat', messages: [{ role: 'user', content: 'Count from 1 to 5' }] }, { credential: { type: 'api-key', value: 'user-token' } })) chunks.push(chunk);
+  assert.equal(chunks.map((chunk) => chunk.delta.content ?? '').join(''), '1, 2, 3, 4, 5');
+  assert.equal(chunks.at(-1)?.finishReason, 'stop');
+  assert.equal(adapter.capabilities.streaming, true);
 });

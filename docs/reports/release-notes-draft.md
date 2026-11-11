@@ -1,7 +1,15 @@
-# Release notes draft: 3.7.0
+# Release notes draft: 3.7.1
 
 Status: 3.0.4 is a runtime fix; 3.0.3 was documentation-only. This file records the current line; the
 GitHub release is the canonical source.
+
+## 3.7.1 — DeepSeek Web parity fixes
+
+- DeepSeek Web accepts `stream: true` again and returns the completed answer as one SSE chunk, matching the old executor's honest one-chunk behavior.
+- Restored token usage from DeepSeek's `accumulated_token_usage` metadata; the prompt side is marked estimated and the output side uses the provider's count.
+- Restored `reasoning_content` on OpenAI-shaped completions, and fixed the adapter to use the contract's `reasoning` field.
+- Rejected a pasted HTTP request line as a userToken instead of treating it as a credential.
+- Restored the generic body-refusal reader used by the old shared module.
 
 ## 3.7.0 — Perplexity Web and Grok Web
 
