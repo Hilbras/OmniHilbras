@@ -65,6 +65,7 @@ import { TimeoutPolicy } from './timeout-policy.js';
 import { type VirtualModel, type VirtualModelStore } from './virtual-models.js';
 import { type SkillStore } from './skills.js';
 import { type WorkspaceStore } from './workspaces.js';
+import { type TunnelStore } from './tunnels.js';
 import {
   compressMessages,
   headroomCompress,
@@ -199,6 +200,8 @@ export type GatewayServiceOptions = {
   virtualModels?: VirtualModelStore;
   /** Workspaces, when wired. */
   workspaces?: WorkspaceStore;
+  /** Tunnels, when wired. */
+  tunnels?: TunnelStore;
   /** Skills, when this gateway is wired with persistence. Absent means no skills surface. */
   skills?: SkillStore;
   /** Consecutive failures before a connection stops receiving traffic. */
@@ -238,6 +241,7 @@ export class GatewayService {
   private readonly usageStore?: UsageStore;
   private readonly virtualModelStore?: VirtualModelStore;
   private readonly workspaceStore?: WorkspaceStore;
+  private readonly tunnelStore?: TunnelStore;
   private readonly skillStore?: SkillStore;
   /** Round-robin position per virtual model; incremented only when a virtual model is routed. */
   private readonly virtualRotation = new Map<string, number>();
@@ -412,6 +416,7 @@ export class GatewayService {
     this.usageStore = options.usageStore ? this.publishingUsage(options.usageStore) : undefined;
     this.virtualModelStore = options.virtualModels;
     this.workspaceStore = options.workspaces;
+    this.tunnelStore = options.tunnels;
     this.skillStore = options.skills;
     this.gatewayConfig = options.config;
     this.tokenSaverConfig = options.tokenSaver?.enabled ? options.tokenSaver : undefined;
@@ -3196,6 +3201,10 @@ export class GatewayService {
 
   get workspaces(): WorkspaceStore | undefined {
     return this.workspaceStore;
+  }
+
+  get tunnels(): TunnelStore | undefined {
+    return this.tunnelStore;
   }
 
   /** The skill catalog, or `undefined` when this build has no persisted store. */
