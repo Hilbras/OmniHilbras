@@ -206,6 +206,25 @@ export type AudioSpeechResponse = {
   contentType: string;
 };
 
+export type AudioTranscriptionRequest = {
+  readonly model: string;
+  readonly audio: string;
+  readonly language?: string;
+  readonly prompt?: string;
+  readonly responseFormat?: 'json' | 'text' | 'srt' | 'verbose_json' | 'vtt';
+  readonly temperature?: number;
+};
+
+export type AudioTranscriptionResponse = {
+  id: string;
+  providerId: ProviderId;
+  model: string;
+  createdAt: string;
+  text: string;
+  language?: string;
+  duration?: number;
+};
+
 export type ChatChunk = {
   id: string;
   providerId: ProviderId;
@@ -407,6 +426,7 @@ export type ProviderAdapter = {
   embed?: (request: EmbeddingRequest, context?: ProviderRequestContext) => Promise<EmbeddingResponse>;
   image?: (request: ImageRequest, context?: ProviderRequestContext) => Promise<ImageResponse>;
   audio?: (request: AudioSpeechRequest, context?: ProviderRequestContext) => Promise<AudioSpeechResponse>;
+  transcribe?: (request: AudioTranscriptionRequest, context?: ProviderRequestContext) => Promise<AudioTranscriptionResponse>;
   /**
    * Reads what the account has left, when the provider meters its accounts.
    *

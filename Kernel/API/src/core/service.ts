@@ -4,7 +4,7 @@ import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
 import { NousAdapter } from '@omnihilbras/sdk-nous';
 import { ZenAdapter, ZEN_GO_BASE_URL } from '@omnihilbras/sdk-zen';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
-import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type AudioSpeechRequest, type AudioSpeechResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext, type ModelPricing } from './index.js';
+import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext, type ModelPricing } from './index.js';
 import { ChatGptWebAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, type ChatGptWebDriver } from '@omnihilbras/sdk-chatgpt-web';
 import { CLAUDE_CODE, ClaudeCodeAdapter, claudeCodeProviderId } from '@omnihilbras/sdk-claude-code';
 import { ClinePassAdapter } from '@omnihilbras/sdk-clinepass';
@@ -84,7 +84,7 @@ import {
 import { startRequestScope, withRequestScope, type RequestScope } from './request-context.js';
 import { decryptBackup, encryptBackup } from './backup.js';
 import { notSupported } from './capability.js';
-import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayImageOutcome, type GatewayAudioOutcome, type GatewayStreamOutcome } from './request-executor.js';
+import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayImageOutcome, type GatewayAudioOutcome, type GatewayTranscriptionOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { providerAlias, sharedCatalogProviders } from './provider-alias.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
@@ -498,6 +498,7 @@ export class GatewayService {
       embed: (providerId, request, signal, scope, connectionId) => this.embed(providerId, request, signal, scope, connectionId),
       image: (providerId, request, signal, scope, connectionId) => this.image(providerId, request, signal, scope, connectionId),
       audio: (providerId, request, signal, scope, connectionId) => this.audio(providerId, request, signal, scope, connectionId),
+      transcribe: (providerId, request, signal, scope, connectionId) => this.transcribe(providerId, request, signal, scope, connectionId),
       withDeadline: (signal, timeoutMs, providerId, run) => this.withDeadline(signal, timeoutMs, providerId, run),
       enforceRateLimit: (candidate) => this.enforceRateLimit(candidate),
       recordSuccess: (providerId, latencyMs, at, connectionId) => {
@@ -2919,6 +2920,17 @@ export class GatewayService {
     }
   }
 
+  async transcribe(providerId: string, request: AudioTranscriptionRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<AudioTranscriptionResponse> {
+    const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
+    if (adapter.capabilities.audio !== true || typeof adapter.transcribe !== 'function') throw notSupported(adapter, 'audio');
+    const release = await this.acquireConcurrency(connectionId);
+    try {
+      return await adapter.transcribe({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId) }, await this.contextForRequest(providerId, connectionId, signal, scope));
+    } finally {
+      release();
+    }
+  }
+
   /**
    * The credential and policy for the account a route selected.
    *
@@ -3009,6 +3021,10 @@ export class GatewayService {
 
   async audioWithFailover(request: AudioSpeechRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayAudioOutcome> {
     return this.requests.audio(request, explicitProviderId, signal, scope);
+  }
+
+  async transcribeWithFailover(request: AudioTranscriptionRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayTranscriptionOutcome> {
+    return this.requests.transcribe(request, explicitProviderId, signal, scope);
   }
 
   /** Streaming cannot retry after bytes are sent, so failover only covers the first chunk. */

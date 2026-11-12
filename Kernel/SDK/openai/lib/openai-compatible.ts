@@ -2,7 +2,7 @@ import { ProviderError } from './errors.js';
 import { parseSseJson, parseSseStream } from './streaming.js';
 import { FetchHttpTransport, type HttpTransport } from './transport.js';
 import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from './url.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, ImageRequest, ImageResponse, AudioSpeechRequest, AudioSpeechResponse, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from './types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, ImageRequest, ImageResponse, AudioSpeechRequest, AudioSpeechResponse, AudioTranscriptionRequest, AudioTranscriptionResponse, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from './types.js';
 
 export type OpenAICompatibleAuth = {
   header?: string;
@@ -336,6 +336,77 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       createdAt: new Date().toISOString(),
       audio,
       contentType,
+    };
+  }
+
+  async transcribe(request: AudioTranscriptionRequest, context: ProviderRequestContext = {}): Promise<AudioTranscriptionResponse> {
+    if (!this.capabilities.audio) {
+      throw new ProviderError('NOT_SUPPORTED', `${this.name} does not support audio.`, {
+        providerId: this.id,
+        publicMessage: `${this.name} does not support audio.`,
+      });
+    }
+    const audioBytes = Buffer.from(request.audio, 'base64');
+    const boundary = `----omnihilbras${Date.now().toString(16)}`;
+    const enc = new TextEncoder();
+    const parts: Uint8Array[] = [];
+    const pushStr = (str: string) => parts.push(enc.encode(str));
+    pushStr(`--${boundary}\r\n`);
+    pushStr(`Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n`);
+    pushStr(`Content-Type: audio/wav\r\n\r\n`);
+    parts.push(new Uint8Array(audioBytes));
+    pushStr(`\r\n--${boundary}\r\n`);
+    pushStr(`Content-Disposition: form-data; name="model"\r\n\r\n`);
+    pushStr(`${request.model}\r\n`);
+    if (request.language) {
+      pushStr(`--${boundary}\r\n`);
+      pushStr(`Content-Disposition: form-data; name="language"\r\n\r\n`);
+      pushStr(`${request.language}\r\n`);
+    }
+    if (request.prompt) {
+      pushStr(`--${boundary}\r\n`);
+      pushStr(`Content-Disposition: form-data; name="prompt"\r\n\r\n`);
+      pushStr(`${request.prompt}\r\n`);
+    }
+    if (request.responseFormat) {
+      pushStr(`--${boundary}\r\n`);
+      pushStr(`Content-Disposition: form-data; name="response_format"\r\n\r\n`);
+      pushStr(`${request.responseFormat}\r\n`);
+    }
+    if (request.temperature !== undefined) {
+      pushStr(`--${boundary}\r\n`);
+      pushStr(`Content-Disposition: form-data; name="temperature"\r\n\r\n`);
+      pushStr(`${request.temperature}\r\n`);
+    }
+    pushStr(`--${boundary}--\r\n`);
+
+    let total = 0;
+    for (const p of parts) total += p.byteLength;
+    const body = new Uint8Array(total);
+    let off = 0;
+    for (const p of parts) { body.set(p, off); off += p.byteLength; }
+
+    const response = await this.transport.request<{ text?: string; language?: string; duration?: number }>({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url('/audio/transcriptions'),
+      headers: {
+        ...this.requestHeaders(context.credential, ''),
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      },
+      body,
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    const payload = response.data ?? {};
+    if (typeof payload.text !== 'string') throw invalidResponse(this.id, 'Provider transcription response is missing text.');
+    return {
+      id: `transcription-${request.model}`,
+      providerId: this.id,
+      model: request.model,
+      createdAt: new Date().toISOString(),
+      text: payload.text,
+      ...(payload.language !== undefined ? { language: payload.language } : {}),
+      ...(typeof payload.duration === 'number' ? { duration: payload.duration } : {}),
     };
   }
 

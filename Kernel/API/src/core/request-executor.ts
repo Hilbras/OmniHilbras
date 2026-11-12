@@ -1,4 +1,4 @@
-import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type AudioSpeechRequest, type AudioSpeechResponse } from './index.js';;
+import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse } from './index.js';;
 import { noCandidateMessage, type RouteCandidate, type RouteDecision } from './routing.js';
 import { RetryPolicy } from './retry-policy.js';
 import { HedgePolicy } from './hedge-policy.js';
@@ -76,6 +76,11 @@ export type GatewayAudioOutcome = {
   attempts: GatewayFailoverAttempt[];
 };
 
+export type GatewayTranscriptionOutcome = {
+  response: AudioTranscriptionResponse;
+  attempts: GatewayFailoverAttempt[];
+};
+
 export type GatewayStreamOutcome = {
   chunks: AsyncIterable<ChatChunk>;
   attempts: GatewayFailoverAttempt[];
@@ -126,6 +131,7 @@ export type RequestExecutorDeps = {
   embed: (providerId: string, request: EmbeddingRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string) => Promise<EmbeddingResponse>;
   image: (providerId: string, request: ImageRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string) => Promise<ImageResponse>;
   audio: (providerId: string, request: AudioSpeechRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string) => Promise<AudioSpeechResponse>;
+  transcribe: (providerId: string, request: AudioTranscriptionRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string) => Promise<AudioTranscriptionResponse>;
   /** Applies a per-attempt deadline and never leaks its timer. */
   withDeadline: <T>(signal: AbortSignal | undefined, timeoutMs: number, providerId: string, run: (signal: AbortSignal | undefined) => Promise<T>) => Promise<T>;
   /** Refuses an attempt that would exceed the connection's per-minute limit. */
@@ -260,6 +266,20 @@ export class RequestExecutor {
       signal,
       scope,
       dispatch: (candidate, deadline) => this.deps.audio(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
+    });
+  }
+
+  async transcribe(request: AudioTranscriptionRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayTranscriptionOutcome> {
+    const decision = await this.deps.planRoute(request.model, explicitProviderId, request.connectionId);
+    if (decision.candidates.length === 0) throw noRouteAvailable(decision.skipped);
+    return this.runSequential({
+      candidates: decision.candidates,
+      attempts: [],
+      racedProviders: new Set(),
+      lastError: undefined,
+      signal,
+      scope,
+      dispatch: (candidate, deadline) => this.deps.transcribe(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
     });
   }
 

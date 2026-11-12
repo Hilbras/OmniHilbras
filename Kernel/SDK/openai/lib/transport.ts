@@ -8,7 +8,7 @@ export type HttpRequest = {
   url: string;
   providerId?: string;
   headers?: Record<string, string>;
-  body?: string;
+  body?: string | Uint8Array;
   signal?: AbortSignal;
   /**
    * Read the body as raw bytes instead of text.
@@ -113,7 +113,7 @@ export class FetchHttpTransport implements HttpTransport {
       const response = await this.fetchImpl(request.url, {
         method: request.method,
         headers: request.headers,
-        body: request.body,
+        body: request.body as BodyInit | null | undefined,
         redirect: 'error',
         signal: lifecycle.signal,
       });
@@ -199,7 +199,7 @@ export class FetchHttpTransport implements HttpTransport {
       const response = await this.fetchImpl(request.url, {
         method: request.method,
         headers: request.headers,
-        body: request.body,
+        body: request.body as BodyInit | null | undefined,
         redirect: 'error',
         signal: lifecycle.signal,
       });
