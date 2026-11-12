@@ -137,6 +137,7 @@ export type RequestExecutorDeps = {
   /** Refuses an attempt that would exceed the connection's per-minute limit. */
   enforceRateLimit: (candidate: RouteCandidate) => void;
   recordSuccess: (providerId: string, latencyMs: number, at: string, connectionId?: string) => void;
+  recordSticky?: (model: string, connectionId: string) => void;
   /** Stamps a successful turn against the connection that served it. */
   recordUsage?: (connectionId: string) => void;
   recordFailure: (providerId: string, code: string, reason: string, connectionId?: string) => void;
@@ -189,6 +190,7 @@ export class RequestExecutor {
       lastError: race?.lastError,
       signal,
       scope,
+      model: request.model,
       dispatch: (candidate, deadline) => this.dispatchChat(candidate, request, deadline, scope),
     });
   }
@@ -237,6 +239,7 @@ export class RequestExecutor {
       lastError: undefined,
       signal,
       scope,
+      model: request.model,
       dispatch: (candidate, deadline) => this.deps.embed(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
     });
   }
@@ -251,6 +254,7 @@ export class RequestExecutor {
       lastError: undefined,
       signal,
       scope,
+      model: request.model,
       dispatch: (candidate, deadline) => this.deps.image(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
     });
   }
@@ -265,6 +269,7 @@ export class RequestExecutor {
       lastError: undefined,
       signal,
       scope,
+      model: request.model,
       dispatch: (candidate, deadline) => this.deps.audio(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
     });
   }
@@ -279,6 +284,7 @@ export class RequestExecutor {
       lastError: undefined,
       signal,
       scope,
+      model: request.model,
       dispatch: (candidate, deadline) => this.deps.transcribe(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
     });
   }
@@ -303,6 +309,7 @@ export class RequestExecutor {
     lastError: unknown;
     signal?: AbortSignal;
     scope?: RequestScope;
+    model?: string;
     dispatch: (candidate: RouteCandidate, deadline: AbortSignal | undefined) => Promise<T>;
   }): Promise<{ response: T; attempts: GatewayFailoverAttempt[] }> {
     // `scope` is deliberately not destructured: the dispatch closure already captures it, and
@@ -368,6 +375,7 @@ export class RequestExecutor {
           // Keyed by the connection as well as the provider: latency is a property of the account that
           // served the request, and two accounts of one vendor are not equally fast.
           this.deps.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString(), candidate.connectionId);
+          if (input.model && candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordSticky?.(input.model, candidate.connectionId);
           if (candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordUsage?.(candidate.connectionId);
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: true, latencyMs });
           return { response, attempts };

@@ -379,6 +379,8 @@ export function resolveRoute(input: {
   strategyFor?: (providerId: string) => 'priority' | 'round-robin' | 'fastest';
   /** Measured round trip per connection, for the `fastest` strategy. */
   latencyFor?: (connectionId: string) => { latencyMs: number; samples: number } | undefined;
+  /** Sticky connection id preferred for this model, when still a candidate. */
+  stickyFor?: (modelId: string) => string | undefined;
 }): RouteDecision {
   const modelId = input.model.trim();
   const usable = input.connections
@@ -435,6 +437,14 @@ export function resolveRoute(input: {
       continue;
     }
     candidates.push(toCandidate(connection));
+  }
+  const stickyId = input.stickyFor?.(modelId);
+  if (stickyId) {
+    const idx = candidates.findIndex((c) => c.connectionId === stickyId);
+    if (idx > 0) {
+      const sticky = candidates.splice(idx, 1)[0];
+      if (sticky) candidates.unshift(sticky);
+    }
   }
   return { candidates, skipped };
 }

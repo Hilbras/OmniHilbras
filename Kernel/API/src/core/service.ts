@@ -360,6 +360,8 @@ export class GatewayService {
   private readonly providerStrategies = new Map<string, 'priority' | 'round-robin' | 'fastest'>();
   /** How fast each account has been, keyed by connection. Read by the `fastest` strategy. */
   private readonly connectionLatency = new ConnectionLatencyLedger();
+  private readonly stickyConnections = new Map<string, { connectionId: string; until: number }>();
+  private readonly stickyTtlMs = 5 * 60 * 1000;
   /** Saved model aliases, synchronous for routing. Loaded from the store and updated only through this service. */
   private readonly aliasSnapshot = new Map<string, { providerId: string; model: string }>();
   /**
@@ -480,6 +482,12 @@ export class GatewayService {
       familyOf: (providerId) => this.registry.get(providerId)?.modelFamily,
       strategyFor: (providerId) => this.providerStrategies.get(providerId) ?? 'priority',
       latencyFor: (connectionId) => this.connectionLatency.get(connectionId),
+      stickyFor: (model) => {
+        const entry = this.stickyConnections.get(model);
+        if (!entry) return undefined;
+        if (Date.now() > entry.until) { this.stickyConnections.delete(model); return undefined; }
+        return entry.connectionId;
+      },
     });
     this.models = new ModelCatalog({
       connections: this.connections,
@@ -503,9 +511,10 @@ export class GatewayService {
       enforceRateLimit: (candidate) => this.enforceRateLimit(candidate),
       recordSuccess: (providerId, latencyMs, at, connectionId) => {
         this.healthManager.recordSuccess(providerId, latencyMs, at, connectionId);
-        // The account that served it, when the attempt named one: `unmanaged:` candidates have no
-        // connection record, and inventing one would put a reading under an id nobody can look up.
         if (connectionId && !connectionId.startsWith('unmanaged:')) this.connectionLatency.record(connectionId, latencyMs);
+      },
+      recordSticky: (model, connectionId) => {
+        this.stickyConnections.set(model, { connectionId, until: Date.now() + this.stickyTtlMs });
       },
       recordFailure: (providerId, code, reason, connectionId) => this.healthManager.recordFailure(providerId, code, reason, connectionId),
       recordModelRateLimit: (providerId, modelId, input, connectionId) => this.healthManager.recordModelRateLimit(providerId, modelId, input, connectionId),

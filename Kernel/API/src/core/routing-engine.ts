@@ -50,6 +50,8 @@ export type RoutingEngineOptions = {
    * provider are not equally fast, which is the whole reason the ledger is keyed that way.
    */
   latencyFor?: (connectionId: string) => { latencyMs: number; samples: number } | undefined;
+  /** Sticky connection preferred for a model, when still a candidate. */
+  stickyFor?: (modelId: string) => string | undefined;
   /**
    * The provider to serve when nothing is configured.
    *
@@ -171,6 +173,7 @@ export class RoutingEngine {
       ...(this.options.familyOf ? { familyOf: this.options.familyOf } : {}),
       ...(this.options.strategyFor ? { strategyFor: this.options.strategyFor } : {}),
       ...(this.options.latencyFor ? { latencyFor: this.options.latencyFor } : {}),
+      ...(this.options.stickyFor ? { stickyFor: this.options.stickyFor } : {}),
       ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
       health,
       failureThreshold: this.options.health.getFailureThreshold(),
