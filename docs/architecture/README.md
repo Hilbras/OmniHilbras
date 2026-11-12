@@ -74,7 +74,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/provider-resolver.ts` | 261 | 1 | enforced by a test that greps the file |
 | `Kernel/API/src/core/request-executor.ts` | 753 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 333 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 3314 | 25 | all twenty-five `.onDemand()` registrations, in one constructor |
+| `Kernel/API/src/core/service.ts` | 3323 | 25 | all twenty-five `.onDemand()` registrations, in one constructor |
 | `Kernel/API/src/core/http.ts` | 314 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 802 | 12 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 358 | 1 | one OpenRouter save shortcut, the generic quota route, and the build stamp |
@@ -82,7 +82,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/routes/api-keys.ts` | 74 | **0** | |
 | `Kernel/API/src/routes/status.ts` | 56 | **0** | `/health`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
-| `Kernel/API/src/server.ts` | 330 | **0** | refuses a half-configured Codex OAuth override at startup |
+| `Kernel/API/src/server.ts` | 332 | **0** | refuses a half-configured Codex OAuth override at startup |
 
 **The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
 provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a

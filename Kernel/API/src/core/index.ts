@@ -20,6 +20,7 @@ export * from './workspaces.js';
 export * from './tunnels.js';
 export * from './mitm.js';
 export * from './proxy-pools.js';
+export * from './provider-nodes.js';
 
 /**
  * Shared provider machinery, kept here because no provider owns it.

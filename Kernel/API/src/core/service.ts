@@ -68,6 +68,7 @@ import { type WorkspaceStore } from './workspaces.js';
 import { type TunnelStore } from './tunnels.js';
 import { type MitmStore } from './mitm.js';
 import { type ProxyPoolStore } from './proxy-pools.js';
+import { type ProviderNodeStore } from './provider-nodes.js';
 import {
   compressMessages,
   headroomCompress,
@@ -208,6 +209,8 @@ export type GatewayServiceOptions = {
   mitm?: MitmStore;
   /** Proxy pools, when wired. */
   proxyPools?: ProxyPoolStore;
+  /** Provider nodes, when wired. */
+  providerNodes?: ProviderNodeStore;
   /** Skills, when this gateway is wired with persistence. Absent means no skills surface. */
   skills?: SkillStore;
   /** Consecutive failures before a connection stops receiving traffic. */
@@ -250,6 +253,7 @@ export class GatewayService {
   private readonly tunnelStore?: TunnelStore;
   private readonly mitmStore?: MitmStore;
   private readonly proxyPoolStore?: ProxyPoolStore;
+  private readonly providerNodeStore?: ProviderNodeStore;
   private readonly skillStore?: SkillStore;
   /** Round-robin position per virtual model; incremented only when a virtual model is routed. */
   private readonly virtualRotation = new Map<string, number>();
@@ -427,6 +431,7 @@ export class GatewayService {
     this.tunnelStore = options.tunnels;
     this.mitmStore = options.mitm;
     this.proxyPoolStore = options.proxyPools;
+    this.providerNodeStore = options.providerNodes;
     this.skillStore = options.skills;
     this.gatewayConfig = options.config;
     this.tokenSaverConfig = options.tokenSaver?.enabled ? options.tokenSaver : undefined;
@@ -3223,6 +3228,10 @@ export class GatewayService {
 
   get proxyPools(): ProxyPoolStore | undefined {
     return this.proxyPoolStore;
+  }
+
+  get providerNodes(): ProviderNodeStore | undefined {
+    return this.providerNodeStore;
   }
 
   /** The skill catalog, or `undefined` when this build has no persisted store. */
