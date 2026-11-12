@@ -1,0 +1,5 @@
+{
+  "app": { "name": "OmniHilbras", "tagline": "One gateway for every provider." },
+  "nav": { "dashboard": "Dashboard", "providers": "Providers", "settings": "Settings" },
+  "common": { "save": "Save", "cancel": "Cancel", "delete": "Delete", "test": "Test" }
+}

@@ -318,6 +318,7 @@ The first local gateway exposes:
 - `GET /v1/provider-nodes` / `GET /v1/provider-nodes/:id` — list/get. `POST /v1/provider-nodes` — create `{id, name?, providerId?, connectionId?, enabled?}`. `PUT`/`PATCH`/`DELETE /v1/provider-nodes/:id` — update/remove.
 - `GET /v1/observability` — gateway stats: uptime, version, per-store counts.
 - `GET /v1/pxpipe` — pipe health check.
+- `GET /v1/locale` — list locales. `GET /v1/locale/:lang` — locale strings.
 - `POST /v1/mcp` — Model Context Protocol JSON-RPC 2.0 endpoint. Methods: `initialize`, `tools/list`, `tools/call`. Tools: `list_connections`, `list_models`, `gateway_status`. Authenticated like the LLM surface (gateway API key or trusted dashboard origin). Management route.
 - `GET /v1/models` includes every enabled virtual model with `virtual: true` and `providers`, the target
   provider ids. The upstream model override is a routing detail; clients send the `oh/` id.

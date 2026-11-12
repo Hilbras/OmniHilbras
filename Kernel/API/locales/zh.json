@@ -1,0 +1,5 @@
+{
+  "app": { "name": "OmniHilbras", "tagline": "一个网关，连接所有提供商。" },
+  "nav": { "dashboard": "仪表盘", "providers": "提供商", "settings": "设置" },
+  "common": { "save": "保存", "cancel": "取消", "delete": "删除", "test": "测试" }
+}
