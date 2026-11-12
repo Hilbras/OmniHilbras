@@ -108,7 +108,7 @@ test('the dispatcher tries every route module, in the order the old chain used',
   const order = [...list[1].matchAll(/handle(\w+?)Route,?\s*$/gm)].map((match) => match[1]);
   // `Usage` and `Logs` sit with the management routes and before `Inference`, which must stay last because it
   // carries the authentication gate for the LLM surface.
-  assert.deepEqual(order, ['Status', 'Connections', 'Backup', 'TokenSaver', 'Oauth', 'ApiKeys', 'Usage', 'Logs', 'Settings', 'VirtualModels', 'Skills', 'Workspaces', 'Tunnels', 'Mitm', 'ProxyPools', 'ProviderNodes', 'Mcp', 'Inference']);
+  assert.deepEqual(order, ['Status', 'Connections', 'Backup', 'TokenSaver', 'Oauth', 'ApiKeys', 'Usage', 'Logs', 'Settings', 'VirtualModels', 'Skills', 'Workspaces', 'Tunnels', 'Mitm', 'ProxyPools', 'ProviderNodes', 'Observability', 'Mcp', 'Inference']);
   // Every module that exists must actually be wired in: a module with routes but no entry here is
   // a module whose routes 404, which no unit test would catch.
   for (const { name } of modules) {
