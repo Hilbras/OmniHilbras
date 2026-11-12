@@ -83,7 +83,52 @@ export async function handleMediaRoute(ctx: RouteContext): Promise<boolean> {
     return true;
   }
   if (request.method === 'POST' && url.pathname === '/v1/search') {
-    throw notImplemented('Search');
+    const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
+    if (typeof body !== 'object' || body === null) throw invalidRequest('Request body must be a JSON object.');
+    const record = body as Record<string, unknown>;
+    const query = record.query;
+    if (typeof query !== 'string' || !query.trim()) throw invalidRequest('query must be a non-empty string.');
+
+    const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query.trim())}&format=json&no_html=1&skip_disambig=1`;
+    let ddgJson: Record<string, unknown> = {};
+    try {
+      const res = await fetch(ddgUrl, { signal });
+      if (res.ok) ddgJson = (await res.json()) as Record<string, unknown>;
+    } catch {
+      ddgJson = {};
+    }
+
+    const results: { title: string; url: string; snippet: string }[] = [];
+    const abstract = typeof ddgJson.Abstract === 'string' ? ddgJson.Abstract : '';
+    const abstractUrl = typeof ddgJson.AbstractURL === 'string' ? ddgJson.AbstractURL : '';
+    const abstractText = typeof ddgJson.AbstractText === 'string' ? ddgJson.AbstractText : '';
+    if (abstract || abstractText) {
+      results.push({ title: abstract || query.trim(), url: abstractUrl, snippet: abstractText || abstract });
+    }
+    const related = Array.isArray(ddgJson.RelatedTopics) ? ddgJson.RelatedTopics : [];
+    for (const item of related) {
+      if (typeof item !== 'object' || item === null) continue;
+      const r = item as Record<string, unknown>;
+      if (typeof r.Text === 'string' && typeof r.FirstURL === 'string') {
+        results.push({ title: r.Text.split(' - ')[0] || r.Text, url: r.FirstURL, snippet: r.Text });
+      }
+      if (Array.isArray(r.Topics)) {
+        for (const t of r.Topics) {
+          if (typeof t !== 'object' || t === null) continue;
+          const tr = t as Record<string, unknown>;
+          if (typeof tr.Text === 'string' && typeof tr.FirstURL === 'string') {
+            results.push({ title: tr.Text.split(' - ')[0] || tr.Text, url: tr.FirstURL, snippet: tr.Text });
+          }
+        }
+      }
+    }
+
+    sendJson(response, 200, {
+      query: query.trim(),
+      provider: 'duckduckgo',
+      results,
+    }, origin);
+    return true;
   }
   return false;
 }
