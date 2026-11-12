@@ -313,6 +313,7 @@ The first local gateway exposes:
 - `PUT /v1/skills/:id` / `PATCH` — replace or update. `DELETE /v1/skills/:id` — remove; `404` when absent.
 - `GET /v1/workspaces` / `GET /v1/workspaces/:id` — list/get. `POST /v1/workspaces` — create `{id, name?, description?, enabled?}`. `PUT`/`PATCH`/`DELETE /v1/workspaces/:id` — update/remove.
 - `GET /v1/tunnels` / `GET /v1/tunnels/:id` — list/get. `POST /v1/tunnels` — create `{id, name?, provider?, token?, publicUrl?, enabled?}`. `PUT`/`PATCH`/`DELETE /v1/tunnels/:id` — update/remove.
+- `GET /v1/mitm` / `GET /v1/mitm/:id` — list/get. `POST /v1/mitm` — create `{id, name?, port?, enabled?, certPath?}`. `PUT`/`PATCH`/`DELETE /v1/mitm/:id` — update/remove.
 - `POST /v1/mcp` — Model Context Protocol JSON-RPC 2.0 endpoint. Methods: `initialize`, `tools/list`, `tools/call`. Tools: `list_connections`, `list_models`, `gateway_status`. Authenticated like the LLM surface (gateway API key or trusted dashboard origin). Management route.
 - `GET /v1/models` includes every enabled virtual model with `virtual: true` and `providers`, the target
   provider ids. The upstream model override is a routing detail; clients send the `oh/` id.

@@ -18,6 +18,7 @@ export * from './virtual-models.js';
 export * from './skills.js';
 export * from './workspaces.js';
 export * from './tunnels.js';
+export * from './mitm.js';
 
 /**
  * Shared provider machinery, kept here because no provider owns it.
