@@ -24,6 +24,7 @@ import { handleProviderNodesRoute } from './routes/provider-nodes.js';
 import { handleObservabilityRoute } from './routes/observability.js';
 import { handlePxpipeRoute } from './routes/pxpipe.js';
 import { handleLocaleRoute } from './routes/locale.js';
+import { handleMediaRoute } from './routes/media.js';
 import { handleMcpRoute } from './routes/mcp.js';
 import type { RouteContext } from './routes/route-context.js';
 import type { ApiKeyStore } from './core/api-keys.js';
@@ -82,6 +83,7 @@ const routes = [
   handleObservabilityRoute,
   handlePxpipeRoute,
   handleLocaleRoute,
+  handleMediaRoute,
   handleMcpRoute,
   // Last, because it carries the authentication gate for the LLM surface and must not shadow
   // anything above.
@@ -143,7 +145,7 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     };
     const responseOrigin = allowedOrigin ? requestOrigin : undefined;
     setCors(response, responseOrigin);
-    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage') || request.url?.startsWith('/v1/oauth') || request.url?.startsWith('/v1/virtual-models') || request.url?.startsWith('/v1/skills') || request.url?.startsWith('/v1/workspaces') || request.url?.startsWith('/v1/tunnels') || request.url?.startsWith('/v1/mitm') || request.url?.startsWith('/v1/proxy-pools') || request.url?.startsWith('/v1/provider-nodes') || request.url?.startsWith('/v1/observability') || request.url?.startsWith('/v1/pxpipe') || request.url?.startsWith('/v1/locale')) response.setHeader('cache-control', 'no-store');
+    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage') || request.url?.startsWith('/v1/oauth') || request.url?.startsWith('/v1/virtual-models') || request.url?.startsWith('/v1/skills') || request.url?.startsWith('/v1/workspaces') || request.url?.startsWith('/v1/tunnels') || request.url?.startsWith('/v1/mitm') || request.url?.startsWith('/v1/proxy-pools') || request.url?.startsWith('/v1/provider-nodes') || request.url?.startsWith('/v1/observability') || request.url?.startsWith('/v1/pxpipe') || request.url?.startsWith('/v1/locale') || request.url?.startsWith('/v1/audio') || request.url?.startsWith('/v1/search')) response.setHeader('cache-control', 'no-store');
     if ((request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') && !isJsonRequest(request)) {
       sendJson(response, 415, { error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'JSON requests must use application/json.' } }, responseOrigin);
       return;
@@ -282,7 +284,7 @@ export async function startGatewayServer(options: {
  * were already reachable, because `authorize()` returns before it can refuse anything. What changed is that
  * a gateway *with* keys enforced now answers the navigation the same way a gateway without them does.
  */
-const MANAGEMENT_PREFIXES = ['/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale'] as const;
+const MANAGEMENT_PREFIXES = ['/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search'] as const;
 
 function isManagementPath(pathname: string) {
   return MANAGEMENT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
