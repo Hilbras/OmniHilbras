@@ -15,6 +15,7 @@ export * from './tool-messages.js';
 export * from './types.js';
 export * from './usage-canonical.js';
 export * from './virtual-models.js';
+export * from './skills.js';
 
 /**
  * Shared provider machinery, kept here because no provider owns it.

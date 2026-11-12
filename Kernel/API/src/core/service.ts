@@ -63,6 +63,7 @@ import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
 import { type VirtualModel, type VirtualModelStore } from './virtual-models.js';
+import { type SkillStore } from './skills.js';
 import {
   compressMessages,
   headroomCompress,
@@ -195,6 +196,8 @@ export type GatewayServiceOptions = {
   usageStore?: UsageStore;
   /** Virtual models, when this gateway is wired with persistence. Absent means concrete routing only. */
   virtualModels?: VirtualModelStore;
+  /** Skills, when this gateway is wired with persistence. Absent means no skills surface. */
+  skills?: SkillStore;
   /** Consecutive failures before a connection stops receiving traffic. */
   failureThreshold?: number;
   /** How long an ejected connection waits before one probe request. */
@@ -231,6 +234,7 @@ export class GatewayService {
   /** Absent means the gateway records nothing; see `GatewayServiceOptions.usageStore`. */
   private readonly usageStore?: UsageStore;
   private readonly virtualModelStore?: VirtualModelStore;
+  private readonly skillStore?: SkillStore;
   /** Round-robin position per virtual model; incremented only when a virtual model is routed. */
   private readonly virtualRotation = new Map<string, number>();
   private readonly gatewayConfig: GatewayConfig | undefined;
@@ -403,6 +407,7 @@ export class GatewayService {
     this.deploymentConfig = deployment;
     this.usageStore = options.usageStore ? this.publishingUsage(options.usageStore) : undefined;
     this.virtualModelStore = options.virtualModels;
+    this.skillStore = options.skills;
     this.gatewayConfig = options.config;
     this.tokenSaverConfig = options.tokenSaver?.enabled ? options.tokenSaver : undefined;
     this.historyTrim = options.historyTrim && options.historyTrim.maxInputTokens > 0 ? options.historyTrim : undefined;
@@ -3182,6 +3187,11 @@ export class GatewayService {
   /** The virtual-model catalog, or `undefined` when this build has no persisted store. */
   get virtualModels(): VirtualModelStore | undefined {
     return this.virtualModelStore;
+  }
+
+  /** The skill catalog, or `undefined` when this build has no persisted store. */
+  get skills(): SkillStore | undefined {
+    return this.skillStore;
   }
 
   /** Each finished request's record, as it is written, to a listener. Returns how to stop listening. */
