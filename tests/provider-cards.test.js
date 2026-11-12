@@ -329,7 +329,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // each with the vendor's own mark and no adapter work.
   // 50-51 from 3.7.0: `grok-web` and `perplexity-web`, the two web-cookie sessions ported from the
   // old tree; both have their own adapter and committed mark.
-  assert.equal(all.length, 53, `the catalog now has ${all.length} cards`);
+  assert.equal(all.length, 54, `the catalog now has ${all.length} cards`);
   // Fifteen cards claim OAuth, but the gateway serves twelve start routes: `clinepass` shares `cline`'s,
   // and `claude-code` and `codex` sign in through `server.ts` routes this scan reads too — the counts of
   // claims and routes do not coincide, which is why both are asserted rather than one derived.

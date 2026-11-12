@@ -58,6 +58,7 @@ export const providerLogoMap = {
   // Added with the CodeBuddy cards: two regions, two accounts, two marks.
   'codebuddy-cn': '/providers/codebuddy-cn.png',
   'codebuddy-intl': '/providers/codebuddy-intl.png',
+  coarena: '/providers/coarena.png',
 } as const;
 
 export function getProviderLogo(id: string | null | undefined) {
@@ -1294,6 +1295,27 @@ export const providerCatalog: ProviderRecord[] = [
     logo: providerLogoMap.nvidia,
     endpoint: 'https://integrate.api.nvidia.com/v1',
     apiKeysUrl: 'https://build.nvidia.com/',
+    modelList: [],
+  },
+  {
+    id: 'coarena',
+    name: 'Coarena',
+    description: 'OpenAI-compatible gateway to 22 models (Claude, GPT, Gemini, Grok, Kimi, Qwen, DeepSeek and more) with a free daily allowance paid by Coarena.',
+    freeTier: 'Free: $5 of model use a day, paid by Coarena. 30 requests a minute, 2 concurrent. Limits and usage shown via /api/v1/limits.',
+    category: 'Multi-model provider',
+    group: 'free-tier',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#6366f1',
+    initial: 'C',
+    logo: providerLogoMap.coarena,
+    endpoint: 'https://coarena.ai/api/v1',
+    apiKeysUrl: 'https://coarena.ai/account/api',
     modelList: [],
   },
   {

@@ -335,7 +335,7 @@ function parseOptionalUrl(value: string | undefined, name: string): string | und
 }
 
 function parseCorsOrigins(value: string | undefined) {
-  const origins = (value ?? 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,https://localhost,http://localhost')
+  const origins = (value ?? 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:20138,http://127.0.0.1:20138,http://localhost:20139,http://127.0.0.1:20139,https://localhost,http://localhost')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
