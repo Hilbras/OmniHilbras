@@ -86,9 +86,9 @@ export class HealthManager {
 
   constructor(
     private readonly source: HealthProbeSource,
-    options: { now?: () => number; recoveryCooldownMs?: number; intervalMs?: number; failureThreshold?: number } = {},
+    options: { now?: () => number; recoveryCooldownMs?: number; maxRecoveryCooldownMs?: number; intervalMs?: number; failureThreshold?: number } = {},
   ) {
-    this.registry = new HealthRegistry(options.now ?? (() => Date.now()), options.recoveryCooldownMs);
+    this.registry = new HealthRegistry(options.now ?? (() => Date.now()), options.recoveryCooldownMs, options.maxRecoveryCooldownMs);
     this.intervalMs = options.intervalMs ?? defaultHealthIntervalMs;
     this.failureThreshold = options.failureThreshold ?? defaultFailureThreshold;
   }

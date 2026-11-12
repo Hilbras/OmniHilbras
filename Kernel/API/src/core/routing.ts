@@ -112,6 +112,7 @@ export type ProviderOutcome = {
  */
 /** How long an ejected provider waits before one probe request is allowed. */
 const defaultRecoveryCooldownMs = 30_000;
+const defaultMaxRecoveryCooldownMs = 10 * 60_000;
 const defaultModelCooldownMs = 60_000;
 const maxModelCooldownMs = 30 * 60_000;
 
@@ -127,6 +128,7 @@ export class HealthRegistry {
   constructor(
     private readonly now: () => number = () => Date.now(),
     private readonly recoveryCooldownMs: number = defaultRecoveryCooldownMs,
+    private readonly maxRecoveryCooldownMs: number = defaultMaxRecoveryCooldownMs,
   ) {}
 
   recordSuccess(providerId: string, latencyMs: number, checkedAt = new Date().toISOString()) {
@@ -171,7 +173,9 @@ export class HealthRegistry {
     if (threshold <= 0) return false;
     const current = this.state.get(providerId);
     if (!current || current.failures < threshold) return false;
-    return this.now() - (current.lastFailureAt ?? 0) < this.recoveryCooldownMs;
+    const exponent = Math.max(0, current.failures - threshold);
+    const cooldown = Math.min(this.recoveryCooldownMs * Math.pow(2, exponent), this.maxRecoveryCooldownMs);
+    return this.now() - (current.lastFailureAt ?? 0) < cooldown;
   }
 
   snapshot(providerId: string, threshold: number) {

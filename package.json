@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "3.26.1",
+  "version": "3.26.2",
   "description": "Provider-neutral local gateway and desktop dashboard",
   "author": {
     "name": "Hilbras",
