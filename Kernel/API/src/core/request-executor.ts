@@ -191,6 +191,7 @@ export class RequestExecutor {
       signal,
       scope,
       model: request.model,
+      stickyEligible: request.connectionId === undefined,
       dispatch: (candidate, deadline) => this.dispatchChat(candidate, request, deadline, scope),
     });
   }
@@ -240,6 +241,7 @@ export class RequestExecutor {
       signal,
       scope,
       model: request.model,
+      stickyEligible: request.connectionId === undefined,
       dispatch: (candidate, deadline) => this.deps.embed(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
     });
   }
@@ -255,6 +257,7 @@ export class RequestExecutor {
       signal,
       scope,
       model: request.model,
+      stickyEligible: request.connectionId === undefined,
       dispatch: (candidate, deadline) => this.deps.image(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
     });
   }
@@ -270,6 +273,7 @@ export class RequestExecutor {
       signal,
       scope,
       model: request.model,
+      stickyEligible: request.connectionId === undefined,
       dispatch: (candidate, deadline) => this.deps.audio(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
     });
   }
@@ -285,6 +289,7 @@ export class RequestExecutor {
       signal,
       scope,
       model: request.model,
+      stickyEligible: request.connectionId === undefined,
       dispatch: (candidate, deadline) => this.deps.transcribe(candidate.providerId, candidate.model ? { ...request, model: candidate.model } : request, deadline, scope, candidate.connectionId),
     });
   }
@@ -310,6 +315,7 @@ export class RequestExecutor {
     signal?: AbortSignal;
     scope?: RequestScope;
     model?: string;
+    stickyEligible?: boolean;
     dispatch: (candidate: RouteCandidate, deadline: AbortSignal | undefined) => Promise<T>;
   }): Promise<{ response: T; attempts: GatewayFailoverAttempt[] }> {
     // `scope` is deliberately not destructured: the dispatch closure already captures it, and
@@ -321,6 +327,18 @@ export class RequestExecutor {
       if (racedProviders.has(candidate.providerId)) continue;
       for (let attempt = 1; attempt <= candidate.resilience.maxRetries + 1; attempt += 1) {
         if (signal?.aborted) throw new ProviderError('CANCELLED', 'The request was cancelled.', { cause: signal.reason });
+        if (attempt > 1) {
+          // Request-level retry with jitter: back off before re-trying the same connection so a
+          // transient blip does not become a tight retry storm. Capped so a long outage still fails fast.
+          const base = Math.min(100 * Math.pow(2, attempt - 2), 2000);
+          const jitter = Math.floor(Math.random() * 100);
+          const delay = base + jitter;
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, delay);
+            signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+          });
+          if (signal?.aborted) throw new ProviderError('CANCELLED', 'The request was cancelled.', { cause: signal.reason });
+        }
         const startedAt = Date.now();
         // **A refusal by the limiter is not a provider failure** (1.56.0).
         //
@@ -375,7 +393,7 @@ export class RequestExecutor {
           // Keyed by the connection as well as the provider: latency is a property of the account that
           // served the request, and two accounts of one vendor are not equally fast.
           this.deps.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString(), candidate.connectionId);
-          if (input.model && candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordSticky?.(input.model, candidate.connectionId);
+          if (input.stickyEligible !== false && input.model && candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordSticky?.(input.model, candidate.connectionId);
           if (candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordUsage?.(candidate.connectionId);
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: true, latencyMs });
           return { response, attempts };

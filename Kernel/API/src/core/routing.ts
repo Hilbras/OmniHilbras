@@ -441,7 +441,9 @@ export function resolveRoute(input: {
   const stickyId = input.stickyFor?.(modelId);
   if (stickyId) {
     const idx = candidates.findIndex((c) => c.connectionId === stickyId);
-    if (idx > 0) {
+    // Sticky never overrides a higher-priority (lower number) connection: priority still wins,
+    // and health tracking on the preferred connection must keep happening.
+    if (idx > 0 && (candidates[idx]?.priority ?? 0) <= (candidates[0]?.priority ?? 0)) {
       const sticky = candidates.splice(idx, 1)[0];
       if (sticky) candidates.unshift(sticky);
     }

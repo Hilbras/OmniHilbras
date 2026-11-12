@@ -19,7 +19,7 @@ test('gateway config loads local defaults and environment credentials', async ()
 
   assert.equal(config.host, '127.0.0.1');
   assert.equal(config.port, 9000);
-  assert.deepEqual(config.corsOrigins, ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5174', 'http://127.0.0.1:5174', 'https://localhost', 'http://localhost']);
+  assert.deepEqual(config.corsOrigins, ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5174', 'http://127.0.0.1:5174', 'http://localhost:20138', 'http://127.0.0.1:20138', 'http://localhost:20139', 'http://127.0.0.1:20139', 'https://localhost', 'http://localhost']);
   assert.equal(config.compatible.authRequired, true);
   assert.deepEqual(await secretStore.get('openai'), { type: 'api-key', value: 'openai-secret' });
   assert.deepEqual(await secretStore.get('openai-compatible'), { type: 'api-key', value: 'local-secret' });
