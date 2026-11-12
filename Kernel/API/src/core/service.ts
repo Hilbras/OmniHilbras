@@ -64,6 +64,7 @@ import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
 import { type VirtualModel, type VirtualModelStore } from './virtual-models.js';
 import { type SkillStore } from './skills.js';
+import { type WorkspaceStore } from './workspaces.js';
 import {
   compressMessages,
   headroomCompress,
@@ -196,6 +197,8 @@ export type GatewayServiceOptions = {
   usageStore?: UsageStore;
   /** Virtual models, when this gateway is wired with persistence. Absent means concrete routing only. */
   virtualModels?: VirtualModelStore;
+  /** Workspaces, when wired. */
+  workspaces?: WorkspaceStore;
   /** Skills, when this gateway is wired with persistence. Absent means no skills surface. */
   skills?: SkillStore;
   /** Consecutive failures before a connection stops receiving traffic. */
@@ -234,6 +237,7 @@ export class GatewayService {
   /** Absent means the gateway records nothing; see `GatewayServiceOptions.usageStore`. */
   private readonly usageStore?: UsageStore;
   private readonly virtualModelStore?: VirtualModelStore;
+  private readonly workspaceStore?: WorkspaceStore;
   private readonly skillStore?: SkillStore;
   /** Round-robin position per virtual model; incremented only when a virtual model is routed. */
   private readonly virtualRotation = new Map<string, number>();
@@ -407,6 +411,7 @@ export class GatewayService {
     this.deploymentConfig = deployment;
     this.usageStore = options.usageStore ? this.publishingUsage(options.usageStore) : undefined;
     this.virtualModelStore = options.virtualModels;
+    this.workspaceStore = options.workspaces;
     this.skillStore = options.skills;
     this.gatewayConfig = options.config;
     this.tokenSaverConfig = options.tokenSaver?.enabled ? options.tokenSaver : undefined;
@@ -3187,6 +3192,10 @@ export class GatewayService {
   /** The virtual-model catalog, or `undefined` when this build has no persisted store. */
   get virtualModels(): VirtualModelStore | undefined {
     return this.virtualModelStore;
+  }
+
+  get workspaces(): WorkspaceStore | undefined {
+    return this.workspaceStore;
   }
 
   /** The skill catalog, or `undefined` when this build has no persisted store. */

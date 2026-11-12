@@ -311,6 +311,7 @@ The first local gateway exposes:
 - `GET /v1/skills` — every persisted skill. `GET /v1/skills/:id` — one skill.
 - `POST /v1/skills` — create. Body `{id, name?, description?, content?, enabled?}`.
 - `PUT /v1/skills/:id` / `PATCH` — replace or update. `DELETE /v1/skills/:id` — remove; `404` when absent.
+- `GET /v1/workspaces` / `GET /v1/workspaces/:id` — list/get. `POST /v1/workspaces` — create `{id, name?, description?, enabled?}`. `PUT`/`PATCH`/`DELETE /v1/workspaces/:id` — update/remove.
 - `POST /v1/mcp` — Model Context Protocol JSON-RPC 2.0 endpoint. Methods: `initialize`, `tools/list`, `tools/call`. Tools: `list_connections`, `list_models`, `gateway_status`. Authenticated like the LLM surface (gateway API key or trusted dashboard origin). Management route.
 - `GET /v1/models` includes every enabled virtual model with `virtual: true` and `providers`, the target
   provider ids. The upstream model override is a routing detail; clients send the `oh/` id.

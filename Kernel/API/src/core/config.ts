@@ -9,6 +9,7 @@ import { assertPublicDestination } from './destination-check.js';
 import { LocalUsageStore } from './usage-store.js';
 import { LocalVirtualModelStore } from './virtual-models.js';
 import { LocalSkillStore } from './skills.js';
+import { LocalWorkspaceStore } from './workspaces.js';
 import { defaultConnectionDirectory, LocalConnectionStore, parseMasterKey, type ConnectionStore } from './connections.js';
 import { GatewayService } from './service.js';
 import { CAVEMAN_LEVELS, PONYTAIL_LEVELS, type CavemanLevel, type PonytailLevel } from '@omnihilbras/token-saver';
@@ -259,6 +260,7 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     usageStore: new LocalUsageStore({ directory: config.dataDir }),
     virtualModels: new LocalVirtualModelStore({ directory: config.dataDir }),
     skills: new LocalSkillStore({ directory: config.dataDir }),
+    workspaces: new LocalWorkspaceStore({ directory: config.dataDir }),
     // Passed so `GET /v1/settings` can report what this process actually loaded. `service.ts` cannot import
     // `loadGatewayConfig` — this file already imports `service.ts`, for `deploymentFrom` — so the factory
     // hands the value over rather than the service reaching back for it.
