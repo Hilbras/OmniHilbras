@@ -188,6 +188,24 @@ export type ImageResponse = {
   data: readonly ImageData[];
 };
 
+export type AudioSpeechRequest = {
+  readonly model: string;
+  readonly input: string;
+  readonly voice?: string;
+  readonly responseFormat?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm';
+  readonly speed?: number;
+  readonly user?: string;
+};
+
+export type AudioSpeechResponse = {
+  id: string;
+  providerId: ProviderId;
+  model: string;
+  createdAt: string;
+  audio: Uint8Array;
+  contentType: string;
+};
+
 export type ChatChunk = {
   id: string;
   providerId: ProviderId;
@@ -388,6 +406,7 @@ export type ProviderAdapter = {
    */
   embed?: (request: EmbeddingRequest, context?: ProviderRequestContext) => Promise<EmbeddingResponse>;
   image?: (request: ImageRequest, context?: ProviderRequestContext) => Promise<ImageResponse>;
+  audio?: (request: AudioSpeechRequest, context?: ProviderRequestContext) => Promise<AudioSpeechResponse>;
   /**
    * Reads what the account has left, when the provider meters its accounts.
    *

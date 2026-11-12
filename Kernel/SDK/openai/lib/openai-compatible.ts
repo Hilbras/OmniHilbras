@@ -2,7 +2,7 @@ import { ProviderError } from './errors.js';
 import { parseSseJson, parseSseStream } from './streaming.js';
 import { FetchHttpTransport, type HttpTransport } from './transport.js';
 import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from './url.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, ImageRequest, ImageResponse, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from './types.js';
+import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, FinishReason, ImageRequest, ImageResponse, AudioSpeechRequest, AudioSpeechResponse, MessageContent, Model, ProviderAdapter, ProviderCapabilities, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolCall, ToolDefinition } from './types.js';
 
 export type OpenAICompatibleAuth = {
   header?: string;
@@ -302,6 +302,40 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       model: request.model,
       createdAt: new Date((typeof response.data?.created === 'number' ? response.data.created : Date.now() / 1000) * 1000).toISOString(),
       data,
+    };
+  }
+
+  async audio(request: AudioSpeechRequest, context: ProviderRequestContext = {}): Promise<AudioSpeechResponse> {
+    if (!this.capabilities.audio) {
+      throw new ProviderError('NOT_SUPPORTED', `${this.name} does not support audio.`, {
+        providerId: this.id,
+        publicMessage: `${this.name} does not support audio.`,
+      });
+    }
+    const body: Record<string, unknown> = { model: request.model, input: request.input };
+    if (request.voice !== undefined) body.voice = request.voice;
+    if (request.responseFormat !== undefined) body.response_format = request.responseFormat;
+    if (request.speed !== undefined) body.speed = request.speed;
+    if (request.user !== undefined) body.user = request.user;
+
+    const response = await this.transport.request<Uint8Array>({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url('/audio/speech'),
+      headers: this.requestHeaders(context.credential, 'application/json'),
+      body: JSON.stringify(body),
+      responseAs: 'bytes',
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    const audio = response.data;
+    const contentType = response.headers.get('content-type') ?? 'audio/mpeg';
+    return {
+      id: `audio-${request.model}`,
+      providerId: this.id,
+      model: request.model,
+      createdAt: new Date().toISOString(),
+      audio,
+      contentType,
     };
   }
 
