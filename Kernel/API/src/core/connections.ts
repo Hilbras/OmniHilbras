@@ -108,6 +108,8 @@ export type ConnectionResponsibility = {
 export type ResilienceSettings = {
   /** Per-request budget for this connection. 0 keeps the shared default. */
   timeoutMs: number;
+  /** First-token (TTFB) budget for streaming; 0 keeps the shared default. */
+  ttfbMs?: number;
   /** Extra attempts after the first failure. Failures that cannot succeed on a retry are not repeated. */
   maxRetries: number;
   /** Requests allowed per minute. 0 disables the limit for this connection. */
@@ -164,6 +166,7 @@ export const defaultResilienceSettings: ResilienceSettings = {
 
 export const resilienceLimits = {
   timeoutMs: { min: 0, max: 600_000 },
+  ttfbMs: { min: 0, max: 600_000 },
   maxRetries: { min: 0, max: 5 },
   requestsPerMinute: { min: 0, max: 100_000 },
   maxConcurrentRequests: { min: 0, max: 1_000 },
@@ -960,6 +963,7 @@ export function normalizeResilienceSettings(value: Partial<ResilienceSettings>):
     return raw;
   };
   const timeoutMs = read('timeoutMs', 'timeoutMs');
+  const ttfbMs = read('ttfbMs', 'ttfbMs');
   const maxRetries = read('maxRetries', 'maxRetries');
   const requestsPerMinute = read('requestsPerMinute', 'requestsPerMinute');
   const maxConcurrentRequests = read('maxConcurrentRequests', 'maxConcurrentRequests');
@@ -970,6 +974,7 @@ export function normalizeResilienceSettings(value: Partial<ResilienceSettings>):
     requestsPerMinute: requestsPerMinute ?? defaultResilienceSettings.requestsPerMinute,
     ...(maxConcurrentRequests === undefined ? {} : { maxConcurrentRequests }),
     hedgeAfterMs: hedgeAfterMs ?? defaultResilienceSettings.hedgeAfterMs,
+    ...(ttfbMs === undefined ? {} : { ttfbMs }),
   };
 }
 

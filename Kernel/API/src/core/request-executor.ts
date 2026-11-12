@@ -606,7 +606,8 @@ export class RequestExecutor {
       }
       try {
         this.deps.recordRateLimitUse(candidate.connectionId);
-        const opened = await this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, async (deadline) => {
+        const ttfbMs = candidate.resilience.ttfbMs && candidate.resilience.ttfbMs > 0 ? candidate.resilience.ttfbMs : candidate.resilience.timeoutMs;
+        const opened = await this.deps.withDeadline(signal, ttfbMs, candidate.providerId, async (deadline) => {
           const source = this.deps.streamChat(candidate.providerId, request, deadline, scope, candidate.connectionId)[Symbol.asyncIterator]();
           const first = await source.next();
           if (first.done) throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before producing a chunk.');

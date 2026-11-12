@@ -72,7 +72,7 @@ that holds is one a machine re-derives.
 | --- | --- | --- | --- |
 | `Kernel/API/src/core/routing.ts` | 463 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
 | `Kernel/API/src/core/provider-resolver.ts` | 261 | 1 | enforced by a test that greps the file |
-| `Kernel/API/src/core/request-executor.ts` | 819 | **0** | the failover loop, the attempt ledger, the ordering |
+| `Kernel/API/src/core/request-executor.ts` | 820 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 333 | **0** | one error mapper, one catalog merge, one lock scope |
 | `Kernel/API/src/core/service.ts` | 3364 | 25 | all twenty-five `.onDemand()` registrations, in one constructor |
 | `Kernel/API/src/core/http.ts` | 314 | **0** | the vocabulary every route shares |
