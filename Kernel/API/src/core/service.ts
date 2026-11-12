@@ -52,6 +52,7 @@ import { createDuckDuckGoWebDriver } from '../providers/duckduckgoWeb.js';
 import { SlidingWindowRateLimiter, bareModelFor, type RouteCandidate, type RouteDecision } from './routing.js';
 import { HealthManager } from './health.js';
 import { ConnectionLatencyLedger } from './connection-latency.js';
+import { ResponseCache } from './response-cache.js';
 import { TokenRenewal, classifyRenewalFailure } from './token-renewal.js';
 import { ProviderResolver } from './provider-resolver.js';
 import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js';
@@ -362,6 +363,7 @@ export class GatewayService {
   private readonly connectionLatency = new ConnectionLatencyLedger();
   private readonly stickyConnections = new Map<string, { connectionId: string; until: number }>();
   private readonly stickyTtlMs = 5 * 60 * 1000;
+  private readonly responseCache = new ResponseCache({ ttlMs: 30_000 });
   /** Saved model aliases, synchronous for routing. Loaded from the store and updated only through this service. */
   private readonly aliasSnapshot = new Map<string, { providerId: string; model: string }>();
   /**
@@ -2985,7 +2987,15 @@ export class GatewayService {
    * than reached for, which is what lets the loop be tested without a gateway.
    */
   async chatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayChatOutcome> {
-    return this.requests.chat(request, explicitProviderId, signal, scope);
+    const cacheable = (request.temperature === undefined || request.temperature === 0) && !signal && request.connectionId === undefined && explicitProviderId === undefined;
+    const cacheKey = cacheable ? this.responseCache.keyFor(request) : undefined;
+    if (cacheKey) {
+      const cached = this.responseCache.get(cacheKey) as ChatResponse | undefined;
+      if (cached) return { response: cached, attempts: [] };
+    }
+    const outcome = await this.requests.chat(request, explicitProviderId, signal, scope);
+    if (cacheKey && outcome?.response) this.responseCache.set(cacheKey, outcome.response);
+    return outcome;
   }
 
   /**
