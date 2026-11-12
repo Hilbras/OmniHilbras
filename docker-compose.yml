@@ -1,0 +1,12 @@
+services:
+  omnihilbras-gateway:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - omnihilbras-data:/root/.config/omnihilbras
+    restart: unless-stopped
+volumes:
+  omnihilbras-data:
