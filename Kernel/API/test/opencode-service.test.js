@@ -89,8 +89,8 @@ test('a turn drives a session: create, subscribe, prompt, read, delete', async (
   // A session created here is an agent, and the agent's own ruleset is `*: allow` — measured: a prompt
   // asking for a directory listing ran the tool and returned /home/gin's contents.
   const ruleset = JSON.parse(calls[0].body).permissions;
-  assert.deepEqual(ruleset[0], { action: '*', resource: '*', effect: 'allow' });
-  assert.ok(ruleset.some((rule) => rule.action === 'shell' && rule.effect === 'deny'), 'the shell must be denied to a chat bridge');
+  assert.deepEqual(ruleset[0], { action: '*', resource: '*', effect: 'deny' }, 'everything is denied first');
+  assert.deepEqual(ruleset.slice(1).map((rule) => rule.action), ['read', 'grep', 'glob'], 'only the read-only tools come back');
   assert.equal(JSON.parse(calls[2].body).text, 'User: hi');
   assert.equal(result.text, 'OK');
   assert.equal(result.reasoning, 'thinking');
@@ -164,14 +164,11 @@ test('model references and message flattening match what the service takes', () 
   );
 });
 
-test('a chat bridge denies the tools that execute or reach the network, unless asked not to', () => {
+test('a chat bridge denies every tool it has not heard of, and allows only the read-only ones back', () => {
   const rules = opencodeServicePermissions({});
-  const denied = rules.filter((rule) => rule.effect === 'deny').map((rule) => rule.action);
-  for (const action of ['shell', 'edit', 'write', 'patch', 'webfetch', 'websearch', 'subagent']) {
-    assert.ok(denied.includes(action), `${action} must be denied by default`);
-  }
-  // Read-only tools stay: a coding agent handed a file still has to be able to answer about it. The
-  // exposure that remains is written down in docs/SPEC-SDK.md rather than claimed away.
-  assert.ok(!denied.includes('read'), 'read stays, and the residual exposure is documented');
+  // A deny list goes stale the moment the client ships another tool — `question`, a to-do tool, a goal
+  // tool, an MCP tool this code cannot name. Deny `*` first and the surface is closed by construction.
+  assert.deepEqual(rules[0], { action: '*', resource: '*', effect: 'deny' });
+  assert.deepEqual(rules.slice(1).map((rule) => rule.action), ['read', 'grep', 'glob']);
   assert.equal(opencodeServicePermissions({ OMNIHILBRAS_OPENCODE_SERVICE_TOOLS: 'all' }), undefined, 'the agent ruleset is opt-in');
 });

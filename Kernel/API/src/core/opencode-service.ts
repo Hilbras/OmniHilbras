@@ -231,7 +231,24 @@ async function readAssistant(
 const UNSAFE_TOOL_ACTIONS = ['shell', 'edit', 'write', 'patch', 'webfetch', 'websearch', 'task', 'subagent', 'browser'] as const;
 
 /**
+ * The only tools a chat bridge keeps, and everything else — including tools this code has never seen —
+ * is denied by the `*` rule above them.
+ */
+const READ_ONLY_TOOL_ACTIONS = ['read', 'grep', 'glob'] as const;
+
+/**
  * What the session the gateway creates is allowed to do.
+ *
+ * ## Deny everything, then allow the two read-only tools back
+ *
+ * The first version listed the tools to deny — `shell`, `edit`, `write`, `patch`, `webfetch`,
+ * `websearch`, `task`, `subagent`, `browser` — which is a list that goes stale the moment the client
+ * ships another tool: `question`, `external_directory`, a to-do tool, a goal tool. A deny list is a
+ * promise to keep enumerating someone else's surface.
+ *
+ * The rules are ordered, and a later rule wins, so this is an allow list by construction: `*` denied,
+ * then `read`, `grep` and `glob` allowed back. A tool this code has never heard of is denied without
+ * anyone updating anything.
  *
  * ## Why this exists — measured, not assumed
  *
@@ -242,17 +259,15 @@ const UNSAFE_TOOL_ACTIONS = ['shell', 'edit', 'write', 'patch', 'webfetch', 'web
  * agent, or anything else holding a gateway key could therefore read files and run commands on the
  * operator's machine and send the result to the provider.
  *
- * So the gateway denies the actions that execute or reach the network, and keeps the read-only ones
- * (`read`, `grep`, `glob`) so a coding agent can still answer about a file it was handed. The read
- * exposure is stated in `docs/SPEC-SDK.md` rather than hidden: a model that can read can read anything
- * the gateway user can. `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent's own ruleset, and
- * it is opt-in.
+ * The read-only tools stay so a coding agent can answer about a file it was handed. That exposure is
+ * real and is stated in `docs/SPEC-SDK.md`: a model that can read can read anything the gateway user
+ * can. `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent's own ruleset, and it is opt-in.
  */
 export function opencodeServicePermissions(env: Readonly<Record<string, string | undefined>> = process.env): Array<{ action: string; resource: string; effect: string }> | undefined {
   if ((env.OMNIHILBRAS_OPENCODE_SERVICE_TOOLS ?? '').trim().toLowerCase() === 'all') return undefined;
   return [
-    { action: '*', resource: '*', effect: 'allow' },
-    ...UNSAFE_TOOL_ACTIONS.map((action) => ({ action, resource: '*', effect: 'deny' })),
+    { action: '*', resource: '*', effect: 'deny' },
+    ...READ_ONLY_TOOL_ACTIONS.map((action) => ({ action, resource: '*', effect: 'allow' })),
   ];
 }
 
@@ -308,6 +323,22 @@ export async function streamOpencodeServiceTurn(
     let buffer = '';
     let text = '';
     let reasoning = '';
+    /**
+     * Whether the answer has started.
+     *
+     * A session is an agent loop, so one turn can be several steps, and each step emits its own
+     * reasoning and text parts. Forwarded in arrival order that reads as *thinking, answer, thinking,
+     * and then the answer continues in the first block* — because `content` is one string while a
+     * client opens a new thinking block wherever a reasoning delta lands. Measured on a live turn:
+     * `reasoning.delta` … `text.started` … `text.delta` ×18 … **`reasoning.ended`** — the parts are
+     * concurrent, and their end events do not follow their deltas.
+     *
+     * So reasoning is forwarded only until the first text delta: one thinking block, then the answer,
+     * which is what a client that shows `reasoning_content` expects. Reasoning produced after the
+     * answer started is still accumulated and still returned in the non-streaming result; it is not
+     * spliced into the middle of the answer.
+     */
+    let contentStarted = false;
     let failure: string | undefined;
     let finished = false;
 
@@ -332,16 +363,20 @@ export async function streamOpencodeServiceTurn(
         // Every event carries a sessionID except the process-wide ones; another turn's output is not
         // this turn's answer.
         if (data.sessionID !== sessionID) continue;
-        if (event?.type === 'session.text.delta' || event?.type === 'session.reasoning.delta') {
+        if (event?.type === 'session.text.delta') {
           const delta = typeof data.delta === 'string' ? data.delta : '';
           if (!delta) continue;
-          if (event.type === 'session.text.delta') {
-            text += delta;
-            options.onDelta?.({ text: delta });
-          } else {
-            reasoning += delta;
-            options.onDelta?.({ reasoning: delta });
-          }
+          text += delta;
+          contentStarted = true;
+          options.onDelta?.({ text: delta });
+          continue;
+        }
+        if (event?.type === 'session.reasoning.delta') {
+          const delta = typeof data.delta === 'string' ? data.delta : '';
+          if (!delta) continue;
+          reasoning += delta;
+          // One thinking block, then the answer — see `contentStarted` above.
+          if (!contentStarted) options.onDelta?.({ reasoning: delta });
           continue;
         }
         if (event?.type === 'session.execution.succeeded' || event?.type === 'session.idle') {
@@ -349,7 +384,14 @@ export async function streamOpencodeServiceTurn(
           break;
         }
         if (event?.type === 'session.execution.failed') {
-          failure = typeof data.error === 'string' ? data.error : 'The OpenCode service failed the turn.';
+          // The service sends `error` as an object (`{type, message}`) on a provider failure and as a
+          // string in some paths; a bare sentence here would hide the one thing worth reading.
+          const detail = data.error;
+          failure = typeof detail === 'string'
+            ? detail
+            : typeof (detail as { message?: unknown } | undefined)?.message === 'string'
+              ? String((detail as { message: string }).message)
+              : 'The OpenCode service failed the turn.';
           finished = true;
           break;
         }

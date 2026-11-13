@@ -233,10 +233,18 @@ that is not on `main`.
   **before** the prompt or a delta in between is lost. The second half is a security boundary, measured:
   a session inherits OpenCode's `build` agent (`*: allow`), so a prompt asking for a directory listing
   ran the tool and answered ``Contents of `/home/gin` (108 entries)`` — a gateway key was a file-reader
-  and a shell. The gateway therefore creates the session with a ruleset denying `shell`, `edit`, `write`,
-  `patch`, `webfetch`, `websearch`, `task`, `subagent`, `browser`, and keeps `read`/`grep`/`glob`;
-  **read exposure remains and is documented, not fixed** — `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all`
-  restores the agent ruleset and is opt-in.
+  and a shell. The gateway therefore creates the session with **`*` denied and only `read`, `grep`,
+  `glob` allowed back**, in that order, so a tool this code has never heard of (`question`, a goal or
+  to-do tool, an MCP tool) is denied without anyone updating a list; the first version enumerated what
+  to deny, which is a promise to keep enumerating someone else's surface. **Denying everything loses
+  the turn**: with nothing allowed back, a plain reply fails with the Console's own
+  `Free usage limit reached`, because the request stops carrying the tool-carrying shape the free tier
+  is granted to. **Read exposure remains and is documented, not fixed** —
+  `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent ruleset and is opt-in.
+  **Reasoning is forwarded only until the first text delta.** The parts are concurrent — measured
+  `reasoning.delta` … `text.started` … `text.delta` ×18 … `reasoning.ended` — so arrival order renders
+  as thinking, answer, thinking, answer-continued-in-the-first-block. One thinking block, then the
+  answer; late reasoning still rides in the non-streaming result.
 - `public/providers/` is **input, not build output**. The `logoPolarity()` plugin reads it and
   writes `src/lib/logoPolarity.generated.ts`; nothing writes into the directory. Never stage with
   `':(exclude)public/providers'` — that silently dropped 141 required assets from 18 releases, two

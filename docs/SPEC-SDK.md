@@ -1043,11 +1043,31 @@ Measured through the gateway: first byte at 2.7–5.3 s, four SSE chunks, assemb
 `build` agent, whose ruleset is `*: allow`. Measured: a prompt saying "list the files in the current
 directory using a tool" ran the tool, and the answer began ``Contents of `/home/gin` (108 entries)``.
 Any caller holding a gateway key could therefore read files and run commands on the operator's
-machine and send the result to the provider. The gateway now creates the session with a ruleset that
-denies `shell`, `edit`, `write`, `patch`, `webfetch`, `websearch`, `task`, `subagent` and `browser`,
-and keeps `read`, `grep` and `glob` so a coding agent can answer about a file it was handed.
-**The residual exposure is real**: a model that can read can read anything the gateway user can.
+machine and send the result to the provider.
+
+The gateway therefore creates the session with `*` **denied** and only `read`, `grep` and `glob`
+allowed back. That order matters: a later rule wins, so this is an allow list by construction, and a
+tool this code has never heard of — `question`, a to-do tool, a goal tool, an MCP tool — is denied
+without anyone updating a list. The first version enumerated what to deny, which is a promise to keep
+enumerating someone else's surface.
+
+**Denying every tool loses the turn.** Measured: with `*: deny` and nothing allowed back, a plain
+"reply with exactly OK" fails with the Console's `Free usage limit reached …` — the request no longer
+carries the tool-carrying shape the free tier is granted to. Read-only tools are therefore not only
+the useful case, they are what keeps the turn admissible.
+
+**The residual exposure is real**: a model that can read can read anything the gateway user can, and
+the tool-tempting prompt above still produced a directory listing from `read`/`glob`.
 `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent's own ruleset, and it is opt-in.
+
+**One thinking block, then the answer.** A session is an agent loop, so one turn can be several
+steps, and each step emits its own reasoning and text parts — concurrently. Measured on a live turn:
+`reasoning.delta` … `text.started` … `text.delta` ×18 … **`reasoning.ended`**. Forwarded in arrival
+order that reads as *thinking, answer, thinking, and then the answer continues in the first block*,
+because `content` is one string while a client opens a new thinking block wherever a reasoning delta
+lands. Reasoning deltas are therefore forwarded only until the first text delta; reasoning produced
+afterwards is still accumulated and still returned in the non-streaming result, it is just not
+spliced into the middle of the answer.
 
 The bridge lives in the gateway (`Kernel/API/src/core/opencode-service.ts`) because it
 needs the filesystem; the SDK takes a `localService` hook, so the SDK stays browser-safe.

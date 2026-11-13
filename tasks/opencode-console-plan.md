@@ -133,3 +133,20 @@ streaming, no thinking.
 - **Not verified after the change:** the free tier's quota was exhausted by the verification runs
   themselves (`provider.quota`, retry after ≈ 14 h), so the deny-by-default ruleset has been exercised
   against a scripted service in tests, not against a live turn.
+
+
+### Phase 6 — An allow list instead of a deny list, and one thinking block (done)
+
+- **Tools.** The ruleset is now `*: deny` followed by `read`, `grep`, `glob`: an allow list by
+  construction, so `question`, a goal or to-do tool, or an MCP tool this code cannot name is denied
+  without an edit. **Measured:** denying *everything* makes the Console refuse the turn with
+  `Free usage limit reached` — the request stops carrying the tool-carrying shape the free tier is
+  granted to — so the read-only trio is also what keeps the turn admissible.
+- **Thinking order.** Live event capture: `reasoning.delta` … `text.started` … `text.delta` ×18 …
+  `reasoning.ended` — parts are concurrent and their end events do not follow their deltas. The bridge
+  forwards reasoning only until the first text delta, so a client shows one thinking block and then the
+  answer instead of reopening thinking between content. Verified live: delta pattern `TC` for both a
+  plain and a tool-tempting prompt.
+- **Service failures are readable.** `session.execution.failed` carries `error` as an object; the
+  bridge read only the string form, so the Console's own sentence was replaced by
+  "The OpenCode service failed the turn." — the one line worth having.
