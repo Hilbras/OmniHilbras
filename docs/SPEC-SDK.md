@@ -189,7 +189,9 @@ The first local gateway exposes:
 - `PUT /v1/connections/openrouter` — validate again, discover the selected model policy, then upsert the single local OpenRouter connection.
 - `POST /v1/connections/:id/models` — add validated model IDs to a saved connection.
 - `POST /v1/connections/:id/probe` — validate **one** saved connection with its own stored credential, returning `valid`, `checkedAt` and a measured `latencyMs`. `/v1/health/:providerId` answers about a provider, and a provider with several accounts has no single answer — the resolver picks the first connection — so a row's Test button calls this and tests its own account.
-- `DELETE /v1/connections/:id` — remove a local connection.
+- `DELETE /v1/connections/:id` — remove a local connection. The dashboard reaches it from every
+  account row: **Delete** asks first, names the account, and says the credential cannot be
+  recovered, because the switch beside it is the reversible action and a delete is not.
 - `GET /v1/keys` — gateway key metadata plus the enforcement flag; never returns a secret.
 - `POST /v1/keys` — mint a key; the response is the only time the secret is returned.
 - `PATCH /v1/keys/:id` — pause or resume a key.
@@ -292,7 +294,11 @@ The first local gateway exposes:
 - `GET /v1/oauth/opencode/session/:id` — poll the OpenCode Zen sign-in to completion.
 - `POST /v1/oauth/opencode-go/start` — begin an OpenCode Console device-flow sign-in that saves under the OpenCode Go provider id.
 - `GET /v1/oauth/opencode-go/session/:id` — poll the OpenCode Go sign-in to completion.
-- `POST /v1/oauth/zcode/start` — begin a standalone ZCode sign-in against ZCode's own OAuth server. Body `{ "provider": "zai" | "bigmodel" }`, defaulting to `zai`. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; the server-issued poll token stays in the gateway and is never returned to the browser. This is ZCode's `oauth/cli` flow, so no desktop app and no `zcode://` scheme handler are needed.
+- `POST /v1/oauth/zcode/start` — begin a standalone ZCode sign-in against ZCode's own OAuth server. Body `{ "provider": "zai" | "bigmodel" }`, defaulting to `zai`, and takes an optional `"addAccount": true`. **`addAccount` decides the
+saved id, and it is remembered on the flow rather than only on the paste route**: the poll is what
+saves the connection, and it used the fixed provider id, so a second sign-in silently overwrote the
+first — the paste path already minted `<id>-<12 hex>`, and the two disagreed about what "another
+account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; the server-issued poll token stays in the gateway and is never returned to the browser. This is ZCode's `oauth/cli` flow, so no desktop app and no `zcode://` scheme handler are needed.
 - `GET /v1/oauth/zcode/session/:id` — one poll of that sign-in: `pending`, `expired`, `failed`, or `ready`. On `ready` the gateway proves a 1-token turn with `data.token` (the `zcodejwttoken` the OAuth server returns), then saves the connection; a plan that cannot infer on the Start Plan lane is reported instead of stored.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
 - `POST /v1/backup/export` — body `{"passphrase": "..."}`; returns `{"backup": envelope}`. The envelope is

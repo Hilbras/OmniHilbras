@@ -332,6 +332,8 @@ export class GatewayService {
    */
   private readonly zcodeFlows = new Map<string, {
     provider: ZcodeOAuthProvider;
+    /** Whether this sign-in is adding a second account rather than repairing the first. */
+    addAccount: boolean;
     pollToken: string;
     expiresAt: number;
     pollIntervalSec: number;
@@ -2166,9 +2168,17 @@ export class GatewayService {
    * in any browser, and the gateway polls ZCode for the resulting token. The poll token stays here;
    * the browser only ever sees the flow id and the authorize URL.
    */
-  async startZcodeSignIn(provider: ZcodeOAuthProvider = 'zai') {
+  async startZcodeSignIn(provider: ZcodeOAuthProvider = 'zai', addAccount = false) {
     const start = await startZcodeOAuth(provider);
-    this.zcodeFlows.set(start.flowId, { provider, pollToken: start.pollToken, expiresAt: start.expiresAt, pollIntervalSec: start.pollIntervalSec });
+    /**
+     * `addAccount` is remembered on the flow, not just at the paste route.
+     *
+     * The poll is what saves the connection, and it used the fixed provider id — so a second sign-in
+     * silently overwrote the first. The paste route already minted `<id>-<12 hex>` for a second
+     * account; the sign-in route never did, and the two paths disagreed about what "another account"
+     * means.
+     */
+    this.zcodeFlows.set(start.flowId, { provider, addAccount, pollToken: start.pollToken, expiresAt: start.expiresAt, pollIntervalSec: start.pollIntervalSec });
     return { authorizeUrl: start.authorizeUrl, flowId: start.flowId, expiresAt: start.expiresAt, pollIntervalSec: start.pollIntervalSec };
   }
 
@@ -2209,7 +2219,7 @@ export class GatewayService {
         // The first real chat reports any plan/CAPTCHA problem with the client's own context.
         const connection = await this.saveConnection(
           {
-            id: zcodeProviderId,
+            id: flow.addAccount ? `${zcodeProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : zcodeProviderId,
             providerId: zcodeProviderId,
             name: 'ZCode (Start Plan)',
             endpoint: 'https://zcode.z.ai',

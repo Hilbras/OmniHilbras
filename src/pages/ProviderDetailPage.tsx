@@ -39,7 +39,7 @@ import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, f
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { ProviderPlayground } from '../components/ProviderPlayground';
-import { addGatewayConnectionModels, getGatewayProviderHealth, getOpencodeRuntime, installOpencodeRuntime, startOpencodeRuntime, getGatewayRoutingState, listGatewayConnections, probeGatewayConnection, refreshGatewayConnectionModels, saveGatewayConnectionDetailed, saveOpenRouterConnection, setGatewayConnectionEnabled, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayOpencodeRuntime, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, deleteGatewayConnection, getGatewayProviderHealth, getOpencodeRuntime, installOpencodeRuntime, startOpencodeRuntime, getGatewayRoutingState, listGatewayConnections, probeGatewayConnection, refreshGatewayConnectionModels, saveGatewayConnectionDetailed, saveOpenRouterConnection, setGatewayConnectionEnabled, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayOpencodeRuntime, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import { dashboardRoutes, providerRoute, providerUsageRoute } from '../lib/routes';
 import { UsageContent } from './UsagePage';
@@ -132,7 +132,7 @@ function DetailStat({ label, value, icon: Icon, tone = 'muted' }: { label: strin
   return <div className="rounded-xl border border-line bg-bg-soft/70 p-3.5"><Icon className={`h-4 w-4 ${toneClass}`} aria-hidden="true" /><p className="muted mt-3 text-[10px] uppercase tracking-[0.1em]">{label}</p><p className="mt-1 truncate font-mono text-sm font-semibold">{value}</p></div>;
 }
 
-function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest, onEdit, onReconnect, onToggleEnabled, togglingEnabled }: { provider: ProviderRecord; connection?: GatewayConnection; healthy: boolean; pingMs?: number; testing: boolean; onTest: () => void; onEdit: () => void; onReconnect?: () => void; onToggleEnabled?: () => void; togglingEnabled?: boolean }) {
+function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest, onEdit, onReconnect, onToggleEnabled, togglingEnabled, onDelete, deleting }: { provider: ProviderRecord; connection?: GatewayConnection; healthy: boolean; pingMs?: number; testing: boolean; onTest: () => void; onEdit: () => void; onReconnect?: () => void; onToggleEnabled?: () => void; togglingEnabled?: boolean; onDelete?: () => void; deleting?: boolean }) {
   const connectionName = connection?.name ?? provider.name;
   const endpoint = connection?.endpoint ?? provider.endpoint;
   const priority = connection?.priority ?? 1;
@@ -162,6 +162,21 @@ function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest,
         {onReconnect && <button type="button" onClick={onReconnect} className="btn-ghost !px-3 !py-2 !text-xs"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Reconnect</button>}
         <button type="button" onClick={() => onTest()} disabled={testing} className="btn-ghost !px-3 !py-2 !text-xs">{testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />}{testing ? 'Testing' : 'Test account'}</button>
         <button type="button" onClick={onEdit} className="btn-quiet !px-2 !py-2 text-xs"><SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />Edit</button>
+        {/* Forget the account, not just switch it off. Placed beside Edit and deliberately not gold:
+            the switch is the reversible action, this one is not. */}
+        {connection && onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            aria-busy={deleting}
+            aria-label={`Delete the ${connectionName} account`}
+            className="btn-quiet !px-2 !py-2 text-xs text-danger hover:!bg-danger/10"
+          >
+            {deleting ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <X className="h-3.5 w-3.5" aria-hidden="true" />}
+            Delete
+          </button>
+        )}
         {/* On the far side of the row from the account's identity, the same place the accounts panel
             puts it. Both surfaces write `PUT /v1/connections/:id/enabled` and both re-read what the
             gateway returns, so neither can hold a state the other does not. */}
@@ -528,6 +543,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   const [probingConnectionId, setProbingConnectionId] = useState<string | null>(null);
   /** Which row's enable/disable call is in flight, for the same reason. */
   const [togglingConnectionId, setTogglingConnectionId] = useState<string | null>(null);
+  const [deletingConnectionId, setDeletingConnectionId] = useState<string | null>(null);
   /** Each probed row's own verdict and latency, keyed by connection id. */
   const [connectionProbeResults, setConnectionProbeResults] = useState<Record<string, { healthy: boolean; latencyMs?: number }>>({});
   const [refreshingModels, setRefreshingModels] = useState(false);
@@ -1018,6 +1034,29 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     }
   }
 
+  /**
+   * Forgets one account.
+   *
+   * The switch beside it is the reversible action and stays the obvious one; this is the irreversible
+   * one, so it asks first and names the account it is about to forget. The gateway route has existed
+   * since the start — what was missing was a way to reach it, which left a mistaken account (or a
+   * second account on the wrong provider) removable only by editing the vault by hand.
+   */
+  async function deleteConnection(row: GatewayConnection) {
+    const label = row.email ? `${row.name} (${row.email})` : row.name;
+    if (!window.confirm(`Delete the ${label} account? Its credential is removed from this machine and cannot be recovered. Disable it instead if you only want it out of rotation.`)) return;
+    setDeletingConnectionId(row.id);
+    try {
+      await deleteGatewayConnection(row.id);
+      await loadConnection();
+      flash(`${label} was deleted.${connections.length <= 1 ? ' No account is left for this provider.' : ''}`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : `${label} could not be deleted.`, 'error');
+    } finally {
+      setDeletingConnectionId(null);
+    }
+  }
+
   async function handleAddConnection(newProvider: NewProvider, apiKey?: string) {
     /**
      * A keyless provider has no key to enter, and the dialog already knows that — it passes no key at all
@@ -1423,6 +1462,8 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
                   onReconnect={isOauth && oauthFlowAvailable ? () => openAddConnection() : undefined}
                   onToggleEnabled={() => void toggleConnectionEnabled(item)}
                   togglingEnabled={togglingConnectionId === item.id}
+                  onDelete={() => void deleteConnection(item)}
+                  deleting={deletingConnectionId === item.id}
                 />
               ))}
             </div>

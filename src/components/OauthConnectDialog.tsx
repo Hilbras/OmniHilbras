@@ -333,7 +333,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
       try {
         // Standalone: ZCode's own OAuth server mints the flow, the user signs in in any browser, and
         // this dialog polls the gateway until the token is saved. Nothing is read from the desktop app.
-        const signIn = await startZcodeSignIn();
+        const signIn = await startZcodeSignIn('zai', undefined, addAccount);
         if (settledRef.current) return;
         startedSessionRef.current = signIn.flowId;
         const sentToOpenTab = navigateTo(signIn.authorizeUrl);

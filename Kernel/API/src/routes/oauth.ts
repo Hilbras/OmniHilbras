@@ -604,7 +604,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
       const provider = readOptionalString(body, 'provider')?.trim();
       if (provider !== undefined && provider !== 'zai' && provider !== 'bigmodel') throw invalidRequest('provider must be zai or bigmodel.');
-      sendJson(response, 200, await service.startZcodeSignIn(provider ?? 'zai'), origin);
+      sendJson(response, 200, await service.startZcodeSignIn(provider ?? 'zai', body.addAccount === true), origin);
       return true;
     }
 

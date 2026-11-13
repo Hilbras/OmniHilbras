@@ -1304,11 +1304,23 @@ export function getClineSignInStatus(sessionId: string, signal?: AbortSignal) {
  * The start answers a URL to open; the poll token stays on the gateway. `flowId` is the session, and
  * `ready` carries the saved connection.
  */
-export function startZcodeSignIn(provider: 'zai' | 'bigmodel' = 'zai', signal?: AbortSignal) {
+/**
+ * Remove one saved account.
+ *
+ * The gateway route existed from the start and the dashboard had no way to reach it, so an account
+ * added by mistake — or a second one added to the wrong provider — could only be removed by editing
+ * the vault by hand. Deleting a connection is not the same as disabling it: the switch keeps an
+ * account out of play, this forgets it, and the dialog says so before it does.
+ */
+export async function deleteGatewayConnection(connectionId: string, signal?: AbortSignal) {
+  return requestJson<{ deleted: boolean }>(`/v1/connections/${encodeURIComponent(connectionId)}`, { method: 'DELETE', ...(signal ? { signal } : {}) });
+}
+
+export function startZcodeSignIn(provider: 'zai' | 'bigmodel' = 'zai', signal?: AbortSignal, addAccount = false) {
   return requestJson<{ authorizeUrl: string; flowId: string; expiresAt: number; pollIntervalSec: number }>('/v1/oauth/zcode/start', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ provider }),
+    body: JSON.stringify({ provider, addAccount }),
     ...(signal ? { signal } : {}),
   });
 }

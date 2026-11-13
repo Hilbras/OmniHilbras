@@ -74,7 +74,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/provider-resolver.ts` | 279 | 1 | enforced by a test that greps the file |
 | `Kernel/API/src/core/request-executor.ts` | 824 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 333 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 3675 | 26 | all twenty-six `.onDemand()` registrations, in one constructor |
+| `Kernel/API/src/core/service.ts` | 3685 | 26 | all twenty-six `.onDemand()` registrations, in one constructor |
 | `Kernel/API/src/core/http.ts` | 340 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 854 | 13 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 358 | 1 | one OpenRouter save shortcut, the generic quota route, and the build stamp |
