@@ -191,6 +191,27 @@ export const providerCatalog: ProviderRecord[] = [
       'Models are served to guests, but every turn is refused by Alibaba’s bot-protection gate (RGV587_ERROR). Visiting the challenge it hands back grants no cookie and the retry is refused identically, so it is a human puzzle rather than a clearance flow. Needs a signed-in Qwen session; not built on a maybe — see docs/SPEC-SDK.md.',
   },
   {
+    id: 'deepseek-web-v2',
+    name: 'DeepSeek Web V2',
+    description:
+      'chat.deepseek.com with a sign-in that happens once, in a window of its own, and every request afterwards in the gateway — carrying the page’s own device fingerprints, the current client version and the server-delivered model catalogue. Separate from DeepSeek Web, which takes a pasted token.',
+    category: 'Web session',
+    group: 'web-cookie',
+    status: 'available',
+    auth: 'Web session',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#4d6bfe',
+    initial: 'D',
+    logo: providerLogoMap.deepseek,
+    endpoint: 'https://chat.deepseek.com',
+    apiKeysUrl: 'https://chat.deepseek.com/',
+    modelList: [],
+  },
+  {
     id: 'deepseek-web',
     name: 'DeepSeek Web',
     description:

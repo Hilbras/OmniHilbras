@@ -363,6 +363,14 @@ The first local gateway exposes:
   `{messages, applied, reason?, imageCount?, imageTokens?}`. Both time out and fail open: any error leaves
   the conversation untouched and records `state: "skipped"` with a reason. `x-omnihilbras-token-saver: off`
   opts out of all of them for one request.
+- `POST /v1/web-cookie/deepseek-web-v2/connect` — body `{ "userToken": "..." }`. Stores the DeepSeek
+  Web V2 connection after DeepSeek accepts the token. Called by the desktop app's **sign-in window**,
+  which loads `chat.deepseek.com` and hands over the session that window ends up holding, and by the
+  paste field. **Why a window:** measured, `POST /api/v0/users/login` carries a 224-byte opaque blob we
+  cannot build, and requesting the emailed code needs an hCaptcha token minted on DeepSeek's own origin
+  against their sitekey — so credential entry happens in a page DeepSeek accepts, and the gateway takes
+  the session it produced. There is **no refresh token** (`users/auth_token/check_device` answers
+  `{"rotate": null}`), so an invalidated session reports "sign in again" rather than retrying.
 - `POST /v1/web-cookie/tokenharbor/check` — verify a pasted Token Harbor session cookie against
   `tokenharbor.ai` by reading the account profile, and store nothing. A credential check, not a
   completion: it says whether the session is accepted, not whether a model can answer.

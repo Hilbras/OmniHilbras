@@ -119,6 +119,43 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     },
     planNote: 'DeepSeek Web serves the same 14 models to every account, so there is no plan to read and nothing is narrowed.',
   },
+  'deepseek-web-v2': {
+    id: 'deepseek-web-v2',
+    name: 'DeepSeek Web V2',
+    website: 'https://chat.deepseek.com',
+    credentialName: 'userToken',
+    /**
+     * The primary path is the desktop app's sign-in window: OmniHilbras opens `chat.deepseek.com`, the
+     * operator signs in there normally — password, hCaptcha, emailed code, all theirs — and the session
+     * that window holds goes straight to the gateway from the main process. Reading another origin's
+     * storage is impossible in a browser dashboard, so the paste path stays as the honest fallback
+     * rather than a button that cannot work.
+     */
+    signIn: {
+      provider: 'deepseek-web-v2',
+      label: 'Sign in with DeepSeek',
+      browserUnavailable: 'A browser dashboard cannot read another site\u2019s storage. Open the desktop app to sign in, or paste the token below.',
+    },
+    extractionSteps: [
+      {
+        label: 'Fastest',
+        body: 'With chat.deepseek.com signed in, open the developer tools (F12) \u2192 Console, paste this line and press Enter. It copies the userToken.',
+        snippet: 'copy(JSON.parse(localStorage.userToken).value)',
+      },
+      {
+        label: 'If the copied value is empty',
+        body: '`{"value":null}` means the page has no session, so you are signed out. Sign in at chat.deepseek.com first, then copy it again.',
+      },
+    ],
+    paste: {
+      path: '/v1/web-cookie/deepseek-web-v2/connect',
+      field: 'userToken',
+      placeholder: 'userToken value, or {"value":"..."}',
+      sectionLabel: 'Or paste a userToken instead',
+      fieldLabel: 'userToken',
+    },
+    planNote: 'DeepSeek serves the same models to every account, so there is no plan to read and nothing is narrowed.',
+  },
   'tokenharbor-web': {
     id: 'tokenharbor-web',
     name: 'Token Harbor Web',

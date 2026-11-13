@@ -221,7 +221,16 @@ export type ProviderCapability =
 export type ProviderCapabilities = Partial<Record<ProviderCapability, boolean>>;
 
 export type ProviderCredential =
-  | { type: 'api-key'; value: string }
+  /**
+   * `deviceId`, `shumeiDeviceId` and `did` are the web client's own device fingerprints, captured from
+   * the page that signed in.
+   *
+   * They are what makes a request look like the web app's rather than like a script's: the live client
+   * sends the same UUID as `x-device-id` on every call, puts the Shumei fingerprint in the completion
+   * body, and names its device with `did` on settings calls. Generated values would be stable but not
+   * the client's; absent values are honest but weaker. Capturing them is both.
+   */
+  | { type: 'api-key'; value: string; deviceId?: string; shumeiDeviceId?: string; did?: string }
   /**
    * A token obtained through an OAuth authorization-code flow. `value` is the
    * current access token; `refreshToken` and `expiresAt` let an adapter renew it

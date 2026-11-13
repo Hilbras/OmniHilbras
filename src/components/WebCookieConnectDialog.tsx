@@ -2,14 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, CircleAlert, Cookie, ExternalLink, LoaderCircle, LogIn, ShieldAlert, Tag } from 'lucide-react';
 import { providerSlug } from '@omnihilbras/kernel-api/public';
-import { requestJson, type GatewayConnection } from '../lib/gatewayClient';
+import { listGatewayConnections, requestJson, type GatewayConnection } from '../lib/gatewayClient';
 
 /**
  * Connecting to a Web Cookie provider.
  *
- * There is no sign-in button here and there will not be one. The only way in is a session
- * the user exports from their own browser, so the dialog's job is to say exactly what to copy,
- * let them check it before committing, and keep the paste out of anything but the gateway.
+ * For most providers there is no sign-in button and there will not be one: the only way in is a
+ * session the user exports from their own browser, so the dialog's job is to say exactly what to
+ * copy, let them check it before committing, and keep the paste out of anything but the gateway.
+ *
+ * **One provider is the exception, and the exception is measured.** DeepSeek's sign-in cannot be a
+ * form here: `POST /api/v0/users/login` carries a 224-byte opaque blob, and requesting its emailed
+ * code needs an hCaptcha token minted on DeepSeek's own origin. So that provider's descriptor carries
+ * a `signIn` block, the desktop app opens the real page in a window, and the session that window ends
+ * up holding is posted to the gateway by the main process — the renderer only learns whether it worked.
+ * In a browser dashboard, where another origin's storage cannot be read, the block says so instead of
+ * offering a button that cannot work.
  *
  * The risk gate is the reason this dialog exists. The credential is a live session for a whole
  * account, not a token scoped to inference, and the flow drives a web app past its own
@@ -51,6 +59,15 @@ export type WebSessionDescriptor = {
   check?: { path: string; field: string };
   /** What a signed-in account offers, when the provider varies its models by plan. */
   planNote?: string;
+  /**
+   * A sign-in the desktop app performs in a window of its own.
+   *
+   * For a provider whose credential cannot be pasted from a form: DeepSeek's login is an opaque blob
+   * and its emailed code needs an hCaptcha token minted on DeepSeek's own origin, so the only honest
+   * path is a real page the operator signs into. The window's session goes from the main process to
+   * the gateway and never touches the renderer.
+   */
+  signIn?: { provider: string; label: string; browserUnavailable: string };
   /**
    * The credential may be left out, and the provider still connects.
    *
@@ -113,10 +130,49 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
   const [error, setError] = useState('');
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
   const settledRef = useRef(false);
+  // The desktop window sign-in: what it returned, and whether it is running.
+  const [signingIn, setSigningIn] = useState(false);
+  const [signInNote, setSignInNote] = useState('');
+  const signInBridge = typeof window !== 'undefined'
+    ? (window as unknown as { omnihilbras?: { providerSignIn?: { signIn: (provider: string) => Promise<{ ok: boolean; reason?: string; message?: string }> } } }).omnihilbras?.providerSignIn
+    : undefined;
 
   useEffect(() => {
     setPortalNode(document.body);
   }, []);
+
+  /**
+   * Sign in through the desktop window.
+   *
+   * The token never reaches this renderer: the main process posts it to the gateway and reports only
+   * whether that worked. So success is re-read from the gateway's own connection list rather than
+   * assembled here — the dialog does not get to claim a connection it did not see.
+   */
+  const startSignIn = async () => {
+    if (!signInBridge || !descriptor.signIn) return;
+    setSigningIn(true);
+    setSignInNote('');
+    setError('');
+    try {
+      const result = await signInBridge.signIn(descriptor.signIn.provider);
+      if (!result.ok) {
+        setError(result.message || (result.reason === 'cancelled' ? 'The sign-in window was closed before a session appeared.' : 'Sign-in did not finish.'));
+        return;
+      }
+      const connections = await listGatewayConnections();
+      const saved = connections.find((connection) => connection.providerId === descriptor.id);
+      if (!saved) {
+        setError('The gateway accepted the session but reports no connection for it. Re-read the page and try again.');
+        return;
+      }
+      setSignInNote(`Signed in as ${saved.name}.`);
+      await onConnected(saved);
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : 'Sign-in did not finish.');
+    } finally {
+      setSigningIn(false);
+    }
+  };
 
   const previousFocusRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -369,6 +425,24 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
                   : 'Paste it below and check the cookie. If it stops working, sign in again and paste a fresh value.'}
               </li>
             </ol>
+            {descriptor.signIn && (
+              <div className="mt-3 rounded-lg border border-line bg-bg-soft p-3">
+                <p className="text-[11px] font-semibold">{descriptor.signIn.label}</p>
+                {signInBridge ? (
+                  <>
+                    <button type="button" onClick={() => void startSignIn()} disabled={signingIn} aria-busy={signingIn} className="btn-gold mt-2 !px-3 !py-2 text-[11px]">
+                      {signingIn ? 'Waiting for the window…' : descriptor.signIn.label}
+                    </button>
+                    <p className="muted mt-2 text-[10px] leading-relaxed">
+                      Opens chat.deepseek.com in its own window. Your password, the captcha and the emailed code are typed there and never pass through OmniHilbras; the session that window ends up with goes straight to the local gateway.
+                    </p>
+                  </>
+                ) : (
+                  <p className="muted mt-1.5 text-[10px] leading-relaxed">{descriptor.signIn.browserUnavailable}</p>
+                )}
+                {signInNote && <p className="mt-2 text-[10px] text-success">{signInNote}</p>}
+              </div>
+            )}
             <p className="mt-2.5 text-[10px] leading-relaxed text-amber-600 dark:text-amber-400">
               Treat this like a password: it may access your signed-in web account until it expires or is revoked.
             </p>

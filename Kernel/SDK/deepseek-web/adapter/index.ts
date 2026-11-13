@@ -23,9 +23,19 @@ import { MAX_DEEPSEEK_POW_DIFFICULTY, findDeepSeekPowNonce } from '../lib/deepse
 
 export const deepseekWebProviderId: ProviderId = 'deepseek-web';
 
+/**
+ * The same sign-in web client, exposed under a second provider id so a connection can be pinned to
+ * the 2.8.0 build's fingerprint without disturbing the provider that is live today.
+ *
+ * `deepseekWebProviderId` stays the 2.0.0 request shape byte for byte; only `variant: 'v2'` sends
+ * the newer headers, the `action` field and reads the server-delivered model catalogue.
+ */
+export const deepseekWebV2ProviderId: ProviderId = 'deepseek-web-v2';
+
 const WEB_ORIGIN = 'https://chat.deepseek.com';
 const API_BASE = `${WEB_ORIGIN}/api`;
 const COMPLETION_URL = `${API_BASE}/v0/chat/completion`;
+const SETTINGS_URL = `${API_BASE}/v0/client/settings`;
 
 /**
  * The fingerprint the web client sends on every `/api/v0/*` call.
@@ -50,6 +60,22 @@ const FINGERPRINT_HEADERS: Readonly<Record<string, string>> = {
   'X-Client-Locale': 'en-US',
   'X-Client-Platform': 'web',
   'X-Client-Version': '2.0.0',
+};
+
+/**
+ * The fingerprint the live 2.8.0 client sends, from `docs/reports/deepseek-web-capture.md`.
+ *
+ * Only the parts that changed are written here. The capture shows the client also sending, on every
+ * `/api/v0/*` call, a UUID `x-device-id` and an **empty** `x-device-model`; both are per-instance
+ * (a device id identifies a device, not a build) so the constructor adds them, generated once.
+ *
+ * `x-client-locale` is `en_US` with an underscore — the newer build's own spelling, not a cosmetic
+ * variant of v1's `en-US`.
+ */
+const V2_FINGERPRINT_HEADERS: Readonly<Record<string, string>> = {
+  ...FINGERPRINT_HEADERS,
+  'X-Client-Locale': 'en_US',
+  'X-Client-Version': '2.8.0',
 };
 
 export const DEEPSEEK_WEB = {
@@ -87,6 +113,70 @@ const DEEPSEEK_WEB_MODELS: ReadonlyArray<{ id: string; name: string; expert: boo
 /** Every id, plus the spelling variants that normalise to the same model. */
 export function allDeepSeekWebModels(): string[] {
   return DEEPSEEK_WEB_MODELS.map((model) => model.id);
+}
+
+/**
+ * Which built-in model a server-delivered `model_type` is.
+ *
+ * The settings endpoint names a model by type (`default`, `expert`) and a display name
+ * (`Instant`, `Expert`), not by the id the completion endpoint takes. These are the ids the
+ * built-in table gives those types, so a server entry refines a name rather than inventing a model
+ * the adapter's `lookupModel` would refuse.
+ */
+const MODEL_TYPE_BASE: Readonly<Record<string, string>> = {
+  default: 'deepseek-v4-flash',
+  expert: 'deepseek-v4-pro',
+};
+
+type ServerModelConfig = { modelType: string; name?: string };
+
+function isModelDescriptor(value: unknown): value is { model_type: string; name?: unknown } {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    typeof (value as { model_type?: unknown }).model_type === 'string' &&
+    (value as { model_type: string }).model_type.length > 0
+  );
+}
+
+/**
+ * Reads the model catalogue out of `GET /api/v0/client/settings?scope=model`.
+ *
+ * The capture (`deepseek-web-captures/auth.json`) shows:
+ *
+ * ```json
+ * {"code":0,"data":{"biz_code":0,"biz_data":{"settings":{
+ *   "model_configs":{"id":…,"value":[{"model_type":"default","name":"Instant",…},
+ *                                     {"model_type":"expert","name":"Expert",…},
+ *                                     {"model_type":"vision","name":"Vision",…}]}}}}}
+ * ```
+ *
+ * The shape is walked rather than indexed down a fixed path — the settings map is server-shaped
+ * and has grown keys before — and anything unexpected returns `null` so the caller falls back to
+ * the built-in table instead of throwing on a response nobody has seen yet.
+ */
+function readServerModelConfigs(json: unknown): ServerModelConfig[] | null {
+  const data = (json as { data?: { biz_data?: { settings?: unknown } } } | null)?.data?.biz_data;
+  const settings = data?.settings;
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return null;
+
+  // `model_configs.value` is the captured shape; other settings entries may also carry arrays, so
+  // every candidate is inspected and the first list of model descriptors wins.
+  const candidates: unknown[][] = [];
+  for (const value of Object.values(settings as Record<string, unknown>)) {
+    const inner = value && typeof value === 'object' && 'value' in value ? (value as { value?: unknown }).value : value;
+    if (Array.isArray(inner)) candidates.push(inner as unknown[]);
+  }
+
+  for (const candidate of candidates) {
+    const descriptors = candidate.filter(isModelDescriptor);
+    if (descriptors.length === 0 || descriptors.length !== candidate.length) continue;
+    return descriptors.map((entry) => ({
+      modelType: entry.model_type,
+      ...(typeof entry.name === 'string' && entry.name ? { name: entry.name } : {}),
+    }));
+  }
+  return null;
 }
 
 const DSML_TOOLS_INSTRUCTION = `[SYSTEM INSTRUCTION: TOOLS AVAILABLE]
@@ -461,8 +551,8 @@ function sessionCacheKey(userToken: string): string {
 }
 
 export class DeepSeekWebAdapter implements ProviderAdapter {
-  readonly id = deepseekWebProviderId;
-  readonly name = 'DeepSeek Web';
+  readonly id: ProviderId;
+  readonly name: string;
   /**
    * Streaming is served as one completed chunk, not token-by-token.
    *
@@ -475,25 +565,120 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
 
   private readonly now: () => number;
   private readonly fetchImpl: typeof fetch;
+  /** `v2` is the 2.8.0 web build's request shape; `v1` is the live 2.0.0 shape, unchanged. */
+  private readonly variant: 'v1' | 'v2';
+  /** The fingerprint for this instance: v1's set verbatim, or v2's plus the device id. */
+  private readonly headers: Readonly<Record<string, string>>;
+  /**
+   * A device id is per device, not per request, so it is generated once and reused — the capture
+   * shows the live client sending the same UUID across calls. Only v2 sends it; v1 sends none.
+   */
+  private readonly deviceId: string;
   /** Keyed by userToken, because the access token is per-account and lasts about an hour. */
   private readonly accessTokens = new Map<string, AccessToken>();
   /** Session ids, keyed by a hash of the userToken; never by the raw credential. */
   private readonly sessions = new Map<string, { id: string; at: number }>();
 
-  constructor(options: { now?: () => number; fetch?: typeof fetch } = {}) {
+  constructor(options: { now?: () => number; fetch?: typeof fetch; variant?: 'v1' | 'v2' } = {}) {
     this.now = options.now ?? (() => Date.now());
     this.fetchImpl = options.fetch ?? fetch;
+    this.variant = options.variant ?? 'v1';
+    this.id = this.variant === 'v2' ? deepseekWebV2ProviderId : deepseekWebProviderId;
+    this.name = this.variant === 'v2' ? 'DeepSeek Web V2' : 'DeepSeek Web';
+    this.deviceId = crypto.randomUUID();
+    this.headers =
+      this.variant === 'v2'
+        ? { ...V2_FINGERPRINT_HEADERS, 'X-Device-Id': this.deviceId, 'X-Device-Model': '' }
+        : FINGERPRINT_HEADERS;
   }
 
-  async listModels(): Promise<Model[]> {
-    return DEEPSEEK_WEB_MODELS.map((model) => ({ id: model.id, providerId: this.id, displayName: model.name }));
+  /**
+   * The headers for one request.
+   *
+   * A connection that signed in through the desktop window carries the **web client's own** device id,
+   * captured from the page that signed in. When it does, that value is what goes out — a request that
+   * claims a different device than the one the session was minted on is exactly the kind of difference
+   * this provider exists to remove. Without it, the per-instance id stands in, which is stable but not
+   * the client's, and is the honest fallback rather than a pretence.
+   */
+  private headersFor(credential?: ProviderCredential): Readonly<Record<string, string>> {
+    const deviceId = credential?.type === 'api-key' ? credential.deviceId : undefined;
+    if (!deviceId || this.variant !== 'v2') return this.headers;
+    return { ...this.headers, 'X-Device-Id': deviceId };
+  }
+
+  /** The device id to name on settings calls: the connection's, else this instance's. */
+  private didFor(credential?: ProviderCredential): string {
+    const captured = credential?.type === 'api-key' ? credential.did : undefined;
+    return captured ?? this.deviceId;
+  }
+
+  /**
+   * The built-in table, refined by the server's own catalogue for v2.
+   *
+   * The capture shows where the client's model choice lives: server-delivered settings, not a field
+   * on the completion request. So v2 asks `client/settings?scope=model` first, and maps each
+   * `model_type` onto the built-in id that type already corresponds to, taking the server's display
+   * name (`Instant`, `Expert`). Everything else stays as the built-in table has it, so an endpoint
+   * that is unreachable, answers a 500, throws, or returns a shape nobody has seen yet still leaves
+   * the provider with its full, usable catalogue — the failure mode of a model list is not an empty
+   * model list.
+   *
+   * A server entry whose `model_type` has no built-in counterpart (currently `vision`) is left out
+   * rather than published: `chat` resolves ids against the built-in table, and a card the adapter
+   * refuses is worse than a shorter list.
+   */
+  async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
+    const builtIn: Model[] = DEEPSEEK_WEB_MODELS.map((model) => ({ id: model.id, providerId: this.id, displayName: model.name }));
+    if (this.variant !== 'v2') return builtIn;
+    const serverNames = await this.serverModelNames(context);
+    if (!serverNames) return builtIn;
+    return builtIn.map((model) => {
+      const name = serverNames.get(model.id);
+      return name ? { ...model, displayName: name } : model;
+    });
+  }
+
+  /**
+   * The server's display name per built-in id, or `null` when it cannot be had honestly.
+   *
+   * Every failure is `null`: no credential on the connection, a dead session, a network error, a
+   * non-200, a body that is not JSON, or settings without a model list. `listModels` must not fail
+   * because an auxiliary endpoint did.
+   */
+  private async serverModelNames(context: ProviderRequestContext): Promise<Map<string, string> | null> {
+    let userToken: string;
+    try {
+      userToken = userTokenFromCredential(context.credential);
+    } catch {
+      return null;
+    }
+    try {
+      const accessToken = await this.accessToken(userToken, context.signal, { credential: context.credential });
+      const response = await this.fetchImpl(`${SETTINGS_URL}?did=${encodeURIComponent(this.didFor(context.credential))}&scope=model`, {
+        method: 'GET',
+        headers: { ...this.headers, Authorization: `Bearer ${accessToken}` },
+        ...(context.signal ? { signal: context.signal } : {}),
+      });
+      if (!response.ok) return null;
+      const configs = readServerModelConfigs(await response.json());
+      if (!configs) return null;
+      const names = new Map<string, string>();
+      for (const config of configs) {
+        const base = MODEL_TYPE_BASE[config.modelType.toLowerCase()];
+        if (base && config.name && !names.has(base)) names.set(base, config.name);
+      }
+      return names.size > 0 ? names : null;
+    } catch {
+      return null;
+    }
   }
 
   async validateCredential(credential: ProviderCredential | undefined): Promise<CredentialValidation> {
     // A real call, because a token's only meaningful test is whether DeepSeek accepts it.
     // Cheap: `users/current` is a single round trip and needs no proof of work. It skips the
     // access-token cache, so "valid" means DeepSeek said so just now rather than an hour ago.
-    await this.accessToken(userTokenFromCredential(credential), undefined, { fresh: true });
+    await this.accessToken(userTokenFromCredential(credential), undefined, { fresh: true, credential });
     return { status: 'valid', checkedAt: new Date(this.now()).toISOString() };
   }
 
@@ -510,13 +695,13 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
    * unverified answer in this area — it looks like a successful check because something was
    * returned. The point of a health check is to learn whether the credential works *now*.
    */
-  private async accessToken(userToken: string, signal?: AbortSignal, options: { fresh?: boolean } = {}): Promise<string> {
+  private async accessToken(userToken: string, signal?: AbortSignal, options: { fresh?: boolean; credential?: ProviderCredential } = {}): Promise<string> {
     const cached = this.accessTokens.get(userToken);
     if (!options.fresh && cached && cached.expiresAt > this.now()) return cached.token;
 
     const response = await this.fetchImpl(`${API_BASE}/v0/users/current`, {
       method: 'GET',
-      headers: { ...FINGERPRINT_HEADERS, Authorization: `Bearer ${userToken}` },
+      headers: { ...this.headersFor(options.credential), Authorization: `Bearer ${userToken}` },
       ...(signal ? { signal } : {}),
     });
     if (!response.ok) {
@@ -547,10 +732,10 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
    * A challenge per completion, not per session: the answer is bound to the target path and
    * carries the challenge's own expiry, so caching one would be reusing spent work.
    */
-  private async proofOfWork(accessToken: string, signal: AbortSignal | undefined, onAuthFailure: () => void): Promise<string> {
+  private async proofOfWork(accessToken: string, signal: AbortSignal | undefined, onAuthFailure: () => void, credential?: ProviderCredential): Promise<string> {
     const response = await this.fetchImpl(`${API_BASE}/v0/chat/create_pow_challenge`, {
       method: 'POST',
-      headers: { ...FINGERPRINT_HEADERS, 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      headers: { ...this.headersFor(credential), 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ target_path: '/api/v0/chat/completion' }),
       ...(signal ? { signal } : {}),
     });
@@ -587,10 +772,10 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
     ).toString('base64');
   }
 
-  private async createSession(accessToken: string, signal: AbortSignal | undefined, onAuthFailure: () => void): Promise<string> {
+  private async createSession(accessToken: string, signal: AbortSignal | undefined, onAuthFailure: () => void, credential?: ProviderCredential): Promise<string> {
     const response = await this.fetchImpl(`${API_BASE}/v0/chat_session/create`, {
       method: 'POST',
-      headers: { ...FINGERPRINT_HEADERS, 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      headers: { ...this.headersFor(credential), 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({}),
       ...(signal ? { signal } : {}),
     });
@@ -610,11 +795,12 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
     accessToken: string,
     signal: AbortSignal | undefined,
     onAuthFailure: () => void,
+    credential?: ProviderCredential,
   ): Promise<string> {
     const key = sessionCacheKey(userToken);
     const cached = this.sessions.get(key);
     if (cached && this.now() - cached.at < SESSION_TTL_MS) return cached.id;
-    const id = await this.createSession(accessToken, signal, onAuthFailure);
+    const id = await this.createSession(accessToken, signal, onAuthFailure, credential);
     this.sessions.set(key, { id, at: this.now() });
     if (this.sessions.size > SESSION_MAX) {
       for (const [candidate, entry] of this.sessions) {
@@ -667,7 +853,7 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
     const form = new FormData();
     form.append('file', new Blob([image.bytes.buffer as ArrayBuffer], { type: image.mimeType }), image.filename);
     const headers = {
-      ...FINGERPRINT_HEADERS,
+      ...this.headers,
       Authorization: `Bearer ${accessToken}`,
       Referer: `${WEB_ORIGIN}/a/chat/s/${sessionId}`,
     };
@@ -740,7 +926,7 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
       });
     }
     const userToken = userTokenFromCredential(context.credential);
-    const accessToken = await this.accessToken(userToken, context.signal);
+    const accessToken = await this.accessToken(userToken, context.signal, { credential: context.credential });
     // One eviction for the whole flow: whichever of the three mid-flight endpoints answers 401,
     // the cached access token and session are now known bad and the next attempt must not reuse
     // them.
@@ -761,7 +947,7 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
       refFileIds.push(await this.uploadImage(image, accessToken, sessionId, context.signal, onAuthFailure));
     }
 
-    const pow = await this.proofOfWork(accessToken, context.signal, onAuthFailure);
+    const pow = await this.proofOfWork(accessToken, context.signal, onAuthFailure, context.credential);
 
     /**
      * The endpoint takes one flat `prompt`, not a message array. `buildDeepSeekPrompt`
@@ -774,7 +960,7 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
     const response = await this.fetchImpl(COMPLETION_URL, {
       method: 'POST',
       headers: {
-        ...FINGERPRINT_HEADERS,
+        ...this.headers,
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
         'X-Ds-Pow-Response': pow,
@@ -788,7 +974,26 @@ export class DeepSeekWebAdapter implements ProviderAdapter {
         ref_file_ids: refFileIds,
         thinking_enabled: model.thinking,
         search_enabled: model.search,
+        // The live 2.8.0 client sends `action: null`; v1 omits it and stays byte-for-byte as it was.
+        ...(this.variant === 'v2' ? { action: null } : {}),
         preempt: false,
+        /**
+         * The client's own Shumei device fingerprint, when the connection captured one at sign-in.
+         *
+         * The capture shows the live client sending it on every completion. It cannot be computed here —
+         * it is the vendor's anti-bot SDK output — so it is taken from the page that signed in, and
+         * omitted when that page had none. Omitting it has never produced a refusal; sending a made-up
+         * value would be worse than either.
+         */
+        ...(this.variant === 'v2' && context.credential?.type === 'api-key' && context.credential.shumeiDeviceId
+          ? { shumei_device_id: context.credential.shumeiDeviceId }
+          : {}),
+        /**
+         * `shumei_device_id` is deliberately absent in both variants. The capture shows the client
+         * sending a per-device Shumei fingerprint, but nothing here can produce one honestly (that
+         * is the vendor's anti-bot SDK output, not a value we can compute), and no refusal from
+         * omitting it has ever been observed. This is a known difference, not an oversight.
+         */
       }),
       ...(context.signal ? { signal: context.signal } : {}),
     });

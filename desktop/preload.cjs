@@ -35,6 +35,15 @@ contextBridge.exposeInMainWorld('omnihilbras', {
   },
   appInfo: () => ipcRenderer.invoke('app:info'),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
+  /**
+   * Signing a provider in, in a window this app opens.
+   *
+   * The renderer learns whether it worked and nothing else: the session token goes from the window
+   * straight to the gateway inside the main process, so a dashboard renderer never holds it.
+   */
+  providerSignIn: {
+    signIn: (provider) => ipcRenderer.invoke('provider:sign-in', { provider }),
+  },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (patch) => ipcRenderer.invoke('settings:set', patch),

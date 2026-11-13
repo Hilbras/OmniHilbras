@@ -46,6 +46,9 @@ export const PROVIDER_SLUGS: Readonly<Record<string, string>> = {
   'chatgpt-web': 'cgw',
   'qwen-web': 'qw',
   'deepseek-web': 'dsw',
+  // Its own prefix, not a share of `dsw`: two cards, two credentials, and a request that must name
+  // which one it means.
+  'deepseek-web-v2': 'dsw2',
   'tokenharbor-web': 'thw',
   'grok-web': 'gw',
   'perplexity-web': 'pw',

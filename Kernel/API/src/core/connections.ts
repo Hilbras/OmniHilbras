@@ -1204,7 +1204,20 @@ function storedCredential(value: unknown): ProviderCredential {
   if (typeof value.value !== 'string' || !value.value || /[\r\n\0]/.test(value.value)) {
     throw new Error('a credential needs a non-empty value with no control characters');
   }
-  if (value.type === 'api-key') return { type: 'api-key', value: value.value };
+  if (value.type === 'api-key') {
+    const key: Record<string, unknown> = { type: 'api-key', value: value.value };
+    // The web client's device fingerprints, carried on the key because they are per-device facts about
+    // the same session. Validated like every other declared field: present means a non-empty string.
+    for (const field of ['deviceId', 'shumeiDeviceId', 'did']) {
+      const candidate = value[field];
+      if (candidate === undefined) continue;
+      if (typeof candidate !== 'string' || !candidate || /[\r\n\0]/.test(candidate)) {
+        throw new Error(`api-key.${field} must be a non-empty string with no control characters`);
+      }
+      key[field] = candidate;
+    }
+    return key as ProviderCredential;
+  }
   if (value.type !== 'oauth') throw new Error(`unknown credential type ${JSON.stringify(value.type)}`);
 
   const oauth: Record<string, unknown> = { type: 'oauth', value: value.value };

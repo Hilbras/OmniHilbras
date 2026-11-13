@@ -108,6 +108,13 @@ saveUserConfig({ gatewayPort: gateway.port });
 let window;
 let tray;
 let quitting = false;
+/**
+ * The window a web-provider sign-in runs in, while it runs.
+ *
+ * Held so a second click focuses the first instead of opening a second session: two windows signing
+ * into the same account is how a login lands on the wrong partition.
+ */
+let providerSignInWindow;
 /** A downloaded update is replacing the app; `before-quit` must not defer that quit. */
 let installingUpdate = false;
 let logSubscription;
@@ -577,6 +584,121 @@ function wireIpc() {
     } catch (error) {
       return { ok: false, status: 0, text: error instanceof Error ? error.message : 'The gateway request failed.' };
     }
+  });
+
+  /**
+   * Sign a web provider in, in a window the provider accepts.
+   *
+   * ## Why a window and not a form
+   *
+   * Measured on DeepSeek's own sign-in: `POST /api/v0/users/login` carries a 224-byte opaque blob, and
+   * requesting the emailed code needs an hCaptcha token minted on DeepSeek's origin against their
+   * sitekey. Neither can be produced from our process — the captcha exists to stop exactly that — so the
+   * credential entry has to happen in a real page, and what OmniHilbras does is take the session that
+   * page ends up holding.
+   *
+   * ## What leaves this function
+   *
+   * The token is posted to the gateway from **here**, and the renderer is told only whether it worked.
+   * A dashboard renderer that received it could be made to leak it; the same reasoning that keeps the
+   * dashboard token in this process.
+   *
+   * The partition is persistent and named, so a second sign-in is a click rather than a password: the
+   * session and the provider's own trusted-device cookie live there between runs.
+   */
+  ipcMain.handle('provider:sign-in', async (_event, request) => {
+    const provider = String(request?.provider ?? '');
+    if (provider !== 'deepseek-web-v2') return { ok: false, reason: 'unsupported', message: 'That provider has no window sign-in.' };
+    if (providerSignInWindow && !providerSignInWindow.isDestroyed()) {
+      providerSignInWindow.focus();
+      return { ok: false, reason: 'already-open', message: 'A sign-in window is already open.' };
+    }
+
+    return await new Promise((resolve) => {
+      const child = new BrowserWindow({
+        width: 520,
+        height: 760,
+        parent: window,
+        title: 'Sign in to DeepSeek',
+        autoHideMenuBar: true,
+        webPreferences: {
+          // No preload and no Node in a page we do not control.
+          partition: 'persist:deepseek-sign-in',
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          devTools: !app.isPackaged,
+        },
+      });
+      providerSignInWindow = child;
+      let settled = false;
+      let timer;
+
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        clearInterval(timer);
+        providerSignInWindow = undefined;
+        if (!child.isDestroyed()) child.close();
+        resolve(result);
+      };
+
+      // A sign-in page does not get to open windows of its own in this app.
+      child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+      /**
+       * Everything the signed-in page knows about itself that a request carries.
+       *
+       * `userToken` is the session. The other three are the web client's own device fingerprints, and
+       * they are the difference between a request that looks like the app's and one that looks like a
+       * script's: the same UUID travels as `x-device-id` on every call, the Shumei value rides in the
+       * completion body, and `did` names the device on settings calls. They cannot be computed outside
+       * that page, so they are read from it here.
+       *
+       * Names are read from the page's storage; no other value is looked at.
+       */
+      const readSession = () =>
+        child.webContents
+          .executeJavaScript(
+            "(() => { try { return { token: localStorage.getItem('userToken'), deviceId: localStorage.getItem('deepseek-device-id:chat'), shumeiDeviceId: localStorage.getItem('smidV2'), did: localStorage.getItem('__ds_remote_feature_did') }; } catch { return null; } })()",
+            true,
+          )
+          .catch(() => null);
+
+      timer = setInterval(async () => {
+        if (settled || child.isDestroyed()) return;
+        const session = await readSession();
+        const raw = session?.token;
+        if (typeof raw !== 'string' || raw.length === 0 || raw === 'null') return;
+        let token = raw;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object' && typeof parsed.value === 'string') token = parsed.value;
+        } catch {
+          // Not JSON: the value is the token itself.
+        }
+        if (!token.trim()) return;
+        const fingerprint = (value) => (typeof value === 'string' && value.trim() && value !== 'null' ? value.trim() : undefined);
+        const sent = await gatewayClient.request({
+          method: 'POST',
+          path: '/v1/web-cookie/deepseek-web-v2/connect',
+          body: JSON.stringify({
+            userToken: token,
+            ...(fingerprint(session?.deviceId) ? { deviceId: fingerprint(session.deviceId) } : {}),
+            ...(fingerprint(session?.shumeiDeviceId) ? { shumeiDeviceId: fingerprint(session.shumeiDeviceId) } : {}),
+            ...(fingerprint(session?.did) ? { did: fingerprint(session.did) } : {}),
+          }),
+        }).catch(() => ({ ok: false, status: 0, text: 'The gateway did not answer.' }));
+        finish(sent.ok
+          ? { ok: true }
+          : { ok: false, reason: 'gateway', message: sent.text.slice(0, 300) || `The gateway refused the session (${sent.status}).` });
+      }, 1000);
+
+      child.on('closed', () => {
+        if (!settled) finish({ ok: false, reason: 'cancelled', message: 'The sign-in window was closed before a session appeared.' });
+      });
+      child.loadURL('https://chat.deepseek.com/sign_in').catch(() => finish({ ok: false, reason: 'load', message: 'The sign-in page could not be loaded.' }));
+    });
   });
 
   ipcMain.on('gateway:stream:start', async (event, id, request) => {

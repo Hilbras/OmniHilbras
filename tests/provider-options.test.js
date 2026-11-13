@@ -76,8 +76,8 @@ test('the neutral option is the local custom endpoint, not a hosted vendor', () 
 test('a web-session provider is recognised, so the keyed dialog is never opened for one', () => {
   // A card for a provider that is *signed into* has no key to collect, and opening the keyed dialog
   // for one produces a form that asks for a credential the provider does not use.
-  const webSession = providerCatalog.filter((card) => ['chatgpt-web', 'qwen-web', 'deepseek-web', 'tokenharbor-web', 'gemini-web', 'duckduckgo-web', 'grok-web', 'perplexity-web'].includes(card.id));
-  assert.equal(webSession.length, 8, 'the fixture moved: update the ids here');
+  const webSession = providerCatalog.filter((card) => ['chatgpt-web', 'qwen-web', 'deepseek-web', 'deepseek-web-v2', 'tokenharbor-web', 'gemini-web', 'duckduckgo-web', 'grok-web', 'perplexity-web'].includes(card.id));
+  assert.equal(webSession.length, 9, 'the fixture moved: update the ids here');
   for (const card of webSession) assert.equal(isWebSessionProvider(card.id), true, `${card.id} is a web-session provider`);
   for (const card of providerCatalog.filter((c) => !webSession.includes(c))) {
     assert.equal(isWebSessionProvider(card.id), false, `${card.id} should not be treated as a web-session provider`);
@@ -174,7 +174,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // Cards 48 -> 50 in 3.6.0 (`agentrouter`, `aion-labs`), both keyed and both in `free-tier`, so the
   // dialog gained two options: 29 -> 31. Cards 50 -> 52 are the web-cookie pair; that group is not
   // offered by the keyed dialog, so the options stay 31.
-  assert.equal(providerCatalog.length, 55, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerCatalog.length, 56, `the catalog now has ${providerCatalog.length} cards`);
   assert.equal(providerOptions.length, 33, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

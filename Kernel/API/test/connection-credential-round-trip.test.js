@@ -76,6 +76,19 @@ for (const field of oauthFields) {
 
 const CREDENTIALS = [
   ['an API key', { type: 'api-key', value: 'sk-test-value' }],
+  /**
+   * The web client's own fingerprints, captured at sign-in. They are what a request carries to look
+   * like the app's rather than a script's, so losing them silently would be the same defect class as
+   * the OAuth fields that were dropped at save time: the vault writes them, so the vault must read
+   * them back.
+   */
+  ['an API key with device fingerprints', {
+    type: 'api-key',
+    value: 'sk-test-value',
+    deviceId: 'ef44ea36-8668-411b-b8d5-00b9258da899',
+    shumeiDeviceId: 'Bd1YTsVuRejiwd4jEkzMCOasfEjPTv/nXJg2WK',
+    did: 'fe0c7f8b-3269-482c-90d1-61396acd0576',
+  }],
   ['an OAuth grant', OAUTH_CREDENTIAL],
   ['no credential at all', { type: 'none' }],
 ];

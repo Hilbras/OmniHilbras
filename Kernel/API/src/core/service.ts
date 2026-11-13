@@ -13,7 +13,7 @@ import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResu
 import { ChatGptWebAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, type ChatGptWebDriver } from '@omnihilbras/sdk-chatgpt-web';
 import { CLAUDE_CODE, ClaudeCodeAdapter, claudeCodeProviderId } from '@omnihilbras/sdk-claude-code';
 import { ClinePassAdapter } from '@omnihilbras/sdk-clinepass';
-import { deepSeekWebCredential, deepseekWebProviderId, DeepSeekWebAdapter } from '@omnihilbras/sdk-deepseek-web';
+import { deepSeekWebCredential, deepseekWebProviderId, deepseekWebV2ProviderId, DeepSeekWebAdapter } from '@omnihilbras/sdk-deepseek-web';
 import { DuckDuckGoWebAdapter, duckduckgoWebProviderId, DUCKDUCKGO_WEB, normalizeDuckDuckGoWebCookie, freeDuckDuckGoWebModels, type DuckDuckGoWebDriver } from '@omnihilbras/sdk-duckduckgo-web';
 import { GeminiWebAdapter, geminiWebProviderId, GEMINI_WEB_MODELS, normalizeGeminiWebCookie, geminiWebCookiePresent, type GeminiWebDriver } from '@omnihilbras/sdk-gemini-web';
 import { GrokWebAdapter, grokWebCredential, grokWebProviderId } from '@omnihilbras/sdk-grok-web';
@@ -315,6 +315,7 @@ export class GatewayService {
   private duckDuckGoWeb?: ProviderAdapter;
   /** DeepSeek Web, built once so its access-token cache is shared across requests. */
   private deepSeek?: DeepSeekWebAdapter;
+  private deepSeekV2?: DeepSeekWebAdapter;
   private tokenHarborWeb?: TokenHarborWebAdapter;
   private grokWeb?: GrokWebAdapter;
   private perplexityWeb?: PerplexityWebAdapter;
@@ -603,6 +604,7 @@ export class GatewayService {
       .onDemand(geminiWebProviderId, ({ providerId, connection }) => this.geminiWebAdapter(connection?.id ?? providerId))
       .onDemand(duckduckgoWebProviderId, () => this.duckDuckGoWebAdapter())
       .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter())
+      .onDemand(deepseekWebV2ProviderId, () => this.deepSeekV2Adapter())
       .onDemand(tokenHarborWebProviderId, () => this.tokenHarborWebAdapter())
       .onDemand(grokWebProviderId, () => this.grokWebAdapter())
       .onDemand(perplexityWebProviderId, () => this.perplexityWebAdapter())
@@ -2071,6 +2073,18 @@ export class GatewayService {
   }
 
   /**
+   * DeepSeek Web V2, built once.
+   *
+   * The same SDK with `variant: 'v2'`: the modern fingerprint headers and the server-delivered model
+   * catalogue. It is a separate provider because it is a separate credential and a separate card — the
+   * sign-in window writes this one, and the paste path writes the other.
+   */
+  deepSeekV2Adapter(): DeepSeekWebAdapter {
+    this.deepSeekV2 ??= new DeepSeekWebAdapter({ variant: 'v2' });
+    return this.deepSeekV2;
+  }
+
+  /**
    * ZCode (Start Plan), built once.
    *
    * It takes the gateway's own transport so the request carries the configured deadlines and the
@@ -2232,6 +2246,50 @@ export class GatewayService {
         id: addAccount ? `${deepseekWebProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : deepseekWebProviderId,
         providerId: deepseekWebProviderId,
         name: 'DeepSeek Web',
+        endpoint: 'https://chat.deepseek.com',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      },
+      credential,
+      signal,
+    );
+  }
+
+  /**
+   * Stores a DeepSeek Web V2 userToken, after checking DeepSeek accepts it.
+   *
+   * The token arrives from the sign-in window, which ran on the operator's machine because DeepSeek's
+   * credential POST is an opaque blob and its emailed-code step needs an hCaptcha token minted on
+   * DeepSeek's own origin. It is checked here before it is stored, so a session DeepSeek has already
+   * invalidated never becomes a connection that reads as connected.
+   */
+  async connectDeepSeekWebV2(
+    userToken: string,
+    signal?: AbortSignal,
+    addAccount = false,
+    fingerprints: { deviceId?: string; shumeiDeviceId?: string; did?: string } = {},
+  ) {
+    /**
+     * The web client's own device fingerprints ride on the credential.
+     *
+     * They come from the page that signed in, and they are what makes the requests it sends
+     * indistinguishable from the app's: the same `x-device-id`, the Shumei value in the completion
+     * body, `did` on settings calls. Absent is not fatal — the adapter falls back — but present is
+     * the point of the sign-in window.
+     */
+    const credential = {
+      ...deepSeekWebCredential(userToken),
+      ...(fingerprints.deviceId ? { deviceId: fingerprints.deviceId } : {}),
+      ...(fingerprints.shumeiDeviceId ? { shumeiDeviceId: fingerprints.shumeiDeviceId } : {}),
+      ...(fingerprints.did ? { did: fingerprints.did } : {}),
+    } as ProviderCredential;
+    await this.deepSeekV2Adapter().validateCredential(credential);
+    return this.saveConnection(
+      {
+        id: addAccount ? `${deepseekWebV2ProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : deepseekWebV2ProviderId,
+        providerId: deepseekWebV2ProviderId,
+        name: 'DeepSeek Web V2',
         endpoint: 'https://chat.deepseek.com',
         priority: 1,
         proxyPool: 'none',

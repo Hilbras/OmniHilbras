@@ -518,6 +518,25 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/deepseek-web-v2/connect') {
+      // Called by the desktop app's sign-in window, which hands over the session it captured, and by
+      // the paste field. The token is verified against DeepSeek before it is stored.
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      // The sign-in window also hands over the page's own device fingerprints, so the requests this
+      // connection makes carry the same identity the session was minted on.
+      const fingerprint = (field: string): string | undefined => {
+        const value = body[field];
+        return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+      };
+      const fingerprints = {
+        ...(fingerprint('deviceId') ? { deviceId: fingerprint('deviceId')! } : {}),
+        ...(fingerprint('shumeiDeviceId') ? { shumeiDeviceId: fingerprint('shumeiDeviceId')! } : {}),
+        ...(fingerprint('did') ? { did: fingerprint('did')! } : {}),
+      };
+      sendJson(response, 201, { connection: await service.connectDeepSeekWebV2(readRequiredString(body, 'userToken'), signal, body.addAccount === true, fingerprints) }, origin);
+      return true;
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/web-cookie/tokenharbor/check') {
       // A credential check, not a completion: it reads `/api/me/profile` and stores nothing. The
       // card's notice says what the trade is — this proxies a service whose terms forbid it — and

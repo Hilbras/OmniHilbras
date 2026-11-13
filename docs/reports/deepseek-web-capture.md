@@ -171,3 +171,27 @@ So a headless credential login is **not reproducible**, and that is a measuremen
   `settings.model_configs[].value[]` with `model_type: "default" | "expert"`. This answers yesterday's
   open question about where model choice lives: it is server-delivered settings, not a field on the
   completion request.
+
+---
+
+# The device fingerprints, and where they live
+
+Read from the signed-in page's own `localStorage` (names only), after the sign-in capture:
+
+```
+userToken                      the session token
+deepseek-device-id:chat        the UUID the client sends as `x-device-id`
+smidV2                         the Shumei device fingerprint it sends as `shumei_device_id`
+__ds_remote_feature_did        the `did` it names on settings calls
+aws-waf-token (+ awswaf_*)     an AWS WAF token, refreshed by their SDK
+settingsJwt, thinkingEnabled, searchEnabled, __appKit_*
+```
+
+So the three values that make a request look like the web app's are **readable from the page that
+signed in**, and that is where the provider takes them from: the desktop sign-in window captures all
+four (token + the three fingerprints), posts them to the gateway, and they ride on the connection's
+credential. A connection that has them sends the client's own identity; one that does not falls back to
+a per-instance UUID and omits `shumei_device_id` — weaker, and said so rather than pretended.
+
+`aws-waf-token` is deliberately **not** carried: it is short-lived, refreshed by a vendor SDK, and no
+request here has ever been refused for its absence.
