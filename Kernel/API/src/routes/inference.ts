@@ -18,6 +18,7 @@ import type { GatewayFailoverAttempt } from '../core/request-executor.js';
 import {
   invalidRequest,
   isRecord,
+  maxInferenceBodyBytes,
   maxPresentedKeyLength,
   readJsonBody,
   sendJson,
@@ -45,7 +46,7 @@ export async function handleInferenceRoute(ctx: RouteContext): Promise<boolean> 
     }
 
     if (request.method === 'POST' && url.pathname === '/v1/messages/count_tokens') {
-      const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
+      const body = await readJsonBody(request, options.maxBodyBytes ?? maxInferenceBodyBytes);
       const counted = isRecord(body) ? JSON.stringify({ model: body.model, system: body.system, messages: body.messages, tools: body.tools }) : '';
       sendJson(response, 200, {
         // Anthropic-shaped count endpoint. It is an estimate, and the field says so; no tokenizer is
@@ -88,7 +89,7 @@ export async function handleInferenceRoute(ctx: RouteContext): Promise<boolean> 
  * would put four branches in the chat path that can never be true for an embeddings request.
  */
 export async function handleEmbeddings(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
-  const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
+  const body = await readJsonBody(request, options.maxBodyBytes ?? maxInferenceBodyBytes);
   const parsedEmbedding = parseEmbeddingRequest(body);
   const explicitConnectionId = getExplicitConnectionId(request, body);
   const embeddingRequest = explicitConnectionId === undefined ? parsedEmbedding : { ...parsedEmbedding, connectionId: explicitConnectionId };
@@ -161,7 +162,7 @@ export async function handleEmbeddings(request: IncomingMessage, response: Serve
  * `POST /v1/images/generations`, in OpenAI's shape.
  */
 export async function handleImages(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
-  const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
+  const body = await readJsonBody(request, options.maxBodyBytes ?? maxInferenceBodyBytes);
   const parsedImage = parseImageRequest(body);
   const explicitConnectionId = getExplicitConnectionId(request, body);
   const imageRequest = explicitConnectionId === undefined ? parsedImage : { ...parsedImage, connectionId: explicitConnectionId };
@@ -303,7 +304,7 @@ function finishEmbeddingRequest(body: Record<string, unknown>, model: string, in
  * Streaming is served as Responses events, not as chat chunks.
  */
 export async function handleResponses(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
-  const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
+  const body = await readJsonBody(request, options.maxBodyBytes ?? maxInferenceBodyBytes);
   const chatRequest = parseChatRequest(responsesToChatBody(body));
   const explicitConnectionId = getExplicitConnectionId(request, body);
   if (explicitConnectionId !== undefined) chatRequest.connectionId = explicitConnectionId;
@@ -477,7 +478,7 @@ async function streamResponses(input: {
 }
 
 export async function handleChat(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
-  const body = await readJsonBody(request, options.maxBodyBytes ?? 1_000_000);
+  const body = await readJsonBody(request, options.maxBodyBytes ?? maxInferenceBodyBytes);
   const chatRequest = parseChatRequest(body);
   const explicitConnectionId = getExplicitConnectionId(request, body);
   if (explicitConnectionId !== undefined) chatRequest.connectionId = explicitConnectionId;

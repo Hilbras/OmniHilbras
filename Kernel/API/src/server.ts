@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { canonicalLoopbackHost, isLoopbackHostname, loopbackBaseUrl } from './core/index.js';
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './core/config.js';
-import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, resolveCorsOrigins, sendError, sendJson, setCors } from './core/http.js';
+import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, resolveCorsOrigins, resolveInferenceBodyBytes, sendError, sendJson, setCors } from './core/http.js';
 import { dashboardTokenHeader, issueDashboardToken, tokenMatches } from './core/dashboard-token.js';
 import { isTrustedDashboard, type AuthContext } from './core/runtime.js';
 import { handleApiKeysRoute } from './routes/api-keys.js';
@@ -181,6 +181,9 @@ export async function startGatewayServer(options: {
   const server = createGatewayServer(service, {
     ...(options.corsOrigin ? { corsOrigin: options.corsOrigin } : {}),
     ...(options.corsOrigins ? { corsOrigins: options.corsOrigins } : options.corsOrigin ? {} : { corsOrigins: config.corsOrigins }),
+    // A coding agent's turn is a conversation, and the old 1 MB cap refused it at the edge — before
+    // any provider saw it, so the failure read as "the provider failed".
+    maxBodyBytes: resolveInferenceBodyBytes(options.env),
     publicBaseUrl,
     dashboardToken,
   });

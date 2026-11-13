@@ -491,6 +491,14 @@ The first local gateway exposes:
   version is therefore reported, not mistaken for an account with no models. `POST
   /v1/connections/:id/models/refresh` re-reads it on demand from the provider page.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
+  The body limit is **32 MiB**, not the 1 MiB it used to be, and
+  `OMNIHILBRAS_MAX_BODY_BYTES` overrides it. This was a real failure, not a precaution: a coding
+  agent's turn — repository context, tool schemas, prior messages — is bigger than 1 MiB, and the
+  gateway answered `400 Request body is too large.` **before any provider saw the request**, so it
+  read as "the provider failed" against a provider that was never asked. 1 million tokens of text is
+  roughly 4 MB before JSON escaping; a model advertising a 1M context cannot be used at all behind a
+  1 MB cap. A value that is not a positive integer is ignored and the default kept, because a typo in
+  an environment variable must not leave a gateway that refuses every request.
 - `POST /v1/embeddings` — normalized embeddings, one vector per input. `input` is a non-empty
   string or a non-empty array of them; `encoding_format` must be `float` (base64 is refused rather
   than silently returned as floats). `dimensions` is echoed per vector **only when the adapter

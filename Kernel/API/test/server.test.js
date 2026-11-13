@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { InMemorySecretStore, ProviderError, ProviderRegistry } from '../dist/src/core/index.js';
+import { maxInferenceBodyBytes, resolveInferenceBodyBytes } from '../dist/src/core/http.js';
 import { InMemoryConnectionStore } from '../dist/src/index.js';
 import { createGatewayServer } from '../dist/src/index.js';
 import { GatewayService } from '../dist/src/index.js';
@@ -68,6 +69,34 @@ test('local gateway exposes health, models, chat, and streaming', async (t) => {
   const streamBody = await stream.text();
   assert.match(streamBody, /Hello/);
   assert.match(streamBody, /data: \[DONE\]/);
+});
+
+test('a conversation larger than a megabyte reaches the provider instead of being refused at the edge', async (t) => {
+  /**
+   * The cap was 1 MB, and a coding agent's turn — a repository's context, tool schemas, prior
+   * messages — is bigger. The gateway answered `400 Request body is too large.` before any provider
+   * saw the request, and the user read that as "the provider failed".
+   */
+  let received;
+  const baseUrl = await startServer(t, createService((request) => { received = request; }));
+  const content = 'x'.repeat(2 * 1024 * 1024);
+  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-omnihilbras-provider': 'fake' },
+    body: JSON.stringify({ model: 'fake-1', messages: [{ role: 'user', content }] }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).choices[0].message.content, 'Hello from gateway');
+  assert.equal(received.messages.at(-1).content.length, content.length, 'the whole message must arrive, not a truncated one');
+});
+
+test('the inference body limit is configurable, and a value that is not a positive integer falls back to the default', () => {
+  assert.equal(resolveInferenceBodyBytes({}), maxInferenceBodyBytes);
+  assert.equal(resolveInferenceBodyBytes({ OMNIHILBRAS_MAX_BODY_BYTES: ' 2048 ' }), 2048);
+  // A typo must leave the gateway working with the default, not with a limit that refuses everything.
+  assert.equal(resolveInferenceBodyBytes({ OMNIHILBRAS_MAX_BODY_BYTES: '0' }), maxInferenceBodyBytes);
+  assert.equal(resolveInferenceBodyBytes({ OMNIHILBRAS_MAX_BODY_BYTES: 'abc' }), maxInferenceBodyBytes);
+  assert.equal(resolveInferenceBodyBytes({ OMNIHILBRAS_MAX_BODY_BYTES: '-5' }), maxInferenceBodyBytes);
 });
 
 test('model test requests use the selected provider and a bounded real chat call', async (t) => {

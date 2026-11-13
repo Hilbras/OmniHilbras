@@ -23,6 +23,32 @@ export const defaultCorsOrigins = ['http://localhost:5173', 'http://127.0.0.1:51
 export const maxConnectionBodyBytes = 16 * 1024;
 export const maxKeyBodyBytes = 4 * 1024;
 export const maxPresentedKeyLength = 512;
+/**
+ * A conversation, not a form.
+ *
+ * This was 1 MB, and a coding agent pastes files: a single turn carrying a repository's context
+ * weighs more than that, so the gateway refused it with `400 Request body is too large.` before the
+ * request reached any provider — the error a user then read as "the provider failed". 1 million
+ * tokens of text is roughly 4 MB before JSON escaping, and a model that advertises a 1M context
+ * cannot be used at all behind a 1 MB cap. 32 MiB leaves room for a full-context turn with tool
+ * schemas and still bounds what a loopback gateway will buffer.
+ */
+export const maxInferenceBodyBytes = 32 * 1024 * 1024;
+
+/**
+ * The inference limit, overridable per deployment.
+ *
+ * A value that is not a positive integer is ignored rather than clamped silently: a typo in an
+ * environment variable should leave the gateway working with the default, not with a limit of 0
+ * that refuses every request.
+ */
+export function resolveInferenceBodyBytes(env: Readonly<Record<string, string | undefined>> = process.env): number {
+  const raw = env.OMNIHILBRAS_MAX_BODY_BYTES?.trim();
+  if (!raw) return maxInferenceBodyBytes;
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) return maxInferenceBodyBytes;
+  return parsed;
+}
 
 export async function readJsonBody(request: IncomingMessage, maxBytes: number) {
   const contentLength = Number(request.headers['content-length']);
