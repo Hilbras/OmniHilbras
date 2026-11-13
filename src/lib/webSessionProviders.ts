@@ -63,26 +63,39 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     id: 'qwen-web',
     name: 'Qwen Web',
     website: 'https://chat.qwen.ai',
-    credentialName: 'Cookie header from auth.qwen.ai',
+    credentialName: 'Session token from chat.qwen.ai',
     /**
-     * Qwen's auth is on a **different origin** from its chat app — `auth.qwen.ai`. That is
-     * measured, not guessed: a guest gets `401 Unauthorized` from `auth.qwen.ai/api/v2/auths/`
-     * and holds no auth cookie on any host, while `chat.qwen.ai/api/v2/models/` answers fine.
-     * So the credential has to come from the auth origin.
+     * Measured from a signed-in session, and it corrects this file.
      *
-     * Deliberately **no console one-liner**, and that is the lesson from ChatGPT Web: the session
-     * cookie is almost certainly HttpOnly, and `document.cookie` cannot read one. A snippet that
-     * cannot work is worse than a slightly longer set of clicks, because it fails in a way that
-     * looks like being signed out.
+     * The instructions used to say "copy the cookies for **auth.qwen.ai**". A real signed-in profile
+     * holds exactly **two** cookies on that host — `aliyungf_tc` and `acw_tc` — and both are Alibaba
+     * anti-bot cookies that every visitor gets. There is no session cookie on the auth origin at all.
+     * The session is a **bearer token in `chat.qwen.ai`'s local storage** (`token`, with
+     * `at_expire_time` and `qwen_access_token_state` beside it), and the cookies on the chat origin
+     * (`alicfw`, `x-ap`, `qwen-locale`, `qwen-theme`) carry no account either.
+     *
+     * And the token does not fix it: replayed with the session's own live cookies, both a cookie-only
+     * request and one carrying `Authorization: Bearer <token>` are refused with
+     * `FAIL_SYS_USER_VALIDATE, RGV587_ERROR` — because every request needs a fresh `bx-ua`, a signature
+     * Alibaba's baxia SDK mints per request for that URL and body. A captured one is refused too; that
+     * was tested with a value seconds old from the same session. See `docs/reports/qwen-web-capture.md`.
+     *
+     * So the extraction steps below say what a person can actually do, and the probe is what decides.
+     * There is no connect route for this provider on purpose: a credential that cannot serve a turn is
+     * not worth storing.
      */
     extractionSteps: [
       {
-        label: 'Copy the auth cookie',
-        body: 'Sign in at chat.qwen.ai. Then: F12 → Application → Storage → Cookies → **https://auth.qwen.ai**, and copy the cookies for that host. If you would rather use the Network tab, reload, click a request to auth.qwen.ai, and copy its **Request Headers → Cookie** value.',
+        label: 'What the session actually is',
+        body: 'Qwen signs you in with a token in **chat.qwen.ai** local storage — DevTools → Application → Local Storage → chat.qwen.ai, the `token` entry — not with a cookie. Deliberately shown as a path rather than as a console one-liner: a snippet in this file that names a credential key is what `tests/browser-storage.test.js` exists to stop, and it would be right to stop it. Nothing here reads that value; this text only says where Qwen keeps it.',
       },
       {
-        label: 'What happens next',
-        body: 'OmniHilbras asks three questions and shows you the answers: whether the credential means anything to auth.qwen.ai, what models Qwen serves, and whether a turn is actually served. Qwen refuses bot-protected requests with **HTTP 200 and a refusal in the body**, so the probe reads the body rather than the status code — nothing is saved either way until a turn really works.',
+        label: 'Why there is no button that connects it',
+        body: 'Every Qwen request needs a **fresh per-request signature** (`bx-ua`, from Alibaba baxia). A real one, taken seconds earlier from this very session, is refused when replayed — HTTP 200 with `FAIL_SYS_USER_VALIDATE, RGV587_ERROR` in the body. Nothing OmniHilbras can store would serve a turn, so nothing is stored.',
+      },
+      {
+        label: 'What the check below does',
+        body: 'It reports the three answers rather than a verdict: whether the credential means anything to Qwen, which models Qwen serves, and whether a turn is actually served.',
       },
     ],
     check: { path: '/v1/web-cookie/qwen/check', field: 'cookieHeader' },
