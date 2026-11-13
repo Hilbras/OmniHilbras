@@ -194,3 +194,25 @@ denied by name after the allows — rules are last-match-wins, so a later wideni
 open the filesystem. `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` still restores the client's own ruleset,
 which allows `external_directory` and `shell`; that is the whole machine by design, and documented as
 such rather than described as "more read".
+
+
+### Phase 9 — The permission default was breaking the provider (fixed)
+
+Reported from use: **`Permission denied: external_directory`**. Reproduced through the gateway:
+
+```json
+{"error":{"type":"permission.rejected","message":"Permission denied: external_directory"}}
+```
+
+The session root is the gateway's working directory — nowhere near the project the caller's agent works
+on — so denying `external_directory` refused the model every file it was asked about, inside an
+otherwise successful turn (the model relays the refusal as prose, so nothing looks broken).
+
+- Default now allows `external_directory`: `read`/`grep`/`glob` reach what the gateway user can read.
+  Verified that the refusal no longer appears for a path outside the root, and that `shell` still does
+  not exist for the model.
+- `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=project` keeps reads inside the session root;
+  `OMNIHILBRAS_OPENCODE_DIRECTORY` names that root.
+- Not verified live after the change: the positive case (a real outside file's contents) — the free
+  tier's quota was spent by the checks themselves. The same permission state was measured earlier in
+  this session answering `read /etc/hostname` with ``lacrous``.

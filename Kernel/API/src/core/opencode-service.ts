@@ -239,7 +239,7 @@ const READ_ONLY_TOOL_ACTIONS = ['read', 'grep', 'glob'] as const;
 /**
  * What the session the gateway creates is allowed to do.
  *
- * ## Deny everything, then allow the two read-only tools back
+ * ## Deny everything, then allow the read-only tools back
  *
  * The first version listed the tools to deny — `shell`, `edit`, `write`, `patch`, `webfetch`,
  * `websearch`, `task`, `subagent`, `browser` — which is a list that goes stale the moment the client
@@ -247,8 +247,25 @@ const READ_ONLY_TOOL_ACTIONS = ['read', 'grep', 'glob'] as const;
  * promise to keep enumerating someone else's surface.
  *
  * The rules are ordered, and a later rule wins, so this is an allow list by construction: `*` denied,
- * then `read`, `grep` and `glob` allowed back. A tool this code has never heard of is denied without
- * anyone updating anything.
+ * then the read-only tools allowed back. A tool this code has never heard of is denied without anyone
+ * updating anything.
+ *
+ * ## Reads reach outside the session root by default, because that is what a coding agent needs
+ *
+ * The session root is the gateway's own working directory — nowhere near the project the caller's agent
+ * is working on. So when `external_directory` was denied, the model was refused every file it was
+ * actually asked about:
+ *
+ * ```json
+ * {"error":{"type":"permission.rejected","message":"Permission denied: external_directory"}}
+ * ```
+ *
+ * measured, for a `read` of a path outside that root. The provider was then useless for its main use
+ * case, and the refusal arrives inside a *successful* turn — the model relays it as prose — so nothing
+ * looks broken while nothing works.
+ *
+ * `project` confines reads to the session root for an operator who wants that, and is the honest name
+ * for the narrower thing.
  *
  * ## Why this exists — measured, not assumed
  *
@@ -264,19 +281,22 @@ const READ_ONLY_TOOL_ACTIONS = ['read', 'grep', 'glob'] as const;
  * can. `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent's own ruleset, and it is opt-in.
  */
 export function opencodeServicePermissions(env: Readonly<Record<string, string | undefined>> = process.env): Array<{ action: string; resource: string; effect: string }> | undefined {
-  if ((env.OMNIHILBRAS_OPENCODE_SERVICE_TOOLS ?? '').trim().toLowerCase() === 'all') return undefined;
+  const mode = (env.OMNIHILBRAS_OPENCODE_SERVICE_TOOLS ?? '').trim().toLowerCase();
+  // `all` is the client's own agent ruleset: reads, writes and a shell.
+  if (mode === 'all') return undefined;
   return [
     { action: '*', resource: '*', effect: 'deny' },
     ...READ_ONLY_TOOL_ACTIONS.map((action) => ({ action, resource: '*', effect: 'allow' })),
-    // Named again after the allows, even though `*` already denies it, because this is the rule that
-    // decides whether "read-only" means "read this project" or "read the whole machine". Rules are
-    // last-match-wins, so anyone who later widens `*` cannot accidentally open the filesystem with it.
-    //
-    // Measured: with the three allows and no `external_directory`, `read /etc/hostname` is rejected by
-    // the client with a permission error naming `external_directory`, and `glob /etc/*.conf` the same.
-    // Adding `{ action: 'external_directory', effect: 'allow' }` returns the file's contents. The
-    // client's own `explore` agent grants it.
-    { action: 'external_directory', resource: '*', effect: 'deny' },
+    /**
+     * `project` keeps reads inside the session root — the gateway's working directory, which is not
+     * where the caller's agent works. Everything else reads the files the gateway user can read, which
+     * is the same set the agent app calling us already has, and the set a coding agent's question is
+     * about. Writing and executing stay denied in both.
+     *
+     * Named even though `*` already decides it, because rules are last-match-wins: a later widening of
+     * `*` must not be able to change the answer by accident.
+     */
+    { action: 'external_directory', resource: '*', effect: mode === 'project' ? 'deny' : 'allow' },
   ];
 }
 

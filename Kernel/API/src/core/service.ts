@@ -2651,7 +2651,10 @@ export class GatewayService {
        * running the adapter falls back to the direct lane, which reports the Console's own refusal.
        */
       localService: createOpencodeLocalService({
-        directory: process.cwd(),
+        // The session's root, which is also the answer to "inside which directory?" for the `project`
+        // ruleset. `process.cwd()` is the gateway's own directory and has nothing to do with the caller's
+        // project, so an operator can name it instead.
+        directory: process.env.OMNIHILBRAS_OPENCODE_DIRECTORY?.trim() || process.cwd(),
         // Discovery, then the client's own server started on demand: a device with the OpenCode binary
         // but nothing running needs no manual step, and a device with neither reports the Console's
         // refusal instead of silence. The runtime is injected because it imports this module's sibling.

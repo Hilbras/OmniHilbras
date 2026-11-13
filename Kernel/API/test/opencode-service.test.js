@@ -90,7 +90,7 @@ test('a turn drives a session: create, subscribe, prompt, read, delete', async (
   // asking for a directory listing ran the tool and returned /home/gin's contents.
   const ruleset = JSON.parse(calls[0].body).permissions;
   assert.deepEqual(ruleset[0], { action: '*', resource: '*', effect: 'deny' }, 'everything is denied first');
-  assert.deepEqual(ruleset.slice(1).map((rule) => rule.action), ['read', 'grep', 'glob', 'external_directory'], 'the read-only tools come back, and the filesystem stays closed');
+  assert.deepEqual(ruleset.slice(1).map((rule) => rule.action), ['read', 'grep', 'glob', 'external_directory'], 'the read-only tools come back');
   assert.equal(JSON.parse(calls[2].body).text, 'User: hi');
   assert.equal(result.text, 'OK');
   assert.equal(result.reasoning, 'thinking');
@@ -170,9 +170,17 @@ test('a chat bridge denies every tool it has not heard of, and allows only the r
   // tool, an MCP tool this code cannot name. Deny `*` first and the surface is closed by construction.
   assert.deepEqual(rules[0], { action: '*', resource: '*', effect: 'deny' });
   assert.deepEqual(rules.slice(1).map((rule) => rule.action), ['read', 'grep', 'glob', 'external_directory']);
-  // The rule that decides whether "read-only" means "this project" or "the whole machine". Measured:
-  // without it, `read /etc/hostname` is refused by the client; with `external_directory` allowed it
-  // answers with the file's contents.
-  assert.equal(rules.at(-1).effect, 'deny');
+  // Reads reach outside the session root by default. The session root is the gateway's own working
+  // directory, so denying this refused the model every file it was actually asked about — measured as
+  // `{"type":"permission.rejected","message":"Permission denied: external_directory"}` inside an
+  // otherwise successful turn, which is a provider that looks fine and does nothing.
+  assert.equal(rules.at(-1).effect, 'allow', 'a coding agent must be able to read the project it is asked about');
+  // Writing and executing stay denied in both modes.
+  const denied = new Set(rules.filter((rule) => rule.effect === 'deny').map((rule) => rule.action));
+  assert.ok(denied.has('*'), 'everything is denied first');
   assert.equal(opencodeServicePermissions({ OMNIHILBRAS_OPENCODE_SERVICE_TOOLS: 'all' }), undefined, 'the agent ruleset is opt-in');
+  // `project` is the narrower thing, and it is named: reads stay inside the session root.
+  const confined = opencodeServicePermissions({ OMNIHILBRAS_OPENCODE_SERVICE_TOOLS: 'project' });
+  assert.equal(confined.at(-1).action, 'external_directory');
+  assert.equal(confined.at(-1).effect, 'deny');
 });

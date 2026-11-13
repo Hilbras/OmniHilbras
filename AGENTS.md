@@ -242,11 +242,17 @@ that is not on `main`.
   is granted to. **Read exposure remains and is documented, not fixed** —
   `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent ruleset and is opt-in — and that ruleset
   allows `external_directory` and `shell`, so it is the whole machine, not a wider project.
-  **`external_directory` is what decides how far read-only reaches.** Measured: with the three allows
-  and nothing else, `read /etc/hostname` and `glob /etc/*.conf` are refused by the client with a
-  permission error naming `external_directory` (outside the workspace root); granting that one action
-  returns the file's contents. It is denied by **name** after the allows even though `*` already covers
-  it, because rules are last-match-wins and a later widening of `*` must not open the filesystem.
+  **`external_directory` decides how far read-only reaches, and the default is to allow it.** Denying
+  it was measured to break the provider: the session root is the **gateway's own working directory**, so
+  the model was refused every file the caller's agent asked about — `{"type":"permission.rejected",
+  "message":"Permission denied: external_directory"}` — inside an otherwise successful turn, relayed as
+  prose, so nothing looked broken while nothing worked. `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=project`
+  confines reads to the session root (name it with `OMNIHILBRAS_OPENCODE_DIRECTORY`, because
+  `process.cwd()` is not the caller's project), `localService`'s default reads what the gateway user can
+  read and reports it honestly, and `all` restores the client's ruleset — which allows `shell`, so it is
+  the whole machine and stays opt-in. Writes, execution and the network tools are denied in both
+  narrower modes, and the tools list is an allow list (`*: deny` first) so a tool this code has never
+  heard of is denied without an edit.
   **The runtime is installable by the gateway, and that is deliberate.** A device that has never seen
   OpenCode cannot use the free tier at all — measured: the account's own token, org, client headers,
   `ses_`-shaped session, tool-carrying body, and even the machine's own system proxy
