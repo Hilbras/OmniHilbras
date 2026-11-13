@@ -46,7 +46,7 @@ test('local gateway exposes health, models, chat, and streaming', async (t) => {
   assert.equal((await health.json()).status, 'ok');
 
   const models = await fetch(`${baseUrl}/v1/models`);
-  assert.deepEqual((await models.json()).data, [{ id: 'fake-1', object: 'model', owned_by: 'fake', display_name: 'Fake One' }]);
+  assert.deepEqual((await models.json()).data, [{ id: 'fake-1', object: 'model', name: 'fake-1', owned_by: 'fake', display_name: 'Fake One' }]);
 
   const chat = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',

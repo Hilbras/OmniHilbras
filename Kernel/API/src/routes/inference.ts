@@ -1164,7 +1164,25 @@ export function toOpenAIChunk(chunk: ChatChunk) {
 
 
 export function toOpenAIModel(model: Model) {
-  return { id: model.id, object: 'model', owned_by: model.providerId, ...(model.displayName ? { display_name: model.displayName } : {}), ...(model.contextWindow ? { context_window: model.contextWindow } : {}), ...(model.virtual ? { virtual: true } : {}), ...(model.providers?.length ? { providers: model.providers } : {}) };
+  return {
+    id: model.id,
+    object: 'model',
+    /**
+     * `name` carries the **qualified** id, not the vendor's label.
+     *
+     * A client that shows ids is fine without it, but the ones that show a name field showed
+     * "Gemini 2.5 Flash" for three different providers — the provider's own words, with the short
+     * provider prefix gone, so the same model under two accounts was indistinguishable in a picker.
+     * OpenRouter's own catalog puts the display label in `name`; ours puts the id a request must
+     * carry, because that is the thing a user has to be able to tell apart.
+     */
+    name: model.id,
+    owned_by: model.providerId,
+    ...(model.displayName ? { display_name: model.displayName } : {}),
+    ...(model.contextWindow ? { context_window: model.contextWindow } : {}),
+    ...(model.virtual ? { virtual: true } : {}),
+    ...(model.providers?.length ? { providers: model.providers } : {}),
+  };
 }
 
 

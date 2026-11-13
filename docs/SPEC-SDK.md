@@ -2755,6 +2755,12 @@ model ID. That constrains two behaviors:
   credentialed connections. Live provider listing remains the fallback only when
   no such connection exists, so clients never see paid models the operator did
   not import.
+  Every id is `<slug>/<model>` (`gm/gemini-2.5-flash`, `or/liquid/lfm-3-1.7b:free`), and the same
+  string is repeated in `name`. A client that shows `id` was already fine; the ones that show a
+  name field were shown the vendor's own label — "Gemini 2.5 Flash" for three different providers,
+  with the prefix gone — so the same model under two accounts could not be told apart in a picker.
+  `display_name` stays the vendor's label, because that is what it means; `owned_by` carries the
+  provider id.
 
 Disabled or credential-less connections take part in neither.
 

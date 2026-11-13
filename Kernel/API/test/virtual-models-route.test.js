@@ -82,10 +82,23 @@ test('GET /v1/models advertises an enabled virtual model with its providers', as
 
   const response = await gw.call('/v1/models');
   assert.equal(response.status, 200);
-  const virtual = (await response.json()).data.find((model) => model.id === 'oh/chat');
+  const data = (await response.json()).data;
+  const virtual = data.find((model) => model.id === 'oh/chat');
   assert.ok(virtual, 'the virtual model is missing from /v1/models');
   assert.equal(virtual.virtual, true);
   assert.deepEqual(virtual.providers, ['a', 'b']);
+
+  /**
+   * `name` repeats the **qualified** id.
+   *
+   * A picker that shows a name field showed the vendor's own label — three providers' "Gemini 2.5
+   * Flash", no prefix — so the same model under two accounts could not be told apart. This asserts
+   * the field a client may prefer carries the id a request must send.
+   */
+  const concrete = data.find((model) => model.id.startsWith('a/'));
+  assert.ok(concrete, 'a connection-backed model is missing from /v1/models');
+  assert.equal(concrete.name, concrete.id);
+  assert.equal(concrete.id, 'a/model-a');
 });
 
 test('virtual model routes require the management key', async (t) => {

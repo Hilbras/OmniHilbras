@@ -78,7 +78,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/http.ts` | 314 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 835 | 12 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 358 | 1 | one OpenRouter save shortcut, the generic quota route, and the build stamp |
-| `Kernel/API/src/routes/inference.ts` | 1252 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and the auth gate |
+| `Kernel/API/src/routes/inference.ts` | 1270 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and the auth gate |
 | `Kernel/API/src/routes/api-keys.ts` | 74 | **0** | |
 | `Kernel/API/src/routes/status.ts` | 56 | **0** | `/health`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
