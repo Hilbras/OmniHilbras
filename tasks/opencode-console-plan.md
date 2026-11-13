@@ -172,8 +172,12 @@ Option 2 shipped instead:
 - The bridge starts the service instead of giving up: discovery → start → wait for the registration.
 - Six tests in `Kernel/API/test/opencode-runtime.test.js`, including "no binary and mode `auto` starts
   nothing" and "a failed download is no runtime, not a broken turn".
-- **Not done yet:** the dashboard button that calls `/install`. Until then a clean device uses
-  `POST /v1/runtime/opencode/install` or `OMNIHILBRAS_OPENCODE_SERVICE=install`.
+- **Dashboard (done):** the `opencode-console` provider page shows an **OpenCode runtime** card —
+  `not installed` / `installed, not running` / `service running` — with **Install runtime** (official
+  release, ~200 MB, with its size stated) and **Start service**, and it renders the gateway's own
+  message when a step fails. `GET`/`POST /install` were also fixed to accept a bodyless request, which
+  had been a `400 Request body is required.` for the most obvious call. Pinned by
+  `tests/opencode-runtime-ui.test.js`.
 
 
 ### Phase 8 — How far "read-only" reaches (done)

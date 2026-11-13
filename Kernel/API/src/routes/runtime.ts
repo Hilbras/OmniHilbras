@@ -37,7 +37,13 @@ export async function handleRuntimeRoute(ctx: RouteContext): Promise<boolean> {
   }
 
   if (request.method === 'POST' && url.pathname === `${runtimePrefix}/install`) {
-    const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? 4096, 4096));
+    /**
+     * The body is optional, and reading one that is not there is an error in `readJsonBody`
+     * ("Request body is required.") — which turned `POST /install` with no body into a `400` for
+     * anyone who had nothing to say except "install the current release".
+     */
+    const declaresBody = Boolean(request.headers['transfer-encoding']) || Number(request.headers['content-length'] ?? 0) > 0;
+    const body = declaresBody ? await readJsonBody(request, Math.min(options.maxBodyBytes ?? 4096, 4096)) : undefined;
     const version = (body as { version?: unknown } | undefined)?.version;
     if (version !== undefined && (typeof version !== 'string' || !/^\d+\.\d+\.\d+[\w.-]*$/.test(version))) {
       throw new ProviderError('INVALID_REQUEST', 'version must look like 1.2.3.', { publicMessage: 'version must look like 1.2.3.' });

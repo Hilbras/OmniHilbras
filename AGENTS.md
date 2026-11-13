@@ -259,7 +259,9 @@ that is not on `main`.
   **No upstream checksum is verified because upstream publishes none** — the official installer checks
   only that the asset exists — so the artifact's SHA-256 is recorded and the installed binary is proved
   by running `--version`. Do not upgrade that into a claim of verification. Nothing the gateway starts
-  is ever killed: the desktop app talks to the same service.
+  is ever killed: the desktop app talks to the same service. The provider page carries the button that
+  calls `/install` and shows the gateway's own answer; `tests/opencode-runtime-ui.test.js` fails if that
+  card ever reports a state the gateway did not send, or sets one inside a timer.
   **Reasoning is forwarded only until the first text delta.** The parts are concurrent — measured
   `reasoning.delta` … `text.started` … `text.delta` ×18 … `reasoning.ended` — so arrival order renders
   as thinking, answer, thinking, answer-continued-in-the-first-block. One thinking block, then the

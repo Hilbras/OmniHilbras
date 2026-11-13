@@ -39,7 +39,7 @@ import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, f
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { ProviderPlayground } from '../components/ProviderPlayground';
-import { addGatewayConnectionModels, getGatewayProviderHealth, getGatewayRoutingState, listGatewayConnections, probeGatewayConnection, refreshGatewayConnectionModels, saveGatewayConnectionDetailed, saveOpenRouterConnection, setGatewayConnectionEnabled, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, getGatewayProviderHealth, getOpencodeRuntime, installOpencodeRuntime, startOpencodeRuntime, getGatewayRoutingState, listGatewayConnections, probeGatewayConnection, refreshGatewayConnectionModels, saveGatewayConnectionDetailed, saveOpenRouterConnection, setGatewayConnectionEnabled, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayOpencodeRuntime, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import { dashboardRoutes, providerRoute, providerUsageRoute } from '../lib/routes';
 import { UsageContent } from './UsagePage';
@@ -260,6 +260,100 @@ const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'opencode',
 
 /** Providers whose flow is a pasted credential rather than a browser sign-in. */
 const webCookieProviders = new Set(webSessionProviderIds());
+
+/**
+ * The OpenCode server, which `opencode-console`'s free models are served through.
+ *
+ * Every sentence here comes from the gateway's own answer: what is installed, where, and whether a
+ * service answers. The card does not claim an install worked because the button was pressed — it
+ * re-reads the status and shows what came back, and a failure shows the gateway's message (which names
+ * the step that failed: the download, the unpack, or the binary refusing to start).
+ */
+function OpencodeRuntimeCard() {
+  const [status, setStatus] = useState<GatewayOpencodeRuntime | null>(null);
+  const [busy, setBusy] = useState<'install' | 'start' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await getOpencodeRuntime());
+      setError(null);
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : 'Could not read the runtime status.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const run = async (action: 'install' | 'start') => {
+    setBusy(action);
+    setError(null);
+    try {
+      setStatus(action === 'install' ? await installOpencodeRuntime() : await startOpencodeRuntime());
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : 'The gateway refused the request.');
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const running = status?.serviceRunning === true;
+  return (
+    <section className="card mt-5 p-4 sm:p-5" aria-labelledby="opencode-runtime-title">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+        <div className="min-w-0">
+          <h2 id="opencode-runtime-title" className="flex items-center gap-2 text-sm font-semibold">
+            <Server className="h-4 w-4 text-gold-text" aria-hidden="true" />
+            OpenCode runtime
+            {status && (
+              <span className={`rounded-full border px-2 py-0.5 font-mono text-[10px] ${running ? 'border-success/25 bg-success/10 text-success' : status.installed ? 'border-line bg-surface text-muted' : 'border-danger/25 bg-danger/10 text-danger'}`}>
+                {running ? 'service running' : status.installed ? 'installed, not running' : 'not installed'}
+              </span>
+            )}
+          </h2>
+          <p className="muted mt-1 text-xs leading-relaxed">
+            The Console serves its <strong>free</strong> models only through OpenCode&rsquo;s own server, so this provider needs it locally.
+            Paid models work without it.
+          </p>
+          {status && (
+            <p className="mt-2 break-all font-mono text-[10px] text-muted">
+              {status.installed ? status.path : `installs to ${status.installPath}`}
+              {status.serviceRunning && status.serviceUrl ? ` · ${status.serviceUrl}` : ''}
+              {status.version ? ` · v${status.version}` : ''}
+            </p>
+          )}
+          {error && (
+            <p className="mt-2 text-[11px] leading-relaxed text-danger/90" role="alert">{error}</p>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {!running && status?.installed && (
+            <button type="button" onClick={() => void run('start')} disabled={busy !== null} aria-busy={busy === 'start'} className="btn-quiet !px-3 !py-2 text-[11px]">
+              {busy === 'start' ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Zap className="h-3.5 w-3.5" aria-hidden="true" />}
+              Start service
+            </button>
+          )}
+          {!status?.installed && (
+            <button type="button" onClick={() => void run('install')} disabled={busy !== null || status === null} aria-busy={busy === 'install'} className="btn-gold !px-3 !py-2 text-[11px]">
+              {busy === 'install' ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />}
+              {busy === 'install' ? 'Downloading…' : 'Install runtime'}
+            </button>
+          )}
+          <button type="button" onClick={() => void load()} disabled={busy !== null} aria-label="Re-read the runtime status" className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-gold-text">
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+      <p className="muted mt-3 text-[10px] leading-relaxed">
+        The download is the official release for this platform (~200 MB). The gateway records the artifact&rsquo;s SHA-256 and runs the
+        binary once to prove it starts; nothing is started automatically unless <code className="font-mono">OMNIHILBRAS_OPENCODE_SERVICE</code> says so.
+      </p>
+    </section>
+  );
+}
 
 function ResiliencePanel({ connection, routingState, onSave, strategy, onStrategy }: { connection: GatewayConnection; routingState?: GatewayRoutingState; onSave: (next: GatewayResilience) => void | Promise<void>; strategy: GatewayProviderStrategy; onStrategy: (next: GatewayProviderStrategy) => void | Promise<void> }) {
   const [open, setOpen] = useState(false);
@@ -1296,6 +1390,8 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
           tone={connectionVerified === undefined ? 'muted' : connectionHealthy ? 'green' : 'gold'}
         />
       </div>
+
+      {provider.id === 'opencode-console' && <OpencodeRuntimeCard />}
 
       <section className="card mt-5 overflow-hidden" aria-labelledby="connections-title">
         <div className="flex flex-col justify-between gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:p-5"><div><h2 id="connections-title" className="text-sm font-semibold">Accounts</h2><p className="muted mt-1 text-xs">One row per account. Credentials, endpoint and limits are isolated by account.</p></div><span className="rounded-full border border-line bg-bg-soft px-2.5 py-1 font-mono text-[10px] text-muted">{connectionState !== 'ready'

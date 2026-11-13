@@ -355,6 +355,36 @@ export async function getGatewayProviderHealth(providerId: string, signal?: Abor
 }
 
 /**
+ * The OpenCode runtime: whether the server is here, and whether it answers.
+ *
+ * `opencode-console`'s free models are served only through that server, so "not installed" is the
+ * reason a free model refuses on a device that has never seen OpenCode — which is why this is a fact
+ * the provider page reads rather than something a user is expected to know.
+ */
+export type GatewayOpencodeRuntime = {
+  installed: boolean;
+  path?: string;
+  serviceRunning: boolean;
+  serviceUrl?: string;
+  version?: string;
+  installPath: string;
+  install?: { version?: string; reportedVersion?: string; installedAt?: string };
+  installedVersion?: string;
+};
+
+export async function getOpencodeRuntime(signal?: AbortSignal) {
+  return requestJson<GatewayOpencodeRuntime>('/v1/runtime/opencode', { signal });
+}
+
+export async function installOpencodeRuntime(signal?: AbortSignal) {
+  return requestJson<GatewayOpencodeRuntime>('/v1/runtime/opencode/install', { method: 'POST', signal });
+}
+
+export async function startOpencodeRuntime(signal?: AbortSignal) {
+  return requestJson<GatewayOpencodeRuntime>('/v1/runtime/opencode/start', { method: 'POST', signal });
+}
+
+/**
  * Asks the gateway to check a candidate key for **any** provider.
  *
  * This used to be `checkOpenRouterConnection`, and it posted to a hardcoded
