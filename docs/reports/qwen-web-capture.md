@@ -111,3 +111,37 @@ two this project has already used elsewhere:
 - Whether the UI's model picker sends anything else on `chats/new` when the model changes.
 - Whether a session resident in a real browser is refused *sometimes* — this capture shows one turn
   succeed in the page and three replays refused, not a rate.
+
+---
+
+# Can a browser driver serve a turn? Measured: yes
+
+The gate refuses every out-of-page request, so the remaining question was whether driving the page
+works. It does, on the same signed-in session:
+
+1. the composer is `textarea.message-input-textarea` ("Ask Qwen");
+2. typing and pressing Enter sends the turn **from the page**, which mints its own `bx-ua` — no
+   replay, no signature to forge;
+3. the answer renders in the page and is readable from a stable node chain:
+
+```
+.chat-response-message-render-flow
+  └ div
+    └ .response-message-content.t2t        ← the assistant turn
+      └ .custom-qwen-markdown
+        └ .qwen-markdown
+          └ p / span.qwen-markdown-text    ← the text nodes
+```
+
+A prompt sent this way was answered (`POC-1794595920689` came back as the page's own text), while the
+same prompt replayed over HTTP was refused. That is the difference between impersonating the client and
+using it.
+
+Two things the page does on its own that a driver must tolerate rather than fight: an update modal
+("Qwen4-Max is now in preview") that sits over the composer until dismissed, and a "Thinking completed"
+step rendered before the answer — both seen in the captured text.
+
+What a driver still needs, none of it proven yet: a persistent profile the operator signs into once,
+detection of "the stream stopped" (the text stops changing, or the stop button disappears), and the
+per-turn cost of a browser process — the same shape and the same cost as `chatgptWeb.ts`, which is the
+template for it.
