@@ -166,3 +166,17 @@ built its Cookie header with `domain.includes('qwen.ai')`, which includes `.qwen
 `Authorization: Bearer`. Both were refused with `FAIL_SYS_USER_VALIDATE, RGV587_ERROR`. Authentication
 was never the missing piece; the per-request `bx-ua` signature is.
 
+
+## The minimal set, probed
+
+The cookies a stored credential would need, and what the gateway's own probe answers with them:
+
+| Cookie header sent | `authenticated` | `turnServed` | Answer |
+| --- | --- | --- | --- |
+| `refresh_token` + `aui` + `cnaui` + `cna` + `isg` | **false** | false | `authDetail: Unauthorized — 401`, `detail: FAIL_SYS_USER_VALIDATE, RGV587_ERROR` |
+| `refresh_token` alone | **false** | false | identical |
+
+So the session cookie does not authenticate from outside the page either: `auth.qwen.ai/api/v2/auths/`
+answers **401** to the refresh cookie, and the turn is refused for the baxia reason regardless. There
+is nothing to paste that changes either column — which is why the provider has a check route and no
+connect route, and why the only measured way to serve a turn is a browser in the loop.
