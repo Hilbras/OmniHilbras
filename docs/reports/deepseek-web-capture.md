@@ -122,3 +122,52 @@ Two latent defects found while reading, independent of the capture:
   is not answered here.
 - File upload (`/api/v0/file/upload_file`, `/api/v0/file/fetch_files`) and `ref_file_ids` were not
   exercised — `ref_file_ids` was empty in all three runs.
+
+---
+
+# The sign-in flow, captured
+
+Recorded over CDP while the operator signed out and signed back in on `chat.deepseek.com`
+(`scripts/capture-deepseek-auth.mjs`; raw redacted in `deepseek-web-captures/auth.json`).
+
+```
+POST /api/v0/users/logout                        → 200
+POST /api/v0/users/login                         → 202 text/html        ← first attempt
+POST /api/v0/users/login                         → 200 {biz_code:14, biz_msg:"MFA_VERIFICATION_CODE_REQUIRED",
+                                                        biz_data:{mfa_session_id}}
+POST /api/v0/users/create_guest_challenge        → 200  PoW challenge for the *next* path
+POST /api/v0/users/mfa/create_verification_code  → 200  sends the emailed code
+POST /api/v0/users/mfa/check_verification_code   → 200  user.token  ← the session token
+POST /api/v0/users/auth_token/check_device       → 200  {rotate: null}
+POST /api/v0/users/mfa/trusted_device/register   → 200  WebAuthn (ES256) registration
+POST /api/v0/users/mfa/trusted_device/verify     → 200  {credential_id, expire_at}
+```
+
+## Two steps a server cannot perform
+
+**1. The credential POST is an opaque blob.** `POST /api/v0/users/login` carries **224 bytes** with
+`content-type: application/json` and no `Content-Encoding` — not JSON, and identical in length on the
+retry after the 202. Whatever turns `{email, password}` into those bytes happens inside the client, and
+nothing in this capture fetches a key from the server for it.
+
+**2. Requesting the code needs an hCaptcha token.** `mfa/create_verification_code` is plain JSON —
+`{"mfa_session_id": …, "hcaptcha_token": "P1_eyJhbGci…"}` — and that token is a JWT minted by hCaptcha
+on DeepSeek's own origin, against their sitekey. It is domain-bound by design; producing one from our
+process is precisely what it exists to prevent.
+
+So a headless credential login is **not reproducible**, and that is a measurement, not a preference.
+
+## What the flow does give us
+
+- **The credential that comes out is the same `userToken`** the current `deepseek-web` provider already
+  consumes: `biz_data.user.token`.
+- **There is no refresh token.** `auth_token/check_device` answers `{"rotate": null}`; nothing else in
+  the flow returns one. When DeepSeek invalidates the session, the session is over and only a fresh
+  sign-in recovers it.
+- **A trusted-device credential is registered at the end** (WebAuthn/ES256, `expire_at` about a year
+  out). It belongs to the browser profile that performed the ceremony, which is why the second sign-in
+  in that profile would skip the emailed code — and why a different client does not get that.
+- **The model catalogue comes from `GET /api/v0/client/settings?did=…&scope=model`** →
+  `settings.model_configs[].value[]` with `model_type: "default" | "expert"`. This answers yesterday's
+  open question about where model choice lives: it is server-delivered settings, not a field on the
+  completion request.
