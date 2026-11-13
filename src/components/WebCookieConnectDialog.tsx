@@ -364,6 +364,25 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
 
           {(descriptor.paste ?? descriptor.check) && (
           <section className="mt-4 rounded-xl border border-line bg-bg-soft/40 p-3">
+            {descriptor.signIn && (
+              <div className="mt-3 rounded-lg border border-line bg-bg-soft p-3">
+                <p className="text-[11px] font-semibold">{descriptor.signIn.label}</p>
+                {signInBridge ? (
+                  <>
+                    <button type="button" onClick={() => void startSignIn()} disabled={signingIn} aria-busy={signingIn} className="btn-gold mt-2 !px-3 !py-2 text-[11px]">
+                      {signingIn ? 'Waiting for the window…' : descriptor.signIn.label}
+                    </button>
+                    <p className="muted mt-2 text-[10px] leading-relaxed">
+                      Opens chat.deepseek.com in its own window. Your password, the captcha and the emailed code are typed there and never pass through OmniHilbras; the session that window ends up with goes straight to the local gateway.
+                    </p>
+                  </>
+                ) : (
+                  <p className="muted mt-1.5 text-[10px] leading-relaxed">{descriptor.signIn.browserUnavailable}</p>
+                )}
+                {signInNote && <p className="mt-2 text-[10px] text-success">{signInNote}</p>}
+              </div>
+            )}
+
             <p className="text-[11px] font-semibold">Copy the credential</p>
             <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
               This is the only step that has to be done by hand, and it is one value.
@@ -425,24 +444,6 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
                   : 'Paste it below and check the cookie. If it stops working, sign in again and paste a fresh value.'}
               </li>
             </ol>
-            {descriptor.signIn && (
-              <div className="mt-3 rounded-lg border border-line bg-bg-soft p-3">
-                <p className="text-[11px] font-semibold">{descriptor.signIn.label}</p>
-                {signInBridge ? (
-                  <>
-                    <button type="button" onClick={() => void startSignIn()} disabled={signingIn} aria-busy={signingIn} className="btn-gold mt-2 !px-3 !py-2 text-[11px]">
-                      {signingIn ? 'Waiting for the window…' : descriptor.signIn.label}
-                    </button>
-                    <p className="muted mt-2 text-[10px] leading-relaxed">
-                      Opens chat.deepseek.com in its own window. Your password, the captcha and the emailed code are typed there and never pass through OmniHilbras; the session that window ends up with goes straight to the local gateway.
-                    </p>
-                  </>
-                ) : (
-                  <p className="muted mt-1.5 text-[10px] leading-relaxed">{descriptor.signIn.browserUnavailable}</p>
-                )}
-                {signInNote && <p className="mt-2 text-[10px] text-success">{signInNote}</p>}
-              </div>
-            )}
             <p className="mt-2.5 text-[10px] leading-relaxed text-amber-600 dark:text-amber-400">
               Treat this like a password: it may access your signed-in web account until it expires or is revoked.
             </p>
