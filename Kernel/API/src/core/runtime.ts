@@ -156,7 +156,7 @@ export function localDeployment(over: Partial<DeploymentConfig> = {}): Deploymen
 }
 
 /** Where a local deployment keeps its state. Named here so the default is visible in one place. */
-function defaultLocalDataDir(): string {
+export function defaultLocalDataDir(): string {
   return join(homedir(), '.omnihilbras');
 }
 

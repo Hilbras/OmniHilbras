@@ -7,6 +7,7 @@ import { ZcodeAdapter, zcodeProviderId } from '@omnihilbras/sdk-zcode-start-plan
 import { readZcodeLocalCredential, type ZcodeLocalCredential } from './zcode-local.js';
 import { pollZcodeOAuth, startZcodeOAuth, type ZcodeOAuthProvider } from './zcode-oauth.js';
 import { createOpencodeLocalService } from './opencode-service.js';
+import { ensureOpencodeService } from './opencode-runtime.js';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
 import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext, type ModelPricing } from './index.js';
 import { ChatGptWebAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, type ChatGptWebDriver } from '@omnihilbras/sdk-chatgpt-web';
@@ -2649,7 +2650,16 @@ export class GatewayService {
        * the same model seconds later. Turns therefore go through the local service. When it is not
        * running the adapter falls back to the direct lane, which reports the Console's own refusal.
        */
-      localService: createOpencodeLocalService({ directory: process.cwd() }),
+      localService: createOpencodeLocalService({
+        directory: process.cwd(),
+        // Discovery, then the client's own server started on demand: a device with the OpenCode binary
+        // but nothing running needs no manual step, and a device with neither reports the Console's
+        // refusal instead of silence. The runtime is injected because it imports this module's sibling.
+        ensure: (o) => {
+          const dataDir = this.config()?.dataDir;
+          return ensureOpencodeService({ ...(o.env ? { env: o.env } : {}), ...(dataDir ? { dataDir } : {}) });
+        },
+      }),
     });
     this.opencodeConsoleAdapters.set(connectionId, adapter);
     return adapter;

@@ -321,6 +321,20 @@ The first local gateway exposes:
 - `GET /v1/observability` — gateway stats: uptime, version, per-store counts.
 - `GET /v1/pxpipe` — pipe health check.
 - `GET /v1/locale` — list locales. `GET /v1/locale/:lang` — locale strings.
+- `GET /v1/runtime/opencode` — whether the OpenCode server is installed, where, and whether a
+  service answers. `POST /v1/runtime/opencode/install` — download the official release for this
+  platform into `<dataDir>/runtime/opencode`, run it once to prove it starts, and record the artifact's
+  SHA-256 beside it. `POST /v1/runtime/opencode/start` — start `opencode serve --service` when a binary
+  exists. `POST /v1/runtime/opencode/*` is the family; nothing else lives under it.
+  **Why this exists:** `opencode-console`'s free models are served only through the OpenCode client's
+  own service, so a device that has never seen OpenCode cannot use them — measured, the same request
+  with the account's own token, org, client headers, session shape, tool-carrying body and even through
+  the machine's system proxy is refused `429 FreeUsageLimitError` from Node, from Bun and from curl,
+  while the service on the same machine answers in the same minute. These routes close that gap without
+  a README: the gateway fetches the same asset the documented installer fetches.
+  **No upstream checksum is verified, because none is published** — the official installer checks only
+  that the asset exists — so the hash is recorded rather than compared, and the binary is proved by
+  running `--version`, which is a different and weaker claim, stated as such.
 - `POST /v1/audio/speech` — TTS (implemented). `POST /v1/audio/transcriptions` — STT (implemented). `POST /v1/search` — search (DuckDuckGo instant answer).
 - `POST /v1/mcp` — Model Context Protocol JSON-RPC 2.0 endpoint. Methods: `initialize`, `tools/list`, `tools/call`. Tools: `list_connections`, `list_models`, `gateway_status`. Authenticated like the LLM surface (gateway API key or trusted dashboard origin). Management route.
 - `GET /v1/models` includes every enabled virtual model with `virtual: true` and `providers`, the target

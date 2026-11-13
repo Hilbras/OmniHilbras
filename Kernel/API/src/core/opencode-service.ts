@@ -490,12 +490,16 @@ export class OpencodeServiceUnavailableError extends Error {
  * Discovery is retried on every call while it fails, so starting OpenCode after the gateway does not
  * require a restart; once found, the endpoint is reused because the registration file is stable.
  */
-export function createOpencodeLocalService(options: { file?: string; env?: Readonly<Record<string, string | undefined>>; directory?: string } = {}): OpencodeLocalService {
+export function createOpencodeLocalService(options: { file?: string; env?: Readonly<Record<string, string | undefined>>; directory?: string; ensure?: (options: { file?: string; env?: Readonly<Record<string, string | undefined>> }) => Promise<OpencodeServiceEndpoint | undefined> } = {}): OpencodeLocalService {
   let endpoint: OpencodeServiceEndpoint | undefined;
   const resolve = async () => {
-    endpoint ??= await discoverOpencodeService(options);
+    // Discovery first, then whatever the caller supplied — which is where the gateway starts the
+    // client's own server on a machine that has the binary but nothing running. It is injected rather
+    // than imported because that machinery lives in `opencode-runtime.ts` and imports this file.
+    const discover = options.ensure ?? ((o: { file?: string; env?: Readonly<Record<string, string | undefined>> }) => discoverOpencodeService(o));
+    endpoint ??= await discover({ ...(options.file ? { file: options.file } : {}), ...(options.env ? { env: options.env } : {}) });
     if (!endpoint) {
-      throw new OpencodeServiceUnavailableError('The OpenCode app is not running on this machine, and its free tier is only served through it. Start OpenCode and try again.');
+      throw new OpencodeServiceUnavailableError('The OpenCode app is not running on this machine, and its free tier is only served through it. Open the provider page and install the OpenCode runtime, or start OpenCode and try again.');
     }
     return endpoint;
   };

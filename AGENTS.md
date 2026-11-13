@@ -241,6 +241,19 @@ that is not on `main`.
   `Free usage limit reached`, because the request stops carrying the tool-carrying shape the free tier
   is granted to. **Read exposure remains and is documented, not fixed** —
   `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent ruleset and is opt-in.
+  **The runtime is installable by the gateway, and that is deliberate.** A device that has never seen
+  OpenCode cannot use the free tier at all — measured: the account's own token, org, client headers,
+  `ses_`-shaped session, tool-carrying body, and even the machine's own system proxy
+  (`gsettings` mode=manual, `127.0.0.1:10809`), all refused `429 FreeUsageLimitError` from Node, Bun and
+  curl, while the client's service answered a fresh nonce in the same minute. So `/v1/runtime/opencode`
+  reports what is here, `/install` downloads the official release into `<dataDir>/runtime/opencode`, and
+  `/start` runs `opencode serve --service`; the bridge starts it on demand instead of giving up.
+  `OMNIHILBRAS_OPENCODE_SERVICE` is `auto` (start a binary that exists — the default), `off`, or
+  `install` (download first; opt-in, because it is a ~200 MB fetch triggered by a model request).
+  **No upstream checksum is verified because upstream publishes none** — the official installer checks
+  only that the asset exists — so the artifact's SHA-256 is recorded and the installed binary is proved
+  by running `--version`. Do not upgrade that into a claim of verification. Nothing the gateway starts
+  is ever killed: the desktop app talks to the same service.
   **Reasoning is forwarded only until the first text delta.** The parts are concurrent — measured
   `reasoning.delta` … `text.started` … `text.delta` ×18 … `reasoning.ended` — so arrival order renders
   as thinking, answer, thinking, answer-continued-in-the-first-block. One thinking block, then the

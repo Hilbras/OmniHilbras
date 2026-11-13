@@ -24,6 +24,7 @@ import { handleProviderNodesRoute } from './routes/provider-nodes.js';
 import { handleObservabilityRoute } from './routes/observability.js';
 import { handlePxpipeRoute } from './routes/pxpipe.js';
 import { handleLocaleRoute } from './routes/locale.js';
+import { handleRuntimeRoute } from './routes/runtime.js';
 import { handleMediaRoute } from './routes/media.js';
 import { handleMcpRoute } from './routes/mcp.js';
 import type { RouteContext } from './routes/route-context.js';
@@ -83,6 +84,7 @@ const routes = [
   handleObservabilityRoute,
   handlePxpipeRoute,
   handleLocaleRoute,
+  handleRuntimeRoute,
   handleMediaRoute,
   handleMcpRoute,
   // Last, because it carries the authentication gate for the LLM surface and must not shadow
@@ -145,7 +147,7 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     };
     const responseOrigin = allowedOrigin ? requestOrigin : undefined;
     setCors(response, responseOrigin);
-    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage') || request.url?.startsWith('/v1/oauth') || request.url?.startsWith('/v1/virtual-models') || request.url?.startsWith('/v1/skills') || request.url?.startsWith('/v1/workspaces') || request.url?.startsWith('/v1/tunnels') || request.url?.startsWith('/v1/mitm') || request.url?.startsWith('/v1/proxy-pools') || request.url?.startsWith('/v1/provider-nodes') || request.url?.startsWith('/v1/observability') || request.url?.startsWith('/v1/pxpipe') || request.url?.startsWith('/v1/locale') || request.url?.startsWith('/v1/audio') || request.url?.startsWith('/v1/search')) response.setHeader('cache-control', 'no-store');
+    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage') || request.url?.startsWith('/v1/oauth') || request.url?.startsWith('/v1/virtual-models') || request.url?.startsWith('/v1/skills') || request.url?.startsWith('/v1/workspaces') || request.url?.startsWith('/v1/tunnels') || request.url?.startsWith('/v1/mitm') || request.url?.startsWith('/v1/proxy-pools') || request.url?.startsWith('/v1/provider-nodes') || request.url?.startsWith('/v1/observability') || request.url?.startsWith('/v1/pxpipe') || request.url?.startsWith('/v1/locale') || request.url?.startsWith('/v1/runtime') || request.url?.startsWith('/v1/audio') || request.url?.startsWith('/v1/search')) response.setHeader('cache-control', 'no-store');
     if ((request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') && !isJsonRequest(request)) {
       sendJson(response, 415, { error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'JSON requests must use application/json.' } }, responseOrigin);
       return;
