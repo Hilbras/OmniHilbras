@@ -240,7 +240,13 @@ that is not on `main`.
   the turn**: with nothing allowed back, a plain reply fails with the Console's own
   `Free usage limit reached`, because the request stops carrying the tool-carrying shape the free tier
   is granted to. **Read exposure remains and is documented, not fixed** —
-  `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent ruleset and is opt-in.
+  `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent ruleset and is opt-in — and that ruleset
+  allows `external_directory` and `shell`, so it is the whole machine, not a wider project.
+  **`external_directory` is what decides how far read-only reaches.** Measured: with the three allows
+  and nothing else, `read /etc/hostname` and `glob /etc/*.conf` are refused by the client with a
+  permission error naming `external_directory` (outside the workspace root); granting that one action
+  returns the file's contents. It is denied by **name** after the allows even though `*` already covers
+  it, because rules are last-match-wins and a later widening of `*` must not open the filesystem.
   **The runtime is installable by the gateway, and that is deliberate.** A device that has never seen
   OpenCode cannot use the free tier at all — measured: the account's own token, org, client headers,
   `ses_`-shaped session, tool-carrying body, and even the machine's own system proxy

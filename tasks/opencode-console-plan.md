@@ -174,3 +174,19 @@ Option 2 shipped instead:
   nothing" and "a failed download is no runtime, not a broken turn".
 - **Not done yet:** the dashboard button that calls `/install`. Until then a clean device uses
   `POST /v1/runtime/opencode/install` or `OMNIHILBRAS_OPENCODE_SERVICE=install`.
+
+
+### Phase 8 — How far "read-only" reaches (done)
+
+Measured with a session rooted at a temp project directory:
+
+| Ruleset | `read /etc/hostname` | `glob /etc/*.conf` |
+| --- | --- | --- |
+| our default (`*` deny, `read`/`grep`/`glob` allow) | refused — the client names `external_directory` | refused, same reason |
+| + `external_directory: allow` | answered with the file's contents | answered with the listing |
+
+So the default reads **inside the project directory only**, and the one action that widens it is now
+denied by name after the allows — rules are last-match-wins, so a later widening of `*` cannot silently
+open the filesystem. `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` still restores the client's own ruleset,
+which allows `external_directory` and `shell`; that is the whole machine by design, and documented as
+such rather than described as "more read".

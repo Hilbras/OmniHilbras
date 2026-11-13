@@ -268,6 +268,15 @@ export function opencodeServicePermissions(env: Readonly<Record<string, string |
   return [
     { action: '*', resource: '*', effect: 'deny' },
     ...READ_ONLY_TOOL_ACTIONS.map((action) => ({ action, resource: '*', effect: 'allow' })),
+    // Named again after the allows, even though `*` already denies it, because this is the rule that
+    // decides whether "read-only" means "read this project" or "read the whole machine". Rules are
+    // last-match-wins, so anyone who later widens `*` cannot accidentally open the filesystem with it.
+    //
+    // Measured: with the three allows and no `external_directory`, `read /etc/hostname` is rejected by
+    // the client with a permission error naming `external_directory`, and `glob /etc/*.conf` the same.
+    // Adding `{ action: 'external_directory', effect: 'allow' }` returns the file's contents. The
+    // client's own `explore` agent grants it.
+    { action: 'external_directory', resource: '*', effect: 'deny' },
   ];
 }
 

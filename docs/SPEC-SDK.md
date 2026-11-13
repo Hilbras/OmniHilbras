@@ -1070,9 +1070,18 @@ enumerating someone else's surface.
 carries the tool-carrying shape the free tier is granted to. Read-only tools are therefore not only
 the useful case, they are what keeps the turn admissible.
 
-**The residual exposure is real**: a model that can read can read anything the gateway user can, and
-the tool-tempting prompt above still produced a directory listing from `read`/`glob`.
-`OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent's own ruleset, and it is opt-in.
+**`external_directory` is the rule that decides how far "read-only" reaches.** Measured, with the
+three allows and nothing else: `read /etc/hostname` is rejected by the client with a permission error
+naming `external_directory` — the path is outside the workspace root — and `glob /etc/*.conf` is refused
+the same way. Adding `{ "action": "external_directory", "effect": "allow" }` returns the file's
+contents, which is exactly what the client's own `explore` agent grants. The gateway therefore denies
+it by **name** after the allows, even though `*` already covers it, because rules are last-match-wins:
+anyone who later widens `*` cannot accidentally open the filesystem with it.
+
+So the default session reads **inside the project directory it was given** and nowhere else. The
+residual exposure inside that directory is real — a tool-tempting prompt still produced a listing — and
+`OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent's own ruleset, which allows
+`external_directory` and `shell`: it is the whole machine, and it is opt-in.
 
 **One thinking block, then the answer.** A session is an agent loop, so one turn can be several
 steps, and each step emits its own reasoning and text parts — concurrently. Measured on a live turn:
