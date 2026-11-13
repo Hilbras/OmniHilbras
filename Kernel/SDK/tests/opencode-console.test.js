@@ -393,3 +393,52 @@ test('streaming through the service yields the answer as one delta plus a finish
   assert.equal(chunks.find((c) => c.delta.reasoning)?.delta.reasoning, 'because');
   assert.equal(chunks.at(-1)?.finishReason, 'stop');
 });
+
+test('a service turn streams: reasoning and text arrive as separate chunks', async () => {
+  /**
+   * The turn used to arrive as one delta after the whole thing finished. A free model takes minutes,
+   * so a client's first-byte deadline fired first (`504 The provider request timed out.`) and the
+   * thinking was only available once the answer was already over.
+   */
+  const adapter = new OpencodeConsoleAdapter({
+    transport: transport({}),
+    localService: {
+      async turn() {
+        throw new Error('turn must not be used when the service can stream');
+      },
+      async stream({ model, text, onDelta }) {
+        assert.equal(model, 'opencode/deepseek-v4.1-flash-free', 'the gateway strips the prefix, so the reference is rebuilt');
+        assert.equal(text, 'User: hi');
+        onDelta({ reasoning: 'think' });
+        onDelta({ text: 'O' });
+        onDelta({ text: 'K' });
+        return { text: 'OK', reasoning: 'think', finish: 'stop', model: 'deepseek-v4.1-flash-free' };
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of adapter.streamChat({ model: 'opencode/deepseek-v4.1-flash-free', messages: [{ role: 'user', content: 'hi' }] }, { credential: signedIn() })) chunks.push(chunk);
+
+  assert.deepEqual(chunks.filter((chunk) => chunk.delta.content).map((chunk) => chunk.delta.content), ['O', 'K']);
+  assert.equal(chunks.find((chunk) => chunk.delta.reasoning)?.delta.reasoning, 'think');
+  assert.equal(chunks.at(-1)?.finishReason, 'stop');
+});
+
+test('a stream that ended early is completed from the stored message, not left short', async () => {
+  const adapter = new OpencodeConsoleAdapter({
+    transport: transport({}),
+    localService: {
+      async turn() { throw new Error('turn must not be used when the service can stream'); },
+      async stream({ onDelta }) {
+        // The stream closed before the answer did — the stored message is the record, and the rest of
+        // it is delivered rather than dropped.
+        onDelta({ text: 'O' });
+        return { text: 'OK', finish: 'stop' };
+      },
+    },
+  });
+  const chunks = [];
+  for await (const chunk of adapter.streamChat({ model: 'opencode/deepseek-v4.1-flash-free', messages: [{ role: 'user', content: 'hi' }] }, { credential: signedIn() })) chunks.push(chunk);
+  assert.equal(chunks.map((chunk) => chunk.delta.content ?? '').join(''), 'OK');
+});

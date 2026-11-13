@@ -225,6 +225,18 @@ that is not on `main`.
   adapter sees a model (`opc/deepseek-v4.1-flash-free` arrives as `deepseek-v4.1-flash-free`), the
   adapter rebuilds the service reference as `opencode/<bare>`. A card or a doc that says this provider
   works with the OpenCode app closed is wrong.
+  **The turn is streamed from the service's event stream, and the session is an agent with tools.**
+  `/api/experimental/session/:id/wait` answers when the whole turn is over, so a client saw nothing for
+  minutes, its 120 s first-byte deadline fired and the failure read `504 The provider request timed
+  out.` — streaming and thinking were both invisible until the end. `GET /api/event` publishes
+  `session.text.delta` and `session.reasoning.delta` while the turn runs, and the subscription is opened
+  **before** the prompt or a delta in between is lost. The second half is a security boundary, measured:
+  a session inherits OpenCode's `build` agent (`*: allow`), so a prompt asking for a directory listing
+  ran the tool and answered ``Contents of `/home/gin` (108 entries)`` — a gateway key was a file-reader
+  and a shell. The gateway therefore creates the session with a ruleset denying `shell`, `edit`, `write`,
+  `patch`, `webfetch`, `websearch`, `task`, `subagent`, `browser`, and keeps `read`/`grep`/`glob`;
+  **read exposure remains and is documented, not fixed** — `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all`
+  restores the agent ruleset and is opt-in.
 - `public/providers/` is **input, not build output**. The `logoPolarity()` plugin reads it and
   writes `src/lib/logoPolarity.generated.ts`; nothing writes into the directory. Never stage with
   `':(exclude)public/providers'` — that silently dropped 141 required assets from 18 releases, two

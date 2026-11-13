@@ -136,16 +136,130 @@ export function parseModelRef(model: string): { providerID: string; id: string; 
   return { providerID, id, ...(hash === -1 ? {} : { variant: rest.slice(hash + 1) }) };
 }
 
+/** One delta as the service reports it: text, reasoning, or both. */
+export type OpencodeServiceDelta = { text?: string; reasoning?: string };
+
+export type OpencodeServiceStreamOptions = {
+  keepSession?: boolean;
+  fetch?: FetchLike;
+  /** Called for every delta the service publishes, while the turn runs. */
+  onDelta?: (delta: OpencodeServiceDelta) => void;
+  /** How long a silent event stream is tolerated before the turn is abandoned. */
+  idleTimeoutMs?: number;
+  /**
+   * The session's ruleset. `undefined` means "decide from the environment", `null` means "send none"
+   * (the agent's own `*: allow`), and an array is used as given.
+   */
+  permissions?: Array<{ action: string; resource: string; effect: string }> | null;
+};
+
+type ByteReader = { read(): Promise<{ done: boolean; value?: Uint8Array }> };
+
+async function readWithIdle(reader: ByteReader, idleMs: number): Promise<{ done: boolean; value?: Uint8Array }> {
+  let timer: NodeJS.Timeout | undefined;
+  const idle = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`The OpenCode service went quiet for ${Math.round(idleMs / 1000)}s.`)), idleMs);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([reader.read(), idle]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
- * Runs one turn through the local service and returns the assistant's text.
+ * Reads the assistant message out of the session's stored record.
  *
- * The session is deleted afterwards unless the caller asked to keep it: a gateway turn is stateless,
- * and leaving a session per request would grow the service's database without bound.
+ * The event stream is the live view; this is the record. It supplies `model` and `finish`, and it
+ * fills anything the stream did not carry — a delta published before the subscription attached.
  */
-export async function runOpencodeServiceTurn(
+async function readAssistant(
+  callHere: (path: string, init: { method: string; body?: unknown; signal?: AbortSignal; expectNoContent?: boolean }) => Promise<Json>,
+  sessionID: string,
+  signal: AbortSignal,
+): Promise<OpencodeServiceTurnResult | undefined> {
+  const listed = await callHere(`/api/session/${encodeURIComponent(sessionID)}/message`, { method: 'GET', signal });
+  const messages = Array.isArray((listed as { data?: unknown }).data) ? ((listed as { data: unknown[] }).data) : [];
+  const assistant = [...messages].reverse().find((entry) => (entry as { type?: unknown })?.type === 'assistant') as
+    | { content?: Array<{ type?: string; text?: string; thinking?: string }>; model?: { id?: string }; finish?: string }
+    | undefined;
+  if (!assistant) return undefined;
+  const content = Array.isArray(assistant.content) ? assistant.content : [];
+  const text = content.filter((part) => part?.type === 'text').map((part) => part.text ?? '').join('');
+  const reasoning = content
+    .filter((part) => part?.type === 'reasoning' || part?.type === 'thinking')
+    .map((part) => part.text ?? part.thinking ?? '')
+    .join('');
+  return {
+    text,
+    ...(reasoning ? { reasoning } : {}),
+    ...(assistant.model?.id ? { model: assistant.model.id } : {}),
+    ...(assistant.finish ? { finish: assistant.finish } : {}),
+  };
+}
+
+/**
+ * Runs one turn through the local service, reporting deltas as they arrive.
+ *
+ * ## Why the event stream, and not `/wait`
+ *
+ * `/wait` answers when the session goes idle — the whole turn in one response. A client saw nothing
+ * for two to three minutes, its 120 s first-byte deadline fired, and the failure read `504 The
+ * provider request timed out.` — with no streaming and no thinking, because both only existed once
+ * the turn was already over.
+ *
+ * The service publishes a per-turn event stream (`GET /api/event`, SSE) whose events carry the
+ * deltas directly. Measured live on a free model:
+ *
+ * ```
+ * session.reasoning.delta   {sessionID, assistantMessageID, ordinal, delta}
+ * session.text.delta        {sessionID, assistantMessageID, ordinal, delta}
+ * session.text.ended        {sessionID, assistantMessageID, ordinal, text}
+ * session.usage.updated     {sessionID, cost, tokens:{input, output, reasoning, cache}}
+ * session.execution.succeeded | session.execution.failed   {sessionID}
+ * ```
+ *
+ * Subscribing **before** the prompt is what makes this complete: a delta published between "prompt
+ * accepted" and "stream attached" would otherwise be lost. The stored message is still read at the
+ * end, because it is the record and supplies `model` and `finish`.
+ *
+ * The session is deleted afterwards unless the caller asked to keep it: a gateway turn is
+ * stateless, and leaving a session per request would grow the service's database without bound.
+ */
+/** The tool actions a chat bridge must not hand the model. */
+const UNSAFE_TOOL_ACTIONS = ['shell', 'edit', 'write', 'patch', 'webfetch', 'websearch', 'task', 'subagent', 'browser'] as const;
+
+/**
+ * What the session the gateway creates is allowed to do.
+ *
+ * ## Why this exists — measured, not assumed
+ *
+ * A session created by this bridge is an **agent** session, not a completion: it inherits OpenCode's
+ * `build` agent, whose ruleset is `*: allow`. A prompt saying "list the files in the current directory
+ * using a tool" did exactly that — the service emitted four `session.tool.*` events and the answer
+ * began `Contents of \`/home/gin\` (108 entries)`. A chat-completions request from the dashboard, an
+ * agent, or anything else holding a gateway key could therefore read files and run commands on the
+ * operator's machine and send the result to the provider.
+ *
+ * So the gateway denies the actions that execute or reach the network, and keeps the read-only ones
+ * (`read`, `grep`, `glob`) so a coding agent can still answer about a file it was handed. The read
+ * exposure is stated in `docs/SPEC-SDK.md` rather than hidden: a model that can read can read anything
+ * the gateway user can. `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent's own ruleset, and
+ * it is opt-in.
+ */
+export function opencodeServicePermissions(env: Readonly<Record<string, string | undefined>> = process.env): Array<{ action: string; resource: string; effect: string }> | undefined {
+  if ((env.OMNIHILBRAS_OPENCODE_SERVICE_TOOLS ?? '').trim().toLowerCase() === 'all') return undefined;
+  return [
+    { action: '*', resource: '*', effect: 'allow' },
+    ...UNSAFE_TOOL_ACTIONS.map((action) => ({ action, resource: '*', effect: 'deny' })),
+  ];
+}
+
+export async function streamOpencodeServiceTurn(
   endpoint: OpencodeServiceEndpoint,
   input: OpencodeServiceTurnInput,
-  options: { keepSession?: boolean; fetch?: FetchLike } = {},
+  options: OpencodeServiceStreamOptions = {},
 ): Promise<OpencodeServiceTurnResult> {
   const fetchImpl = options.fetch ?? fetch;
   const callHere = (path: string, init: { method: string; body?: unknown; signal?: AbortSignal; expectNoContent?: boolean }) => call(endpoint, path, init, fetchImpl);
@@ -154,46 +268,127 @@ export async function runOpencodeServiceTurn(
 
   const created = await callHere('/api/session', {
     method: 'POST',
-    body: { model: ref, ...(input.directory ? { location: { directory: input.directory } } : {}) },
+    body: {
+      model: ref,
+      ...(options.permissions === undefined ? { permissions: opencodeServicePermissions() } : options.permissions ? { permissions: options.permissions } : {}),
+      ...(input.directory ? { location: { directory: input.directory } } : {}),
+    },
     ...(input.signal ? { signal: input.signal } : {}),
   });
   const sessionID = ((created.data ?? {}) as { id?: unknown }).id;
   if (typeof sessionID !== 'string' || !sessionID) throw new Error('The local OpenCode service created no session.');
 
+  const abort = new AbortController();
+  const relay = () => abort.abort(input.signal?.reason);
+  if (input.signal) {
+    if (input.signal.aborted) abort.abort(input.signal.reason);
+    else input.signal.addEventListener('abort', relay, { once: true });
+  }
+  const signal = abort.signal;
+  let cancelStream: (() => void) | undefined;
+
   try {
+    const events = await fetchImpl(`${endpoint.url}/api/event`, {
+      method: 'GET',
+      headers: { authorization: basicAuth(endpoint.password), accept: 'text/event-stream' },
+      signal,
+    });
+    if (!events.ok || !events.body) throw new Error(`The local OpenCode service refused GET /api/event: HTTP ${events.status}`);
+    const chunks = events.body.getReader() as ByteReader;
+    cancelStream = () => { void (events.body as ReadableStream<Uint8Array>).cancel().catch(() => undefined); };
+
     await callHere(`/api/session/${encodeURIComponent(sessionID)}/prompt`, {
       method: 'POST',
       body: { text: input.text },
-      ...(input.signal ? { signal: input.signal } : {}),
+      signal,
     });
-    await callHere(`/api/experimental/session/${encodeURIComponent(sessionID)}/wait`, {
-      method: 'POST',
-      expectNoContent: true,
-      ...(input.signal ? { signal: input.signal } : {}),
-    });
-    const listed = await callHere(`/api/session/${encodeURIComponent(sessionID)}/message`, {
-      method: 'GET',
-      ...(input.signal ? { signal: input.signal } : {}),
-    });
-    const messages = Array.isArray((listed as { data?: unknown }).data) ? ((listed as { data: unknown[] }).data) : [];
-    const assistant = [...messages].reverse().find((entry) => (entry as { type?: unknown })?.type === 'assistant') as
-      | { content?: Array<{ type?: string; text?: string; thinking?: string }>; model?: { id?: string }; finish?: string }
-      | undefined;
-    if (!assistant) throw new Error('The local OpenCode service returned no assistant message.');
-    const content = Array.isArray(assistant.content) ? assistant.content : [];
-    const text = content.filter((part) => part?.type === 'text').map((part) => part.text ?? '').join('');
-    const reasoning = content.filter((part) => part?.type === 'reasoning' || part?.type === 'thinking').map((part) => part.text ?? part.thinking ?? '').join('');
+
+    const decoder = new TextDecoder();
+    const idleMs = options.idleTimeoutMs ?? 300_000;
+    let buffer = '';
+    let text = '';
+    let reasoning = '';
+    let failure: string | undefined;
+    let finished = false;
+
+    while (!finished) {
+      const chunk = await readWithIdle(chunks, idleMs);
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value ?? new Uint8Array(), { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trimEnd();
+        if (!trimmed.startsWith('data:')) continue;
+        const payload = trimmed.slice('data:'.length).trim();
+        if (!payload) continue;
+        let event: { type?: string; data?: Record<string, unknown> } | undefined;
+        try {
+          event = JSON.parse(payload) as { type?: string; data?: Record<string, unknown> };
+        } catch {
+          continue;
+        }
+        const data = event?.data ?? {};
+        // Every event carries a sessionID except the process-wide ones; another turn's output is not
+        // this turn's answer.
+        if (data.sessionID !== sessionID) continue;
+        if (event?.type === 'session.text.delta' || event?.type === 'session.reasoning.delta') {
+          const delta = typeof data.delta === 'string' ? data.delta : '';
+          if (!delta) continue;
+          if (event.type === 'session.text.delta') {
+            text += delta;
+            options.onDelta?.({ text: delta });
+          } else {
+            reasoning += delta;
+            options.onDelta?.({ reasoning: delta });
+          }
+          continue;
+        }
+        if (event?.type === 'session.execution.succeeded' || event?.type === 'session.idle') {
+          finished = true;
+          break;
+        }
+        if (event?.type === 'session.execution.failed') {
+          failure = typeof data.error === 'string' ? data.error : 'The OpenCode service failed the turn.';
+          finished = true;
+          break;
+        }
+      }
+    }
+
+    if (failure) throw new Error(failure);
+
+    const stored = await readAssistant(callHere, sessionID, signal).catch(() => undefined);
+    const finalText = stored?.text || text;
+    const finalReasoning = stored?.reasoning || reasoning;
     return {
-      text,
-      ...(reasoning ? { reasoning } : {}),
-      ...(assistant.model?.id ? { model: assistant.model.id } : {}),
-      ...(assistant.finish ? { finish: assistant.finish } : {}),
+      text: finalText,
+      ...(finalReasoning ? { reasoning: finalReasoning } : {}),
+      ...(stored?.model ? { model: stored.model } : {}),
+      ...(stored?.finish ? { finish: stored.finish } : {}),
     };
   } finally {
+    cancelStream?.();
+    abort.abort();
+    input.signal?.removeEventListener('abort', relay);
     if (!options.keepSession) {
       await callHere(`/api/session/${encodeURIComponent(sessionID)}`, { method: 'DELETE' }).catch(() => undefined);
     }
   }
+}
+
+/**
+ * Runs one turn and returns the answer once it is complete.
+ *
+ * The stream is what makes the answer arrive at all — see `streamOpencodeServiceTurn`. A caller that
+ * does not want the deltas just does not supply `onDelta`.
+ */
+export async function runOpencodeServiceTurn(
+  endpoint: OpencodeServiceEndpoint,
+  input: OpencodeServiceTurnInput,
+  options: OpencodeServiceStreamOptions = {},
+): Promise<OpencodeServiceTurnResult> {
+  return streamOpencodeServiceTurn(endpoint, input, options);
 }
 
 /**
@@ -224,6 +419,19 @@ export function flattenMessagesForService(messages: ReadonlyArray<{ role: string
  */
 export type OpencodeLocalService = {
   turn(input: { model: string; text: string; signal?: AbortSignal }): Promise<{ text: string; reasoning?: string; finish?: string; model?: string }>;
+  /**
+   * The same turn, reporting deltas while it runs.
+   *
+   * Without this the answer arrived in one piece after the whole turn — two to three minutes for a
+   * free model — and a client's first-byte deadline fired first, so it saw `504` and never saw the
+   * thinking at all.
+   */
+  stream?(input: {
+    model: string;
+    text: string;
+    signal?: AbortSignal;
+    onDelta: (delta: OpencodeServiceDelta) => void;
+  }): Promise<{ text: string; reasoning?: string; finish?: string; model?: string }>;
 };
 
 /** Thrown when OpenCode is not running here. The adapter falls back to the direct lane on this name. */
@@ -242,24 +450,37 @@ export class OpencodeServiceUnavailableError extends Error {
  */
 export function createOpencodeLocalService(options: { file?: string; env?: Readonly<Record<string, string | undefined>>; directory?: string } = {}): OpencodeLocalService {
   let endpoint: OpencodeServiceEndpoint | undefined;
+  const resolve = async () => {
+    endpoint ??= await discoverOpencodeService(options);
+    if (!endpoint) {
+      throw new OpencodeServiceUnavailableError('The OpenCode app is not running on this machine, and its free tier is only served through it. Start OpenCode and try again.');
+    }
+    return endpoint;
+  };
+  const finish = (result: OpencodeServiceTurnResult) => ({
+    text: result.text,
+    ...(result.reasoning ? { reasoning: result.reasoning } : {}),
+    ...(result.finish ? { finish: result.finish } : {}),
+    ...(result.model ? { model: result.model } : {}),
+  });
   return {
     async turn({ model, text, signal }) {
-      endpoint ??= await discoverOpencodeService(options);
-      if (!endpoint) {
-        throw new OpencodeServiceUnavailableError('The OpenCode app is not running on this machine, and its free tier is only served through it. Start OpenCode and try again.');
-      }
-      const result = await runOpencodeServiceTurn(endpoint, {
+      const found = await resolve();
+      return finish(await streamOpencodeServiceTurn(found, {
         model,
         text,
         ...(options.directory ? { directory: options.directory } : {}),
         ...(signal ? { signal } : {}),
-      });
-      return {
-        text: result.text,
-        ...(result.reasoning ? { reasoning: result.reasoning } : {}),
-        ...(result.finish ? { finish: result.finish } : {}),
-        ...(result.model ? { model: result.model } : {}),
-      };
+      }, { permissions: opencodeServicePermissions(options.env) }));
+    },
+    async stream({ model, text, signal, onDelta }) {
+      const found = await resolve();
+      return finish(await streamOpencodeServiceTurn(found, {
+        model,
+        text,
+        ...(options.directory ? { directory: options.directory } : {}),
+        ...(signal ? { signal } : {}),
+      }, { onDelta, permissions: opencodeServicePermissions(options.env) }));
     },
   };
 }

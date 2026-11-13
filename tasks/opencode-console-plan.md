@@ -111,3 +111,25 @@ service is the transport that qualifies for the free tier.
   (`FreeUsageLimitError` / `Insufficient balance` with the billing URL) rather than
   `PROVIDER_REQUEST_FAILED` — met.
 - `pnpm test` (repo + SDK + gateway) passes apart from the five pre-existing routing failures.
+### Phase 5 — Streaming, thinking, and the tool boundary (done)
+
+Measured from a client: `Retrying (2/10) · APIStatusError 504 The provider request timed out.`, no
+streaming, no thinking.
+
+- **The 504 was ours.** The bridge drove `/api/experimental/session/:id/wait`, which answers when the
+  whole turn is over; the adapter then yielded that answer as one delta. The gateway's first-byte
+  deadline is 120 s, a free model takes longer, so the client gave up first.
+- **Fix:** subscribe to `GET /api/event` (SSE) *before* the prompt, forward `session.text.delta` and
+  `session.reasoning.delta` as chunks, stop on `session.execution.succeeded` / `.failed`, and read the
+  stored message afterwards for `model`, `finish`, and any delta the subscription missed. Reasoning
+  deltas ride out as `reasoning_content`.
+- **Measured through the gateway:** first byte 2.7–5.3 s, four SSE chunks, assembled answer exact.
+- **The session is an agent with tools.** A prompt asking for a directory listing ran the shell and
+  answered ``Contents of `/home/gin` (108 entries)`` — a gateway key was a file reader and a shell.
+  The gateway now creates the session with `shell`, `edit`, `write`, `patch`, `webfetch`, `websearch`,
+  `task`, `subagent`, `browser` denied; `read`/`grep`/`glob` stay so a coding agent can answer about a
+  file it was handed. `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` opts back into the agent's own ruleset.
+  **Read exposure remains** — a model that can read can read anything the gateway user can.
+- **Not verified after the change:** the free tier's quota was exhausted by the verification runs
+  themselves (`provider.quota`, retry after ≈ 14 h), so the deny-by-default ruleset has been exercised
+  against a scripted service in tests, not against a live turn.

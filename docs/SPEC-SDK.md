@@ -1014,12 +1014,40 @@ it when it is present:
 | --- | --- |
 | Discovery | `~/.local/state/opencode/service.json` → `{url, pid, password, version}` |
 | Auth | HTTP Basic, user `opencode`, password from that file |
-| A turn | `POST /api/session` → `POST /api/session/:id/prompt` → `POST /api/experimental/session/:id/wait` → `GET /api/session/:id/message` |
+| A turn | `POST /api/session` → `GET /api/event` (SSE) → `POST /api/session/:id/prompt` → read deltas → `GET /api/session/:id/message` → `DELETE /api/session/:id` |
 
 There is no `/v1/chat/completions` on the service — it is an agent session, so the whole
-conversation is flattened into one prompt with the roles kept as text, and the answer is
-returned as a single stream delta. The provider **lists the models** normally, and reading
-`/api/v2/config` drops the ones the account's entitlement marks `disabled`.
+conversation is flattened into one prompt with the roles kept as text.
+
+**The turn is streamed, and that is not decoration.** The first version drove
+`POST /api/experimental/session/:id/wait` and read the answer afterwards: the client saw nothing for
+two to three minutes, its 120 s first-byte deadline fired, and the failure read
+`504 The provider request timed out.` — with no streaming and no thinking, because both only existed
+once the turn was already over. The service publishes a per-turn event stream, measured live on a free
+model:
+
+```
+session.reasoning.delta   {sessionID, assistantMessageID, ordinal, delta}
+session.text.delta        {sessionID, assistantMessageID, ordinal, delta}
+session.text.ended        {sessionID, assistantMessageID, ordinal, text}
+session.usage.updated     {sessionID, cost, tokens:{input, output, reasoning, cache}}
+session.execution.succeeded | session.execution.failed   {sessionID, error?}
+```
+
+The subscription is opened **before** the prompt, or a delta published in between is lost; the
+stored message is read at the end anyway, because it is the record and supplies `model` and `finish`.
+Reasoning deltas become `reasoning_content`, so a thinking model's thinking arrives as it happens.
+Measured through the gateway: first byte at 2.7–5.3 s, four SSE chunks, assembled answer exact.
+
+**A session created this way is an agent, and that is a security boundary.** It inherits OpenCode's
+`build` agent, whose ruleset is `*: allow`. Measured: a prompt saying "list the files in the current
+directory using a tool" ran the tool, and the answer began ``Contents of `/home/gin` (108 entries)``.
+Any caller holding a gateway key could therefore read files and run commands on the operator's
+machine and send the result to the provider. The gateway now creates the session with a ruleset that
+denies `shell`, `edit`, `write`, `patch`, `webfetch`, `websearch`, `task`, `subagent` and `browser`,
+and keeps `read`, `grep` and `glob` so a coding agent can answer about a file it was handed.
+**The residual exposure is real**: a model that can read can read anything the gateway user can.
+`OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the agent's own ruleset, and it is opt-in.
 
 The bridge lives in the gateway (`Kernel/API/src/core/opencode-service.ts`) because it
 needs the filesystem; the SDK takes a `localService` hook, so the SDK stays browser-safe.

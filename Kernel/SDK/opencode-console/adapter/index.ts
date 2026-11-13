@@ -250,6 +250,19 @@ export type OpencodeConsoleAdapterOptions = {
    */
   localService?: {
     turn(input: { model: string; text: string; signal?: AbortSignal }): Promise<{ text: string; reasoning?: string; finish?: string; model?: string }>;
+    /**
+     * The same turn, reporting deltas while it runs.
+     *
+     * A turn that reports nothing until it is finished is a turn a client's first-byte deadline can
+     * cancel (`504 The provider request timed out.`), and the thinking is invisible until the end —
+     * both measured, both fixed by forwarding the service's event stream.
+     */
+    stream?(input: {
+      model: string;
+      text: string;
+      signal?: AbortSignal;
+      onDelta: (delta: { text?: string; reasoning?: string }) => void;
+    }): Promise<{ text: string; reasoning?: string; finish?: string; model?: string }>;
   };
 };
 
@@ -365,6 +378,12 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
     return adapter.chat(request, { ...context, credential: this.laneCredential(await this.credential(context)) });
   }
 
+  /** The reference the local service wants, rebuilt from the bare id the gateway hands an adapter. */
+  private serviceModelRef(model: string): string {
+    const bare = model.includes('/') ? model.slice(model.lastIndexOf('/') + 1) : model;
+    return `${OPENCODE_CONSOLE.serviceProviderId}/${bare}`;
+  }
+
   /**
    * One turn through the OpenCode app's local service, or `undefined` when it is not running.
    *
@@ -378,9 +397,8 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
       // The gateway hands an adapter a bare model id, so the reference the service wants is rebuilt
       // here: `opc/deepseek-v4.1-flash-free` arrives as `deepseek-v4.1-flash-free` and leaves as
       // `opencode/deepseek-v4.1-flash-free`.
-      const bare = request.model.includes('/') ? request.model.slice(request.model.lastIndexOf('/') + 1) : request.model;
       return await this.localService.turn({
-        model: `${OPENCODE_CONSOLE.serviceProviderId}/${bare}`,
+        model: this.serviceModelRef(request.model),
         text: flattenForService(request.messages),
         ...(context.signal ? { signal: context.signal } : {}),
       });
@@ -391,9 +409,72 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
   }
 
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
-    // The service runs a whole turn and returns its text, so a stream through it is that answer
-    // delivered as one delta. The free tier is what matters here; token-by-token is the direct lane's
-    // property, and that lane refuses this network.
+    const service = this.localService;
+    if (service?.stream) {
+      const id = `opencode-service-${this.now().toString(36)}`;
+      const queue: Array<{ text?: string; reasoning?: string }> = [];
+      let wake: (() => void) | undefined;
+      let settled: { result?: { text: string; reasoning?: string; finish?: string; model?: string }; error?: unknown } | undefined;
+      // Deltas are pushed while the generator is suspended at a `yield`, so the queue is what carries
+      // them across: the callback cannot yield, and awaiting the whole turn is the failure this path
+      // exists to remove.
+      void service.stream({
+        model: this.serviceModelRef(request.model),
+        text: flattenForService(request.messages),
+        ...(context.signal ? { signal: context.signal } : {}),
+        onDelta: (delta) => {
+          queue.push(delta);
+          const resume = wake;
+          wake = undefined;
+          resume?.();
+        },
+      }).then(
+        (result) => { settled = { result }; const resume = wake; wake = undefined; resume?.(); },
+        (error) => { settled = { error }; const resume = wake; wake = undefined; resume?.(); },
+      );
+
+      let model = request.model;
+      let streamed = '';
+      while (true) {
+        const delta = queue.shift();
+        if (delta) {
+          if (delta.text !== undefined) streamed += delta.text;
+          yield {
+            id,
+            providerId: this.id,
+            model,
+            delta: {
+              ...(delta.text !== undefined ? { role: 'assistant' as const, content: delta.text } : {}),
+              ...(delta.reasoning !== undefined ? { reasoning: delta.reasoning } : {}),
+            },
+          };
+          continue;
+        }
+        if (settled) break;
+        await new Promise<void>((resolve) => { wake = resolve; });
+      }
+
+      const outcome = settled!;
+      if (outcome.error) {
+        if ((outcome.error as { name?: string } | undefined)?.name === 'OpencodeServiceUnavailable') {
+          // Nothing was streamed and nothing was tried: fall through to the direct lane below, which
+          // reports the Console's own refusal rather than a transport error.
+        } else {
+          throw outcome.error;
+        }
+      } else if (outcome.result) {
+        model = outcome.result.model ?? model;
+        // A delta published before the subscription attached is not in the stream; the stored message
+        // is the record, so whatever it holds beyond what was streamed is delivered now.
+        const full = outcome.result.text;
+        if (full.startsWith(streamed) && full.length > streamed.length) {
+          yield { id, providerId: this.id, model, delta: { role: 'assistant', content: full.slice(streamed.length) } };
+        }
+        yield { id, providerId: this.id, model, delta: {}, finishReason: outcome.result.finish === 'tool_calls' ? 'tool_calls' : 'stop' };
+        return;
+      }
+    }
+
     const turn = await this.localTurn(request, context);
     if (turn) {
       const id = `opencode-service-${this.now().toString(36)}`;
