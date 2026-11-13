@@ -123,7 +123,7 @@ export default function DownloadPage() {
             <div className="card p-5">
               <Terminal className="h-4 w-4 text-gold-text" aria-hidden="true" />
               <h2 className="mt-3 text-sm font-semibold">Same API</h2>
-              <p className="muted mt-1.5 text-xs leading-relaxed">Point any OpenAI-compatible client at <span className="font-mono">127.0.0.1:8787</span>.</p>
+              <p className="muted mt-1.5 text-xs leading-relaxed">Point any OpenAI-compatible client at <span className="font-mono">127.0.0.1:20138</span>.</p>
             </div>
             <div className="card p-5">
               <CheckCircle2 className="h-4 w-4 text-gold-text" aria-hidden="true" />

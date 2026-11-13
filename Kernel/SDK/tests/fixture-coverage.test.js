@@ -145,6 +145,7 @@ const NO_CAPTURE_YET = {
   // are the source of the frame shapes. Their tests replay those frames explicitly.
   'perplexity-web': 'the only captureable body is a live ask SSE stream from a signed-in Perplexity account; this machine has no such session, so the block and delta shapes are replayed from the old executor\'s measured parser fixture in `perplexity-web.test.js`',
   'grok-web': 'the only captureable body is a live conversation NDJSON stream from a signed-in grok.com subscription; this machine has no such session, so the token/modelResponse/fingerprint frames are replayed from the old executor\'s measured fixture in `grok-web.test.js`',
+  'zcode-start-plan': 'its `/messages` endpoint needs a signed-in Start Plan account, i.e. a session token this machine does not have; the request shape (stock system, effort mapping, dual auth headers) is pinned against a scripted transport in `zcode.test.js`',
   codex: 'a real Responses SSE capture requires an approved Codex account and locally configured OAuth client; no live sign-in was authorized, so request and terminal-frame behavior is covered by scripted tests without claiming a provider capture',
 };
 

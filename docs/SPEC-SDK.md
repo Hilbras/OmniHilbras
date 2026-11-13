@@ -54,7 +54,7 @@ and a registration, not an edit to routing or request execution.
   Publishing is suspended; the per-provider packages under `Kernel/SDK/` are private.
 - Package manager: pnpm workspaces.
 - SDK code is runtime-agnostic and uses standard `fetch` and Web Streams.
-- The first gateway binds to `127.0.0.1:8787` and has no authentication in local mode.
+- The first gateway binds to `127.0.0.1:20138` and has no authentication in local mode.
 - Local mode rejects non-loopback binds and wildcard CORS; browser access uses an explicit dashboard-origin allowlist.
 - Credentials are injected through a `SecretStore` boundary; the first implementation reads environment variables and, for the OpenRouter local flow, persists a validated key in an encrypted gateway-owned vault. Secret values are never logged or returned by the API.
 - The SDK does not require a web framework. The local gateway starts with a small Node HTTP adapter and keeps the service layer framework-independent.
@@ -292,6 +292,8 @@ The first local gateway exposes:
 - `GET /v1/oauth/opencode/session/:id` — poll the OpenCode Zen sign-in to completion.
 - `POST /v1/oauth/opencode-go/start` — begin an OpenCode Console device-flow sign-in that saves under the OpenCode Go provider id.
 - `GET /v1/oauth/opencode-go/session/:id` — poll the OpenCode Go sign-in to completion.
+- `POST /v1/oauth/zcode/start` — begin a standalone ZCode sign-in against ZCode's own OAuth server. Body `{ "provider": "zai" | "bigmodel" }`, defaulting to `zai`. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; the server-issued poll token stays in the gateway and is never returned to the browser. This is ZCode's `oauth/cli` flow, so no desktop app and no `zcode://` scheme handler are needed.
+- `GET /v1/oauth/zcode/session/:id` — one poll of that sign-in: `pending`, `expired`, `failed`, or `ready`. On `ready` the gateway proves a 1-token turn with `data.token` (the `zcodejwttoken` the OAuth server returns), then saves the connection; a plan that cannot infer on the Start Plan lane is reported instead of stored.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
 - `POST /v1/backup/export` — body `{"passphrase": "..."}`; returns `{"backup": envelope}`. The envelope is
   AES-256-GCM with a scrypt-derived key and contains connections with their credentials, provider
@@ -363,6 +365,11 @@ The first local gateway exposes:
   `perplexity.ai/rest/sse/perplexity_ask`, storing nothing.
 - `POST /v1/web-cookie/perplexity/connect` — store the Perplexity Web session after the check accepts it.
   The seven `pplx-*` ids are the old registry's catalog; a turn is SSE and the adapter forwards real chunks.
+- `POST /v1/web-cookie/zcode/check` — prove the pasted Start Plan token with one 1-token “Reply only OK.”
+  turn to `zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`, storing nothing. The model list is static,
+  so a catalog read would prove nothing about the token.
+- `POST /v1/web-cookie/zcode/connect` — store the token as a `zcode` connection after that turn succeeds.
+  The card sits in the OAuth group but the credential is a pasted session, not a redirect flow.
 - `POST /v1/web-cookie/gemini/check` — open `gemini.google.com` in a browser with the pasted
   `__Secure-1PSID`/`__Secure-1PSIDTS` cookies and report whether the session is signed in, storing nothing.
   It costs a page load because a local check cannot tell a working session from a revoked one, and it is a
@@ -976,6 +983,51 @@ compatible adapter appends the whole chat path.
 saved connection's catalog and stores the result, keeping custom models. Without it a
 connection saved with no models has no way back short of signing in again, which for a
 device flow means another browser approval.
+
+#### The free tier is served through the OpenCode app's own service
+
+Measured from this machine, a **free** model refuses a direct request:
+
+```
+POST https://opencode.ai/inference/openai/v1/chat/completions
+429 {"type":"error","error":{"type":"FreeUsageLimitError", ...}}
+```
+
+That is not a credential problem and not a header problem. The same request, with the
+account's own session credential and the client's own headers, was issued from **Node and
+from Bun** and refused identically; a paid model on the same credential answers `402
+Insufficient balance. Top up at …/billing`, which is the endpoint working. Seconds later
+the OpenCode app served the same free model.
+
+So the transport that qualifies is the **app's own local service**, and the gateway uses
+it when it is present:
+
+| Piece | Where |
+| --- | --- |
+| Discovery | `~/.local/state/opencode/service.json` → `{url, pid, password, version}` |
+| Auth | HTTP Basic, user `opencode`, password from that file |
+| A turn | `POST /api/session` → `POST /api/session/:id/prompt` → `POST /api/experimental/session/:id/wait` → `GET /api/session/:id/message` |
+
+There is no `/v1/chat/completions` on the service — it is an agent session, so the whole
+conversation is flattened into one prompt with the roles kept as text, and the answer is
+returned as a single stream delta. The provider **lists the models** normally, and reading
+`/api/v2/config` drops the ones the account's entitlement marks `disabled`.
+
+The bridge lives in the gateway (`Kernel/API/src/core/opencode-service.ts`) because it
+needs the filesystem; the SDK takes a `localService` hook, so the SDK stays browser-safe.
+When the service is not running the hook throws `OpencodeServiceUnavailable`, and the turn
+falls back to the direct lane — which reports the Console's own refusal rather than a
+generic failure. **A turn that started and failed reports its own error**; it is not
+retried on the lane this network always gets refused on.
+
+Two consequences worth stating plainly:
+
+- `opencode-console` now depends on the OpenCode app running locally for its free models.
+  With the app closed, free models answer with the Console's `FreeUsageLimitError`, and
+  paid models keep working through the direct lane.
+- The gateway strips the provider prefix before an adapter sees a model
+  (`opc/deepseek-v4.1-flash-free` arrives as `deepseek-v4.1-flash-free`), so the adapter
+  rebuilds the service reference as `opencode/<bare>` — the service's own provider id.
 
 ### Model metadata and filters
 
@@ -1878,8 +1930,9 @@ it is the right trade.
 ### A refusal is not an outage
 
 The gateway answers **`403 CORS_ORIGIN_DENIED`** when a request carries an `Origin` that is not
-on its allowlist (`http://localhost:5173`, `http://127.0.0.1:5173`, the Vite fallback ports
-`5174`, and the Android shell origins `https://localhost` and `http://localhost` are). The browser cannot
+on its allowlist (`http://localhost:5173`, `http://127.0.0.1:5173`, the Vite fallback port
+`5174`, the main dev ports `20137`/`20138`, and the Android shell origins `https://localhost` and
+`http://localhost` are). The browser cannot
 read that response, so from the dashboard it is indistinguishable from a dead server — and the
 badge said `Gateway offline`, which points the user at restarting a server that is running
 perfectly and refusing correctly.
@@ -1892,7 +1945,7 @@ So the two are now distinct states with distinct wording:
 
 | state | badge | hint |
 | --- | --- | --- |
-| up | `Gateway online` | `localhost:8787 · local mode` |
+| up | `Gateway online` | `localhost:20138 · local mode` |
 | nothing answered | `Gateway offline` | `not answering · pnpm dev:gateway` |
 | answered, refused this origin | `Gateway refused this page` | `this page's origin is not allowed` |
 
@@ -2812,6 +2865,31 @@ Behavior when serving a request:
   request open. It defaults to **two minutes**; a connection saved without an
   explicit `timeoutMs` gets that default. A `timeoutMs` of `0` means no
   deadline, and is only reachable by asking for it.
+- A **stream** has its own budgets, and they are far longer than the connect
+  budget on purpose: a reasoning model can be silent for minutes while its
+  prompt is prefilled. `OMNIHILBRAS_STREAM_IDLE_TIMEOUT_MS` (default **360 s**)
+  is the gap allowed between upstream bytes, reset on every chunk;
+  `OMNIHILBRAS_STREAM_TOTAL_TIMEOUT_MS` (default **30 min**) is the absolute
+  ceiling. The transport used to apply its 30 s connect timeout to the stream's
+  first byte as well, which aborted a slow reasoning turn as `CANCELLED` long
+  before the executor's own two-minute deadline — the reason a real request could
+  fail as "cancelled" while the provider was working normally.
+- The **destination check caches its verdict**. Every request and stream resolves
+  the provider hostname before it is sent, to refuse a name that points at a
+  private address; that resolve was repeated per request, so a resolver stalling
+  for its 2.5 s budget (measured on this network) added that wait to a request
+  that was otherwise ready, and a health poll plus the request after it paid
+  twice. The verdict is now cached for `OMNIHILBRAS_DNS_CACHE_TTL_MS` (default
+  **60 s**; `0` disables it), and concurrent checks for the same host share one
+  lookup. The cache only skips the *re-check*; the transport still connects
+  however it resolves the name, which is why this stays the documented
+  narrowing rather than a guarantee.
+- **Identical requests already in flight are coalesced.** The response cache
+  helps a request that arrives after the first one *finished*; a burst of
+  identical requests all missed it and all reached the provider. Requests the
+  cache would serve (no streaming, no signal, no pinned connection or provider,
+  temperature 0 or unset) now share one upstream call, and every caller gets
+  that answer. A request the cache would not serve is never coalesced.
 - Rate limiting uses a sliding window per connection, so a burst cannot
   straddle a minute boundary and double the effective rate. A limited
   connection hands the request to the next route **without being retried**,
@@ -2952,7 +3030,7 @@ measurement, and `Kernel/API/test/spec-success-criteria.mjs` fails if any stops 
       `build` script; every `Kernel/SDK/<provider>/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **163 files** in `Kernel/SDK/` — 27 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url` and `bounded-map` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 26: it measures providers, this counts files.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **170 files** in `Kernel/SDK/` — 28 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url` and `bounded-map` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 27: it measures providers, this counts files.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

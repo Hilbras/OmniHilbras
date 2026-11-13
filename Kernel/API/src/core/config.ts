@@ -23,6 +23,18 @@ export type GatewayConfig = {
   host: string;
   port: number;
   timeoutMs: number;
+  /**
+   * How long the transport waits for the next upstream byte on a stream, reset on every chunk.
+   *
+   * Separate from `timeoutMs` — and the separation is the point. `timeoutMs` is the header/connect
+   * budget; a reasoning model can be silent for a long time after the headers while its prompt is
+   * still being prefilled, and a stream that reuses the short connect budget aborts it as
+   * `CANCELLED`. The reference implementation waits 200 s for the first byte and 360 s between
+   * bytes; this single timer covers both, so it takes the larger value.
+   */
+  streamIdleTimeoutMs: number;
+  /** Absolute ceiling for one upstream stream, measured from the request start. */
+  maxStreamDurationMs: number;
   /** Background provider health polling interval. 0 disables polling. */
   healthIntervalMs: number;
   /** Consecutive failures before a connection stops receiving traffic. */
@@ -118,8 +130,10 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
 
   return {
     host,
-    port: parseInteger(env.OMNIHILBRAS_PORT, 8787, 'OMNIHILBRAS_PORT'),
-    timeoutMs: parseInteger(env.OMNIHILBRAS_TIMEOUT_MS, 30_000, 'OMNIHILBRAS_TIMEOUT_MS'),
+    port: parseInteger(env.OMNIHILBRAS_PORT, 20138, 'OMNIHILBRAS_PORT'),
+    timeoutMs: parseInteger(env.OMNIHILBRAS_TIMEOUT_MS, 120_000, 'OMNIHILBRAS_TIMEOUT_MS'),
+    streamIdleTimeoutMs: parseInteger(env.OMNIHILBRAS_STREAM_IDLE_TIMEOUT_MS, 360_000, 'OMNIHILBRAS_STREAM_IDLE_TIMEOUT_MS'),
+    maxStreamDurationMs: parseInteger(env.OMNIHILBRAS_STREAM_TOTAL_TIMEOUT_MS, 1_800_000, 'OMNIHILBRAS_STREAM_TOTAL_TIMEOUT_MS'),
     healthIntervalMs: parseNonNegativeInteger(env.OMNIHILBRAS_HEALTH_INTERVAL_MS, 60_000, 'OMNIHILBRAS_HEALTH_INTERVAL_MS', 3_600_000),
     failureThreshold: parseNonNegativeInteger(env.OMNIHILBRAS_FAILURE_THRESHOLD, 3, 'OMNIHILBRAS_FAILURE_THRESHOLD', 100),
     recoveryCooldownMs: parseNonNegativeInteger(env.OMNIHILBRAS_RECOVERY_COOLDOWN_MS, 30_000, 'OMNIHILBRAS_RECOVERY_COOLDOWN_MS', 3_600_000),
@@ -189,7 +203,7 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
   };
 }
 
-export function createProviderRegistry(config: GatewayConfig, transport = new FetchHttpTransport({ timeoutMs: config.timeoutMs, checkDestination: assertPublicDestination })) {
+export function createProviderRegistry(config: GatewayConfig, transport = new FetchHttpTransport({ timeoutMs: config.timeoutMs, streamIdleTimeoutMs: config.streamIdleTimeoutMs, maxStreamDurationMs: config.maxStreamDurationMs, checkDestination: assertPublicDestination })) {
   const registry = new ProviderRegistry();
   registry.register(new OpenAIAdapter({
     baseUrl: config.openai.baseUrl,
@@ -335,7 +349,7 @@ function parseOptionalUrl(value: string | undefined, name: string): string | und
 }
 
 function parseCorsOrigins(value: string | undefined) {
-  const origins = (value ?? 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:20138,http://127.0.0.1:20138,http://localhost:20139,http://127.0.0.1:20139,https://localhost,http://localhost')
+  const origins = (value ?? 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:20137,http://127.0.0.1:20137,http://localhost:20138,http://127.0.0.1:20138,https://localhost,http://localhost')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);

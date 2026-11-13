@@ -1,6 +1,6 @@
 {
   "name": "@omnihilbras/kernel-api",
-  "version": "3.26.6",
+  "version": "3.31.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -38,6 +38,7 @@
     "@omnihilbras/sdk-qwen-web": "workspace:*",
     "@omnihilbras/sdk-tokenharbor-web": "workspace:*",
     "@omnihilbras/sdk-zen": "workspace:*",
+    "@omnihilbras/sdk-zcode-start-plan": "workspace:*",
     "@omnihilbras/token-saver": "workspace:*",
     "playwright-core": "1.62.1"
   },

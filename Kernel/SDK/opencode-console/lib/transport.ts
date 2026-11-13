@@ -491,10 +491,23 @@ function providerErrorFromResponse(response: Response, body: unknown, providerId
   // gateway problem rather than a refusal that reached the provider.
   const detail = providerErrorDetail(body) ?? `HTTP ${response.status} with an empty response body`;
 
+  /**
+   * The Console's two refusals are the whole diagnosis, so they are the public message.
+   *
+   * Measured through the gateway: a free model answers
+   * `429 {"type":"error","error":{"type":"FreeUsageLimitError","message":"Free usage limit reached.
+   * Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going:
+   * https://opencode.ai/go"}}` and a paid one `402 {"error":{"message":"Insufficient balance. Top up
+   * at https://opencode.ai/console/<org>/billing?credits=1."}}`. Both texts say exactly what to do;
+   * replacing them with "The provider rate limit was reached." removes the one actionable part.
+   */
+  const actionable = typeof detail === 'string' && /free usage limit|insufficient balance|top up at/i.test(detail) ? detail.slice(0, 400) : undefined;
+
   return new ProviderError(code, message, {
     providerId,
     statusCode: response.status,
     retryable: code === 'RATE_LIMITED' || code === 'PROVIDER_TIMEOUT' || code === 'PROVIDER_UNAVAILABLE',
+    ...(actionable ? { publicMessage: actionable } : {}),
     ...(detail ? { details: { providerMessage: detail, ...retryAfterDetail(code, response) } } : {}),
   });
 }

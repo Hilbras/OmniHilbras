@@ -983,11 +983,28 @@ export function parseTool(value: unknown): ToolDefinition {
 }
 
 
-/** The reasoning effort a client may ask for. Anything else is refused, rather than forwarded. */
+/**
+ * The reasoning effort a client may ask for.
+ *
+ * **The vocabulary is the shared one, not three words.** The first version accepted only the exact
+ * lowercase strings `low`, `medium`, `high` and answered `400` for anything else — so a client
+ * sending `minimal` (a real OpenAI level), `none`, `auto`, or `HIGH` was refused before the provider
+ * was ever reached. The reference implementation normalizes instead: it lowercases the value, treats
+ * `none`/`off` as "no thinking", and maps the full level set (`minimal`, `low`, `medium`, `high`,
+ * `xhigh`, `max`). This does the same, folding the wider set onto the three levels the adapters
+ * understand, and refuses only a value from outside the vocabulary.
+ */
 export function parseReasoningEffort(value: unknown): 'low' | 'medium' | 'high' | undefined {
-  if (value === undefined) return undefined;
-  if (value === 'low' || value === 'medium' || value === 'high') return value;
-  throw invalidRequest('reasoning_effort must be low, medium or high.');
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') throw invalidRequest('reasoning_effort must be one of NONE, MINIMAL, LOW, MEDIUM, HIGH, XHIGH, MAX.');
+  const level = value.trim().toLowerCase();
+  // "No thinking" and "let the provider decide" are not levels: the field is omitted so the
+  // provider's own default applies, rather than being sent a value it may not know.
+  if (level === '' || level === 'none' || level === 'off' || level === 'auto' || level === 'default') return undefined;
+  if (level === 'minimal' || level === 'low') return 'low';
+  if (level === 'medium') return 'medium';
+  if (level === 'high' || level === 'xhigh' || level === 'max' || level === 'ultra') return 'high';
+  throw invalidRequest('reasoning_effort must be one of NONE, MINIMAL, LOW, MEDIUM, HIGH, XHIGH, MAX.');
 }
 
 /** The tool-use policy a client may send. Anything else is refused, rather than forwarded to a provider that may read it as a default. */

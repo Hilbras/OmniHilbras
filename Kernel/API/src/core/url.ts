@@ -178,7 +178,7 @@ function isUnspecifiedIpv6(value: string) {
 /**
  * The URL a loopback gateway advertises, with an IPv6 literal bracketed.
  *
- * `assertLoopbackHost` accepts `::1`, so `http://${host}:${port}` produced `http://::1:8787`, which
+ * `assertLoopbackHost` accepts `::1`, so `http://${host}:${port}` produced `http://::1:20138`, which
  * `new URL()` refuses. Every OAuth redirect is built from this string, so binding on IPv6 loopback
  * broke sign-in rather than merely displaying an odd URL.
  */

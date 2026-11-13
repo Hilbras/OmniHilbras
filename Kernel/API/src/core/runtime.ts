@@ -148,9 +148,9 @@ export type ConnectionSecretStore = {
  */
 export function localDeployment(over: Partial<DeploymentConfig> = {}): DeploymentConfig {
   return Object.freeze({
-    publicBaseUrl: over.publicBaseUrl ?? 'http://127.0.0.1:8787',
+    publicBaseUrl: over.publicBaseUrl ?? 'http://127.0.0.1:20138',
     dataDir: over.dataDir ?? defaultLocalDataDir(),
-    corsOrigins: Object.freeze([...(over.corsOrigins ?? ['http://localhost:5173', 'http://127.0.0.1:5173'])]),
+    corsOrigins: Object.freeze([...(over.corsOrigins ?? ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:20137', 'http://127.0.0.1:20137'])]),
     tenant: over.tenant ?? Object.freeze({ id: 'local', label: 'This machine' }),
   });
 }

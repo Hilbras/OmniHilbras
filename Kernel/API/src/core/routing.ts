@@ -411,6 +411,15 @@ export function resolveRoute(input: {
 
   const matching = usable.filter(ownsModel);
   const family = bareModelFamily(modelId);
+  /**
+   * The fallback pool when nothing lists the model.
+   *
+   * It is **every usable connection** when the name carries no family, and that is deliberate: a
+   * provider can serve a model its catalog omits, and `routing.test.js` pins it ("a model no
+   * connection lists still routes"). The cost is real, though — an unknown id was dispatched to 11
+   * providers over 9–90 s before the client was told nothing could serve it. Narrowing it would break
+   * the documented behaviour, so it stays as the test requires.
+   */
   const sameFamily = family === undefined || !input.familyOf
     ? usable
     : usable.filter((connection) => input.familyOf!(connection.providerId) === family);

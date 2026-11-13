@@ -168,7 +168,7 @@ const gatewayBaseUrl = import.meta.env.DEV && typeof window !== 'undefined'
   : normalizeGatewayBaseUrl(
       (typeof globalThis !== 'undefined' ? (globalThis as { __OMNIHILBRAS_GATEWAY_URL__?: unknown }).__OMNIHILBRAS_GATEWAY_URL__ : undefined) as string
         ?? import.meta.env.VITE_GATEWAY_URL
-        ?? 'http://127.0.0.1:8787',
+        ?? 'http://127.0.0.1:20138',
     );
 
 /**
@@ -1266,6 +1266,28 @@ export function startGatewayOauthSignIn(providerId: string, signal?: AbortSignal
 /** Whether a sign-in started earlier has finished, and how it went. */
 export function getClineSignInStatus(sessionId: string, signal?: AbortSignal) {
   return requestJson<GatewayOauthSignInStatus>(`/v1/oauth/cline/session/${encodeURIComponent(sessionId)}`, { signal });
+}
+
+/**
+ * ZCode's own OAuth server, the standalone sign-in the desktop app also uses for a CLI.
+ *
+ * The start answers a URL to open; the poll token stays on the gateway. `flowId` is the session, and
+ * `ready` carries the saved connection.
+ */
+export function startZcodeSignIn(provider: 'zai' | 'bigmodel' = 'zai', signal?: AbortSignal) {
+  return requestJson<{ authorizeUrl: string; flowId: string; expiresAt: number; pollIntervalSec: number }>('/v1/oauth/zcode/start', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ provider }),
+    ...(signal ? { signal } : {}),
+  });
+}
+
+export function getZcodeSignInStatus(flowId: string, signal?: AbortSignal) {
+  return requestJson<{ status: 'pending' | 'ready' | 'failed' | 'expired'; connection?: GatewayConnection; message?: string }>(
+    `/v1/oauth/zcode/session/${encodeURIComponent(flowId)}`,
+    { signal },
+  );
 }
 
 /**

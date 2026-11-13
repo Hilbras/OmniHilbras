@@ -117,7 +117,7 @@ test('it never serves a credential, whatever the configuration holds', async (t)
   // live" reports wrong. It carries a version and an optional commit — never a build path or anything
   // else derived from the machine.
   const allowed = new Set([
-    'host', 'port', 'localOnly', 'timeoutMs', 'healthIntervalMs', 'failureThreshold', 'recoveryCooldownMs',
+    'host', 'port', 'localOnly', 'timeoutMs', 'streamIdleTimeoutMs', 'maxStreamDurationMs', 'healthIntervalMs', 'failureThreshold', 'recoveryCooldownMs',
     'corsOrigins', 'dataDir', 'endpoints', 'codex', 'build', 'compression', 'maxOutputTokensCap', 'thinkingBudgetCap',
     'historyTrim', 'cacheAnchor', 'mutableAtRuntime', 'mutableByRestart',
   ]);

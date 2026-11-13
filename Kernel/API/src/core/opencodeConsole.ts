@@ -136,7 +136,7 @@ type TokenResponse = {
 type Org = { id?: string; name?: string };
 type User = { id?: string; email?: string };
 
-async function postJson<T>(path: string, body: Record<string, string>): Promise<{ status: number; data: T }> {
+async function postJson<T>(path: string, body: Record<string, string | boolean | number>): Promise<{ status: number; data: T }> {
   const response = await fetch(`${OPENCODE_CONSOLE.server}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
@@ -180,7 +180,10 @@ export async function beginOpencodeConsoleSignIn(): Promise<{
   verificationUrl: string;
   expiresIn?: number;
 }> {
-  const { data } = await postJson<DeviceCodeResponse>(OPENCODE_CONSOLE.deviceCodePath, { client_id: OPENCODE_CONSOLE.clientId });
+  // `supports_org_scope` is what the desktop client sends; it asks the server for an org-scoped
+  // grant, which is what `/api/config` and inference need. Verified in `opencode-cli`:
+  // `POST ${server}/auth/device/code {client_id:"opencode-cli", supports_org_scope:true}`.
+  const { data } = await postJson<DeviceCodeResponse>(OPENCODE_CONSOLE.deviceCodePath, { client_id: OPENCODE_CONSOLE.clientId, supports_org_scope: true });
   const deviceCode = typeof data.device_code === 'string' ? data.device_code : '';
   const userCode = typeof data.user_code === 'string' ? data.user_code : '';
   if (!deviceCode || !userCode) {

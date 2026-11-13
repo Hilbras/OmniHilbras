@@ -2,7 +2,7 @@ services:
   omnihilbras-gateway:
     build: .
     ports:
-      - "8787:8787"
+      - "20138:20138"
     environment:
       - NODE_ENV=production
     volumes:

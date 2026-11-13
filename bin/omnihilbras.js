@@ -22,7 +22,7 @@
  *   records why: a substring match also matches your editor, `grep` and `str`. We keep a PID file
  *   instead, and *still* check the process command line before signalling, because a PID file can
  *   outlive the process it names and PIDs get reused.
- * - **Refuse to touch a port someone else holds.** If 8787 is not ours, we say so and stop, rather
+ * - **Refuse to touch a port someone else holds.** If a port is not ours, we say so and stop, rather
  *   than killing an unknown process to make room.
  *
  * Deliberately not copied: the reference also self-installs native runtime dependencies on first
@@ -48,8 +48,8 @@ import path from 'node:path';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PKG = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 
-const DEFAULT_DASHBOARD_PORT = 5173;
-const GATEWAY_PORT = 8787;
+const DEFAULT_DASHBOARD_PORT = 20137;
+const GATEWAY_PORT = 20138;
 const LOOPBACK = '127.0.0.1';
 const READY_TIMEOUT_MS = 120_000;
 
@@ -381,9 +381,10 @@ async function main() {
 
   const gateway = spawnOne('gateway', ['dev:gateway'], {
     OMNIHILBRAS_PORT: String(options.gatewayPort),
-    // The gateway's default CORS allowlist names port 5173. A launcher on any other port would proxy
-    // the dashboard's Origin (`localhost:<chosen port>`) and the gateway would refuse every management
-    // call, including the log stream — the dashboard looks connected and every feed is silently dead.
+    // The gateway's default CORS allowlist names the dashboard port (20137). A launcher on any other
+    // port would proxy the dashboard's Origin (`localhost:<chosen port>`) and the gateway would refuse
+    // every management call, including the log stream — the dashboard looks connected and every feed
+    // is silently dead.
     ...(process.env.OMNIHILBRAS_CORS_ORIGINS
       ? {}
       : { OMNIHILBRAS_CORS_ORIGINS: `http://localhost:${options.dashboardPort},http://127.0.0.1:${options.dashboardPort}` }),

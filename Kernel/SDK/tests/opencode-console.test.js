@@ -292,3 +292,104 @@ test('a streamed tool call on a free model reaches the caller, with its argument
   assert.equal(pieces.map((p) => p.function?.arguments ?? '').join(''), '{"command":"ls"}', 'the fragments join into the whole JSON');
   assert.equal(finish, 'tool_calls', 'a tool-call finish is reported as tool_calls, not stop');
 });
+
+test('the Console free-limit refusal reaches the client in its own words', async () => {
+  // Measured: a free model answers 429 {"type":"error","error":{"type":"FreeUsageLimitError",
+  // "message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai);
+  // subscribe to OpenCode Go to keep going: https://opencode.ai/go"}}. The generic
+  // "The provider rate limit was reached." removes the one sentence that tells the reader what to do.
+  const { FetchHttpTransport } = await import('../opencode-console/dist/lib/transport.js');
+  const body = JSON.stringify({ type: 'error', error: { type: 'FreeUsageLimitError', message: 'Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go' } });
+  const http = new FetchHttpTransport({ fetch: async () => new Response(body, { status: 429, headers: { 'content-type': 'application/json' } }) });
+  await assert.rejects(
+    () => http.request({ method: 'POST', providerId: opencodeConsoleProviderId, url: 'https://opencode.ai/inference/openai/v1/chat/completions', body: '{}' }),
+    (error) => {
+      assert.equal(error.code, 'RATE_LIMITED');
+      assert.match(error.publicMessage ?? '', /subscribe to OpenCode Go/, 'the free-limit sentence was replaced by a generic one');
+      return true;
+    },
+  );
+});
+
+test('an insufficient-balance refusal names the billing URL', async () => {
+  const { FetchHttpTransport } = await import('../opencode-console/dist/lib/transport.js');
+  const body = JSON.stringify({ error: { type: 'invalid_request_error', message: 'Insufficient balance. Top up at https://opencode.ai/console/wrk_01M2TE204SPTYM3114WCY1P8HA/billing?credits=1.' } });
+  const http = new FetchHttpTransport({ fetch: async () => new Response(body, { status: 402, headers: { 'content-type': 'application/json' } }) });
+  await assert.rejects(
+    () => http.request({ method: 'POST', providerId: opencodeConsoleProviderId, url: 'https://opencode.ai/inference/openai/v1/chat/completions', body: '{}' }),
+    (error) => {
+      assert.match(error.publicMessage ?? '', /Top up at/, 'the billing URL was dropped from the refusal');
+      return true;
+    },
+  );
+});
+
+const CONFIG_V2_URL = `${OPENCODE_CONSOLE.server}${OPENCODE_CONSOLE.configV2Path}`;
+
+test('a model the Console disables for this account is not offered', async () => {
+  // `/api/v2/config` is the entitlement view the installed client reads: it marks the models this
+  // account cannot use with `disabled: true`, and every request to one answers
+  // `402 Insufficient balance`. Offering it makes the catalog look healthy while turns fail.
+  const t = transport({
+    [CONFIG_URL]: config('org_abc'),
+    [CONFIG_V2_URL]: { data: { providers: { opencode: { models: { 'gpt-paid': { disabled: true }, 'mimo-v2.6-flash-free': { disabled: false } } } } } },
+  });
+  const adapter = new OpencodeConsoleAdapter({ transport: t });
+  const ids = (await adapter.listModels({ credential: signedIn() })).map((model) => model.id);
+  assert.ok(!ids.includes('gpt-paid'), 'a model the Console disabled was still offered');
+  assert.ok(ids.includes('mimo-v2.6-flash-free'), 'an enabled model was dropped');
+});
+
+test('a Console that does not serve the entitlement view still lists its catalog', async () => {
+  // v2 is best effort: a Console that 404s it, or a credential that cannot read it, must not take the
+  // whole catalog down. The v2 URL is deliberately not scripted, so the read fails.
+  const t = transport({ [CONFIG_URL]: config('org_abc') });
+  const adapter = new OpencodeConsoleAdapter({ transport: t });
+  const ids = (await adapter.listModels({ credential: signedIn() })).map((model) => model.id);
+  assert.ok(ids.includes('gpt-paid'), 'the catalog disappeared when the entitlement view was unavailable');
+});
+
+test('a turn goes through the OpenCode local service when it is running', async () => {
+  // The Console's free tier refuses a direct request from this host — from Node and from Bun — while
+  // the app serves the same model. The service is that transport, so when it answers the direct lane
+  // must not be touched at all.
+  const t = transport({});
+  const seen = {};
+  const adapter = new OpencodeConsoleAdapter({
+    transport: t,
+    localService: {
+      async turn({ model, text }) {
+        seen.model = model;
+        seen.text = text;
+        return { text: 'OK', model: 'deepseek-v4.1-flash-free', finish: 'stop' };
+      },
+    },
+  });
+  const response = await adapter.chat({ model: 'opencode/deepseek-v4.1-flash-free', messages: [{ role: 'user', content: 'hi' }] }, { credential: signedIn() });
+  assert.equal(response.message.content, 'OK');
+  assert.equal(response.finishReason, 'stop');
+  assert.equal(seen.model, 'opencode/deepseek-v4.1-flash-free', 'the gateway strips the prefix, so the service reference is rebuilt');
+  assert.equal(seen.text, 'User: hi', 'the conversation is flattened for the session API');
+  assert.equal(t.requests.length, 0, 'the direct lane was used even though the service answered');
+});
+
+test('a service that is not running falls back to the direct lane', async () => {
+  const unavailable = Object.assign(new Error('OpenCode is not running'), { name: 'OpencodeServiceUnavailable' });
+  const t = transport({ [CONFIG_URL]: config('org_abc') });
+  const adapter = new OpencodeConsoleAdapter({ transport: t, localService: { turn: async () => { throw unavailable; } } });
+  // The fallback reaches the free lane, which this scripted transport does not serve, so the call
+  // fails — the point is that it did not return the service's answer and did not swallow the error.
+  await assert.rejects(() => adapter.chat({ model: 'mimo-v2.6-flash-free', messages: [{ role: 'user', content: 'hi' }] }, { credential: signedIn() }));
+});
+
+test('streaming through the service yields the answer as one delta plus a finish reason', async () => {
+  const adapter = new OpencodeConsoleAdapter({
+    transport: transport({}),
+    localService: { turn: async () => ({ text: 'OK', reasoning: 'because', finish: 'stop' }) },
+  });
+  const chunks = [];
+  for await (const chunk of adapter.streamChat({ model: 'opencode/deepseek-v4.1-flash-free', messages: [{ role: 'user', content: 'hi' }] }, { credential: signedIn() })) chunks.push(chunk);
+  assert.equal(chunks.map((c) => c.delta.content ?? '').join(''), 'OK');
+  assert.equal(chunks.find((c) => c.delta.reasoning)?.delta.reasoning, 'because');
+  assert.equal(chunks.at(-1)?.finishReason, 'stop');
+});

@@ -171,6 +171,14 @@ export type ChatChunk = {
   delta: {
     role?: ChatRole;
     content?: string;
+    /**
+     * Reasoning for a turn the model thought through before answering.
+     *
+     * The gateway maps this to the OpenAI `reasoning_content` field. It matters here because the
+     * OpenCode Console's models reason before answering, and a turn that spent its budget thinking has
+     * no `content` at all — without this field the answer looked empty.
+     */
+    reasoning?: string;
     toolCalls?: readonly ToolCallDelta[];
   };
   finishReason?: FinishReason;

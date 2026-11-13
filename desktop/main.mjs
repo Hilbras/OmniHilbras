@@ -51,9 +51,14 @@ function saveUserConfig(patch) {
 
 const userConfig = readUserConfig();
 const savedPort = Number(userConfig.gatewayPort);
-// Migrate the pre-3.11.1 default (8787) to the new far port so an upgraded install does not keep
-// serving on the old port, which conflicts with the dev gateway.
-const preferredPort = Number(process.env.OMNIHILBRAS_PORT) || (savedPort === 8787 ? 20137 : savedPort) || 20137;
+// An upgraded install keeps whatever port it saved, except the two old defaults — 8787, then the
+// desktop-only 20137 — which become the main gateway port so nothing keeps serving on a port the
+// dev gateway also wants.
+const migratedPort = savedPort === 8787 || savedPort === 20137 ? 20138 : savedPort;
+// A test run must never take the main port from a dev gateway, so it asks for an ephemeral one
+// (`0`), which the supervisor resolves before it spawns.
+const testRun = process.env.OMNIHILBRAS_RANDOM_PORT === '1' || process.env.OMNIHILBRAS_SMOKE === '1';
+const preferredPort = testRun ? 0 : Number(process.env.OMNIHILBRAS_PORT) || migratedPort || 20138;
 // The CLI and the web dashboard use this directory. The desktop app used its own `userData/data`,
 // which made an exported backup imported in the other surface look like it did nothing: they were
 // two vaults. Share the store, and migrate a pre-existing desktop-only store once when the shared
@@ -75,7 +80,7 @@ function appSettings() {
     closeToTray: config.closeToTray !== false,
     autoStartGateway: config.autoStartGateway !== false,
     checkUpdatesOnLaunch: config.checkUpdatesOnLaunch !== false,
-    gatewayPort: (Number(config.gatewayPort) === 8787 ? 20137 : Number(config.gatewayPort)) || preferredPort,
+    gatewayPort: (Number(config.gatewayPort) === 8787 || Number(config.gatewayPort) === 20137 ? 20138 : Number(config.gatewayPort)) || preferredPort,
   };
 }
 const logFile = join(app.getPath('userData'), 'logs', 'gateway.log');
@@ -87,7 +92,7 @@ const gateway = createGatewaySupervisor({
   port: preferredPort,
   readinessTimeoutMs: 40_000,
   logFile,
-  // 8787 is the default, not a requirement. Another local gateway must not stop this app opening.
+  // 20138 is the default, not a requirement. Another local gateway must not stop this app opening.
   fallbackToFreePort: true,
   // A crash is a restart, not a dead app. Five consecutive crashes then stop trying.
   autoRestart: true,

@@ -110,11 +110,59 @@ export async function resolveForDestinationCheck(hostname: string, signal?: Abor
  * narrowing, not a guarantee: it stops names that point at private addresses, not a deliberate rebinding.
  */
 export async function assertPublicDestination(hostname: string, signal?: AbortSignal): Promise<void> {
-  const addresses = await resolveForDestinationCheck(hostname, signal);
-  if (addresses.length === 0) throw new Error(`The host ${hostname} did not resolve.`);
-  if (addresses.some((address) => isPrivateHostname(address))) {
-    throw new Error(`The host ${hostname} resolves to a private address.`);
+  signal?.throwIfAborted();
+  const ttl = destinationCacheTtlMs();
+  if (ttl > 0) {
+    const cached = destinationVerdicts.get(hostname);
+    if (cached && cached.expiresAt > Date.now()) {
+      if (cached.verdict === 'private') throw new Error(`The host ${hostname} resolves to a private address.`);
+      return;
+    }
+    if (cached) destinationVerdicts.delete(hostname);
   }
+  // One lookup shared by concurrent requests for the same host, so a health poll and the user
+  // request right after it do not each pay for a resolve. A caller's abort ends only that caller's
+  // wait; the shared lookup runs to completion and populates the cache for everyone else.
+  let work = pendingResolutions.get(hostname);
+  if (!work) {
+    work = resolveForDestinationCheck(hostname).finally(() => { pendingResolutions.delete(hostname); });
+    pendingResolutions.set(hostname, work);
+  }
+  const addresses = await raceAbort(work, signal);
+  if (addresses.length === 0) throw new Error(`The host ${hostname} did not resolve.`);
+  const isPrivate = addresses.some((address) => isPrivateHostname(address));
+  if (ttl > 0) destinationVerdicts.set(hostname, { verdict: isPrivate ? 'private' : 'public', expiresAt: Date.now() + ttl });
+  if (isPrivate) throw new Error(`The host ${hostname} resolves to a private address.`);
+}
+
+/**
+ * How long a destination verdict is trusted. `OMNIHILBRAS_DNS_CACHE_TTL_MS=0` disables the cache.
+ *
+ * The check is a narrowing, not a guarantee (see above), and caching widens that limit by the TTL: a
+ * name judged public now is not re-judged for this long. Sixty seconds keeps the traffic win — a
+ * health poll and the requests after it share one lookup, and a resolver that stalls for 2.5 s is
+ * paid once rather than per request — without holding a stale verdict for the five minutes the
+ * reference implementation uses.
+ */
+function destinationCacheTtlMs(): number {
+  const raw = process.env.OMNIHILBRAS_DNS_CACHE_TTL_MS?.trim();
+  if (raw === undefined || raw === '') return 60_000;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 60_000;
+}
+
+type DestinationVerdict = 'public' | 'private';
+const destinationVerdicts = new Map<string, { verdict: DestinationVerdict; expiresAt: number }>();
+const pendingResolutions = new Map<string, Promise<string[]>>();
+
+/** Exported for tests and for a caller that wants a re-check after a network change. */
+export function clearDestinationCache() {
+  destinationVerdicts.clear();
+  pendingResolutions.clear();
+}
+
+export function destinationCacheSize() {
+  return destinationVerdicts.size;
 }
 
 function raceAbort<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {

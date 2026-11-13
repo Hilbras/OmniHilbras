@@ -332,6 +332,9 @@ importers:
       '@omnihilbras/sdk-tokenharbor-web':
         specifier: workspace:*
         version: link:../SDK/tokenharbor-web
+      '@omnihilbras/sdk-zcode-start-plan':
+        specifier: workspace:*
+        version: link:../SDK/zcode-start-plan
       '@omnihilbras/sdk-zen':
         specifier: workspace:*
         version: link:../SDK/zen
@@ -500,6 +503,12 @@ importers:
         version: 5.9.3
 
   Kernel/SDK/tokenharbor-web:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/zcode-start-plan:
     devDependencies:
       typescript:
         specifier: ^5.9.3

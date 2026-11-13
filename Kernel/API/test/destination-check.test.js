@@ -18,6 +18,9 @@ const STUB_ANSWERS = {
   'www.codebuddy.ai': '43.169.32.91',
   // A name the machine's own resolver has never heard of, for the rescue-on-failure case.
   'nous-rescue.test': '203.0.113.7',
+  // A unique name for the cache test: the system resolver cannot answer it, so every check that is
+  // not cached reaches this stub, which is what makes the query count meaningful.
+  'cache-rescue.test': '203.0.113.9',
   /**
    * `nip.io` is answered by the machine's resolver here — normally in milliseconds, and that is the
    * path this test has always taken. Under load that lookup has been measured stalling past the 2.5s
@@ -31,6 +34,8 @@ const STUB_ANSWERS = {
 
 const stub = createSocket('udp4');
 stub.unref();
+/** Every name this stub was asked about, so a test can prove a cached check did not resolve again. */
+const stubQueries = [];
 stub.on('message', (message, rinfo) => {
   if (message.length < 12 || message.readUInt16BE(4) !== 1) return;
   // Walk the question labels to find the name and where the question ends.
@@ -41,6 +46,7 @@ stub.on('message', (message, rinfo) => {
     labels.push(message.subarray(offset + 1, offset + 1 + length).toString());
     offset += 1 + length;
   }
+  stubQueries.push(labels.join('.').toLowerCase());
   const questionEnd = offset + 1 + 4; // the terminating zero, then QTYPE and QCLASS
   const header = Buffer.from(message.subarray(0, 12));
   header.writeUInt16BE(0x8180, 2); // QR=1, RD=1, RA=1 — a normal recursive response
@@ -142,4 +148,38 @@ test('a name the system resolver cannot answer at all is rescued by the public o
     undefined,
     'a name the public resolver also lacks still ends as a refusal',
   );
+});
+
+test('a repeated check reuses the verdict instead of resolving again', async () => {
+  // Every request and every stream runs the destination check before it is sent. Resolving the name
+  // each time meant a resolver that stalled for its 2.5 s budget added that wait to a request that
+  // was otherwise ready — and a health poll plus the user request right after it paid twice. The
+  // verdict is cached, so the second check must not reach the resolver at all.
+  const { assertPublicDestination, clearDestinationCache } = await import('../dist/src/core/destination-check.js');
+  clearDestinationCache();
+  const count = () => stubQueries.filter((name) => name === 'cache-rescue.test').length;
+
+  const before = count();
+  await assertPublicDestination('cache-rescue.test');
+  await assertPublicDestination('cache-rescue.test');
+
+  assert.equal(count() - before, 1, 'the second check resolved the name again instead of using the cached verdict');
+});
+
+test('the cache can be turned off, so a caller that needs a fresh answer gets one', async () => {
+  const { assertPublicDestination, clearDestinationCache } = await import('../dist/src/core/destination-check.js');
+  const previous = process.env.OMNIHILBRAS_DNS_CACHE_TTL_MS;
+  process.env.OMNIHILBRAS_DNS_CACHE_TTL_MS = '0';
+  clearDestinationCache();
+  const count = () => stubQueries.filter((name) => name === 'cache-rescue.test').length;
+  try {
+    const before = count();
+    await assertPublicDestination('cache-rescue.test');
+    await assertPublicDestination('cache-rescue.test');
+    assert.equal(count() - before, 2, 'TTL 0 still served a cached verdict');
+  } finally {
+    if (previous === undefined) delete process.env.OMNIHILBRAS_DNS_CACHE_TTL_MS;
+    else process.env.OMNIHILBRAS_DNS_CACHE_TTL_MS = previous;
+    clearDestinationCache();
+  }
 });

@@ -22,7 +22,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.26.6**
+**Current version: 3.31.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
@@ -83,8 +83,8 @@ Requirements: Node.js 24+, pnpm 12.5.1.
 
 ```bash
 pnpm install
-pnpm dev            # marketing site + dashboard on :5173
-pnpm dev:gateway    # local gateway on 127.0.0.1:8787
+pnpm dev            # marketing site + dashboard on :20137
+pnpm dev:gateway    # local gateway on 127.0.0.1:20138
 ```
 
 The desktop app has its own commands:
@@ -138,7 +138,7 @@ shared SDK core to drift away from them.
 
 ## Gateway
 
-The gateway listens on `127.0.0.1:8787` by default. It refuses a non-loopback host unless deployment
+The gateway listens on `127.0.0.1:20138` by default. It refuses a non-loopback host unless deployment
 configuration explicitly changes the threat model.
 
 ### Core routes
@@ -161,7 +161,7 @@ backup import/export and every rejection shape, is in [`docs/SPEC-SDK.md`](./doc
 ### Quick request
 
 ```bash
-curl http://127.0.0.1:8787/v1/chat/completions \
+curl http://127.0.0.1:20138/v1/chat/completions \
   -H "Authorization: Bearer $OMNIHILBRAS_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -237,7 +237,7 @@ failure behave exactly as they do for a concrete model. A disabled virtual model
 silently fall back to a provider model with the same suffix.
 
 ```bash
-curl http://127.0.0.1:8787/v1/chat/completions \
+curl http://127.0.0.1:20138/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"oh/chat","messages":[{"role":"user","content":"Hello"}]}'
 ```
@@ -340,7 +340,7 @@ A debug Android shell lives under `android/`. It is a Capacitor WebView for the 
 gateway on the phone. On first launch it asks for a gateway URL and a device API key, then stores both in
 Android Keystore.
 
-- Local debug: `adb reverse tcp:8787 tcp:8787`, then pair with `http://127.0.0.1:8787`.
+- Local debug: `adb reverse tcp:20138 tcp:20138`, then pair with `http://127.0.0.1:20138`.
 - Remote: use an HTTPS private tunnel or reverse proxy; plain HTTP to a non-loopback host is rejected.
 - Build: `pnpm build:android` then `pnpm android:apk`; output is
   `android/app/build/outputs/apk/debug/app-debug.apk`.
@@ -355,7 +355,7 @@ the ones most people change:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `OMNIHILBRAS_HOST` | `127.0.0.1` | Loopback host; non-loopback values are refused in local mode |
-| `OMNIHILBRAS_PORT` | `8787` | Gateway port |
+| `OMNIHILBRAS_PORT` | `20138` | Gateway port |
 | `OMNIHILBRAS_DATA_DIR` | XDG config | Connections, vault, usage and settings |
 | `OMNIHILBRAS_REQUIRE_API_KEY` | — | Require an admin/LLM key for management and inference |
 | `OMNIHILBRAS_TOKEN_SAVER` | off | Enable local context compression |
@@ -390,8 +390,8 @@ The full threat model and known limits are in [`SECURITY.md`](./SECURITY.md).
 
 ```bash
 pnpm install
-pnpm dev              # marketing + dashboard on :5173
-pnpm dev:gateway      # gateway on :8787
+pnpm dev              # marketing + dashboard on :20137
+pnpm dev:gateway      # gateway on :20138
 pnpm typecheck
 pnpm test             # SDK, gateway, token-saver and repository guards
 pnpm build

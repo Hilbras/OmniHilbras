@@ -298,7 +298,7 @@ export function AppHomeContent() {
             <h2 className="text-sm font-semibold">No provider connections yet</h2>
             <p className="muted mt-1 text-xs leading-relaxed">
               The gateway is running. Add a provider to route your first request. The gateway URL is
-              <code className="mx-1 font-mono">http://127.0.0.1:{snapshot?.port ?? 8787}/v1</code>.
+              <code className="mx-1 font-mono">http://127.0.0.1:{snapshot?.port ?? 20138}/v1</code>.
             </p>
             <Link to="/providers" className="btn-gold mt-3 inline-flex !px-3 !py-2 !text-xs">Add your first provider</Link>
           </section>

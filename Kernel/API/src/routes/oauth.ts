@@ -385,7 +385,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     if (request.method === 'POST' && url.pathname === '/v1/oauth/claude-code/start') {
       const body = await readJsonBody(request, maxKeyBodyBytes);
       const { addAccount, targetConnectionId } = readSignInTarget(body);
-      sendJson(response, 201, service.startClaudeCodeSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:8787', addAccount, targetConnectionId), origin);
+      sendJson(response, 201, service.startClaudeCodeSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:20138', addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -434,7 +434,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
     if (request.method === 'POST' && url.pathname === '/v1/oauth/codex/start') {
       const body = await readJsonBody(request, maxKeyBodyBytes);
       const { addAccount, targetConnectionId } = readSignInTarget(body);
-      sendJson(response, 201, await service.startCodexSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:8787', addAccount, targetConnectionId), origin);
+      sendJson(response, 201, await service.startCodexSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:20138', addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -563,6 +563,39 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/zcode/check') {
+      // One 1-token turn, and nothing stored. The Start Plan model list is static, so a catalog read
+      // would prove nothing; only a served turn establishes that the token and the entitlement work.
+      // The token is optional: with none, the gateway reads the one the ZCode app already stored.
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      sendJson(response, 200, await service.checkZcode(readOptionalString(body, 'token'), signal), origin);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/web-cookie/zcode/connect') {
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      const connection = await service.connectZcode(readOptionalString(body, 'token'), signal, body.addAccount === true);
+      sendJson(response, 201, { connection }, origin);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/zcode/start') {
+      // Standalone sign-in: ZCode's own OAuth server, no desktop app and no custom scheme. The
+      // response is the URL to open; the poll token stays in the gateway.
+      const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
+      const provider = readOptionalString(body, 'provider')?.trim();
+      if (provider !== undefined && provider !== 'zai' && provider !== 'bigmodel') throw invalidRequest('provider must be zai or bigmodel.');
+      sendJson(response, 200, await service.startZcodeSignIn(provider ?? 'zai'), origin);
+      return true;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/zcode/session/')) {
+      const flowId = decodeURIComponent(url.pathname.slice('/v1/oauth/zcode/session/'.length));
+      if (!flowId) throw invalidRequest('A sign-in id is required.');
+      sendJson(response, 200, await service.pollZcodeSignIn(flowId, signal), origin);
+      return true;
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/web-cookie/qwen/check') {
       // A probe, not a connect, and it stores nothing. The open question is whether Alibaba's
       // bot-protection gate applies to an authenticated request, and that cannot be answered
@@ -655,7 +688,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
 }
 
 export function defaultClineRedirect(publicBaseUrl: string | undefined) {
-  return `${publicBaseUrl ?? 'http://127.0.0.1:8787'}/v1/oauth/cline/callback`;
+  return `${publicBaseUrl ?? 'http://127.0.0.1:20138'}/v1/oauth/cline/callback`;
 }
 
 

@@ -62,7 +62,7 @@ function DocsPage() {
     >
       <Card title="Quick start">
         <p>Start the desktop app or run the gateway on its own, then send an OpenAI-compatible request:</p>
-        <Code>{`curl http://127.0.0.1:8787/v1/chat/completions \\
+        <Code>{`curl http://127.0.0.1:20138/v1/chat/completions \\
   -H "Authorization: Bearer $OMNIHILBRAS_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -83,7 +83,7 @@ function DocsPage() {
       </Card>
       <Card title="Configuration">
         <p>The gateway is configured by environment variables. The ones you are most likely to change:</p>
-        <Code>{`OMNIHILBRAS_PORT=8787
+        <Code>{`OMNIHILBRAS_PORT=20138
 OMNIHILBRAS_TOKEN_SAVER=1
 OMNIHILBRAS_MAX_OUTPUT_TOKENS=8192
 OMNIHILBRAS_HISTORY_TRIM_TOKENS=120000
@@ -91,7 +91,7 @@ OMNIHILBRAS_CACHE_ANCHOR=1`}</Code>
         <p>Every value is local. No provider credential is sent to a browser store, and the vault lives under <code className="font-mono">$XDG_CONFIG_HOME/omnihilbras</code>.</p>
       </Card>
       <Card title="Clients">
-        <p>Any OpenAI-compatible client works: set the base URL to <code className="font-mono">http://127.0.0.1:8787/v1</code> and choose a saved model, or use <code className="font-mono">model: "auto"</code> to let the gateway resolve a connection.</p>
+        <p>Any OpenAI-compatible client works: set the base URL to <code className="font-mono">http://127.0.0.1:20138/v1</code> and choose a saved model, or use <code className="font-mono">model: "auto"</code> to let the gateway resolve a connection.</p>
         <p><a className="text-gold-text hover:underline" href="/download">Download the desktop app</a> or <a className="text-gold-text hover:underline" href={GITHUB} target="_blank" rel="noreferrer">build from source</a>.</p>
       </Card>
     </PageShell>

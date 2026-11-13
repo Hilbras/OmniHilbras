@@ -272,7 +272,7 @@ test('every card that pastes a credential has a descriptor, and its routes are r
 });
 
 test('no card claims an auth mode outside the set the collectors understand', () => {
-  const known = new Set(['API key', 'No key', 'OAuth', 'Web cookie', 'Session cookie', 'Web session', 'OAuth or API key']);
+  const known = new Set(['API key', 'No key', 'OAuth', 'Web cookie', 'Session cookie', 'Web session', 'OAuth or API key', 'Session token']);
   const used = [...new Set(cards().map((card) => card.auth))].sort();
   const unknown = used.filter((mode) => !known.has(mode));
   assert.deepEqual(unknown, [], `these auth modes are new: ${unknown.join(', ')}. Add the collector and say here what asks for the credential, or the card promises a flow that does not exist`);
@@ -329,13 +329,15 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // each with the vendor's own mark and no adapter work.
   // 50-51 from 3.7.0: `grok-web` and `perplexity-web`, the two web-cookie sessions ported from the
   // old tree; both have their own adapter and committed mark.
-  assert.equal(all.length, 54, `the catalog now has ${all.length} cards`);
-  // Fifteen cards claim OAuth, but the gateway serves twelve start routes: `clinepass` shares `cline`'s,
-  // and `claude-code` and `codex` sign in through `server.ts` routes this scan reads too — the counts of
-  // claims and routes do not coincide, which is why both are asserted rather than one derived.
-  assert.equal(oauthCapableProviders().size, 15, 'the gateway serves an OAuth start route for fifteen providers');
+  // 55 from 3.28.0: `zcode`, a ZCode Start Plan OAuth card with its own adapter and standalone sign-in.
+  assert.equal(all.length, 55, `the catalog now has ${all.length} cards`);
+  // Seventeen cards claim OAuth, and the gateway serves sixteen start routes: `clinepass` shares
+  // `cline`'s, `claude-code` and `codex` sign in through `server.ts` routes this scan reads too, and
+  // `zcode` claims OAuth and serves its own start route. The counts of claims and routes do not have
+  // to coincide, which is why both are asserted.
+  assert.equal(oauthCapableProviders().size, 16, 'the gateway serves an OAuth start route for sixteen providers');
   const oauthClaiming = all.filter((card) => card.auth === 'OAuth' || card.authModes?.includes('oauth'));
-  assert.equal(oauthClaiming.length, 16, 'sixteen cards claim an OAuth sign-in: fourteen named OAuth, and Nous Research and the two OpenCode cards which offer it beside a key');
+  assert.equal(oauthClaiming.length, 17, 'seventeen cards claim an OAuth sign-in: fifteen named OAuth, and Nous Research and the two OpenCode cards which offer it beside a key');
   console.log(`    cards: ${all.length}   claiming OAuth: ${oauthClaiming.length}   gateway OAuth routes: ${oauthCapableProviders().size}   claiming a measurement: 0`);
 });
 

@@ -107,7 +107,7 @@ test('no adapter claims it verified inference without completing a request', () 
     if (!sendsInference(source)) overclaiming.push(file);
   }
   assert.deepEqual(overclaiming, [], `${overclaiming.join(', ')} claim inference but send no request`);
-  assert.deepEqual(claiming.sort(), ['nous/adapter/index.ts'], 'the adapters that send an inference request, so a new claimer is a reviewed edit');
+  assert.deepEqual(claiming.sort(), ['nous/adapter/index.ts', 'zcode-start-plan/adapter/index.ts'], 'the adapters that send an inference request, so a new claimer is a reviewed edit');
 });
 
 test('the merge carries the scope, so the card can name what was checked', () => {

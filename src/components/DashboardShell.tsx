@@ -171,7 +171,7 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse, status }: {
           : problem === 'unauthorized'
             ? 'gateway is up · dashboard token not accepted, reload the dashboard'
             : desktopBridge() ? 'open Servers to start it' : 'not answering · pnpm dev:gateway'
-        : `localhost:8787 · build ${buildVersion ?? 'unknown'}`;
+        : `localhost:20138 · build ${buildVersion ?? 'unknown'}`;
   return (
     <aside className={`dashboard-sidebar flex h-full w-[252px] shrink-0 flex-col border-r border-line bg-bg-soft transition-[width] duration-200 ${collapsed ? 'lg:w-[76px]' : 'lg:w-[252px]'}`}>
       <div className={`flex items-center gap-1 pb-4 pt-5 ${collapsed ? 'justify-center px-2' : 'justify-between px-5'}`}>
@@ -202,7 +202,7 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse, status }: {
       */}
       <div
         className={`mx-4 mb-5 rounded-xl border ${gatewayUp ? 'border-success/20 bg-success/10' : 'border-danger/30 bg-danger/10'} ${collapsed ? 'flex justify-center p-2.5' : 'p-3'}`}
-        title={collapsed ? `${gatewayLabel} · localhost:8787` : undefined}
+        title={collapsed ? `${gatewayLabel} · localhost:20138` : undefined}
         aria-label={gatewayLabel}
       >
         <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'}`}>

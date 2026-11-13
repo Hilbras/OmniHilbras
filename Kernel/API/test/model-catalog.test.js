@@ -243,3 +243,22 @@ test('THE INVARIANT: the catalog names no provider', () => {
   const found = adapters.filter((id) => new RegExp("['\"\`]" + id + "['\"\`]").test(code));
   assert.deepEqual(found, [], `the model-catalog must name no provider, found: ${found.join(', ')}`);
 });
+
+test('a shared provider’s live catalog is cached instead of fetched on every model list', async () => {
+  // A shared provider has no stored `modelIds`, so `listAll` asks it live — a network round trip on
+  // every `/v1/models`, measured at 0.3–1.5 s. An agent app fetches the model list on connect, so the
+  // repeated fetch is pure latency. The first call fetches, the second is served from the cache.
+  const behind = adapter('clinepass', { models: [{ id: 'cline-pass/one' }] });
+  let calls = 0;
+  const counting = { ...behind, async listModels(context) { calls += 1; return behind.listModels(context); } };
+  const { instance } = catalog({
+    connections: [connection({ providerId: 'cline', modelIds: ['cline-model'] })],
+    adapters: [counting],
+  });
+
+  const first = await instance.listAll();
+  const second = await instance.listAll();
+  assert.equal(calls, 1, 'the shared catalog was fetched again instead of read from the cache');
+  assert.ok(first.models.some((model) => model.providerId === 'clinepass'), 'the shared models are missing');
+  assert.deepEqual(second.models, first.models, 'the cached list differed from the live one');
+});

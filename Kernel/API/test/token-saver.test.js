@@ -108,12 +108,29 @@ test('a tool_choice from the client reaches the provider, and an unknown choice 
   assert.equal(bad.status, 400, 'a choice the gateway does not know is refused, not forwarded');
 });
 
-test('a reasoning_effort from the client reaches the provider, and an unknown effort is refused with 400', async (t) => {
+test('reasoning_effort is normalized to three levels, not refused at the edge', async (t) => {
   const seen = [];
   const base = await start(t, seen);
   const ok = await post(base, { ...body(longGrep.slice(0, 40)), reasoning_effort: 'high' });
   assert.equal(ok.status, 200);
   assert.equal(lastRequest.reasoningEffort, 'high', 'the adapter receives the client\'s effort');
+
+  // The wider vocabulary the reference implementation accepts — OpenAI's `minimal`, Anthropic's
+  // `xhigh`/`max`, and any casing — is folded onto the three levels the adapters understand.
+  for (const [sent, expected] of [['minimal', 'low'], ['HIGH', 'high'], ['Medium', 'medium'], ['xhigh', 'high'], ['max', 'high']]) {
+    const response = await post(base, { ...body(longGrep.slice(0, 40)), reasoning_effort: sent });
+    assert.equal(response.status, 200, `${sent} was refused`);
+    assert.equal(lastRequest.reasoningEffort, expected, `${sent} was not folded to ${expected}`);
+  }
+
+  // "No thinking" and "let the provider decide" are not levels: the field is omitted so the
+  // provider's own default applies.
+  for (const sent of ['none', 'auto', 'off']) {
+    const response = await post(base, { ...body(longGrep.slice(0, 40)), reasoning_effort: sent });
+    assert.equal(response.status, 200, `${sent} was refused`);
+    assert.equal(lastRequest.reasoningEffort, undefined, `${sent} should omit the field`);
+  }
+
   const bad = await post(base, { ...body(longGrep.slice(0, 40)), reasoning_effort: 'maximum' });
-  assert.equal(bad.status, 400, 'an effort the gateway does not know is refused, not forwarded');
+  assert.equal(bad.status, 400, 'an effort from outside the vocabulary is refused, not forwarded');
 });

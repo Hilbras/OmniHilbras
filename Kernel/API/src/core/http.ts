@@ -18,7 +18,7 @@ import { codexCallbackRoutePath } from '../routes/oauth.js';
  * that had simply never been separated from the routes using them.
  */
 
-export const defaultCorsOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:20138', 'http://127.0.0.1:20138', 'http://localhost:20139', 'http://127.0.0.1:20139'];
+export const defaultCorsOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:20137', 'http://127.0.0.1:20137', 'http://localhost:20138', 'http://127.0.0.1:20138'];
 /** A connection body carries an endpoint and a model list, so it gets more room than a key. */
 export const maxConnectionBodyBytes = 16 * 1024;
 export const maxKeyBodyBytes = 4 * 1024;

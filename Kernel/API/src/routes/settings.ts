@@ -105,6 +105,9 @@ function publicSettings(config: GatewayConfig) {
     /** Loopback is enforced twice, so this is always true; shown because a reader will want to know it is enforced. */
     localOnly: true,
     timeoutMs: config.timeoutMs,
+    /** The stream's own budgets, so a slow reasoning provider is visible in the settings rather than inferred. */
+    streamIdleTimeoutMs: config.streamIdleTimeoutMs,
+    maxStreamDurationMs: config.maxStreamDurationMs,
     healthIntervalMs: config.healthIntervalMs,
     failureThreshold: config.failureThreshold,
     recoveryCooldownMs: config.recoveryCooldownMs,
@@ -155,7 +158,7 @@ function publicSettings(config: GatewayConfig) {
      */
     mutableAtRuntime: ['requireApiKey'],
     mutableByRestart: [
-      'host', 'port', 'timeoutMs', 'healthIntervalMs', 'failureThreshold',
+      'host', 'port', 'timeoutMs', 'streamIdleTimeoutMs', 'maxStreamDurationMs', 'healthIntervalMs', 'failureThreshold',
       'recoveryCooldownMs', 'corsOrigins', 'dataDir', 'endpoints', 'compression', 'maxOutputTokensCap', 'thinkingBudgetCap', 'historyTrim', 'cacheAnchor', 'caveman', 'ponytail', 'headroom', 'pxpipe',
     ],
   };

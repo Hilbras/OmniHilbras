@@ -59,6 +59,9 @@ export const providerLogoMap = {
   'codebuddy-cn': '/providers/codebuddy-cn.png',
   'codebuddy-intl': '/providers/codebuddy-intl.png',
   coarena: '/providers/coarena.png',
+  // ZCode's own mark, pulled from zcode.z.ai and committed here (the favicon and hero logo are the
+  // vendor's; this is a 1024px PNG of the latter).
+  zcode: '/providers/zcode.png',
 } as const;
 
 export function getProviderLogo(id: string | null | undefined) {
@@ -265,7 +268,7 @@ export const providerCatalog: ProviderRecord[] = [
     color: '#7cc7a1',
     initial: 'C',
     logo: providerLogoMap.cline,
-    endpoint: 'http://127.0.0.1:8787/v1',
+    endpoint: 'http://127.0.0.1:20138/v1',
     apiKeysUrl: 'https://app.cline.bot/',
     modelList: [],
   },
@@ -1224,6 +1227,32 @@ export const providerCatalog: ProviderRecord[] = [
     endpoint: 'https://token-plan.maas.qwencloudapi.com/compatible-mode/v1',
     apiKeysUrl: 'https://console.qwencloud.com/',
     modelList: [],
+  },
+  {
+    id: 'zcode',
+    name: 'ZCode (Start Plan)',
+    description: 'Your ZCode Start Plan account (GLM-5.3 / GLM-5.3-Flash), reached through its Anthropic-compatible endpoint. Paste the access token from the ZCode desktop app.',
+    category: 'Model provider',
+    group: 'oauth',
+    // Placeholders, because this is the state the card shows when the gateway has no connection for it.
+    status: 'available',
+    // The standalone sign-in: ZCode's own OAuth server, the same flow the desktop app uses for a CLI.
+  // `POST /v1/oauth/zcode/start` mints it, the browser signs in, and the dialog polls until the
+  // gateway has saved the account's JWT. Nothing is read from the installed app and nothing is pasted.
+  auth: 'OAuth',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#3563e9',
+    initial: 'Z',
+    logo: providerLogoMap.zcode,
+    endpoint: 'https://zcode.z.ai',
+    modelList: [],
+    riskNotice:
+      'This is an unofficial interoperability surface for a ZCode Start Plan account, not a Z.ai API key. The token is your signed-in ZCode session; use it only for the account you are authorized to use.',
+    riskSeverity: 'standard',
   },
   {
     id: 'groq',

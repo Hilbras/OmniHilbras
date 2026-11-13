@@ -3,6 +3,10 @@ import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
 import { NousAdapter } from '@omnihilbras/sdk-nous';
 import { ZenAdapter, ZEN_GO_BASE_URL } from '@omnihilbras/sdk-zen';
+import { ZcodeAdapter, zcodeProviderId } from '@omnihilbras/sdk-zcode-start-plan';
+import { readZcodeLocalCredential, type ZcodeLocalCredential } from './zcode-local.js';
+import { pollZcodeOAuth, startZcodeOAuth, type ZcodeOAuthProvider } from './zcode-oauth.js';
+import { createOpencodeLocalService } from './opencode-service.js';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
 import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext, type ModelPricing } from './index.js';
 import { ChatGptWebAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, type ChatGptWebDriver } from '@omnihilbras/sdk-chatgpt-web';
@@ -313,6 +317,25 @@ export class GatewayService {
   private tokenHarborWeb?: TokenHarborWebAdapter;
   private grokWeb?: GrokWebAdapter;
   private perplexityWeb?: PerplexityWebAdapter;
+  /** ZCode Start Plan, built once so its device id and transport are shared across requests. */
+  private zcode?: ZcodeAdapter;
+  /** The local ZCode store, read once. Its token is never returned to a browser. */
+  private zcodeLocal?: ZcodeLocalCredential;
+  /**
+   * In-flight standalone sign-ins, keyed by the server's flow id. The poll token never leaves the gateway.
+   *
+   * `completion` and `connection` exist for the poll race: the dialog polls every second, and a second
+   * poll arriving while the first is still proving its turn must wait for that same completion rather
+   * than see a missing flow. `connection` also keeps a late poll answering `ready` after the flow is done.
+   */
+  private readonly zcodeFlows = new Map<string, {
+    provider: ZcodeOAuthProvider;
+    pollToken: string;
+    expiresAt: number;
+    pollIntervalSec: number;
+    completion?: Promise<{ status: 'ready'; connection: ConnectionRecord } | { status: 'failed'; message: string }>;
+    connection?: ConnectionRecord;
+  }>();
   private readonly kiroAdapters = new Map<string, ProviderAdapter>();
   /** Why the last model discovery failed, when it was tolerated rather than fatal. */
   private lastDiscoveryNote?: string;
@@ -364,6 +387,15 @@ export class GatewayService {
   private readonly stickyConnections = new Map<string, { connectionId: string; until: number }>();
   private readonly stickyTtlMs = 5 * 60 * 1000;
   private readonly responseCache = new ResponseCache({ ttlMs: 30_000 });
+  /**
+   * Identical requests already in flight, keyed the same way as the response cache.
+   *
+   * The cache only helps a request that arrives *after* the first one finished; a burst of identical
+   * requests all miss it, all reach the provider, and all pay the same latency (and the same bill).
+   * This makes the later ones wait for the first instead of duplicating it. Only requests that are
+   * cacheable in the first place are coalesced, so a streaming or pinned request is never shared.
+   */
+  private readonly inflightChats = new Map<string, Promise<GatewayChatOutcome>>();
   /** Saved model aliases, synchronous for routing. Loaded from the store and updated only through this service. */
   private readonly aliasSnapshot = new Map<string, { providerId: string; model: string }>();
   /**
@@ -457,7 +489,24 @@ export class GatewayService {
     // Kept, not just read: the ChatGPT Web driver is built lazily on first use, long after
     // the constructor has returned, so the override has to outlive this call.
     this.options = options;
-    this.transport = options.transport ?? new FetchHttpTransport({ checkDestination: assertPublicDestination });
+    /**
+     * One transport, carrying the configured timeouts.
+     *
+     * It used to be built with neither `timeoutMs` nor `streamIdleTimeoutMs`, so it fell back to the
+     * SDK's 30 s default for both — while the request executor's own deadline came from the
+     * connection (120 s by default). The transport therefore aborted a slow reasoning turn at 30 s
+     * with `CANCELLED`, before the executor's deadline was anywhere near. This is the transport the
+     * on-demand adapters use, and the resolver hands it to the generic OpenAI-compatible adapter too,
+     * which is the one a plain `provider/model` call reaches.
+     */
+    this.transport = options.transport ?? new FetchHttpTransport({
+      ...(options.config ? {
+        timeoutMs: options.config.timeoutMs,
+        streamIdleTimeoutMs: options.config.streamIdleTimeoutMs,
+        maxStreamDurationMs: options.config.maxStreamDurationMs,
+      } : {}),
+      checkDestination: assertPublicDestination,
+    });
     const now = options.now ?? (() => Date.now());
     this.rateLimiter = new SlidingWindowRateLimiter(now);
     this.apiKeys = new ApiKeyManager(this.apiKeyStore);
@@ -523,7 +572,7 @@ export class GatewayService {
       recordRateLimitUse: (connectionId) => this.rateLimiter.record(connectionId),
       recordUsage: (connectionId) => { void this.connectionStore?.recordUsage(connectionId).catch(() => undefined); },
     });
-    this.providers = new ProviderResolver(registry)
+    this.providers = new ProviderResolver(registry, this.transport)
       .onDemand('cline', ({ connection }) => this.clineAdapter(connection?.id ?? 'cline'), { validateOnSave: true })
       // No `validateOnSave`: ClinePass stores no credential of its own — it reads Cline's connection
       // through the alias in `credential-manager.ts` — so there is nothing to prove at save time.
@@ -555,7 +604,8 @@ export class GatewayService {
       .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter())
       .onDemand(tokenHarborWebProviderId, () => this.tokenHarborWebAdapter())
       .onDemand(grokWebProviderId, () => this.grokWebAdapter())
-      .onDemand(perplexityWebProviderId, () => this.perplexityWebAdapter());
+      .onDemand(perplexityWebProviderId, () => this.perplexityWebAdapter())
+      .onDemand(zcodeProviderId, () => this.zcodeAdapter());
     this.credentialLifecycle = new CredentialLifecycle({
       adapterFor: (providerId) => { try { return this.registry.get(providerId); } catch { return undefined; } },
       now,
@@ -2019,6 +2069,156 @@ export class GatewayService {
     return this.deepSeek;
   }
 
+  /**
+   * ZCode (Start Plan), built once.
+   *
+   * It takes the gateway's own transport so the request carries the configured deadlines and the
+   * destination check, which a fresh transport inside the adapter would not.
+   */
+  zcodeAdapter(): ZcodeAdapter {
+    this.zcode ??= new ZcodeAdapter({ transport: this.transport, workingDirectory: process.cwd() });
+    return this.zcode;
+  }
+
+  /**
+   * The token to use: a pasted one, else the one the ZCode app already stored on this machine.
+   *
+   * Reading the local store is what makes this provider connect the way the app does — the token is
+   * the app's own session, so there is no "API key" to paste. A pasted token still wins, so the
+   * dialog keeps working on a machine without the app. Device and account ids are adopted for
+   * request attribution whenever they can be read; failing to read them never blocks a pasted token.
+   */
+  private async zcodeToken(pasted: string | undefined): Promise<string> {
+    let local: ZcodeLocalCredential | undefined;
+    try {
+      this.zcodeLocal ??= await readZcodeLocalCredential();
+      local = this.zcodeLocal;
+      this.zcodeAdapter().setLocalIdentity({
+        ...(local.deviceMid ? { deviceMid: local.deviceMid } : {}),
+        ...(local.accountUuid ? { accountUuid: local.accountUuid } : {}),
+      });
+    } catch {
+      // No ZCode app here, or a secret this machine cannot derive. Only fatal when nothing was pasted.
+    }
+    const token = pasted?.trim() || local?.token;
+    if (!token) {
+      throw new ProviderError('CONFIGURATION_ERROR', 'No ZCode token: sign in to the ZCode app on this machine, or paste a token.', {
+        providerId: zcodeProviderId,
+        publicMessage: 'No ZCode credential was found on this machine. Sign in to the ZCode app, or paste the token.',
+      });
+    }
+    return token;
+  }
+
+  /**
+   * Proves the Start Plan token with one 1-token turn, and stores nothing.
+   *
+   * A catalog read would prove nothing here: the model list is static. Only a served turn establishes
+   * that the token is accepted and the entitlement can infer. Answers with the plan and models the
+   * dialog shows before saving.
+   */
+  async checkZcode(token: string | undefined, signal?: AbortSignal) {
+    const value = await this.zcodeToken(token);
+    const models = await this.zcodeAdapter().listModels();
+    await this.zcodeAdapter().validateCredential({ type: 'api-key', value }, { signal });
+    const planType = this.zcodeLocal?.activeProvider === 'bigmodel' ? 'ZCode BigModel' : 'ZCode Start Plan';
+    return { verified: true, planType, isFreePlan: false, models: models.map((model) => ({ id: model.id, name: model.displayName ?? model.id })) };
+  }
+
+  /** Saves the token only after a turn succeeds, so a refused session never becomes a connection. */
+  async connectZcode(token: string | undefined, signal?: AbortSignal, addAccount = false) {
+    const value = await this.zcodeToken(token);
+    await this.zcodeAdapter().validateCredential({ type: 'api-key', value }, { signal });
+    return this.saveConnection(
+      {
+        id: addAccount ? `${zcodeProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : zcodeProviderId,
+        providerId: zcodeProviderId,
+        name: 'ZCode (Start Plan)',
+        endpoint: 'https://zcode.z.ai',
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      },
+      { type: 'api-key', value },
+      signal,
+    );
+  }
+
+  /**
+   * Starts a standalone ZCode sign-in and returns the URL to open.
+   *
+   * This is ZCode's own OAuth server, not the installed app: `init` mints a flow, the user signs in
+   * in any browser, and the gateway polls ZCode for the resulting token. The poll token stays here;
+   * the browser only ever sees the flow id and the authorize URL.
+   */
+  async startZcodeSignIn(provider: ZcodeOAuthProvider = 'zai') {
+    const start = await startZcodeOAuth(provider);
+    this.zcodeFlows.set(start.flowId, { provider, pollToken: start.pollToken, expiresAt: start.expiresAt, pollIntervalSec: start.pollIntervalSec });
+    return { authorizeUrl: start.authorizeUrl, flowId: start.flowId, expiresAt: start.expiresAt, pollIntervalSec: start.pollIntervalSec };
+  }
+
+  /**
+   * One poll of a sign-in. `pending` is normal; `ready` stores the connection after proving a turn.
+   *
+   * The token is the account's own JWT from the OAuth server, so there is no dependency on the ZCode
+   * desktop app. A turn is sent before the save: an account that cannot infer on the Start Plan lane
+   * is reported here rather than stored as a connection that fails later.
+   */
+  async pollZcodeSignIn(flowId: string, signal?: AbortSignal) {
+    const flow = this.zcodeFlows.get(flowId);
+    // Not a thrown 404: a restart, an expired flow or a second poll after `ready` all land here, and
+    // the dialog must say which it is instead of showing the provider-error fallback ("The requested
+    // resource was not found") for a sign-in the user just started.
+    if (!flow) return { status: 'failed' as const, message: 'This ZCode sign-in is unknown or already finished. Start again.' };
+    // The dialog polls every second. A poll that arrives while the first is still proving its turn
+    // waits for the same result; otherwise it would see no flow and report a failure for a sign-in
+    // that is seconds away from succeeding, which is what the first live attempt did.
+    if (flow.completion) return flow.completion;
+    if (flow.connection) return { status: 'ready' as const, connection: flow.connection };
+    if (Date.now() > flow.expiresAt * 1000) {
+      this.zcodeFlows.delete(flowId);
+      return { status: 'expired' as const };
+    }
+    const result = await pollZcodeOAuth(flowId, flow.pollToken, signal ? { signal } : {});
+    if (result.status !== 'ready') {
+      if (result.status === 'failed') this.zcodeFlows.delete(flowId);
+      return result;
+    }
+
+    const completion = (async () => {
+      try {
+        if (result.accountUuid) this.zcodeAdapter().setLocalIdentity({ accountUuid: result.accountUuid });
+        // Not gated on a test turn. The OAuth server has already authenticated the account, and the
+        // desktop app saves the session without a probe too; gating it here is what made a successful
+        // sign-in report "did not finish" whenever the plan lane replied slowly or with reasoning only.
+        // The first real chat reports any plan/CAPTCHA problem with the client's own context.
+        const connection = await this.saveConnection(
+          {
+            id: zcodeProviderId,
+            providerId: zcodeProviderId,
+            name: 'ZCode (Start Plan)',
+            endpoint: 'https://zcode.z.ai',
+            priority: 1,
+            proxyPool: 'none',
+            modelPolicy: 'all',
+          },
+          { type: 'api-key', value: result.token },
+          signal,
+        );
+        // Keep the flow for a minute so a poll already in flight answers `ready`, not "unknown".
+        flow.connection = connection;
+        const timer = setTimeout(() => { this.zcodeFlows.delete(flowId); }, 60_000);
+        timer.unref?.();
+        return { status: 'ready' as const, connection };
+      } catch (error) {
+        this.zcodeFlows.delete(flowId);
+        return { status: 'failed' as const, message: error instanceof Error ? error.message : 'The ZCode sign-in could not be completed.' };
+      }
+    })();
+    flow.completion = completion;
+    return completion;
+  }
+
 
 
   /** Stores a DeepSeek Web userToken, after checking DeepSeek accepts it. */
@@ -2441,6 +2641,15 @@ export class GatewayService {
         if (!this.connectionStore) return;
         await this.connectionStore.set(connectionId, credential).catch(() => undefined);
       },
+      /**
+       * The OpenCode app's own transport, when it is running.
+       *
+       * A direct request from this machine is refused with `429 FreeUsageLimitError` — from Node and
+       * from Bun alike, with the account's credential and the client's headers — while the app serves
+       * the same model seconds later. Turns therefore go through the local service. When it is not
+       * running the adapter falls back to the direct lane, which reports the Console's own refusal.
+       */
+      localService: createOpencodeLocalService({ directory: process.cwd() }),
     });
     this.opencodeConsoleAdapters.set(connectionId, adapter);
     return adapter;
@@ -2987,15 +3196,36 @@ export class GatewayService {
    * than reached for, which is what lets the loop be tested without a gateway.
    */
   async chatWithFailover(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayChatOutcome> {
+    /**
+     * A client request is never deduplicated.
+     *
+     * `!signal` looks like an accident here and is the opposite: the HTTP layer always passes an
+     * abort signal, so this condition keeps every request that came from a client on the real path.
+     * `load.test.js` pins the invariant — 200 concurrent identical requests must reach the provider
+     * 200 times, "once, not zero times and not twice" — so serving a client from the response cache,
+     * or coalescing two client requests onto one upstream call, is a behaviour the project refuses.
+     * The cache and the coalescing below therefore apply only to a caller that reaches the service
+     * directly with no signal.
+     */
     const cacheable = (request.temperature === undefined || request.temperature === 0) && !signal && request.connectionId === undefined && explicitProviderId === undefined;
     const cacheKey = cacheable ? this.responseCache.keyFor(request) : undefined;
     if (cacheKey) {
       const cached = this.responseCache.get(cacheKey) as ChatResponse | undefined;
       if (cached) return { response: cached, attempts: [] };
+      // A duplicate already running is waited on rather than sent again. `!signal` is guaranteed by
+      // `cacheable`, so no caller can abort out of a shared promise and strand the others.
+      const inflight = this.inflightChats.get(cacheKey);
+      if (inflight) return inflight;
+      const work = this.requests.chat(request, explicitProviderId, undefined, scope)
+        .then((outcome) => {
+          if (outcome?.response) this.responseCache.set(cacheKey, outcome.response);
+          return outcome;
+        })
+        .finally(() => { this.inflightChats.delete(cacheKey); });
+      this.inflightChats.set(cacheKey, work);
+      return work;
     }
-    const outcome = await this.requests.chat(request, explicitProviderId, signal, scope);
-    if (cacheKey && outcome?.response) this.responseCache.set(cacheKey, outcome.response);
-    return outcome;
+    return this.requests.chat(request, explicitProviderId, signal, scope);
   }
 
   /**

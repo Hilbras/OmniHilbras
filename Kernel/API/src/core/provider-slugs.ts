@@ -81,6 +81,7 @@ export const PROVIDER_SLUGS: Readonly<Record<string, string>> = {
   deepseek: 'ds',
   qwen: 'qn',
   'qwen-token-plan': 'qtp',
+  zcode: 'zc',
   grok: 'gk',
   openai: 'oa',
   anthropic: 'an',

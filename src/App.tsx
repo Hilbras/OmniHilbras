@@ -108,7 +108,7 @@ const steps = [
 
 
 const codeSamples = {
-  curl: `curl http://127.0.0.1:8787/v1/chat/completions \\
+  curl: `curl http://127.0.0.1:20138/v1/chat/completions \\
   -H "Authorization: Bearer $OMNIHILBRAS_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -116,7 +116,7 @@ const codeSamples = {
     "messages": [{ "role": "user", "content": "Hello" }]
   }'`,
   typescript: `const response = await fetch(
-  'http://127.0.0.1:8787/v1/chat/completions',
+  'http://127.0.0.1:20138/v1/chat/completions',
   {
     method: 'POST',
     headers: {

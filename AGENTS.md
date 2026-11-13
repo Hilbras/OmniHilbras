@@ -163,6 +163,13 @@ that is not on `main`.
   false.** `canSave` is computed from form fields alone and knows nothing about flows, and three
   providers have since grown real OAuth flows. If you add an auth mode with no collector, disable Save
   and say so in the UI, and add the mode to the set the card test knows about.
+  **`zcode` signs in through ZCode's own OAuth server, standalone.** The card claims `OAuth` and
+  `POST /v1/oauth/zcode/start` mints a flow with ZCode's `oauth/cli` init; the user signs in in any
+  browser and `GET /v1/oauth/zcode/status?flowId=…` polls until the gateway has the account's
+  `zcodejwttoken`, then proves a 1-token turn and saves. Nothing is read from the installed desktop app
+  and no `zcode://` scheme handler is needed — the polling flow is the CLI sign-in, not the app's
+  redirect. `webSessionProviders.ts` must **not** carry a `zcode` descriptor; that dialog is for a
+  pasted session and would shadow the OAuth dialog.
   **One description per provider.** `AddProviderModal`'s provider list is **derived** from
   `providerCatalog`, never re-declared: it used to repeat `name`, `description`, `auth`, `color`,
   `initial`, `logo` and the endpoint for ten providers, and seven of the seven shared providers had two
@@ -205,6 +212,19 @@ that is not on `main`.
   — from the tracking, not from health. `tests/provider-card-merge.test.js` asserts the general
   property: with no connection the output is the input, and every field that changes is traceable to the
   input.
+- **One provider's free tier is served by another program running on this machine.** `opencode-console`'s
+  free models refuse a direct request from this host — `429 FreeUsageLimitError`, from Node and from Bun
+  alike, with the account's own credential and the client's own headers — while the OpenCode app serves
+  the same model seconds later. The gateway therefore drives the app's **local service** when it is
+  running (`Kernel/API/src/core/opencode-service.ts`, discovered from
+  `~/.local/state/opencode/service.json`, Basic auth `opencode:<password>`), and the SDK takes it as a
+  `localService` hook so the SDK itself stays browser-safe. Two rules that are easy to get wrong:
+  a service that is *not running* falls back to the direct lane (which reports the Console's own
+  refusal), while a turn that **started and failed** reports its own error and is never retried on the
+  lane this network always gets refused on; and because the gateway strips the provider prefix before an
+  adapter sees a model (`opc/deepseek-v4.1-flash-free` arrives as `deepseek-v4.1-flash-free`), the
+  adapter rebuilds the service reference as `opencode/<bare>`. A card or a doc that says this provider
+  works with the OpenCode app closed is wrong.
 - `public/providers/` is **input, not build output**. The `logoPolarity()` plugin reads it and
   writes `src/lib/logoPolarity.generated.ts`; nothing writes into the directory. Never stage with
   `':(exclude)public/providers'` — that silently dropped 141 required assets from 18 releases, two
@@ -254,8 +274,8 @@ that is not on `main`.
 
 ```bash
 pnpm install
-pnpm dev            # dashboard + marketing site on :5173
-pnpm dev:gateway    # local gateway on 127.0.0.1:8787
+pnpm dev            # dashboard + marketing site on :20137
+pnpm dev:gateway    # local gateway on 127.0.0.1:20138
 omnihilbras         # both of the above in one terminal (needs `npm link` once)
 pnpm typecheck
 pnpm test           # SDK then gateway

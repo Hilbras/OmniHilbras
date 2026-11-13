@@ -36,6 +36,20 @@ export const OPENCODE_CONSOLE = {
   userPath: '/api/user',
   orgsPath: '/api/orgs',
   configPath: '/api/config',
+  /**
+   * The entitlement view. `/api/v2/config` is what the installed client reads
+   * (`packages/core/src/plugin/provider/opencode.ts` → `GET ${server}/api/v2/config`), and unlike v1
+   * it marks each model the account **cannot** use with `disabled: true` — which is why a signed-in
+   * account sees `402 Insufficient balance` on a model the catalog still advertises. v1 stays the
+   * source of the lane URL; v2 is the source of the entitlement.
+   */
+  configV2Path: '/api/v2/config',
+  /**
+   * The OpenCode provider id inside the local service. The gateway strips the gateway-side prefix
+   * before an adapter sees a model (`opc/deepseek-v4.1-flash-free` → `deepseek-v4.1-flash-free`), and
+   * the service wants the reference back: `opencode/deepseek-v4.1-flash-free`.
+   */
+  serviceProviderId: 'opencode',
   grantType: 'urn:ietf:params:oauth:grant-type:device_code',
 } as const;
 
@@ -63,6 +77,8 @@ type ConsoleModelConfig = {
   limit?: { context?: unknown; output?: unknown };
   /** Quoted per 1M tokens, unlike OpenRouter's per-token strings. */
   cost?: { input?: unknown; output?: unknown; cache_read?: unknown; cache_write?: unknown };
+  /** v2 only: the account cannot use this model (no credit, or the plan excludes it). */
+  disabled?: unknown;
 };
 
 type ConsoleConfig = {
@@ -73,6 +89,16 @@ type ConsoleConfig = {
         options?: { headers?: Record<string, string> };
         models?: Record<string, ConsoleModelConfig>;
       };
+    };
+  };
+};
+
+/** `/api/v2/config`: the entitlement view, the same document the installed client reads. */
+type ConsoleConfigV2 = {
+  providers?: {
+    opencode?: {
+      headers?: Record<string, string>;
+      models?: Record<string, ConsoleModelConfig>;
     };
   };
 };
@@ -212,6 +238,19 @@ export type OpencodeConsoleAdapterOptions = {
   /** Called with a renewed credential so the caller can persist it. */
   onTokensRefreshed?: (credential: ProviderCredential) => void | Promise<void>;
   now?: () => number;
+  /**
+   * Runs a turn through the OpenCode app's own local service.
+   *
+   * The Console's free tier answers `429 FreeUsageLimitError` to a direct request from this machine,
+   * from Node **and** from Bun, with the account's credential and the client's own headers — while the
+   * app serves the same model seconds later. The service is the transport that qualifies, so when it is
+   * present the turn goes through it. Supplied by the gateway (which can read the filesystem); the SDK
+   * stays browser-safe. A service that is not running throws with `name: 'OpencodeServiceUnavailable'`,
+   * and the turn falls back to the direct lane so the Console's own refusal is still reported.
+   */
+  localService?: {
+    turn(input: { model: string; text: string; signal?: AbortSignal }): Promise<{ text: string; reasoning?: string; finish?: string; model?: string }>;
+  };
 };
 
 export class OpencodeConsoleAdapter implements ProviderAdapter {
@@ -222,6 +261,7 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
   private readonly transport: HttpTransport;
   private readonly onTokensRefreshed?: (credential: ProviderCredential) => void | Promise<void>;
   private readonly now: () => number;
+  private readonly localService?: OpencodeConsoleAdapterOptions['localService'];
   /** Lanes keyed by the access token they were read with, so a renewal invalidates them. */
   private lanes = new Map<string, { at: number; lanes: ConsoleLanes }>();
   /** Renewed credentials, keyed by the token they replaced. */
@@ -233,13 +273,17 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
     this.transport = options.transport ?? new FetchHttpTransport();
     this.onTokensRefreshed = options.onTokensRefreshed;
     this.now = options.now ?? (() => Date.now());
+    this.localService = options.localService;
   }
 
   async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
     const credential = await this.credential(context);
     const lanes = await this.resolveLanes(credential, context.signal);
     return [...lanes.byModel.keys()]
-      .filter((id) => id.length > 0)
+      // A model the Console marks `disabled` for this account is not an option: the client hides it and
+      // every request to it answers `402 Insufficient balance`. Offering it is what made the card look
+      // like a working catalog whose turns fail.
+      .filter((id) => id.length > 0 && lanes.entries.get(id)?.disabled !== true)
       .map((id) => describeConsoleModel(id, lanes.entries.get(id), this.id));
   }
 
@@ -275,6 +319,17 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
   }
 
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
+    const turn = await this.localTurn(request, context);
+    if (turn) {
+      return {
+        id: `opencode-service-${this.now().toString(36)}`,
+        providerId: this.id,
+        model: turn.model ?? request.model,
+        createdAt: new Date().toISOString(),
+        message: { role: 'assistant', content: turn.text },
+        finishReason: turn.finish === 'tool_calls' ? 'tool_calls' : 'stop',
+      };
+    }
     if (this.isFreeModel(request.model)) {
       let text = '';
       let finishReason: ChatResponse['finishReason'] | undefined;
@@ -310,7 +365,44 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
     return adapter.chat(request, { ...context, credential: this.laneCredential(await this.credential(context)) });
   }
 
+  /**
+   * One turn through the OpenCode app's local service, or `undefined` when it is not running.
+   *
+   * Only "not running" falls through to the direct lane. A turn that started and failed reports its own
+   * failure: retrying it on the direct lane would replace a real error with the free-tier refusal this
+   * network always gets.
+   */
+  private async localTurn(request: ChatRequest, context: ProviderRequestContext): Promise<{ text: string; reasoning?: string; finish?: string; model?: string } | undefined> {
+    if (!this.localService) return undefined;
+    try {
+      // The gateway hands an adapter a bare model id, so the reference the service wants is rebuilt
+      // here: `opc/deepseek-v4.1-flash-free` arrives as `deepseek-v4.1-flash-free` and leaves as
+      // `opencode/deepseek-v4.1-flash-free`.
+      const bare = request.model.includes('/') ? request.model.slice(request.model.lastIndexOf('/') + 1) : request.model;
+      return await this.localService.turn({
+        model: `${OPENCODE_CONSOLE.serviceProviderId}/${bare}`,
+        text: flattenForService(request.messages),
+        ...(context.signal ? { signal: context.signal } : {}),
+      });
+    } catch (error) {
+      if ((error as { name?: string } | undefined)?.name === 'OpencodeServiceUnavailable') return undefined;
+      throw error;
+    }
+  }
+
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
+    // The service runs a whole turn and returns its text, so a stream through it is that answer
+    // delivered as one delta. The free tier is what matters here; token-by-token is the direct lane's
+    // property, and that lane refuses this network.
+    const turn = await this.localTurn(request, context);
+    if (turn) {
+      const id = `opencode-service-${this.now().toString(36)}`;
+      const model = turn.model ?? request.model;
+      if (turn.reasoning) yield { id, providerId: this.id, model, delta: { reasoning: turn.reasoning } };
+      yield { id, providerId: this.id, model, delta: { role: 'assistant', content: turn.text } };
+      yield { id, providerId: this.id, model, delta: {}, finishReason: turn.finish === 'tool_calls' ? 'tool_calls' : 'stop' };
+      return;
+    }
     if (this.isFreeModel(request.model)) {
       yield* this.streamFree(request, context);
       return;
@@ -570,6 +662,26 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
       else if (base) byModel.set(id, base);
       entries.set(id, model ?? {});
     }
+    // The entitlement view (`/api/v2/config`), best effort. It is the document the installed client
+    // reads, and the only one that marks a model `disabled` for this account; a Console that does not
+    // serve it, or refuses it, must not take the lane catalog down with it.
+    try {
+      const version2 = await this.transport.request<ConsoleConfigV2>({
+        method: 'GET',
+        providerId: this.id,
+        url: `${OPENCODE_CONSOLE.server}${OPENCODE_CONSOLE.configV2Path}`,
+        headers: { ...this.headers(credential), ...(orgId ? { 'x-org-id': orgId } : {}) },
+        ...(signal ? { signal } : {}),
+      });
+      for (const [id, model] of Object.entries(version2.data?.providers?.opencode?.models ?? {})) {
+        if (!id || model?.disabled !== true) continue;
+        const existing = entries.get(id);
+        if (existing) existing.disabled = true;
+        else entries.set(id, { disabled: true });
+      }
+    } catch {
+      // No v2, or this credential cannot read it: the catalog is still usable from v1.
+    }
     // The config names the header inference wants, which is spelled differently again.
     const inferenceOrgId = provider?.options?.headers?.['x-opencode-org-id'] ?? orgId;
     const lanes: ConsoleLanes = { base, byModel, entries, ...(inferenceOrgId ? { orgId: inferenceOrgId } : {}) };
@@ -647,4 +759,27 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
       { transport: this.transport },
     );
   }
+}
+
+/**
+ * Flattens a conversation into the single prompt the OpenCode local service takes.
+ *
+ * The service is an agent session, not a completion endpoint, so the roles have to survive as text —
+ * the same limit the reference bridges ran into. A message whose content carries no text (an image
+ * only, say) is dropped rather than sent as an empty turn.
+ */
+function flattenForService(messages: ChatRequest['messages']): string {
+  const lines: string[] = [];
+  for (const message of messages) {
+    const content = message.content;
+    const text = typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content.map((part) => (part as { text?: string })?.text ?? '').join('')
+        : '';
+    if (!text.trim()) continue;
+    const label = message.role === 'assistant' ? 'Assistant' : message.role === 'system' ? 'System' : message.role === 'tool' ? 'Tool' : 'User';
+    lines.push(`${label}: ${text}`);
+  }
+  return lines.join('\n\n');
 }

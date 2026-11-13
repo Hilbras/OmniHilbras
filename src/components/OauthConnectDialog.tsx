@@ -8,11 +8,13 @@ import {
   getClineSignInStatus,
   getDeviceSignInStatus,
   getKiroSignInStatus,
+  getZcodeSignInStatus,
   startClaudeCodeSignIn,
   startCodexSignIn,
   startGatewayDeviceSignIn,
   startGatewayOauthSignIn,
   startKiroSignIn,
+  startZcodeSignIn,
   listGatewayConnections,
   type GatewayConnection,
   type GatewayOauthSignInStatus,
@@ -327,6 +329,33 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
     setError('');
     missedPollsRef.current = 0;
 
+    if (providerId === 'zcode') {
+      try {
+        // Standalone: ZCode's own OAuth server mints the flow, the user signs in in any browser, and
+        // this dialog polls the gateway until the token is saved. Nothing is read from the desktop app.
+        const signIn = await startZcodeSignIn();
+        if (settledRef.current) return;
+        startedSessionRef.current = signIn.flowId;
+        const sentToOpenTab = navigateTo(signIn.authorizeUrl);
+        setPhase('waiting');
+        setMessage(sentToOpenTab
+          ? 'Sign in to ZCode in your browser. This tab will finish the connection.'
+          : 'Your browser blocked the sign-in tab. Open the link below to sign in.');
+        watch(signIn.flowId, async (id) => {
+          const status = await getZcodeSignInStatus(id);
+          if (status.status === 'ready') return { status: 'connected' as const, ...(status.connection ? { connection: status.connection } : {}) };
+          if (status.status === 'failed') return { status: 'failed' as const, ...(status.message ? { error: status.message } : {}) };
+          return { status: status.status };
+        }, 'The ZCode sign-in timed out. Start again from OmniHilbras.');
+      } catch (startError) {
+        settledRef.current = true;
+        discardSignInTab();
+        setPhase('failed');
+        setError(startError instanceof Error ? startError.message : 'The sign-in could not be started.');
+      }
+      return;
+    }
+
     if (providerId === 'kiro') {
       try {
         const signIn = await startKiroSignIn(addAccount);
@@ -574,7 +603,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
                 value={paste}
                 onChange={(event) => { setPaste(event.target.value); setError(''); }}
                 onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submitPastedCode(); } }}
-                placeholder="http://127.0.0.1:8787/v1/oauth/cline/callback?code=…"
+                placeholder="http://127.0.0.1:20138/v1/oauth/cline/callback?code=…"
                 aria-label="Callback URL or authorization code"
                 className="input mt-2 !h-10 !w-full !rounded-lg !border !border-line !bg-surface-2 !px-3 !font-mono !text-[11px]"
                 autoComplete="off"

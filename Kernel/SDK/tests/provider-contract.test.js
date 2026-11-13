@@ -11,6 +11,7 @@ import { ProviderError } from '../openai/dist/lib/errors.js';
 import { OpenRouterAdapter } from '../openrouter/dist/adapter/index.js';
 import { OpenAICompatibleAdapter } from '../openai/dist/adapter/index.js';
 import { AnthropicAdapter } from '../anthropic/dist/adapter/index.js';
+import { ZcodeAdapter } from '../zcode-start-plan/dist/adapter/index.js';
 import { GeminiAdapter } from '../gemini/dist/adapter/index.js';
 import { DeepSeekWebAdapter } from '../deepseek-web/dist/adapter/index.js';
 import { TokenHarborWebAdapter } from '../tokenharbor-web/dist/adapter/index.js';
@@ -88,6 +89,16 @@ const providers = [
     make: () => {
       const { stub, transport: t } = transport('anthropic');
       return { adapter: new AnthropicAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    // ZCode's Start Plan endpoint speaks the Anthropic Messages shape, so the same wire harness drives
+    // it. What differs is above the wire — the stock system blocks, the desktop headers and the
+    // `output_config.effort` mapping — and those are pinned in `zcode.test.js`.
+    name: 'zcode-start-plan',
+    make: () => {
+      const { stub, transport: t } = transport('anthropic');
+      return { adapter: new ZcodeAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
     },
   },
   {

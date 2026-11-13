@@ -271,7 +271,7 @@ function gatewayProxy(): Plugin {
   };
 }
 
-const gatewayPort = Number(process.env.OMNIHILBRAS_PORT?.trim() || 8787);
+const gatewayPort = Number(process.env.OMNIHILBRAS_PORT?.trim() || 20138);
 
 function readDashboardTokenFile(): string | undefined {
   // The gateway owns where this file lives. Re-deriving the `XDG_CONFIG_HOME || ~/.config` path here
@@ -338,7 +338,7 @@ export default defineConfig({
     fullReloadForInvalidatableModules(),
     dashboardFallback(), gatewayProxy(), logoPolarity(), react(), tailwindcss(), repoVersion()],
   server: {
-    port: 20139,
+    port: 20137,
     /**
      * Full reload for the modules Fast Refresh cannot handle.
      *

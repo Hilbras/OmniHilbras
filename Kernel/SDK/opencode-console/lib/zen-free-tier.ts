@@ -298,9 +298,19 @@ export function isZenFreeTierRefusalError(error: unknown): boolean {
  * everything the gate asks for, and saying so is what stops the reader rotating a working credential.
  */
 export function zenFreeTierRefusal(input: { providerId: string; model: string; label: string; contractSatisfied: boolean; gated: boolean; providerReason?: string }): ProviderError {
-  const message = input.contractSatisfied
-    ? `${input.label} refused ${input.model} after this gateway sent everything its free-tier request contract requires — a streaming request, the tool quartet, a session header and a client version. The credential was accepted, so this is not a credential problem: OpenCode limits its free tier to non-datacenter networks, and this host's egress address is the likely cause.`
-    : `${input.label} refused ${input.model}, and this gateway could not satisfy its free-tier request contract.`;
+  /**
+   * The provider's own words win when they are actionable.
+   *
+   * The Console distinguishes two refusals that read nothing alike — `FreeUsageLimitError` ("subscribe
+   * to OpenCode Go") and `Insufficient balance` ("Top up at …/billing") — and both say what to do.
+   * Replacing either with a paragraph about datacenter networks hides the only sentence that helps.
+   */
+  const providerReason = input.providerReason?.trim();
+  const actionable = providerReason && /free usage limit|insufficient balance|top up at/i.test(providerReason) ? providerReason.slice(0, 400) : undefined;
+  const message = actionable
+    ?? (input.contractSatisfied
+      ? `${input.label} refused ${input.model} after this gateway sent everything its free-tier request contract requires — a streaming request, the tool quartet, a session header and a client version. The credential was accepted, so this is not a credential problem: OpenCode limits its free tier to non-datacenter networks, and this host's egress address is the likely cause.`
+      : `${input.label} refused ${input.model}, and this gateway could not satisfy its free-tier request contract.`);
   // `PROVIDER_UNAVAILABLE` for the gate, because a lane that refuses every caller on this network is
   // unreachable rather than broken — and the code is what the retry policy reads. A refusal that is
   // not the gate stays a plain failure, so the two cannot collapse into one meaning nothing.

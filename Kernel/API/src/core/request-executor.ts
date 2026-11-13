@@ -1,4 +1,4 @@
-import { ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse } from './index.js';;
+import { isProviderError, ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse } from './index.js';;
 import { noCandidateMessage, type RouteCandidate, type RouteDecision } from './routing.js';
 import { RetryPolicy } from './retry-policy.js';
 import { HedgePolicy } from './hedge-policy.js';
@@ -767,7 +767,11 @@ function noRouteAvailable(skipped: Array<{ providerId: string; reason: string }>
 function attachAttempts(error: unknown, attempts: GatewayFailoverAttempt[]) {
   const failedProviders = [...new Set(attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.providerId))];
   const ledger = { attempts };
-  if (error instanceof ProviderError) {
+  // `isProviderError` rather than `instanceof`: an adapter lives in its own package with its own copy of
+  // `ProviderError`, so `instanceof` is false across the package boundary and this branch used to drop the
+  // provider's public message on exactly the path that reports a failure. The portable check survives the
+  // copy (it tests `name` and `code`).
+  if (isProviderError(error)) {
     // A single route keeps the adapter's own redacted public message, so existing
     // error semantics do not change when failover never engaged.
     if (failedProviders.length <= 1) {

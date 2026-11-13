@@ -147,11 +147,16 @@ export class GatewaySupervisor extends EventEmitter {
   }
 
   /**
-   * The port this launch will use. 8787 is the documented default, not a requirement: another local
+   * The port this launch will use. 20138 is the documented default, not a requirement: another local
    * gateway, or anything else on that port, must not stop the app from opening. A fallback port is
-   * announced through the snapshot so the renderer and IPC client follow it.
+   * announced through the snapshot so the renderer and IPC client follow it. A configured port of
+   * `0` asks for an ephemeral one, which is how a test run avoids a dev gateway on the main port.
    */
   async resolvePort() {
+    if (this.options.port === 0) {
+      this.options.port = await freePort(this.options.host);
+      return this.options.port;
+    }
     if (await portIsFree(this.options.port, this.options.host)) return this.options.port;
     if (!this.options.fallbackToFreePort) return this.options.port;
     const fallback = await freePort(this.options.host);
