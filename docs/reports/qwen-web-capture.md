@@ -145,3 +145,24 @@ What a driver still needs, none of it proven yet: a persistent profile the opera
 detection of "the stream stopped" (the text stops changing, or the stop button disappears), and the
 per-turn cost of a browser process — the same shape and the same cost as `chatgptWeb.ts`, which is the
 template for it.
+
+## Correction: the session cookie exists, on the domain scope
+
+An earlier pass filtered cookies by `auth.qwen.ai` and `chat.qwen.ai` and concluded there was no session
+cookie. That filter was wrong: a cookie set on **`.qwen.ai`** matches neither suffix. The full jar for
+the signed-in profile, by scope:
+
+| Scope | Cookie | Length | HttpOnly | What it is |
+| --- | --- | --- | --- | --- |
+| **`.qwen.ai`** | **`refresh_token`** | **297** | **yes** | **the session** |
+| `.qwen.ai` | `aui`, `cnaui` | 36 | no | account identifiers |
+| `.qwen.ai` | `cna`, `isg`, `scn`, `ssxmod_itna` | — | no | Alibaba anti-bot / device |
+| `chat.qwen.ai` | `alicfw`, `x-ap`, `qwen-locale`, `qwen-theme` | — | no | session-ish and UI |
+| `auth.qwen.ai` | `aliyungf_tc`, `acw_tc` | — | yes | anti-bot only |
+
+**It does not change the conclusion, and that was tested with it present:** the replay that was refused
+built its Cookie header with `domain.includes('qwen.ai')`, which includes `.qwen.ai` — so
+`refresh_token` was in the jar for the cookie-only attempt and for the one carrying
+`Authorization: Bearer`. Both were refused with `FAIL_SYS_USER_VALIDATE, RGV587_ERROR`. Authentication
+was never the missing piece; the per-request `bx-ua` signature is.
+

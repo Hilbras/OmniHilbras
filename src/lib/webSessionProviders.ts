@@ -63,11 +63,17 @@ export const WEB_SESSION_PROVIDERS: Record<string, WebSessionDescriptor> = {
     id: 'qwen-web',
     name: 'Qwen Web',
     website: 'https://chat.qwen.ai',
-    credentialName: 'Session token from chat.qwen.ai',
+    credentialName: 'refresh_token cookie from .qwen.ai',
     /**
      * Measured from a signed-in session, and it corrects this file.
      *
-     * The instructions used to say "copy the cookies for **auth.qwen.ai**". A real signed-in profile
+     * The session is the **`refresh_token` cookie on `.qwen.ai`** (HttpOnly, 297 characters) — plus the
+     * toolbar cookies `aui`/`cnaui` for the account identifiers. The first version of this text said
+     * "copy the cookies for auth.qwen.ai", and a second pass filtered by that host and concluded there
+     * was no session cookie: both were wrong in the same way, because a cookie on the **parent** domain
+     * matches neither `auth.qwen.ai` nor `chat.qwen.ai`.
+     *
+     * A real signed-in profile
      * holds exactly **two** cookies on that host — `aliyungf_tc` and `acw_tc` — and both are Alibaba
      * anti-bot cookies that every visitor gets. There is no session cookie on the auth origin at all.
      * The session is a **bearer token in `chat.qwen.ai`'s local storage** (`token`, with
