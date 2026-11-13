@@ -59,8 +59,10 @@ export const providerLogoMap = {
   'codebuddy-cn': '/providers/codebuddy-cn.png',
   'codebuddy-intl': '/providers/codebuddy-intl.png',
   coarena: '/providers/coarena.png',
-  // ZCode's own mark, pulled from zcode.z.ai and committed here (the favicon and hero logo are the
-  // vendor's; this is a 1024px PNG of the latter).
+  // ZCode's own mark, taken from the icon the installed ZCode app ships with
+  // (`/usr/share/icons/hicolor/1024x1024/apps/zcode.png`) and committed here. The first version of
+  // this file was pulled from zcode.z.ai, and it was not the app's mark — the card showed a logo the
+  // product does not use.
   zcode: '/providers/zcode.png',
 } as const;
 
