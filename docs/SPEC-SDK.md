@@ -1096,6 +1096,17 @@ The exposure is stated rather than implied: in the default mode a model can read
 user can read and send it to the provider. That is the same set the agent app calling the gateway
 already has, and it is why a gateway key is a credential worth guarding.
 
+**A refused turn reports the Console's sentence, with a code.** The service reports a failure as
+`session.execution.failed` and carries the Console's own words — `Free usage limit reached. Free models
+work in OpenCode (…); subscribe to OpenCode Go to keep going`. Throwing a bare `Error` there made the
+gateway answer `502 Every provider route failed`, which names neither the provider's reason nor a reason
+at all; a client retried ten times with nothing to act on. The bridge now throws a `ProviderError`: the
+quota sentence becomes `RATE_LIMITED` (not retryable — retrying a spent daily quota is the loop to stay
+out of), the balance sentence stays `PROVIDER_REQUEST_FAILED` and not retryable, and the Console's own
+sentence rides along as `providerMessage`, which is the field the dashboard reads. Measured with a
+provider that fails this way: the aggregate carries `code: RATE_LIMITED` and the sentence in
+`details.providerMessage`.
+
 **One thinking block, then the answer.** A session is an agent loop, so one turn can be several
 steps, and each step emits its own reasoning and text parts — concurrently. Measured on a live turn:
 `reasoning.delta` … `text.started` … `text.delta` ×18 … **`reasoning.ended`**. Forwarded in arrival

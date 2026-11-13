@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { discoverOpencodeService, flattenMessagesForService, opencodeServicePermissions, parseModelRef, runOpencodeServiceTurn, streamOpencodeServiceTurn } from '../dist/src/core/opencode-service.js';
+import { discoverOpencodeService, flattenMessagesForService, opencodeServicePermissions, opencodeServiceTurnError, parseModelRef, runOpencodeServiceTurn, streamOpencodeServiceTurn } from '../dist/src/core/opencode-service.js';
 
 /**
  * The local OpenCode service, which is the transport the desktop app uses.
@@ -138,7 +138,15 @@ test('a turn the service fails names the failure instead of reporting an empty a
   };
   await assert.rejects(
     () => runOpencodeServiceTurn({ url: 'http://127.0.0.1:49374', password: 'pw' }, { model: 'opencode/x', text: 'hi' }, { fetch: scripted }),
-    /exceed quota limit/,
+    (error) => {
+      // A bare Error here made the gateway answer `502 Every provider route failed`, which names no
+      // provider and no reason: a client retried ten times with nothing to act on.
+      assert.equal(error.name, 'ProviderError');
+      assert.equal(error.code, 'PROVIDER_REQUEST_FAILED');
+      assert.match(error.publicMessage, /exceed quota limit/);
+      assert.equal(error.details.providerMessage, 'exceed quota limit');
+      return true;
+    },
   );
 });
 
@@ -183,4 +191,20 @@ test('a chat bridge denies every tool it has not heard of, and allows only the r
   const confined = opencodeServicePermissions({ OMNIHILBRAS_OPENCODE_SERVICE_TOOLS: 'project' });
   assert.equal(confined.at(-1).action, 'external_directory');
   assert.equal(confined.at(-1).effect, 'deny');
+});
+
+
+test('a free-tier refusal is reported as rate limiting, with the Console\'s own sentence', () => {
+  const quota = opencodeServiceTurnError('Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go');
+  assert.equal(quota.code, 'RATE_LIMITED', 'a quota refusal is a rate limit, not a transport failure');
+  assert.equal(quota.retryable, false, 'retrying a spent daily quota is the loop a client should not be in');
+  assert.match(quota.details.providerMessage, /subscribe to OpenCode Go/);
+
+  const balance = opencodeServiceTurnError('Insufficient balance. Top up at https://opencode.ai/console/wrk_x/billing?credits=1.');
+  assert.equal(balance.code, 'PROVIDER_REQUEST_FAILED');
+  assert.equal(balance.retryable, false);
+  assert.match(balance.publicMessage, /Top up at/);
+
+  const other = opencodeServiceTurnError('The model returned nothing.');
+  assert.equal(other.retryable, true, 'an unclassified failure may be worth another attempt');
 });

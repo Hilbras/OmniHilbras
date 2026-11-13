@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { ProviderError } from './provider-error.js';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -227,6 +228,31 @@ async function readAssistant(
  * The session is deleted afterwards unless the caller asked to keep it: a gateway turn is
  * stateless, and leaving a session per request would grow the service's database without bound.
  */
+/**
+ * Turns what the service said into an error the gateway can report.
+ *
+ * The service reports a refused turn as `session.execution.failed` with the Console's own sentence —
+ * "Free usage limit reached. Free models work in OpenCode (…); subscribe to OpenCode Go to keep going"
+ * — and throwing a bare `Error` there made the gateway answer `502 Every provider route failed`, which
+ * names neither the provider's reason nor a reason at all. Measured from a client: the retry loop saw
+ * `502` ten times with nothing to act on.
+ *
+ * The Console's quota sentence becomes `RATE_LIMITED`, which is what it is, and the sentence itself
+ * rides along as the provider message so a dashboard reads it.
+ */
+export function opencodeServiceTurnError(message: string, cause?: unknown): ProviderError {
+  const quota = /free usage limit|usage limit reached/i.test(message);
+  const balance = /insufficient balance|top up at/i.test(message);
+  const code = quota ? 'RATE_LIMITED' : 'PROVIDER_REQUEST_FAILED';
+  return new ProviderError(code, message, {
+    publicMessage: message,
+    retryable: !quota && !balance,
+    // The dashboard-only field: the provider's own words rather than a neutral sentence.
+    details: { providerMessage: message },
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
+
 /** The tool actions a chat bridge must not hand the model. */
 const UNSAFE_TOOL_ACTIONS = ['shell', 'edit', 'write', 'patch', 'webfetch', 'websearch', 'task', 'subagent', 'browser'] as const;
 
@@ -427,7 +453,7 @@ export async function streamOpencodeServiceTurn(
       }
     }
 
-    if (failure) throw new Error(failure);
+    if (failure) throw opencodeServiceTurnError(failure);
 
     const stored = await readAssistant(callHere, sessionID, signal).catch(() => undefined);
     const finalText = stored?.text || text;

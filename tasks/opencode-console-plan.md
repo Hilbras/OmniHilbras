@@ -216,3 +216,20 @@ otherwise successful turn (the model relays the refusal as prose, so nothing loo
 - Not verified live after the change: the positive case (a real outside file's contents) — the free
   tier's quota was spent by the checks themselves. The same permission state was measured earlier in
   this session answering `read /etc/hostname` with ``lacrous``.
+
+
+### Phase 10 — A failure says what it was (fixed)
+
+Reported from a client: `502 · Every provider route failed. Tried: opencode-console.` — with the agent
+retrying eight times, because there was nothing in the answer to act on.
+
+The cause of that particular 502 could not be reproduced afterwards (the same request succeeded minutes
+later, which points at the free tier's daily quota, spent by this session's own checks). The defect that
+*is* certain is the reporting: the bridge threw a bare `Error`, so every refusal — quota, balance, a
+broken turn — arrived as the same neutral `502`.
+
+- `opencodeServiceTurnError` maps the Console's sentences to codes: quota → `RATE_LIMITED` (not
+  retryable), balance → `PROVIDER_REQUEST_FAILED` (not retryable), anything else retryable, with the
+  Console's own sentence as `providerMessage`.
+- Verified the aggregate keeps both the code and the sentence (`/tmp/agg-check.mjs`).
+- Not verified: which failure the reporter hit — only that the next one will say so.
