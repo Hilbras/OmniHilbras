@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { AddProviderModal, isWebSessionProvider, providerOptions, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
-import { ProviderCard, providerGroupLabels, providerGroupOrder, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
+import { ProviderCard, providerGroupBadges, providerGroupLabels, providerGroupOrder, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
 import {
   getGatewayHealth,
   listGatewayConnections,
@@ -596,7 +596,14 @@ export function ProvidersContent() {
                 {groupedProviders.map(({ group, providers: grouped }) => (
                   <section key={group} aria-labelledby={`provider-group-${group}`}>
                     <div className="mb-3 flex items-center justify-between gap-3">
-                      <h3 id={`provider-group-${group}`} className="text-sm font-semibold">{providerGroupLabels[group]}</h3>
+                      <h3 id={`provider-group-${group}`} className="flex items-center gap-2 text-sm font-semibold">
+                {providerGroupLabels[group]}
+                {providerGroupBadges[group] && (
+                  <span className="rounded-full border border-gold/30 bg-gold-soft px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-gold-text">
+                    {providerGroupBadges[group]}
+                  </span>
+                )}
+              </h3>
                       <span className="muted font-mono text-[10px]">{grouped.length} {grouped.length === 1 ? 'provider' : 'providers'}</span>
                     </div>
                     {/*

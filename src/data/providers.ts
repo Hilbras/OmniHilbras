@@ -198,7 +198,7 @@ export const providerCatalog: ProviderRecord[] = [
     description:
       'chat.deepseek.com with a sign-in that happens once, in a window of its own, and every request afterwards in the gateway — carrying the page’s own device fingerprints, the current client version and the server-delivered model catalogue. Separate from DeepSeek Web, which takes a pasted token.',
     category: 'Web session',
-    group: 'web-cookie',
+    group: 'v2-web',
     status: 'available',
     auth: 'Web session',
     models: '—',

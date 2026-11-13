@@ -11,19 +11,31 @@ import { ProviderMark } from './ProviderMark';
  * thing a status like this exists to prevent.
  */
 export type ProviderStatus = 'connected' | 'attention' | 'available' | 'planned';
-export type ProviderGroup = 'oauth' | 'api-key' | 'web-cookie' | 'free-tier' | 'hosted' | 'local' | 'custom';
+export type ProviderGroup = 'oauth' | 'api-key' | 'web-cookie' | 'v2-web' | 'free-tier' | 'hosted' | 'local' | 'custom';
 export type ProviderCardMode = 'simple' | 'advanced';
 
-export const providerGroupOrder: ProviderGroup[] = ['oauth', 'free-tier', 'api-key', 'web-cookie', 'hosted', 'local', 'custom'];
+export const providerGroupOrder: ProviderGroup[] = ['oauth', 'free-tier', 'api-key', 'web-cookie', 'v2-web', 'hosted', 'local', 'custom'];
 
 export const providerGroupLabels: Record<ProviderGroup, string> = {
   oauth: 'OAuth Providers',
   'api-key': 'API Key Providers',
   'web-cookie': 'Web Cookie Providers',
+  'v2-web': 'V2 Web',
   'free-tier': 'Free Tier Providers',
   hosted: 'Hosted API Providers',
   local: 'Local Providers',
   custom: 'Custom Endpoints',
+};
+
+/**
+ * Groups that carry a caution.
+ *
+ * "V2 Web" is new ground, not a second name for the web-cookie providers beside it: its sign-in goes
+ * through a window the app drives, and its request shape was reverse engineered this week. Saying so on
+ * the heading is cheaper than a user discovering it.
+ */
+export const providerGroupBadges: Partial<Record<ProviderGroup, string>> = {
+  'v2-web': 'Beta',
 };
 
 export type ProviderRecord = {
