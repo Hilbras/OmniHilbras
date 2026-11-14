@@ -148,12 +148,36 @@ export class RoutingEngine {
     connections: readonly ConnectionRecord[];
     model: string;
     explicitProviderId?: string;
-    /** Narrow routing to one saved account; no silent fallback when it cannot serve. */
+    /**
+     * A saved account to try **first**; its siblings remain behind it.
+     *
+     * It used to confine routing to that one connection, on the reasoning that a caller naming an
+     * account chose it and serving elsewhere would be a substitution. That reasoning holds for *who
+     * answers first* and fails for *who is never asked*: with one account out of quota the request
+     * died while the provider's other accounts sat idle, and a model test pinned to an exhausted
+     * account could only ever report a failure. An account is a preference now, not a fence — the
+     * same conclusion the reference implementation reached with its per-account exclusion loop.
+     */
     explicitConnectionId?: string;
   }): Promise<RouteDecision> {
-    const connections = input.explicitConnectionId === undefined
+    // The pinned account is promoted to the front rather than kept alone, so it is always the first
+    // one spent and the rest stay reachable when it refuses.
+    const pinned = input.explicitConnectionId === undefined
+      ? undefined
+      : input.connections.find((connection) => connection.id === input.explicitConnectionId);
+    /**
+     * A **disabled** account named by the caller is refused, not replaced.
+     *
+     * Different question from the exhausted one: "this account has no quota left" is a fact the next
+     * account can help with, while "this account is paused" is an instruction. Serving the request from
+     * a sibling would quietly undo the pause.
+     */
+    if (pinned && !pinned.enabled) {
+      return { candidates: [], skipped: [{ providerId: pinned.providerId, reason: 'disabled' as const }] };
+    }
+    const connections = pinned === undefined
       ? input.connections
-      : input.connections.filter((connection) => connection.id === input.explicitConnectionId);
+      : [pinned, ...input.connections.filter((connection) => connection.id !== pinned.id)];
     // Before anything is read or written. Two maps are keyed by connection id and only ever grew, so a
     // dashboard that deleted a connection kept its wait and its request window for the life of the process.
     // Measured at 2000 and 3000 stale entries respectively.
@@ -175,6 +199,7 @@ export class RoutingEngine {
       ...(this.options.latencyFor ? { latencyFor: this.options.latencyFor } : {}),
       ...(this.options.stickyFor ? { stickyFor: this.options.stickyFor } : {}),
       ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
+      ...(input.explicitConnectionId === undefined ? {} : { pinnedConnectionId: input.explicitConnectionId }),
       health,
       failureThreshold: this.options.health.getFailureThreshold(),
       // Asked of the limiter, per connection, for this request — see `currentWait`. Passing

@@ -374,13 +374,26 @@ export class RequestExecutor {
         } catch (error) {
           const code = error instanceof ProviderError ? error.code : 'RATE_LIMITED';
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs: 0, errorCode: code });
+          /**
+           * A **local** concurrency saturation is reported, not absorbed.
+           *
+           * The account's in-flight counter is full because of requests this gateway is already
+           * running — nothing the provider said, and nothing the sibling should pay for. Falling
+           * through to the next account here turned "wait a moment" into "spend someone else's quota",
+           * and with a single account it turned it into a silently different failure. Every other
+           * limiter refusal still steps aside to the next route.
+           */
+          const local = (error instanceof ProviderError ? error.details as { concurrencyLimited?: unknown } | undefined : undefined)?.concurrencyLimited === true;
           // Nothing was sent, so this connection is skipped and the next route is tried. The refusal is kept as
           // the last error, and is what the caller sees only if no route answers.
-          lastError = new ProviderError(
-            code,
-            `The connection is at its rate limit.${code === 'RATE_LIMITED' ? '' : ''}`,
-            { retryable: false, publicMessage: 'This connection is at its rate limit. Wait for the window to reset.', cause: error },
-          );
+          lastError = local
+            ? error
+            : new ProviderError(
+              code,
+              'The connection is at its rate limit.',
+              { retryable: false, publicMessage: 'This connection is at its rate limit. Wait for the window to reset.', cause: error },
+            );
+          if (local) throw attachAttempts(error, attempts);
           break;
         }
         try {

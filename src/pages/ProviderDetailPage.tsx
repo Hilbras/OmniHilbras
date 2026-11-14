@@ -697,8 +697,32 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     if (scrollAnchorRef.current !== null) window.scrollTo(0, scrollAnchorRef.current);
   }, [connectionPingMs, modelTestErrors, modelTestLatencies, modelTestNotes, modelTests, testingModels]);
 
-  const importedModels = connection?.modelIds ?? provider.modelList;
+  /**
+   * Every model any account of this provider lists.
+   *
+   * It used to be `connection.modelIds` — one account's catalog, where `connection` is the *first*.
+   * A provider that allows several accounts then showed a second account's models as absent, and every
+   * model test was spent from the first account because that was the only account the page ever read.
+   * The union is what the provider serves; `accountForModel` below decides whose quota pays for it.
+   */
+  const importedModels = useMemo(() => {
+    const accounts = connections.filter((item) => item.hasCredential);
+    if (accounts.length === 0) return connection?.modelIds ?? provider.modelList;
+    return [...new Set(accounts.flatMap((account) => account.modelIds))];
+  }, [connections, connection?.modelIds, provider.modelList]);
   const allModels = useMemo(() => [...new Set([...importedModels, ...customModels])], [customModels, importedModels]);
+
+  /**
+   * The account a model test should spend.
+   *
+   * Prefers an account that lists the model, so a model only account B serves is not tested against
+   * account A and reported as broken. Falls back to the first account with a credential, which is the
+   * old behaviour and still right when no catalog mentions the model.
+   */
+  function accountForModel(model: string): string | undefined {
+    const accounts = connections.filter((item) => item.hasCredential);
+    return (accounts.find((item) => item.modelIds.includes(model)) ?? accounts[0])?.id ?? connection?.id;
+  }
 
   /**
    * Filters this provider's models. A query matches the whole ID and the part
@@ -1205,7 +1229,8 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     const timeout = window.setTimeout(() => controller.abort(), 30_000);
     setTestingModels([model]);
     try {
-      const outcome = await runModelTest(model, controller.signal);
+      // The account that actually lists this model, so the test spends the quota it is asking about.
+      const outcome = await runModelTest(model, controller.signal, accountForModel(model));
       if (!outcome.ok) flash(outcome.message, 'error');
     } finally {
       window.clearTimeout(timeout);
@@ -1269,7 +1294,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       while (queue.length > 0 && !controller.signal.aborted) {
         const model = queue.shift();
         if (model === undefined) return;
-        const outcome = await runModelTest(model, controller.signal);
+        const outcome = await runModelTest(model, controller.signal, accountForModel(model));
         done += 1;
         if (outcome.ok) latencies.push(outcome.latencyMs);
         else failures.push(model);

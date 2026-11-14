@@ -1,5 +1,5 @@
-import { ProviderError } from './index.js';;
-import { isRetryableFailure, type RouteCandidate } from './routing.js';
+import { ProviderError } from './provider-error.js';
+import { isRetryableFailure, shouldRotateAccount, type RouteCandidate } from './routing.js';
 
 /**
  * What happens after a request fails.
@@ -85,19 +85,47 @@ export class RetryPolicy {
     // cancellation is the deadline firing as the request is torn down, and retrying it would spend
     // a request the caller has already abandoned.
     if (input.aborted) return 'stop';
-    // Permanent by construction: the request or the credential is wrong, and the next connection
+
+    /**
+     * A dead credential stops here, even though a sibling *could* answer.
+     *
+     * This is the one place the "move on" rule is deliberately not applied. Rotating past a revoked
+     * key would succeed — and would quietly bill a different account for every request while the
+     * operator's broken account stays broken and invisible. The failure belongs to the account that
+     * owns the credential, so it is reported against it.
+     */
+    if (input.error instanceof ProviderError && (input.error.code === 'AUTHENTICATION_FAILED' || input.error.statusCode === 401)) return 'stop';
+
+    /**
+     * A **local** concurrency saturation stops here too.
+     *
+     * It arrives during dispatch rather than from the limiter, and it means only that this gateway is
+     * already running its allowed number of requests for the account. Nothing was sent, the provider
+     * said nothing, and a sibling should not be billed for it — the honest answer is "the account is
+     * busy", which is what the caller is told. Every other limiter refusal steps aside to the next route.
+     */
+    const details = input.error instanceof ProviderError ? input.error.details as { concurrencyLimited?: unknown } | undefined : undefined;
+    if (details?.concurrencyLimited === true) return 'stop';
+
+    /**
+     * A refusal about the **account's allowance** hands off, before anything is retried.
+     *
+     * Checked ahead of `isRetryableFailure` because it answers a different question. A `400` carrying
+     * `insufficient_quota` is not worth retrying on this account — it will refuse again — but it is a
+     * reason to spend the *next* account. The old order asked only "is this retryable?", saw a 400,
+     * and stopped, so a provider that reports an exhausted plan as a 400 or 422 left every sibling
+     * account unused and the caller with a failure a healthy account would have answered.
+     *
+     * This is the reference implementation's rule (its `ERROR_RULES` match text before status), and
+     * the exclusion set its chat loop keeps: an account that has said no is not asked again in this
+     * request.
+     */
+    if (shouldRotateAccount(input.error)) return 'next-route';
+
+    // Permanent by construction: the request or the model is wrong, and the next connection
     // will refuse it identically. Spending an upstream request to confirm that is the cost this
     // avoids.
     if (!isRetryableFailure(input.error)) return 'stop';
-
-    /**
-     * A per-connection limit hands off, always.
-     *
-     * Unconditional, and that is the whole fix: a provider that has said "you have reached your
-     * limit" has said it about the connection, so the next request to that connection is one it has
-     * already refused. Retrying is not optimism, it is paying twice for the same refusal.
-     */
-    if (input.error instanceof ProviderError && input.error.code === 'RATE_LIMITED') return 'next-route';
 
     // Nothing left to give this connection.
     if (input.attemptsOnThisRoute >= input.candidate.resilience.maxRetries + 1) return 'next-route';

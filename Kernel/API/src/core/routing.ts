@@ -196,6 +196,116 @@ export class HealthRegistry {
   }
 }
 
+/**
+ * Wording that means *this account is out*, whatever status the provider wrapped it in.
+ *
+ * Matched against the provider's own message, case-insensitively, before the status code is looked at.
+ * This is the rule the reference implementation taught (`ERROR_RULES` in its `errorConfig.js`), and the
+ * reason it is here is concrete: an exhausted plan is not always a `429`. Aggregators answer `422` or
+ * `400` with `insufficient_quota` in the body, or a `200` carrying a refusal — none of which the status
+ * alone can tell apart from a malformed request. Those used to be treated as "the provider rejected
+ * this request", which is terminal, so the *next account was never asked* and a healthy sibling sat
+ * unused while the request failed.
+ *
+ * Deliberately narrow. Every phrase here describes the account or its allowance; none of them
+ * describes the request. A `400` about the request itself must not rotate, because cooling an account
+ * down over a bad body removes a working connection from rotation for everyone.
+ */
+const quotaOrCapacityWording = [
+  'rate limit',
+  'too many requests',
+  'quota exceeded',
+  'insufficient_quota',
+  'insufficient quota',
+  'exceeded your current quota',
+  'exceeded your quota',
+  'credit balance',
+  'insufficient credit',
+  'insufficient balance',
+  'insufficient_balance',
+  'billing',
+  'capacity',
+  'overloaded',
+  'out of credit',
+  'no remaining',
+] as const;
+
+/** The provider's own words about this failure, if it gave any. */
+function providerWording(error: unknown): string {
+  if (!(error instanceof ProviderError)) return '';
+  const details = error.details as { providerMessage?: unknown } | undefined;
+  const said = typeof details?.providerMessage === 'string' ? details.providerMessage : '';
+  return `${error.message} ${said}`.toLowerCase();
+}
+
+/**
+ * Whether this failure says something about **the account**, and so belongs on the next account.
+ *
+ * Distinct from `isRetryableFailure`, which asks whether the same route is worth retrying. The two
+ * answer different questions and had been conflated: a `400` is not worth retrying on the same account,
+ * but `insufficient_quota` on a `400` is a reason to try the *next* one.
+ */
+export function shouldRotateAccount(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return false;
+  // A caller who hung up is not a vote against the account.
+  if (error.code === 'CANCELLED') return false;
+
+  /**
+   * The provider's own wording outranks its status code, and is checked first.
+   *
+   * An exhausted plan is not reliably a `429`: aggregators answer `422`, `400`, or even `403` with
+   * `insufficient_quota` in the body. The status then reads as "the request was refused", which is
+   * terminal, and the sibling account that could have served the request is never asked. Matching the
+   * words first is the reference implementation's rule (`ERROR_RULES`), and it is what makes a plan
+   * that ran out rotate while a genuinely malformed body still does not.
+   */
+  const wording = providerWording(error);
+  if (quotaOrCapacityWording.some((phrase) => wording.includes(phrase))) return true;
+
+  /**
+   * A **local** concurrency saturation is not the account's allowance.
+   *
+   * `maxConcurrentRequests` is our own in-flight counter, and it is momentary: the request that
+   * happened to arrive while the account was busy must be told so, not quietly re-billed to a sibling
+   * and not treated as "this account is out". The limiter already marks it (`concurrencyLimited`,
+   * `retryable: false`) because it is retryable *later*, not *elsewhere*.
+   */
+  const details = error.details as { concurrencyLimited?: unknown } | undefined;
+  if (details?.concurrencyLimited === true) return false;
+
+  /**
+   * The allowance is gone: the account is spent, but the *request* is fine.
+   *
+   * These rotate. `402` is "payment required", `403` is how several providers signal a plan ceiling,
+   * `404` is the model not being on this plan, and `429` is the limit itself. A sibling with quota
+   * answers the same request — that is the whole point of holding several accounts.
+   */
+  const status = error.statusCode;
+  if (status === 402 || status === 403 || status === 404 || status === 429) return true;
+  // The provider is unwell; another account may be on a healthier host. Neither says anything about
+  // the request. A 5xx *without* a retry budget still deserves the sibling.
+  if (status !== undefined && status >= 500) return true;
+  // A limit by name, with no status to read. Timeouts and unavailability are deliberately **not** here:
+  // they are what a retry budget exists for, and moving on before spending it would skip an account
+  // that is merely slow.
+  return error.code === 'RATE_LIMITED';
+
+  /**
+   * Everything below is **not** the allowance, and moving on would spend a sibling for nothing:
+   *
+   * - `401` / `AUTHENTICATION_FAILED` — this account's credential is dead. A sibling has its own
+   *   credential and would answer, so rotating would *work*; it is refused here for a different reason:
+   *   a revoked key is an operator problem to fix, not something to paper over by quietly billing
+   *   another account. The dashboard reports it against the account that owns it.
+   * - `INVALID_REQUEST` / `NOT_SUPPORTED` — the request or the model is wrong; every account refuses
+   *   it identically, so each one tried is a wasted upstream call.
+   *
+   * Both were measured before this rule existed: a request with a bad body was dispatched to eleven
+   * providers over 9–90 s before the client was told nothing could serve it.
+   */
+  return false;
+}
+
 /** Failures worth another attempt. Bad requests and auth errors never are. */
 export function isRetryableFailure(error: unknown) {
   if (!(error instanceof ProviderError)) return false;
@@ -381,6 +491,14 @@ export function resolveRoute(input: {
   latencyFor?: (connectionId: string) => { latencyMs: number; samples: number } | undefined;
   /** Sticky connection id preferred for this model, when still a candidate. */
   stickyFor?: (modelId: string) => string | undefined;
+  /**
+   * An account the caller named, which goes first **regardless of priority**.
+   *
+   * The caller asked for this account, so "first" is the promise; the siblings keep their priority
+   * order behind it. Without this the sort below undid the pin whenever the chosen account was not
+   * also the highest-priority one — which is every account a person clicks on but the first.
+   */
+  pinnedConnectionId?: string;
 }): RouteDecision {
   const modelId = input.model.trim();
   const usable = input.connections
@@ -388,6 +506,14 @@ export function resolveRoute(input: {
     .sort((left, right) => left.priority - right.priority || left.name.localeCompare(right.name));
   rotateBalancedConnections(usable, input.rotation ?? 0);
   orderFastestFirst(usable, input.strategyFor, input.latencyFor);
+  // Last, so nothing above can reorder over it: the named account leads, priority or not.
+  if (input.pinnedConnectionId !== undefined) {
+    const index = usable.findIndex((connection) => connection.id === input.pinnedConnectionId);
+    if (index > 0) {
+      const [pinned] = usable.splice(index, 1);
+      if (pinned) usable.unshift(pinned);
+    }
+  }
 
   const skipped: RouteDecision['skipped'] = [];
   const lookupId = lookupModelId(modelId);
