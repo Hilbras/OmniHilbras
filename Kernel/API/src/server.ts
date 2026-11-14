@@ -1,14 +1,16 @@
+import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { canonicalLoopbackHost, isLoopbackHostname, loopbackBaseUrl } from './core/index.js';
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './core/config.js';
 import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, resolveCorsOrigins, resolveInferenceBodyBytes, sendError, sendJson, setCors } from './core/http.js';
 import { dashboardTokenHeader, issueDashboardToken, tokenMatches } from './core/dashboard-token.js';
 import { isTrustedDashboard, type AuthContext } from './core/runtime.js';
+import { RateLimiter, resolveRequestsPerMinute } from './core/rate-limit.js';
 import { handleApiKeysRoute } from './routes/api-keys.js';
 import { handleConnectionsRoute } from './routes/connections.js';
 import { handleBackupRoute } from './routes/backup.js';
 import { handleTokenSaverRoute } from './routes/token-saver.js';
-import { extractApiKey, handleInferenceRoute } from './routes/inference.js';
+import { extractApiKey, handleInferenceRoute, isPublicLlmRoute } from './routes/inference.js';
 import { handleOauthRoute } from './routes/oauth.js';
 import { handleStatusRoute } from './routes/status.js';
 import { handleUsageRoute } from './routes/usage.js';
@@ -50,6 +52,15 @@ export type GatewayServerOptions = {
    * tests and embedders still rely on.
    */
   dashboardToken?: string;
+  /**
+   * Inbound requests per minute per caller on the LLM surface.
+   *
+   * Defaults to `OMNIHILBRAS_REQUESTS_PER_MINUTE`, and to 600 when that is unset. `0` disables the
+   * limit; a value that is not a non-negative integer is ignored, because a typo in an environment
+   * variable must not leave a gateway that refuses every request.
+   */
+  requestsPerMinute?: number;
+  env?: Readonly<Record<string, string | undefined>>;
 };
 
 /**
@@ -112,8 +123,35 @@ function isLoopbackHostHeader(host: string | undefined) {
   return isLoopbackHostname(hostname);
 }
 
+/**
+ * The bucket a request counts against.
+ *
+ * The **presented** credential, hashed — not the resolved one. `extractApiKey` answers `undefined` for a
+ * key the store does not recognise, which collapsed every such caller into one shared bucket: one
+ * client's loop refused another client's first request. Hashing keeps raw keys out of a long-lived map.
+ * A caller with no credential counts as `local`, which is what a gateway without enforcement sees.
+ */
+function rateLimitCaller(request: IncomingMessage): string {
+  const presented = request.headers.authorization
+    ?? request.headers['x-api-key']
+    ?? request.headers['x-goog-api-key'];
+  const value = Array.isArray(presented) ? presented[0] : presented;
+  if (!value) return 'local';
+  return createHash('sha256').update(String(value)).digest('hex').slice(0, 32);
+}
+
 export function createGatewayServer(service: GatewayService, options: GatewayServerOptions = {}) {
   const corsOrigins = resolveCorsOrigins(options);
+  /**
+   * The inbound ceiling, per caller.
+   *
+   * The gateway already had a limit on what it sends to a provider; it had none on what arrives, so a
+   * retrying agent could spend the operator's quota at line speed and the provider's own limiter became
+   * the thing that stopped it. `0` disables it deliberately, and a value that is not a number falls back
+   * to the default rather than refusing everything.
+   */
+  const limiter = new RateLimiter({ perMinute: options.requestsPerMinute ?? resolveRequestsPerMinute(options.env) });
+  let prunedAt = 0;
   return createServer((request, response) => {
     if (!isLoopbackHostHeader(request.headers.host)) {
       sendJson(response, 421, { error: { code: 'MISDIRECTED_REQUEST', message: 'This gateway only answers on a loopback host name.' } });
@@ -148,6 +186,35 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     const responseOrigin = allowedOrigin ? requestOrigin : undefined;
     setCors(response, responseOrigin);
     if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage') || request.url?.startsWith('/v1/oauth') || request.url?.startsWith('/v1/virtual-models') || request.url?.startsWith('/v1/skills') || request.url?.startsWith('/v1/workspaces') || request.url?.startsWith('/v1/tunnels') || request.url?.startsWith('/v1/mitm') || request.url?.startsWith('/v1/proxy-pools') || request.url?.startsWith('/v1/provider-nodes') || request.url?.startsWith('/v1/observability') || request.url?.startsWith('/v1/pxpipe') || request.url?.startsWith('/v1/locale') || request.url?.startsWith('/v1/runtime') || request.url?.startsWith('/v1/audio') || request.url?.startsWith('/v1/search')) response.setHeader('cache-control', 'no-store');
+    /**
+     * The LLM surface, counted per caller.
+     *
+     * Only the public routes: management calls are a person clicking, and refusing those would be the
+     * dashboard breaking rather than a loop being caught.
+     */
+    // Generating calls only. `GET /v1/models` is part of the same surface but it is discovery, not
+    // spend: throttling it breaks the startup of the agents this gateway exists to serve while bounding
+    // nothing that costs money.
+    if (limiter.enabled && request.method !== 'GET' && isPublicLlmRoute(request.method ?? 'GET', new URL(request.url ?? '/', 'http://localhost').pathname)) {
+      const now = Date.now();
+      if (now - prunedAt > 60_000) {
+        limiter.prune();
+        prunedAt = now;
+      }
+      const decision = limiter.check(rateLimitCaller(request));
+      if (!decision.allowed) {
+        const seconds = Math.max(1, Math.ceil(decision.retryAfterMs / 1000));
+        response.setHeader('retry-after', String(seconds));
+        sendJson(response, 429, {
+          error: {
+            code: 'RATE_LIMITED',
+            message: `Too many requests: the gateway allows ${decision.limit} per minute per caller. Try again in ${seconds}s. Set OMNIHILBRAS_REQUESTS_PER_MINUTE to change it, or 0 to turn the limit off.`,
+          },
+        }, responseOrigin);
+        return;
+      }
+    }
+
     if ((request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') && !isJsonRequest(request)) {
       sendJson(response, 415, { error: { code: 'UNSUPPORTED_MEDIA_TYPE', message: 'JSON requests must use application/json.' } }, responseOrigin);
       return;
