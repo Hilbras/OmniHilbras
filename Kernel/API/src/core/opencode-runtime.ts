@@ -202,6 +202,20 @@ async function waitForOpencodeService(options: OpencodeRuntimeOptions & { timeou
 const RELEASE_REPO = 'https://github.com/anomalyco/opencode/releases/download';
 const VERSION_FEEDS = ['https://registry.npmjs.org/@opencode/cli/latest', 'https://registry.npmjs.org/opencode-ai/latest'];
 
+/**
+ * The release this gateway installs unless the operator names another one.
+ *
+ * The audit's N3: the version came from npm's `latest` dist-tag, and that string is the only pointer to
+ * the binary this process then executes. A moved dist-tag — a compromised publisher, a hijacked scope —
+ * would change what every install downloads, with no second source to disagree. Pinning the version in
+ * the repository moves that decision into review: changing it is a commit.
+ *
+ * `OMNIHILBRAS_OPENCODE_VERSION` still overrides it, because an operator pinning a version is exactly the
+ * person this is protecting, and `OMNIHILBRAS_OPENCODE_SHA256` pins the artifact when the operator knows
+ * which one they want.
+ */
+const pinnedOpencodeVersion = '2.0.28';
+
 export type OpencodeInstallOptions = OpencodeRuntimeOptions & {
   fetch?: typeof fetch;
   version?: string;
@@ -224,7 +238,16 @@ export async function installOpencodeRuntime(options: OpencodeInstallOptions = {
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
 
-  const version = options.version?.trim() || env.OMNIHILBRAS_OPENCODE_VERSION?.trim() || await resolveOpencodeVersion(fetchImpl);
+  let version = options.version?.trim()
+    || env.OMNIHILBRAS_OPENCODE_VERSION?.trim()
+    || pinnedOpencodeVersion;
+  // `latest` stays available, but only when it is asked for by name — and a failure to resolve it is an
+  // error, not a silent fall back to the pinned version, because the operator asked for something else.
+  if (version === 'latest') {
+    const resolved = await resolveOpencodeVersion(fetchImpl);
+    if (!resolved) throw new OpencodeRuntimeError('Could not resolve the latest OpenCode release version. Name one with OMNIHILBRAS_OPENCODE_VERSION instead.');
+    version = resolved;
+  }
   if (!version) throw new OpencodeRuntimeError('Could not resolve an OpenCode release version to install. Set OMNIHILBRAS_OPENCODE_VERSION to name one.');
 
   const filename = opencodeAssetName(platform, arch);
@@ -246,6 +269,17 @@ export async function installOpencodeRuntime(options: OpencodeInstallOptions = {
   const bytes = Buffer.from(await response.arrayBuffer());
   await writeFile(archive, bytes, { mode: 0o600 });
   const sha256 = createHash('sha256').update(bytes).digest('hex');
+  /**
+   * A pinned artifact hash, when the operator has one.
+   *
+   * Recorded-only was the previous behaviour, and it is honest but weak: the value is written beside the
+   * binary and compared with nothing. Pinning turns it into a check, which is why it is worth having even
+   * though upstream publishes no hash of its own.
+   */
+  const pinnedSha = env.OMNIHILBRAS_OPENCODE_SHA256?.trim().toLowerCase();
+  if (pinnedSha && pinnedSha !== sha256) {
+    throw new OpencodeRuntimeError(`The downloaded OpenCode artifact does not match OMNIHILBRAS_OPENCODE_SHA256. Expected ${pinnedSha}, got ${sha256}.`);
+  }
 
   const extracted = await extractBinary(archive, filename, runtimeDir);
   const binDir = join(runtimeDir, 'bin');
@@ -269,6 +303,7 @@ export async function installOpencodeRuntime(options: OpencodeInstallOptions = {
   return { version, path: target, ...(reportedVersion ? { reportedVersion } : {}), sha256 };
 }
 
+/** Only reached when the operator asks for `latest` by name; see `pinnedOpencodeVersion`. */
 async function resolveOpencodeVersion(fetchImpl: typeof fetch): Promise<string | undefined> {
   for (const feed of VERSION_FEEDS) {
     try {

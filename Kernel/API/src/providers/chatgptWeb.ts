@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ProviderError } from '../core/index.js';
@@ -190,7 +190,9 @@ async function openSignedInPage(cookies: readonly ChatGptCookie[], profile: stri
     timezoneId: BROWSER_TIMEZONE,
     viewport: { width: 1400, height: 950 },
   };
-  await mkdir(profile, { recursive: true });
+  // 0700 before anything is written: a persistent profile is a signed-in session on disk, and the
+  // directory Playwright creates by default is world-readable on some systems.
+  await mkdir(profile, { recursive: true, mode: 0o700 });
   const context = await playwright.chromium.launchPersistentContext(profile, launchOptions);
   const close = async () => {
     await context.close().catch(() => undefined);
@@ -291,13 +293,30 @@ function describeSignedOut(): string {
  * a timeout. A real browser remembers that it has been dismissed, and so does this one.
  * It is also the difference between a 20-second page load and an instant one per turn.
  */
-function profileDir(connectionKey: string): string {
+/**
+ * Where one connection's browser profile lives.
+ *
+ * Keyed by a hash of the connection so two accounts never share a profile — which is the property that
+ * keeps one provider's cookies out of another's session.
+ */
+export function chatGptWebProfileDir(connectionKey: string): string {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
   return join(base, 'omnihilbras', 'chatgpt-web', createHash('sha256').update(connectionKey).digest('hex').slice(0, 32));
 }
 
+/**
+ * Forgets one connection's profile.
+ *
+ * The audit's N4: a persistent profile is a live third-party session on disk, and deleting the connection
+ * left it there — a credential the operator believed they had removed. Best effort, because a connection
+ * that never opened a browser has no directory to remove.
+ */
+export async function removeChatGptWebProfile(connectionKey: string): Promise<void> {
+  await rm(chatGptWebProfileDir(connectionKey), { recursive: true, force: true }).catch(() => undefined);
+}
+
 export function createChatGptWebDriver(connectionKey = 'default'): ChatGptWebDriver {
-  const dir = profileDir(connectionKey);
+  const dir = chatGptWebProfileDir(connectionKey);
   return {
     async available() {
       const playwright = await loadPlaywright();

@@ -52,7 +52,7 @@ contextBridge.exposeInMainWorld('omnihilbras', {
     getState: () => ipcRenderer.invoke('update:state'),
     check: () => ipcRenderer.invoke('update:check'),
     download: () => ipcRenderer.invoke('update:download'),
-    install: () => ipcRenderer.invoke('update:install'),
+    install: (options) => ipcRenderer.invoke('update:install', options),
     openRelease: () => ipcRenderer.invoke('update:open-release'),
     onState: (callback) => subscribe('update:state', callback),
   },

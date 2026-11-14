@@ -26,6 +26,14 @@ export type DesktopServerSnapshot = {
 
 export type UpdateState = {
   status: 'idle' | 'checking' | 'available' | 'current' | 'downloading' | 'downloaded' | 'installing' | 'error' | 'skipped';
+  /**
+   * Whether this build can prove an update came from this project.
+   *
+   * `false` until release signing exists, and the banner asks for confirmation in that case rather than
+   * installing something the feed merely claimed. The reason travels with it so the prompt can say why.
+   */
+  signed?: boolean;
+  trustReason?: string;
   version?: string;
   percent?: number;
   reason?: string;
@@ -91,7 +99,7 @@ export type OmniBridge = {
     getState: () => Promise<UpdateState>;
     check: () => Promise<UpdateState>;
     download: () => Promise<UpdateState>;
-    install: () => Promise<void>;
+    install: (options?: { allowUnsigned?: boolean }) => Promise<void>;
     openRelease: () => Promise<void>;
     onState: (callback: (state: UpdateState) => void) => () => void;
   };

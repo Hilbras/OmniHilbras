@@ -185,6 +185,25 @@ function createTray() {
  */
 let updater;
 let updateState = { status: 'idle' };
+
+/**
+ * Whether an update can be *proved* to come from this project.
+ *
+ * The audit found the updater comparing a download against a `sha512` taken from the same release's
+ * `latest-*.yml` — which detects a truncated download and nothing else — with every build unsigned, so
+ * anyone able to publish a release could have had code executed on every install. Signing keys do not
+ * exist yet, so the honest state is "cannot be proved", and what changes here is that the app says so and
+ * requires a deliberate action instead of installing silently.
+ *
+ * When a release-signing key is added, this reads the pinned public key, verifies the manifest and the
+ * artifact against it, and returns true — the rest of the flow already treats a proved update as the
+ * ordinary case.
+ */
+function updateTrust() {
+  const pinnedKey = process.env.OMNIHILBRAS_UPDATE_PUBLIC_KEY?.trim();
+  if (!pinnedKey) return { signed: false, reason: 'No release-signing key is configured, so this build cannot verify an update.' };
+  return { signed: false, reason: 'A signing key is configured but verification is not implemented for it yet.' };
+}
 /** The `.deb` selected from the update feed, and the file after it has been verified. */
 let pendingDebFile;
 let pendingDebPath = '';
@@ -194,7 +213,7 @@ function canSelfUpdate() {
   return process.platform !== 'linux' || Boolean(process.env.APPIMAGE);
 }
 function setUpdateState(next) {
-  updateState = { ...updateState, ...next };
+  updateState = { ...updateState, ...next, ...updateTrust() };
   send('update:state', updateState);
 }
 
@@ -307,8 +326,18 @@ async function downloadUpdate() {
   return updateState;
 }
 
-async function installUpdate() {
+async function installUpdate(options = {}) {
   if (!updater || updateState.status !== 'downloaded') throw new Error('No downloaded update is ready to install.');
+  /**
+   * An update that cannot be proved to come from this project needs a person to say so.
+   *
+   * The renderer asks for confirmation and passes `allowUnsigned`; nothing else does, so a stray call
+   * cannot install one quietly.
+   */
+  const trust = updateTrust();
+  if (!trust.signed && options?.allowUnsigned !== true) {
+    throw new Error(`${trust.reason} Confirm that you want to install an unverified update to continue.`);
+  }
   if (updateState.installMethod === 'deb') {
     if (!pendingDebPath) throw new Error('The downloaded .deb is no longer available.');
     setUpdateState({ status: 'installing' });
@@ -530,7 +559,7 @@ function wireIpc() {
   ipcMain.handle('update:state', () => updateState);
   ipcMain.handle('update:check', () => checkForUpdates(true));
   ipcMain.handle('update:download', () => downloadUpdate());
-  ipcMain.handle('update:install', () => installUpdate());
+  ipcMain.handle('update:install', (_event, options) => installUpdate(options ?? {}));
   ipcMain.handle('update:open-release', () => {
     void shell.openExternal('https://github.com/Hilbras/OmniHilbras/releases/latest');
   });

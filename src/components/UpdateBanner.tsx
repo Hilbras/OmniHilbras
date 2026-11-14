@@ -38,8 +38,18 @@ export function UpdateBanner() {
   const run = async (action: 'download' | 'install') => {
     setError(undefined);
     try {
-      if (action === 'download') await bridge.updates.download();
-      else await bridge.updates.install();
+      if (action === 'download') {
+        await bridge.updates.download();
+        return;
+      }
+      /**
+       * An unverified update is a decision, not a click-through.
+       *
+       * `signed` comes from the main process: until release signing exists it is false, and the confirm is
+       * what turns "the feed said so" into "the operator agreed".
+       */
+      if (state.signed === false && !window.confirm(`${state.trustReason ?? 'This update cannot be verified.'}\n\nInstall it anyway?`)) return;
+      await bridge.updates.install(state.signed === false ? { allowUnsigned: true } : undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The update action failed.');
     }
@@ -61,6 +71,13 @@ export function UpdateBanner() {
                   ? 'Download, install, and restart into the new version.'
                   : 'This build cannot replace itself. Download the release for your platform.'}
           </p>
+          {/* Said before the button is pressed, not only in the confirmation. An update nobody can
+              prove came from this project should look different from one that can. */}
+          {state.signed === false && state.status !== 'error' && (
+            <p className="mt-1 text-[10px] leading-relaxed text-amber-600 dark:text-amber-400">
+              This update cannot be verified: {state.trustReason ?? 'no release-signing key is configured.'}
+            </p>
+          )}
         </div>
         <button type="button" aria-label="Dismiss update" onClick={() => setDismissed(true)} className="muted rounded-md p-1 hover:text-text"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>
       </div>

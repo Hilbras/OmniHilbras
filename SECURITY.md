@@ -96,3 +96,59 @@ The latest released version. This project ships every change as its own versione
 - Acknowledge a report within three days.
 - Triage within seven, and tell you the severity I think it has and why.
 - Credit you in the advisory unless you would rather I did not.
+
+---
+
+## What changed after the 2026-11-14 audit
+
+A source-first audit (`~/security-audit-skill/omnihilbras/run-1`, run against `c642ba2f`) produced eight
+findings. Six are fixed; each carries a regression test.
+
+### Update trust
+
+Every desktop build is **unsigned**, and the updater compared a download against a `sha512` taken from the
+same release's `latest-*.yml` — which detects a truncated download and nothing more. Until a
+release-signing key exists, the app **says it cannot verify an update and refuses to install one until a
+person confirms**. `OMNIHILBRAS_UPDATE_PUBLIC_KEY` is where a verification key will be read from; the
+verification itself is not implemented, and the app claims no more than that
+(`tests/update-consent.test.js`).
+
+The release workflow also gained a `preflight` job: a tag whose commit is not an ancestor of `main` is
+refused, and publishing is a separate job — the only one holding `contents: write`, behind a `release`
+environment. Every action is pinned to a commit SHA.
+
+### Credentials in API responses
+
+- **Tunnel tokens are never returned.** `publicTunnel()` omits the value and reports `hasToken`.
+- **Proxy pool entries are validated on write and redacted on read.** Entries must parse as
+  `http`, `https`, `socks4`, `socks5` or `socks5h` with a host; a refusal names the scheme and host and
+  never the value, because a refused proxy URL is exactly the string carrying `user:pass@`. Responses
+  show `***:***`; the stored entry keeps its credential, which is what the proxy needs.
+
+### Inbound rate limiting
+
+The gateway limited what it *sends* to providers and nothing about what arrives, so a retrying agent could
+spend a quota at line speed. The LLM surface now allows **600 requests per minute per caller** —
+`OMNIHILBRAS_REQUESTS_PER_MINUTE` changes it, `0` disables it, and a value that is not a non-negative
+integer is ignored rather than refusing everything. `GET /v1/models` is deliberately exempt: it is
+discovery, not spend. Refusals are `429` with `retry-after`.
+
+### Runtime installer
+
+`opencode-runtime` no longer takes the release version from npm's `latest` dist-tag — the only pointer to a
+binary it then executes. The version is pinned in the repository (`pinnedOpencodeVersion` in
+`Kernel/API/src/core/opencode-runtime.ts`), `latest` is available only when asked for by name, and
+`OMNIHILBRAS_OPENCODE_SHA256` turns the recorded hash into a check.
+
+### Browser-driver profiles
+
+A driver profile is a signed-in third-party session on disk. It is created `0700`, keyed per connection so
+two accounts never share one, and **removed when the connection is deleted**.
+
+### Open, with the reason
+
+- **Release signing** — no keys exist yet. The consent path is what is available; the verification is not
+  written because there is nothing to verify against. This is the remaining half of the highest finding.
+- **`minimatch` (moderate, DoS via glob expansion)** — reaches the toolchain through `electron-builder`
+  only, not the shipped app. The fix belongs upstream; forcing it with an override risks the packager, and
+  a forced remediation is not worth that. Review after `electron-builder` moves past `minimatch@3`.

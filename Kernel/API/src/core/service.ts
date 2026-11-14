@@ -7,6 +7,7 @@ import { ZcodeAdapter, zcodeProviderId } from '@omnihilbras/sdk-zcode-start-plan
 import { readZcodeLocalCredential, type ZcodeLocalCredential } from './zcode-local.js';
 import { pollZcodeOAuth, startZcodeOAuth, type ZcodeOAuthProvider } from './zcode-oauth.js';
 import { createOpencodeLocalService } from './opencode-service.js';
+import { removeChatGptWebProfile } from '../providers/chatgptWeb.js';
 import { ensureOpencodeService } from './opencode-runtime.js';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
 import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext, type ModelPricing } from './index.js';
@@ -2775,8 +2776,17 @@ export class GatewayService {
     return this.connections.setModels(connectionId, modelIds);
   }
 
+  /**
+   * Removes a connection, and the traces of it that are not credentials.
+   *
+   * A browser-driver profile is a signed-in third-party session on disk; leaving it behind after a delete
+   * leaves a credential the operator asked to be rid of. Best effort: a connection that never opened a
+   * browser has nothing to remove, and a failure to clean up must not make the delete fail.
+   */
   async removeConnection(connectionId: string) {
-    return this.connections.remove(connectionId);
+    const removed = await this.connections.remove(connectionId);
+    await removeChatGptWebProfile(connectionId).catch(() => undefined);
+    return removed;
   }
 
   /** The API keys this gateway knows about, and whether a key is required to use it. */
