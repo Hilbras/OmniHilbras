@@ -718,10 +718,15 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
    * Prefers an account that lists the model, so a model only account B serves is not tested against
    * account A and reported as broken. Falls back to the first account with a credential, which is the
    * old behaviour and still right when no catalog mentions the model.
+   *
+   * A **paused** account is never chosen. It cannot serve anything, and pinning it made the test answer
+   * "that account is disabled" instead of asking an account that works — the pause is an instruction to
+   * the gateway, not a reason for a test to fail.
    */
   function accountForModel(model: string): string | undefined {
-    const accounts = connections.filter((item) => item.hasCredential);
-    return (accounts.find((item) => item.modelIds.includes(model)) ?? accounts[0])?.id ?? connection?.id;
+    const accounts = connections.filter((item) => item.hasCredential && item.enabled !== false);
+    return (accounts.find((item) => item.modelIds.includes(model)) ?? accounts[0])?.id
+      ?? connections.find((item) => item.hasCredential && item.enabled !== false)?.id;
   }
 
   /**

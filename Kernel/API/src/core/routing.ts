@@ -219,6 +219,11 @@ const quotaOrCapacityWording = [
   'insufficient quota',
   'exceeded your current quota',
   'exceeded your quota',
+  'exceed quota',
+  'quota limit',
+  'quota exhausted',
+  'quota reached',
+  'no quota',
   'credit balance',
   'insufficient credit',
   'insufficient balance',
@@ -230,12 +235,33 @@ const quotaOrCapacityWording = [
   'no remaining',
 ] as const;
 
+/**
+ * A scarcity word next to `quota` also means the allowance is gone, whatever the phrasing.
+ *
+ * Written as a pair of tests rather than a longer phrase list because the phrasings are unbounded and
+ * the real ones arrived from the field: ZCode refuses a turn inside a `200` with `1005 exceed quota
+ * limit`, which matched nothing in the list above — "quota exceeded" but never "exceed quota limit" —
+ * so the account stayed in the terminal path and its siblings were never asked. A provider is free to
+ * word this however it likes; what identifies it is that the sentence is about an allowance and says
+ * that allowance is not available.
+ *
+ * Still narrow: a message that mentions quota without one of these words is about something else, and
+ * does not rotate.
+ */
+const scarcityWording = ['exceed', 'limit', 'insufficient', 'exhaust', 'depleted', 'out of', 'no remaining', 'reached', 'zero', 'empty'] as const;
+
 /** The provider's own words about this failure, if it gave any. */
 function providerWording(error: unknown): string {
   if (!(error instanceof ProviderError)) return '';
   const details = error.details as { providerMessage?: unknown } | undefined;
   const said = typeof details?.providerMessage === 'string' ? details.providerMessage : '';
   return `${error.message} ${said}`.toLowerCase();
+}
+
+/** Whether the provider's sentence says the account has no allowance left. */
+function saidQuotaIsGone(wording: string): boolean {
+  if (quotaOrCapacityWording.some((phrase) => wording.includes(phrase))) return true;
+  return wording.includes('quota') && scarcityWording.some((word) => wording.includes(word));
 }
 
 /**
@@ -260,7 +286,7 @@ export function shouldRotateAccount(error: unknown): boolean {
    * that ran out rotate while a genuinely malformed body still does not.
    */
   const wording = providerWording(error);
-  if (quotaOrCapacityWording.some((phrase) => wording.includes(phrase))) return true;
+  if (saidQuotaIsGone(wording)) return true;
 
   /**
    * A **local** concurrency saturation is not the account's allowance.

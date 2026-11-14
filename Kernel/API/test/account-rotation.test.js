@@ -118,9 +118,22 @@ test('the quota vocabulary rotates the account; a plain bad request does not', (
     'Your credit balance is too low',
     'capacity exceeded',
     'The model is overloaded',
+    /**
+     * The real one, taken from ZCode. This is the sentence that was NOT rotating and is the whole
+     * reason the phrase list became a rule: "quota exceeded" was on the list, "exceed quota limit" —
+     * the wording ZCode actually uses, inside a `200` and inside an SSE error event — was not. The
+     * account stayed terminal, so its siblings were never asked and the model test always failed on
+     * the first account. Note it arrives with **no status code at all**.
+     */
+    'ZCode refused the turn: 1005 exceed quota limit',
+    'The ZCode stream returned an error: 1005 exceed quota limit',
   ]) {
     assert.equal(shouldRotateAccount(said(wording)), true, `${wording} is about the account`);
   }
+
+  // A quota word with no scarcity word beside it is about something else.
+  assert.equal(shouldRotateAccount(said('unknown field: quota')), false);
+  assert.equal(shouldRotateAccount(said('the quota header is malformed')), false);
 
   // The request is the problem: another account would refuse it identically, and cooling a healthy
   // account over a bad body removes it from rotation for everyone.
