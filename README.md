@@ -22,7 +22,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.45.1**
+**Current version: 3.46.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
@@ -386,6 +386,26 @@ an issue, or written to browser storage.
 
 The full threat model and known limits are in [`SECURITY.md`](./SECURITY.md).
 
+## CLI
+
+`omnihilbras` with no verb starts the gateway and the dashboard. With a verb it **asks a running gateway
+something**, which is what a script or an agent needs and a page cannot give:
+
+```bash
+omnihilbras status              # is it up, what is it, what is wrong with it
+omnihilbras providers zcode     # the accounts of a provider, and which are usable
+omnihilbras test zcode          # probe every account of that provider
+omnihilbras routing --problems  # who is ejected, who is waiting
+omnihilbras logs                # follow finished requests
+```
+
+Every verb takes `--json` and prints the answer as data and nothing else, so a script never parses a
+table. Each one calls a route the gateway already serves, so the CLI and the dashboard cannot drift into
+two opinions about the same thing. It has no dependencies, and asking it what it does starts nothing —
+`omnihilbras help` reads a string and exits.
+
+Full reference, including the authentication the management routes require: [`docs/CLI.md`](./docs/CLI.md).
+
 ## Development
 
 ```bash
@@ -417,6 +437,7 @@ repository record the mutation that first proved them blind; keep that habit whe
 | Document | What it covers |
 | --- | --- |
 | [`docs/SPEC-SDK.md`](./docs/SPEC-SDK.md) | Gateway routes, provider contract, rejection shapes and success criteria |
+| [`docs/CLI.md`](./docs/CLI.md) | The `omnihilbras` verbs, their flags, the auth they use and the exit codes they return |
 | [`docs/architecture/README.md`](./docs/architecture/README.md) | Measured architecture, layer boundaries and provider-specific surface |
 | [`docs/architecture/embeddings-plan.md`](./docs/architecture/embeddings-plan.md) | Embeddings design and dispatch rules |
 | [`docs/reports/`](./docs/reports/) | Performance, reliability, release readiness and provider test reports |

@@ -118,7 +118,10 @@ connections, and shuts both down again on Ctrl-C.
   -v, --version           print the version
 
 This is a developer launcher for a checkout — it runs the same commands as
-\`pnpm dev\` and \`pnpm dev:gateway\`, in one terminal.`);
+\`pnpm dev\` and \`pnpm dev:gateway\`, in one terminal.
+
+To ask a running gateway something instead of starting one, use a verb:
+  omnihilbras help      list them (status, providers, models, test, keys, …)`);
   process.exit(code);
 }
 
@@ -322,7 +325,26 @@ function captureTail(stream, label, lines = []) {
  * ------------------------------------------------------------------ */
 
 async function main() {
-  const options = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+
+  /**
+   * A verb is dispatched **before anything else happens in this file**.
+   *
+   * The reference implementation ran its runtime self-heal and its SQLite setup ahead of parsing
+   * arguments, so `--help` could install packages and start processes. Asking a CLI what it does must not
+   * do anything — so the verb check is the first statement here, and `omnihilbras status` never reaches
+   * the dependency check, the port scan or the process reaping below.
+   */
+  const first = argv[0];
+  if (first !== undefined && !first.startsWith('-')) {
+    const cli = await import('../cli/index.mjs');
+    // Every bare word is the CLI's to judge, including a misspelled verb: letting an unknown word fall
+    // through to the launcher's option parser reported it as a bad flag with exit 1, when what the person
+    // needs is "that is not a verb, here are the verbs" and the usage exit code.
+    process.exit(await cli.main(argv, { version: PKG.version }));
+  }
+
+  const options = parseArgs(argv);
   const pm = packageManager();
 
   if (!fs.existsSync(path.join(ROOT, 'node_modules'))) {

@@ -324,6 +324,7 @@ pnpm install
 pnpm dev            # dashboard + marketing site on :20137
 pnpm dev:gateway    # local gateway on 127.0.0.1:20138
 omnihilbras         # both of the above in one terminal (needs `npm link` once)
+omnihilbras status  # …or a verb, which asks a *running* gateway something (see docs/CLI.md)
 pnpm typecheck
 pnpm test           # SDK then gateway
 pnpm build
@@ -361,3 +362,12 @@ the spawned pid alone left the previous run holding the ports on restart. So it 
 **still verifies the group's command lines before signalling it**, because a group id can outlive its
 members and be reused. A port held by anything else is **refused, never killed**, and it is checked
 *before* the previous run is stopped, so a typo in a port cannot cost you a running server.
+
+The same binary also answers questions: `omnihilbras status`, `providers`, `models`, `test`, `keys`,
+`routing`, `logs` (`docs/CLI.md`). Three rules hold there, and each is a reference-implementation mistake
+not repeated. **A verb dispatches before any launcher work** — `bin/omnihilbras.js` checks for one as its
+first statement, because the reference ran its runtime self-heal ahead of parsing arguments, so asking for
+`--help` could install packages. **Every verb calls a route the gateway already serves**, so the CLI and
+the dashboard cannot hold two opinions about one fact. **An unknown flag is refused, not ignored** — a
+dropped `--strict` is a check that never ran, which is worse than one that is missing — which is why each
+verb declares its own `flags` and a test drives the built command against a fake gateway.
