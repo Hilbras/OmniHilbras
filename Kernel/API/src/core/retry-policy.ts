@@ -1,4 +1,4 @@
-import { ProviderError } from './provider-error.js';
+import { isProviderError, ProviderError } from './provider-error.js';
 import { isRetryableFailure, shouldRotateAccount, type RouteCandidate } from './routing.js';
 
 /**
@@ -94,7 +94,7 @@ export class RetryPolicy {
      * operator's broken account stays broken and invisible. The failure belongs to the account that
      * owns the credential, so it is reported against it.
      */
-    if (input.error instanceof ProviderError && (input.error.code === 'AUTHENTICATION_FAILED' || input.error.statusCode === 401)) return 'stop';
+    if (isProviderError(input.error) && (input.error.code === 'AUTHENTICATION_FAILED' || input.error.statusCode === 401)) return 'stop';
 
     /**
      * A **local** concurrency saturation stops here too.
@@ -104,7 +104,7 @@ export class RetryPolicy {
      * said nothing, and a sibling should not be billed for it — the honest answer is "the account is
      * busy", which is what the caller is told. Every other limiter refusal steps aside to the next route.
      */
-    const details = input.error instanceof ProviderError ? input.error.details as { concurrencyLimited?: unknown } | undefined : undefined;
+    const details = isProviderError(input.error) ? input.error.details as { concurrencyLimited?: unknown } | undefined : undefined;
     if (details?.concurrencyLimited === true) return 'stop';
 
     /**

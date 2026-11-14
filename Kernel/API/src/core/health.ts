@@ -3,7 +3,7 @@ import { ProviderError, type ProviderAdapter, type ProviderHealth, type Provider
 // question: "who is ejected?". It is read by `resolveRoute` and written here, and the two are
 // deliberately the same object so a failure recorded by a request and a failure recorded by a
 // sweep cannot disagree.
-import { HealthRegistry } from './routing.js';
+import { HealthRegistry, saysAllowanceExhausted } from './routing.js';
 import type { ModelCooldown } from './connections.js';
 
 /**
@@ -265,7 +265,18 @@ export class HealthManager {
          * sites to each remember.
          */
         const message = health.message?.trim() || `${adapter.name} reported itself unavailable without saying why.`;
-        this.registry.recordFailure(adapter.id, 'PROVIDER_UNAVAILABLE', message);
+        /**
+         * An exhausted allowance is reported, never charged to health.
+         *
+         * This is the second half of the ZCode failure, and the half that did the most damage. This
+         * sweep spends a **real turn** per adapter (`healthCheck` posts a chat), so an account with no
+         * allowance refuses it — and the refusal was recorded against `adapter.id`, which for a
+         * provider with several connections is the **provider**. Both accounts were then read as
+         * unhealthy through `isUnhealthy(connection.providerId)`, and the escalation
+         * (`30 s × 2^(failures - threshold)`) held them both out for about half an hour, including the
+         * account that was working. The dashboard still sees the reason; the router is not lied to.
+         */
+        if (!saysAllowanceExhausted(message)) this.registry.recordFailure(adapter.id, 'PROVIDER_UNAVAILABLE', message);
         return { ...health, providerId: adapter.id, message };
       }
       this.registry.recordSuccess(adapter.id, health.latencyMs ?? Date.now() - startedAt, health.checkedAt);

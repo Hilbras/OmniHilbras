@@ -1,4 +1,4 @@
-import { ProviderError } from './index.js';;
+import { ProviderError, isProviderError } from './index.js';;
 import { isRetryableFailure } from './routing.js';
 
 /**
@@ -18,7 +18,7 @@ import { isRetryableFailure } from './routing.js';
  * an unknown failure keeps the credential, because a live token is not thrown away over a network blip.
  */
 export function classifyRenewalFailure(error: unknown): 'needs-sign-in' | 'retry-later' {
-  if (!(error instanceof ProviderError)) return 'retry-later';
+  if (!isProviderError(error)) return 'retry-later';
   return isRetryableFailure(error) ? 'retry-later' : 'needs-sign-in';
 }
 

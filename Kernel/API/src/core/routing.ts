@@ -1,4 +1,4 @@
-import { ProviderError, providerPrefixes } from './index.js';;
+import { isProviderError, ProviderError, providerPrefixes } from './index.js';;
 import type { ConnectionRecord, ModelCooldown, ResilienceSettings } from './connections.js';
 
 /** Why a candidate was skipped, so the gateway can explain the decision. */
@@ -315,7 +315,7 @@ const scarcityWording = ['exceed', 'limit', 'insufficient', 'exhaust', 'depleted
 
 /** The provider's own words about this failure, if it gave any. */
 function providerWording(error: unknown): string {
-  if (!(error instanceof ProviderError)) return '';
+  if (!isProviderError(error)) return '';
   const details = error.details as { providerMessage?: unknown } | undefined;
   const said = typeof details?.providerMessage === 'string' ? details.providerMessage : '';
   return `${error.message} ${said}`.toLowerCase();
@@ -328,6 +328,35 @@ function saidQuotaIsGone(wording: string): boolean {
 }
 
 /**
+ * The same test, for a caller that holds only the provider's message — the health sweep.
+ *
+ * A probe failure arrives as a string, because an adapter's `healthCheck` catches its own error to
+ * report `unavailable` rather than throwing. That is where the second half of the ZCode failure lived:
+ * the sweep spends a real turn, an account with no allowance refuses it, and the refusal was recorded
+ * **against the provider**, ejecting every account of that provider for `30 s × 2^(failures-3)` — about
+ * half an hour once nine had accumulated, including the account that was working.
+ */
+export function saysAllowanceExhausted(text: string): boolean {
+  return saidQuotaIsGone(text.toLowerCase());
+}
+
+/**
+ * A refusal that is about the account's **allowance**, not the provider's health.
+ *
+ * The distinction is the whole fix: "you have used your quota" is a fact about one credential that
+ * another account answers, while a `5xx` or a timeout is the provider being unwell and is exactly what
+ * the ejection counter exists for. Charging the first to health meant a spent account ejected itself —
+ * and, via the provider-level verdict, its working siblings with it.
+ */
+export function isAllowanceRefusal(error: unknown): boolean {
+  if (!isProviderError(error)) return false;
+  if (saidQuotaIsGone(providerWording(error))) return true;
+  if (error.code === 'RATE_LIMITED') return true;
+  const status = error.statusCode;
+  return status === 402 || status === 403 || status === 404 || status === 429;
+}
+
+/**
  * Whether this failure says something about **the account**, and so belongs on the next account.
  *
  * Distinct from `isRetryableFailure`, which asks whether the same route is worth retrying. The two
@@ -335,7 +364,7 @@ function saidQuotaIsGone(wording: string): boolean {
  * but `insufficient_quota` on a `400` is a reason to try the *next* one.
  */
 export function shouldRotateAccount(error: unknown): boolean {
-  if (!(error instanceof ProviderError)) return false;
+  if (!isProviderError(error)) return false;
   // A caller who hung up is not a vote against the account.
   if (error.code === 'CANCELLED') return false;
 
@@ -397,7 +426,7 @@ export function shouldRotateAccount(error: unknown): boolean {
 
 /** Failures worth another attempt. Bad requests and auth errors never are. */
 export function isRetryableFailure(error: unknown) {
-  if (!(error instanceof ProviderError)) return false;
+  if (!isProviderError(error)) return false;
   if (error.code === 'CANCELLED') return false;
   if (error.code === 'INVALID_REQUEST' || error.code === 'AUTHENTICATION_FAILED' || error.code === 'NOT_SUPPORTED' || error.code === 'NOT_FOUND') return false;
   /**
@@ -642,16 +671,33 @@ export function resolveRoute(input: {
     return { candidates: [], skipped: usable.map((connection) => ({ providerId: connection.providerId, reason: 'no-models' as const })) };
   }
   const fallbackPool = matching.length > 0 ? matching : sameFamily;
+  /**
+   * Whether the provider's own id is also the id of one of its connections.
+   *
+   * It very often is — the first account of a provider is saved under the provider id (`zcode`, and the
+   * same shape for kiro, cline, every card whose first sign-in writes `providerId` as the connection
+   * id). That aliasing made the provider-level check below read **that account's** counter, so one
+   * account's failures ejected its siblings: with two ZCode accounts the working one was skipped as
+   * `unhealthy` and the request failed with "Tried: zcode" while the second account was answering
+   * normally. Counters keyed that way belong to the connection and are already read above.
+   */
+  const providerKeyIsAConnection = input.connections.some((connection) => connection.id === connection.providerId);
   const candidates: RouteCandidate[] = [];
   for (const connection of fallbackPool) {
     // Health is recorded per connection for request outcomes, and per provider for a background
     // sweep. Either answer ejects the connection: a provider-level check that failed says nothing
-    // good about any account on it, while one account's failures must not eject its sibling.
-    if (input.health.isUnhealthy(connection.id, input.failureThreshold) || input.health.isUnhealthy(connection.providerId, input.failureThreshold)) {
+    // good about any account on it, while one account's failures must not eject its sibling — which
+    // is what `providerKeyIsAConnection` guards against.
+    const providerVerdict = providerKeyIsAConnection ? false : input.health.isUnhealthy(connection.providerId, input.failureThreshold);
+    if (input.health.isUnhealthy(connection.id, input.failureThreshold) || providerVerdict) {
       skipped.push({ providerId: connection.providerId, reason: 'unhealthy' });
       continue;
     }
-    if (input.health.isModelCoolingDown(connection.id, modelId) || input.health.isModelCoolingDown(connection.providerId, modelId)) {
+    // The same aliasing applies to the cooldown: with `zcode` as both the provider id and the first
+    // account's id, a provider-keyed cooldown is that account's cooldown, and reading it here would
+    // stand the *sibling* down for a model its own allowance covers.
+    const providerCoolingDown = providerKeyIsAConnection ? false : input.health.isModelCoolingDown(connection.providerId, modelId);
+    if (input.health.isModelCoolingDown(connection.id, modelId) || providerCoolingDown) {
       skipped.push({ providerId: connection.providerId, reason: 'model-cooling-down' });
       continue;
     }

@@ -1,4 +1,4 @@
-import { ProviderError, type ProviderRequestContext } from './index.js';;
+import { ProviderError, isProviderError, type ProviderRequestContext } from './index.js';;
 
 /**
  * One request's identity, from the edge to whichever provider answered it.
@@ -94,7 +94,7 @@ export function withRequestScope(context: ProviderRequestContext, scope: Request
  * id, so attaching twice is harmless and attaching to the wrong request cannot happen.
  */
 export function attachRequestId(error: unknown, scope: RequestScope): unknown {
-  if (!(error instanceof ProviderError)) return error;
+  if (!isProviderError(error)) return error;
   const details = (error.details ?? {}) as Record<string, unknown>;
   /**
    * Any existing id is left alone, not just this request's.

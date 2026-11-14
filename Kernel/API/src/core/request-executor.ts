@@ -1,5 +1,5 @@
 import { isProviderError, ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse } from './index.js';;
-import { noCandidateMessage, type RouteCandidate, type RouteDecision } from './routing.js';
+import { isAllowanceRefusal, noCandidateMessage, type RouteCandidate, type RouteDecision } from './routing.js';
 import { RetryPolicy } from './retry-policy.js';
 import { HedgePolicy } from './hedge-policy.js';
 import type { RequestScope } from './request-context.js';
@@ -213,7 +213,7 @@ export class RequestExecutor {
       const effective = candidate.model ? { ...request, model: candidate.model } : request;
       return await this.deps.chat(candidate.providerId, effective, deadline, scope, candidate.connectionId);
     } catch (error) {
-      if (error instanceof ProviderError && error.code === 'RATE_LIMITED' && !(typeof error.details === 'object' && error.details !== null && (error.details as { concurrencyLimited?: unknown }).concurrencyLimited === true)) this.noteModelRateLimit(candidate.providerId, candidate.model ?? request.model, error, candidate.connectionId);
+      if (isProviderError(error) && error.code === 'RATE_LIMITED' && !(typeof error.details === 'object' && error.details !== null && (error.details as { concurrencyLimited?: unknown }).concurrencyLimited === true)) this.noteModelRateLimit(candidate.providerId, candidate.model ?? request.model, error, candidate.connectionId);
       throw error;
     }
   }
@@ -380,7 +380,7 @@ export class RequestExecutor {
         try {
           this.deps.enforceRateLimit(candidate);
         } catch (error) {
-          const code = error instanceof ProviderError ? error.code : 'RATE_LIMITED';
+          const code = isProviderError(error) ? error.code : 'RATE_LIMITED';
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs: 0, errorCode: code });
           /**
            * A **local** concurrency saturation is reported, not absorbed.
@@ -391,7 +391,7 @@ export class RequestExecutor {
            * and with a single account it turned it into a silently different failure. Every other
            * limiter refusal still steps aside to the next route.
            */
-          const local = (error instanceof ProviderError ? error.details as { concurrencyLimited?: unknown } | undefined : undefined)?.concurrencyLimited === true;
+          const local = (isProviderError(error) ? error.details as { concurrencyLimited?: unknown } | undefined : undefined)?.concurrencyLimited === true;
           // Nothing was sent, so this connection is skipped and the next route is tried. The refusal is kept as
           // the last error, and is what the caller sees only if no route answers.
           lastError = local
@@ -421,8 +421,19 @@ export class RequestExecutor {
           return { response, attempts };
         } catch (error) {
           const latencyMs = Date.now() - startedAt;
-          const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
-          if (!isCallerFault(code) && code !== 'RATE_LIMITED') this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.', candidate.connectionId);
+          const code = isProviderError(error) ? error.code : 'PROVIDER_REQUEST_FAILED';
+          /**
+           * A refusal about the account's **allowance** is not provider ill-health, and must not count
+           * toward ejecting the connection.
+           *
+           * This is where the reported failure actually lived. A ZCode quota refusal arrives as
+           * `PROVIDER_REQUEST_FAILED`, which is not `RATE_LIMITED`, so it was charged to the connection's
+           * failure counter — nine times, in the live gateway — and ejection escalates
+           * (`30 s × 2^(failures - threshold)`), so both accounts of the provider ended up ejected for
+           * roughly half an hour. The router then skipped the healthy account as `unhealthy` and the
+           * request failed with "Tried: zcode" while that account was working the whole time.
+           */
+          if (!isCallerFault(code) && !isAllowanceRefusal(error)) this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.', candidate.connectionId);
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs, errorCode: code });
           lastError = error;
           const action = this.retryPolicy.afterFailure({
@@ -486,7 +497,7 @@ export class RequestExecutor {
           attempt: 1,
           ok: false,
           latencyMs: 0,
-          errorCode: error instanceof ProviderError ? error.code : 'RATE_LIMITED',
+          errorCode: isProviderError(error) ? error.code : 'RATE_LIMITED',
         });
         return;
       }
@@ -500,7 +511,7 @@ export class RequestExecutor {
         )
         .then((outcome) => {
           settled.add(done);
-          const code = outcome.ok ? undefined : outcome.error instanceof ProviderError ? outcome.error.code : 'PROVIDER_REQUEST_FAILED';
+          const code = outcome.ok ? undefined : isProviderError(outcome.error) ? outcome.error.code : 'PROVIDER_REQUEST_FAILED';
           // **An attempt that was already abandoned must not record health again.**
           //
           // When a winner is chosen the losers are aborted and recorded `CANCELLED`. A provider that does
@@ -522,7 +533,7 @@ export class RequestExecutor {
             this.deps.clearModelCooldown?.(candidate.providerId, request.model);
             if (candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordUsage?.(candidate.connectionId);
           } else {
-            if (!isCallerFault(code ?? 'PROVIDER_REQUEST_FAILED')) this.deps.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.', candidate.connectionId);
+            if (!isCallerFault(code ?? 'PROVIDER_REQUEST_FAILED') && !isAllowanceRefusal(outcome.error)) this.deps.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.', candidate.connectionId);
           }
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: outcome.ok, latencyMs: outcome.latencyMs, ...(code ? { errorCode: code } : {}) });
           if (outcome.ok) {
@@ -619,7 +630,7 @@ export class RequestExecutor {
       try {
         this.deps.enforceRateLimit(candidate);
       } catch (error) {
-        const code = error instanceof ProviderError ? error.code : 'RATE_LIMITED';
+        const code = isProviderError(error) ? error.code : 'RATE_LIMITED';
         attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
         throw new ProviderError(code, 'This connection is at its rate limit.', {
           retryable: false,
@@ -647,8 +658,8 @@ export class RequestExecutor {
         opening = opened.first;
         rest = opened.remainder[Symbol.asyncIterator]();
       } catch (error) {
-        const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
-        if (!isCallerFault(code)) this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.', candidate.connectionId);
+        const code = isProviderError(error) ? error.code : 'PROVIDER_REQUEST_FAILED';
+        if (!isCallerFault(code) && !isAllowanceRefusal(error)) this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.', candidate.connectionId);
         attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
         lastError = error;
         // `canRetry: false`, because a stream walks the route chain once: once the first chunk has
@@ -705,7 +716,7 @@ export class RequestExecutor {
             // pointed the other way.
             const cancelled = signal?.aborted === true;
             if (cancelled) throw error;
-            const code = error instanceof ProviderError ? error.code : 'PROVIDER_REQUEST_FAILED';
+            const code = isProviderError(error) ? error.code : 'PROVIDER_REQUEST_FAILED';
             executor.deps.recordFailure(
               candidate.providerId,
               code,

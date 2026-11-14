@@ -6,7 +6,7 @@
  * the wrong thing.
  */
 
-import { ProviderError, canonicalizeUsage, isLoopbackHostname, type ProviderId, isPrivateHostname, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type MessageContent, type Model, type ToolCall, type ToolDefinition } from '../core/index.js';
+import { ProviderError, canonicalizeUsage, isLoopbackHostname, isPrivateHostname, isProviderError, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type MessageContent, type Model, type ProviderId, type ToolCall, type ToolDefinition } from '../core/index.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
 import { attachRequestId, type RequestScope } from '../core/request-context.js';
@@ -103,12 +103,12 @@ export async function handleEmbeddings(request: IncomingMessage, response: Serve
   } catch (error) {
     // The same ledger read as chat's failure path, and for the same reason: `attachAttempts` rebuilds
     // the error, so `details.attempts` is the only place the list survives.
-    const details = error instanceof ProviderError ? error.details : undefined;
+    const details = isProviderError(error) ? error.details : undefined;
     const ledger: GatewayFailoverAttempt[] =
       typeof details === 'object' && details !== null && Array.isArray((details as { attempts?: unknown }).attempts)
         ? ((details as { attempts: GatewayFailoverAttempt[] }).attempts)
         : [];
-    const cancelled = signal.aborted || (error instanceof ProviderError && error.code === 'CANCELLED');
+    const cancelled = signal.aborted || (isProviderError(error) && error.code === 'CANCELLED');
     recordUsage(service, {
       model: embeddingRequest.model,
       providerId: ledger[ledger.length - 1]?.providerId,
@@ -116,7 +116,7 @@ export async function handleEmbeddings(request: IncomingMessage, response: Serve
       outcome: cancelled ? 'cancelled' : 'failure',
       attempts: ledger.length,
       latencyMs: Date.now() - startedAt,
-      ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+      ...(isProviderError(error) ? { errorCode: error.code } : {}),
       requestId: scope.id,
       ledger,
     });
@@ -174,12 +174,12 @@ export async function handleImages(request: IncomingMessage, response: ServerRes
   try {
     responseBody = await service.imageWithFailover(imageRequest, explicitProviderId, signal, scope);
   } catch (error) {
-    const details = error instanceof ProviderError ? error.details : undefined;
+    const details = isProviderError(error) ? error.details : undefined;
     const ledger: GatewayFailoverAttempt[] =
       typeof details === 'object' && details !== null && Array.isArray((details as { attempts?: unknown }).attempts)
         ? ((details as { attempts: GatewayFailoverAttempt[] }).attempts)
         : [];
-    const cancelled = signal.aborted || (error instanceof ProviderError && error.code === 'CANCELLED');
+    const cancelled = signal.aborted || (isProviderError(error) && error.code === 'CANCELLED');
     recordUsage(service, {
       model: imageRequest.model,
       providerId: ledger[ledger.length - 1]?.providerId,
@@ -187,7 +187,7 @@ export async function handleImages(request: IncomingMessage, response: ServerRes
       outcome: cancelled ? 'cancelled' : 'failure',
       attempts: ledger.length,
       latencyMs: Date.now() - startedAt,
-      ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+      ...(isProviderError(error) ? { errorCode: error.code } : {}),
       requestId: scope.id,
       ledger,
     });
@@ -320,12 +320,12 @@ export async function handleResponses(request: IncomingMessage, response: Server
   try {
     ({ response: completion, attempts } = await service.chatWithFailover(chatRequest, explicitProviderId, signal, scope));
   } catch (error) {
-    const details = error instanceof ProviderError ? error.details : undefined;
+    const details = isProviderError(error) ? error.details : undefined;
     const ledger: GatewayFailoverAttempt[] =
       typeof details === 'object' && details !== null && Array.isArray((details as { attempts?: unknown }).attempts)
         ? ((details as { attempts: GatewayFailoverAttempt[] }).attempts)
         : [];
-    const cancelled = signal.aborted || (error instanceof ProviderError && error.code === 'CANCELLED');
+    const cancelled = signal.aborted || (isProviderError(error) && error.code === 'CANCELLED');
     recordUsage(service, {
       model: chatRequest.model,
       providerId: ledger[ledger.length - 1]?.providerId,
@@ -333,7 +333,7 @@ export async function handleResponses(request: IncomingMessage, response: Server
       outcome: cancelled ? 'cancelled' : 'failure',
       attempts: ledger.length,
       latencyMs: Date.now() - startedAt,
-      ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+      ...(isProviderError(error) ? { errorCode: error.code } : {}),
       requestId: scope.id,
       ledger,
     });
@@ -458,7 +458,7 @@ async function streamResponses(input: {
     });
     response.end();
   } catch (error) {
-    const cancelled = signal.aborted || (error instanceof ProviderError && error.code === 'CANCELLED');
+    const cancelled = signal.aborted || (isProviderError(error) && error.code === 'CANCELLED');
     recordUsage(service, {
       model,
       providerId: servingOf()?.providerId ?? outcome.attempts[0]?.providerId,
@@ -466,7 +466,7 @@ async function streamResponses(input: {
       outcome: cancelled ? 'cancelled' : 'failure',
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
-      ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+      ...(isProviderError(error) ? { errorCode: error.code } : {}),
       requestId: scope.id,
       ledger: outcome.attempts,
     });
@@ -601,12 +601,12 @@ async function handleChatRequest(input: {
       // `error.attempts`, which does not exist — the error is rebuilt by `attachAttempts` and the ledger was
       // dropped. A wrong-property read here produced *no record at all* rather than a wrong one, which is a
       // better failure mode but still a silent one.
-      const details = error instanceof ProviderError ? error.details : undefined;
+      const details = isProviderError(error) ? error.details : undefined;
       const ledger: GatewayFailoverAttempt[] =
         typeof details === 'object' && details !== null && Array.isArray((details as { attempts?: unknown }).attempts)
           ? ((details as { attempts: GatewayFailoverAttempt[] }).attempts)
           : [];
-      const cancelled = signal.aborted || (error instanceof ProviderError && error.code === 'CANCELLED');
+      const cancelled = signal.aborted || (isProviderError(error) && error.code === 'CANCELLED');
       recordUsage(service, {
         model: chatRequest.model,
         providerId: ledger[ledger.length - 1]?.providerId,
@@ -615,7 +615,7 @@ async function handleChatRequest(input: {
         outcome: cancelled ? 'cancelled' : 'failure',
         attempts: ledger.length,
         latencyMs: Date.now() - startedAt,
-        ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+        ...(isProviderError(error) ? { errorCode: error.code } : {}),
         requestId: scope.id,
         ledger,
       });
@@ -701,7 +701,7 @@ async function handleChatRequest(input: {
   } catch (error) {
     // A client disconnect is the user's decision, not a provider outcome, and the v1.52.0 rule applies to
     // usage exactly as it does to health: a cancellation is neither a success nor a failure.
-    const cancelled = signal.aborted || (error instanceof ProviderError && error.code === 'CANCELLED');
+    const cancelled = signal.aborted || (isProviderError(error) && error.code === 'CANCELLED');
     recordUsage(service, {
       model: chatRequest.model,
       providerId: outcome.attempts.find((attempt) => attempt.ok)?.providerId ?? outcome.attempts[0]?.providerId,
@@ -709,7 +709,7 @@ async function handleChatRequest(input: {
       outcome: cancelled ? 'cancelled' : 'failure',
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
-      ...(error instanceof ProviderError ? { errorCode: error.code } : {}),
+      ...(isProviderError(error) ? { errorCode: error.code } : {}),
       requestId: scope.id,
     });
     if (!response.destroyed && !signal.aborted) {

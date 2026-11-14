@@ -10,7 +10,7 @@ import { createOpencodeLocalService } from './opencode-service.js';
 import { removeChatGptWebProfile } from '../providers/chatgptWeb.js';
 import { ensureOpencodeService } from './opencode-runtime.js';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
-import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, toolResultBytes, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext, type ModelPricing } from './index.js';
+import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, isProviderError, toolResultBytes, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type Model, type ModelImportPolicy, type ModelPricing, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext } from './index.js';
 import { ChatGptWebAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, type ChatGptWebDriver } from '@omnihilbras/sdk-chatgpt-web';
 import { CLAUDE_CODE, ClaudeCodeAdapter, claudeCodeProviderId } from '@omnihilbras/sdk-claude-code';
 import { ClinePassAdapter } from '@omnihilbras/sdk-clinepass';
@@ -532,7 +532,7 @@ export class GatewayService {
       discover: ({ providerId, credential, policy, signal, pendingEndpoint }) =>
         this.discoverConnectionModels(providerId, credential, policy, signal, pendingEndpoint),
       readCredential: (connectionId, providerId) => this.secretStore.get(connectionId, providerId),
-      noteDiscoveryFailure: (error) => { this.lastDiscoveryNote = error instanceof ProviderError ? providerSaid(error) : error instanceof Error ? error.message : undefined; },
+      noteDiscoveryFailure: (error) => { this.lastDiscoveryNote = isProviderError(error) ? providerSaid(error) : error instanceof Error ? error.message : undefined; },
       // A service built without a store has nothing to fingerprint against, and no save will reach
       // here; the empty string simply never matches a stored fingerprint.
       credentialFingerprint: (providerId, credential) => this.connectionStore?.credentialFingerprint(providerId, credential) ?? Promise.resolve(''),
