@@ -85,7 +85,9 @@ export class ApiKeyManager {
         return await operation();
       } catch (error) {
         if (isProviderError(error)) throw error;
-        if (error instanceof ApiKeyLimitError) throw new ProviderError('INVALID_REQUEST', error.message, { cause: error });
+        // The limit is the caller's own input problem, so its reason travels: the generic replacement
+        // ("The request is invalid.") is what a person got for a full key list, with nothing to act on.
+        if (error instanceof ApiKeyLimitError) throw new ProviderError('INVALID_REQUEST', error.message, { cause: error, publicMessage: error.message });
         throw new ProviderError('CONFIGURATION_ERROR', 'The local API key store could not be updated.', { cause: error });
       }
     });

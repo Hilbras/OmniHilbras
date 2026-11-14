@@ -755,7 +755,7 @@ export class GatewayService {
   /** Changes a provider's strategy. Routing reads the change on the next request, with no restart. */
   async setProviderStrategy(providerId: string, strategy: string): Promise<void> {
     if (strategy !== 'priority' && strategy !== 'round-robin' && strategy !== 'fastest') {
-      throw new ProviderError('INVALID_REQUEST', 'The provider strategy must be one of priority, round-robin, fastest.');
+      throw new ProviderError('INVALID_REQUEST', 'The provider strategy must be one of priority, round-robin, fastest.', { publicMessage: 'The provider strategy must be one of priority, round-robin, fastest.' });
     }
     const store = this.connectionStore as { setStrategy?: (id: string, value: string) => Promise<void> } | undefined;
     if (!store?.setStrategy) throw new ProviderError('CONFIGURATION_ERROR', 'Provider strategies are not stored by this connection store.');
@@ -2854,11 +2854,11 @@ export class GatewayService {
       apiKeys?: unknown;
     };
     if (payload?.format !== 'omnihilbras-gateway-backup' || payload.version !== 1 || !Array.isArray(payload.connections)) {
-      throw new ProviderError('INVALID_REQUEST', 'The backup payload is not a gateway backup.');
+      throw new ProviderError('INVALID_REQUEST', 'The backup payload is not a gateway backup.', { publicMessage: 'The backup payload is not a gateway backup.' });
     }
     for (const entry of payload.connections) {
       if (!entry?.connection || typeof entry.connection.id !== 'string' || typeof entry.connection.providerId !== 'string' || !entry.credential) {
-        throw new ProviderError('INVALID_REQUEST', 'The backup contains an unreadable connection.');
+        throw new ProviderError('INVALID_REQUEST', 'The backup contains an unreadable connection.', { publicMessage: 'The backup contains an unreadable connection.' });
       }
     }
     const previous = await this.connectionStore.list();

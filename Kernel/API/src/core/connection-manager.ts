@@ -1,6 +1,6 @@
 import { isProviderError } from './provider-error.js';
 import { ProviderError, type Model, type ModelImportPolicy, type ProviderCredential } from './index.js';;
-import { ConnectionMetadataLimitError, ConnectionModelLimitError, modelMetaPriceOrder, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ModelMeta, type ModelMetaMap, type ResilienceSettings } from './connections.js';
+import { ConnectionMetadataLimitError, ConnectionModelLimitError, modelMetaPriceOrder, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ModelMeta, type ModelMetaMap, type ResilienceSettings, ConnectionLimitError } from './connections.js';
 
 /**
  * Storing and changing connections.
@@ -141,8 +141,10 @@ export class ConnectionManager {
       if (isProviderError(error)) throw error;
       // A limit is the operator's input being too large, not a fault, and the store's own wording
       // is more specific than anything written here.
-      if (error instanceof ConnectionModelLimitError || error instanceof ConnectionMetadataLimitError) {
-        throw new ProviderError('INVALID_REQUEST', error.message, { cause: error });
+      if (error instanceof ConnectionLimitError || error instanceof ConnectionModelLimitError || error instanceof ConnectionMetadataLimitError) {
+        // `publicMessage` is the point: without it the caller got "The request is invalid." for a vault
+        // that is simply full, with nothing to act on.
+        throw new ProviderError('INVALID_REQUEST', error.message, { cause: error, publicMessage: error.message });
       }
       // Anything else is ours. It names what could not be saved rather than blaming a provider that
       // was never asked.

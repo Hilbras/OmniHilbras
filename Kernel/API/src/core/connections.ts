@@ -231,7 +231,31 @@ const maxMetadataBytes = 256 * 1024;
 /** Catalog metadata is bounded so a large catalog cannot fill the metadata file. */
 const maxModelMetaEntries = 2_000;
 const maxSecretEnvelopeBytes = 1024 * 1024;
-const maxConnections = 100;
+/**
+ * How many connections this vault holds.
+ *
+ * It was a flat 100, and the catalogue alone is 56 cards: a person with two accounts on a handful of
+ * providers crosses it without doing anything unusual — one vault measured here had **113**, and every
+ * save past the limit was refused with a sentence that said nothing. The bound still exists (a vault is a
+ * file, and an unbounded one is not a data structure, it is a leak), but it is now high enough not to be
+ * a surprise, and `OMNIHILBRAS_MAX_CONNECTIONS` moves it without a release.
+ */
+export function resolveMaxConnections(env: Readonly<Record<string, string | undefined>> = process.env): number {
+  const raw = env.OMNIHILBRAS_MAX_CONNECTIONS?.trim();
+  if (!raw) return 250;
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) return 250;
+  return parsed;
+}
+
+/** A vault that has reached its bound. Typed, so the reason can travel to the person who hit it. */
+export class ConnectionLimitError extends Error {
+  constructor(message = 'This vault has reached its connection limit. Remove a connection, or raise OMNIHILBRAS_MAX_CONNECTIONS.') {
+    super(message);
+    this.name = 'ConnectionLimitError';
+  }
+}
+
 const maxDiscoveredModelIds = 2_000;
 const maxCustomModelIds = 2_000;
 const maxConnectionModelIds = maxDiscoveredModelIds + maxCustomModelIds;
@@ -292,6 +316,7 @@ export function parseMasterKey(value: string | undefined) {
 }
 
 export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecretStore {
+  private readonly maxConnections = resolveMaxConnections();
   private readonly credentials = new Map<ProviderId, ProviderCredential>();
   private readonly connections = new Map<string, ConnectionRecord>();
 
@@ -335,7 +360,7 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     const id = normalized.id ?? this.findIdForProvider(normalized.providerId) ?? normalized.providerId;
     const existing = this.connections.get(id);
     if (existing && existing.providerId !== normalized.providerId) throw new Error('Connection ID is already used by another provider.');
-    if (!existing && this.connections.size >= maxConnections) throw new Error('The local connection limit has been reached.');
+    if (!existing && this.connections.size >= this.maxConnections) throw new ConnectionLimitError();
 
     // The fingerprint rides with the record so a later save can recognise the same credential without
     // decrypting anything to compare.
@@ -497,6 +522,8 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   private aliasMap = new Map<string, ModelAlias>();
   private mutationQueue: Promise<void> = Promise.resolve();
   private loadPromise?: Promise<void>;
+  /** Resolved once, so a save cannot disagree with the load about the bound. */
+  private readonly maxConnections = resolveMaxConnections();
 
   constructor(options: LocalConnectionStoreOptions = {}) {
     this.directory = options.directory ?? defaultConnectionDirectory();
@@ -583,7 +610,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       const id = normalized.id ?? this.findIdForProvider(normalized.providerId) ?? normalized.providerId;
       const existing = this.connections.get(id);
       if (existing && existing.providerId !== normalized.providerId) throw new Error('Connection ID is already used by another provider.');
-      if (!existing && this.connections.size >= maxConnections) throw new Error('The local connection limit has been reached.');
+      if (!existing && this.connections.size >= this.maxConnections) throw new ConnectionLimitError();
 
       // Keyed by the connection, so a provider can hold several without the
       // newest credential overwriting the others.
@@ -1029,7 +1056,7 @@ function parseMetadata(value: string | undefined) {
   } catch {
     throw new Error('Local connection metadata is not valid JSON.');
   }
-  if (!isRecord(parsed) || parsed.version !== metadataVersion || !Array.isArray(parsed.connections) || parsed.connections.length > maxConnections) {
+  if (!isRecord(parsed) || parsed.version !== metadataVersion || !Array.isArray(parsed.connections) || parsed.connections.length > resolveMaxConnections()) {
     throw new Error('Local connection metadata has an unsupported format.');
   }
   const connections = new Map<string, ConnectionRecord>();
