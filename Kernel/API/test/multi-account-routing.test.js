@@ -86,11 +86,39 @@ test('per-connection adapters are memoised by connection, not by provider', asyn
     ['cline', (id) => service.clineAdapter(id)],
     ['gemini', (id) => service.geminiWebAdapter(id)],
     ['chatgpt', (id) => service.chatGptWebAdapter(id)],
+    // ZCode holds the device id and account uuid that Start Plan meters quota against, and
+    // `setLocalIdentity` overwrites them. A provider-wide instance therefore served every account as
+    // whichever one signed in last: a request routed to account A carried account B's ids, and its
+    // refusal was B's balance reported against A. It was missing from this list, which is exactly how
+    // that shipped.
+    ['zcode', (id) => service.zcodeAdapter(id)],
   ]) {
     const first = build('account-a');
     assert.equal(build('account-a'), first, `${name}: the same connection must reuse its adapter`);
     assert.notEqual(build('account-b'), first, `${name}: a second account got the first account's adapter`);
   }
+});
+
+test('signing in a second ZCode account does not relabel the first', async () => {
+  /**
+   * The failure this pins: the adapter carried `deviceId` and `accountUuid`, `setLocalIdentity`
+   * overwrote both, and one instance served the whole provider. So the second sign-in rewrote the
+   * attribution of every existing account — and because Start Plan meters quota per account, a
+   * request routed to account A was billed and refused as account B.
+   */
+  const seen = [];
+  const store = new InMemoryConnectionStore();
+  const service = new GatewayService(registry(seen), store, store, new InMemoryApiKeyStore());
+
+  const accountA = service.zcodeAdapter('account-a');
+  accountA.setLocalIdentity({ deviceMid: 'device-a', accountUuid: 'uuid-a' });
+  const accountB = service.zcodeAdapter('account-b');
+  accountB.setLocalIdentity({ deviceMid: 'device-b', accountUuid: 'uuid-b' });
+
+  assert.notEqual(accountA, accountB, 'each account has its own adapter');
+  const identityOf = (adapter) => ({ deviceMid: adapter.deviceId, accountUuid: adapter.accountUuid });
+  assert.deepEqual(identityOf(accountA), { deviceMid: 'device-a', accountUuid: 'uuid-a' }, 'account A kept its own identity');
+  assert.deepEqual(identityOf(accountB), { deviceMid: 'device-b', accountUuid: 'uuid-b' }, 'account B has its own');
 });
 
 test('a direct chat on a named connection uses that connection credential', async () => {

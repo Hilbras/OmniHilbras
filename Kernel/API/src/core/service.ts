@@ -320,8 +320,18 @@ export class GatewayService {
   private tokenHarborWeb?: TokenHarborWebAdapter;
   private grokWeb?: GrokWebAdapter;
   private perplexityWeb?: PerplexityWebAdapter;
-  /** ZCode Start Plan, built once so its device id and transport are shared across requests. */
-  private zcode?: ZcodeAdapter;
+  /**
+   * ZCode Start Plan adapters, **one per connection**.
+   *
+   * This was a single adapter for the whole provider, built once and reused, on the reasoning that its
+   * device id and transport should be shared. But the adapter holds per-**account** state — `deviceId`
+   * and `accountUuid`, which `setLocalIdentity` overwrites — so with two accounts of the provider the
+   * last sign-in silently replaced the identity for both. A request routed to account A then carried
+   * account B's ids, and Start Plan meter quota per account: the refusal was account B's balance
+   * reported against account A, and the second account was never reached. Every other multi-account
+   * provider here is memoised by connection id for exactly this reason.
+   */
+  private readonly zcodeAdapters = new Map<string, ZcodeAdapter>();
   /** The local ZCode store, read once. Its token is never returned to a browser. */
   private zcodeLocal?: ZcodeLocalCredential;
   /**
@@ -611,7 +621,7 @@ export class GatewayService {
       .onDemand(tokenHarborWebProviderId, () => this.tokenHarborWebAdapter())
       .onDemand(grokWebProviderId, () => this.grokWebAdapter())
       .onDemand(perplexityWebProviderId, () => this.perplexityWebAdapter())
-      .onDemand(zcodeProviderId, () => this.zcodeAdapter());
+      .onDemand(zcodeProviderId, ({ providerId, connection }) => this.zcodeAdapter(connection?.id ?? providerId));
     this.credentialLifecycle = new CredentialLifecycle({
       adapterFor: (providerId) => { try { return this.registry.get(providerId); } catch { return undefined; } },
       now,
@@ -2088,14 +2098,22 @@ export class GatewayService {
   }
 
   /**
-   * ZCode (Start Plan), built once.
+   * The ZCode (Start Plan) adapter for **one connection**, built once per connection.
    *
-   * It takes the gateway's own transport so the request carries the configured deadlines and the
+   * Per connection, not per provider: the adapter carries the device id and account uuid that Start
+   * Plan meters quota against, so a shared instance served every account as whichever one signed in
+   * last. It takes the gateway's own transport so the request carries the configured deadlines and the
    * destination check, which a fresh transport inside the adapter would not.
+   *
+   * `connectionId` defaults to the provider id only for callers that genuinely have no connection in
+   * hand (a save-time validation of a credential that is not stored yet); routing always names one.
    */
-  zcodeAdapter(): ZcodeAdapter {
-    this.zcode ??= new ZcodeAdapter({ transport: this.transport, workingDirectory: process.cwd() });
-    return this.zcode;
+  zcodeAdapter(connectionId: string = zcodeProviderId): ZcodeAdapter {
+    const memo = this.zcodeAdapters.get(connectionId);
+    if (memo) return memo;
+    const adapter = new ZcodeAdapter({ transport: this.transport, workingDirectory: process.cwd() });
+    this.zcodeAdapters.set(connectionId, adapter);
+    return adapter;
   }
 
   /**
@@ -2106,12 +2124,14 @@ export class GatewayService {
    * dialog keeps working on a machine without the app. Device and account ids are adopted for
    * request attribution whenever they can be read; failing to read them never blocks a pasted token.
    */
-  private async zcodeToken(pasted: string | undefined): Promise<string> {
+  private async zcodeToken(pasted: string | undefined, connectionId: string = zcodeProviderId): Promise<string> {
     let local: ZcodeLocalCredential | undefined;
     try {
       this.zcodeLocal ??= await readZcodeLocalCredential();
       local = this.zcodeLocal;
-      this.zcodeAdapter().setLocalIdentity({
+      // Written to the adapter for **this connection**, never to a provider-wide one: the device and
+      // account ids belong to the account the request is about.
+      this.zcodeAdapter(connectionId).setLocalIdentity({
         ...(local.deviceMid ? { deviceMid: local.deviceMid } : {}),
         ...(local.accountUuid ? { accountUuid: local.accountUuid } : {}),
       });
@@ -2213,14 +2233,19 @@ export class GatewayService {
 
     const completion = (async () => {
       try {
-        if (result.accountUuid) this.zcodeAdapter().setLocalIdentity({ accountUuid: result.accountUuid });
+        // The id of the connection this sign-in is about, decided **here** and reused for both the
+        // identity write and the save — the same rule the rest of the gateway follows, that the
+        // account is chosen when the sign-in starts rather than guessed afterwards. Writing it to a
+        // provider-wide adapter is what let the last sign-in relabel every other account.
+        const connectionId = flow.addAccount ? `${zcodeProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : zcodeProviderId;
+        if (result.accountUuid) this.zcodeAdapter(connectionId).setLocalIdentity({ accountUuid: result.accountUuid });
         // Not gated on a test turn. The OAuth server has already authenticated the account, and the
         // desktop app saves the session without a probe too; gating it here is what made a successful
         // sign-in report "did not finish" whenever the plan lane replied slowly or with reasoning only.
         // The first real chat reports any plan/CAPTCHA problem with the client's own context.
         const connection = await this.saveConnection(
           {
-            id: flow.addAccount ? `${zcodeProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : zcodeProviderId,
+            id: connectionId,
             providerId: zcodeProviderId,
             name: 'ZCode (Start Plan)',
             endpoint: 'https://zcode.z.ai',

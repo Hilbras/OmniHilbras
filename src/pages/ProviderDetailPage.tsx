@@ -1217,14 +1217,18 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   /**
    * One bounded real request, shared by the single-model button and the bulk
    * run so both produce identical results and per-model state.
+   *
+   * `processId` is the account to spend. It is threaded through rather than read from a shared
+   * variable because a bulk run tests several accounts at once, and the result must be filed against
+   * the account that produced it.
    */
-  async function runModelTest(model: string, signal: AbortSignal) {
+  async function runModelTest(model: string, signal: AbortSignal, processId?: string) {
     setModelTests((current) => ({ ...current, [model]: 'testing' }));
     setModelTestErrors((current) => omitKey(current, model));
     setModelTestNotes((current) => omitKey(current, model));
     setModelTestLatencies((current) => omitNumberKey(current, model));
     try {
-      const result = await testGatewayModel(provider.id, model, signal);
+      const result = await testGatewayModel(provider.id, model, { signal, ...(processId ? { connectionId: processId } : {}) });
       setModelTests((current) => ({ ...current, [model]: 'ok' }));
       setModelTestNotes((current) => ({ ...current, [model]: result.note ?? '' }));
       setModelTestLatencies((current) => ({ ...current, [model]: result.latencyMs }));

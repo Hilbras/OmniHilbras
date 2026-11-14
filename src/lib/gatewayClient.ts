@@ -809,8 +809,18 @@ async function sendWithoutStreaming(
   };
 }
 
-export async function testGatewayModel(providerId: string, model: string, options?: AbortSignal | { signal?: AbortSignal; maxTokens?: number }) {
+/**
+ * Sends one tiny turn to prove a model answers.
+ *
+ * `connectionId` names the **account** to spend, and it is not optional decoration: without it the
+ * request carries only the provider, so it is routed to whichever account the resolver reaches first.
+ * A provider with two accounts then tested the first one every time — the button on account B's row
+ * spent account A, and when A was out of quota the failure was reported against B. The gateway has
+ * honoured `x-omnihilbras-connection` all along; this caller simply never sent it.
+ */
+export async function testGatewayModel(providerId: string, model: string, options?: AbortSignal | { signal?: AbortSignal; maxTokens?: number; connectionId?: string }) {
   const signal = options instanceof AbortSignal ? options : options?.signal;
+  const connectionId = options instanceof AbortSignal ? undefined : options?.connectionId;
   const maxTokens = options instanceof AbortSignal ? MODEL_TEST_MAX_TOKENS : options?.maxTokens ?? MODEL_TEST_MAX_TOKENS;
   const startedAt = Date.now();
   const body = await requestJson<unknown>('/v1/chat/completions', {
@@ -818,6 +828,7 @@ export async function testGatewayModel(providerId: string, model: string, option
     headers: {
       'content-type': 'application/json',
       'x-omnihilbras-provider': providerId,
+      ...(connectionId ? { 'x-omnihilbras-connection': connectionId } : {}),
     },
     body: JSON.stringify({
       model,
