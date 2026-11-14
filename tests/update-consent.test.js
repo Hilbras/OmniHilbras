@@ -20,7 +20,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 const main = readFileSync(join(root, 'desktop', 'main.mjs'), 'utf8');
 const preload = readFileSync(join(root, 'desktop', 'preload.cjs'), 'utf8');
-const banner = readFileSync(join(root, 'src', 'components', 'UpdateBanner.tsx'), 'utf8');
+// The consent lives in the sidebar notice now; the floating banner it moved from is gone, so this
+// reads the surface that renders it rather than the file it used to be in.
+const banner = readFileSync(join(root, 'src', 'components', 'UpdateIndicator.tsx'), 'utf8');
 const bridge = readFileSync(join(root, 'src', 'lib', 'electronBridge.ts'), 'utf8');
 
 test('the main process reports whether it can prove an update', () => {

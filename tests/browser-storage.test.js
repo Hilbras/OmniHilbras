@@ -137,6 +137,16 @@ const ALLOWED_KEYS = {
   'omnihilbras-sidebar-collapsed': 'whether the sidebar is collapsed. A layout preference, worthless to anyone who steals it.',
   'omnihilbras-theme': 'light or dark. A layout preference, worthless to anyone who steals it.',
   'omnihilbras-reduce-motion': 'whether animations are disabled. An accessibility preference, worthless to anyone who steals it.',
+  /**
+   * The version a person asked not to be told about again.
+   *
+   * A version **string** and nothing else (`3.49.0`) — no token, no account, no identifier for the person
+   * or the machine. It exists because the reference implementation's update badge could not be dismissed at
+   * all and reappeared on every page load; this is the smallest thing that lets somebody say "not this
+   * one" and be believed. Skipping a version does not hide the next one, which is why the value is the
+   * version rather than a flag.
+   */
+  'omnihilbras.update.skipped': 'the version string the person dismissed, so the update notice does not return for that release alone.',
 };
 
 /**
@@ -227,11 +237,12 @@ test('the stores this product does not use are asserted at zero, not merely unre
 });
 
 test('THE COUNT, asserted so it cannot drift quietly', () => {
-  // The number is the finding: nine accesses, three preference keys. Asserted so the surface has to be
+  // The number is the finding: twelve accesses, four preference keys — three of them added by the sidebar
+  // update notice, which reads the dismissed version once and writes or clears it. Asserted so the surface has to be
   // counted rather than trusted.
   const accesses = storageAccesses();
-  assert.equal(accesses.length, 9, `browser storage accesses changed: ${accesses.map((a) => `${a.file}:${a.key}`).join(', ')}`);
-  assert.equal(Object.keys(ALLOWED_KEYS).length, 3);
+  assert.equal(accesses.length, 12, `browser storage accesses changed: ${accesses.map((a) => `${a.file}:${a.key}`).join(', ')}`);
+  assert.equal(Object.keys(ALLOWED_KEYS).length, 4);
   assert.ok(accesses.every((access) => access.store === 'localStorage'), 'localStorage only — the two other stores are asserted absent above');
   console.log(`    browser-storage accesses: ${accesses.length}   allowed keys: ${Object.keys(ALLOWED_KEYS).length}   credential-shaped: 0`);
 });

@@ -22,7 +22,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.48.1**
+**Current version: 3.49.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
@@ -328,6 +328,12 @@ The desktop shell owns the local gateway so the app can start and stop it withou
 - **Release-feed updates** — the app checks the GitHub release feed, downloads an installer, and can install
   and restart. Windows NSIS, signed macOS and the Linux AppImage replace themselves; a `.deb` downloads and
   opens the system installer, which asks for administrator permission.
+- **The sidebar says when an update exists**, directly under the gateway badge: a gold pill with the new
+  version, Download or Install and restart depending on what this build can do, and a **skip this version**
+  that is remembered for that release only. The desktop app reads the state its own main process already
+  keeps — it checks on launch and on a timer — and a browser, which has no updater, asks GitHub for the
+  newest release and offers the release page and the install command instead of a button that would do
+  nothing. A check that fails says it failed; it never renders "up to date".
 - **Encrypted backup** import and export through the About/Settings surfaces.
 
 The renderer never holds the dashboard token and never calls `127.0.0.1` directly. Requests, chat streams and

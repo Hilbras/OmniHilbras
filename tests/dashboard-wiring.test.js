@@ -94,7 +94,7 @@ test('page changes replay the entrance without remounting the page', () => {
 test('updates can be downloaded and installed from the UI', () => {
   const main = read('desktop/main.mjs');
   const preload = read('desktop/preload.cjs');
-  const banner = read('src/components/UpdateBanner.tsx');
+  const banner = read('src/components/UpdateIndicator.tsx');
   const settings = read('src/pages/SettingsPage.tsx');
   assert.match(main, /downloadUpdate/, 'main has no download action');
   assert.match(main, /quitAndInstall/, 'main has no install action');
