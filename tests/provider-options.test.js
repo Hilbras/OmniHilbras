@@ -174,7 +174,10 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // Cards 48 -> 50 in 3.6.0 (`agentrouter`, `aion-labs`), both keyed and both in `free-tier`, so the
   // dialog gained two options: 29 -> 31. Cards 50 -> 52 are the web-cookie pair; that group is not
   // offered by the keyed dialog, so the options stay 31.
-  assert.equal(providerCatalog.length, 56, `the catalog now has ${providerCatalog.length} cards`);
-  assert.equal(providerOptions.length, 33, `the dialog now offers ${providerOptions.length} options`);
+  // Cards 55 -> 56 in 3.38.0 (`deepseek-web-v2`), whose group is `v2-web` — not one the keyed dialog
+  // offers — so the options stay 33.
+  // Cards 56 -> 57 in 3.43.0 (`numes`): keyed, `free-tier`, so the dialog gains one: 33 -> 34.
+  assert.equal(providerCatalog.length, 57, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerOptions.length, 34, `the dialog now offers ${providerOptions.length} options`);
   console.log(`    cards: ${providerCatalog.length}   dialog options: ${providerOptions.length}   ids tested: ${knownIds().length + UNKNOWN_IDS.length}`);
 });

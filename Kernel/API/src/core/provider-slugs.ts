@@ -66,6 +66,7 @@ export const PROVIDER_SLUGS: Readonly<Record<string, string>> = {
   kiraai: 'ka',
   vengetic: 'vg',
   anyrouter: 'ar',
+  numes: 'nms',
   zro: 'zro',
   unorouter: 'ur',
   mistral: 'mst',

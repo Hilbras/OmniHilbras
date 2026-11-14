@@ -330,7 +330,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 50-51 from 3.7.0: `grok-web` and `perplexity-web`, the two web-cookie sessions ported from the
   // old tree; both have their own adapter and committed mark.
   // 55 from 3.28.0: `zcode`, a ZCode Start Plan OAuth card with its own adapter and standalone sign-in.
-  assert.equal(all.length, 56, `the catalog now has ${all.length} cards`);
+  assert.equal(all.length, 57, `the catalog now has ${all.length} cards`);
   // Seventeen cards claim OAuth, and the gateway serves sixteen start routes: `clinepass` shares
   // `cline`'s, `claude-code` and `codex` sign in through `server.ts` routes this scan reads too, and
   // `zcode` claims OAuth and serves its own start route. The counts of claims and routes do not have

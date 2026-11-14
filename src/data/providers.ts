@@ -64,6 +64,9 @@ export const providerLogoMap = {
   // this file was pulled from zcode.z.ai, and it was not the app's mark — the card showed a logo the
   // product does not use.
   zcode: '/providers/zcode.png',
+  // Numes' own mark, from the favicon it ships. SVG because no rasteriser is available here and the
+  // catalogue already carries eighteen providers as SVG.
+  numes: '/providers/numes.svg',
 } as const;
 
 export function getProviderLogo(id: string | null | undefined) {
@@ -430,6 +433,34 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'N',
     endpoint: 'https://inference-api.nousresearch.com/v1',
     apiKeysUrl: 'https://portal.nousresearch.com/api-keys',
+    modelList: [],
+  },
+  {
+    id: 'numes',
+    name: 'Numes',
+    /**
+     * The price is in the card because the group is not.
+     *
+     * `free-tier` holds relays and marketplaces as well as genuinely free services — BeatAPI and KiraAI
+     * are already there — so this belongs beside them, but a person reading the group name should not be
+     * surprised by a balance requirement either.
+     */
+    description:
+      'An inference marketplace behind one OpenAI-compatible API: a single key reaches frontier APIs, OpenRouter and independent providers serving Ollama, vLLM or llama.cpp, with each request routed by live price, speed and reliability. **Paid per request** from a USD or BTC balance, and the balance must cover a request\'s cost hold before it runs — unlike the genuinely free cards in this group.',
+    category: 'Multi-model provider',
+    group: 'free-tier',
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    logo: providerLogoMap['numes'],
+    color: '#d7ff01',
+    initial: 'N',
+    endpoint: 'https://api.numes.ai/api/v1',
+    apiKeysUrl: 'https://numes.ai/dashboard/keys',
     modelList: [],
   },
   {
