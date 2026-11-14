@@ -4,6 +4,7 @@ import { ProviderError, type ProviderAdapter, type ProviderHealth, type Provider
 // deliberately the same object so a failure recorded by a request and a failure recorded by a
 // sweep cannot disagree.
 import { HealthRegistry } from './routing.js';
+import type { ModelCooldown } from './connections.js';
 
 /**
  * Health, as its own concern.
@@ -86,11 +87,21 @@ export class HealthManager {
 
   constructor(
     private readonly source: HealthProbeSource,
-    options: { now?: () => number; recoveryCooldownMs?: number; maxRecoveryCooldownMs?: number; intervalMs?: number; failureThreshold?: number } = {},
+    options: { now?: () => number; recoveryCooldownMs?: number; maxRecoveryCooldownMs?: number; intervalMs?: number; failureThreshold?: number; persistCooldown?: (key: string, cooldown: ModelCooldown | undefined) => void } = {},
   ) {
-    this.registry = new HealthRegistry(options.now ?? (() => Date.now()), options.recoveryCooldownMs, options.maxRecoveryCooldownMs);
+    this.registry = new HealthRegistry(options.now ?? (() => Date.now()), options.recoveryCooldownMs, options.maxRecoveryCooldownMs, options.persistCooldown);
     this.intervalMs = options.intervalMs ?? defaultHealthIntervalMs;
     this.failureThreshold = options.failureThreshold ?? defaultFailureThreshold;
+  }
+
+  /** Cooldowns read back from the vault at startup. Best-effort and never awaited by a request. */
+  seedModelCooldowns(cooldowns: Record<string, ModelCooldown>) {
+    this.registry.seedModelCooldowns(cooldowns);
+  }
+
+  /** The account answered for this model, so the pair is no longer cooling. */
+  clearModelCooldown(providerId: string, modelId: string) {
+    this.registry.clearModelCooldown(providerId, modelId);
   }
 
   setFailureThreshold(threshold: number) {

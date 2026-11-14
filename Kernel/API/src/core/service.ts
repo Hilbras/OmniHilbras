@@ -584,6 +584,7 @@ export class GatewayService {
       },
       recordFailure: (providerId, code, reason, connectionId) => this.healthManager.recordFailure(providerId, code, reason, connectionId),
       recordModelRateLimit: (providerId, modelId, input, connectionId) => this.healthManager.recordModelRateLimit(providerId, modelId, input, connectionId),
+      clearModelCooldown: (providerId, modelId) => this.healthManager.clearModelCooldown(providerId, modelId),
       recordRateLimitUse: (connectionId) => this.rateLimiter.record(connectionId),
       recordUsage: (connectionId) => { void this.connectionStore?.recordUsage(connectionId).catch(() => undefined); },
     });
@@ -642,8 +643,31 @@ export class GatewayService {
         now,
         ...(options.recoveryCooldownMs === undefined ? {} : { recoveryCooldownMs: options.recoveryCooldownMs }),
         ...(options.failureThreshold === undefined ? {} : { failureThreshold: options.failureThreshold }),
+        /**
+         * Cooldowns are written through to the vault, not kept in memory.
+         *
+         * In memory they lasted exactly as long as the process, and this process is restarted on every
+         * release — so an account that had just been told to wait was immediately eligible again and the
+         * first request after each restart re-hammered it. The reference implementation keeps its
+         * `modelLock_*` fields in the database for this reason.
+         *
+         * Fire-and-forget on purpose: the write is bookkeeping for the *next* request, and failing the
+         * request in hand because a file could not be appended would trade a real answer for a note.
+         */
+        persistCooldown: (key, cooldown) => { void this.connectionStore?.setCooldown(key, cooldown).catch(() => undefined); },
+        // Accepted from the same options bag, so a test can drive the clock the cooldowns are measured on.
       },
     );
+    /**
+     * Read back what the previous process left behind.
+     *
+     * Not awaited, and it cannot be: the constructor is synchronous and the vault is not. A request that
+     * arrives in the few milliseconds before this resolves sees an empty cooldown list, which is exactly
+     * the behaviour of the version before this existed.
+     */
+    void this.connectionStore?.listCooldowns()
+      .then((cooldowns) => this.healthManager.seedModelCooldowns(cooldowns))
+      .catch(() => undefined);
   }
 
   /**

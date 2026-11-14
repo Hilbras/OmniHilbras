@@ -1,5 +1,5 @@
 import { ProviderError, providerPrefixes } from './index.js';;
-import type { ConnectionRecord, ResilienceSettings } from './connections.js';
+import type { ConnectionRecord, ModelCooldown, ResilienceSettings } from './connections.js';
 
 /** Why a candidate was skipped, so the gateway can explain the decision. */
 export type RouteSkipReason = 'disabled' | 'no-credential' | 'unhealthy' | 'rate-limited' | 'model-cooling-down' | 'no-models';
@@ -113,6 +113,15 @@ export type ProviderOutcome = {
 /** How long an ejected provider waits before one probe request is allowed. */
 const defaultRecoveryCooldownMs = 30_000;
 const defaultMaxRecoveryCooldownMs = 10 * 60_000;
+/**
+ * The first wait for one account-and-model, and the ceiling the ladder climbs to.
+ *
+ * 60 s rather than the reference implementation's 2 s: our per-provider ejection already covers the
+ * "something is briefly wrong" case at 30 s, and this cooldown exists for the *account's allowance*,
+ * which a provider does not restore in two seconds. The ladder below is theirs (base × 2^(level-1)),
+ * because the reason for it is theirs: an account that keeps refusing should be asked less often, not
+ * every minute forever.
+ */
 const defaultModelCooldownMs = 60_000;
 const maxModelCooldownMs = 30 * 60_000;
 
@@ -122,14 +131,29 @@ function modelKey(providerId: string, modelId: string) {
 
 export class HealthRegistry {
   private readonly state = new Map<string, { failures: number; successes: number; lastFailureAt?: number; lastCheckedAt?: string; lastLatencyMs?: number; lastError?: string }>();
-  /** Rate-limit cooldowns per `provider:model`, until a time in the registry's clock. */
-  private readonly modelCooldowns = new Map<string, number>();
+  /** Cooldowns per `<connection or provider>:<model>`, each with the ladder level that produced its wait. */
+  private modelCooldowns = new Map<string, ModelCooldown>();
 
   constructor(
     private readonly now: () => number = () => Date.now(),
     private readonly recoveryCooldownMs: number = defaultRecoveryCooldownMs,
     private readonly maxRecoveryCooldownMs: number = defaultMaxRecoveryCooldownMs,
+    /**
+     * Called after a cooldown changes, so the vault can keep it.
+     *
+     * Optional because a registry is perfectly usable without a place to write — the embedded and test
+     * callers pass nothing. Never awaited: a failure to record bookkeeping must not fail the request
+     * that is asking for an answer.
+     */
+    private readonly persistCooldown?: (key: string, cooldown: ModelCooldown | undefined) => void,
   ) {}
+
+  /** Seeds cooldowns read back from the vault, so a restart does not re-hammer an exhausted account. */
+  seedModelCooldowns(cooldowns: Record<string, ModelCooldown>) {
+    for (const [key, cooldown] of Object.entries(cooldowns)) {
+      if (cooldown && cooldown.until > this.now()) this.modelCooldowns.set(key, { until: cooldown.until, level: cooldown.level });
+    }
+  }
 
   recordSuccess(providerId: string, latencyMs: number, checkedAt = new Date().toISOString()) {
     const current = this.state.get(providerId) ?? { failures: 0, successes: 0 };
@@ -151,17 +175,56 @@ export class HealthRegistry {
   }
 
   /**
-   * A rate limit is a fact about one model's quota, so it cools that model alone. The provider's reset time
-   * (`Retry-After`) is used when it gave one; otherwise a default, capped, so one bad header cannot park a model for hours.
+   * A rate limit is a fact about one model's quota, so it cools that model alone.
+   *
+   * The wait grows with each consecutive refusal of the same pair and resets on a success, which is the
+   * reference implementation's ladder (`getQuotaCooldown`): 1 min, 2, 4, 8 … capped. A provider that
+   * keeps saying no should be asked less often, and an account that answered is not cooling at all —
+   * `clearModelCooldown` is what makes the second half true.
+   *
+   * A provider that states its own reset time (`Retry-After`) is believed over the ladder and its level
+   * is left alone, because a known expiry is better information than a guess about how often to retry.
    */
   recordModelRateLimit(providerId: string, modelId: string, input: { retryAfterMs?: number } = {}) {
-    const waitMs = Math.min(input.retryAfterMs ?? defaultModelCooldownMs, maxModelCooldownMs);
-    this.modelCooldowns.set(modelKey(providerId, modelId), this.now() + waitMs);
+    const key = modelKey(providerId, modelId);
+    const previous = this.modelCooldowns.get(key);
+    if (input.retryAfterMs !== undefined) {
+      const cooldown = { until: this.now() + Math.min(input.retryAfterMs, maxModelCooldownMs), level: previous?.level ?? 0 };
+      this.modelCooldowns.set(key, cooldown);
+      this.persistCooldown?.(key, cooldown);
+      return;
+    }
+    const level = Math.min((previous?.level ?? 0) + 1, 16);
+    const waitMs = Math.min(defaultModelCooldownMs * Math.pow(2, level - 1), maxModelCooldownMs);
+    const cooldown = { until: this.now() + waitMs, level };
+    this.modelCooldowns.set(key, cooldown);
+    this.persistCooldown?.(key, cooldown);
+  }
+
+  /**
+   * The account answered for this model, so it is not cooling.
+   *
+   * Without this, the ladder only ever climbed: a pair that failed once stayed "level 1" forever, so the
+   * next unrelated failure jumped to a four-minute wait, and a model that had been served successfully
+   * still had to wait out a cooldown it no longer needed.
+   */
+  clearModelCooldown(providerId: string, modelId: string) {
+    const key = modelKey(providerId, modelId);
+    if (!this.modelCooldowns.has(key)) return;
+    this.modelCooldowns.delete(key);
+    this.persistCooldown?.(key, undefined);
   }
 
   isModelCoolingDown(providerId: string, modelId: string) {
-    const until = this.modelCooldowns.get(modelKey(providerId, modelId));
-    return until !== undefined && this.now() < until;
+    const cooldown = this.modelCooldowns.get(modelKey(providerId, modelId));
+    return cooldown !== undefined && this.now() < cooldown.until;
+  }
+
+  /** Every live cooldown, for a caller that wants to keep them. */
+  cooldowns(): Record<string, ModelCooldown> {
+    const live: Record<string, ModelCooldown> = {};
+    for (const [key, cooldown] of this.modelCooldowns) if (cooldown.until > this.now()) live[key] = cooldown;
+    return live;
   }
 
   /**

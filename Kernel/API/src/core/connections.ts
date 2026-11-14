@@ -217,6 +217,15 @@ export interface ConnectionStore extends ConnectionCredentialStore {
   remove(connectionId: string): Promise<boolean>;
   /** Increments the connection’s successful-turn counter and stamps lastUsed. */
   recordUsage(connectionId: string): Promise<void>;
+  /**
+   * Per account-and-model cooldowns, keyed `<connectionId>:<modelId>`.
+   *
+   * Read at startup and written on change, so an exhausted account stays stood down across a restart
+   * — the reference implementation keeps its `modelLock_*` fields in the database for the same reason.
+   */
+  listCooldowns(): Promise<Record<string, ModelCooldown>>;
+  /** Writes one cooldown; `undefined` clears it. Expired entries are dropped rather than accumulating. */
+  setCooldown(key: string, cooldown: ModelCooldown | undefined): Promise<void>;
 }
 
 export type LocalConnectionStoreOptions = {
@@ -305,6 +314,16 @@ type EncryptedSecretEnvelope = {
   ciphertext: string;
 };
 
+/**
+ * One account's cooling-down state for one model.
+ *
+ * `level` is how many consecutive refusals this pair has produced without an intervening success, and
+ * it is what makes the wait grow. Both travel with the vault rather than living in memory: ours were
+ * lost on every restart, and a restart happens on every release, so an account that had just been told
+ * to wait was immediately eligible again and the first request after each restart re-hammered it.
+ */
+export type ModelCooldown = { until: number; level: number };
+
 type MetadataEnvelope = {
   version: number;
   connections: ConnectionRecord[];
@@ -312,6 +331,8 @@ type MetadataEnvelope = {
   strategies?: Record<string, ProviderStrategy>;
   /** A requested model name mapped to the provider and model it should reach. */
   aliases?: Record<string, ModelAlias>;
+  /** Per account-and-model cooldowns, keyed `<connectionId>:<modelId>`. Absent means nothing is cooling. */
+  cooldowns?: Record<string, ModelCooldown>;
 };
 
 /** How connections of one provider are chosen. `priority` is the default, and it is what a file without a strategy means. */
@@ -341,6 +362,8 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
   private readonly maxConnections = resolveMaxConnections();
   private readonly credentials = new Map<ProviderId, ProviderCredential>();
   private readonly connections = new Map<string, ConnectionRecord>();
+  /** Held only for the life of the process, which is what "in memory" means; `LocalConnectionStore` persists. */
+  private readonly modelCooldowns = new Map<string, ModelCooldown>();
 
   constructor(private readonly fallback?: ProviderSecretStore) {}
 
@@ -453,6 +476,18 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     record.lastUsed = new Date().toISOString();
   }
 
+  async listCooldowns(): Promise<Record<string, ModelCooldown>> {
+    const now = Date.now();
+    const live: Record<string, ModelCooldown> = {};
+    for (const [key, cooldown] of this.modelCooldowns) if (cooldown.until > now) live[key] = cooldown;
+    return live;
+  }
+
+  async setCooldown(key: string, cooldown: ModelCooldown | undefined): Promise<void> {
+    if (cooldown === undefined) this.modelCooldowns.delete(key);
+    else this.modelCooldowns.set(key, cooldown);
+  }
+
   private findIdForProvider(providerId: ProviderId) {
     return [...this.connections.values()]
       .find((connection) => connection.providerId === providerId || connection.providers?.includes(providerId))?.id;
@@ -542,6 +577,8 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   private connections = new Map<string, ConnectionRecord>();
   private strategies = new Map<string, ProviderStrategy>();
   private aliasMap = new Map<string, ModelAlias>();
+  /** Per account-and-model cooldowns, keyed `<connectionId>:<modelId>`. */
+  private modelCooldowns = new Map<string, ModelCooldown>();
   private mutationQueue: Promise<void> = Promise.resolve();
   private loadPromise?: Promise<void>;
   /** Resolved once, so a save cannot disagree with the load about the bound. */
@@ -805,6 +842,38 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
     });
   }
 
+  /**
+   * The cooldowns this vault holds, with expired ones dropped on the way out.
+   *
+   * Pruning here rather than on a timer: an entry has meaning only until its `until`, so an expired one
+   * is not state, it is a line in a file that would otherwise grow for the life of the installation.
+   */
+  async listCooldowns(): Promise<Record<string, ModelCooldown>> {
+    await this.ensureLoaded();
+    const now = Date.now();
+    const live: Record<string, ModelCooldown> = {};
+    for (const [key, cooldown] of this.modelCooldowns) if (cooldown.until > now) live[key] = cooldown;
+    return live;
+  }
+
+  async setCooldown(key: string, cooldown: ModelCooldown | undefined): Promise<void> {
+    await this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = this.modelCooldowns.get(key);
+      if (cooldown === undefined) this.modelCooldowns.delete(key);
+      else this.modelCooldowns.set(key, cooldown);
+      // Best-effort: a cooldown is an optimisation for the *next* request, and failing the request in
+      // hand because the file could not be written would trade a real answer for bookkeeping.
+      try {
+        await this.persistMetadata();
+      } catch (error) {
+        if (previous === undefined) this.modelCooldowns.delete(key);
+        else this.modelCooldowns.set(key, previous);
+        throw error;
+      }
+    });
+  }
+
   async remove(connectionId: string) {
     return this.withMutation(async () => {
       await this.ensureLoaded();
@@ -886,6 +955,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
     this.connections = parsedMetadata.connections;
     this.strategies = parsedMetadata.strategies;
     this.aliasMap = parsedMetadata.aliases;
+    this.modelCooldowns = parsedMetadata.cooldowns;
     this.credentials = secretText ? await this.decryptSecrets(secretText) : new Map<ProviderId, ProviderCredential>();
     // Credentials are keyed by connection id, so a stored key that matches no
     // credential-bearing connection is an orphan. For a single-connection
@@ -908,9 +978,11 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   private async persistMetadata() {
     const strategies = Object.fromEntries(this.strategies);
     const aliases = Object.fromEntries(this.aliasMap);
+    const now = Date.now();
+    const cooldowns = Object.fromEntries([...this.modelCooldowns].filter(([, cooldown]) => cooldown.until > now));
     // Compact, not `null, 2`: the indentation was ~42% of a budget that a real vault ran out of, for a
     // file nothing reads by eye. `jq .` is one command away when a person does want to look.
-    const payload = JSON.stringify({ version: metadataVersion, connections: [...this.connections.values()], ...(this.strategies.size > 0 ? { strategies } : {}), ...(this.aliasMap.size > 0 ? { aliases } : {}) } satisfies MetadataEnvelope) + '\n';
+    const payload = JSON.stringify({ version: metadataVersion, connections: [...this.connections.values()], ...(this.strategies.size > 0 ? { strategies } : {}), ...(this.aliasMap.size > 0 ? { aliases } : {}), ...(Object.keys(cooldowns).length > 0 ? { cooldowns } : {}) } satisfies MetadataEnvelope) + '\n';
     const bytes = Buffer.byteLength(payload, 'utf8');
     if (bytes > this.maxMetadataBytes) {
       const kib = (value: number) => `${Math.round(value / 1024)} KiB`;
@@ -1081,7 +1153,7 @@ function isSafeModelId(value: string) {
 }
 
 function parseMetadata(value: string | undefined) {
-  if (!value) return { connections: new Map<string, ConnectionRecord>(), strategies: new Map<string, ProviderStrategy>(), aliases: new Map<string, ModelAlias>() };
+  if (!value) return { connections: new Map<string, ConnectionRecord>(), strategies: new Map<string, ProviderStrategy>(), aliases: new Map<string, ModelAlias>(), cooldowns: new Map<string, ModelCooldown>() };
   let parsed: unknown;
   try {
     parsed = JSON.parse(value) as unknown;
@@ -1113,7 +1185,19 @@ function parseMetadata(value: string | undefined) {
       aliases.set(name, { providerId: value.providerId, model: value.model });
     }
   }
-  return { connections, strategies, aliases };
+  const cooldowns = new Map<string, ModelCooldown>();
+  if (parsed.cooldowns !== undefined) {
+    if (!isRecord(parsed.cooldowns)) throw new Error('Local connection metadata has an invalid cooldown map.');
+    for (const [key, value] of Object.entries(parsed.cooldowns)) {
+      // A malformed cooldown is dropped rather than fatal. It is bookkeeping about the *next* request;
+      // refusing to open the vault over one would turn a stale entry into an unusable installation, and
+      // the entries are rebuilt by the next refusal anyway.
+      if (!isRecord(value) || typeof value.until !== 'number' || !Number.isFinite(value.until)) continue;
+      const level = typeof value.level === 'number' && Number.isFinite(value.level) && value.level > 0 ? Math.floor(value.level) : 0;
+      cooldowns.set(key, { until: value.until, level });
+    }
+  }
+  return { connections, strategies, aliases, cooldowns };
 }
 
 function parseRecord(value: unknown): ConnectionRecord {
