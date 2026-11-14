@@ -227,7 +227,29 @@ export type LocalConnectionStoreOptions = {
 
 const metadataVersion = 1;
 const secretEnvelopeVersion = 1;
-const maxMetadataBytes = 256 * 1024;
+/**
+ * How large the metadata file may grow.
+ *
+ * It was a flat 256 KiB, and a real vault reached **262,137 bytes of the 262,144** — so the next
+ * connection could not be added at all, and the refusal quoted a limit the person had no part in
+ * choosing. Two things were wrong with it:
+ *
+ * - the payload was written **pretty-printed**, so indentation was ~42% of the budget (262 KiB of
+ *   whitespace-bearing JSON is 148 KiB of actual data) for a file nothing reads by eye;
+ * - the ceiling was sized for a handful of providers rather than a vault of 250 connections, several
+ *   of which carry an aggregator's thousand-model catalogue.
+ *
+ * `OMNIHILBRAS_MAX_METADATA_BYTES` moves it without a release; a value that is not a positive integer
+ * keeps the default rather than making the vault unopenable.
+ */
+export function resolveMaxMetadataBytes(env: Readonly<Record<string, string | undefined>> = process.env): number {
+  const fallback = 4 * 1024 * 1024;
+  const raw = env.OMNIHILBRAS_MAX_METADATA_BYTES?.trim();
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
 /** Catalog metadata is bounded so a large catalog cannot fill the metadata file. */
 const maxModelMetaEntries = 2_000;
 const maxSecretEnvelopeBytes = 1024 * 1024;
@@ -524,6 +546,8 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   private loadPromise?: Promise<void>;
   /** Resolved once, so a save cannot disagree with the load about the bound. */
   private readonly maxConnections = resolveMaxConnections();
+  /** The same, for the metadata file: a load and a save must agree on how big it may be. */
+  private readonly maxMetadataBytes = resolveMaxMetadataBytes();
 
   constructor(options: LocalConnectionStoreOptions = {}) {
     this.directory = options.directory ?? defaultConnectionDirectory();
@@ -855,7 +879,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   private async load() {
     await ensureSecureDirectory(this.directory);
     const [metadataText, secretText] = await Promise.all([
-      readOptionalText(this.metadataPath, maxMetadataBytes),
+      readOptionalText(this.metadataPath, this.maxMetadataBytes),
       readOptionalText(this.secretsPath, maxSecretEnvelopeBytes),
     ]);
     const parsedMetadata = parseMetadata(metadataText);
@@ -884,8 +908,16 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   private async persistMetadata() {
     const strategies = Object.fromEntries(this.strategies);
     const aliases = Object.fromEntries(this.aliasMap);
-    const payload = JSON.stringify({ version: metadataVersion, connections: [...this.connections.values()], ...(this.strategies.size > 0 ? { strategies } : {}), ...(this.aliasMap.size > 0 ? { aliases } : {}) } satisfies MetadataEnvelope, null, 2) + '\n';
-    if (Buffer.byteLength(payload, 'utf8') > maxMetadataBytes) throw new ConnectionMetadataLimitError();
+    // Compact, not `null, 2`: the indentation was ~42% of a budget that a real vault ran out of, for a
+    // file nothing reads by eye. `jq .` is one command away when a person does want to look.
+    const payload = JSON.stringify({ version: metadataVersion, connections: [...this.connections.values()], ...(this.strategies.size > 0 ? { strategies } : {}), ...(this.aliasMap.size > 0 ? { aliases } : {}) } satisfies MetadataEnvelope) + '\n';
+    const bytes = Buffer.byteLength(payload, 'utf8');
+    if (bytes > this.maxMetadataBytes) {
+      const kib = (value: number) => `${Math.round(value / 1024)} KiB`;
+      throw new ConnectionMetadataLimitError(
+        `The connection metadata exceeds its size limit: ${kib(bytes)} of the ${kib(this.maxMetadataBytes)} allowed. Remove a connection, or raise OMNIHILBRAS_MAX_METADATA_BYTES.`,
+      );
+    }
     await atomicWrite(this.metadataPath, payload);
   }
 

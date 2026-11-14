@@ -87,6 +87,15 @@ test('local connection store serializes concurrent model additions', async (t) =
 test('local connection store rejects metadata that cannot be reloaded safely', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'omnihilbras-large-metadata-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
+  // The ceiling is stated rather than inherited: it is 4 MiB by default now (a real vault ran out of the
+  // old 256 KiB), and a test that depends on the default's exact value is a test about the default, not
+  // about oversized metadata being refused.
+  const previousLimit = process.env.OMNIHILBRAS_MAX_METADATA_BYTES;
+  process.env.OMNIHILBRAS_MAX_METADATA_BYTES = String(200 * 1024);
+  t.after(() => {
+    if (previousLimit === undefined) delete process.env.OMNIHILBRAS_MAX_METADATA_BYTES;
+    else process.env.OMNIHILBRAS_MAX_METADATA_BYTES = previousLimit;
+  });
   const store = new LocalConnectionStore({ directory, masterKey: Buffer.alloc(32, 10) });
   const modelIds = Array.from({ length: 1_000 }, (_, index) => `vendor/${'x'.repeat(240)}-${index}`);
 
