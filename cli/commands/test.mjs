@@ -9,6 +9,9 @@
 
 import { CliError } from '../lib/client.mjs';
 
+/** The pause between probes. Long enough not to look like a burst, short enough not to feel broken. */
+const proberGapMs = 400;
+
 export const test = {
   name: 'test',
   summary: 'Probe one account, or every account of a provider',
@@ -29,16 +32,25 @@ export const test = {
     // still only one of several.
     const targets = flags.all || matches.every((row) => row.providerId === target) ? matches : matches.slice(0, 1);
 
-    const results = await Promise.all(targets.map(async (row) => {
+    /**
+     * **One at a time, with a gap.** This used to be `Promise.all`, and the probe is a real request to the
+     * provider for each account: testing a provider with four accounts meant four logins' worth of traffic
+     * from one address in the same instant. That is the shape providers describe as unusual activity —
+     * CodeBuddy answers it with `403 11140 request illegal` and restricts the account — so a command whose
+     * job is to find out which accounts still work should not be the thing that gets them restricted.
+     */
+    const results = [];
+    for (const row of targets) {
+      if (results.length > 0) await new Promise((resolve) => setTimeout(resolve, proberGapMs));
       try {
         const probe = await client.request(`/v1/connections/${encodeURIComponent(row.id)}/probe`, { method: 'POST' });
-        return { connectionId: row.id, providerId: row.providerId, enabled: row.enabled !== false, valid: probe.valid !== false, latencyMs: probe.latencyMs };
+        results.push({ connectionId: row.id, providerId: row.providerId, enabled: row.enabled !== false, valid: probe.valid !== false, latencyMs: probe.latencyMs });
       } catch (error) {
         // One account refusing is a result, not a reason to abandon the others: the whole point of testing
         // every account is to find the one that still works.
-        return { connectionId: row.id, providerId: row.providerId, enabled: row.enabled !== false, valid: false, message: error instanceof Error ? error.message : String(error) };
+        results.push({ connectionId: row.id, providerId: row.providerId, enabled: row.enabled !== false, valid: false, message: error instanceof Error ? error.message : String(error) });
       }
-    }));
+    }
 
     out.data(results);
     if (out.json) return results.some((result) => result.valid) ? 0 : 1;

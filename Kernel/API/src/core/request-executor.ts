@@ -1,5 +1,5 @@
 import { isProviderError, ProviderError, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse } from './index.js';;
-import { isAllowanceRefusal, noCandidateMessage, type RouteCandidate, type RouteDecision } from './routing.js';
+import { isAllowanceRefusal, noCandidateMessage, providerWordingOf, saysAccountRestricted, type RouteCandidate, type RouteDecision } from './routing.js';
 import { RetryPolicy } from './retry-policy.js';
 import { HedgePolicy } from './hedge-policy.js';
 import type { RequestScope } from './request-context.js';
@@ -170,8 +170,14 @@ export class RequestExecutor {
   constructor(private readonly deps: RequestExecutorDeps) {}
 
   /**
-   * A rate limit cools the one model that caused it. The provider's reset time is read from the error when it gave
-   * one, so the cooldown matches what the provider asked for rather than a guess.
+   * A refusal that says "this account is not usable right now" stands that account down for that model —
+   * for one model's worth of time, not one request's.
+   *
+   * Two kinds arrive here and both mean the same thing for the *next* request: a rate limit, and an
+   * account the provider has **restricted**. The restriction matters more, not less: it is the provider
+   * saying "something about this session looks wrong", and the correct response is to stop using it for a
+   * while rather than to ask again immediately — which is what would happen if only rate limits cooled the
+   * pair. Kept on the cooldown path rather than the routing one so the account's own next request sees it.
    */
   private noteModelRateLimit(providerId: string, modelId: string, error: ProviderError, connectionId?: string) {
     const details = typeof error.details === 'object' && error.details !== null ? error.details as { retryAfterMs?: unknown } : {};
@@ -213,7 +219,18 @@ export class RequestExecutor {
       const effective = candidate.model ? { ...request, model: candidate.model } : request;
       return await this.deps.chat(candidate.providerId, effective, deadline, scope, candidate.connectionId);
     } catch (error) {
-      if (isProviderError(error) && error.code === 'RATE_LIMITED' && !(typeof error.details === 'object' && error.details !== null && (error.details as { concurrencyLimited?: unknown }).concurrencyLimited === true)) this.noteModelRateLimit(candidate.providerId, candidate.model ?? request.model, error, candidate.connectionId);
+      /**
+       * A rate limit **or an account restriction** stands this account down for this model.
+       *
+       * The restriction case is the one that was missing, and it is the one that costs: the provider
+       * answers a restricted account with a fresh refusal, so without a cooldown the next request asks the
+       * same restricted session again — and every sibling is asked the same thing through the same
+       * fingerprint, which is the pattern that got the account restricted in the first place.
+       */
+      const cooldownWorthy = isProviderError(error)
+        && (error.code === 'RATE_LIMITED' || saysAccountRestricted(providerWordingOf(error)))
+        && !(typeof error.details === 'object' && error.details !== null && (error.details as { concurrencyLimited?: unknown }).concurrencyLimited === true);
+      if (cooldownWorthy) this.noteModelRateLimit(candidate.providerId, candidate.model ?? request.model, error as ProviderError, candidate.connectionId);
       throw error;
     }
   }

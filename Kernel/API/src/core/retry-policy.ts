@@ -1,5 +1,5 @@
 import { isProviderError, ProviderError } from './provider-error.js';
-import { isRetryableFailure, shouldRotateAccount, type RouteCandidate } from './routing.js';
+import { isRetryableFailure, providerWordingOf, saysAccountRestricted, shouldRotateAccount, type RouteCandidate } from './routing.js';
 
 /**
  * What happens after a request fails.
@@ -106,6 +106,17 @@ export class RetryPolicy {
      */
     const details = isProviderError(input.error) ? input.error.details as { concurrencyLimited?: unknown } | undefined : undefined;
     if (details?.concurrencyLimited === true) return 'stop';
+
+    /**
+     * A **restriction** stops the walk, and it is checked ahead of the allowance rule.
+     *
+     * Reported from the field: CodeBuddy answered `403` `11140 request illegal` / "Your account has been
+     * restricted due to unusual activity". The old behaviour treated a `403` as "the allowance is gone" and
+     * moved to the sibling account — with the same IDE fingerprint, from the same address, one request
+     * later. That is the shape the provider flags, so rotating deepens the problem it is complaining about
+     * instead of routing around it.
+     */
+    if (isProviderError(input.error) && saysAccountRestricted(providerWordingOf(input.error))) return 'stop';
 
     /**
      * A refusal about the **account's allowance** hands off, before anything is retried.

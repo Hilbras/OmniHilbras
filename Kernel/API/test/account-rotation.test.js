@@ -3,6 +3,7 @@ import test from 'node:test';
 import { ProviderError, ProviderRegistry } from '../dist/src/core/index.js';
 import { GatewayService, InMemoryConnectionStore } from '../dist/src/index.js';
 import { shouldRotateAccount } from '../dist/src/core/routing.js';
+import { InMemoryApiKeyStore } from '../dist/src/index.js';
 
 /**
  * Accounts are tried one by one, and an exhausted account is not the request's failure.
@@ -162,4 +163,91 @@ test('the quota vocabulary rotates the account; a plain bad request does not', (
   // This is the case that was reported: an exhausted plan answered as 422 with `insufficient_quota`.
   assert.equal(shouldRotateAccount(said('insufficient_quota: your plan is exhausted', 422)), true);
   assert.equal(shouldRotateAccount(said('You have exceeded your current quota', 403)), true);
+});
+
+test('an account restriction stops the walk instead of moving to the sibling', async () => {
+  /**
+   * Reported from the field, CodeBuddy's own refusal:
+   *
+   *   HTTP 503 ← [codebuddy-intl/deepseek-v4.1-flash] [403]:
+   *   {"code":11140,"msg":"request illegal","displayMsg":{"en":"Your account has been restricted due to
+   *    unusual activity","zh":"账号存在异常行为,已被限制使用"}}
+   *
+   * A `403` used to be classified "the allowance is gone" and rotated to the next account — through the
+   * same IDE fingerprint, from the same address, one request later. That is the pattern the provider is
+   * objecting to, so rotating spreads the restriction rather than routing around it.
+   */
+  const seen = [];
+  const { service } = await threeAccounts((key, request) => {
+    seen.push(key);
+    if (key === 'key-A') {
+      throw new ProviderError('PROVIDER_REQUEST_FAILED', 'The provider refused the request.', {
+        providerId: 'p',
+        statusCode: 403,
+        details: {
+          providerMessage: '{"code":11140,"msg":"request illegal","displayMsg":{"en":"Your account has been restricted due to unusual activity","zh":"账号存在异常行为,已被限制使用"}}',
+        },
+      });
+    }
+    return answer(key, request);
+  });
+
+  const failure = await service
+    .chatWithFailover(chat(), undefined, signal())
+    .then(() => null, (error) => error);
+
+  assert.ok(failure, 'the request fails: the provider refused this account');
+  assert.deepEqual(seen, ['key-A'], 'and no sibling was asked through the same fingerprint');
+  assert.equal((failure.details?.attempts ?? []).length, 1, 'the ledger shows a single attempt');
+});
+
+test('a restricted account is stood down for that model, not asked again next request', async () => {
+  let now = 1_000_000;
+  const seen = [];
+  const registry = new ProviderRegistry();
+  registry.register({
+    id: 'p',
+    name: 'P',
+    capabilities: { chat: true, streaming: true, models: true },
+    async listModels() { return [{ id: 'm', providerId: 'p' }]; },
+    async healthCheck() { return { status: 'healthy', checkedAt: new Date().toISOString(), latencyMs: 1 }; },
+    async chat(request, context) {
+      seen.push(context?.credential?.value);
+      throw new ProviderError('PROVIDER_REQUEST_FAILED', 'The provider refused the request.', {
+        providerId: 'p',
+        statusCode: 403,
+        details: { providerMessage: 'request illegal: your account has been restricted due to unusual activity' },
+      });
+    },
+    async *streamChat() {},
+  });
+  const store = new InMemoryConnectionStore();
+  await store.save(account('account-a', 1), { type: 'api-key', value: 'key-A' });
+  const service = new GatewayService(registry, store, store, new InMemoryApiKeyStore(), { failureThreshold: 2, now: () => now });
+
+  await service.chatWithFailover(chat(), undefined, signal()).catch(() => {});
+  assert.equal(seen.length, 1, 'first request reached the account');
+
+  // The account is cooling, so the next request does not ask the same restricted session again.
+  const plan = await service.planRoute('m');
+  assert.deepEqual(plan.skipped.map((entry) => entry.reason), ['model-cooling-down'], 'the pair is cooling down');
+
+  now += 61_000;
+  await service.chatWithFailover(chat(), undefined, signal()).catch(() => {});
+  assert.equal(seen.length, 2, 'and it is tried again once the cool-down expires');
+});
+
+test('the restriction wording is recognised in both languages, and not confused with a plan ceiling', () => {
+  const restricted = (providerMessage) => new ProviderError('PROVIDER_REQUEST_FAILED', 'The provider refused the request.', { providerId: 'p', statusCode: 403, details: { providerMessage } });
+  for (const wording of [
+    'request illegal',
+    'Your account has been restricted due to unusual activity',
+    '账号存在异常行为,已被限制使用',
+    'account suspended',
+  ]) {
+    assert.equal(shouldRotateAccount(restricted(wording)), false, `${wording} stops the walk`);
+  }
+  // A 403 that is about the allowance still rotates: the two are different answers.
+  assert.equal(shouldRotateAccount(restricted('insufficient_quota: your plan is exhausted')), true);
+  assert.equal(shouldRotateAccount(restricted('')), true, 'and a bare 403 keeps its old meaning');
 });

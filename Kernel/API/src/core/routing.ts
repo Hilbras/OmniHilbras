@@ -341,6 +341,47 @@ export function saysAllowanceExhausted(text: string): boolean {
 }
 
 /**
+ * Wording that means *the provider has restricted this account*, not that it has run out of anything.
+ *
+ * The distinction is the response, and it is the opposite of the allowance case. An exhausted allowance is
+ * a fact a sibling can answer, so the walk continues. A restriction is the provider saying "something about
+ * this session looks wrong" — and asking the *next* account through the same client fingerprint, from the
+ * same address, is what turns one restricted account into several. So this stops the walk.
+ *
+ * Taken from a real refusal, CodeBuddy's `403` body:
+ *
+ * ```
+ * {"code":11140,"msg":"request illegal","displayMsg":{"en":"Your account has been restricted due to
+ *  unusual activity","zh":"账号存在异常行为,已被限制使用"}}
+ * ```
+ *
+ * Both languages are matched, because the browser-facing message is localised and only the `msg` field is
+ * reliably English.
+ */
+const accountRestrictedWording = [
+  'request illegal',
+  'unusual activity',
+  'account has been restricted',
+  'account restricted',
+  'account is restricted',
+  'account suspended',
+  'account flagged',
+  '账号存在异常行为',
+  '已被限制',
+  '账号异常',
+] as const;
+
+export function saysAccountRestricted(text: string): boolean {
+  const wording = text.toLowerCase();
+  return accountRestrictedWording.some((phrase) => wording.includes(phrase.toLowerCase()));
+}
+
+/** The provider's own words, for a caller holding the error rather than the message. */
+export function providerWordingOf(error: unknown): string {
+  return providerWording(error);
+}
+
+/**
  * A refusal that is about the account's **allowance**, not the provider's health.
  *
  * The distinction is the whole fix: "you have used your quota" is a fact about one credential that
@@ -369,6 +410,18 @@ export function shouldRotateAccount(error: unknown): boolean {
   if (error.code === 'CANCELLED') return false;
 
   /**
+   * A **restriction** outranks everything below, including the allowance rule.
+   *
+   * It is checked first because the two can appear in the same body, and the response differs: an exhausted
+   * allowance belongs on the next account, while "this account has been restricted" is about the *client*
+   * the provider is seeing — so walking on means presenting the same fingerprint again, from the same
+   * address, to the next account. That is how one restricted account becomes several. The request stops,
+   * the account is cooled, and the person is told what the provider said.
+   */
+  const wording = providerWording(error);
+  if (saysAccountRestricted(wording)) return false;
+
+  /**
    * The provider's own wording outranks its status code, and is checked first.
    *
    * An exhausted plan is not reliably a `429`: aggregators answer `422`, `400`, or even `403` with
@@ -377,7 +430,6 @@ export function shouldRotateAccount(error: unknown): boolean {
    * words first is the reference implementation's rule (`ERROR_RULES`), and it is what makes a plan
    * that ran out rotate while a genuinely malformed body still does not.
    */
-  const wording = providerWording(error);
   if (saidQuotaIsGone(wording)) return true;
 
   /**
