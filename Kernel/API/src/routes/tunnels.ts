@@ -1,5 +1,6 @@
 import type { RouteContext } from './route-context.js';
 import { invalidRequest, isRecord, readJsonBody, sendJson } from '../core/http.js';
+import { publicTunnel } from '../core/tunnels.js';
 import { ProviderError } from '../core/provider-error.js';
 
 const tunnelsPrefix = '/v1/tunnels';
@@ -18,14 +19,14 @@ export async function handleTunnelsRoute(ctx: RouteContext): Promise<boolean> {
   const { request, response, url, origin } = ctx;
 
   if (request.method === 'GET' && url.pathname === tunnelsPrefix) {
-    sendJson(response, 200, { object: 'list', data: await store(ctx).list() }, origin);
+    sendJson(response, 200, { object: 'list', data: (await store(ctx).list()).map(publicTunnel) }, origin);
     return true;
   }
   if (request.method === 'GET' && url.pathname.startsWith(`${tunnelsPrefix}/`)) {
     const id = decodeId(url.pathname);
     const t = await store(ctx).get(id);
     if (!t) throw new ProviderError('NOT_FOUND', `Tunnel "${id}" does not exist.`, { publicMessage: 'That tunnel does not exist.' });
-    sendJson(response, 200, { tunnel: t }, origin);
+    sendJson(response, 200, { tunnel: publicTunnel(t) }, origin);
     return true;
   }
   if (request.method === 'POST' && url.pathname === tunnelsPrefix) {
@@ -41,7 +42,7 @@ export async function handleTunnelsRoute(ctx: RouteContext): Promise<boolean> {
       ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
     };
     const t = await store(ctx).save(input);
-    sendJson(response, 201, { tunnel: t }, origin);
+    sendJson(response, 201, { tunnel: publicTunnel(t) }, origin);
     return true;
   }
   if ((request.method === 'PUT' || request.method === 'PATCH') && url.pathname.startsWith(`${tunnelsPrefix}/`)) {
@@ -57,7 +58,7 @@ export async function handleTunnelsRoute(ctx: RouteContext): Promise<boolean> {
       ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
     };
     const t = await store(ctx).save(input);
-    sendJson(response, 200, { tunnel: t }, origin);
+    sendJson(response, 200, { tunnel: publicTunnel(t) }, origin);
     return true;
   }
   if (request.method === 'DELETE' && url.pathname.startsWith(`${tunnelsPrefix}/`)) {

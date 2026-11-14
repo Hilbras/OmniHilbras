@@ -6,11 +6,35 @@ on:
     tags:
       - 'v*'
 
+# Least privilege at the top: every job below reads, and the single job that publishes asks for write and
+# passes through a protected environment. Before this, the whole file held `contents: write` and the
+# build matrix attached the release itself, so any step in any matrix leg could publish.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # A tag is not evidence that the code was reviewed, and this repository's rule — every tag on `main` —
+  # lived only in prose and in an offline test. Nothing in the workflow enforced it, so a write-holder
+  # could push a tag at any commit and have CI publish it under the project's own name.
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tagged commit must be an ancestor of main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "::error::$GITHUB_REF_NAME points at $GITHUB_SHA, which is not an ancestor of main. Publish from main."
+            exit 1
+          fi
+          echo "$GITHUB_SHA is on main."
+
   build:
+    needs: preflight
     strategy:
       fail-fast: false
       matrix:
@@ -28,9 +52,11 @@ jobs:
             artifact: release/*.dmg
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: pnpm
@@ -45,20 +71,26 @@ jobs:
         run: xvfb-run -a pnpm app:smoke
       - name: Package
         run: pnpm exec electron-builder ${{ matrix.target }} --publish never
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: omnihilbras-${{ runner.os }}
           path: ${{ matrix.artifact }}
           if-no-files-found: error
-      # `latest*.yml` is what electron-updater reads. A release without it makes every installed
-      # app fail its update check with "Cannot find latest yml in the latest release artifacts".
-      - name: Attach assets to the GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+
+  # Publishing is its own job, so it is the only place `contents: write` exists and the only place an
+  # environment with reviewers can gate. `latest*.yml` is what electron-updater reads: a release without
+  # it makes every installed app fail its update check with "Cannot find latest yml".
+  publish:
+    needs: [preflight, build]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    environment: release
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          files: |
-            ${{ matrix.artifact }}
-            release/latest*.yml
-            release/*.blockmap
-          fail_on_unmatched_files: false
-          generate_release_notes: true
+          path: artifacts
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: artifacts/**/*

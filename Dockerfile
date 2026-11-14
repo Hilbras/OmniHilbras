@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 FROM node:20-alpine AS base
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Pinned to the version CI uses and the lockfile records. `pnpm@latest` in a build that then installs
+# from a committed lockfile means the toolchain reading the lockfile is whatever npm published that day.
+RUN corepack enable && corepack prepare pnpm@12.5.1 --activate
 WORKDIR /app
 
 FROM base AS deps
@@ -16,7 +18,9 @@ COPY . .
 RUN pnpm build:sdk && pnpm build:token-saver && pnpm build:gateway
 
 FROM node:20-alpine AS runtime
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Pinned to the version CI uses and the lockfile records. `pnpm@latest` in a build that then installs
+# from a committed lockfile means the toolchain reading the lockfile is whatever npm published that day.
+RUN corepack enable && corepack prepare pnpm@12.5.1 --activate
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/Kernel/API/dist /app/Kernel/API/dist

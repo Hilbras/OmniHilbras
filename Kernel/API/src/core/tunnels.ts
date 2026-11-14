@@ -13,6 +13,21 @@ export type Tunnel = {
   updatedAt: string;
 };
 
+/**
+ * A tunnel as a caller may see it.
+ *
+ * `token` is omitted rather than blanked, so a caller cannot tell a stored token from a stored empty
+ * one, and `hasToken` says what the management UI actually needs to know. The audit found the route
+ * returning the whole record — the token is enough to run `cloudflared` elsewhere and attach to the
+ * operator's named tunnel.
+ */
+export type PublicTunnel = Omit<Tunnel, 'token'> & { hasToken: boolean };
+
+export function publicTunnel(tunnel: Tunnel): PublicTunnel {
+  const { token, ...rest } = tunnel;
+  return { ...rest, hasToken: typeof token === 'string' && token.length > 0 };
+}
+
 export type TunnelInput = {
   id: string;
   name?: string;
