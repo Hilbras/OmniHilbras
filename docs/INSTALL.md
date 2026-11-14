@@ -60,6 +60,39 @@ omnihilbras setup   # check the tools before starting anything
 > publish. The name on npm today (`@hilbras/omnihilbras@2.9.18`) is the **previous** project. `npm link`
 > from a checkout is the supported path until a publishable manifest exists.
 
+## The `omnihilbras` command
+
+Installing the app puts `omnihilbras` on `PATH` so it can be typed in a terminal. How that happens differs
+per platform, and so does whether it is already done for you:
+
+| Installed with | The command comes from | Status |
+| --- | --- | --- |
+| `npm i -g @hilbras/omnihilbras` | the package's `bin`, which npm links into its global bin directory | works — no privileges needed |
+| Linux `.deb` | electron-builder's generated `after-install` registers `/usr/bin/omnihilbras` as an `update-alternatives` entry pointing at `/opt/OmniHilbras/omnihilbras` | already done by the installer |
+| Windows `.exe` | `scripts/installer/windows/shortcut.ps1`, called by the NSIS installer, appends the install directory to the **user** `PATH` | wired; the installer was not run here |
+| macOS `.dmg` | nothing: a disk image has no post-install hook | run `bash scripts/installer/macos/shortcut.sh --install` once |
+
+Verify any of them the same way:
+
+```bash
+omnihilbras --version
+which omnihilbras        # or: where omnihilbras
+```
+
+The Linux registration is visible with `update-alternatives --display omnihilbras`, which is how the claim
+above was checked rather than assumed.
+
+### Two deliberate choices
+
+**The Windows installer edits the user's `PATH`, not the machine's.** `HKCU\Environment` needs no
+elevation. Writing the machine `PATH` would put an admin prompt in front of installing an app, and a
+mistake there is a machine-wide change.
+
+**The macOS script refuses to overwrite a link it did not create.** If `omnihilbras` already exists —
+pointing at a globally installed npm client, say — it stops and says so. The Linux deb's generated script
+does the opposite: it deletes a non-alternatives link it finds at `/usr/bin/omnihilbras`, which silently
+removes an npm-installed client. Worth knowing before installing both.
+
 ## Uninstalling
 
 Two ways, and the second is the one that actually removes everything.
@@ -87,6 +120,11 @@ Both scripts do the same four things, in this order:
 | `--purge-data` / `-PurgeData` | Also remove the vault and configuration. **Credentials live there** — see below. |
 | `--yes` / `-Yes` | Do not ask for confirmation. |
 | `--help` | The script's own help. |
+
+It also **deregisters the Debian alternative** the `.deb` created (`update-alternatives --remove`), because
+deleting the symlink alone leaves the registration to put it straight back on the next
+`update-alternatives --auto` — an uninstall that undoes itself. On macOS it runs the shim's `--uninstall` if
+that shim is present.
 
 It does **not** kill processes. It reports them and tells you to stop them, because deciding that a
 process it did not start should die is how an uninstaller becomes the thing that broke your evening. (The

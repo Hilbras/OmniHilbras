@@ -192,3 +192,29 @@ test('the uninstaller does not match unrelated processes as running servers', as
   const running = stdout.split('Checking for running processes')[1] ?? '';
   assert.equal(/chrome|headless/i.test(running), false, 'no browser is reported as a running server');
 });
+
+test('a dry run cannot reach any removal code', async () => {
+  /**
+   * The bug this pins, made while editing this script: a slice removed the dry-run early exit, and the
+   * dry run then walked into the removal section. It happened to be harmless that time — every removal is
+   * behind its own `DRY_RUN` check — but "happened to be harmless" is not a property, and a `--dry-run`
+   * that deletes is the worst thing this file could do.
+   *
+   * Asserted on the source rather than by running it, because a behavioural test can only prove that a
+   * *particular* removal did not happen, while this proves none of them can be reached.
+   */
+  const source = fs.readFileSync(script, 'utf8');
+  const exitAt = source.indexOf('Dry run — nothing was removed');
+  assert.ok(exitAt > 0, 'the dry-run exit still exists');
+
+  // The executable forms, not the words: `npm rm -g` also appears in this script's own header comment,
+  // which is above the dry-run exit and made the first version of this test fail for the wrong reason.
+  for (const marker of ['step "Removing"', 'if npm rm -g "$name"', 'update-alternatives --remove omnihilbras', 'remove_path "$dir"']) {
+    const at = source.indexOf(marker);
+    assert.ok(at > exitAt, `${marker} must come after the dry-run exit`);
+  }
+
+  // And the exit has to be an exit, not a note printed on the way past.
+  const after = source.slice(exitAt, exitAt + 200);
+  assert.match(after, /exit 0/, 'the dry-run branch actually stops');
+});

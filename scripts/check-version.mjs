@@ -33,8 +33,12 @@ const fixed = [];
  *
  * The SDK is no longer one manifest: it is one package per provider under `Kernel/SDK/`, each private and
  * versioned with the repo. `Kernel/API` is the publishable one, so it is the manifest this checks.
+ *
+ * `cli/package.json` is the second, and it is the one where drift would be worst: it is the manifest of
+ * the package a person installs globally, so a version that disagreed with the release would ship a
+ * `omnihilbras --version` that contradicted every other version in the tree.
  */
-for (const manifest of ['Kernel/API/package.json']) {
+for (const manifest of ['Kernel/API/package.json', 'cli/package.json']) {
   const found = JSON.parse(read(manifest)).version;
   if (found !== version) {
     if (fix) {

@@ -1,0 +1,41 @@
+{
+  "name": "@hilbras/omnihilbras",
+  "version": "3.48.0",
+  "private": false,
+  "description": "The OmniHilbras gateway client: check the runtime, inspect accounts, probe them, stream finished requests.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "omnihilbras": "./bin/omnihilbras.js"
+  },
+  "exports": {
+    ".": "./index.mjs",
+    "./lib/*": "./lib/*"
+  },
+  "files": [
+    "bin",
+    "commands",
+    "lib",
+    "index.mjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "omnihilbras",
+    "gateway",
+    "llm",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hilbras/OmniHilbras.git"
+  },
+  "homepage": "https://github.com/Hilbras/OmniHilbras#readme",
+  "bugs": "https://github.com/Hilbras/OmniHilbras/issues",
+  "dependencies": {},
+  "scripts": {
+    "pack:check": "node -e \"require('node:child_process').execSync('npm pack --dry-run', { stdio: 'inherit' })\""
+  }
+}

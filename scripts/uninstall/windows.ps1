@@ -211,6 +211,35 @@ if ($PurgeData) {
   Write-Note "  The vault holds your provider credentials and gateway keys. Pass -PurgeData to remove it too."
 }
 
+# The installer put this installation's directory on PATH; an uninstall that left it there would leave a
+# `omnihilbras` command that no longer resolves to anything, which is the Windows shape of the leftover
+# binary the Unix script removes.
+Write-Step "Removing from PATH"
+try {
+  $pathKey = Get-Item 'HKCU:\Environment'
+  # `DoNotExpandEnvironmentNames`, or reading expands `%USERPROFILE%` into a literal path and writing it back
+  # freezes every variable in the user's PATH at today's value.
+  $current = [string]$pathKey.GetValue('PATH', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+  $kept = @()
+  $removedAny = $false
+  foreach ($segment in ($current -split ';')) {
+    if ([string]::IsNullOrWhiteSpace($segment)) { continue }
+    $trimmed = $segment.Trim().TrimEnd('\')
+    if ($AppDirs | Where-Object { $_.TrimEnd('\') -ieq $trimmed }) { $removedAny = $true; continue }
+    $kept += $segment.Trim()
+  }
+  if ($removedAny) {
+    Set-ItemProperty -Path 'HKCU:\Environment' -Name 'PATH' -Value ($kept -join ';') -Type ExpandString
+    Write-Host "  removed the installation directory from PATH" -ForegroundColor Green
+    $script:Removed++
+  } else {
+    Write-Host "  not on PATH"
+  }
+} catch {
+  Write-Host ("  could not update PATH: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+  Write-Note "  Remove the OmniHilbras directory from PATH by hand if the command is still found."
+}
+
 Write-Step "Done"
 Write-Host ("  removed: {0} item(s)" -f $script:Removed)
 if ($script:Problems -gt 0) {

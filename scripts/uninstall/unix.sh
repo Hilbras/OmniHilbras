@@ -209,7 +209,24 @@ if [ "${#DATA_FOUND[@]}" -gt 0 ]; then
   for found in "${DATA_FOUND[@]}"; do say "  your data:      $found"; done
 fi
 
-if [ "${#GLOBAL_PACKAGES[@]}" -eq 0 ] && [ "${#PATHS_FOUND[@]}" -eq 0 ] && [ "${#APP_FOUND[@]}" -eq 0 ] && [ "${#AUTOSTART_FOUND[@]}" -eq 0 ] && [ "${#DATA_FOUND[@]}" -eq 0 ]; then
+# The `.deb` does not only create a symlink: electron-builder's generated after-install registers
+# `/usr/bin/omnihilbras` as an **update-alternative**, which is why the link goes through
+# `/etc/alternatives/omnihilbras`. It is found and reported with everything else, because deleting the
+# symlink without deregistering leaves the registration to put it straight back on the next
+# `update-alternatives --auto` — an uninstall that undoes itself.
+ALTERNATIVES_FOUND=()
+if command -v update-alternatives >/dev/null 2>&1; then
+  while read -r alt_path; do
+    [ -n "$alt_path" ] && ALTERNATIVES_FOUND+=("$alt_path")
+  done <<EOF
+$(update-alternatives --query omnihilbras 2>/dev/null | sed -n 's/^Alternative: //p')
+EOF
+fi
+for alt_path in "${ALTERNATIVES_FOUND[@]:-}"; do
+  [ -n "$alt_path" ] && say "  alternative:    omnihilbras → $alt_path"
+done
+
+if [ "${#GLOBAL_PACKAGES[@]}" -eq 0 ] && [ "${#PATHS_FOUND[@]}" -eq 0 ] && [ "${#APP_FOUND[@]}" -eq 0 ] && [ "${#AUTOSTART_FOUND[@]}" -eq 0 ] && [ "${#DATA_FOUND[@]}" -eq 0 ] && [ "${#ALTERNATIVES_FOUND[@]}" -eq 0 ]; then
   say ""
   say "${GREEN}Nothing to remove.${OFF}"
   exit 0
@@ -272,6 +289,26 @@ for found in "${PATHS_FOUND[@]:-}"; do
   # never knew about it.
   remove_path "$found"
 done
+
+# Deregistered before the symlink is removed: `update-alternatives --remove` owns that file, and deleting it
+# first leaves the registration behind.
+for alt_path in "${ALTERNATIVES_FOUND[@]:-}"; do
+  [ -n "$alt_path" ] || continue
+  if update-alternatives --remove omnihilbras "$alt_path" >/dev/null 2>&1; then
+    say "  ${GREEN}deregistered${OFF} alternative omnihilbras → $alt_path"
+    REMOVED=$((REMOVED + 1))
+  else
+    say "  ${RED}could not deregister${OFF} alternative omnihilbras → $alt_path ${DIM}(try: sudo update-alternatives --remove omnihilbras $alt_path)${OFF}"
+    PROBLEMS=1
+  fi
+done
+
+# macOS has no installer hook, so its shortcut is a script the person ran once; removing it is the same
+# script in reverse, run here so an uninstall does not leave a link in /usr/local/bin.
+MACOS_SHIM="$(dirname "$0")/../installer/macos/shortcut.sh"
+if [ -x "$MACOS_SHIM" ]; then
+  bash "$MACOS_SHIM" --uninstall 2>/dev/null | sed 's/^/  /' || true
+fi
 
 for dir in "${APP_FOUND[@]:-}"; do [ -n "$dir" ] && remove_path "$dir"; done
 for file in "${AUTOSTART_FOUND[@]:-}"; do [ -n "$file" ] && remove_path "$file"; done
