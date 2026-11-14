@@ -28,15 +28,17 @@
 
 import { CliError, createClient } from './lib/client.mjs';
 import { createOutput } from './lib/output.mjs';
+import { doctor } from './commands/doctor.mjs';
 import { keys } from './commands/keys.mjs';
 import { logs } from './commands/logs.mjs';
 import { models } from './commands/models.mjs';
 import { providers } from './commands/providers.mjs';
 import { routing } from './commands/routing.mjs';
+import { setup } from './commands/setup.mjs';
 import { status } from './commands/status.mjs';
 import { test } from './commands/test.mjs';
 
-export const verbs = { status, providers, models, test, keys, routing, logs };
+export const verbs = { setup, doctor, status, providers, models, test, keys, routing, logs };
 
 /** Flags every verb accepts, so none of them has to re-implement them or forget one. */
 const globalFlags = new Set(['--json', '--gateway', '--api-key', '--help', '-h']);

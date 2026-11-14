@@ -22,7 +22,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.46.0**
+**Current version: 3.47.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
@@ -392,6 +392,7 @@ The full threat model and known limits are in [`SECURITY.md`](./SECURITY.md).
 something**, which is what a script or an agent needs and a page cannot give:
 
 ```bash
+omnihilbras setup               # first run: check the tools, install what is missing
 omnihilbras status              # is it up, what is it, what is wrong with it
 omnihilbras providers zcode     # the accounts of a provider, and which are usable
 omnihilbras test zcode          # probe every account of that provider
@@ -437,6 +438,7 @@ repository record the mutation that first proved them blind; keep that habit whe
 | Document | What it covers |
 | --- | --- |
 | [`docs/SPEC-SDK.md`](./docs/SPEC-SDK.md) | Gateway routes, provider contract, rejection shapes and success criteria |
+| [`docs/INSTALL.md`](./docs/INSTALL.md) | Installing, the first-run check, and uninstalling every version on a machine |
 | [`docs/CLI.md`](./docs/CLI.md) | The `omnihilbras` verbs, their flags, the auth they use and the exit codes they return |
 | [`docs/architecture/README.md`](./docs/architecture/README.md) | Measured architecture, layer boundaries and provider-specific surface |
 | [`docs/architecture/embeddings-plan.md`](./docs/architecture/embeddings-plan.md) | Embeddings design and dispatch rules |

@@ -1,0 +1,151 @@
+/**
+ * `omnihilbras setup` — the first-run terminal.
+ *
+ * What it is for: a person who just installed this should not have to read a README to find out that
+ * `pnpm` is missing. So it checks, *says* what it found, and offers the two things that follow from that —
+ * install what is missing, and deal with an older copy of this project that is still on the machine.
+ *
+ * Two rules it does not bend:
+ *
+ * - **Nothing is installed without being shown first.** The exact command line is printed and confirmed.
+ *   `--yes` skips the confirmation for automation, and still prints it.
+ * - **Nothing is removed here.** Uninstalling lives in `scripts/uninstall/`, which shows the file list
+ *   before it deletes anything; a first-run wizard is the wrong place to hold a delete key.
+ *
+ * Without a terminal it refuses to guess: it prints the report and the commands, and exits non-zero if
+ * something blocking was found. A prompt nobody can answer is a hang, and a wizard that silently does
+ * nothing is worse than one that says why.
+ */
+
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import readline from 'node:readline/promises';
+import { inspect } from '../lib/detect.mjs';
+
+const SEVERITY_LABEL = { blocking: 'blocking', 'needed-from-source': 'from source', optional: 'optional' };
+
+/** Runs one fix command, with its output attached — the person asked for it, so they should see it. */
+function runFix(command) {
+  return new Promise((resolve) => {
+    const child = spawn(command, [], { shell: true, stdio: 'inherit' });
+    child.on('close', (code) => resolve(code ?? 1));
+    child.on('error', () => resolve(1));
+  });
+}
+
+export const setup = {
+  name: 'setup',
+  summary: 'First-run check: what is missing, and what to do about it',
+  usage: 'omnihilbras setup [--yes] [--json]',
+  flags: ['--yes'],
+  async run({ out, flags, client }) {
+    const report = await inspect();
+    // A gateway that is not running is the normal state of a fresh install, so it is reported rather than
+    // thrown — `setup` exists precisely for the case where nothing is running yet.
+    let gateway;
+    try {
+      const health = await client.request('/health');
+      gateway = { reachable: true, version: health.build?.version };
+    } catch {
+      gateway = { reachable: false };
+    }
+
+    const blocking = report.gaps.filter((gap) => gap.severity === 'blocking');
+    out.data({ ...report, gateway, blocking: blocking.length });
+
+    if (out.json) return blocking.length > 0 ? 1 : 0;
+
+    out.title('Omnihilbras setup');
+    out.line(`  ${out.muted('node')}     ${report.runtime.node}${report.runtime.nodeSatisfies ? out.ok(' ok') : out.bad(` — needs v${report.runtime.requiredNodeMajor}+`)}`);
+    out.line(`  ${out.muted('pnpm')}     ${report.runtime.pnpm ?? out.warn('not found')}`);
+    out.line(`  ${out.muted('git')}      ${report.runtime.git ?? out.warn('not found')}`);
+    out.line(`  ${out.muted('gateway')}  ${gateway.reachable ? out.ok(`${gateway.version} running`) : out.warn('not running')}`);
+    if (report.otherVersionCount > 0) out.line(`  ${out.muted('others')}   ${out.warn(`${report.otherVersionCount} other installation${report.otherVersionCount === 1 ? '' : 's'} found`)}`);
+    out.line();
+
+    /**
+     * Without a terminal there is nobody to answer, and inventing an answer is how a wizard installs
+     * something nobody asked for. Print the plan and stop, with an exit code a script can act on.
+     */
+    if (!(process.stdin.isTTY && process.stdout.isTTY)) {
+      if (report.gaps.length > 0) {
+        out.title('Run these to finish setting up');
+        for (const gap of report.gaps) out.line(`  ${gap.fix}   ${out.muted(`# ${gap.title}`)}`);
+      } else {
+        out.line(out.ok('Everything the gateway needs is present.'));
+      }
+      if (report.otherVersionCount > 0) out.line(`\n${out.muted('Other versions found; `omnihilbras doctor` lists them, `scripts/uninstall/` removes them.')}`);
+      return blocking.length > 0 ? 1 : 0;
+    }
+
+    // One interface for the whole session. Creating one per question leaks a listener per prompt, and the
+    // process then will not exit on its own after the last answer.
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      for (;;) {
+        const options = [];
+        if (report.gaps.length > 0) options.push(['install the missing tools', 'gaps']);
+        options.push(['show the full report', 'report']);
+        if (report.otherVersionCount > 0) options.push(['remove another version on this machine', 'uninstall']);
+        options.push(['start the gateway and dashboard', 'start']);
+        options.push(['exit', 'exit']);
+
+        out.line(out.muted('What next?'));
+        options.forEach(([label], index) => out.line(`  ${index + 1}. ${label}`));
+        const answer = (await rl.question('  > ')).trim();
+        const chosen = options[Number(answer) - 1]?.[1] ?? 'exit';
+
+        switch (chosen) {
+          case 'gaps': {
+            for (const gap of report.gaps) {
+              out.line();
+              out.line(`${SEVERITY_LABEL[gap.severity] ?? gap.severity}  ${gap.title}`);
+              out.line(`  ${out.muted(gap.detail)}`);
+              out.line(`  command: ${gap.fix}`);
+              const go = flags.yes || (await rl.question('  Run it? [y/N] ')).trim().toLowerCase().startsWith('y');
+              if (!go) {
+                out.line(out.muted('  skipped'));
+                continue;
+              }
+              const code = await runFix(gap.fix);
+              out.line(code === 0 ? out.ok('  done') : out.bad(`  exited ${code} — run it yourself to see why`));
+            }
+            break;
+          }
+          case 'report': {
+            const { doctor } = await import('./doctor.mjs');
+            out.line();
+            await doctor.run({ out, flags: {}, client });
+            break;
+          }
+          case 'uninstall': {
+            // A pointer, not an action: removal prints a file list and asks, and that belongs in one place
+            // rather than two copies that can disagree about what "uninstalled" means.
+            const command = report.runtime.platform === 'win32'
+              ? 'powershell -File scripts/uninstall/windows.ps1'
+              : 'bash scripts/uninstall/unix.sh';
+            out.line();
+            out.line('  Uninstallers live in scripts/uninstall/. Each prints everything it would remove and');
+            out.line('  asks first, and leaves your vault alone unless you pass --purge-data:');
+            out.line(`    ${command}`);
+            break;
+          }
+          case 'start': {
+            const bin = fileURLToPath(new URL('../../bin/omnihilbras.js', import.meta.url));
+            out.line();
+            out.line(out.muted('  Starting. Ctrl-C stops both servers.'));
+            out.line();
+            rl.close();
+            const child = spawn(process.execPath, [bin], { stdio: 'inherit' });
+            return await new Promise((resolve) => child.on('close', (code) => resolve(code ?? 0)));
+          }
+          default:
+            return 0;
+        }
+        out.line();
+      }
+    } finally {
+      rl.close();
+    }
+  },
+};
