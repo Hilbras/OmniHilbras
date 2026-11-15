@@ -123,6 +123,20 @@ test('updates can be downloaded and installed from the UI', () => {
   assert.match(settings, /updateAction\('download'\)|updates\.download/, 'Settings cannot download');
 });
 
+test('the stale-build hint names the side that is actually behind', () => {
+  const shell = read('src/components/DashboardShell.tsx');
+  /**
+   * The hint said "restart the gateway" for every version mismatch, and the common mismatch in development is
+   * the other way round: `pnpm dev` reads `package.json` once at startup, so after a bump the page reports the
+   * old version while the gateway is current. Measured today — gateway 3.56.0, page 3.54.0, gateway already
+   * right — and following the old advice restarted the correct process and changed nothing.
+   */
+  assert.match(shell, /const pageBehind = staleBuild && compareVersions\(PAGE_VERSION, buildVersion as string\) < 0/, 'the page compares its own version against the gateway\'s');
+  assert.match(shell, /restart \\`pnpm dev\\`/, 'a page that is behind says to restart the dev server');
+  assert.match(shell, /this page is \$\{PAGE_VERSION\}, the gateway is \$\{buildVersion\}/, 'and says which is which, with numbers');
+  assert.match(shell, /the gateway is \$\{buildVersion\}, this page is \$\{PAGE_VERSION\} · restart the gateway/, 'a gateway that is behind still says to restart the gateway');
+});
+
 test('a start that lands nothing is reported, not swallowed', () => {
   const page = read('src/pages/ProviderDetailPage.tsx');
   // The call returns the current status, so an unsuccessful start used to set exactly the state the badge was

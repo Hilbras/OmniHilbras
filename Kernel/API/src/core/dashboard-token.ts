@@ -21,11 +21,28 @@ export function dashboardTokenPath(env: Readonly<Record<string, string | undefin
   return join(defaultStateDirectory(env), tokenFileName);
 }
 
-/** Creates a fresh token, writes it at 0600 in the 0700 state directory, and returns it. */
-export async function issueDashboardToken(env: Readonly<Record<string, string | undefined>> = process.env) {
-  const token = randomBytes(32).toString('hex');
+/**
+ * A fresh token. **Nothing is written here**, and that separation is the point of this function existing.
+ *
+ * Minting used to write the file on the spot, 27 lines before `listen()` — so a gateway that started while
+ * another held the port published its token and *then* died on `EADDRINUSE`. The survivor kept serving with
+ * the token it had minted, while the file the dashboard's dev server reads held the dead process's; every
+ * management call answered 401 and the shell said "Gateway needs sign-in", with "reload the dashboard" as
+ * advice that could not work because the browser never holds the token. Measured: file written four seconds
+ * into a start, and its contents refused by the gateway that was actually listening.
+ */
+export function createDashboardToken(): string {
+  return randomBytes(32).toString('hex');
+}
+
+/**
+ * Publishes the token where the dashboard's dev server reads it — **after this process is listening**.
+ *
+ * The file is a claim about which token the running gateway accepts, so it may only be written by a gateway
+ * that is in fact running. A caller that has not bound its port has nothing to claim.
+ */
+export async function publishDashboardToken(token: string, env: Readonly<Record<string, string | undefined>> = process.env) {
   await atomicWrite(dashboardTokenPath(env), token);
-  return token;
 }
 
 /** The token the gateway issued at start, read back from disk, or undefined when it is missing. */

@@ -26,6 +26,7 @@ import { dashboardRoutes } from '../lib/routes';
 import { useGatewayStatus } from '../lib/useGatewayStatus';
 import { desktopBridge } from '../lib/electronBridge';
 import { PAGE_VERSION } from '../lib/pageVersion';
+import { compareVersions } from '../lib/versionCompare.mjs';
 
 /**
  * Which sidebar entry is active.
@@ -145,6 +146,16 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse, status }: {
   const staleBuild =
     typeof buildVersion === 'string' && buildVersion !== 'unknown' && buildVersion !== PAGE_VERSION;
   /**
+   * Which side is behind, not merely that they differ.
+   *
+   * The hint read "restart the gateway" for every mismatch, which is only half the cases — and the wrong half
+   * is the common one in development: `pnpm dev` reads `package.json` once when it starts, so after a version
+   * bump the page keeps reporting the old number while the gateway is current. Telling someone to restart the
+   * process that is already right is how they end up restarting it twice and still seeing the banner.
+   * Measured today: gateway 3.56.0, page 3.54.0, gateway already current — restarting `pnpm dev` cleared it.
+   */
+  const pageBehind = staleBuild && compareVersions(PAGE_VERSION, buildVersion as string) < 0;
+  /**
    * A refusal is not an outage, and the wording has to say which one it is.
    *
    * The gateway answers 403 when this browser's origin is not on its allowlist — it is
@@ -164,7 +175,9 @@ function Sidebar({ onClose, activePage, collapsed, onToggleCollapse, status }: {
             : 'Gateway offline';
   const gatewayHint =
     staleBuild
-      ? `running ${buildVersion}, this page is ${PAGE_VERSION} · restart the gateway`
+      ? pageBehind
+        ? `this page is ${PAGE_VERSION}, the gateway is ${buildVersion} · restart \`pnpm dev\``
+        : `the gateway is ${buildVersion}, this page is ${PAGE_VERSION} · restart the gateway`
       : reachable === false
         ? problem === 'refused'
           ? 'this page’s origin is not allowed'

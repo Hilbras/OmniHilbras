@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { canonicalLoopbackHost, isLoopbackHostname, loopbackBaseUrl } from './core/index.js';
 import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './core/config.js';
 import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, resolveCorsOrigins, resolveInferenceBodyBytes, sendError, sendJson, setCors } from './core/http.js';
-import { dashboardTokenHeader, issueDashboardToken, tokenMatches } from './core/dashboard-token.js';
+import { createDashboardToken, dashboardTokenHeader, publishDashboardToken, tokenMatches } from './core/dashboard-token.js';
 import { isTrustedDashboard, type AuthContext } from './core/runtime.js';
 import { RateLimiter, resolveRequestsPerMinute } from './core/rate-limit.js';
 import { handleApiKeysRoute } from './routes/api-keys.js';
@@ -255,7 +255,12 @@ export async function startGatewayServer(options: {
   const service = createGatewayService(config, options.env, options.connectionStore, options.apiKeyStore);
   service.setHealthInterval(options.healthIntervalMs ?? config.healthIntervalMs);
   service.startTokenRenewal();
-  const dashboardToken = await issueDashboardToken(options.env);
+  /**
+   * Minted here so the auth closure can compare against it, **published only once this process is listening**
+   * (below). Writing it before a successful bind is how a gateway that lost the port race clobbered the
+   * running one's token and turned every dashboard call into a 401 for as long as the winner stayed up.
+   */
+  const dashboardToken = createDashboardToken();
   const server = createGatewayServer(service, {
     ...(options.corsOrigin ? { corsOrigin: options.corsOrigin } : {}),
     ...(options.corsOrigins ? { corsOrigins: options.corsOrigins } : options.corsOrigin ? {} : { corsOrigins: config.corsOrigins }),
@@ -284,6 +289,9 @@ export async function startGatewayServer(options: {
     server.once('listening', onListening);
     server.listen(config.port, bindHost);
   });
+
+  // The port is ours: now the token file may say which token the running gateway accepts.
+  await publishDashboardToken(dashboardToken, options.env);
 
   return { config, server, service };
 }
