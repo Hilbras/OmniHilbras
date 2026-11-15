@@ -10,8 +10,10 @@
 <p align="center">
   <a href="https://github.com/Hilbras/OmniHilbras/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Hilbras/OmniHilbras" /></a>
   <a href="https://github.com/Hilbras/OmniHilbras/actions/workflows/verify.yml"><img alt="CI" src="https://github.com/Hilbras/OmniHilbras/actions/workflows/verify.yml/badge.svg" /></a>
+  <a href="https://www.npmjs.com/package/@hilbras/omnihilbras"><img alt="npm" src="https://img.shields.io/npm/v/@hilbras/omnihilbras?label=cli" /></a>
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue" />
   <img alt="TypeScript strict" src="https://img.shields.io/badge/TypeScript-strict-3178C6" />
+  <img alt="Node 24+" src="https://img.shields.io/badge/Node-24%2B-339933" />
 </p>
 
 <p align="center">
@@ -22,37 +24,61 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.50.2**
+**Current version: 3.50.3**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
-OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection should serve
-each request. The same repository ships the gateway, the React dashboard, the marketing site and the Electron
-desktop app.
+OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
+request. One repository ships the gateway, the React dashboard, the marketing site, the Electron desktop app,
+an Android companion shell and the `omnihilbras` command line.
 
-> **Publishing status:** the npm package is legacy. Kernel/API is private while the Kernel restructure is in
-> progress, so the supported install paths are the desktop app and a build from source. See
-> [`AGENTS.md`](./AGENTS.md) for the release rules that apply today.
+---
 
-## Why OmniHilbras
+## Quick start
 
-- **One API, many providers.** Point any OpenAI-compatible client at loopback. Provider-specific wire formats
-  stay inside their adapters; the gateway core stays provider-neutral.
-- **Local by default.** The gateway binds to `127.0.0.1`, credentials live in an encrypted local vault, and
-  provider keys never enter browser storage.
-- **Failover instead of silent failure.** Connections carry a priority and a health state. A request skips an
-  unhealthy, rate-limited or credential-less connection and records which one failed.
-- **Measured, not invented.** Usage records carry tokens, cache reads and writes, request IDs and the ordered
-  attempts. A value that was not measured is shown as unmeasured, never as zero.
-- **Token saving you can audit.** Compression, history trimming and cache anchoring are separate, reversible
-  savers with per-request telemetry in `GET /v1/token-saver/stats`.
-- **Desktop and web.** The desktop app owns the gateway lifecycle, logs and updates; the browser dashboard
-  remains available for development.
+```bash
+# 1. Run it
+pnpm install && omnihilbras          # gateway on 127.0.0.1:20138, dashboard on :20137
+
+# 2. Add a provider (browser) — or from the CLI:
+omnihilbras providers                # what is already saved
+omnihilbras test zcode               # prove an account can actually serve
+
+# 3. Point any OpenAI-compatible client at it
+curl http://127.0.0.1:20138/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"auto","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+`model: "auto"` lets the gateway pick a saved connection. A concrete id (`zc/glm-5.3-flash`) routes to the
+account that lists it. Either way the decision is deterministic and recorded — see
+[How a request is routed](#how-a-request-is-routed).
+
+## Contents
+
+| | |
+| --- | --- |
+| **Using it** | [Features](#features) · [Install](#install) · [Providers](#providers) · [Accounts](#accounts) · [Virtual models](#virtual-models) · [Token saver](#token-saver) · [Dashboard](#dashboard) · [Desktop app](#desktop-app) · [Android companion](#android-companion) · [CLI](#cli) |
+| **Under the hood** | [Architecture](#architecture) · [How a request is routed](#how-a-request-is-routed) · [Gateway](#gateway) · [Configuration](#configuration) |
+| **Project** | [Security and privacy](#security-and-privacy) · [Current state](#current-state) · [Development](#development) · [Documentation](#documentation) · [License](#license) |
+
+## Features
+
+| | |
+| --- | --- |
+| **One API, many providers** | Any OpenAI-compatible client points at loopback. Provider wire formats stay inside their adapters; the gateway core is provider-neutral. |
+| **Local by default** | Binds `127.0.0.1`, refuses a non-loopback host unless you change the threat model deliberately. Credentials live in an encrypted vault, never in browser storage. |
+| **Accounts, not just providers** | Several accounts per provider, each with its own credential, models, priority, limits and usage attribution — and a routing walk that tries them in order. |
+| **Failover that names the cause** | A refusal about an *allowance* moves to the next account; a refusal about *you* (restriction, dead credential, malformed request) stops and says why. |
+| **Measured, not invented** | Usage records carry tokens, cache reads and writes, request ids and the ordered attempts. A value nobody measured is shown as unmeasured, never as zero. |
+| **Token saving you can audit** | Compression, history trimming, output caps and cache anchoring are separate, reversible savers with per-request telemetry. |
+| **Virtual models** | One public id (`oh/chat`) that routes across several accounts and providers, with a strategy you choose. |
+| **Everything is a surface** | Browser dashboard, desktop app, CLI verbs with `--json`. The CLI and the dashboard call the same routes, so they cannot hold two opinions. |
 
 ## Install
 
 ### Desktop app
 
-Download the latest installer from [the download page](https://omnihilbras.hilbras.com/download):
+Download from [the download page](https://omnihilbras.hilbras.com/download):
 
 | Platform | Package |
 | --- | --- |
@@ -69,17 +95,36 @@ https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-linu
 https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-macos.dmg
 ```
 
-The Windows and macOS builds are not code-signed yet. SmartScreen or Gatekeeper may ask you to confirm the
-first launch. The AppImage updates itself without administrator rights. The `.deb` can be downloaded from the
-app and opened in the system installer, which still asks for administrator permission; install it with:
+The Windows and macOS builds are **not code-signed yet**, so SmartScreen or Gatekeeper asks you to confirm
+the first launch, and an update asks before installing because the app cannot prove where it came from. The
+AppImage updates itself without administrator rights. The `.deb` downloads and opens the system installer,
+which asks for administrator permission:
 
 ```bash
 sudo apt install ./OmniHilbras-linux-amd64.deb
 ```
 
+### The `omnihilbras` command
+
+```bash
+npm i -g @hilbras/omnihilbras
+```
+
+It installs the **client**: `status`, `providers`, `models`, `test`, `keys`, `routing`, `logs`, `setup`,
+`doctor`. It **cannot start a server** — a globally installed package has no checkout to run. The server is
+the desktop app; a command that also starts the servers comes from a checkout (`npm link`, then
+`omnihilbras setup`).
+
+> Versions before `3.0.0` under this name are a **different program** (the previous project, whose
+> `omnihilbras` started a server). They are deprecated with that warning. See
+> [`NPM-PUBLISH.md`](./NPM-PUBLISH.md) for what is published and what is not.
+
 ### From source
 
-Requirements: Node.js 24+, pnpm 12.5.1.
+| Requirement | Version |
+| --- | --- |
+| Node.js | 24 or newer (`.nvmrc`) |
+| pnpm | 12.5.1 (`packageManager` in `package.json`) |
 
 ```bash
 pnpm install
@@ -87,13 +132,15 @@ pnpm dev            # marketing site + dashboard on :20137
 pnpm dev:gateway    # local gateway on 127.0.0.1:20138
 ```
 
-The desktop app has its own commands:
+Desktop app commands:
 
 ```bash
 pnpm app:dev        # build the gateway and dashboard, then open Electron
 pnpm app:check      # build and drive the real binary through its smoke test
 pnpm app:pack       # build installers for the current platform
 ```
+
+Installing, the first-run check and removing every version from a machine: [`docs/INSTALL.md`](./docs/INSTALL.md).
 
 ## Architecture
 
@@ -119,27 +166,59 @@ pnpm app:pack       # build installers for the current platform
 └───────────────┘ └───────────────────────────────┘
 ```
 
-The important boundary is **the gateway core does not speak provider wire formats**. A provider is an adapter
-and a registration. The shared machinery each adapter needs is vendored into that package's `lib/`; there is no
-shared SDK core to drift away from them.
+The important boundary: **the gateway core does not speak provider wire formats.** A provider is an adapter
+plus a registration, and the shared machinery each adapter needs is vendored into that package's `lib/`, so
+there is no shared SDK core to drift away from them.
 
 ### Repository map
 
 | Path | Responsibility |
 | --- | --- |
-| `Kernel/API/` | Gateway, routes, routing, health, usage, vault, token-saver integration |
-| `Kernel/SDK/<provider>/` | Provider adapter and vendored runtime types |
+| `Kernel/API/` | Gateway: routes, routing, health, usage, vault, token-saver integration |
+| `Kernel/SDK/<provider>/` | Provider adapter and vendored runtime types, one package per provider |
 | `Kernel/TokenSaver/` | Standalone, reversible context compressor and saver telemetry |
 | `src/` | React dashboard and marketing pages |
 | `site/` | Static entry files for Home, Download, Docs and legal pages |
 | `desktop/` | Electron main process, preload bridge and supervisor |
+| `cli/` | The published `@hilbras/omnihilbras` client, and `bin/omnihilbras.js`'s verbs |
+| `android/` | Capacitor companion shell for the dashboard |
 | `docs/` | Specification, architecture notes, reports and tools |
-| `tests/` | Repository-wide guards, brand, security and documentation checks |
+| `tests/` | Repository-wide guards: brand, security, documentation, release trail |
+
+## How a request is routed
+
+The order is fixed, and each step can be read back from `GET /v1/routing`.
+
+1. **Virtual models first.** An enabled `oh/…` id expands into one route candidate per target; a disabled one
+   has no candidates and does *not* fall back to a provider model with the same suffix.
+2. **Candidates are filtered, not guessed.** A connection must be enabled, have a credential, not be
+   serving-time ejected, and not be cooling down for that model. Whatever is skipped is listed with a reason
+   (`unhealthy`, `model-cooling-down`, `no-models`, …).
+3. **Ordering.** A named account (`x-omnihilbras-connection`) goes first **regardless of priority**; otherwise
+   connections sort by priority then name, with the provider's strategy (`priority`, `round-robin`,
+   `fastest`) applied on top.
+4. **The walk.** Accounts are tried one at a time. What a failure *means* decides the next step:
+
+   | The failure says | The response |
+   | --- | --- |
+   | The allowance is gone (`429`, `402`, `403`, `404`, `5xx`, or wording like `quota exceeded`, `insufficient_quota`, `exceed quota limit`) | **Next account** — a sibling has its own allowance |
+   | The account is *restricted* (`request illegal`, `unusual activity`, `账号存在异常行为`) | **Stop.** Asking the next account through the same fingerprint is how one restricted account becomes several |
+   | The credential is dead (`401`) | **Stop** and name that account — rotating would quietly bill a sibling while your broken key stays invisible |
+   | The request is wrong (`INVALID_REQUEST`, `NOT_SUPPORTED`) | **Stop** — every account refuses it identically |
+   | The account is busy (our own concurrency cap) | **Stop** with "at its concurrency limit" — nothing was sent |
+   | The provider is unwell (timeout, `5xx` without a body) | Retry its own budget, then move on |
+
+5. **Cool-downs are per account *and* model, and they persist.** A refusal stands down that account for that
+   model — it is still used for every other model — for a wait that grows (`60 s × 2^(level-1)`, capped at 30
+   minutes) and resets on a success. A provider that states its own reset time is believed instead. The state
+   lives in the vault, so a restart does not re-hammer the account that just refused.
+6. **The answer carries its own audit.** The attempt ledger names each account, whether it answered, and the
+   error code if it did not; usage records keep the same information afterwards.
 
 ## Gateway
 
-The gateway listens on `127.0.0.1:20138` by default. It refuses a non-loopback host unless deployment
-configuration explicitly changes the threat model.
+Listen address `127.0.0.1:20138` by default. A non-loopback host is refused unless deployment configuration
+explicitly changes the threat model.
 
 ### Core routes
 
@@ -147,16 +226,21 @@ configuration explicitly changes the threat model.
 | --- | --- |
 | `POST /v1/chat/completions` | Chat, streaming and tool calls through the selected provider |
 | `POST /v1/responses` | OpenAI Responses API shape |
-| `GET /v1/models` | Saved models of enabled, credentialed connections |
+| `GET /v1/models` | Saved models of enabled, credentialed connections, plus enabled virtual models |
 | `POST /v1/messages/count_tokens` | Explicit bytes/4 estimate, marked as estimated |
 | `POST /v1/embeddings` | Embeddings where the provider supports them |
-| `GET /health` | Gateway and provider health, including the reason for each unavailable provider |
+| `GET /health` | Gateway and provider health, with the reason for each unavailable provider |
+| `GET /v1/routing` | Live routing state: failures, ejection, rate-limit waits, measured latency |
+| `GET /v1/connections` | Saved accounts and their credentials' kind |
+| `POST /v1/connections/:id/probe` | Validate one account with its own stored credential |
+| `GET /v1/keys` | Gateway API keys (metadata only; a secret is returned once, at creation) |
 | `GET /v1/usage` | Recorded usage, paged and filterable |
 | `GET /v1/token-saver/stats` | Per-saver savings, skips and cache figures |
+| `GET /v1/logs/stream` | Each finished request as a server-sent event — no prompt content, no credential |
 | `GET /v1/settings` | The configuration this process actually loaded |
 
-Management routes use the admin key when enforcement is on. The full route contract, including OAuth callbacks,
-backup import/export and every rejection shape, is in [`docs/SPEC-SDK.md`](./docs/SPEC-SDK.md).
+Management routes use the admin key when enforcement is on. The full contract — OAuth callbacks, backup
+import/export, error shapes, and every rejection — is [`docs/SPEC-SDK.md`](./docs/SPEC-SDK.md).
 
 ### Quick request
 
@@ -170,50 +254,47 @@ curl http://127.0.0.1:20138/v1/chat/completions \
   }'
 ```
 
-`model: "auto"` lets the gateway resolve a saved connection. A concrete model id is routed to the connection
-that lists it, then to an explicit `x-omnihilbras-provider` header or body field if one is present. The routing
-order is deterministic: priority, health, credential, rate limit, then failover.
-
 ## Providers
 
-Provider integrations live under `Kernel/SDK/`. The gateway supports API-key providers, OAuth providers,
-web-session providers, local runtimes such as Ollama, and generic OpenAI-compatible endpoints.
+Integrations live under `Kernel/SDK/`, one adapter package per provider. Five kinds of auth are supported:
 
-- **API key:** the credential is stored in the local encrypted vault.
-- **OAuth:** the gateway owns the sign-in session and saves the resulting credential. The desktop app opens the
-  provider page in your default browser.
-- **Web session:** a pasted cookie is verified against the provider before it is stored. Cards exist for
-  ChatGPT Web, Qwen Web, DeepSeek Web, Token Harbor Web, Gemini Web, Duck.ai, Grok Web and Perplexity Web;
-  Grok and Perplexity forward real streams, DeepSeek and Duck.ai return one completed chunk, and the
-  rest declare `streaming: false` and say so in the spec. DeepSeek Web and Duck.ai both support
+- **API key** — the credential is stored in the local encrypted vault.
+- **OAuth** — the gateway owns the sign-in session and saves the resulting credential; the desktop app opens
+  the provider page in your default browser.
+- **Web session** — a pasted cookie or token is verified against the provider before it is stored. Cards exist
+  for ChatGPT Web, Qwen Web, DeepSeek Web (and a V2 group), Token Harbor Web, Gemini Web, Duck.ai, Grok Web
+  and Perplexity Web. Grok and Perplexity forward real streams; DeepSeek and Duck.ai return one completed
+  chunk; the rest declare `streaming: false` and say so in the spec. DeepSeek Web and Duck.ai support
   prompt-level DSML tool rounds; DeepSeek also supports images and bounded session reuse.
-- **Local:** no credential is required; the connection is saved with `credential: "none"`, not an invented key.
-- **Custom endpoint:** any OpenAI-compatible base URL with optional model and chat paths.
+- **Local runtime** — no credential at all. The connection is saved with `credential: "none"` rather than an
+  invented empty key, which is why the save path asks you to say so.
+- **Custom endpoint** — any OpenAI-compatible base URL, with optional model and chat paths.
 
-Provider cards are catalog metadata. A card shows `—` metrics and `No connections` until a real connection
-exists; it never invents a measurement. See the provider notes in the [gateway specification](./docs/SPEC-SDK.md)
-for auth-specific behavior and standing warnings.
+Provider cards in `src/data/providers.ts` are **catalog metadata**: they show `—` metrics and `No connections`
+until a real connection exists, and never invent a measurement. Provider-specific behaviour and standing
+warnings are in the [gateway specification](./docs/SPEC-SDK.md).
 
 ## Accounts
 
-A saved connection is an account. One provider may have several, each with its own credential, model list,
-priority, limits and usage attribution.
+A saved connection **is** an account. One provider may have several, each with its own credential, model list,
+priority, limits and usage attribution — the multi-account model is the core of the routing above.
 
-- **Explicit selection.** `x-omnihilbras-connection: <id>` or the `connection` body field narrows routing to
-  that account. An unknown id is `INVALID_REQUEST`; a disabled or credential-less account gets no route. The
-  chain never silently replaces a named account.
+- **Explicit selection.** `x-omnihilbras-connection: <id>` or the `connection` body field puts that account
+  first. It is a **preference, not a fence**: when it refuses for an allowance reason, its siblings are tried.
+  An unknown id is `INVALID_REQUEST`; a *disabled* named account is refused rather than quietly replaced.
 - **Independent limits.** `resilience.requestsPerMinute` and `resilience.maxConcurrentRequests` are keyed by
   account. A concurrency refusal is not a provider failure and does not cool the model for another account.
-- **Authentication isolation.** `AUTHENTICATION_FAILED` is terminal for that account. It is not retried on
-  the next account, because a dead credential is a fact about one account.
+- **Authentication isolation.** `AUTHENTICATION_FAILED` is terminal for that account; it is not retried on the
+  next one, because a dead credential is a fact about one account.
 - **Network isolation is not claimed until enforced.** `proxyPool` is stored, but this build has no proxy
-  transport. A connection that names a non-`none` pool is refused with `CONFIGURATION_ERROR` rather than sent
-  direct. Remove the pool or use a direct account until transport-level egress lands.
+  transport: a connection naming a non-`none` pool is refused with `CONFIGURATION_ERROR` rather than sent
+  direct. That matters most for providers that flag several accounts on one address — a code-level answer
+  cannot make one machine look like several.
 
 ## Virtual models
 
-A virtual model is one public ID that routes to several saved accounts. Every virtual ID starts with
-`oh/`; the prefix is required and keeps it distinct from a provider's own model IDs.
+A virtual model is one public id that routes to several saved accounts. Every virtual id starts with `oh/` —
+the prefix is required, and keeps it distinct from a provider's own ids.
 
 ```text
 oh/chat
@@ -222,84 +303,62 @@ oh/chat
   → ollama     / llama3.3
 ```
 
-Create and manage them at `/dashboard/models`. A card shows the public ID, name, enabled state, strategy,
-targets and provider accounts. Disable the card to stop using the alias without deleting its targets.
+Manage them at `/dashboard/models`: each card shows the public id, name, enabled state, strategy, targets and
+provider accounts. Disabling the card stops the alias without deleting its targets.
 
-Strategies:
+| Strategy | Behaviour |
+| --- | --- |
+| `priority` | Lower target priority first — usually a primary plus fallbacks |
+| `round-robin` | Rotate the enabled targets in order |
+| `fastest` | Prefer the account with a measured faster round trip; unmeasured targets last |
 
-- **priority** — lower target priority first; usually a primary plus fallbacks.
-- **round-robin** — rotate the enabled targets in order.
-- **fastest** — prefer the account with a measured faster round trip; unmeasured targets come last.
-
-The gateway resolves an enabled `oh/` model before concrete routing. Each target becomes an ordinary route
-candidate with an upstream model override, so account health, credentials, rate limits, concurrency and auth
-failure behave exactly as they do for a concrete model. A disabled virtual model has no candidates; it does not
-silently fall back to a provider model with the same suffix.
-
-```bash
-curl http://127.0.0.1:20138/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"oh/chat","messages":[{"role":"user","content":"Hello"}]}'
-```
-
-`GET /v1/models` lists enabled virtual models with `virtual: true` and their provider list. The management
-routes are `GET/POST /v1/virtual-models` and `PUT/DELETE /v1/virtual-models/:id`.
+Each target becomes an ordinary route candidate with an upstream model override, so health, credentials, rate
+limits, concurrency and the failure rules above apply unchanged. `GET /v1/models` lists enabled virtual models
+with `virtual: true`; the management routes are `GET/POST /v1/virtual-models` and
+`PUT/DELETE /v1/virtual-models/:id`.
 
 ## Token saver
 
-The saver is a separate package, not a mode hidden in the adapter:
+A separate package, not a mode hidden in an adapter:
 
-- **RTK filters** recognize git, build, grep, find, tree, ls, search and log output shapes.
+- **RTK filters** recognise git, build, grep, find, tree, ls, search and log output shapes.
 - **Generic compression** preserves valid JSON, error rows and retrievable originals.
-- **History trimming** stubs whole old turns above a threshold while keeping the system prompt, the first user
-  ask, the recent window and error-bearing tool results.
+- **History trimming** stubs whole old turns above a threshold, keeping the system prompt, the first user ask,
+  the recent window and error-bearing tool results.
 - **Output and thinking caps** clamp requests before routing; Anthropic re-clamps its own thinking budget.
 - **`count_tokens`** is an estimate with an explicit `estimated` field; no provider tokenizer is bundled.
 - **Cache anchoring** re-anchors Anthropic cache breakpoints on the final body, after the savers run.
-- **Optional external savers** — Headroom and PXPIPE — are fail-open, time out, and report `ran` or `skipped`
-  with a reason. PXPIPE only runs for adapters that advertise Anthropic image context.
+- **Optional external savers** — Headroom and PXPIPE — fail open, time out, and report `ran` or `skipped` with
+  a reason. PXPIPE runs only for adapters that advertise Anthropic image context.
 
 Every lossy rewrite that stores an original is reversible through `GET /v1/token-saver/:id`. Cache reads and
-writes are accounted for separately from prompt tokens, and cached input is priced as cached input.
-
-Configuration:
+writes are accounted separately from prompt tokens, and cached input is priced as cached input.
 
 ```bash
 OMNIHILBRAS_TOKEN_SAVER=1
 # OMNIHILBRAS_TOKEN_SAVER_RATIO=0.5
 # OMNIHILBRAS_TOKEN_SAVER_PROTECT_RECENT=4
-# OMNIHILBRAS_TOKEN_SAVER_USERS=1
-# OMNIHILBRAS_TOKEN_SAVER_CODE=1
 # OMNIHILBRAS_TOKEN_SAVER_REVERSIBLE=true
-# OMNIHILBRAS_TOKEN_SAVER_CCR_LIMIT=500
-
 OMNIHILBRAS_HISTORY_TRIM_TOKENS=120000
 OMNIHILBRAS_HISTORY_TRIM_KEEP_RECENT=8
 OMNIHILBRAS_MAX_OUTPUT_TOKENS=8192
 OMNIHILBRAS_THINKING_BUDGET=4096
 OMNIHILBRAS_CACHE_ANCHOR=1
-```
-
-External savers are opt-in by URL. A request never depends on them:
-
-```bash
-OMNIHILBRAS_HEADROOM_URL=http://127.0.0.1:8788
-OMNIHILBRAS_PXPIPE_URL=http://127.0.0.1:8789
+OMNIHILBRAS_HEADROOM_URL=http://127.0.0.1:8788     # optional, opt-in by URL
+OMNIHILBRAS_PXPIPE_URL=http://127.0.0.1:8789       # optional, opt-in by URL
 ```
 
 ## Dashboard
 
-The dashboard is one React Router app mounted at `/dashboard`. Client-side navigation never reloads the
-document.
+One React Router app mounted at `/dashboard`; client-side navigation never reloads the document.
 
 | Route | Page |
 | --- | --- |
-| `/dashboard` | Gateway lifecycle, live host CPU/memory, server output and request feed |
+| `/dashboard` | Gateway lifecycle, live host CPU/memory, server output and the request feed |
 | `/dashboard/providers` | Provider catalog and connections |
-| `/dashboard/models` | Virtual `oh/` models and multi-account targets |
-| `/dashboard/models` | Virtual `oh/` models and their multi-account targets |
-| `/dashboard/providers/:providerId` | Provider overview |
+| `/dashboard/providers/:providerId` | One provider: its accounts, models and check buttons |
 | `/dashboard/providers/:providerId/usage` | Usage scoped to that provider |
+| `/dashboard/models` | Virtual `oh/` models and their multi-account targets |
 | `/dashboard/routing` | Routing order and connection state |
 | `/dashboard/keys` | Gateway API keys |
 | `/dashboard/usage` | Requests, tokens, cache and cost |
@@ -309,8 +368,8 @@ document.
 There is no Overview page: the earlier one had no data source and was removed rather than kept. `/dashboard`
 redirects to providers.
 
-A static host must send every `/dashboard/*` request to `dashboard.html`. `public/_redirects` covers Netlify and
-Cloudflare Pages; the equivalent nginx rule is:
+A static host must send every `/dashboard/*` request to `dashboard.html`. `public/_redirects` covers Netlify
+and Cloudflare Pages; the nginx equivalent is:
 
 ```nginx
 location /dashboard { try_files $uri /dashboard.html; }
@@ -322,41 +381,70 @@ The desktop shell owns the local gateway so the app can start and stop it withou
 
 - **Frameless on Windows/Linux**, with the dashboard header as the title bar and custom window controls.
   macOS keeps its traffic lights.
-- **Gateway lifecycle** — start, stop, restart, port changes and a bounded restart policy. A crash is a restart,
-  not a dead app; five consecutive crashes stop trying.
+- **Gateway lifecycle** — start, stop, restart, port changes, and a bounded restart policy: a crash is a
+  restart, not a dead app, and five consecutive crashes stop trying.
 - **Logs** stream into the dashboard over the preload bridge.
 - **Release-feed updates** — the app checks the GitHub release feed, downloads an installer, and can install
-  and restart. Windows NSIS, signed macOS and the Linux AppImage replace themselves; a `.deb` downloads and
-  opens the system installer, which asks for administrator permission.
-- **The sidebar says when an update exists**, directly under the gateway badge: a gold pill with the new
-  version, Download or Install and restart depending on what this build can do, and a **skip this version**
-  that is remembered for that release only. The desktop app reads the state its own main process already
-  keeps — it checks on launch and on a timer — and a browser, which has no updater, asks GitHub for the
-  newest release and offers the release page and the install command instead of a button that would do
-  nothing. A check that fails says it failed; it never renders "up to date".
+  and restart. Windows NSIS, macOS and the Linux AppImage replace themselves; a `.deb` downloads and opens the
+  system installer. An update that cannot be proved asks first, because there is no signing key yet.
+- **The sidebar says when an update exists**, directly under the gateway badge: the new version, Download or
+  Install and restart depending on what this build can do, and a **skip this version** remembered for that
+  release only. The desktop reads the state its own main process keeps (it checks on launch and on a timer);
+  a browser, which has no updater, asks GitHub for the newest release and offers the release page and the
+  install command instead of a button that would do nothing. A check that fails says it failed — it never
+  renders "up to date".
 - **Encrypted backup** import and export through the About/Settings surfaces.
 
-The renderer never holds the dashboard token and never calls `127.0.0.1` directly. Requests, chat streams and
+The renderer never holds the dashboard token and never calls `127.0.0.1` directly: requests, chat streams and
 logs cross a narrow preload bridge. The packaged dashboard is served from `app://omnihilbras` out of `dist/`
 with a strict CSP, all permission requests denied, navigation away from the app blocked, and DevTools disabled.
 
 ## Android companion
 
-A debug Android shell lives under `android/`. It is a Capacitor WebView for the existing dashboard, not a
+A debug Android shell lives under `android/`. It is a Capacitor WebView for the existing dashboard, **not** a
 gateway on the phone. On first launch it asks for a gateway URL and a device API key, then stores both in
 Android Keystore.
 
 - Local debug: `adb reverse tcp:20138 tcp:20138`, then pair with `http://127.0.0.1:20138`.
-- Remote: use an HTTPS private tunnel or reverse proxy; plain HTTP to a non-loopback host is rejected.
-- Build: `pnpm build:android` then `pnpm android:apk`; output is
+- Remote: an HTTPS private tunnel or reverse proxy. Plain HTTP to a non-loopback host is rejected.
+- Build: `pnpm build:android` then `pnpm android:apk` →
   `android/app/build/outputs/apk/debug/app-debug.apk`.
 - Latest debug APK: `https://github.com/Hilbras/OmniHilbras/releases/latest/download/OmniHilbras-android-debug.apk`.
-- QR pairing, release signing and physical-device verification are still open. See [`android/README.md`](./android/README.md).
+- QR pairing, release signing and physical-device verification are still open — see [`android/README.md`](./android/README.md).
+
+## CLI
+
+`omnihilbras` with no verb starts the gateway and the dashboard. With a verb it **asks a running gateway
+something** — what a script or an agent needs and a page cannot give. Every verb takes `--json`, which prints
+the answer as data and nothing else.
+
+| Verb | What it does |
+| --- | --- |
+| `setup` | First run: what is missing, install it (showing the command first), install the `omnihilbras` command, start the servers |
+| `doctor` | The same checks as a report that **changes nothing** — safe in a script or on someone else's machine |
+| `status` | Is the gateway up, what version, which providers are unhealthy (`--strict` exits `1`) |
+| `providers` | Every saved account: enabled, priority, credential kind, models, ejection, last error |
+| `models` | The served model ids, grouped by provider prefix — what you paste into a client |
+| `test` | Probe one account, or all accounts of a provider (the repository's account walk at the limit of one request) |
+| `keys` | Key metadata; `--mint` creates one and prints the secret once |
+| `routing` | Live routing state: failures, ejection, waits, latency, strategy (`--problems` narrows) |
+| `logs` | Follow finished requests — model, provider, account, outcome, attempts, error code |
+
+```bash
+omnihilbras status
+omnihilbras providers zcode
+omnihilbras test zcode --json
+omnihilbras routing --problems
+```
+
+Each verb calls a route the gateway already serves, so the CLI and the dashboard cannot drift into two
+opinions. It has **no dependencies**, and asking what it does starts nothing: `omnihilbras help` reads a
+string and exits. Full reference: [`docs/CLI.md`](./docs/CLI.md).
 
 ## Configuration
 
-The gateway is configured by environment variables. The full list is in [`docs/SPEC-SDK.md`](./docs/SPEC-SDK.md);
-the ones most people change:
+Configured by environment variables; the full list is in [`docs/SPEC-SDK.md`](./docs/SPEC-SDK.md). The ones
+most people change:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -369,49 +457,45 @@ the ones most people change:
 | `OMNIHILBRAS_THINKING_BUDGET` | none | Thinking-budget cap where supported |
 | `OMNIHILBRAS_HISTORY_TRIM_TOKENS` | none | Trim whole old turns above this estimate |
 | `OMNIHILBRAS_CACHE_ANCHOR` | off | Re-anchor provider cache breakpoints |
-| `OMNIHILBRAS_HEADROOM_URL` | none | Optional external compressor |
-| `OMNIHILBRAS_PXPIPE_URL` | none | Optional Anthropic image-context hook |
+| `OMNIHILBRAS_HEADROOM_URL` / `OMNIHILBRAS_PXPIPE_URL` | none | Optional external savers |
+| `OMNIHILBRAS_MAX_CONNECTIONS` | 250 | How many connections a vault holds |
+| `OMNIHILBRAS_MAX_METADATA_BYTES` | 4 MiB | How large the metadata file may grow |
+| `OMNIHILBRAS_FAILURE_THRESHOLD` | 3 | Consecutive failures before a connection is ejected |
 
-Secrets are read from the environment or the encrypted vault. A credential must never be committed, pasted into
-an issue, or written to browser storage.
+Secrets are read from the environment or the encrypted vault. A credential must never be committed, pasted
+into an issue, or written to browser storage.
 
 ## Security and privacy
 
-- **Loopback by default.** `OMNIHILBRAS_HOST` is validated as a loopback address more than once, so a typo or a
-  second code path cannot widen the listener silently.
-- **Encrypted vault.** Provider credentials are written atomically with owner-only permissions; the vault is
-  encrypted at rest. Backups use AES-256-GCM with a scrypt-derived key and are unreadable without the passphrase.
-- **No credential in browser storage.** Every `localStorage`/`sessionStorage` key is on a two-entry allowlist;
-  `sessionStorage`, `document.cookie` writes, IndexedDB and the Cache API are asserted at zero.
-- **No secret-shaped string in the tree.** `tests/no-secrets.test.js` scans tracked files for credential shapes
-  on every push.
+- **Loopback by default.** `OMNIHILBRAS_HOST` is validated as a loopback address in more than one place, so a
+  typo or a second code path cannot widen the listener silently.
+- **Encrypted vault.** Credentials are written atomically with owner-only permissions and encrypted at rest.
+  Backups use AES-256-GCM with a scrypt-derived key and are unreadable without the passphrase.
+- **No credential in browser storage.** Every `localStorage`/`sessionStorage` key is on a short allowlist of
+  display preferences, and `sessionStorage`, `document.cookie` writes, IndexedDB and the Cache API are
+  asserted at zero by a test that splits camelCase so `apiKey` cannot slip past.
+- **No secret-shaped string in the tree.** Every tracked file is scanned for credential shapes on each push.
 - **Fail closed on bad configuration.** A malformed cap, URL or master key is a startup error, not a silent
   fallback.
-- **Optional services fail open.** Headroom and PXPIPE time out and leave the request untouched; a skipped saver
-  is reported as skipped, not as a saving.
+- **Optional services fail open.** Headroom and PXPIPE time out and leave the request untouched; a skipped
+  saver is reported as skipped, never as a saving.
 
-The full threat model and known limits are in [`SECURITY.md`](./SECURITY.md).
+The threat model, what was audited, and the limits that remain are in [`SECURITY.md`](./SECURITY.md).
 
-## CLI
+## Current state
 
-`omnihilbras` with no verb starts the gateway and the dashboard. With a verb it **asks a running gateway
-something**, which is what a script or an agent needs and a page cannot give:
+This section exists because the rest of the file describes what *should* happen, and these are the parts that
+are known not to:
 
-```bash
-omnihilbras setup               # first run: check the tools, install what is missing
-omnihilbras status              # is it up, what is it, what is wrong with it
-omnihilbras providers zcode     # the accounts of a provider, and which are usable
-omnihilbras test zcode          # probe every account of that provider
-omnihilbras routing --problems  # who is ejected, who is waiting
-omnihilbras logs                # follow finished requests
-```
-
-Every verb takes `--json` and prints the answer as data and nothing else, so a script never parses a
-table. Each one calls a route the gateway already serves, so the CLI and the dashboard cannot drift into
-two opinions about the same thing. It has no dependencies, and asking it what it does starts nothing —
-`omnihilbras help` reads a string and exits.
-
-Full reference, including the authentication the management routes require: [`docs/CLI.md`](./docs/CLI.md).
+- **Installers are unsigned.** Windows and macOS builds prompt on first launch, and the updater asks before
+  installing anything it cannot prove. Verifying properly needs signing keys, which do not exist yet.
+- **A few routing guards in the gateway suite are red**, and have been since before the current work. They are
+  recorded rather than hidden, and they are the next thing worth fixing — a red guard that nobody reads is
+  how a real defect survives a green build.
+- **`proxyPool` has no transport.** A non-`none` pool is refused rather than ignored, so a provider that flags
+  several accounts on one address cannot be fully answered from inside the app.
+- **The npm package is the client only**; the server is the desktop app or a checkout.
+- **The Android build is a debug shell** — no release signing, no physical-device verification yet.
 
 ## Development
 
@@ -427,25 +511,26 @@ pnpm verify           # version, brand, typecheck, test, SPEC guard, build, bund
 pnpm release:audit    # every tag: pushed, released on GitHub, published to npm
 ```
 
-`pnpm verify` is the release gate. It is the same command CI runs, in the order that fails fastest.
+`pnpm verify` is the release gate: the same command CI runs, in the order that fails fastest.
 
 ### Tests are guards, not decoration
 
-The repository has a large test suite, but the important part is what the guards assert: provider cards do not
-invent measurements, credentials never reach browser storage, every served gateway route has a SPEC line, every
-tag is on `main`, every rendered provider mark is committed, and an update feed missing `latest.yml` fails instead
+The suite is large, but the important part is what the guards assert: provider cards do not invent
+measurements, credentials never reach browser storage, every served gateway route has a spec line, every tag
+is on `main`, every rendered provider mark is committed, and an update feed missing `latest.yml` fails instead
 of looking healthy.
 
-A guard is not considered real until it has been made to fail on the thing it forbids. Several tests in this
-repository record the mutation that first proved them blind; keep that habit when adding one.
+A guard is not considered real until it has been **made to fail** on the thing it forbids. Several tests here
+record the mutation that first proved them blind; keep that habit when adding one.
 
 ## Documentation
 
 | Document | What it covers |
 | --- | --- |
 | [`docs/SPEC-SDK.md`](./docs/SPEC-SDK.md) | Gateway routes, provider contract, rejection shapes and success criteria |
-| [`docs/INSTALL.md`](./docs/INSTALL.md) | Installing, the first-run check, and uninstalling every version on a machine |
 | [`docs/CLI.md`](./docs/CLI.md) | The `omnihilbras` verbs, their flags, the auth they use and the exit codes they return |
+| [`docs/INSTALL.md`](./docs/INSTALL.md) | Installing, the first-run check, and uninstalling every version on a machine |
+| [`NPM-PUBLISH.md`](./NPM-PUBLISH.md) | What is published, how, and how to confirm it actually landed |
 | [`docs/architecture/README.md`](./docs/architecture/README.md) | Measured architecture, layer boundaries and provider-specific surface |
 | [`docs/architecture/embeddings-plan.md`](./docs/architecture/embeddings-plan.md) | Embeddings design and dispatch rules |
 | [`docs/reports/`](./docs/reports/) | Performance, reliability, release readiness and provider test reports |
