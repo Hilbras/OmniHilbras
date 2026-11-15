@@ -1,4 +1,5 @@
 import { startGatewayServer } from './server.js';
+import { ensureOpencodeService, resolveOpencodeBinary, stopOpencodeService } from './core/opencode-runtime.js';
 
 /**
  * Shutdown state, declared before anything can fail.
@@ -28,12 +29,30 @@ let markReady: () => void = () => {};
 const ready = new Promise<void>((resolve) => { markReady = resolve; });
 
 const close = (code: number) => {
+  /**
+   * The OpenCode instance this gateway owns is stopped here, and only if we started it.
+   *
+   * Before this, nothing stopped it: the service was borrowed, so leaving it running was the rule. An
+   * instance we own is part of our server, and a server that leaves a child behind after it exits is a
+   * process the next start has to guess about. `stopOpencodeService` reads our own pid file and checks
+   * the command line before signalling, so the user's own OpenCode app is never touched.
+   *
+   * Started here so it runs *alongside* the drain, and awaited before the exit — not fired and forgotten.
+   * The first version was `void stopOpencodeService()`, and it never stopped anything: the drain finishes in
+   * a few milliseconds, `process.exit` runs, and the pending `readFile`/`kill` work died with the process.
+   * Measured: the instance was still alive and still listening after the gateway exited.
+   *
+   * Its wait is bounded internally (SIGTERM, then up to five seconds, then SIGKILL), so awaiting it cannot
+   * outlast the drain's own five-second deadline by much.
+   */
+  const stoppingService = stopOpencodeService().catch(() => undefined);
+
   // The server stops accepting first, then the service drains. That order is the contract: the
   // key store's drain loops until nothing is in flight, which terminates on an idle queue and not
   // on a busy one, so it must not run while requests are still arriving.
   const server = instance!.server;
   server.close(() => {
-    void instance!.service.close().then(() => process.exit(code));
+    void stoppingService.then(() => instance!.service.close()).then(() => process.exit(code));
   });
   // A log stream or an open SSE answer never becomes idle, so `server.close()` waits forever and the
   // drain never starts. Idle sockets are dropped at once; anything still open gets a bounded grace
@@ -66,4 +85,29 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 instance = await startGatewayServer();
 markReady();
+
+/**
+ * Our OpenCode instance starts with the gateway.
+ *
+ * The provider used to be lazy: `auto` started the service when a request needed it, so the state a
+ * person saw in the dashboard was "installed, not running" and pressing a button was the only way to
+ * find out it worked. A server that owns a dependency should start it — the browser surface then reports
+ * a running service because it *is* running.
+ *
+ * Off by request, and silent when there is nothing to start: `OMNIHILBRAS_OPENCODE_SERVICE=off` means
+ * "never", and a machine with no runtime at all is a state the dashboard reports rather than an error a
+ * boot should fail on. Starting it does not block the server: the gateway is already accepting.
+ */
+void (async () => {
+  try {
+    const env = process.env;
+    if ((env.OMNIHILBRAS_OPENCODE_SERVICE ?? 'auto').trim().toLowerCase() === 'off') return;
+    if (!(await resolveOpencodeBinary())) return;
+    await ensureOpencodeService();
+  } catch (error) {
+    // A runtime that will not start is the provider's problem, reported when it is used, not a reason for
+    // the gateway to die at boot.
+    console.error(`OmniHilbras gateway: the OpenCode runtime did not start. ${error instanceof Error ? error.message : String(error)}`);
+  }
+})();
 console.log(`OmniHilbras gateway listening on http://${instance.config.host}:${instance.config.port}`);
