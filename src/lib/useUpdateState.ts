@@ -73,7 +73,32 @@ function writeSkippedVersion(version: string | undefined) {
 let releaseCache: { at: number; state: UpdateState } | undefined;
 let inFlight: Promise<UpdateState> | undefined;
 
+/**
+ * A dev-only way to look at the notice.
+ *
+ * The notice renders only when a newer release exists, and every release bumps the version — so the state
+ * this card exists to show is the one state a developer cannot reach: on the newest checkout the comparison
+ * is always equal and the card is always invisible. `?update-preview=3.53.0` is the notice, offline and
+ * deterministic. `import.meta.env.DEV` is `false` in every build, so this cannot exist in a shipped
+ * dashboard, and the state it produces says a preview was asked for rather than presenting a version as a
+ * release that was checked.
+ */
+function previewVersion(): string | undefined {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return undefined;
+  const asked = new URLSearchParams(window.location.search).get('update-preview')?.trim();
+  return asked && /^\d/.test(asked) ? asked : undefined;
+}
+
 async function fetchLatestRelease(): Promise<UpdateState> {
+  // Before the cache and before the request: a preview that needed the network would report GitHub's rate
+  // limit instead of the card.
+  const preview = previewVersion();
+  if (preview) {
+    return compareVersions(preview, repoVersion) > 0
+      ? { status: 'available', version: preview.replace(/^v/i, ''), canInstall: false, reason: `Preview of the update notice (update-preview=${preview}). No release was checked.` }
+      : { status: 'current' };
+  }
+
   const now = Date.now();
   if (releaseCache && now - releaseCache.at < RELEASE_CACHE_MS) return releaseCache.state;
   if (inFlight) return inFlight;

@@ -90,6 +90,19 @@ test('the notice is re-checked, and can be dismissed for one version only', () =
   assert.match(hook, /version === skipped/, 'and compared by value, not as a boolean flag');
 });
 
+test('the notice can be looked at in dev, and the preview cannot ship', () => {
+  const hook = read('src/lib/useUpdateState.ts');
+  /**
+   * The card's own state was unreachable. It renders only when a newer release exists, and every release
+   * bumps the version, so on the newest checkout the comparison is always equal and the notice is always
+   * invisible — the one state a person working on it can never see. The preview exists for that, and these
+   * assertions are about it not becoming a way to claim a version that was never published.
+   */
+  assert.match(hook, /if \(!import\.meta\.env\.DEV \|\| typeof window === 'undefined'\) return undefined;/, 'the preview is dev-only');
+  assert.match(hook, /'update-preview'/, 'and reachable by query parameter');
+  assert.match(hook, /No release was checked/, 'and says so, rather than presenting a preview as a release');
+});
+
 test('the notice lives in the sidebar, next to the gateway badge', () => {
   const shell = read('src/components/DashboardShell.tsx');
   const badge = shell.indexOf('aria-label={gatewayLabel}');
