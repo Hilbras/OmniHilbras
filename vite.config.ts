@@ -259,8 +259,25 @@ function gatewayProxy(): Plugin {
           upstream.headers.forEach((value, name) => {
             if (name !== 'content-encoding' && name !== 'transfer-encoding') response.setHeader(name, value);
           });
-          if (upstream.body) Readable.fromWeb(upstream.body as import('node:stream/web').ReadableStream).pipe(response);
-          else response.end();
+          if (upstream.body) {
+            const source = Readable.fromWeb(upstream.body as import('node:stream/web').ReadableStream);
+            /**
+             * The upstream can die mid-body, and without this the dev server dies with it.
+             *
+             * Restarting the gateway — `pnpm dev:gateway`, which happens constantly while working on it —
+             * with a request or the log stream open makes the source emit an error. A piped stream with no
+             * `error` listener does not fail the request: it is an **unhandled error event**, and Node exits.
+             * Measured three times in one session: the dashboard's dev server gone, its log ending
+             * `TypeError: terminated` / `[cause]: SocketError: other side closed` / `[ELIFECYCLE] Command
+             * failed with exit code 1`, always right after a gateway restart.
+             *
+             * So the error ends this one response and nothing else. The request is already half-answered and
+             * half-answering it is not possible; what must not happen is the whole server going with it.
+             */
+            source.on('error', () => { if (!response.writableEnded) response.end(); });
+            response.on('close', () => source.destroy());
+            source.pipe(response);
+          } else response.end();
         } catch {
           response.statusCode = 502;
           response.setHeader('content-type', 'application/json');

@@ -47,3 +47,26 @@ test('a completion without reasoning does not invent the field', () => {
   assert.equal('reasoning_content' in body.choices[0].message, false);
   assert.equal('usage' in body, false);
 });
+
+test('a chat reply names the account that served, and never invents one', () => {
+  /**
+   * `provider` alone cannot say which member of a virtual model answered: its targets are *accounts*, and two
+   * targets of one provider are indistinguishable by provider id. The value comes from the failover ledger, so
+   * it is the account that actually served rather than the one that was planned — and with no ledger entry the
+   * field is absent, not guessed.
+   */
+  const completion = {
+    id: 'chatcmpl-test',
+    providerId: 'opencode-console',
+    model: 'beam-free',
+    createdAt: '2026-11-15T00:00:00.000Z',
+    message: { role: 'assistant', content: 'ok' },
+    finishReason: 'stop',
+  };
+  const served = toOpenAICompletion(completion, 'opencode-console-2');
+  assert.equal(served.provider, 'opencode-console');
+  assert.equal(served.connection, 'opencode-console-2');
+
+  const unrecorded = toOpenAICompletion(completion);
+  assert.equal('connection' in unrecorded, false, 'absent rather than invented');
+});

@@ -899,6 +899,66 @@ export async function testGatewayModel(providerId: string, model: string, option
   } satisfies GatewayModelTestResult;
 }
 
+export type GatewayVirtualModelProbe = {
+  /** The provider that answered. */
+  provider: string;
+  /** The account that answered, when the gateway named one. Absent is never invented. */
+  connection?: string;
+  /** The upstream model that answered — not the `oh/` id that was asked for. */
+  model: string;
+  /** Whether the member actually produced a turn: text, reasoning, or a tool call. */
+  ok: boolean;
+  latencyMs: number;
+  content: string;
+  /** Said when the member answered without visible text (a reasoning-only reply, or an empty body). */
+  note?: string;
+};
+
+/**
+ * Runs **the combo's own routing**: one tiny turn to `oh/<id>`, with no provider and no account pinned.
+ *
+ * That is the difference between this and `testGatewayModel`, which names an account to spend. Here the
+ * combo decides, and the reply's `provider`/`connection`/`model` are the gateway's own report of which member
+ * answered — the only honest way to show routing working, since a page that picked a member itself would be
+ * testing the page. A real turn is spent (a few tokens) and billed to whichever member answers.
+ */
+export async function testGatewayVirtualModel(model: string, options?: { signal?: AbortSignal; maxTokens?: number }): Promise<GatewayVirtualModelProbe> {
+  const startedAt = Date.now();
+  const maxTokens = options?.maxTokens ?? MODEL_TEST_MAX_TOKENS;
+  const body = await requestJson<unknown>('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: 'hi' }],
+      max_tokens: maxTokens,
+      stream: false,
+    }),
+    ...(options?.signal ? { signal: options.signal } : {}),
+  });
+  if (!isRecord(body) || body.object !== 'chat.completion' || !Array.isArray(body.choices)) {
+    throw new Error('The gateway returned an invalid model test response.');
+  }
+  const choice = body.choices[0];
+  if (!isRecord(choice) || !isRecord(choice.message)) throw new Error('The gateway returned an invalid model test response.');
+  const content = typeof choice.message.content === 'string' ? choice.message.content.trim() : '';
+  const reasoning = readReasoning(choice.message);
+  const ok = Boolean(content) || Boolean(reasoning) || hasToolCalls(choice.message);
+  return {
+    provider: typeof body.provider === 'string' ? body.provider : '',
+    ...(typeof body.connection === 'string' ? { connection: body.connection } : {}),
+    model: typeof body.model === 'string' ? body.model : model,
+    ok,
+    latencyMs: Math.max(0, Date.now() - startedAt),
+    content,
+    ...(!ok
+      ? { note: choice.finish_reason === 'length' ? 'The member spent the whole test budget without producing anything.' : 'The member answered with an empty body.' }
+      : !content
+        ? { note: 'Reasoning-only reply — the member answered, using its whole budget to think.' }
+        : {}),
+  };
+}
+
 export function addGatewayConnectionModels(connectionId: string, modelIds: string[], signal?: AbortSignal) {
   return requestJson<{ connection: GatewayConnection }>(`/v1/connections/${encodeURIComponent(connectionId)}/models`, {
     method: 'POST',

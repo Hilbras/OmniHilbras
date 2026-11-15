@@ -572,6 +572,11 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
   version is therefore reported, not mistaken for an account with no models. `POST
   /v1/connections/:id/models/refresh` re-reads it on demand from the provider page.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
+  **The reply names who answered:** `provider`, and `connection` — the *account* — taken from the failover
+  ledger, so it is the account that actually served rather than the one that was planned. That is what lets a
+  virtual model report which of its members answered: its targets are accounts, and two targets of one provider
+  are indistinguishable by provider id. `gateway.requestId` is always present, and `gateway.attempts` appears
+  when more than one attempt was made, so a hand-off can be read rather than inferred.
   The body limit is **32 MiB**, not the 1 MiB it used to be, and
   `OMNIHILBRAS_MAX_BODY_BYTES` overrides it. This was a real failure, not a precaution: a coding
   agent's turn — repository context, tool schemas, prior messages — is bigger than 1 MiB, and the

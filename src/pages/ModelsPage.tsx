@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Activity,
   Boxes,
   LoaderCircle,
   Pencil,
+  Play,
   Plus,
   RefreshCw,
   Sparkles,
@@ -10,12 +12,15 @@ import {
   X,
 } from 'lucide-react';
 import {
+  getGatewayRoutingState,
   listGatewayConnections,
   listGatewayVirtualModels,
   removeGatewayVirtualModel,
   saveGatewayVirtualModel,
+  testGatewayVirtualModel,
   updateGatewayVirtualModel,
   type GatewayConnection,
+  type GatewayRoutingState,
   type GatewayVirtualModel,
 } from '../lib/gatewayClient';
 import { useGatewayReload } from '../lib/useGatewayStatus';
@@ -58,14 +63,31 @@ export function ModelsContent() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string>();
+  /**
+   * The live routing state, per account: measured latency, failures, ejection and rate-limit waits.
+   *
+   * It is what makes "why would this target be skipped" answerable before a request fails — the same data the
+   * Routing page shows, read here per target. Absent fields stay absent: an unmeasured account says so rather
+   * than showing a zero.
+   */
+  const [routing, setRouting] = useState<GatewayRoutingState>();
+  const [testingId, setTestingId] = useState<string>();
+  const [probes, setProbes] = useState<Record<string, { ok: boolean; text: string }>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(undefined);
     try {
-      const [nextModels, nextConnections] = await Promise.all([listGatewayVirtualModels(), listGatewayConnections()]);
+      const [nextModels, nextConnections, nextRouting] = await Promise.all([
+        listGatewayVirtualModels(),
+        listGatewayConnections(),
+        // A routing read that fails must not take the model list with it: the page still lists and edits
+        // combos, it just cannot say how each account is doing.
+        getGatewayRoutingState().catch(() => undefined),
+      ]);
       setModels(nextModels);
       setConnections(nextConnections);
+      setRouting(nextRouting);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The model catalog could not be read.');
     } finally {
@@ -130,6 +152,66 @@ export function ModelsContent() {
     }
   };
 
+  /**
+   * How one target looks right now, from the gateway's own routing state.
+   *
+   * Every branch names a real condition the router acts on (`routing.ts`): a disabled account, a missing
+   * credential, a rate-limit wait, an ejection after consecutive failures. "never measured" is its own answer,
+   * because the ledger records latency only after a success — absent and zero are different facts.
+   */
+  const statusFor = (connectionId: string): { label: string; tone: 'ok' | 'warn' | 'bad' | 'unknown' } => {
+    const entry = routing?.connections.find((candidate) => candidate.connectionId === connectionId);
+    if (!entry) return { label: 'no reading', tone: 'unknown' };
+    if (!entry.enabled) return { label: 'disabled', tone: 'bad' };
+    if (!entry.hasCredential) return { label: 'no credential', tone: 'bad' };
+    if (entry.rateLimitWaitMs !== undefined && entry.rateLimitWaitMs > 0) return { label: `rate-limited ${Math.ceil(entry.rateLimitWaitMs / 1000)}s`, tone: 'warn' };
+    if (entry.ejected) return { label: 'ejected', tone: 'bad' };
+    if (entry.failures && entry.failures > 0) return { label: `${entry.failures} failure${entry.failures === 1 ? '' : 's'}`, tone: 'warn' };
+    if (entry.latency) return { label: `${Math.round(entry.latency.latencyMs)} ms`, tone: 'ok' };
+    return { label: 'never measured', tone: 'unknown' };
+  };
+
+  const toneClass = (tone: 'ok' | 'warn' | 'bad' | 'unknown') => (tone === 'ok'
+    ? 'border-success/25 bg-success/10 text-success'
+    : tone === 'warn'
+      ? 'border-gold/30 bg-gold-soft text-gold-text'
+      : tone === 'bad'
+        ? 'border-danger/30 bg-danger/10 text-danger'
+        : 'border-line bg-bg text-muted');
+
+  /**
+   * Sends one real turn through the combo and reports which member answered.
+   *
+   * The page cannot know that itself: the whole point of a combo is that the gateway decides. So this reads
+   * the gateway's own `provider`/`connection`/`model` from the reply, and on a refusal shows the refusal
+   * instead of a member it guessed.
+   */
+  const testModel = async (model: GatewayVirtualModel) => {
+    setTestingId(model.id);
+    setError(undefined);
+    setProbes((current) => ({ ...current, [model.id]: { ok: true, text: 'Sending one turn through this combo...' } }));
+    try {
+      const result = await testGatewayVirtualModel(model.id);
+      const account = result.connection ? connectionById.get(result.connection)?.name ?? result.connection : undefined;
+      const served = [result.provider || 'unknown provider', account, result.model].filter(Boolean).join(' · ');
+      setProbes((current) => ({
+        ...current,
+        [model.id]: {
+          ok: result.ok,
+          text: result.ok
+            ? `Answered by ${served} in ${result.latencyMs} ms.${result.note ? ` ${result.note}` : ''}`
+            : `${served} answered with nothing in ${result.latencyMs} ms. ${result.note ?? ''}`.trim(),
+        },
+      }));
+      // The probe just spent a request: health and the latency ledger have moved.
+      await load();
+    } catch (cause) {
+      setProbes((current) => ({ ...current, [model.id]: { ok: false, text: cause instanceof Error ? cause.message : 'The test failed.' } }));
+    } finally {
+      setTestingId(undefined);
+    }
+  };
+
   const toggle = async (model: GatewayVirtualModel) => {
     setBusyId(model.id);
     setError(undefined);
@@ -169,9 +251,23 @@ export function ModelsContent() {
           <p className="eyebrow"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> Virtual models</p>
           <h1 className="mt-2 text-xl font-semibold tracking-[-0.03em] sm:text-2xl">One id, many accounts.</h1>
           <p className="muted mt-1.5 max-w-2xl text-sm">A virtual model starts with <code className="font-mono text-gold-text">oh/</code> and routes to the targets below. Disable it to stop using the alias without deleting its targets.</p>
+          {/* The three strategies, in the page rather than only in a select: which one is set decides what the
+              order below means, and the reference project put the same legend above its list. */}
+          <dl className="muted mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+            {strategies.map((strategy) => (
+              <div key={strategy.value} className="flex items-baseline gap-1.5">
+                <dt className="font-semibold text-gold-text">{strategy.label}</dt>
+                <dd>{strategy.hint}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => void load()} className="btn-ghost !px-3 !py-2 !text-xs"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />Refresh</button>
+          <span className="muted hidden items-center gap-1 text-[11px] sm:flex" title="Test sends one real turn and reports which member answered">
+            <Activity className="h-3.5 w-3.5 text-gold-text" aria-hidden="true" />
+            {routing ? `${routing.connections.filter((entry) => entry.hasCredential && entry.enabled).length} accounts routable` : ''}
+          </span>
           <button type="button" onClick={openCreate} disabled={connections.length === 0} className="btn-gold !px-3 !py-2 !text-xs disabled:cursor-not-allowed disabled:opacity-40"><Plus className="h-3.5 w-3.5" aria-hidden="true" />Create model</button>
         </div>
       </div>
@@ -211,12 +307,37 @@ export function ModelsContent() {
                 <ul className="mt-4 flex-1 space-y-2">
                   {model.targets.map((target, index) => (
                     <li key={`${target.connectionId}-${target.upstreamModelId}-${index}`} className="flex items-center justify-between gap-2 rounded-lg border border-line bg-bg-soft px-2.5 py-2 font-mono text-[10px]">
-                      <span className="truncate">{connectionById.get(target.connectionId)?.name ?? target.connectionId}</span>
-                      <span className="muted truncate text-right">{target.upstreamModelId}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{connectionById.get(target.connectionId)?.name ?? target.connectionId}</span>
+                        <span className="muted block truncate">{target.upstreamModelId}</span>
+                      </span>
+                      {(() => {
+                        const status = statusFor(target.connectionId);
+                        return (
+                          <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] ${toneClass(status.tone)}`} title="Live routing state for this account">
+                            {status.label}
+                          </span>
+                        );
+                      })()}
                     </li>
                   ))}
                 </ul>
+                {probes[model.id] && (
+                  <p className={`mt-3 rounded-lg border px-2.5 py-2 text-[10px] leading-relaxed ${probes[model.id].ok ? 'border-line bg-bg-soft text-muted' : 'border-danger/30 bg-danger/10 text-danger'}`}>
+                    {probes[model.id].text}
+                  </p>
+                )}
                 <div className="mt-4 flex items-center justify-end gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void testModel(model)}
+                    disabled={busy || testingId === model.id || !model.enabled}
+                    title={model.enabled ? 'Sends one real turn through this combo and names the member that answers. A few tokens, billed to that member.' : 'Enable this model to test it.'}
+                    className="btn-ghost !px-2.5 !py-1.5 !text-[11px]"
+                  >
+                    {testingId === model.id ? <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden="true" /> : <Play className="h-3 w-3" aria-hidden="true" />}
+                    {testingId === model.id ? 'Testing' : 'Test'}
+                  </button>
                   <button type="button" onClick={() => openEdit(model)} disabled={busy} className="btn-ghost !px-2.5 !py-1.5 !text-[11px]"><Pencil className="h-3 w-3" aria-hidden="true" />Edit</button>
                   <button type="button" onClick={() => void remove(model)} disabled={busy} className="btn-ghost !px-2.5 !py-1.5 !text-[11px] text-danger"><Trash2 className="h-3 w-3" aria-hidden="true" />Delete</button>
                 </div>

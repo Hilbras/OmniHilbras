@@ -634,7 +634,7 @@ async function handleChatRequest(input: {
       ledger: attempts,
     });
     sendJson(response, 200, {
-      ...toOpenAICompletion(completion),
+      ...toOpenAICompletion(completion, serving?.connectionId),
       // Always present, even on a success with one attempt. A client that was refused gets it from
       // the error; a client that succeeded and wants to quote a conversation gets it from here.
       gateway: { requestId: scope.id, ...(attempts.length > 1 ? { attempts: attempts.map(toPublicAttempt) } : {}) },
@@ -1116,13 +1116,22 @@ export function getExplicitConnectionId(request: IncomingMessage, body: unknown)
 
 /** A pasted secret, bounded, and rejected rather than coerced when it is absent. */
 
-export function toOpenAICompletion(response: ChatResponse) {
+/**
+ * The OpenAI-shaped body, plus the two facts about who answered.
+ *
+ * `provider` was already here. `connection` — the *account* — is added because a provider can hold several
+ * accounts and, for a virtual model whose targets are accounts, naming the provider alone cannot say which
+ * member served: two targets of one provider are indistinguishable. Taken from the failover ledger, so it is
+ * the account that actually answered rather than the one that was planned.
+ */
+export function toOpenAICompletion(response: ChatResponse, servingConnectionId?: string) {
   return {
     id: response.id,
     object: 'chat.completion',
     created: Math.floor(Date.parse(response.createdAt) / 1000),
     model: response.model,
     provider: response.providerId,
+    ...(servingConnectionId ? { connection: servingConnectionId } : {}),
     choices: [{
       index: 0,
       message: {

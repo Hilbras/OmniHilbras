@@ -64,6 +64,24 @@ function buildService(adapters, store, options, apiKeys = new InMemoryApiKeyStor
 
 const chatRequest = { model: 'shared/model', messages: [{ role: 'user', content: 'hi' }] };
 
+/**
+ * Every call in this file passes a signal, and that is not decoration.
+ *
+ * `chatWithFailover` answers a repeated **identical, signal-less** request from a 30-second response cache
+ * (`service.ts:3354` — `cacheable` requires `!signal`), which is deliberate: the HTTP layer always passes an
+ * abort signal, so no real client is ever served from it. These tests advance routing state by calling the
+ * service twice with the same body and no signal, which is exactly the shape the cache treats as cacheable —
+ * so the second call was answered from the cache and never reached `plan()` at all. All five of the routing
+ * assertions that had been failing were reading a cache hit as a routing decision:
+ *
+ *     before: the second call returned `attempts: []` with the primary called once
+ *     after:  the routing state advances, and every assertion in this file passes
+ *
+ * `account-rotation.test.js` and `allowance-does-not-eject.test.js` already passed a signal for this reason.
+ */
+const signal = () => new AbortController().signal;
+
+
 test('a failing primary retries its own budget before failing over', async () => {
   const calls = [];
   let primaryCalls = 0;
@@ -82,7 +100,7 @@ test('a failing primary retries its own budget before failing over', async () =>
   const apiKeys = new InMemoryApiKeyStore();
   const service = buildService([primary, backup], store);
 
-  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined);
+  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(response.providerId, 'primary');
   assert.equal(primaryCalls, 2, 'the retry budget is spent on the primary');
   assert.deepEqual(attempts.map((attempt) => `${attempt.providerId}#${attempt.attempt}:${attempt.ok ? 'ok' : attempt.errorCode}`), ['primary#1:PROVIDER_TIMEOUT', 'primary#2:ok']);
@@ -96,7 +114,7 @@ test('a retryable failure fails over to the next priority connection', async () 
   const store = await storeWith([{ id: 'primary', priority: 1, resilience: { maxRetries: 0 } }, { id: 'backup', priority: 2 }]);
   const service = buildService([primary, backup], store);
 
-  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined);
+  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(response.providerId, 'backup');
   assert.equal(response.message.content, 'hello from backup');
   assert.deepEqual(attempts.map((attempt) => `${attempt.providerId}:${attempt.ok ? 'ok' : attempt.errorCode}`), ['primary:PROVIDER_UNAVAILABLE', 'backup:ok']);
@@ -110,7 +128,7 @@ test('auth and validation failures fail over immediately without retrying', asyn
     const store = await storeWith([{ id: 'primary', priority: 1, resilience: { maxRetries: 3 } }, { id: 'backup', priority: 2 }]);
     const service = buildService([primary, backup], store);
 
-    await assert.rejects(() => service.chatWithFailover(chatRequest, undefined), (error) => error instanceof ProviderError && error.code === code);
+    await assert.rejects(() => service.chatWithFailover(chatRequest, undefined, signal()), (error) => error instanceof ProviderError && error.code === code);
     assert.equal(calls.filter((call) => call.provider === 'primary').length, 1, `${code} is attempted once`);
     assert.equal(calls.filter((call) => call.provider === 'backup').length, 0, `${code} does not fail over`);
   }
@@ -123,7 +141,7 @@ test('when every route fails the client gets one clear gateway error', async () 
   const service = buildService([failing('alpha'), failing('beta')], store);
 
   await assert.rejects(
-    () => service.chatWithFailover(chatRequest, undefined),
+    () => service.chatWithFailover(chatRequest, undefined, signal()),
     (error) => {
       assert.ok(error instanceof ProviderError);
       assert.equal(error.code, 'PROVIDER_UNAVAILABLE');
@@ -148,19 +166,19 @@ test('a connection is ejected after consecutive failures and recovers on success
   const service = buildService([primary, backup], store, { failureThreshold: 2, recoveryCooldownMs: 5_000, now: () => now });
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const outcome = await service.chatWithFailover(chatRequest, undefined);
+    const outcome = await service.chatWithFailover(chatRequest, undefined, signal());
     assert.equal(outcome.response.providerId, 'backup', 'failover covers the failing primary');
   }
   const beforeEjection = calls.filter((call) => call.provider === 'primary').length;
   assert.equal(beforeEjection, 2, 'the threshold is reached after two consecutive failures');
 
-  const afterEjection = await service.chatWithFailover(chatRequest, undefined);
+  const afterEjection = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(afterEjection.response.providerId, 'backup');
   assert.equal(calls.filter((call) => call.provider === 'primary').length, beforeEjection, 'the ejected primary is skipped entirely');
 
   primaryHealthy = true;
   now += 6_000;
-  const recovered = await service.chatWithFailover(chatRequest, undefined);
+  const recovered = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(recovered.response.providerId, 'primary', 'a recovered provider rejoins after the cooldown');
 });
 
@@ -176,7 +194,7 @@ test('a per-connection timeout fails over as a retryable error', async () => {
   const store = await storeWith([{ id: 'primary', priority: 1, resilience: { maxRetries: 0, timeoutMs: 20 } }, { id: 'backup', priority: 2 }]);
   const service = buildService([primary, backup], store);
 
-  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined);
+  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(response.providerId, 'backup');
   assert.equal(attempts[0].errorCode, 'PROVIDER_TIMEOUT');
 });
@@ -188,9 +206,9 @@ test('a per-connection rate limit hands off to the next route', async () => {
   const store = await storeWith([{ id: 'primary', priority: 1, resilience: { maxRetries: 0, requestsPerMinute: 1 } }, { id: 'backup', priority: 2 }]);
   const service = buildService([primary, backup], store);
 
-  const first = await service.chatWithFailover(chatRequest, undefined);
+  const first = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(first.response.providerId, 'primary');
-  const second = await service.chatWithFailover(chatRequest, undefined);
+  const second = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(second.response.providerId, 'backup', 'the limited connection steps aside');
   assert.equal(calls.filter((call) => call.provider === 'primary').length, 1, 'the limit is enforced');
 });
@@ -205,7 +223,7 @@ test('only the connection that owns the model is used when several share it', as
   ]);
   const service = buildService([openrouter, backup], store);
 
-  const { response } = await service.chatWithFailover(chatRequest, undefined);
+  const { response } = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(response.providerId, 'openrouter');
   assert.equal(calls.filter((call) => call.provider === 'backup').length, 0, 'an unrelated provider stays out of the chain');
 });
@@ -216,9 +234,36 @@ test('an explicit provider pin is served even when the model is not catalogued',
   const store = await storeWith([{ id: 'primary', priority: 1, modelIds: ['shared/model'] }]);
   const service = buildService([primary], store);
 
-  const { response } = await service.chatWithFailover({ ...chatRequest, model: 'unlisted/model' }, 'primary');
+  const { response } = await service.chatWithFailover({ ...chatRequest, model: 'unlisted/model' }, 'primary', signal());
   assert.equal(response.providerId, 'primary');
   assert.equal(response.model, 'unlisted/model');
+});
+
+test('a failing account is retried a bounded number of times, then routing moves on', async () => {
+  /**
+   * "No unbounded retries", pinned by counting.
+   *
+   * `maxRetries: 2` means three attempts on that route at most — `request-executor.ts:353` loops
+   * `attempt <= candidate.resilience.maxRetries + 1`, and `retry-policy.ts:142` hands the request to the next
+   * route once that count is reached. The failure mode this guards is a policy that keeps retrying the same
+   * dead account while the request waits, which is worse than failing: the caller pays the timeout.
+   */
+  const calls = [];
+  const primary = chattyAdapter('primary', { calls, fail: async (id) => { if (id === 'primary') throw new ProviderError('PROVIDER_UNAVAILABLE', 'down', { retryable: true }); } });
+  const backup = chattyAdapter('backup', { calls });
+  const store = await storeWith([
+    { id: 'primary', priority: 1, resilience: { maxRetries: 2 } },
+    { id: 'backup', priority: 2 },
+  ]);
+  const service = buildService([primary, backup], store);
+
+  const { response } = await service.chatWithFailover(chatRequest, undefined, signal());
+  assert.equal(response.providerId, 'backup', 'the request still succeeds, on the next route');
+  assert.equal(
+    calls.filter((entry) => entry.provider === 'primary').length,
+    3,
+    'the failing account is tried three times — the first attempt plus two retries — and no more',
+  );
 });
 
 test('streaming fails over only before the first chunk is sent', async () => {
@@ -272,7 +317,7 @@ test('background health polling marks a provider unhealthy without a request', a
   assert.equal(primaryState.ejected, true, 'an unhealthy provider is marked ejected in the dashboard view');
   assert.match(primaryState.lastError ?? '', /PROVIDER_UNAVAILABLE/);
 
-  const { response } = await service.chatWithFailover(chatRequest, undefined);
+  const { response } = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(response.providerId, 'backup', 'an unhealthy provider is skipped');
   service.stopHealthMonitor();
 });
@@ -360,7 +405,7 @@ test('a slow leader is hedged and the faster route wins', async () => {
   const service = buildService([slow, fast], store);
 
   const startedAt = Date.now();
-  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined);
+  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined, signal());
   const elapsed = Date.now() - startedAt;
 
   assert.equal(response.providerId, 'fast', 'the hedge wins when it is faster');
@@ -381,7 +426,7 @@ test('a fast leader is never hedged', async () => {
   const store = await storeWith([{ id: 'quick', priority: 1, resilience: { maxRetries: 0, hedgeAfterMs: 200 } }, { id: 'backup', priority: 2 }]);
   const service = buildService([quick, backup], store);
 
-  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined);
+  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(response.providerId, 'quick');
   assert.equal(calls.filter((call) => call.provider === 'backup').length, 0, 'the backup is never contacted');
   assert.equal(attempts.length, 1, 'a single attempt needs no trace');
@@ -397,7 +442,7 @@ test('hedging is skipped when only one connection can serve the model', async ()
   ]);
   const service = buildService([only, other], store);
 
-  const { response } = await service.chatWithFailover(chatRequest, undefined);
+  const { response } = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(response.providerId, 'only');
   assert.equal(calls.filter((call) => call.provider === 'other').length, 0, 'an unrelated provider is not raced in');
 });
@@ -414,7 +459,7 @@ test('a hedged request still returns the leader when it wins', async () => {
   const store = await storeWith([{ id: 'leader', priority: 1, resilience: { maxRetries: 0, hedgeAfterMs: 30 } }, { id: 'backup', priority: 2 }]);
   const service = buildService([leader, backup], store);
 
-  const { response } = await service.chatWithFailover(chatRequest, undefined);
+  const { response } = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(response.providerId, 'leader');
   assert.equal(response.message.content, 'hello from leader');
 });
@@ -439,7 +484,7 @@ test('both hedged routes failing falls through to the chain', async () => {
   ]);
   const service = buildService([slowFail, hedgeFail, last], store);
 
-  const { response } = await service.chatWithFailover(chatRequest, undefined);
+  const { response } = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(response.providerId, 'last', 'the chain continues after a failed race');
 });
 
@@ -465,7 +510,7 @@ test('a saved connection without a registered adapter can still serve traffic', 
   // happened rather than failing with "provider not registered".
   let failure;
   try {
-    await service.chatWithFailover({ model: 'llama3.2', messages: [] }, undefined);
+    await service.chatWithFailover({ model: 'llama3.2', messages: [] }, undefined, signal());
   } catch (error) {
     failure = error;
   }
@@ -509,7 +554,7 @@ test('one provider returning an unreadable body no longer takes down a healthy s
     { id: 'healthy', priority: 2 },
   ]);
   const service = buildService([broken, healthy], store);
-  const outcome = await service.chatWithFailover(chatRequest, undefined);
+  const outcome = await service.chatWithFailover(chatRequest, undefined, signal());
   // Asserting on the *set* of routes, because `broken` legitimately appears twice: the default
   // resilience allows one retry, and a retryable failure is retried before the chain moves on.
   // What this test is about is which providers were reached, not how many times.
@@ -537,12 +582,12 @@ test('the routing report carries the rate-limit wait, and a limited connection s
   const before = await service.describeRouting();
   assert.equal('rateLimitWaitMs' in before.connections[0], false, 'no request has asked about its limit yet, so there is nothing to report');
 
-  await service.chatWithFailover(chatRequest, undefined);
+  await service.chatWithFailover(chatRequest, undefined, signal());
   const after = await service.describeRouting();
   assert.equal(after.connections[0].rateLimitWaitMs, 0, 'checked and free is 0, not absent: never checked and not waiting are different answers');
 
   await assert.rejects(
-    () => service.chatWithFailover(chatRequest, undefined),
+    () => service.chatWithFailover(chatRequest, undefined, signal()),
     (error) => {
       // **Corrected in 1.54.0.** This gateway has exactly **one** connection and it is over its limit,
       // so every reason is `rate-limited` — and 429 is the honest code. The original assertion expected
@@ -563,7 +608,7 @@ test('the routing report carries the rate-limit wait, and a limited connection s
 
   // The recovery. A per-minute budget that can spend itself once is a switch, not a rate limit.
   now += 61_000;
-  const recovered = await service.chatWithFailover(chatRequest, undefined);
+  const recovered = await service.chatWithFailover(chatRequest, undefined, signal());
   assert.equal(recovered.response.providerId, 'limited', 'the window slides, and the connection serves again');
   assert.equal((await service.describeRouting()).connections[0].rateLimitWaitMs, 0, 'and the recorded wait is corrected by a real dispatch');
 });
@@ -715,7 +760,7 @@ test('a request pinned to a provider with no usable connection is refused, not s
   const service = buildService([pinned, other], store);
 
   await assert.rejects(
-    () => service.chatWithFailover({ ...chatRequest, model: 'm' }, 'pinned'),
+    () => service.chatWithFailover({ ...chatRequest, model: 'm' }, 'pinned', signal()),
     (error) => error.code === 'PROVIDER_UNAVAILABLE' && /pinned/.test(error.message),
     'the pin must be honoured or refused, never silently served elsewhere',
   );
