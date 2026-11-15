@@ -92,7 +92,22 @@ test('the ports it validated reach the servers it spawns', () => {
   // The launcher used to validate `--port` and `--gateway-port`, record them, announce them and wait on
   // them — and spawn both servers on their defaults. Every custom port then timed out for 120 s.
   assert.match(source, /OMNIHILBRAS_PORT: String\(options\.gatewayPort\)/, 'the gateway is not told which port to bind');
-  assert.match(source, /'--port', String\(options\.dashboardPort\)/, 'the dashboard is not told which port to bind');
+  /**
+   * The dashboard's port travels in the environment, and it did not always.
+   *
+   * This assertion used to require `'--port', String(options.dashboardPort)` — the argument the launcher
+   * passed as `pnpm dev -- --port <n>`. It was there, and it never worked: `pnpm run` forwards the `--`
+   * literally, so Vite read the rest as positional arguments, kept its configured 20137, found it busy and
+   * moved to the next free port while the launcher waited on the one it had asked for. The guard was
+   * satisfied by the *presence* of an argument whose delivery nobody checked, which is the shape of
+   * assertion this suite exists to avoid. It now requires the channel that actually carries it.
+   */
+  assert.match(source, /OMNIHILBRAS_DASHBOARD_PORT: String\(options\.dashboardPort\)/, 'the dashboard is not told which port to bind');
+  assert.match(source, /OMNIHILBRAS_DASHBOARD_PORT/, 'and Vite reads it');
+  // Read as code, not as prose: the comment above the fix quotes the form it replaced, and a check that
+  // reads comments would forbid explaining the very thing it guards.
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+  assert.doesNotMatch(code, /'--', '--port'/, 'the swallowed argument form is back');
   assert.match(source, /env: \{ \.\.\.process\.env, \.\.\.env \}/, 'the child environment is not extended');
   // The gateway's default CORS list names 5173. Without this, a launcher on 5174 proxies Origin
   // `localhost:5174` and the gateway refuses every dashboard request with 403.

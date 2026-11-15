@@ -7,6 +7,7 @@
  */
 
 import { inspect } from '../lib/detect.mjs';
+import { inspectShortcut } from '../lib/shortcut.mjs';
 
 const SEVERITY_LABEL = {
   blocking: 'blocking',
@@ -45,6 +46,28 @@ export const doctor = {
     out.line(`  ${out.muted('pnpm')}      ${runtime.pnpm ?? out.warn('not found')}`);
     out.line(`  ${out.muted('git')}       ${runtime.git ?? out.warn('not found')}`);
     out.line(`  ${out.muted('gateway')}   ${gateway.reachable ? out.ok(`${gateway.version} at ${gateway.url}`) : out.warn(`not running (${gateway.url})`)}`);
+    out.line();
+
+    /**
+     * The `omnihilbras` command itself: is there one, is it ours, and does its target still exist.
+     *
+     * A dangling link is the failure worth naming — the checkout was moved or deleted after `setup` made
+     * the shortcut, so the command exists and does nothing, which is the least diagnosable state of all.
+     */
+    const shortcut = inspectShortcut();
+    const foreign = shortcut.foreign[0];
+    out.line(`  ${out.muted('command')}   ${shortcut.pointsAtUs
+      ? `${shortcut.commandPath} ${shortcut.onPath ? out.ok('on PATH') : out.warn('(not on PATH)')}`
+      : shortcut.present
+        ? out.warn(`${shortcut.commandPath} belongs to something else${shortcut.link ? ` → ${shortcut.link}` : ''}`)
+        : foreign
+          // Says which command would run, not just that ours is absent: on this machine an older global
+          // install is what `omnihilbras` resolves to, and "not on PATH" would have been false.
+          ? out.warn(`this checkout's shortcut is absent; \`omnihilbras\` resolves to ${foreign}`)
+          : out.warn('omnihilbras is not on PATH')}`);
+    if (shortcut.pointsAtUs && shortcut.dangling) {
+      out.line(`             ${out.bad(`its target ${shortcut.link} no longer exists — re-run \`omnihilbras setup\` to point it somewhere real`)}`);
+    }
     out.line();
 
     out.title('Missing tools');

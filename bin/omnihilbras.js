@@ -414,7 +414,20 @@ async function main() {
   // Both the port and the gateway's port reach the dashboard: Vite binds `--port`, and its proxy reads
   // `OMNIHILBRAS_PORT` to find the gateway. Neither was forwarded, so a custom port was awaited and
   // announced while Vite served 5173.
-  const dashboard = spawnOne('dashboard', ['dev', '--', '--port', String(options.dashboardPort)], { OMNIHILBRAS_PORT: String(options.gatewayPort) });
+  /**
+   * The dashboard's port travels in the environment, not as an argument.
+   *
+   * It used to be `['dev', '--', '--port', n]`, and that never reached Vite: `pnpm run` forwards the `--`
+   * literally, Vite read `-- --port 20265` as positional arguments, kept its configured port and — because
+   * a port in use is only a suggestion to it — moved to the next free one. The launcher then waited for
+   * 20265 until it timed out, and reported "the dashboard did not answer" about a dashboard that was
+   * running perfectly well one port along. `vite.config.ts` reads this variable and, when it is set,
+   * refuses to drift off it.
+   */
+  const dashboard = spawnOne('dashboard', ['dev'], {
+    OMNIHILBRAS_PORT: String(options.gatewayPort),
+    OMNIHILBRAS_DASHBOARD_PORT: String(options.dashboardPort),
+  });
 
   const children = { gateway, dashboard };
   let shuttingDown = false;

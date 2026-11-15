@@ -46,7 +46,7 @@ account can serve this" without a browser. Both want the answer as data, which i
 
 | Verb | What it does |
 | --- | --- |
-| `setup [--yes]` | First-run check with a menu: what is missing, install it (showing the command first), see the full report, deal with another version on this machine, or start the servers. Prints the plan and exits without a terminal rather than prompting into the void. |
+| `setup [--yes]` | First-run check with a menu: what is missing, install it (showing the command first), install the `omnihilbras` command itself, see the full report, deal with another version on this machine, or start the servers. `--yes` does the fixes without a terminal, which is also how the shortcut gets installed from a script. |
 | `doctor [--installs]` | The same checks as a report, and **changes nothing** — safe in a script or on someone else's machine. Exits `1` if something blocking was found. |
 | `status [--strict]` | Gateway identity and version, how many providers report healthy, and the ones that do not. `--strict` exits `1` if any provider is unhealthy. |
 | `providers [provider] [--all]` | Every saved **account** — which is what routing actually chooses between — with its enabled state, priority, model count, credential kind, and live routing state (ejected, waiting, last error). |

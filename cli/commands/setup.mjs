@@ -21,6 +21,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline/promises';
 import { inspect } from '../lib/detect.mjs';
+import { inspectShortcut, installShortcut } from '../lib/shortcut.mjs';
 
 const SEVERITY_LABEL = { blocking: 'blocking', 'needed-from-source': 'from source', optional: 'optional' };
 
@@ -61,6 +62,32 @@ export const setup = {
     out.line(`  ${out.muted('git')}      ${report.runtime.git ?? out.warn('not found')}`);
     out.line(`  ${out.muted('gateway')}  ${gateway.reachable ? out.ok(`${gateway.version} running`) : out.warn('not running')}`);
     if (report.otherVersionCount > 0) out.line(`  ${out.muted('others')}   ${out.warn(`${report.otherVersionCount} other installation${report.otherVersionCount === 1 ? '' : 's'} found`)}`);
+
+    /**
+     * The shortcut, reported the way everything else here is: what is actually true.
+     *
+     * A foreign `omnihilbras` is the interesting case and gets the command that removes it, because the
+     * alternative — silently replacing an older installation's command — breaks something the person still
+     * has. The count of "other installations" above and this line are usually about the same thing.
+     */
+    const shortcut = inspectShortcut();
+    if (!shortcut.present) {
+      const foreign = shortcut.foreign[0];
+      // "Not on PATH" alone was false where an older global install still provides the command, so where
+      // one exists it is named.
+      out.line(`  ${out.muted('command')}  ${foreign
+        ? out.warn(`this checkout's shortcut is absent; \`omnihilbras\` resolves to ${foreign}`)
+        : out.warn('omnihilbras is not on PATH')}`);
+    }
+    else if (shortcut.pointsAtUs) {
+      const where = shortcut.onPath ? out.ok('on PATH') : out.warn('not on PATH yet');
+      out.line(`  ${out.muted('command')}  ${shortcut.commandPath} ${out.muted(`(${where})`)}`);
+    } else if (shortcut.link) {
+      out.line(`  ${out.muted('command')}  ${out.warn(`${shortcut.commandPath} belongs to something else`)} ${out.muted(`→ ${shortcut.link}`)}`);
+      out.line(`             ${out.muted('npm rm -g @hilbras/omnihilbras')} ${out.muted('removes the older one, if that is what it is')}`);
+    } else {
+      out.line(`  ${out.muted('command')}  ${out.warn(`${shortcut.commandPath} exists and is not ours`)}`);
+    }
     out.line();
 
     /**
@@ -68,6 +95,22 @@ export const setup = {
      * something nobody asked for. Print the plan and stop, with an exit code a script can act on.
      */
     if (!(process.stdin.isTTY && process.stdout.isTTY)) {
+      /**
+       * `--yes` is what makes this usable from a script, and it is also the only way to install the
+       * shortcut without a terminal. Nothing else in this branch changes anything: the report is the point
+       * of running `setup` non-interactively, and `doctor` exists for the read-only case.
+       */
+      if (flags.yes && !shortcut.pointsAtUs) {
+        out.line();
+        const result = await installShortcut();
+        out.line(result.ok
+          ? out.ok(`  installed the \`omnihilbras\` command: ${result.commandPath} → ${result.version ?? 'no version printed'}`)
+          : out.bad(`  could not install the shortcut: ${result.reason}`));
+        if (result.ok && result.hint) out.line(`  ${out.warn(result.hint)}`);
+        if (result.ok && shortcut.foreign[0]) {
+          out.line(`  ${out.warn(`Note: ${shortcut.foreign[0]} also provides \`omnihilbras\`; whichever directory comes first on PATH wins.`)}`);
+        }
+      }
       if (report.gaps.length > 0) {
         out.title('Run these to finish setting up');
         for (const gap of report.gaps) out.line(`  ${gap.fix}   ${out.muted(`# ${gap.title}`)}`);
@@ -85,6 +128,7 @@ export const setup = {
       for (;;) {
         const options = [];
         if (report.gaps.length > 0) options.push(['install the missing tools', 'gaps']);
+        if (!shortcut.pointsAtUs) options.push(['install the `omnihilbras` command', 'shortcut']);
         options.push(['show the full report', 'report']);
         if (report.otherVersionCount > 0) options.push(['remove another version on this machine', 'uninstall']);
         options.push(['start the gateway and dashboard', 'start']);
@@ -112,6 +156,37 @@ export const setup = {
             }
             break;
           }
+          case 'shortcut': {
+            const target = shortcut.target;
+            out.line();
+            if (!target) {
+              out.line(out.warn('  Neither this checkout nor the CLI package could be found.'));
+              break;
+            }
+            out.line(`  It will link ${out.ok(shortcut.commandPath)}`);
+            out.line(`  to ${target.path}`);
+            out.line();
+            out.line(target.kind === 'launcher'
+              ? `  That entry point runs ${out.ok('both halves')}: a verb asks the gateway something, and no verb starts the gateway and the dashboard.`
+              : `  That entry point is the ${out.warn('published client')}: verbs work, and starting the servers does not — there is no checkout for it to run.`);
+            if (!shortcut.onPath) out.line(`  ${out.warn(`${shortcut.directory} is not on PATH yet; you will need a new shell, and possibly to add it.`)}`);
+            out.line();
+            const go = flags.yes || (await rl.question('  Create it? [y/N] ')).trim().toLowerCase().startsWith('y');
+            if (!go) {
+              out.line(out.muted('  skipped'));
+              break;
+            }
+            const result = await installShortcut();
+            if (result.ok) {
+              // The verification is a run of the command itself; the version is reported as measured.
+              out.line(out.ok(`  installed, and it runs: ${out.muted(result.commandPath)} → ${result.version ?? 'no version printed'}`));
+              if (result.hint) out.line(`  ${out.warn(result.hint)}`);
+            } else {
+              out.line(out.bad(`  not installed: ${result.reason}`));
+              if (result.hint) out.line(`  ${out.muted(result.hint)}`);
+            }
+            break;
+          }
           case 'report': {
             const { doctor } = await import('./doctor.mjs');
             out.line();
@@ -131,6 +206,9 @@ export const setup = {
             break;
           }
           case 'start': {
+            // Started through the checkout's own entry point rather than through whatever `omnihilbras`
+            // resolves to: this verb's job is to start *these* servers, and the command on PATH may be the
+            // published client, which cannot.
             const bin = fileURLToPath(new URL('../../bin/omnihilbras.js', import.meta.url));
             out.line();
             out.line(out.muted('  Starting. Ctrl-C stops both servers.'));

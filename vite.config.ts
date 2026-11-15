@@ -338,7 +338,25 @@ export default defineConfig({
     fullReloadForInvalidatableModules(),
     dashboardFallback(), gatewayProxy(), logoPolarity(), react(), tailwindcss(), repoVersion()],
   server: {
-    port: 20137,
+    /**
+     * The dashboard's port, from the environment so a caller can actually choose it.
+     *
+     * This was a bare `20137`, and the launcher tried to override it by passing `--port` through
+     * `pnpm dev -- --port <n>`. That never arrived: the `--` is forwarded literally, Vite saw `-- --port
+     * 20265` as positional arguments, kept its configured 20137, found it taken and silently moved to the
+     * next free port — 20140 — while the launcher waited on 20265 until it gave up. An environment
+     * variable crosses that boundary intact, whatever the package manager does with arguments.
+     */
+    port: Number(process.env.OMNIHILBRAS_DASHBOARD_PORT) || 20137,
+    /**
+     * An explicitly requested port is not a suggestion.
+     *
+     * Without this, Vite helps by trying the next one — which is how the failure above stayed quiet: the
+     * server was up, on a port nobody was waiting for. A collision should be an error the caller sees.
+     * The default keeps Vite's own fallback behaviour, because nothing is waiting on a specific port
+     * unless it asked for one.
+     */
+    strictPort: Boolean(process.env.OMNIHILBRAS_DASHBOARD_PORT),
     /**
      * Full reload for the modules Fast Refresh cannot handle.
      *

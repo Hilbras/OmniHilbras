@@ -71,6 +71,27 @@ per platform, and so does whether it is already done for you:
 | Linux `.deb` | electron-builder's generated `after-install` registers `/usr/bin/omnihilbras` as an `update-alternatives` entry pointing at `/opt/OmniHilbras/omnihilbras` | already done by the installer |
 | Windows `.exe` | `scripts/installer/windows/shortcut.ps1`, called by the NSIS installer, appends the install directory to the **user** `PATH` | wired; the installer was not run here |
 | macOS `.dmg` | nothing: a disk image has no post-install hook | run `bash scripts/installer/macos/shortcut.sh --install` once |
+| **any of them, from a checkout** | `omnihilbras setup` creates it in `~/.local/bin` (`%LOCALAPPDATA%\Programs\omnihilbras\bin` on Windows), pointing at this checkout | `omnihilbras setup --yes` does it without a terminal |
+
+### The one `setup` installs, and what it points at
+
+`setup` offers to install the command, and it is worth knowing which of the two entry points it links to,
+because they differ in exactly one way:
+
+| Linked to | Verbs (`status`, `providers`, …) | Starts the servers |
+| --- | --- | --- |
+| `bin/omnihilbras.js` — this checkout's launcher | yes | **yes** (`omnihilbras` with no verb starts the gateway and the dashboard) |
+| `cli/bin/omnihilbras.js` — the published client | yes | no: there is no checkout for it to run |
+
+It prefers the launcher when there is one, so the command gives both halves. It is a **symlink**, not a copy
+— a copy is a second CLI that goes stale the moment you update the checkout — and the cost of that is real
+and checkable: `omnihilbras doctor` reports a link whose target has gone, which is what a moved or deleted
+checkout leaves behind. `setup` verifies the shortcut by **running it** and printing the version it
+answered with, rather than trusting that the file exists.
+
+If something else already owns the name — an older globally installed `@hilbras/omnihilbras`, say —
+`setup` **refuses to replace it** and says how to remove it. `npm rm -g @hilbras/omnihilbras` is usually the
+answer. Whichever directory comes first on `PATH` wins, and `setup` says so when both exist.
 
 Verify any of them the same way:
 
