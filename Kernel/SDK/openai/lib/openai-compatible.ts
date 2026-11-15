@@ -1,4 +1,5 @@
 import { ProviderError } from './errors.js';
+import { readResponsesFrame, responsesLaneFor, responsesLaneRefusal, rememberResponsesLane, toResponsesBody, toResponsesChatResponse, type ResponsesPayload, type ResponsesStreamEvent } from './responses-lane.js';
 import { parseSseJson, parseSseStream } from './streaming.js';
 import { FetchHttpTransport, type HttpTransport } from './transport.js';
 import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from './url.js';
@@ -17,6 +18,20 @@ export type OpenAICompatibleAdapterConfig = {
   auth?: OpenAICompatibleAuth;
   modelsPath?: string;
   chatPath?: string;
+  /**
+   * The OpenAI **Responses** lane for this endpoint, or absent when the endpoint has none.
+   *
+   * **Setting it is the opt-in, and the path is the value** — there is no default path, because a default
+   * would mean an endpoint could acquire a lane by a typo, pointed at a path nobody measured on it. A
+   * provider that does not set it has no Responses lane and behaves exactly as it did, including when a
+   * model refuses the chat path — which is the difference between "this endpoint has a second lane" and
+   * "this gateway retries things".
+   *
+   * The lane is chosen **per model**, from the provider's own refusal, and remembered for the process; the
+   * measurement, the wording it matches and why it is learned rather than matched by model name are in
+   * `lib/responses-lane.ts`.
+   */
+  responsesPath?: string;
   /**
    * Where the embeddings endpoint lives, relative to `baseUrl`.
    *
@@ -120,6 +135,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   private readonly auth: Required<Pick<OpenAICompatibleAuth, 'required'>> & OpenAICompatibleAuth;
   private readonly modelsPath: string;
   private readonly chatPath: string;
+  private readonly responsesPath?: string;
   private readonly embeddingsPath: string;
   private readonly unwrap?: OpenAICompatibleAdapterConfig['unwrapResponse'];
   private readonly headers: Record<string, string>;
@@ -141,6 +157,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     };
     this.modelsPath = config.modelsPath ?? '/models';
     this.chatPath = config.chatPath ?? '/chat/completions';
+    if (config.responsesPath !== undefined) this.responsesPath = config.responsesPath;
     this.embeddingsPath = config.embeddingsPath ?? '/embeddings';
     this.unwrap = config.unwrapResponse;
     this.headers = sanitizeProviderHeaders(config.headers, config.id);
@@ -185,15 +202,71 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   }
 
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
-    const response = await this.transport.request<OpenAIResponse>({
-      method: 'POST',
-      providerId: this.id,
-      url: this.url(this.chatPath),
-      headers: this.requestHeaders(context.credential, 'application/json'),
-      body: JSON.stringify(this.toRequestBody(request, false)),
-      ...(context.signal ? { signal: context.signal } : {}),
-    });
-    return this.toChatResponse(this.unwrap ? this.unwrap(response.data) : response.data, request.model);
+    // A model this process already proved is on the Responses lane goes straight there: the refusal was
+    // the evidence, and paying for it a second time on every turn is the whole cost this memo exists to
+    // avoid.
+    if (this.responsesPath && responsesLaneFor(this.id, request.model)) {
+      return this.chatResponses(request, context);
+    }
+    try {
+      const response = await this.transport.request<OpenAIResponse>({
+        method: 'POST',
+        providerId: this.id,
+        url: this.url(this.chatPath),
+        headers: this.requestHeaders(context.credential, 'application/json'),
+        body: JSON.stringify(this.toRequestBody(request, false)),
+        ...(context.signal ? { signal: context.signal } : {}),
+      });
+      return this.toChatResponse(this.unwrap ? this.unwrap(response.data) : response.data, request.model);
+    } catch (error) {
+      if (!this.rememberLaneOnRefusal(error, request.model)) throw error;
+      return this.chatResponses(request, context, error);
+    }
+  }
+
+  /**
+   * Whether this refusal is the provider telling us where the model actually lives.
+   *
+   * The memo is written **before** the retry rather than after it. The refusal is the evidence, not the
+   * retry's success: a model the relay will not serve on the chat path is on the Responses lane whatever
+   * happens next, and a second turn should not rediscover that. Every other error returns false and is
+   * rethrown untouched by the caller — the decision is the provider's own sentence, so a 401, a 403, a 408, a
+   * 429, an outage whose text names neither endpoint, and a 400 about the request body all keep exactly the
+   * behaviour they had. This is a lane switch, not a retry policy.
+   */
+  private rememberLaneOnRefusal(error: unknown, model: string): boolean {
+    if (!this.responsesPath) return false;
+    if (!responsesLaneRefusal(error)) return false;
+    rememberResponsesLane(this.id, model);
+    return true;
+  }
+
+  /**
+   * One turn on the Responses lane.
+   *
+   * `cause` is the chat lane's refusal, when this request started there. If this attempt fails too, the
+   * error a caller sees is **this** one — it is the failure that ended the turn, and its status is what a
+   * retry policy reads — with the earlier refusal attached as its cause, so the chain still carries what
+   * the provider said the first time. Replacing a specific refusal with a vaguer one is how two different
+   * defects start to read alike.
+   *
+   * `unwrapResponse` is deliberately not applied: it exists to reshape a `choices`-shaped body a provider
+   * wrapped, and a Responses payload has no `choices` for it to find.
+   */
+  private async chatResponses(request: ChatRequest, context: ProviderRequestContext, cause?: unknown): Promise<ChatResponse> {
+    try {
+      const response = await this.transport.request<ResponsesPayload>({
+        method: 'POST',
+        providerId: this.id,
+        url: this.url(this.responsesPath as string),
+        headers: this.requestHeaders(context.credential, 'application/json'),
+        body: JSON.stringify(toResponsesBody(request, false)),
+        ...(context.signal ? { signal: context.signal } : {}),
+      });
+      return toResponsesChatResponse(response.data, request.model, this.id);
+    } catch (error) {
+      throw withCause(error, cause);
+    }
   }
 
   /**
@@ -411,6 +484,35 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   }
 
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
+    if (this.responsesPath && responsesLaneFor(this.id, request.model)) {
+      yield* this.streamResponses(request, context);
+      return;
+    }
+
+    let yielded = false;
+    try {
+      for await (const chunk of this.chatLaneChunks(request, context)) {
+        // Set before the yield, not after: once a chunk is in the caller's hands the answer has started,
+        // and a second attempt from here would repeat what they already have or interleave two answers.
+        yielded = true;
+        yield chunk;
+      }
+    } catch (error) {
+      // A refusal arrives **before** the first event — `transport.stream` reads the status and throws
+      // without yielding — so an empty `yielded` is what makes this the same turn retried rather than a
+      // half-answer duplicated.
+      if (yielded || !this.rememberLaneOnRefusal(error, request.model)) throw error;
+      yield* this.streamResponses(request, context, error);
+    }
+  }
+
+  /**
+   * The chat lane's stream: the request every provider has always received.
+   *
+   * Split out of `streamChat` so the lane decision wraps it without a second copy of the frame loop — two
+   * copies of a stream reader is how one of them stops handling a finish reason.
+   */
+  private async *chatLaneChunks(request: ChatRequest, context: ProviderRequestContext): AsyncIterable<ChatChunk> {
     const events = this.transport.stream({
       method: 'POST',
       providerId: this.id,
@@ -452,6 +554,72 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     }
 
     if (!sawPayload || !sawMeaningfulPayload || !sawDone) {
+      throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before completion.', { providerId: this.id });
+    }
+  }
+
+  /**
+   * The stream on the Responses lane, with the chat lane's refusal kept as the cause of a second failure.
+   *
+   * A wrapper rather than a `try` inside the reader, because a generator cannot attach a cause to an error
+   * it has already thrown — and the cause is the whole point: the caller sees the failure that ended the
+   * turn, and the reason the chat path was abandoned is still readable behind it.
+   */
+  private async *streamResponses(request: ChatRequest, context: ProviderRequestContext, cause?: unknown): AsyncIterable<ChatChunk> {
+    try {
+      yield* this.responsesLaneChunks(request, context);
+    } catch (error) {
+      throw withCause(error, cause);
+    }
+  }
+
+  /**
+   * The Responses event stream, as our chunks.
+   *
+   * The terminator is `response.completed` (or `response.incomplete` for a truncated turn), which is the
+   * Responses protocol's own end-of-turn frame; the chat lane's `[DONE]` sentinel does not appear here. A
+   * stream that ends without one is reported rather than returned as an answer, exactly as the chat lane
+   * treats a stream that stopped mid-answer.
+   */
+  private async *responsesLaneChunks(request: ChatRequest, context: ProviderRequestContext): AsyncIterable<ChatChunk> {
+    const events = this.transport.stream({
+      method: 'POST',
+      providerId: this.id,
+      url: this.url(this.responsesPath as string),
+      headers: this.requestHeaders(context.credential, 'text/event-stream'),
+      body: JSON.stringify(toResponsesBody(request, true)),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+
+    let sawPayload = false;
+    let sawMeaningfulPayload = false;
+    let sawTerminal = false;
+    for await (const event of parseSseStream(events)) {
+      const payload = parseSseJson<ResponsesStreamEvent>(event, this.id);
+      if (!payload) continue;
+      sawPayload = true;
+      const frame = readResponsesFrame(payload);
+      // The provider's own sentence, not a verdict: `response.failed` carries the reason, and dropping it
+      // makes a refused turn read as a truncated stream.
+      if (frame.failure) {
+        throw new ProviderError('PROVIDER_REQUEST_FAILED', `The provider stream returned an error: ${frame.failure}`, { providerId: this.id });
+      }
+      if (frame.text || frame.toolCall || frame.finishReason || frame.usage) sawMeaningfulPayload = true;
+      if (frame.terminal) sawTerminal = true;
+      yield {
+        id: payload.response?.id ?? `stream-${request.model}`,
+        providerId: this.id,
+        model: payload.response?.model ?? request.model,
+        delta: {
+          ...(frame.text ? { content: frame.text } : {}),
+          ...(frame.toolCall ? { toolCalls: [frame.toolCall] } : {}),
+        },
+        ...(frame.finishReason ? { finishReason: frame.finishReason } : {}),
+        ...(frame.usage ? { usage: frame.usage } : {}),
+      };
+    }
+
+    if (!sawPayload || !sawMeaningfulPayload || !sawTerminal) {
       throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before completion.', { providerId: this.id });
     }
   }
@@ -616,6 +784,20 @@ function assertNoProviderOptions(request: ChatRequest, providerId: string) {
   if (request.providerOptions && Object.keys(request.providerOptions).length > 0) {
     throw new ProviderError('INVALID_REQUEST', `Provider options are not supported by ${providerId} yet.`, { providerId });
   }
+}
+
+/**
+ * The failure that ended the turn, carrying the one before it.
+ *
+ * The **last** error is the one a caller sees, because it is the one whose status and message describe
+ * where the request stopped; the earlier one is attached as its cause rather than substituted for it. A
+ * cause is only written when the error has none: a transport that already set one (a DNS failure behind an
+ * unreachable host) knows more about that failure than this does, and overwriting it would trade a specific
+ * cause for a less specific one.
+ */
+function withCause<T>(error: T, cause: unknown): T {
+  if (cause !== undefined && error instanceof Error && error.cause === undefined) error.cause = cause;
+  return error;
 }
 
 function providerStreamError(providerId: string, error: unknown) {

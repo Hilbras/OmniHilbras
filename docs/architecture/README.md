@@ -71,7 +71,7 @@ that holds is one a machine re-derives.
 | Surface | Lines | Provider ids named | Note |
 | --- | --- | --- | --- |
 | `Kernel/API/src/core/routing.ts` | 785 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
-| `Kernel/API/src/core/provider-resolver.ts` | 292 | 1 | enforced by a test that greps the file |
+| `Kernel/API/src/core/provider-resolver.ts` | 306 | 1 | enforced by a test that greps the file; the per-provider tables live in `provider-client-identity.ts` and `provider-responses-lane.ts` it reads |
 | `Kernel/API/src/core/request-executor.ts` | 876 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 335 | **0** | one error mapper, one catalog merge, one lock scope |
 | `Kernel/API/src/core/service.ts` | 3748 | 26 | all twenty-six `.onDemand()` registrations, in one constructor |

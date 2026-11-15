@@ -2469,6 +2469,40 @@ rather than applied globally, because a global rewrite would misattribute this g
 traffic everywhere else. `OMNIHILBRAS_AGENTROUTER_USER_AGENT` replaces the `User-Agent` value
 for this provider when the relay's list changes.
 
+**Some of AgentRouter's models are served from the OpenAI Responses API and nowhere else.** A
+turn on 2026-11-16 was refused with the relay's own sentence, on a connection whose credential had
+already been accepted (the `HTTP 502` is this gateway's status for a provider failure; the relay's
+own status is not in the transcript, and a bogus key cannot recover it because the relay judges the
+token before any model routing):
+
+```
+HTTP 502 provider=agentrouter
+{"error":{"message":"模型 gpt-6-astra 不支持 /v1/chat/completions 接口,请改用 /v1/responses(OpenAI
+ Responses API). Model gpt-6-astra does not support /v1/chat/completions, please use /v1/responses
+ instead. (request id: ...)"}}
+```
+
+Other models on the same connection (`glm`, `deepseek` families) answer `/v1/chat/completions`, so
+the lane is a property of the **model** and not of the connection or the credential. The relay
+publishes no table of which model is on which lane, so the gateway learns it from the refusal
+instead of guessing from the name: a body naming both `/v1/chat/completions` and `/v1/responses`
+sends that one request to `/v1/responses` and records the model as being on the lane for the life
+of the process — one extra round trip per model per process, and no list to keep in step with them.
+The **message is the discriminator and the status is an exclusion list**: only 401, 403, 408 and 429
+disqualify a refusal whatever it says, because those are the cases where a second request is wrong on
+its own terms — a rejected credential, a refusal not meant to be worked around, an aborted request, a
+rate limit. Any other 4xx and any 5xx is retried, so an envelope nobody has seen yet does not make
+the lane silently stop working; a body that names only one of the two endpoints is still refused as
+before, at every status. If the Responses attempt also fails, that failure is the one reported, with
+the original refusal attached as its cause.
+
+The translation is `Kernel/SDK/openai/lib/responses-lane.ts`, vendored from Zen's Responses lane
+(which selects by a published per-family table rather than by refusal), and the table of providers
+that have a second lane is `Kernel/API/src/core/provider-responses-lane.ts`, whose only entry is
+AgentRouter. A provider absent from it carries no `responsesPath` and therefore no second lane at
+all. The Responses wire shapes are OpenAI's documented ones; this machine has no working
+AgentRouter key, so **the refusal is measured and the wire shapes are not**.
+
 A card never borrows another provider's logo. There is a `tokenrouter` asset in
 `public/providers` belonging to a different, unrelated service, and `tokenharbor` uses the
 letter mark rather than it.
@@ -3234,7 +3268,7 @@ measurement, and `Kernel/API/test/spec-success-criteria.mjs` fails if any stops 
       `build` script; every `Kernel/SDK/<provider>/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **170 files** in `Kernel/SDK/` — 28 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url` and `bounded-map` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 27: it measures providers, this counts files.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **171 files** in `Kernel/SDK/` — 28 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url` and `bounded-map` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 27: it measures providers, this counts files.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

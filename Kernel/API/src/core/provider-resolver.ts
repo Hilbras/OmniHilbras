@@ -2,6 +2,7 @@ import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '@o
 import type { ProviderAdapter, ProviderRegistry } from './index.js';
 import { providerAlias } from './provider-alias.js';
 import { providerClientHeaders } from './provider-client-identity.js';
+import { providerResponsesPath } from './provider-responses-lane.js';
 
 /**
  * The transport a generic adapter is built with.
@@ -137,6 +138,19 @@ export class ProviderResolver {
   }
 
   /**
+   * The Responses lane a generic adapter carries, for a provider that serves part of its catalog there.
+   *
+   * Empty for every provider but the one in the table, for the same reason the identity option is: a lane
+   * configured on the wrong provider is a request sent to an endpoint that does not exist. The measurement,
+   * and why the lane is learned per model rather than switched per provider, are in
+   * `provider-responses-lane.ts`.
+   */
+  private responsesOptions(providerId: string): { responsesPath?: string } {
+    const path = providerResponsesPath(providerId);
+    return path ? { responsesPath: path } : {};
+  }
+
+  /**
    * Registers an adapter that has to be built when it is first needed.
    *
    * A factory rather than a value, because an instance would be shared across connections that
@@ -195,7 +209,7 @@ export class ProviderResolver {
         adapters.push(cached.adapter);
         continue;
       }
-      const adapter = new OpenAICompatibleAdapter({ id: connection.providerId, name: connection.name ?? connection.providerId, baseUrl: connection.endpoint, ...this.identityOptions(connection.providerId) }, this.adapterOptions());
+      const adapter = new OpenAICompatibleAdapter({ id: connection.providerId, name: connection.name ?? connection.providerId, baseUrl: connection.endpoint, ...this.identityOptions(connection.providerId), ...this.responsesOptions(connection.providerId) }, this.adapterOptions());
       this.dynamic.set(connection.providerId, { endpoint: connection.endpoint, adapter });
       adapters.push(adapter);
     }
@@ -280,7 +294,7 @@ export class ProviderResolver {
     // gets a new one, because reusing the old adapter would keep sending to the old host.
     const cached = this.dynamic.get(providerId);
     if (cached && cached.endpoint === endpoint.endpoint) return cached.adapter;
-    const adapter = new OpenAICompatibleAdapter({ id: providerId, name: endpoint.name, baseUrl: endpoint.endpoint, ...this.identityOptions(providerId) }, this.adapterOptions());
+    const adapter = new OpenAICompatibleAdapter({ id: providerId, name: endpoint.name, baseUrl: endpoint.endpoint, ...this.identityOptions(providerId), ...this.responsesOptions(providerId) }, this.adapterOptions());
     this.dynamic.set(providerId, { endpoint: endpoint.endpoint, adapter });
     return adapter;
   }
