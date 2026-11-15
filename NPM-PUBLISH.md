@@ -1,57 +1,91 @@
-# Publishing @hilbras/omnihilbras
+# Publishing `@hilbras/omnihilbras`
 
-The SDK is published to npm as **`@hilbras/omnihilbras`**. Do not confuse it
-with `@hilbras/sdk`, which is a separate, unrelated project.
+This is the process for the **one** publishable manifest in this repository: `cli/`. Everything else —
+`Kernel/API`, every package under `Kernel/SDK/` — is `private: true` and is not published.
 
-## Status
+## What the published package is, and is not
 
-**Publishing is suspended.** The Kernel restructure dissolved the single SDK
-manifest: the SDK is now one private package per provider under `Kernel/SDK/`,
-each versioned `0.1.0`, and `Kernel/API` — the gateway — is private too. There
-is no manifest to publish until a new publishing story is chosen, and until
-then a release ends at the tag and the GitHub release. The npm registry may hold
-later versions from a different tag lineage; this checkout has no publishable
-manifest, so its own release trail ends at the tag. The steps below describe the
-process before the restructure and are kept for when that story exists — their
-paths name the tree as it was.
+It is the gateway **client**: the verbs in [`docs/CLI.md`](./docs/CLI.md) — `status`, `providers`, `models`,
+`test`, `keys`, `routing`, `logs`, `setup`, `doctor`.
 
-## Version bumps
+It **cannot start a server**. A globally installed package has no checkout to run, so `omnihilbras` with no
+verb prints the help rather than launching anything. The server ships as the desktop app, and a command that
+also starts the servers comes from `npm link` in a checkout plus `omnihilbras setup`.
 
-Pick the bump by the size of the change: breaking → `x.0.0`, new capability →
-`0.x.0`, fix or docs → `0.0.x`. Bump the version in `package.json`,
-`Kernel/SDK/package.json`, and `Kernel/API/gateway/package.json`
-together, then tag `v<version>` and publish.
+That distinction is not a footnote. The name previously held a different program — `2.9.x`, "OmniHilbras CLI
+- Start and manage OmniHilbras server" — whose `omnihilbras` *did* start a server. Publishing over `latest`
+changed what the name does for anyone on those versions, so they are deprecated with a message saying so,
+and `docs/INSTALL.md` leads with it.
 
-## Publish a new version
+## Publish a version
 
-1. Bump the version in `Kernel/SDK/package.json`.
-2. Build and verify:
+1. Bump the version, in every manifest the release touches:
 
    ```bash
-   pnpm install
-   pnpm typecheck
-   pnpm test
-   pnpm build
+   # package.json and Kernel/API/package.json, then the derived copies:
+   pnpm version:fix     # rewrites cli/package.json, the README headline and the client-version constant
+   pnpm version:check
    ```
 
-3. Commit, tag, and push.
+   `scripts/check-version.mjs` includes `cli/package.json` for exactly this reason: a globally installed
+   package reports its own manifest's version, so a mismatch would make `omnihilbras --version` contradict
+   the release it came from.
+
+2. Run the gate:
+
+   ```bash
+   pnpm verify          # version, typecheck, tests, build, bundle budget
+   ```
+
+3. Commit, tag, push, and create the release — `AGENTS.md` has the order, and the definition of done ends
+   after the publish is *confirmed*, not after the tag.
+
 4. Publish:
 
    ```bash
-   cd Kernel/SDK
+   cd cli
    npm publish --access public
    ```
 
-`prepublishOnly` rebuilds the SDK, so the tarball always matches source.
+   No `prepublishOnly` build: this package is plain ESM with **no dependencies**, so what is in the tree is
+   what ships. (The old process built an SDK here; there is no build step left to get wrong.)
 
-## Verify
+5. Confirm — this step is not a formality:
+
+   ```bash
+   npm view @hilbras/omnihilbras@<version> version   # poll until it echoes the version
+   npm view @hilbras/omnihilbras dist-tags           # latest should point at it
+   ```
+
+   **`npm publish` reporting success is not evidence the version exists.** It has printed
+   `+ @hilbras/omnihilbras@<version>` while the version was absent twice in this project's history; the
+   tarball is staged and finalised minutes later, and a re-publish inside that window fails with
+   `409 Cannot publish over previously staged version`. Measured for 3.50.0: **five `E404`s over ~75
+   seconds** before the registry answered.
+
+6. Install it the way a stranger would, which is the only check that exercises the published artefact
+   rather than the working tree:
+
+   ```bash
+   npm i -g --prefix /tmp/regcheck @hilbras/omnihilbras
+   /tmp/regcheck/bin/omnihilbras --version
+   /tmp/regcheck/bin/omnihilbras help
+   ```
+
+   If the shortcut is missing or the version disagrees, the release is not done.
+
+## Deprecating an old range
+
+The previous project occupies `<3.0.0` and cannot be unpublished (npm refuses after 72 hours), so it is
+deprecated instead:
 
 ```bash
-npm view @hilbras/omnihilbras version
-npm i @hilbras/omnihilbras
-node -e "import('@hilbras/omnihilbras').then(m => console.log(Object.keys(m).length, 'exports'))"
+npm deprecate "@hilbras/omnihilbras@<3.0.0" "Superseded by 3.x, which is a different thing. …"
 ```
 
-A newly published version can take a few minutes to appear on the read path
-even though `npm publish` already reported success; the registry search index
-updates first.
+The message must say what changed — that 3.x is the client and does not start a server — because a bare
+"upgrade" tells the person nothing about why their working command would behave differently. To reverse it:
+
+```bash
+npm deprecate "@hilbras/omnihilbras@<3.0.0" ""
+```

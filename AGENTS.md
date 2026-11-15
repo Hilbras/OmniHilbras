@@ -19,11 +19,17 @@ size of the change, not by the number of files touched:
 The workspace version is kept in step across `package.json` and
 `Kernel/API/package.json`. The SDK is one private package per provider under
 `Kernel/SDK/`, each versioned `0.1.0` and none of them published.
-**Publishing is suspended during the Kernel restructure:** there is no
-publishable manifest — the single SDK manifest was dissolved into the
-per-provider packages, and `Kernel/API` is private. Until a new publishing
-story is chosen, a release ends at the tag; `pnpm release:audit` will name
-the npm gap, and that is the honest state rather than one to paper over.
+**Publishing resumed in 3.50.0, for one package: `cli/`.** It is the gateway
+**client** — `@hilbras/omnihilbras`, whose `bin` is the `omnihilbras` command —
+and it is the only manifest here that is not private. `Kernel/API` (the gateway)
+and every package under `Kernel/SDK/` are still private and still unpublished, so
+the restructure's original problem is unchanged for them; what changed is that the
+name on npm is a real part of this project rather than the previous one. Note what
+the published command is and is not: it runs the verbs and **cannot start a
+server**, because a globally installed package has no checkout to run. The
+server ships as the desktop app, and a command that starts the servers comes from
+`npm link` plus `omnihilbras setup`. Versions before 3.0.0 are deprecated with a
+message saying exactly that. `NPM-PUBLISH.md` is the process.
 
 ## Definition of done for a change
 
@@ -50,9 +56,11 @@ the npm gap, and that is the honest state rather than one to paper over.
 4. Committed, tagged `v<version>`, and pushed to `origin/main`.
 5. A GitHub release exists for the tag with notes that say what changed and how
    to verify it.
-6. `npm publish --access public`, then confirm the version resolves from the
-   registry. **Suspended while publishing is suspended** (see Versioning):
-   until there is a publishable manifest, the definition of done ends at step 5.
+6. `npm publish --access public` **from `cli/`**, then confirm the version resolves
+   from the registry. This is the only publishable manifest (see Versioning), and it
+   is the package a person installs globally, so the confirmation matters more here
+   than anywhere: `npm view @hilbras/omnihilbras@<version> version` must echo the
+   version before the release is done.
 
 **Steps 4–5 are required after every phase, every checkpoint, and every task
 group that changes behaviour** — 4–6 once publishing resumes. A phase is not

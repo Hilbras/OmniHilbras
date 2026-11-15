@@ -27,7 +27,7 @@ Build order is dependency order, enforced by `pnpm build`:
 Kernel/SDK/* → Kernel/TokenSaver → Kernel/API → dashboard/desktop
 ```
 
-Publishing is suspended while the Kernel restructure is in progress. `Kernel/API` and the provider
+`Kernel/API` — the gateway — and the provider
 packages are private; the desktop installers and a build from source are the supported distribution paths.
 
 ## Objective
@@ -51,7 +51,8 @@ and a registration, not an edit to routing or request execution.
 ## Technical Assumptions
 
 - Runtime: TypeScript. The gateway and the monorepo tooling require Node.js 24+, matching CI and `.nvmrc`.
-  Publishing is suspended; the per-provider packages under `Kernel/SDK/` are private.
+  The gateway and the per-provider packages under `Kernel/SDK/` are private; the published package is
+  `cli/` — the client — since 3.50.0.
 - Package manager: pnpm workspaces.
 - SDK code is runtime-agnostic and uses standard `fetch` and Web Streams.
 - The first gateway binds to `127.0.0.1:20138` and has no authentication in local mode.

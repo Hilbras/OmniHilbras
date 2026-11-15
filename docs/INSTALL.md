@@ -55,10 +55,12 @@ npm link            # puts `omnihilbras` on your PATH, pointed at this checkout
 omnihilbras setup   # check the tools before starting anything
 ```
 
-> **`npm i -g @hilbras/omnihilbras` does not install this project yet.** Publishing is suspended during
-> the Kernel restructure: every manifest in this repository is `private: true`, so there is nothing to
-> publish. The name on npm today (`@hilbras/omnihilbras@2.9.18`) is the **previous** project. `npm link`
-> from a checkout is the supported path until a publishable manifest exists.
+> **`npm i -g @hilbras/omnihilbras` installs the *client*, not the server.** Since 3.50.0 this name is
+> this project's gateway client — the verbs in [`docs/CLI.md`](./CLI.md) — and it **cannot start a
+> server**: a globally installed package has no checkout to run. Versions before 3.0.0 were the previous
+> project and are deprecated with the same warning. For a command that starts the servers as well, use
+> `npm link` from a checkout and run `omnihilbras setup` (see below); for the server itself, install the
+> desktop app.
 
 ## The `omnihilbras` command
 
