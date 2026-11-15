@@ -352,23 +352,39 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
   **No upstream checksum is verified, because none is published** — the official installer checks only
   that the asset exists — so the hash is recorded rather than compared, and the binary is proved by
   running `--version`, which is a different and weaker claim, stated as such.
-  **The instance is the gateway's own, not a borrowed one.** It runs with `XDG_CONFIG_HOME` pointed at
-  `<dataDir>/runtime/opencode/service/config` — that directory holds nothing but a password the gateway
-  generates, so owning it costs nothing — on port `49390` (`OMNIHILBRAS_OPENCODE_PORT` moves it), started
-  when the gateway starts and stopped when it stops, with the pid recorded in
-  `<dataDir>/runtime/opencode/service/service.pid`. `serviceOwned` is true only when that pid file names
-  the process the registration names: an instance someone started by hand against the gateway's paths is
-  discovered and used, and is never killed by a gateway that did not start it.
-  **`XDG_STATE_HOME` is deliberately left alone**, and that is measured rather than assumed: redirected to
-  an empty directory, the same binary, port, account and body answered `429 RATE_LIMITED` where the
-  canonical state directory answered `200`. Whatever qualifies an instance for free usage lives there. A
-  consequence worth stating: the registration file is the canonical one
-  (`$XDG_STATE_HOME/opencode/service.json`), which is the same file the user's own OpenCode reads, and it
-  names the gateway's instance while that instance runs.
+  **The instance is the gateway's own, not a borrowed one.** It runs with `XDG_CONFIG_HOME` *and*
+  `XDG_STATE_HOME` pointed inside the local data directory — `<local data>/runtime/opencode/service/{config,state}`
+  — on port `49390` (`OMNIHILBRAS_OPENCODE_PORT` moves it), started when the gateway starts and stopped when
+  it stops, with the pid recorded in `<local data>/runtime/opencode/service/service.pid`. `serviceOwned` is
+  true only when that pid file names the process the registration names, and the process is still there: an
+  instance someone started by hand against the gateway's paths is discovered and used, and is never killed by
+  a gateway that did not start it.
+  **Owning the state directory is what keeps the instance alive.** OpenCode reaps the occupant of the
+  *canonical* registration file when it starts, so an instance registered there is killed whenever the app is
+  opened — measured: ours died within seconds of the app opening, and the canonical file had been rewritten to
+  the app's url and pid. Registered in our own state directory, no OpenCode process learns our pid: the same
+  measurement now leaves ours running, and the app's own instance untouched.
+  **`XDG_DATA_HOME` is deliberately not redirected.** The account credentials the free tier is derived from
+  live there — static analysis of `opencode` 2.0.28 found the decision made by `opencode.ai` from those
+  credentials, with the refusal sentence relayed back, and nothing in the state directory carrying an
+  entitlement at all. A machine with no OpenCode data therefore has no free tier; that is a read, and it is
+  the one dependency that remains.
   **A registration whose process is gone is not adopted.** `serviceRunning` answers whether a service is
   there, not whether a file says so: a file outlives the process that wrote it, and treating one as
   running is what made a boot report a running service on an empty port and answer its first turn `502`.
   Stale registrations are skipped and a fresh instance is started instead.
+  **A remembered endpoint is re-checked before it is used again.** The endpoint used to be cached for the life
+  of the process, so the app being closed left every later turn against a dead port — measured, the turn after
+  it failed in 14 ms with `502` and no instance was ever started. A TCP probe now drops a dead endpoint and
+  re-runs discovery, which starts ours.
+  **The instance is kept running, and only when nothing else is.** A supervisor checks every 10 seconds and
+  starts ours when no service is live, so the app wins whenever it is open (the provider then uses the app's
+  service, which is the same service) and ours returns when it closes — measured, unprompted within 18 seconds.
+  It never reaps the app's instance.
+  **The runtime's directory is the local data directory, never the connection store's.** Routes used to pass
+  `config.dataDir` (`~/.config/omnihilbras`) into every runtime call while the gateway's own boot, supervisor
+  and shutdown used `~/.omnihilbras`, so one gateway ran two instances and recorded two pid files: shutdown
+  read one and stopped nothing, because the instance actually running was recorded in the other.
 - `POST /v1/audio/speech` — TTS (implemented). `POST /v1/audio/transcriptions` — STT (implemented). `POST /v1/search` — search (DuckDuckGo instant answer).
 - `POST /v1/mcp` — Model Context Protocol JSON-RPC 2.0 endpoint. Methods: `initialize`, `tools/list`, `tools/call`. Tools: `list_connections`, `list_models`, `gateway_status`. Authenticated like the LLM surface (gateway API key or trusted dashboard origin). Management route.
 - `GET /v1/models` includes every enabled virtual model with `virtual: true` and `providers`, the target

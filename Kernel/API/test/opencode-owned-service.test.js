@@ -13,6 +13,7 @@ import {
   opencodeOwnServicePidFile,
   opencodeOwnServicePort,
   opencodeOwnServiceRoot,
+  startOpencodeSupervisor,
   stopOpencodeService,
 } from '../dist/src/core/opencode-runtime.js';
 
@@ -52,23 +53,31 @@ test('the port is ours to choose, and deliberately not the one the user’s app 
   assert.notEqual(opencodeOwnServicePort({}), 49_374, 'not the port the user\'s own instance uses');
 });
 
-test('our config is ours, and the registration file is deliberately the canonical one', async (t) => {
+test('everything an instance needs is ours: config, state, registration and pid', async (t) => {
   const dataDir = await tempData(t);
   const options = { dataDir, env: {} };
   const root = opencodeOwnServiceRoot(options);
 
-  // Ours: a password of our own, in our own directory.
-  assert.equal(opencodeOwnServiceConfigFile(options).startsWith(root), true);
-  assert.equal(opencodeOwnServicePidFile(options).startsWith(root), true);
+  assert.equal(opencodeOwnServiceConfigFile(options).startsWith(root), true, 'our own password');
+  assert.equal(opencodeOwnServicePidFile(options).startsWith(root), true, 'our own pid record');
 
   /**
-   * Not ours, and it cannot be: `XDG_STATE_HOME` is where the free-tier qualification lives — an instance
-   * with its own empty state directory answered `429` for the same binary, port, account and body that
-   * answered `200` from the canonical one. So the registration file is the canonical file, which is also
-   * the file the user's own OpenCode reads. It names our instance while ours runs.
+   * And the registration file too — which is what stops OpenCode killing this instance.
+   *
+   * The app reaps the occupant of the *canonical* registration when it starts: measured, ours was dead within
+   * seconds of the app opening, and the canonical file had been rewritten to the app's url and pid. A file
+   * inside our own state directory is a file no OpenCode process reads or writes.
+   *
+   * This test asserted the opposite an hour before this line was written, on measurements that turned out to be
+   * confounded by the free tier's own rate limit. See `opencodeOwnServiceEnv` for the interleaved run that
+   * replaced them.
    */
-  assert.equal(opencodeOwnServiceFile(options), join('/home/gin/.local', 'state', 'opencode', 'service.json').replace('/home/gin', options.env.HOME ?? process.env.HOME));
-  assert.equal(opencodeOwnServiceFile(options).includes(join(root, 'state')), false, 'the state dir is not redirected into ours');
+  assert.equal(opencodeOwnServiceFile(options).startsWith(join(root, 'state')), true, 'our own registration');
+  assert.notEqual(
+    opencodeOwnServiceFile(options),
+    join(process.env.HOME ?? '', '.local', 'state', 'opencode', 'service.json'),
+    'not the canonical file the app reads',
+  );
 });
 
 test('our config is written once, locked down, and its password is kept', async (t) => {
@@ -87,15 +96,15 @@ test('our config is written once, locked down, and its password is kept', async 
   assert.equal(JSON.parse(await readFile(opencodeOwnServiceConfigFile(options), 'utf8')).password, first.password);
 });
 
-test('the child environment redirects the config directory and leaves the state directory alone', () => {
+test('both directories are ours, and the data directory is left alone', () => {
   const env = opencodeOwnServiceEnv({ dataDir: '/tmp/example', env: { PATH: '/usr/bin', HOME: '/home/x' } });
   assert.equal(env.PATH, '/usr/bin', 'the rest of the environment survives');
   assert.equal(env.HOME, '/home/x');
   assert.equal(env.XDG_CONFIG_HOME, join('/tmp/example', 'runtime', 'opencode', 'service', 'config'), 'our password, our config');
-  // The whole finding, asserted: redirecting this is what cost the free tier.
-  assert.equal('XDG_STATE_HOME' in env, false, 'the state directory is not redirected');
-  const inherited = opencodeOwnServiceEnv({ dataDir: '/tmp/example', env: { XDG_STATE_HOME: '/custom/state' } });
-  assert.equal(inherited.XDG_STATE_HOME, '/custom/state', 'and a state directory that is already set is passed through');
+  assert.equal(env.XDG_STATE_HOME, join('/tmp/example', 'runtime', 'opencode', 'service', 'state'), 'our registration, our lock');
+  // The account credentials the free tier is derived from live in the data directory. Reading them is what the
+  // Console provider *is*; redirecting it would leave a machine that can never use a free model.
+  assert.equal('XDG_DATA_HOME' in env, false, 'the data directory is not redirected');
 });
 
 test('stopping claims nothing when there is no instance of ours', async (t) => {
@@ -159,11 +168,8 @@ test('ownership is claimed only when our own pid file names the registered proce
   const options = { dataDir: await tempData(t) };
   // A registration in our directory that we did not start — someone ran the binary by hand against our
   // paths. It is discovered and used, and it is not ours to kill.
-  const emptyState = await mkdtemp(join(tmpdir(), 'owned-service-state-'));
-  t.after(() => rm(emptyState, { recursive: true, force: true }));
-  const registration = join(emptyState, 'opencode', 'service.json');
-  options.env = { ...process.env, XDG_STATE_HOME: emptyState };
-  await mkdir(join(emptyState, 'opencode'), { recursive: true });
+  const registration = opencodeOwnServiceFile(options);
+  await mkdir(join(opencodeOwnServiceRoot(options), 'state', 'opencode'), { recursive: true });
   // A live pid — this test process — because ownership also requires the process to be there at all.
   await writeFile(registration, JSON.stringify({ id: 'x', version: '2.0.28', url: 'http://127.0.0.1:49374', pid: process.pid, password: 'p' }));
 
@@ -174,4 +180,69 @@ test('ownership is claimed only when our own pid file names the registered proce
   await writeFile(opencodeOwnServicePidFile(options), String(process.pid));
   const withPid = await inspectOwnService(options);
   assert.equal(withPid.owned, true, 'our pid file naming that process is what makes it ours');
+});
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('the supervisor starts an instance when nothing is running, and stops when told', async (t) => {
+  const dataDir = await tempData(t);
+  const emptyState = await mkdtemp(join(tmpdir(), 'owned-service-supervisor-'));
+  t.after(() => rm(emptyState, { recursive: true, force: true }));
+  let started = 0;
+  const stop = startOpencodeSupervisor({
+    dataDir,
+    intervalMs: 25,
+    // A binary that exists — the probe only asks whether one is there — and an empty state directory, so
+    // nothing is live and the supervisor has to act.
+    env: { ...process.env, OMNIHILBRAS_OPENCODE_SERVICE: 'auto', OMNIHILBRAS_OPENCODE_BINARY: process.execPath, XDG_STATE_HOME: emptyState },
+    ensure: async () => { started += 1; },
+    log: () => {},
+  });
+  // Long enough to survive a busy machine: the assertion is "it keeps checking", not a frame budget.
+  await wait(400);
+  stop();
+  const settled = started;
+  assert.ok(settled >= 2, `it keeps checking while the gateway lives (saw ${settled})`);
+
+  await wait(90);
+  // A supervisor that outlives its gateway would start an instance during shutdown, which is the process-leak
+  // this whole file is careful about.
+  assert.equal(started, settled, 'stopping it stops it');
+});
+
+test('the supervisor leaves a service that is already running alone', async (t) => {
+  const dataDir = await tempData(t);
+  const state = await mkdtemp(join(tmpdir(), 'owned-service-live-'));
+  t.after(() => rm(state, { recursive: true, force: true }));
+  // A registration naming a live process: the user's own OpenCode is running, and the rule is that it wins —
+  // ours must not start on top of it, because starting ours is what reaps theirs.
+  await mkdir(join(state, 'opencode'), { recursive: true });
+  await writeFile(join(state, 'opencode', 'service.json'), JSON.stringify({ id: 'x', version: '2.0.28', url: 'http://127.0.0.1:49374', pid: process.pid, password: 'p' }));
+
+  let started = 0;
+  const stop = startOpencodeSupervisor({
+    dataDir,
+    intervalMs: 20,
+    env: { ...process.env, OMNIHILBRAS_OPENCODE_SERVICE: 'auto', OMNIHILBRAS_OPENCODE_BINARY: process.execPath, XDG_STATE_HOME: state },
+    ensure: async () => { started += 1; },
+    log: () => {},
+  });
+  await wait(110);
+  stop();
+  assert.equal(started, 0, 'nothing was started while a service was live');
+});
+
+test('the supervisor does nothing at all when the runtime is switched off', async (t) => {
+  const dataDir = await tempData(t);
+  let started = 0;
+  const stop = startOpencodeSupervisor({
+    dataDir,
+    intervalMs: 20,
+    env: { ...process.env, OMNIHILBRAS_OPENCODE_SERVICE: 'off' },
+    ensure: async () => { started += 1; },
+    log: () => {},
+  });
+  await wait(100);
+  stop();
+  assert.equal(started, 0, '`off` means off');
 });

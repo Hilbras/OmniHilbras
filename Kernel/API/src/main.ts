@@ -1,5 +1,5 @@
 import { startGatewayServer } from './server.js';
-import { ensureOpencodeService, resolveOpencodeBinary, stopOpencodeService } from './core/opencode-runtime.js';
+import { ensureOpencodeService, opencodeServiceMode, resolveOpencodeBinary, startOpencodeSupervisor, stopOpencodeService } from './core/opencode-runtime.js';
 
 /**
  * Shutdown state, declared before anything can fail.
@@ -25,6 +25,14 @@ import { ensureOpencodeService, resolveOpencodeBinary, stopOpencodeService } fro
  */
 let instance: Awaited<ReturnType<typeof startGatewayServer>> | undefined;
 let shuttingDown = false;
+/**
+ * Assigned once the server is up, and a no-op before that.
+ *
+ * Declared here rather than next to its assignment because a SIGTERM can arrive between the server starting
+ * and the supervisor existing — a `const` read before its assignment throws, and this runs inside the shutdown
+ * path, which is the worst place to discover that.
+ */
+let stopSupervisor: () => void = () => {};
 let markReady: () => void = () => {};
 const ready = new Promise<void>((resolve) => { markReady = resolve; });
 
@@ -46,6 +54,8 @@ const close = (code: number) => {
    * outlast the drain's own five-second deadline by much.
    */
   const stoppingService = stopOpencodeService().catch(() => undefined);
+  // The supervisor stops first, so it cannot start a fresh instance while this one is being stopped.
+  stopSupervisor();
 
   // The server stops accepting first, then the service drains. That order is the contract: the
   // key store's drain loops until nothing is in flight, which terminates on an idle queue and not
@@ -87,7 +97,7 @@ instance = await startGatewayServer();
 markReady();
 
 /**
- * Our OpenCode instance starts with the gateway.
+ * Our OpenCode instance starts with the gateway, and is kept running afterwards.
  *
  * The provider used to be lazy: `auto` started the service when a request needed it, so the state a
  * person saw in the dashboard was "installed, not running" and pressing a button was the only way to
@@ -100,8 +110,7 @@ markReady();
  */
 void (async () => {
   try {
-    const env = process.env;
-    if ((env.OMNIHILBRAS_OPENCODE_SERVICE ?? 'auto').trim().toLowerCase() === 'off') return;
+    if (opencodeServiceMode() === 'off') return;
     if (!(await resolveOpencodeBinary())) return;
     await ensureOpencodeService();
   } catch (error) {
@@ -110,4 +119,14 @@ void (async () => {
     console.error(`OmniHilbras gateway: the OpenCode runtime did not start. ${error instanceof Error ? error.message : String(error)}`);
   }
 })();
+
+/**
+ * And it stays running while the gateway does.
+ *
+ * Opening OpenCode kills our instance — its service reaps whatever the canonical registration names, and
+ * registering there is what the free tier requires — so without this the provider stayed pointed at a dead
+ * port until somebody restarted the gateway. The supervisor starts ours only when nothing is live, so the
+ * app wins whenever it is open and ours returns when it closes; it never reaps the app's instance.
+ */
+stopSupervisor = startOpencodeSupervisor();
 console.log(`OmniHilbras gateway listening on http://${instance.config.host}:${instance.config.port}`);

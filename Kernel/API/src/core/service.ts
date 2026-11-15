@@ -2776,10 +2776,14 @@ export class GatewayService {
         // Discovery, then the client's own server started on demand: a device with the OpenCode binary
         // but nothing running needs no manual step, and a device with neither reports the Console's
         // refusal instead of silence. The runtime is injected because it imports this module's sibling.
-        ensure: (o) => {
-          const dataDir = this.config()?.dataDir;
-          return ensureOpencodeService({ ...(o.env ? { env: o.env } : {}), ...(dataDir ? { dataDir } : {}) });
-        },
+        //
+        // The runtime's directory is **not** the connection store's. Passing `this.config().dataDir` here is
+        // what split the runtime across two roots: this path recorded a pid under
+        // `~/.config/omnihilbras/runtime/opencode/service/service.pid` while the gateway's own boot, supervisor
+        // and shutdown used `~/.omnihilbras/runtime/opencode/service/service.pid`. Two instances were started,
+        // only one was ever stopped, and `owned` was true in one place and false in the other. The runtime
+        // resolves its own root; nothing here needs to name it.
+        ensure: (o) => ensureOpencodeService({ ...(o.env ? { env: o.env } : {}) }),
       }),
     });
     this.opencodeConsoleAdapters.set(connectionId, adapter);

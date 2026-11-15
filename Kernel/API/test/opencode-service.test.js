@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { discoverOpencodeService, flattenMessagesForService, opencodeServicePermissions, opencodeServiceTurnError, parseModelRef, runOpencodeServiceTurn, streamOpencodeServiceTurn } from '../dist/src/core/opencode-service.js';
+import { createOpencodeLocalService, discoverOpencodeService, flattenMessagesForService, opencodeEndpointListening, opencodeServicePermissions, opencodeServiceTurnError, parseModelRef, runOpencodeServiceTurn, streamOpencodeServiceTurn } from '../dist/src/core/opencode-service.js';
 
 /**
  * The local OpenCode service, which is the transport the desktop app uses.
@@ -207,4 +208,48 @@ test('a free-tier refusal is reported as rate limiting, with the Console\'s own 
 
   const other = opencodeServiceTurnError('The model returned nothing.');
   assert.equal(other.retryable, true, 'an unclassified failure may be worth another attempt');
+});
+
+test('the liveness probe answers for a listening port and not for a closed one', async (t) => {
+  const server = createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  t.after(() => server.close());
+
+  assert.equal(await opencodeEndpointListening(`http://127.0.0.1:${port}`), true);
+  assert.equal(await opencodeEndpointListening(`http://127.0.0.1:${port}/api/info`), true, 'a path is irrelevant: it is a TCP connect');
+  await new Promise((resolve) => server.close(resolve));
+  assert.equal(await opencodeEndpointListening(`http://127.0.0.1:${port}`), false, 'nothing is listening there any more');
+  assert.equal(await opencodeEndpointListening('not a url'), false);
+  assert.equal(await opencodeEndpointListening('http://127.0.0.1:notaport'), false);
+});
+
+test('a remembered endpoint is dropped once its process is gone — the 14ms 502', async (t) => {
+  /**
+   * The bug this pins: `endpoint ??=` remembered the endpoint forever, so the app being closed left the
+   * gateway talking to a dead port. A turn after that failed in 0.014s and never asked for a new endpoint,
+   * which is why nothing restarted the instance:
+   *
+   *     turn while the app's instance was up   -> 200 in 14.8s
+   *     app closed, next turn                  -> 502 in 0.014s
+   */
+  const server = createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  t.after(() => server.close());
+
+  let asked = 0;
+  const service = createOpencodeLocalService({
+    ensure: async () => {
+      asked += 1;
+      return { url: `http://127.0.0.1:${port}`, password: 'pw' };
+    },
+  });
+
+  await assert.rejects(() => service.turn({ model: 'opencode/beam-free', text: 'hi' }));
+  assert.equal(asked, 1, 'the first turn asks for an endpoint');
+
+  await assert.rejects(() => service.turn({ model: 'opencode/beam-free', text: 'hi' }));
+  assert.equal(asked, 2, 'the second asks again, because that endpoint stopped answering');
 });

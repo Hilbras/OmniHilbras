@@ -15,8 +15,26 @@ import { ensureOpencodeService, installOpencodeRuntime, opencodeRuntimeStatus, r
 const runtimePrefix = '/v1/runtime/opencode';
 
 function runtimeOptions(ctx: RouteContext): OpencodeRuntimeOptions {
-  const dataDir = (ctx.service as unknown as { config?: { dataDir?: string } })?.config?.dataDir;
-  return dataDir ? { dataDir } : {};
+  /**
+   * **No `dataDir`, deliberately.**
+   *
+   * This used to pass the connection store's directory (`this.config().dataDir`, i.e. `~/.config/omnihilbras`)
+   * into every runtime call. The runtime's own root is resolved from the *local data directory*
+   * (`~/.omnihilbras`) when nothing is passed, so the same gateway ended up with two of everything: the boot
+   * path started an instance whose pid was recorded under `~/.omnihilbras/runtime/opencode/service/service.pid`
+   * while these routes recorded theirs under `~/.config/omnihilbras/runtime/opencode/service/service.pid`.
+   * Measured on this machine, both files existed at once, naming different processes:
+   *
+   * ```
+   * ~/.omnihilbras/runtime/opencode/service/service.pid         -> 1610458  (boot, supervisor, shutdown)
+   * ~/.config/omnihilbras/runtime/opencode/service/service.pid  -> 1611120  (status, install, start)
+   * ```
+   *
+   * Shutdown read the first and stopped nothing, because the instance that was actually running was recorded
+   * in the second. The runtime is not part of the connection store, so it is no longer given its directory.
+   */
+  void ctx;
+  return {};
 }
 
 async function status(ctx: RouteContext) {

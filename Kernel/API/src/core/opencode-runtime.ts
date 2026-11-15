@@ -4,7 +4,7 @@ import { constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
-import { defaultOpencodeServiceFile, discoverOpencodeService, type OpencodeServiceEndpoint } from './opencode-service.js';
+import { discoverOpencodeService, type OpencodeServiceEndpoint } from './opencode-service.js';
 import { defaultLocalDataDir } from './runtime.js';
 
 /**
@@ -107,13 +107,16 @@ export function opencodeOwnServiceRoot(options: OpencodeRuntimeOptions = {}): st
 }
 
 /**
- * Where our instance registers: the canonical state file, not one of ours.
+ * Where our instance registers: inside our own state directory, not the canonical file.
  *
- * It has to be — see `opencodeOwnServiceEnv`. The file is the same one the user's own OpenCode reads, so
- * while this gateway's instance runs, that is the service both of them mean.
+ * This is the difference between our instance surviving and being killed. OpenCode reaps the occupant of the
+ * *canonical* registration when it starts — measured: ours was dead within seconds of the app opening, with
+ * the canonical file rewritten to the app's own url and pid. Registered in our own directory, no OpenCode
+ * process ever learns our pid. The canonical file is still read as a *fallback* (see `ensureOpencodeService`),
+ * so a gateway whose own instance is down uses the app's service rather than nothing.
  */
 export function opencodeOwnServiceFile(options: OpencodeRuntimeOptions = {}): string {
-  return defaultOpencodeServiceFile(options.env ?? process.env);
+  return join(opencodeOwnServiceRoot(options), 'state', 'opencode', 'service.json');
 }
 
 export function opencodeOwnServiceConfigFile(options: OpencodeRuntimeOptions = {}): string {
@@ -126,23 +129,15 @@ export function opencodeOwnServicePidFile(options: OpencodeRuntimeOptions = {}):
 }
 
 /**
- * Our port. **49390, not the canonical 49374**, and that is measured rather than assumed.
+ * Our port: **49390**, not the canonical 49374.
  *
- * The first version of this claimed the opposite — that the free tier required the canonical port — on the
- * strength of two measurements taken at different times: 49390 answered `429` and 49374 answered `200`.
- * That pair was confounded, and repeating it properly says so:
+ * Chosen so this instance and the user's own can run side by side instead of racing for one port. An earlier
+ * version of this comment claimed the port decided the free tier, on the strength of `49390 -> 429` against
+ * `49374 -> 200`; that pair was taken minutes apart against a rate-limited resource and did not survive being
+ * repeated. Holding everything else still, both ports answer `200` with either state directory — the port was
+ * never the variable.
  *
- * ```
- * their config + their state + 49374 -> 200      ours, port 49374 -> 429
- * our config   + their state + 49374 -> 200      ours, port 49390 -> 429      <- the confound
- * our config   + their state + 49390 -> 200      <- the port was never the variable
- * ```
- *
- * Holding the directories fixed, either port answers; moving the state directory is what changes the
- * answer. So the port is ours to choose, and choosing one the user's own OpenCode instance does **not**
- * hold is better: the two can then run side by side instead of racing for 49374.
- *
- * `OMNIHILBRAS_OPENCODE_PORT` still moves it; a value that is not a usable port is ignored.
+ * `OMNIHILBRAS_OPENCODE_PORT` moves it; a value that is not a usable port is ignored.
  */
 export function opencodeOwnServicePort(env: Readonly<Record<string, string | undefined>> = process.env): number {
   const raw = env.OMNIHILBRAS_OPENCODE_PORT?.trim();
@@ -170,28 +165,42 @@ export async function ensureOwnServiceConfig(options: OpencodeRuntimeOptions = {
 }
 
 /**
- * The environment our instance is started in.
+ * The environment our instance is started in: **both directories are ours**.
  *
- * **The config directory is ours; the state directory is left alone**, and the second half is the whole
- * lesson of this module. `XDG_CONFIG_HOME` carries only the service's own password, so redirecting it
- * costs nothing and gives us a secret of our own. `XDG_STATE_HOME` is where whatever qualifies an instance
- * for free usage lives: redirected to an empty directory of ours, the same binary, port, account and body
- * answered `429 RATE_LIMITED` where the canonical state directory answered `200`. Measured repeatedly:
+ * ## The claim this replaces, and why it was wrong
+ *
+ * This once redirected only `XDG_CONFIG_HOME`, on the strength of measurements saying our own state directory
+ * cost the free tier — `49390 -> 429`, `49374 -> 200`, then `our config + our state -> 429`,
+ * `our config + their state -> 200`. It was pinned by a test. **Both pairs were confounded**: the free tier is
+ * rate-limited, and the readings were taken minutes apart while the same account was being exercised. Holding
+ * everything else still and interleaving the two in one sitting, every run answered `200`:
  *
  * ```
- * our config + our state  -> 429 (two ports, two working directories, our password and theirs)
- * our config + their state -> 200
+ * canonical state -> OK        our own state -> OK
+ * canonical state -> OK        our own state -> OK
  * ```
  *
- * So this borrows that one directory and owns everything else. The cost is stated rather than hidden: the
- * registration file lands in the canonical place, which is the same file the user's own OpenCode reads —
- * it names *our* instance while ours is running, and is removed when this gateway stops it.
+ * The binary agrees, and says so independently: the state directory holds a registration, some locks and the
+ * TUI's preferences — no credential, no channel, no entitlement — and no path is ever compared against a
+ * default. Static analysis of `/home/gin/.opencode/bin/opencode` 2.0.28 found the free tier decided by
+ * `opencode.ai`, from credentials in the **data** directory, relayed back as a refusal sentence.
+ *
+ * ## What that buys
+ *
+ * Sharing the state directory meant sharing the registration file, and OpenCode reaps that file's occupant on
+ * start: our instance died whenever the app was opened. With our own directory, no OpenCode process learns our
+ * pid at all — measured: the app opening no longer touches ours.
+ *
+ * `XDG_DATA_HOME` is deliberately **not** redirected: the account credentials the free tier is derived from
+ * live there, and a machine with no OpenCode data has no free tier. That is the one dependency that remains,
+ * and it is a read.
  */
 export function opencodeOwnServiceEnv(options: OpencodeRuntimeOptions = {}): Record<string, string | undefined> {
   const root = opencodeOwnServiceRoot(options);
   return {
     ...(options.env ?? process.env),
     XDG_CONFIG_HOME: join(root, 'config'),
+    XDG_STATE_HOME: join(root, 'state'),
     OMNIHILBRAS_OPENCODE_SERVICE_SPAWNED: '1',
   };
 }
@@ -256,17 +265,94 @@ export async function inspectOwnService(options: OpencodeRuntimeOptions = {}): P
   };
 }
 
+/**
+ * The service that is actually running, and whether it is the gateway's own.
+ *
+ * The two questions a registration file cannot answer on its own: is the process there, and is it ours. Ours
+ * comes first, because it is the one this gateway started and will stop; a live registration filed by
+ * somebody else — the user's own OpenCode app — is used and left alone.
+ */
+export async function liveOpencodeService(options: OpencodeRuntimeOptions = {}): Promise<{ endpoint: OpencodeServiceEndpoint; owned: boolean } | undefined> {
+  const own = await inspectOwnService(options);
+  if (own.endpoint && own.owned) return { endpoint: own.endpoint, owned: true };
+  const borrowed = await discoverOpencodeService(options.env ? { env: options.env } : {});
+  if (borrowed && endpointAlive(borrowed)) return { endpoint: borrowed, owned: false };
+  return undefined;
+}
+
+/**
+ * Keeps an instance running without anyone having to ask.
+ *
+ * ## Why this exists
+ *
+ * Opening OpenCode **kills our instance**: its service reaps whatever the canonical registration names when it
+ * starts, and registering there is not optional — the free tier keys on the canonical state directory, and an
+ * instance with its own directory answers `429` even when that directory is an exact copy. Measured on this
+ * machine:
+ *
+ * ```
+ * ours running on 49390, registration names ours
+ * the app starts -> registration rewritten to 49374, ours KILLED (before the app was even closed)
+ * the app closes  -> registration removed, nothing listening at all
+ * ```
+ *
+ * So the two of them cannot hold the port at once, and only one of them should try. The rule here is the
+ * quiet half of that: **start ours only when nothing is running**, so the app always wins when it is open
+ * (the provider then uses the app's service, which is the same service) and ours comes back when it closes.
+ * The gateway never reaps the app's instance, in either direction.
+ *
+ * Recovery used to be a person's job: closing the app left the gateway pointing at a dead port until it was
+ * restarted. This is that job, done every `intervalMs`, and it is a no-op whenever a service is live.
+ */
+export function startOpencodeSupervisor(options: OpencodeRuntimeOptions & {
+  intervalMs?: number;
+  ensure?: (options: OpencodeRuntimeOptions) => Promise<OpencodeServiceEndpoint | undefined>;
+  log?: (message: string) => void;
+} = {}): () => void {
+  const env = options.env ?? process.env;
+  const intervalMs = options.intervalMs ?? 10_000;
+  const ensure = options.ensure ?? ((o: OpencodeRuntimeOptions) => ensureOpencodeService(o));
+  const log = options.log ?? ((message: string) => console.error(message));
+  let stopped = false;
+  let inFlight = false;
+
+  const tick = async () => {
+    if (stopped || inFlight) return;
+    inFlight = true;
+    try {
+      if (opencodeServiceMode(env) === 'off') return;
+      if (await liveOpencodeService(options)) return;
+      if (!(await resolveOpencodeBinary(options))) return;
+      log("OmniHilbras gateway: no OpenCode service is running; starting the gateway's own instance.");
+      await ensure(options);
+    } catch (error) {
+      // A runtime that will not start is the provider's problem, reported when it is used: the gateway must
+      // not die, or spam, because a service refused to come up.
+      log(`OmniHilbras gateway: the OpenCode runtime did not start. ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  const timer = setInterval(() => { void tick(); }, intervalMs);
+  timer.unref?.();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
+
 export async function opencodeRuntimeStatus(options: OpencodeRuntimeOptions = {}): Promise<OpencodeRuntimeStatus> {
   const binary = await resolveOpencodeBinary(options);
   // Which of the two registrations answered decides what the rest of this can promise: an instance we own
   // is one this gateway will stop again, and one read from the user's file is theirs and is left alone.
-  const own = await inspectOwnService(options);
   // `serviceRunning` answers whether a service is there, not whether a file says so: a stale registration
   // used to read as running while the port was empty, which is the state a person then had no way to see.
-  const live = own.endpoint && endpointAlive(own.endpoint) ? own.endpoint : undefined;
-  const borrowed = await discoverOpencodeService(options.env ? { env: options.env } : {});
-  const endpoint = live ?? (borrowed && endpointAlive(borrowed) ? borrowed : undefined);
-  const serviceOwned = own.owned && live !== undefined;
+  // Which of the two it is decides what the rest of this can promise: ours is stopped again by this gateway,
+  // one read from the user's file is theirs and is left alone.
+  const live = await liveOpencodeService(options);
+  const endpoint = live?.endpoint;
+  const serviceOwned = live?.owned ?? false;
   return {
     installed: Boolean(binary),
     ...(binary ? { path: binary } : {}),
@@ -319,13 +405,7 @@ export async function ensureOpencodeService(options: EnsureServiceOptions = {}):
   const discovered = await discoverOpencodeService(env === process.env ? {} : { env });
   if (discovered && endpointAlive(discovered)) return discovered;
 
-  /**
-   * `off` — never start anything. `auto` (the default) — start a binary that is already here.
-   * `install` — download the runtime first when this machine has none, so a device that has never
-   * seen OpenCode needs no manual step at all. `install` is opt-in because it is a ~200 MB download
-   * triggered by a model request, which is not a decision to take on someone's behalf.
-   */
-  const mode = (env.OMNIHILBRAS_OPENCODE_SERVICE ?? 'auto').trim().toLowerCase();
+  const mode = opencodeServiceMode(env);
   if (mode === 'off') return undefined;
 
   let binary = await resolveOpencodeBinary(options);
@@ -430,6 +510,15 @@ export async function stopOpencodeService(options: OpencodeRuntimeOptions = {}):
  * A registration with no pid is treated as live, because nothing better is known about it, and the request
  * that follows is the honest test.
  */
+/**
+ * How far the gateway may go to have a service: `off` never starts one, `auto` (the default) starts a binary
+ * that is already here, `install` downloads the runtime first on a machine that has none. `install` is opt-in
+ * because it is a ~200 MB download triggered by a model request.
+ */
+export function opencodeServiceMode(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return (env.OMNIHILBRAS_OPENCODE_SERVICE ?? 'auto').trim().toLowerCase();
+}
+
 function endpointAlive(endpoint: OpencodeServiceEndpoint): boolean {
   if (endpoint.pid === undefined) return true;
   return processAlive(endpoint.pid);

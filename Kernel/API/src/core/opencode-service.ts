@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ProviderError } from './provider-error.js';
 import { readFile } from 'node:fs/promises';
+import { connect as netConnect } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -545,9 +546,57 @@ export class OpencodeServiceUnavailableError extends Error {
  * Discovery is retried on every call while it fails, so starting OpenCode after the gateway does not
  * require a restart; once found, the endpoint is reused because the registration file is stable.
  */
+/**
+ * Whether anything is listening where a registration points.
+ *
+ * A registration file outlives the service that wrote it, and so does a *resolved* endpoint: the app can be
+ * closed between two turns. This is a TCP connect with a short deadline rather than an HTTP call, because the
+ * only question being asked is "is the process still there", and that must cost nothing and never depend on
+ * the service's health.
+ */
+export async function opencodeEndpointListening(endpointUrl: string, timeoutMs = 400): Promise<boolean> {
+  let port: number;
+  try {
+    const url = new URL(endpointUrl);
+    port = Number(url.port);
+    if (!Number.isInteger(port) || port <= 0) return false;
+  } catch {
+    return false;
+  }
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const done = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(value);
+    };
+    const socket = netConnect({ host: '127.0.0.1', port });
+    socket.setTimeout(timeoutMs, () => done(false));
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+  });
+}
+
 export function createOpencodeLocalService(options: { file?: string; env?: Readonly<Record<string, string | undefined>>; directory?: string; ensure?: (options: { file?: string; env?: Readonly<Record<string, string | undefined>> }) => Promise<OpencodeServiceEndpoint | undefined> } = {}): OpencodeLocalService {
   let endpoint: OpencodeServiceEndpoint | undefined;
   const resolve = async () => {
+    /**
+     * A remembered endpoint is checked before it is used again.
+     *
+     * `endpoint ??=` was the whole of this, and it meant an endpoint outlived its process: the app was
+     * opened (its service took over and reaped ours), the app was closed, and from then on **every** turn
+     * failed in 14ms against a port nobody was listening on. Measured on this machine:
+     *
+     * ```
+     * turn while the app's instance was up   -> 200 in 14.8s
+     * app closed, next turn                  -> 502 in 0.014s   (cached endpoint, dead port)
+     * ```
+     *
+     * No spawn was attempted, because nothing asked discovery again. Now a dead endpoint is dropped and the
+     * injected `ensure` runs — which is what starts the gateway's own instance.
+     */
+    if (endpoint && !(await opencodeEndpointListening(endpoint.url))) endpoint = undefined;
     // Discovery first, then whatever the caller supplied — which is where the gateway starts the
     // client's own server on a machine that has the binary but nothing running. It is injected rather
     // than imported because that machinery lives in `opencode-runtime.ts` and imports this file.
