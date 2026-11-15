@@ -2434,7 +2434,7 @@ The endpoint is checked before the card is written, not after:
 | --- | --- | --- | --- |
 | NaraRouter | `https://router.bynara.id/v1` | `GET /v1/models` | `401 A valid API key is required.` |
 | TokenHarbor | `https://tokenharbor.ai/v1` | `GET /v1/models` | `401 Invalid or revoked API key. Rotate your key at …` |
-| AgentRouter | `https://agentrouter.org/v1` | `GET /v1/models` | `401 unauthorized client detected, contact support for assistance` |
+| AgentRouter | `https://agentrouter.org/v1` | `GET /v1/models` | `401 unauthorized client detected, contact support for assistance` — a **client-identity gate, checked before the key**; see below |
 | Aion Labs | `https://api.aionlabs.ai/v1` | `GET /v1/models` | `200` with a public model list; chat still requires a bearer key |
 
 A `401` with a JSON error body is the useful result: it shows the route exists, the service
@@ -2445,6 +2445,29 @@ NaraRouter's site root returns HTML and `/api/v1` 404s, so only `/v1` is the API
 Aion Labs is the exception to that reading: its `200` proves the host and path, not the key,
 because the catalog is public. The card therefore claims no credential health until a real
 request is made; the generic adapter's model-list health check is not evidence about a key here.
+
+**AgentRouter's `401` is the exception in the other direction — it is not about the key at
+all.** It is a client-identity gate the relay applies *before* it reads the bearer token: a
+valid key, a deliberately bogus one and no key at all produce the byte-identical
+`unauthorized client detected` body, which is why the Add-connection flow reported "Provider
+authentication failed. UNAUTHENTICATED" and never saved, whatever was pasted in. Measured
+against `GET https://agentrouter.org/v1/models` on 2026-11-16, one deliberately-bogus key
+throughout, changing only `User-Agent`: `claude-cli/2.1.296 (external, cli)`,
+`codex_cli_rs/0.159.2 (...)`, `Cline/3.5.54` and `opencode/1.18.34` all get the gate past
+(`401 无效的令牌`, an ordinary token error), while `curl/8.5.0`, `node` and an
+`OmniHilbras/1.0` `User-Agent` all get `unauthorized client detected`. Their relay accepts a
+short allowlist of coding-CLI fingerprints, their own documentation does not say so, and the
+Discord invite in the refusal is their blocked-client support channel.
+
+So the gateway sends `User-Agent: claude-cli/2.1.296 (external, cli)` and `x-app: cli` for
+**this provider and no other** — the table is `Kernel/API/src/core/provider-client-identity.ts`,
+and the adapter config `ProviderResolver` builds for a generic endpoint carries it. `x-app: cli`
+is not what opens the gate: with a stock `curl` `User-Agent` it was refused exactly as `curl`
+alone was. Sending another vendor's client identity is impersonation of that client, it may
+stop working the moment the allowlist moves, and it is deliberately scoped to this one provider
+rather than applied globally, because a global rewrite would misattribute this gateway's
+traffic everywhere else. `OMNIHILBRAS_AGENTROUTER_USER_AGENT` replaces the `User-Agent` value
+for this provider when the relay's list changes.
 
 A card never borrows another provider's logo. There is a `tokenrouter` asset in
 `public/providers` belonging to a different, unrelated service, and `tokenharbor` uses the

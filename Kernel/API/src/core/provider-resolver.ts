@@ -1,6 +1,7 @@
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '@omnihilbras/sdk-openai';
 import type { ProviderAdapter, ProviderRegistry } from './index.js';
 import { providerAlias } from './provider-alias.js';
+import { providerClientHeaders } from './provider-client-identity.js';
 
 /**
  * The transport a generic adapter is built with.
@@ -124,6 +125,18 @@ export class ProviderResolver {
   }
 
   /**
+   * The config a generic adapter carries for a provider that gates on the client's identity.
+   *
+   * Empty for every provider but the one in the table, and a test pins that: the header this carries is
+   * another vendor's client, so sending it anywhere else would misattribute this gateway's traffic to a
+   * tool it is not. `provider-client-identity.ts` holds the measurement and what the impersonation is.
+   */
+  private identityOptions(providerId: string): { headers?: Record<string, string> } {
+    const headers = providerClientHeaders(providerId);
+    return headers ? { headers } : {};
+  }
+
+  /**
    * Registers an adapter that has to be built when it is first needed.
    *
    * A factory rather than a value, because an instance would be shared across connections that
@@ -182,7 +195,7 @@ export class ProviderResolver {
         adapters.push(cached.adapter);
         continue;
       }
-      const adapter = new OpenAICompatibleAdapter({ id: connection.providerId, name: connection.name ?? connection.providerId, baseUrl: connection.endpoint }, this.adapterOptions());
+      const adapter = new OpenAICompatibleAdapter({ id: connection.providerId, name: connection.name ?? connection.providerId, baseUrl: connection.endpoint, ...this.identityOptions(connection.providerId) }, this.adapterOptions());
       this.dynamic.set(connection.providerId, { endpoint: connection.endpoint, adapter });
       adapters.push(adapter);
     }
@@ -267,7 +280,7 @@ export class ProviderResolver {
     // gets a new one, because reusing the old adapter would keep sending to the old host.
     const cached = this.dynamic.get(providerId);
     if (cached && cached.endpoint === endpoint.endpoint) return cached.adapter;
-    const adapter = new OpenAICompatibleAdapter({ id: providerId, name: endpoint.name, baseUrl: endpoint.endpoint }, this.adapterOptions());
+    const adapter = new OpenAICompatibleAdapter({ id: providerId, name: endpoint.name, baseUrl: endpoint.endpoint, ...this.identityOptions(providerId) }, this.adapterOptions());
     this.dynamic.set(providerId, { endpoint: endpoint.endpoint, adapter });
     return adapter;
   }

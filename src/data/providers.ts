@@ -373,7 +373,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'agentrouter',
     name: 'AgentRouter',
-    description: 'OpenAI- and Anthropic-compatible gateway for coding tools, with a free credit allowance and a model list that changes with capacity. Create a key in the AgentRouter console.',
+    description: 'OpenAI- and Anthropic-compatible gateway that serves only requests looking like one of a few coding tools, with a free credit allowance and a model list that changes with capacity; create a key in the AgentRouter console.',
     freeTier: 'Free credits for developers, and models that rotate with capacity. Check the console for the current model list and remaining quota.',
     category: 'Multi-model provider',
     group: 'free-tier',

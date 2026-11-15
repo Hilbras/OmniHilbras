@@ -71,7 +71,7 @@ that holds is one a machine re-derives.
 | Surface | Lines | Provider ids named | Note |
 | --- | --- | --- | --- |
 | `Kernel/API/src/core/routing.ts` | 785 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
-| `Kernel/API/src/core/provider-resolver.ts` | 279 | 1 | enforced by a test that greps the file |
+| `Kernel/API/src/core/provider-resolver.ts` | 292 | 1 | enforced by a test that greps the file |
 | `Kernel/API/src/core/request-executor.ts` | 876 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 335 | **0** | one error mapper, one catalog merge, one lock scope |
 | `Kernel/API/src/core/service.ts` | 3748 | 26 | all twenty-six `.onDemand()` registrations, in one constructor |
@@ -161,6 +161,8 @@ Kernel/API/src/
     http.ts          Read a request, write a response, turn a failure into an envelope.
     service.ts       Composition root. Wires the managers below to its own effects.
     provider-resolver  Which adapter serves a provider id. Zero provider ids; a test enforces it.
+    provider-client-identity  The client identity one provider's relay gates on — impersonation of another
+                       vendor's tool, one provider, overridable, and named as such where it is written.
     request-executor  The failover chain: hedge, retry, next route, attempt ledger. Zero ids.
     connection-manager  Storing connections: one error mapper, one catalog merge, one lock scope.
     sign-in-sessions  The one OAuth session lifecycle. A grant is spent once, in one function.
