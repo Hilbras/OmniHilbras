@@ -17,6 +17,9 @@
   --gold-ink: #ffffff;
   --gold-soft: rgba(212, 175, 55, 0.14);
   --glow: rgba(212, 175, 55, 0.35);
+  /* The update notice's tone, taken from the reference card: a darker amber than the brand gold, so an
+     update reads as a notice rather than as another gold accent. */
+  --warning: #b8860b;
   --success: #177d47;
   --danger: #c23b31;
   --shadow: 0 1px 2px rgba(30, 25, 5, 0.05), 0 12px 40px rgba(30, 25, 5, 0.07);
@@ -38,6 +41,7 @@
   --gold-ink: #1a1503;
   --gold-soft: rgba(226, 189, 82, 0.12);
   --glow: rgba(226, 189, 82, 0.25);
+  --warning: #e6c768;
   --success: #6fdb9b;
   --danger: #ff8a80;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 48px rgba(0, 0, 0, 0.5);
@@ -56,6 +60,7 @@
   --color-gold-bright: var(--gold-bright);
   --color-gold-text: var(--gold-text);
   --color-gold-ink: var(--gold-ink);
+  --color-warning: var(--warning);
   --color-success: var(--success);
   --color-danger: var(--danger);
   --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
