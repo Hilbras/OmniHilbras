@@ -90,6 +90,24 @@ test('the notice is re-checked, and can be dismissed for one version only', () =
   assert.match(hook, /version === skipped/, 'and compared by value, not as a boolean flag');
 });
 
+test('the update button opens a popup with the command, a copy, and the two actions', () => {
+  const indicator = read('src/components/UpdateIndicator.tsx');
+  /**
+   * The manual path, which is the one a browser and a server install need: the command, a control that
+   * copies exactly what is on screen, where to download it, and getting the gateway out of the way so the
+   * command can replace it. Asserted as source because this suite has no DOM; the behavioural half of the
+   * same property is `Kernel/API/test/system-shutdown.test.js`, which drives the route the button calls.
+   */
+  assert.match(indicator, /setPopupOpen\(true\)/, 'the card button opens the popup');
+  assert.match(indicator, /navigator\.clipboard\.writeText\(INSTALL_COMMAND\)/, 'the copy copies the command it shows');
+  assert.match(indicator, /Update release/, 'and the release is one of the two actions');
+  assert.match(indicator, /shutdownGateway\(/, 'with the gateway stop as the other');
+  assert.match(indicator, /window\.confirm\('Stop the gateway now/, 'the stop asks first, in its own words');
+  // The reference implementation shut the server down as a side effect of copying a string, after a
+  // countdown whose Cancel was disabled. This one asks, and the question can be answered no.
+  assert.doesNotMatch(indicator, /disabled=\{isCountingDown\}/, 'there is no countdown that cannot be cancelled');
+});
+
 test('the notice can be looked at in dev, and the preview cannot ship', () => {
   const hook = read('src/lib/useUpdateState.ts');
   /**

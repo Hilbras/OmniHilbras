@@ -91,6 +91,25 @@ test('page changes replay the entrance without remounting the page', () => {
   assert.doesNotMatch(app, /key=\{location\.pathname\}/, 'the remount key is back');
 });
 
+test('every write announces JSON, which the gateway requires before any route', () => {
+  /**
+   * Measured against the running gateway, because this was a real 415 rather than a theory:
+   *
+   *     POST /v1/runtime/opencode/start                      -> 415 UNSUPPORTED_MEDIA_TYPE
+   *     POST /v1/runtime/opencode/start + JSON + body '{}'   -> 200
+   *
+   * The browser's Start and Install buttons on a provider page were sending no content-type, and the desktop
+   * bridge had the same gap; one caller had already worked around it by hand. The rule lives in one place per
+   * surface now, so a body-less write added later cannot rediscover it.
+   */
+  const client = read('src/lib/gatewayClient.ts');
+  const bridge = read('desktop/gateway-ipc.mjs');
+  assert.match(client, /const write = method === 'POST' \|\| method === 'PUT' \|\| method === 'PATCH'/, 'the client knows which methods are writes');
+  assert.match(client, /init\.body \?\? '\{\}'/, "and gives a write a JSON body even when it has nothing to send");
+  assert.match(client, /content-type': 'application\/json'/, 'and the header, in the fetch path');
+  assert.match(bridge, /const write = upper === 'POST' \|\| upper === 'PUT' \|\| upper === 'PATCH'/, 'the bridge applies the same rule');
+});
+
 test('updates can be downloaded and installed from the UI', () => {
   const main = read('desktop/main.mjs');
   const preload = read('desktop/preload.cjs');

@@ -61,10 +61,20 @@ export function createGatewayClient({ host = '127.0.0.1', port }) {
     async request({ method = 'GET', path, body } = {}) {
       const upper = String(method).toUpperCase();
       if (!ALLOWED_METHODS.has(upper)) throw new Error(`Gateway method ${method} is not allowed.`);
+      /**
+       * A write announces JSON whether or not it has anything to send.
+       *
+       * The gateway refuses a `POST`/`PUT`/`PATCH` with no `content-type: application/json` with `415`,
+       * before any route sees it — so the body-less writes (starting the opencode runtime, stopping the
+       * gateway) were refused from here too. The renderer now normalises its own writes; this is the same
+       * rule at the boundary, so a caller that gets either one right works.
+       */
+      const write = upper === 'POST' || upper === 'PUT' || upper === 'PATCH';
+      const payload = write ? (body ?? '{}') : body;
       const response = await fetch(`${base()}${assertGatewayPath(path)}`, {
         method: upper,
-        headers: await headersFor(body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...(body === undefined ? {} : { body }),
+        headers: await headersFor(write ? { 'content-type': 'application/json' } : {}),
+        ...(payload === undefined ? {} : { body: payload }),
         signal: AbortSignal.timeout(30_000),
       });
       return { ok: response.ok, status: response.status, text: await response.text() };

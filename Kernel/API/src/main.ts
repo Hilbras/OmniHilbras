@@ -93,7 +93,14 @@ const shutdown = (signal: NodeJS.Signals) => {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-instance = await startGatewayServer();
+instance = await startGatewayServer({
+  /**
+   * The dashboard's own stop button (`POST /v1/system/shutdown`) takes the same path a `SIGTERM` does, so
+   * the opencode instance this gateway owns is stopped and the stores drain — not `process.exit` from a
+   * route, which would leave the child running and the vault mid-write.
+   */
+  onShutdownRequest: () => close(0),
+});
 markReady();
 
 /**

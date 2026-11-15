@@ -385,6 +385,19 @@ export async function startOpencodeRuntime(signal?: AbortSignal) {
 }
 
 /**
+ * Asks the gateway to stop, for the update notice's manual path: copy the install command, stop the server,
+ * run the command in a terminal, start again.
+ *
+ * It resolves only after the gateway has answered `{"stopping": true}` — the answer is sent *before* the stop
+ * begins, so a `503 SHUTDOWN_UNAVAILABLE` (a gateway with no shutdown hook) is distinguishable from a stop
+ * that is actually happening. The connection then drops, which is why callers must treat a failure *after*
+ * this resolves as the server going away rather than as the request failing.
+ */
+export async function shutdownGateway(signal?: AbortSignal) {
+  return requestJson<{ stopping: boolean }>('/v1/system/shutdown', { method: 'POST', signal });
+}
+
+/**
  * Asks the gateway to check a candidate key for **any** provider.
  *
  * This used to be `checkOpenRouterConnection`, and it posted to a hardcoded
@@ -1566,12 +1579,32 @@ export function getProviderQuota(connectionId: string, signal?: AbortSignal) {
 }
 
 export async function requestJson<T>(path: string, init: RequestInit = {}) {
+  /**
+   * Every write announces JSON, body or no body.
+   *
+   * The gateway refuses a `POST`/`PUT`/`PATCH` without `content-type: application/json` with `415
+   * UNSUPPORTED_MEDIA_TYPE`, before any route sees it — measured against the running gateway:
+   *
+   * ```
+   * POST /v1/runtime/opencode/start                      -> 415
+   * POST /v1/runtime/opencode/start + JSON + body '{}'   -> 200
+   * ```
+   *
+   * Several callers here are writes with nothing to send (`install` and `start` on the runtime, the
+   * shutdown below), and each of them was sending no content-type — so the browser's Start and Install
+   * buttons on a provider page were answering `415`, and the desktop's IPC bridge had the same gap. One
+   * caller had already worked around it by hand with `{ 'content-type': 'application/json', body: '{}' }`,
+   * which is the shape this now applies to all of them rather than leaving the next one to rediscover.
+   */
+  const method = String(init.method ?? 'GET').toUpperCase();
+  const write = method === 'POST' || method === 'PUT' || method === 'PATCH';
+  const requestBody = write ? (init.body ?? '{}') : init.body;
   const bridge = desktopBridge();
   if (bridge) {
-    if (init.body !== undefined && typeof init.body !== 'string') throw new Error('Desktop gateway requests require a string body.');
+    if (requestBody !== undefined && typeof requestBody !== 'string') throw new Error('Desktop gateway requests require a string body.');
     const result = await bridge.gateway.request(path, {
       ...(init.method ? { method: String(init.method) } : {}),
-      ...(init.body === undefined ? {} : { body: init.body }),
+      ...(requestBody === undefined ? {} : { body: requestBody }),
     });
     noteGatewayReachability(result.status !== 0);
     let body: { error?: { code?: string; message?: string; providerMessage?: string } } | undefined;
@@ -1602,7 +1635,13 @@ export async function requestJson<T>(path: string, init: RequestInit = {}) {
       credentials: 'omit',
       redirect: 'error',
       ...init,
-      headers: { accept: 'application/json', ...gatewayAuthHeaders(), ...init.headers },
+      ...(write ? { body: requestBody } : {}),
+      headers: {
+        accept: 'application/json',
+        ...(write ? { 'content-type': 'application/json' } : {}),
+        ...gatewayAuthHeaders(),
+        ...init.headers,
+      },
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;

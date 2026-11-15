@@ -53,6 +53,14 @@ export type GatewayServerOptions = {
    */
   dashboardToken?: string;
   /**
+   * What to do when the dashboard asks this gateway to stop (`POST /v1/system/shutdown`).
+   *
+   * Absent for an embedder and in tests, and the route answers `503` when it is absent rather than claiming
+   * a stop that will not happen. `main.ts` wires it to the same graceful shutdown a `SIGTERM` takes, so the
+   * opencode instance is stopped and the stores drain either way.
+   */
+  onShutdownRequest?: () => void;
+  /**
    * Inbound requests per minute per caller on the LLM surface.
    *
    * Defaults to `OMNIHILBRAS_REQUESTS_PER_MINUTE`, and to 600 when that is unset. `0` disables the
@@ -233,6 +241,7 @@ export async function startGatewayServer(options: {
   connectionStore?: ConnectionStore;
   apiKeyStore?: ApiKeyStore;
   healthIntervalMs?: number;
+  onShutdownRequest?: () => void;
 } = {}) {
   const config = options.config ?? loadGatewayConfig(options.env);
   assertLoopbackHost(config.host);
@@ -255,6 +264,7 @@ export async function startGatewayServer(options: {
     maxBodyBytes: resolveInferenceBodyBytes(options.env),
     publicBaseUrl,
     dashboardToken,
+    ...(options.onShutdownRequest ? { onShutdownRequest: options.onShutdownRequest } : {}),
   });
 
   await service.loadProviderStrategies();

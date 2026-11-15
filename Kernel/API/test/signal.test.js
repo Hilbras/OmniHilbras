@@ -236,7 +236,17 @@ test('the signal listeners are registered before startup, and a second signal is
   const code = source.split('\n').filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line)).join('\n');
 
   const registrations = [...code.matchAll(/^process\.on\(/gm)].map((match) => match.index);
-  const startup = code.indexOf('await startGatewayServer()');
+  /**
+   * The position of the awaited startup, by call rather than by exact parentheses.
+   *
+   * This read `indexOf('await startGatewayServer()')`, and the call now passes the shutdown hook the
+   * dashboard's stop button needs (`POST /v1/system/shutdown`), so the empty-paren literal stopped matching
+   * and the assertion below it failed with "the entry point must await startup, or this test is asserting
+   * nothing" — the guard doing its job on a change to its anchor rather than to the contract. The contract is
+   * the ordering, so this matches the call.
+   */
+  const startupMatch = /await startGatewayServer\(/.exec(code);
+  const startup = startupMatch?.index ?? -1;
   assert.ok(registrations.length >= 2, `expected SIGINT and SIGTERM listeners, found ${registrations.length}`);
   assert.ok(startup > 0, 'the entry point must await startup, or this test is asserting nothing');
   assert.ok(
