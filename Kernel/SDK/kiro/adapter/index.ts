@@ -46,8 +46,24 @@ export const KIRO = {
     'https://runtime.us-east-1.kiro.dev/generateAssistantResponse',
   ],
   streamingTarget: 'AmazonCodeWhispererStreamingService.GenerateAssistantResponse',
-  userAgent: 'AWS-SDK-JS/3.0.0 kiro-ide/1.0.0',
-  amzUserAgent: 'aws-sdk-js/3.0.0 kiro-ide/1.0.0',
+  /**
+   * The product the gate reads. The version lives in `KiroIDE-<version>`, and nothing else in the string is
+   * checked — the SDK prefix did not change between requests Kiro accepted and requests it refused.
+   */
+  sdkPrefix: 'aws-sdk-js/3.0.0',
+  /**
+   * Where the version comes from: Kiro's own update metadata, which is what the IDE itself polls.
+   *
+   * `currentRelease` is the version Kiro gates on, so reading it beats pinning one. The old constant here was
+   * `kiro-ide/1.0.0`, copied from a reference implementation, and Kiro now answers it with
+   * *"This version of Kiro is no longer supported. Please update to the latest version of Kiro to continue."*
+   * — a **shape** it no longer accepts (`KiroIDE-<version>`, capital K, capital IDE, hyphen) carrying a number
+   * from before the gate existed. A pinned constant ages out silently because nothing reads it; this is read
+   * from the same feed the IDE reads, and the pin below is only for a machine with no network.
+   */
+  versionFeed: 'https://prod.download.desktop.kiro.dev/stable/metadata-linux-x64-stable.json',
+  /** Used when the feed cannot be reached. Current as of 2026-11-13; the feed is preferred. */
+  pinnedClientVersion: '1.4.178',
   eventStreamAccept: 'application/vnd.amazon.eventstream',
   /** The account's quota, the same service that answers the chat call. */
   usageLimitsUrl: 'https://codewhisperer.us-east-1.amazonaws.com/getUsageLimits',
@@ -798,15 +814,78 @@ export function kiroOrderedSurfaces(credential: ProviderCredential | undefined):
   return q.length > 0 ? [...q, ...rest, ...other] : [...amazon, ...other];
 }
 
-function kiroHeaders(credential: ProviderCredential): Record<string, string> {
+/** Six hours: the gate moves on release cadence, not by the minute, and this is a request per cold start. */
+const CLIENT_VERSION_TTL_MS = 6 * 60 * 60 * 1000;
+
+let cachedClientVersion: { version: string; at: number } | undefined;
+
+/**
+ * The Kiro version this client presents to the gate.
+ *
+ * Order: `OMNIHILBRAS_KIRO_IDE_VERSION` if set (an operator whose Kiro is newer than the feed we know, or who
+ * wants to pin), then Kiro's feed (cached), then the pin. Never a value invented here: an unrecognised answer
+ * from the feed falls back rather than being sent.
+ */
+export async function kiroClientVersion(
+  options: { fetchImpl?: typeof fetch; now?: () => number; env?: Readonly<Record<string, string | undefined>> } = {},
+): Promise<string> {
+  const env = options.env ?? process.env;
+  const override = env.OMNIHILBRAS_KIRO_IDE_VERSION?.trim();
+  if (override) return override.replace(/^KiroIDE-/i, '');
+
+  const now = options.now?.() ?? Date.now();
+  if (cachedClientVersion && now - cachedClientVersion.at < CLIENT_VERSION_TTL_MS) return cachedClientVersion.version;
+
+  try {
+    const response = await (options.fetchImpl ?? fetch)(KIRO.versionFeed, { signal: AbortSignal.timeout(4_000) });
+    const body = (await response.json()) as { currentRelease?: unknown };
+    const version = typeof body.currentRelease === 'string' ? body.currentRelease.trim() : '';
+    // A feed that answers with something else is not a version, and sending it would be a guess.
+    if (/^\d+\.\d+\.\d+/.test(version)) {
+      cachedClientVersion = { version, at: now };
+      return version;
+    }
+  } catch {
+    // Offline, or the feed moved: the pin, which is a version Kiro's gate accepted when it was written.
+  }
+  return KIRO.pinnedClientVersion;
+}
+
+/**
+ * Both headers Kiro reads, carrying the token it accepts.
+ *
+ * The account's `machineId` is appended when the credential has one — the shape other clients use is
+ * `KiroIDE-<version>-<sha256>`, and a credential that recorded one should keep presenting it.
+ */
+export function kiroIdentity(version: string, machineId?: string): { userAgent: string; amzUserAgent: string } {
+  const token = machineId ? `KiroIDE-${version}-${machineId}` : `KiroIDE-${version}`;
+  return { userAgent: `${KIRO.sdkPrefix} ${token}`, amzUserAgent: `${KIRO.sdkPrefix} ${token}` };
+}
+
+/**
+ * The quota URL, carrying the account's profile when the credential recorded one.
+ *
+ * The probe and the chat ask about the same account, and Kiro answers the request **without** a profile with
+ * `400 Invalid profileArn` — which is how it says "which account?" rather than "this account is wrong". The
+ * chat path has always sent one in its body; this route has no body, so it belongs in the query.
+ */
+function kiroUsageUrl(credential: ProviderCredential): string {
+  const base = `${KIRO.usageLimitsUrl}?origin=AI_EDITOR&resourceType=AGENTIC_REQUEST`;
+  return credential.type === 'oauth' && credential.accountId
+    ? `${base}&profileArn=${encodeURIComponent(credential.accountId)}`
+    : base;
+}
+
+function kiroHeaders(credential: ProviderCredential, version: string): Record<string, string> {
+  const identity = kiroIdentity(version, credential.type === 'oauth' ? credential.machineId : undefined);
   // `value` exists on every variant except `none`, which never reaches a request.
   const token = credential.type === 'none' ? '' : credential.value;
   return {
     'content-type': 'application/json',
     accept: KIRO.eventStreamAccept,
     'X-Amz-Target': KIRO.streamingTarget,
-    'User-Agent': KIRO.userAgent,
-    'X-Amz-User-Agent': KIRO.amzUserAgent,
+    'User-Agent': identity.userAgent,
+    'X-Amz-User-Agent': identity.amzUserAgent,
     Authorization: `Bearer ${token}`,
   };
 }
@@ -1116,15 +1195,41 @@ export class KiroAdapter implements ProviderAdapter {
         publicMessage: 'Sign in to Kiro to use this provider.',
       });
     }
-    try {
+    const probe = async (candidate: ProviderCredential) => {
       await this.transport.request({
         method: 'GET',
         providerId: this.id,
-        url: `${KIRO.usageLimitsUrl}?origin=AI_EDITOR&resourceType=AGENTIC_REQUEST`,
-        headers: kiroHeaders(credential),
+        url: kiroUsageUrl(candidate),
+        headers: kiroHeaders(candidate, await kiroClientVersion()),
       });
+    };
+
+    try {
+      await probe(credential);
     } catch (error) {
       const status = (error as { statusCode?: unknown } | null)?.statusCode;
+      /**
+       * A refused token is renewed once here, exactly as a chat request does it.
+       *
+       * This probe is what a health sweep asks, and it used to end at the refusal: the connection was marked
+       * failed, and after `failureThreshold` sweeps the router stopped sending it any request at all — which is
+       * where the only code that *would* have renewed the token lived. A session whose refresh token was
+       * perfectly good died permanently, and the dashboard could not say why.
+       *
+       * Kiro's tokens last about an hour, and a credential signed in through the social flow carries no
+       * `expiresAt` — so the five-minute scheduler skips it too (`token-renewal.ts`: nothing without an expiry
+       * is ever due). This is what keeps such a session alive: the sweep renews it, `onTokensRefreshed` writes
+       * the new credential back, and the probe is re-run with it.
+       */
+      if ((status === 401 || status === 403) && credential.refreshToken) {
+        try {
+          await probe(await this.renew(credential));
+          return { status: 'valid', checkedAt: new Date().toISOString() };
+        } catch {
+          // The renewal did not stand the token up either, so the *original* refusal is what a person needs:
+          // it is the one that carries why Kiro said no.
+        }
+      }
       if (status === 401 || status === 403) {
         throw new ProviderError('AUTHENTICATION_FAILED', 'Kiro rejected the stored sign-in.', {
           providerId: this.id,
@@ -1169,7 +1274,7 @@ export class KiroAdapter implements ProviderAdapter {
           method: 'POST',
           providerId: this.id,
           url,
-          headers: kiroHeaders(activeCredential),
+          headers: kiroHeaders(activeCredential, await kiroClientVersion()),
           body: JSON.stringify(toKiroBody(request, conversationIdFor(request), activeCredential)),
           // Read as bytes: the answer is a binary eventstream and a text decode corrupts it.
           responseAs: 'bytes',
@@ -1280,12 +1385,12 @@ export class KiroAdapter implements ProviderAdapter {
         publicMessage: 'Sign in to Kiro to read its quota.',
       });
     }
-    const url = `${KIRO.usageLimitsUrl}?origin=AI_EDITOR&resourceType=AGENTIC_REQUEST`;
+    const url = kiroUsageUrl(credential);
     const response = await this.transport.request<Json>({
       method: 'GET',
       providerId: this.id,
       url,
-      headers: { ...kiroHeaders(credential), accept: 'application/json' },
+      headers: { ...kiroHeaders(credential, await kiroClientVersion()), accept: 'application/json' },
       ...(context.signal ? { signal: context.signal } : {}),
     });
     return parseKiroUsageLimits(response.data ?? {});

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { KIRO, KIRO_MODELS, KiroAdapter, refreshKiroCredential, decodeKiroStream, kiroCredentialExpired, toKiroBody, toKiroEvent, parseKiroUsageLimits, kiroOrderedSurfaces } from '../kiro/dist/adapter/index.js';
+import { KIRO, KIRO_MODELS, KiroAdapter, refreshKiroCredential, decodeKiroStream, kiroClientVersion, kiroCredentialExpired, kiroIdentity, toKiroBody, toKiroEvent, parseKiroUsageLimits, kiroOrderedSurfaces } from '../kiro/dist/adapter/index.js';
 
 /**
  * Kiro is CodeWhisperer's streaming service, not an OpenAI-compatible endpoint, so the
@@ -629,6 +629,75 @@ test('a 403 on every surface refreshes the token once and succeeds on the retry'
   assert.equal(written[0].refreshToken, 'r2', 'and carries the rotated refresh token, or the next renewal fails');
 });
 
+test('the health probe renews a refused token instead of condemning the connection', async () => {
+  /**
+   * The loop this pins, because nothing in the suite exercised it: the probe is what a health sweep asks, and
+   * it used to end at the refusal. The connection was then marked failed, and after `failureThreshold` sweeps
+   * the router stopped sending it any request at all — while the only code that renewed a refused token lived
+   * in `chat`, which was therefore never reached. A session with a perfectly good refresh token died
+   * permanently, and all the dashboard could say was "Kiro rejected the stored sign-in."
+   *
+   * Kiro's tokens last about an hour, and a social sign-in records no `expiresAt`, so the five-minute scheduler
+   * skips that credential too (`token-renewal.ts` treats "no expiry" as "never due"). This probe is the thing
+   * that keeps such a session alive.
+   */
+  const urls = [];
+  let renewed = 0;
+  const transport = {
+    async request(request) {
+      urls.push(request.url);
+      if (request.url.includes('/refreshToken')) {
+        return { status: 200, headers: new Headers(), data: { accessToken: 'fresh-token', refreshToken: 'r2', expiresIn: 3600 } };
+      }
+      if (request.headers.Authorization !== 'Bearer fresh-token') {
+        const error = new Error('The bearer token included in the request is invalid.');
+        error.statusCode = 401;
+        throw error;
+      }
+      return { status: 200, headers: new Headers(), data: {} };
+    },
+    async *stream() {},
+  };
+  const written = [];
+  const adapter = new KiroAdapter({
+    transport,
+    onTokensRefreshed: (credential) => { written.push(credential); },
+    refreshCredential: async () => {
+      renewed += 1;
+      return { type: 'oauth', value: 'fresh-token', refreshToken: 'r2', expiresAt: new Date(Date.now() + 3_600_000).toISOString() };
+    },
+  });
+
+  const verdict = await adapter.validateCredential({ type: 'oauth', value: 'stale-token', refreshToken: 'r1' });
+
+  assert.equal(verdict.status, 'valid', 'the probe heals the token rather than reporting a dead session');
+  assert.equal(renewed, 1, 'exactly one renewal, not a loop');
+  assert.equal(written.length, 1, 'and the renewed credential is handed to the write-back, or the next sweep repeats this');
+  assert.equal(urls.filter((url) => url.includes('getUsageLimits')).length, 2, 'the probe was asked again with the new token');
+});
+
+test('a probe whose renewal is refused too reports the original refusal', async () => {
+  // If the refresh grant does not stand the token up, what a person needs is Kiro's own refusal — the one that
+  // carries why — rather than a generic "cannot be renewed" that hides it.
+  const transport = {
+    async request() {
+      const error = new Error('This version of Kiro is no longer supported.');
+      error.statusCode = 403;
+      throw error;
+    },
+    async *stream() {},
+  };
+  const adapter = new KiroAdapter({
+    transport,
+    refreshCredential: async () => { throw new Error('refresh refused'); },
+  });
+
+  await assert.rejects(
+    () => adapter.validateCredential({ type: 'oauth', value: 'stale-token', refreshToken: 'r1' }),
+    (error) => error.code === 'AUTHENTICATION_FAILED' && /rejected the stored sign-in/.test(error.message),
+  );
+});
+
 test('a refreshed token that is still refused does not loop', async () => {
   let refreshes = 0;
   const transport = {
@@ -768,4 +837,50 @@ test('a 400 is terminal and is not retried on another surface', async () => {
   const adapter = new KiroAdapter({ transport });
   await assert.rejects(() => adapter.chat({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] }, { credential: { type: 'oauth', value: 'v' } }));
   assert.equal(attempts.length, 1, `a 400 must stop at the first surface, saw ${attempts.length}`);
+});
+
+test('the identity Kiro gates on is KiroIDE-<version>, in both headers', () => {
+  /**
+   * The string this replaces was `kiro-ide/1.0.0`, copied from a reference implementation, and Kiro answers it
+   * with *"This version of Kiro is no longer supported. Please update to the latest version of Kiro to continue."*
+   * The number mattered, but the **shape** mattered more: the token Kiro reads is `KiroIDE-<version>` — capital
+   * K, capital IDE, a hyphen. Nothing asserted either, so it aged out unobserved, and the provider was dead
+   * until somebody sent a request and read the refusal.
+   */
+  const identity = kiroIdentity('1.4.178');
+  assert.match(identity.userAgent, /KiroIDE-1\.4\.178/, 'the token Kiro reads, with the version in it');
+  assert.match(identity.amzUserAgent, /KiroIDE-1\.4\.178/, 'and in the second header it reads');
+  assert.doesNotMatch(identity.userAgent, /kiro-ide\//, 'never the rejected shape again');
+  assert.doesNotMatch(identity.amzUserAgent, /kiro-ide\//, 'in either header');
+
+  // An account that recorded a machine id keeps presenting it, in the shape other clients use.
+  const withMachine = kiroIdentity('1.4.178', 'abc123');
+  assert.match(withMachine.userAgent, /KiroIDE-1\.4\.178-abc123/);
+});
+
+test('the version comes from Kiro feed, then an override, then the pin', async () => {
+  /**
+   * Pinning a number is what rotted, so the live value is read — once, and then remembered: this is a request
+   * per cold start, not per turn. `now` is injected so the remembering is testable rather than hoped for.
+   */
+  const t0 = 1_800_000_000_000;
+  let reads = 0;
+  const feed = async () => { reads += 1; return { json: async () => ({ currentRelease: '9.9.9' }) }; };
+  assert.equal(await kiroClientVersion({ fetchImpl: feed, env: {}, now: () => t0 }), '9.9.9', 'the feed is the source');
+  assert.equal(await kiroClientVersion({ fetchImpl: feed, env: {}, now: () => t0 + 60_000 }), '9.9.9');
+  assert.equal(reads, 1, 'and it is read once, not once per call');
+
+  // An operator whose Kiro is newer than the feed we know can say so; a pasted `KiroIDE-` prefix is accepted.
+  assert.equal(await kiroClientVersion({ fetchImpl: feed, env: { OMNIHILBRAS_KIRO_IDE_VERSION: 'KiroIDE-8.8.8' }, now: () => t0 }), '8.8.8');
+
+  // Offline, or a feed that moved: the pin, after the remembered value has aged out.
+  const broken = async () => { throw new Error('offline'); };
+  assert.equal(
+    await kiroClientVersion({ fetchImpl: broken, env: {}, now: () => t0 + 7 * 60 * 60 * 1000 }),
+    KIRO.pinnedClientVersion,
+    'a failed read falls back to the pin rather than failing a request',
+  );
+  // And an answer that is not a version is not sent as one.
+  const nonsense = async () => ({ json: async () => ({ currentRelease: 'latest' }) });
+  assert.equal(await kiroClientVersion({ fetchImpl: nonsense, env: {}, now: () => t0 + 8 * 60 * 60 * 1000 }), KIRO.pinnedClientVersion);
 });
