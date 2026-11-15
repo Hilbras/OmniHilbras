@@ -123,6 +123,16 @@ test('updates can be downloaded and installed from the UI', () => {
   assert.match(settings, /updateAction\('download'\)|updates\.download/, 'Settings cannot download');
 });
 
+test('a start that lands nothing is reported, not swallowed', () => {
+  const page = read('src/pages/ProviderDetailPage.tsx');
+  // The call returns the current status, so an unsuccessful start used to set exactly the state the badge was
+  // already showing — "installed, not running" before the click and after it, with no error. Measured on a
+  // machine whose port was held: HTTP 200, `serviceRunning: false`, nothing on screen.
+  assert.match(page, /if \(action === 'start' && next\.serviceRunning !== true\)/, 'an unsuccessful start is detected');
+  assert.match(page, /next\.message \?\? 'The gateway did not report a running service/, "and says the gateway's reason, or that there is none");
+  assert.match(page, /\{status\?\.message && !error &&/, 'the conflict the gateway reports is shown in the panel');
+});
+
 test('Settings persists real desktop and gateway choices', () => {
   const page = read('src/pages/SettingsPage.tsx');
   assert.match(page, /bridge\.settings\.set/, 'desktop settings are not persisted');

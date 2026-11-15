@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -34,10 +35,32 @@ async function fakeBinary(path) {
   return path;
 }
 
-/** An environment that cannot see this machine: no PATH, no HOME, no registered service. */
+/** A port nothing is listening on, so a service a test starts is the only thing that could answer it. */
+async function freePort() {
+  const server = createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+/**
+ * An environment that cannot see this machine: no PATH, no HOME, no registered service — **and its own port**.
+ *
+ * The port is not decoration. `ensureOpencodeService` refuses to start a service into a port that already
+ * answers, and the real `49390` is held by the gateway running on this machine, so a test that expects a start
+ * would otherwise be testing the refusal. Two files had to learn this; it is the same lesson both times: a test
+ * that spawns must own everything the spawn reads about the machine.
+ */
 async function isolatedEnv(t, extra = {}) {
   const home = await tempDir(t);
-  return { PATH: '', HOME: home, XDG_STATE_HOME: join(home, 'state'), ...extra };
+  return {
+    PATH: '',
+    HOME: home,
+    XDG_STATE_HOME: join(home, 'state'),
+    OMNIHILBRAS_OPENCODE_PORT: String(await freePort()),
+    ...extra,
+  };
 }
 
 test('the binary is chosen by the most explicit decision first', async (t) => {

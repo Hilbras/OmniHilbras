@@ -23,6 +23,7 @@ import {
   type GatewayRoutingState,
   type GatewayVirtualModel,
 } from '../lib/gatewayClient';
+import { resolveProviderOption } from '../lib/providerOptions';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 
 const strategies: Array<{ value: GatewayVirtualModel['strategy']; label: string; hint: string }> = [
@@ -150,6 +151,25 @@ export function ModelsContent() {
     } finally {
       setSaving(false);
     }
+  };
+
+  /**
+   * A target named by its **provider**, not by whatever the connection happens to be called.
+   *
+   * An account's own name is often a note to self — "main", "5k0eqgspm6" — while the provider is the thing a
+   * person recognises. So the provider's catalog name is what a target is called here.
+   *
+   * **A provider with more than one account keeps its account in the label.** Two rows both reading
+   * "OpenRouter" would be two selections a person cannot tell apart, and the store needs a *connection*: the
+   * disambiguation is not decoration, it is the only thing that makes an otherwise identical pair pickable. A
+   * provider whose id has no catalog card falls back to the id itself, which is at least the provider.
+   */
+  const providerLabel = (connection: GatewayConnection): string => {
+    const option = resolveProviderOption(connection.providerId);
+    const name = option.name && option.id === connection.providerId ? option.name : connection.providerId;
+    const accounts = connections.filter((entry) => entry.providerId === connection.providerId);
+    if (accounts.length <= 1) return name;
+    return `${name} — ${connection.name}${connection.email ? ` · ${connection.email}` : ''}`;
   };
 
   /**
@@ -308,7 +328,9 @@ export function ModelsContent() {
                   {model.targets.map((target, index) => (
                     <li key={`${target.connectionId}-${target.upstreamModelId}-${index}`} className="flex items-center justify-between gap-2 rounded-lg border border-line bg-bg-soft px-2.5 py-2 font-mono text-[10px]">
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate">{connectionById.get(target.connectionId)?.name ?? target.connectionId}</span>
+                        <span className="block truncate">
+                          {connectionById.has(target.connectionId) ? providerLabel(connectionById.get(target.connectionId)!) : target.connectionId}
+                        </span>
                         <span className="muted block truncate">{target.upstreamModelId}</span>
                       </span>
                       {(() => {
@@ -368,7 +390,7 @@ export function ModelsContent() {
                   const connection = connectionById.get(target.connectionId);
                   return (
                     <div key={index} className="grid gap-2 rounded-xl border border-line bg-bg-soft p-3 sm:grid-cols-[1fr_1fr_auto_auto]">
-                      <label className="block"><span className="mono-label mb-1 block text-[9px]">Account</span><select value={target.connectionId} onChange={(event) => { const next = connections.find((entry) => entry.id === event.target.value); patchTarget(index, { connectionId: event.target.value, upstreamModelId: next?.modelIds[0] ?? '' }); }} className="input !py-1.5 !text-xs">{connections.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}{entry.email ? ` · ${entry.email}` : ''}</option>)}</select></label>
+                      <label className="block"><span className="mono-label mb-1 block text-[9px]">Provider</span><select value={target.connectionId} onChange={(event) => { const next = connections.find((entry) => entry.id === event.target.value); patchTarget(index, { connectionId: event.target.value, upstreamModelId: next?.modelIds[0] ?? '' }); }} className="input !py-1.5 !text-xs">{connections.map((entry) => <option key={entry.id} value={entry.id}>{providerLabel(entry)}</option>)}</select></label>
                       <label className="block"><span className="mono-label mb-1 block text-[9px]">Upstream model</span><select value={target.upstreamModelId} onChange={(event) => patchTarget(index, { upstreamModelId: event.target.value })} className="input !py-1.5 !text-xs">{(connection?.modelIds ?? []).map((modelId) => <option key={modelId} value={modelId}>{modelId}</option>)}</select></label>
                       <label className="block"><span className="mono-label mb-1 block text-[9px]">Priority</span><input type="number" min={0} max={1000} value={target.priority} onChange={(event) => patchTarget(index, { priority: Number(event.target.value) })} className="input !w-20 !py-1.5 !text-xs" /></label>
                       <button type="button" onClick={() => setDraft((current) => current ? { ...current, targets: current.targets.filter((_, at) => at !== index) } : current)} className="muted mt-4 grid h-8 w-8 place-items-center rounded-lg hover:bg-bg hover:text-danger" aria-label="Remove target"><Trash2 className="h-3.5 w-3.5" /></button>

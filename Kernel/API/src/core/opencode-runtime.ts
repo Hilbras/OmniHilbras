@@ -4,7 +4,7 @@ import { constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
-import { discoverOpencodeService, type OpencodeServiceEndpoint } from './opencode-service.js';
+import { discoverOpencodeService, opencodeEndpointListening, type OpencodeServiceEndpoint } from './opencode-service.js';
 import { defaultLocalDataDir } from './runtime.js';
 
 /**
@@ -247,6 +247,10 @@ export type OpencodeRuntimeStatus = {
   servicePort: number;
   /** Our registration file, named so a support question can be answered without guessing the path. */
   ownServiceFile: string;
+  /** Something answers on our port that this gateway did not start, so starting one cannot succeed. */
+  portOccupied?: boolean;
+  /** Why nothing can start, when that is the case. Never a guess: read from a probe. */
+  message?: string;
 };
 
 /**
@@ -353,6 +357,15 @@ export async function opencodeRuntimeStatus(options: OpencodeRuntimeOptions = {}
   const live = await liveOpencodeService(options);
   const endpoint = live?.endpoint;
   const serviceOwned = live?.owned ?? false;
+  const port = opencodeOwnServicePort(options.env ?? process.env);
+  /**
+   * Nothing is registered, but something answers where our instance would be.
+   *
+   * That is a fact about the machine, and without it the panel says "installed, not running" for a port that is
+   * busy — which reads as a button that does nothing when it is clicked, because starting a second instance
+   * there cannot succeed.
+   */
+  const portOccupied = endpoint === undefined && await opencodeEndpointListening(`http://127.0.0.1:${port}`);
   return {
     installed: Boolean(binary),
     ...(binary ? { path: binary } : {}),
@@ -363,7 +376,13 @@ export async function opencodeRuntimeStatus(options: OpencodeRuntimeOptions = {}
     /** Whether the running service is this gateway's own instance — started by us, stopped by us. */
     serviceOwned,
     /** The port our instance would use, so a person can find it without reading the registration file. */
-    servicePort: opencodeOwnServicePort(options.env ?? process.env),
+    servicePort: port,
+    ...(portOccupied
+      ? {
+          portOccupied: true,
+          message: `127.0.0.1:${port} is already answering and its pid is not recorded as this gateway's, so no second instance can start there. Stop whatever holds that port, or set OMNIHILBRAS_OPENCODE_PORT to a free one.`,
+        }
+      : {}),
     ownServiceFile: opencodeOwnServiceFile(options),
   };
 }
@@ -418,6 +437,16 @@ export async function ensureOpencodeService(options: EnsureServiceOptions = {}):
   }
   if (!binary) return undefined;
 
+  /**
+   * A port that already answers ends this here, rather than in a twenty-second wait for a registration that
+   * cannot happen.
+   *
+   * This is what "Start service does nothing" was: the route spawned a second instance into an occupied port,
+   * the child died, the wait polled for twenty seconds, and the answer was the same status the badge was
+   * already showing.
+   */
+  if (await opencodeEndpointListening(`http://127.0.0.1:${opencodeOwnServicePort(env)}`)) return undefined;
+
   const start = options.start ?? startOpencodeService;
   /**
    * The options travel with the start, and this was the bug that made the first version of the owned
@@ -438,19 +467,48 @@ export async function ensureOpencodeService(options: EnsureServiceOptions = {}):
  * desktop app talks to the same instance. The pid is written down so a later run — and our own shutdown —
  * can stop *this* instance and not the user's.
  */
+/**
+ * The start in flight, if any.
+ *
+ * The route (`POST /v1/runtime/opencode/start`) and the supervisor both call `ensureOpencodeService` when
+ * nothing is live, so two spawns could race for one port. The loser cannot bind and exits — and **its pid is
+ * what ends up in the pid file, because it wrote last**. Measured after clicking Start service on a machine
+ * whose port was already held:
+ *
+ * ```
+ * our pid file -> 2188042      the process actually listening -> 2188013
+ * ```
+ *
+ * An instance nobody recorded is worse than no instance: `serviceOwned` is false, so the gateway will not stop
+ * it, the status says "not running", and the next Start races again. Concurrent callers share one attempt.
+ */
+let startingOwnService: Promise<void> | undefined;
+
 export async function startOpencodeService(binary: string, options: OpencodeRuntimeOptions = {}): Promise<void> {
-  await ensureOwnServiceConfig(options);
-  const port = opencodeOwnServicePort(options.env ?? process.env);
-  const child = nodeSpawn(binary, ['serve', '--service', '--port', String(port)], {
-    detached: true,
-    stdio: 'ignore',
-    env: opencodeOwnServiceEnv(options),
-  });
-  child.on('error', () => undefined);
-  if (child.pid !== undefined) {
-    await writeFile(opencodeOwnServicePidFile(options), String(child.pid), { mode: 0o600 }).catch(() => undefined);
-  }
-  child.unref();
+  if (startingOwnService) return startingOwnService;
+  startingOwnService = (async () => {
+    await ensureOwnServiceConfig(options);
+    const port = opencodeOwnServicePort(options.env ?? process.env);
+    /**
+     * Nothing is spawned into a port that already answers.
+     *
+     * Whatever is there is not ours to duplicate: a second bind fails, and the only evidence is a pid file
+     * naming a process that no longer exists. The status reports the conflict instead (see
+     * `opencodeRuntimeStatus`), which is the difference between "not running" and "cannot start".
+     */
+    if (await opencodeEndpointListening(`http://127.0.0.1:${port}`)) return;
+    const child = nodeSpawn(binary, ['serve', '--service', '--port', String(port)], {
+      detached: true,
+      stdio: 'ignore',
+      env: opencodeOwnServiceEnv(options),
+    });
+    child.on('error', () => undefined);
+    if (child.pid !== undefined) {
+      await writeFile(opencodeOwnServicePidFile(options), String(child.pid), { mode: 0o600 }).catch(() => undefined);
+    }
+    child.unref();
+  })().finally(() => { startingOwnService = undefined; });
+  return startingOwnService;
 }
 
 /**

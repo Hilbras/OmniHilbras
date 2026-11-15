@@ -309,7 +309,18 @@ function OpencodeRuntimeCard() {
     setBusy(action);
     setError(null);
     try {
-      setStatus(action === 'install' ? await installOpencodeRuntime() : await startOpencodeRuntime());
+      const next = action === 'install' ? await installOpencodeRuntime() : await startOpencodeRuntime();
+      setStatus(next);
+      /**
+       * A start that lands nothing is reported, because it used to be invisible.
+       *
+       * The call returns the *current* status, so when nothing came up it set exactly the state the badge was
+       * already showing — "installed, not running" before, the same words after — and a person clicking the
+       * button saw nothing happen. A refusal is a fact and gets said.
+       */
+      if (action === 'start' && next.serviceRunning !== true) {
+        setError(next.message ?? 'The gateway did not report a running service after the start. The gateway log will say what happened.');
+      }
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : 'The gateway refused the request.');
       await load();
@@ -342,6 +353,9 @@ function OpencodeRuntimeCard() {
               {status.serviceRunning && status.serviceUrl ? ` · ${status.serviceUrl}` : ''}
               {status.version ? ` · v${status.version}` : ''}
             </p>
+          )}
+          {status?.message && !error && (
+            <p className="mt-2 text-[11px] leading-relaxed text-danger/90" role="alert">{status.message}</p>
           )}
           {error && (
             <p className="mt-2 text-[11px] leading-relaxed text-danger/90" role="alert">{error}</p>

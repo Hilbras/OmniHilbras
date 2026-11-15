@@ -370,6 +370,10 @@ export type GatewayOpencodeRuntime = {
   installPath: string;
   install?: { version?: string; reportedVersion?: string; installedAt?: string };
   installedVersion?: string;
+  /** Something answers on the service's port that the gateway did not start, so starting one cannot work. */
+  portOccupied?: boolean;
+  /** The gateway's own words for why nothing will start. Absent when there is nothing to explain. */
+  message?: string;
 };
 
 export async function getOpencodeRuntime(signal?: AbortSignal) {

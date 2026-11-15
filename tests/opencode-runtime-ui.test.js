@@ -36,7 +36,11 @@ test('the card is shown for the provider that needs it, and shows what the gatew
   // Status is read on mount and re-read after an action, so the card cannot report a state nothing
   // observed. Removing either call leaves the UI asserting its own optimism.
   assert.match(card, /await getOpencodeRuntime\(\)/, 'the card reads the real status');
-  assert.match(card, /setStatus\(action === 'install' \? await installOpencodeRuntime\(\) : await startOpencodeRuntime\(\)\)/, 'the card shows the gateway\'s answer to the action, not a guess');
+  assert.match(card, /const next = action === 'install' \? await installOpencodeRuntime\(\) : await startOpencodeRuntime\(\);/, "the card shows the gateway's answer to the action, not a guess");
+  assert.match(card, /setStatus\(next\);/, 'and stores the answer rather than an assumption');
+  // The answer is *checked*: a start that lands nothing used to set exactly the state the badge already showed,
+  // so a click looked like nothing happened. Now it says so.
+  assert.match(card, /if \(action === 'start' && next\.serviceRunning !== true\)/, 'a start that lands nothing is reported');
   assert.match(card, /await load\(\)/, 'a failed action re-reads the status instead of leaving a stale one');
   assert.match(card, /setError\(problem instanceof Error \? problem\.message/, 'the gateway\'s message is what the operator reads');
 

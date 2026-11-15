@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { createServer } from 'node:net';
 import {
   ensureOpencodeService,
   ensureOwnServiceConfig,
@@ -13,6 +14,8 @@ import {
   opencodeOwnServicePidFile,
   opencodeOwnServicePort,
   opencodeOwnServiceRoot,
+  opencodeRuntimeStatus,
+  startOpencodeService,
   startOpencodeSupervisor,
   stopOpencodeService,
 } from '../dist/src/core/opencode-runtime.js';
@@ -126,7 +129,7 @@ test('the options reach the spawn — the bug that made the first version look b
   const seen = [];
   await ensureOpencodeService({
     dataDir,
-    env: { ...process.env, OMNIHILBRAS_OPENCODE_SERVICE: 'auto', XDG_STATE_HOME: emptyState },
+    env: { ...process.env, OMNIHILBRAS_OPENCODE_SERVICE: 'auto', XDG_STATE_HOME: emptyState, OMNIHILBRAS_OPENCODE_PORT: String(await freePort()) },
     // The binary is "found" without touching the machine, and the start is watched rather than performed.
     start: (binary, options) => { seen.push({ binary, dataDir: options?.dataDir }); },
     waitForService: (options) => {
@@ -154,7 +157,7 @@ test('a registration whose process is gone is not adopted — the 502 this shipp
   let started = false;
   await ensureOpencodeService({
     dataDir,
-    env: { ...process.env, XDG_STATE_HOME: emptyState, OMNIHILBRAS_OPENCODE_SERVICE: 'auto' },
+    env: { ...process.env, XDG_STATE_HOME: emptyState, OMNIHILBRAS_OPENCODE_SERVICE: 'auto', OMNIHILBRAS_OPENCODE_PORT: String(await freePort()) },
     start: () => { started = true; },
     waitForService: () => undefined,
   }).catch(() => undefined);
@@ -245,4 +248,87 @@ test('the supervisor does nothing at all when the runtime is switched off', asyn
   await wait(100);
   stop();
   assert.equal(started, 0, '`off` means off');
+});
+
+/** A port nothing is listening on, taken by binding and releasing one. */
+async function freePort() {
+  const server = createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+test('two concurrent starts spawn one instance, not two', async (t) => {
+  /**
+   * The race that left a running instance unowned. The route and the supervisor both start when nothing is
+   * live; the loser cannot bind the port, exits, and — writing last — puts *its* pid in the pid file. Measured
+   * on a real click: pid file `2188042`, the process listening `2188013`, `serviceOwned: false` for a service
+   * that was running perfectly well.
+   *
+   * The binary is a stub that records each time it runs, so "how many spawns happened" is a fact rather than
+   * an inference from the pid file.
+   */
+  const dataDir = await tempData(t);
+  const dir = await mkdtemp(join(tmpdir(), 'owned-start-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const ledger = join(dir, 'spawns');
+  const stub = join(dir, 'opencode-stub.sh');
+  await writeFile(stub, `#!/bin/sh\necho start >> ${ledger}\nsleep 30\n`, { mode: 0o755 });
+  const options = { dataDir, env: { ...process.env, OMNIHILBRAS_OPENCODE_PORT: String(await freePort()) } };
+
+  await Promise.all([startOpencodeService(stub, options), startOpencodeService(stub, options)]);
+  await wait(500);
+
+  const spawns = (await readFile(ledger, 'utf8').catch(() => '')).split('\n').filter(Boolean).length;
+  assert.equal(spawns, 1, 'one spawn for two concurrent starts');
+
+  // The stub is detached: it has to be killed by the pid the start recorded, which is also the record the
+  // gateway would stop it by.
+  const pid = Number.parseInt((await readFile(opencodeOwnServicePidFile(options), 'utf8').catch(() => '')).trim(), 10);
+  if (Number.isInteger(pid)) {
+    try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+  }
+});
+
+test('nothing is started into a port that already answers', async (t) => {
+  const server = createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  t.after(() => server.close());
+
+  const dataDir = await tempData(t);
+  const emptyState = await mkdtemp(join(tmpdir(), 'owned-service-occupied-'));
+  t.after(() => rm(emptyState, { recursive: true, force: true }));
+  let started = 0;
+  const options = {
+    dataDir,
+    env: { ...process.env, OMNIHILBRAS_OPENCODE_PORT: String(port), XDG_STATE_HOME: emptyState, OMNIHILBRAS_OPENCODE_BINARY: process.execPath },
+    start: async () => { started += 1; },
+  };
+
+  const endpoint = await ensureOpencodeService(options);
+  assert.equal(endpoint, undefined, 'it does not claim a service it did not find');
+  assert.equal(started, 0, 'and it does not spawn one into an occupied port');
+});
+
+test('the status names a port that something else holds', async (t) => {
+  const server = createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  t.after(() => server.close());
+
+  const dataDir = await tempData(t);
+  const emptyState = await mkdtemp(join(tmpdir(), 'owned-service-status-'));
+  t.after(() => rm(emptyState, { recursive: true, force: true }));
+  const status = await opencodeRuntimeStatus({
+    dataDir,
+    env: { ...process.env, OMNIHILBRAS_OPENCODE_PORT: String(port), XDG_STATE_HOME: emptyState },
+  });
+
+  // Without this the panel says "installed, not running" for a busy port, which is what made Start service
+  // look like a button that does nothing.
+  assert.equal(status.serviceRunning, false);
+  assert.equal(status.portOccupied, true);
+  assert.match(status.message ?? '', /already answering/, 'and says so rather than leaving it to be guessed');
 });

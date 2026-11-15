@@ -39,6 +39,27 @@ test('the combo test button spends a real turn through the combo, naming no acco
   assert.match(page, /Answered by \$\{served\}/, 'and the page says which member answered');
 });
 
+test('a target is chosen by provider name, and disambiguated only where it must be', () => {
+  const page = read('src/pages/ModelsPage.tsx');
+
+  // Asked for directly: the selector said "Account" and listed connection names, which are often notes to
+  // self — "main", "5k0eqgspm6" — where the provider is what a person recognises.
+  assert.match(page, /mono-label mb-1 block text-\[9px\]">Provider</, 'the selector says Provider');
+  assert.equal(/>Account</.test(page), false, 'and no longer says Account');
+
+  // The name is the catalog's, resolved from the provider id — not whatever the connection is called.
+  assert.match(page, /resolveProviderOption\(connection\.providerId\)/, 'the provider name comes from the catalog');
+  assert.match(page, /providerLabel\(entry\)/, 'and the selector renders it');
+  assert.match(page, /providerLabel\(connectionById\.get\(target\.connectionId\)!\)/, 'so does the card, so both read the same');
+
+  /**
+   * The disambiguation is load-bearing rather than decoration: the store holds a **connection**, so two
+   * accounts of one provider must stay tellable apart, or one of them becomes unpickable.
+   */
+  assert.match(page, /if \(accounts\.length <= 1\) return name;/, 'one account reads as the provider alone');
+  assert.match(page, /return `\$\{name\} — \$\{connection\.name\}/, 'two accounts of one provider keep the account');
+});
+
 test('a test states its cost, and a refused test reports the refusal', () => {
   const page = read('src/pages/ModelsPage.tsx');
   // A real turn costs money or allowance: `AGENTS.md` requires saying so rather than spending silently.

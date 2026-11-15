@@ -81,8 +81,19 @@ export async function handleRuntimeRoute(ctx: RouteContext): Promise<boolean> {
   if (request.method === 'POST' && url.pathname === `${runtimePrefix}/start`) {
     const endpoint = await ensureOpencodeService(runtimeOptions(ctx));
     if (!endpoint) {
-      throw new ProviderError('PROVIDER_REQUEST_FAILED', 'No OpenCode runtime is available to start.', {
-        publicMessage: 'No OpenCode runtime is installed on this machine. Install it first, or set OMNIHILBRAS_OPENCODE_BINARY to a binary you already have.',
+      /**
+       * Why it did not start, read from the status rather than asserted.
+       *
+       * This answered "No OpenCode runtime is installed on this machine", which is **false** whenever the
+       * runtime is installed and the failure is somewhere else — a port already held by something the gateway
+       * did not start, which is precisely the case that made Start service look like a button that does
+       * nothing. The status already knows which of the two it is, so it is asked.
+       */
+      const current = await status(ctx);
+      throw new ProviderError('PROVIDER_REQUEST_FAILED', current.message ?? 'The OpenCode runtime did not start.', {
+        publicMessage: current.message ?? (current.installed
+          ? 'The OpenCode runtime is installed but did not start. The gateway log will say what happened.'
+          : 'No OpenCode runtime is installed on this machine. Install it first, or set OMNIHILBRAS_OPENCODE_BINARY to a binary you already have.'),
       });
     }
     sendJson(response, 200, await status(ctx), origin);
