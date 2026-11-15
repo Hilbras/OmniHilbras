@@ -250,7 +250,10 @@ export type OpencodeRuntimeStatus = {
 export async function inspectOwnService(options: OpencodeRuntimeOptions = {}): Promise<{ endpoint?: OpencodeServiceEndpoint; owned: boolean }> {
   const endpoint = await discoverOpencodeService({ file: opencodeOwnServiceFile(options) });
   const recorded = Number.parseInt(await readFile(opencodeOwnServicePidFile(options), 'utf8').then((text) => text.trim()).catch(() => ''), 10);
-  return { ...(endpoint ? { endpoint } : {}), owned: Boolean(endpoint) && Number.isInteger(recorded) && recorded === endpoint?.pid };
+  return {
+    ...(endpoint ? { endpoint } : {}),
+    owned: Boolean(endpoint) && Number.isInteger(recorded) && recorded === endpoint?.pid && endpointAlive(endpoint),
+  };
 }
 
 export async function opencodeRuntimeStatus(options: OpencodeRuntimeOptions = {}): Promise<OpencodeRuntimeStatus> {
@@ -258,8 +261,12 @@ export async function opencodeRuntimeStatus(options: OpencodeRuntimeOptions = {}
   // Which of the two registrations answered decides what the rest of this can promise: an instance we own
   // is one this gateway will stop again, and one read from the user's file is theirs and is left alone.
   const own = await inspectOwnService(options);
-  const endpoint = own.endpoint ?? (await discoverOpencodeService(options.env ? { env: options.env } : {}));
-  const serviceOwned = own.owned;
+  // `serviceRunning` answers whether a service is there, not whether a file says so: a stale registration
+  // used to read as running while the port was empty, which is the state a person then had no way to see.
+  const live = own.endpoint && endpointAlive(own.endpoint) ? own.endpoint : undefined;
+  const borrowed = await discoverOpencodeService(options.env ? { env: options.env } : {});
+  const endpoint = live ?? (borrowed && endpointAlive(borrowed) ? borrowed : undefined);
+  const serviceOwned = own.owned && live !== undefined;
   return {
     installed: Boolean(binary),
     ...(binary ? { path: binary } : {}),
@@ -305,10 +312,12 @@ export async function ensureOpencodeService(options: EnsureServiceOptions = {}):
    * that was working before this change keeps working — but it is read second, so a machine that has both
    * uses the one this gateway owns and can stop again.
    */
+  // A registration whose process is gone is not an answer: it is the file a service left behind, and
+  // adopting it is how a working machine ends up answering `502` with nothing listening on the port.
   const ours = await discoverOpencodeService({ file: opencodeOwnServiceFile(options) });
-  if (ours) return ours;
+  if (ours && endpointAlive(ours)) return ours;
   const discovered = await discoverOpencodeService(env === process.env ? {} : { env });
-  if (discovered) return discovered;
+  if (discovered && endpointAlive(discovered)) return discovered;
 
   /**
    * `off` — never start anything. `auto` (the default) — start a binary that is already here.
@@ -409,6 +418,23 @@ export async function stopOpencodeService(options: OpencodeRuntimeOptions = {}):
   return true;
 }
 
+/**
+ * Whether a registration names a process that is actually there.
+ *
+ * A registration file outlives the process that wrote it — the gateway is killed with SIGKILL, the machine
+ * loses power, a container is replaced — and the file then describes a service nobody is serving. Reading it
+ * as "running" is what made the first boot after this feature shipped report `serviceRunning: true` for an
+ * empty port and answer the first turn with `502`: the stale registration was adopted, so the gateway never
+ * started its own instance.
+ *
+ * A registration with no pid is treated as live, because nothing better is known about it, and the request
+ * that follows is the honest test.
+ */
+function endpointAlive(endpoint: OpencodeServiceEndpoint): boolean {
+  if (endpoint.pid === undefined) return true;
+  return processAlive(endpoint.pid);
+}
+
 function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -437,7 +463,9 @@ async function waitForOpencodeService(options: OpencodeRuntimeOptions & { timeou
   while (Date.now() < deadline) {
     const endpoint = await discoverOpencodeService({ file: opencodeOwnServiceFile(options) })
       ?? await discoverOpencodeService(options.env ? { env: options.env } : {});
-    if (endpoint) return endpoint;
+    // The stale file this replaced is exactly what a *fresh* spawn has to overwrite, so waiting on a dead
+    // registration would return the previous service's corpse instead of the one just started.
+    if (endpoint && endpointAlive(endpoint)) return endpoint;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return undefined;

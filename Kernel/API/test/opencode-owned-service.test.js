@@ -132,16 +132,46 @@ test('the options reach the spawn — the bug that made the first version look b
   assert.deepEqual(seen, [{ binary: seen[0]?.binary, dataDir }, { waitedOn: dataDir }], 'start and wait receive the same options');
 });
 
+test('a registration whose process is gone is not adopted — the 502 this shipped with', async (t) => {
+  const dataDir = await tempData(t);
+  const emptyState = await mkdtemp(join(tmpdir(), 'owned-service-stale-'));
+  t.after(() => rm(emptyState, { recursive: true, force: true }));
+  const registration = join(emptyState, 'opencode', 'service.json');
+  await mkdir(join(emptyState, 'opencode'), { recursive: true });
+  // Exactly the file a service leaves behind when the gateway is SIGKILLed, or the machine loses power: a
+  // url, a password, and a pid nobody is running.
+  await writeFile(registration, JSON.stringify({ id: 'x', version: '2.0.28', url: 'http://127.0.0.1:49390', pid: 999_999, password: 'p' }));
+
+  let started = false;
+  await ensureOpencodeService({
+    dataDir,
+    env: { ...process.env, XDG_STATE_HOME: emptyState, OMNIHILBRAS_OPENCODE_SERVICE: 'auto' },
+    start: () => { started = true; },
+    waitForService: () => undefined,
+  }).catch(() => undefined);
+
+  // Adopting the corpse is what made the first boot after this feature report `serviceRunning: true` for an
+  // empty port and answer its first turn with `502 PROVIDER_REQUEST_FAILED`.
+  assert.equal(started, true, 'the gateway starts its own instance instead of adopting a dead one');
+});
+
 test('ownership is claimed only when our own pid file names the registered process', async (t) => {
   const options = { dataDir: await tempData(t) };
   // A registration in our directory that we did not start — someone ran the binary by hand against our
   // paths. It is discovered and used, and it is not ours to kill.
-  await mkdir(join(opencodeOwnServiceRoot(options), 'state', 'opencode'), { recursive: true });
-  await writeFile(opencodeOwnServiceFile(options), JSON.stringify({ id: 'x', version: '2.0.28', url: 'http://127.0.0.1:49374', pid: 4242, password: 'p' }));
+  const emptyState = await mkdtemp(join(tmpdir(), 'owned-service-state-'));
+  t.after(() => rm(emptyState, { recursive: true, force: true }));
+  const registration = join(emptyState, 'opencode', 'service.json');
+  options.env = { ...process.env, XDG_STATE_HOME: emptyState };
+  await mkdir(join(emptyState, 'opencode'), { recursive: true });
+  // A live pid — this test process — because ownership also requires the process to be there at all.
+  await writeFile(registration, JSON.stringify({ id: 'x', version: '2.0.28', url: 'http://127.0.0.1:49374', pid: process.pid, password: 'p' }));
+
   const withoutPid = await inspectOwnService(options);
   assert.equal(withoutPid.owned, false, 'registered is not the same as started by us');
 
-  await writeFile(opencodeOwnServicePidFile(options), '4242');
+  await mkdir(opencodeOwnServiceRoot(options), { recursive: true });
+  await writeFile(opencodeOwnServicePidFile(options), String(process.pid));
   const withPid = await inspectOwnService(options);
   assert.equal(withPid.owned, true, 'our pid file naming that process is what makes it ours');
 });

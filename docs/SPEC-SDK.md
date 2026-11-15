@@ -352,6 +352,23 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
   **No upstream checksum is verified, because none is published** — the official installer checks only
   that the asset exists — so the hash is recorded rather than compared, and the binary is proved by
   running `--version`, which is a different and weaker claim, stated as such.
+  **The instance is the gateway's own, not a borrowed one.** It runs with `XDG_CONFIG_HOME` pointed at
+  `<dataDir>/runtime/opencode/service/config` — that directory holds nothing but a password the gateway
+  generates, so owning it costs nothing — on port `49390` (`OMNIHILBRAS_OPENCODE_PORT` moves it), started
+  when the gateway starts and stopped when it stops, with the pid recorded in
+  `<dataDir>/runtime/opencode/service/service.pid`. `serviceOwned` is true only when that pid file names
+  the process the registration names: an instance someone started by hand against the gateway's paths is
+  discovered and used, and is never killed by a gateway that did not start it.
+  **`XDG_STATE_HOME` is deliberately left alone**, and that is measured rather than assumed: redirected to
+  an empty directory, the same binary, port, account and body answered `429 RATE_LIMITED` where the
+  canonical state directory answered `200`. Whatever qualifies an instance for free usage lives there. A
+  consequence worth stating: the registration file is the canonical one
+  (`$XDG_STATE_HOME/opencode/service.json`), which is the same file the user's own OpenCode reads, and it
+  names the gateway's instance while that instance runs.
+  **A registration whose process is gone is not adopted.** `serviceRunning` answers whether a service is
+  there, not whether a file says so: a file outlives the process that wrote it, and treating one as
+  running is what made a boot report a running service on an empty port and answer its first turn `502`.
+  Stale registrations are skipped and a fresh instance is started instead.
 - `POST /v1/audio/speech` — TTS (implemented). `POST /v1/audio/transcriptions` — STT (implemented). `POST /v1/search` — search (DuckDuckGo instant answer).
 - `POST /v1/mcp` — Model Context Protocol JSON-RPC 2.0 endpoint. Methods: `initialize`, `tools/list`, `tools/call`. Tools: `list_connections`, `list_models`, `gateway_status`. Authenticated like the LLM surface (gateway API key or trusted dashboard origin). Management route.
 - `GET /v1/models` includes every enabled virtual model with `virtual: true` and `providers`, the target
