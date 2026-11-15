@@ -150,7 +150,7 @@ test('the recorded gaps are explicit, and adding one is a deliberate edit', () =
   );
   // Pinned, so that exempting a release is an edit to this number and not a line nobody reads.
   const exempted = knownGaps.reduce((sum, entry) => sum + entry.versions.length, 0);
-  assert.equal(exempted, 21, `the recorded gaps now cover ${exempted} versions, not the 21 that were audited`);
+  assert.equal(exempted, 21 + 88, `the recorded gaps now cover ${exempted} versions, not the 109 that were audited: 21 from the early eras plus the 88 tags of the suspended-publishing period, 3.0.0 through 3.49.0`);
 });
 
 test('the audit tells a recorded gap from a new one', () => {
