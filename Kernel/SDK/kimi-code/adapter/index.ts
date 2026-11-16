@@ -561,6 +561,18 @@ export class KimiCodeAdapter implements ProviderAdapter {
     }
   }
 
+  /**
+   * The scheduler's entry point: the same renewal a request performs, reachable without one.
+   *
+   * The value returned is what the vault stores, so a rotated refresh token survives a restart.
+   */
+  async renewCredential(credential: ProviderCredential): Promise<ProviderCredential> {
+    if (credential.type !== 'oauth' || !credential.refreshToken) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'The Kimi Code session has expired. Sign in again.', { providerId: this.id });
+    }
+    return this.credential({ credential });
+  }
+
   /** Kimi's token, renewed without asking the user to sign in again. */
   private async credential(context: ProviderRequestContext): Promise<ProviderCredential> {
     const current = context.credential;

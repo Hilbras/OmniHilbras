@@ -88,7 +88,7 @@ const inFlightRefreshesRegistry = globalThis as unknown as Record<symbol, Map<st
 const inFlightRefreshes = (inFlightRefreshesRegistry[inFlightRefreshesKey] ??= new Map());
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '3.60.0';
+const omnihilbrasVersion = '3.61.0';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {
@@ -479,6 +479,22 @@ export class ClineAdapter implements ProviderAdapter {
     const renewal = this.refresh(credential, signal).finally(() => { inFlightRefreshes.delete(login); });
     inFlightRefreshes.set(login, renewal);
     return renewal;
+  }
+
+  /**
+   * The scheduler's entry point for a renewal, and the value it returns is what the vault stores.
+   *
+   * This copy is the one `ClinePassAdapter` inherits — the vendored class in this directory, not the one in
+   * `Kernel/SDK/cline/adapter/` — so a fix to renewal has to exist here as well or the two drift.
+   */
+  async renewCredential(credential: ProviderCredential): Promise<ProviderCredential> {
+    if (credential.type !== 'oauth' || !credential.refreshToken) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'The Cline session cannot be renewed. Sign in again.', {
+        providerId: this.id,
+        publicMessage: 'The Cline session cannot be renewed. Sign in again.',
+      });
+    }
+    return this.refresh(credential);
   }
 
   protected async refresh(credential: Extract<ProviderCredential, { type: 'oauth' }>, signal?: AbortSignal) {

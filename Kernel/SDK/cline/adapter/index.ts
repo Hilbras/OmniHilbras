@@ -87,7 +87,7 @@ const inFlightRefreshesRegistry = globalThis as unknown as Record<symbol, Map<st
 const inFlightRefreshes = (inFlightRefreshesRegistry[inFlightRefreshesKey] ??= new Map());
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '3.60.0';
+const omnihilbrasVersion = '3.61.0';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {
@@ -478,6 +478,22 @@ export class ClineAdapter implements ProviderAdapter {
     const renewal = this.refresh(credential, signal).finally(() => { inFlightRefreshes.delete(login); });
     inFlightRefreshes.set(login, renewal);
     return renewal;
+  }
+
+  /**
+   * The scheduler's entry point for a renewal, and the value it returns is what the vault stores.
+   *
+   * A refused grant here is the one failure a user has to act on, so it is an `AUTHENTICATION_FAILED` rather than
+   * a request failure: the honest instruction is "sign in again", not "try later".
+   */
+  async renewCredential(credential: ProviderCredential): Promise<ProviderCredential> {
+    if (credential.type !== 'oauth' || !credential.refreshToken) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'The Cline session cannot be renewed. Sign in again.', {
+        providerId: this.id,
+        publicMessage: 'The Cline session cannot be renewed. Sign in again.',
+      });
+    }
+    return this.refresh(credential);
   }
 
   protected async refresh(credential: Extract<ProviderCredential, { type: 'oauth' }>, signal?: AbortSignal) {

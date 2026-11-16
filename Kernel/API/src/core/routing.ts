@@ -163,10 +163,15 @@ export class HealthRegistry {
   /**
    * A refused login is a fact about one connection's credential, not about the provider's health: the provider's other
    * connections may be fine. The reason is kept for the dashboard, without counting toward ejecting the provider.
+   *
+   * `key` is the **connection id** when the caller knows it, and the provider id otherwise — the same rule
+   * `recordFailure` follows one method up. It used to be the provider id unconditionally, so a refused refresh on
+   * one account wrote its reason onto the provider and a two-account provider reported "sign in again" for a row
+   * that was answering fine, which is what was reported as *"with two accounts, the healthy one is skipped"*.
    */
-  noteLoginRefused(providerId: string, reason: string) {
-    const current = this.state.get(providerId) ?? { failures: 0, successes: 0 };
-    this.state.set(providerId, { ...current, lastError: `AUTHENTICATION_FAILED: ${reason}` });
+  noteLoginRefused(key: string, reason: string) {
+    const current = this.state.get(key) ?? { failures: 0, successes: 0 };
+    this.state.set(key, { ...current, lastError: `AUTHENTICATION_FAILED: ${reason}` });
   }
 
   recordFailure(providerId: string, errorCode: string, errorMessage: string) {

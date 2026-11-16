@@ -109,12 +109,16 @@ test('a refused refresh marks the login as needing sign-in, while an outage keep
   assert.equal(classifyRenewalFailure(new Error('socket hang up')), 'retry-later', 'an unknown failure is not treated as a dead login');
 });
 
-test('a refused renewal is recorded as the provider\'s last error, so the dashboard shows why the login needs attention', async () => {
+test('a refused renewal reaches the error channel with the connection it belongs to', async () => {
+  // The service's own handler now records this against `connection.id` (see token-renewal-persistence.test.js).
+  // What this pins is the channel: `onError` is handed the whole renewable connection, so a caller *can* key it
+  // by account. It used to be handed one and use the provider id anyway, which is how a dead row marked a live one.
   const { ProviderError } = await import('../dist/src/core/index.js');
   const { HealthRegistry, TokenRenewal, classifyRenewalFailure } = await import('../dist/src/index.js');
   const health = new HealthRegistry(() => Date.now(), 60_000);
   const now = Date.parse('2026-10-10T12:00:00Z');
   const expiring = { id: 'c1', providerId: 'cline', expiresAt: new Date(now + 60_000).toISOString() };
+  const seen = [];
   const renewal = new TokenRenewal({
     connections: async () => [expiring],
     renew: async () => { throw new ProviderError('AUTHENTICATION_FAILED', 'Refresh token rejected.', { providerId: 'cline' }); },
@@ -122,12 +126,14 @@ test('a refused renewal is recorded as the provider\'s last error, so the dashbo
     now: () => now,
     windowMs: 30 * 60_000,
     onError: (connection, error) => {
-      if (classifyRenewalFailure(error) === 'needs-sign-in') health.recordFailure(connection.providerId, 'AUTHENTICATION_FAILED', 'The login needs sign-in again: refresh was refused.');
+      seen.push(connection.id);
+      if (classifyRenewalFailure(error) === 'needs-sign-in') health.noteLoginRefused(connection.id, 'The login needs sign-in again: refresh was refused.');
     },
   });
   await renewal.pass();
-  const snapshot = health.snapshot('cline', 3);
-  assert.match(snapshot.lastError, /needs sign-in/, 'the dashboard can read why');
+  assert.deepEqual(seen, ['c1'], 'the handler was not told which connection failed');
+  assert.match(health.snapshot('c1', 3).lastError, /needs sign-in/, 'the account cannot say why it needs a sign-in');
+  assert.equal(health.snapshot('cline', 3), undefined, 'the provider was marked instead of its account');
 });
 
 test('a refused login is shown on the provider but does not eject it, because the provider\'s other connections may work', async () => {
@@ -160,6 +166,10 @@ test('the service\'s own renewal of a dead login does not eject the provider', a
     { type: 'oauth', value: 'old', refreshToken: 'r', expiresAt: new Date(Date.now() + 60_000).toISOString() });
   const service = new GatewayService(new ProviderRegistry().register(adapter), store, store, undefined, { failureThreshold: 3 });
   for (let i = 0; i < 5; i += 1) await service.renewExpiringTokens();
-  assert.equal(service.healthManager.snapshotRegistry().isUnhealthy('deadlogin', 3), false, 'five refused renewals must not eject the provider');
-  assert.match(service.healthManager.snapshotRegistry().snapshot('deadlogin', 3).lastError, /needs sign-in/, 'the dashboard sees why');
+  assert.equal(service.healthManager.snapshotRegistry().isUnhealthy('dead', 3), false, 'five refused renewals must not eject the account');
+  // Recorded against the **account**, because that is what the fact is about: this assertion used to read
+  // `snapshot('deadlogin')`, which meant one refused refresh wrote "needs sign-in" onto the provider and a
+  // second, healthy account of the same provider read as dead. See `token-renewal-persistence.test.js`.
+  assert.match(service.healthManager.snapshotRegistry().snapshot('dead', 3).lastError, /needs sign-in/, 'the row that needs a sign-in cannot say so');
+  assert.equal(service.healthManager.snapshotRegistry().snapshot('deadlogin', 3), undefined, 'the provider was marked instead of the account');
 });

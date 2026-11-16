@@ -398,6 +398,31 @@ export class NousAdapter extends OpenAICompatibleAdapter {
   }
 
   /**
+   * The scheduler's entry point: the same renewal a request performs, reachable without one.
+   *
+   * The value returned is what the vault stores, so a rotated refresh token survives a restart. Nous renews in
+   * two steps — a portal refresh and a fresh agent key minted from it — and `credential()` returns undefined only
+   * for an absent argument, which this rules out, so the throw below is a type obligation rather than a branch a
+   * caller should expect.
+   */
+  async renewCredential(credential: ProviderCredential): Promise<ProviderCredential> {
+    if (credential.type !== 'oauth' || !credential.refreshToken) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'The Nous Research session cannot be renewed. Sign in again.', {
+        providerId: nousProviderId,
+        publicMessage: 'The Nous Research session cannot be renewed. Sign in again.',
+      });
+    }
+    const renewed = await this.credential({ credential });
+    if (!renewed) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'The Nous Research session has expired. Sign in again.', {
+        providerId: nousProviderId,
+        publicMessage: 'The Nous Research session has expired. Sign in again.',
+      });
+    }
+    return renewed;
+  }
+
+  /**
    * The credential to use, renewed if it has expired.
    *
    * An OAuth session is two tokens: the portal's access/refresh pair, and the agent key minted from it.

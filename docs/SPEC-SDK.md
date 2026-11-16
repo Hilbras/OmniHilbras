@@ -180,7 +180,7 @@ The first local gateway exposes:
   "last 24 hours", with `GET /health` called on every load and its result merged into the cards and
   then discarded. Both now read the report they display, and both label a credential check as one.
 - `GET /v1/models` — normalized models from configured adapters.
-- `GET /v1/connections` — connection metadata without credentials.
+- `GET /v1/connections` — connection metadata without credentials, plus `credentialExpiresAt` and `credentialState` (`valid`, `expiring`, `expired`, `unknown`, `none`). The expiry is the OAuth credential's own, the same field the renewal pass filters on: `expiring` means the pass will renew it inside its window, `expired` means renewal did not happen or was refused, and `none` is a deliberately keyless connection rather than an unreadable one. A connection's refused refresh is recorded against **that connection**, not its provider, so one dead account cannot mark a live sibling.
 - `POST /v1/connections/:providerId/check` — validate a candidate API key for any provider without
   saving it. Accepts `{ apiKey }`, and optionally `endpoint` for a proxied or self-hosted provider; a
   supplied endpoint goes through the same address check as a saved one. `/openrouter/check` is this

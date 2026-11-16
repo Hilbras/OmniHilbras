@@ -501,4 +501,20 @@ export type ProviderAdapter = {
    * request, or a working connection ejected.
    */
   isCredentialExpired?: (credential: ProviderCredential | undefined, now?: number) => boolean | undefined;
+  /**
+   * Renews a stored OAuth credential and **returns the replacement**, so the vault receives the rotated
+   * refresh token.
+   *
+   * Optional, and its absence is meaningful: a provider that cannot renew (a long-lived device token, a
+   * refresh endpoint that refuses) leaves it out, and the honest answer for that connection is "sign in
+   * again" rather than a renewal that spends a grant and changes nothing.
+   *
+   * It started as a cast at one call site — `service.ts` reached for it with
+   * `as { renewCredential?: (…) => Promise<void> }`, which typed the result as `void`. A rotated refresh
+   * token could then only reach the vault through the adapter's own `onTokensRefreshed` hook, so a
+   * provider that forgot the hook kept a refresh token the provider had already replaced, and the next
+   * renewal was refused with *"this refresh token was already rejected"*. The return value is the
+   * contract: what the pass stores is what the adapter says the credential now is.
+   */
+  renewCredential?: (credential: ProviderCredential) => Promise<ProviderCredential | void>;
 };

@@ -684,6 +684,21 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
   }
 
   /**
+   * The scheduler's entry point: the same renewal a request performs, reachable without one.
+   *
+   * The value returned is what the vault stores, so a rotated refresh token survives a restart.
+   */
+  async renewCredential(credential: ProviderCredential): Promise<ProviderCredential> {
+    if (credential.type !== 'oauth' || !credential.refreshToken) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'This OpenCode Console session cannot be renewed. Sign in again.', {
+        providerId: this.id,
+        publicMessage: 'This OpenCode Console session cannot be renewed. Sign in again.',
+      });
+    }
+    return this.credential({ credential });
+  }
+
+  /**
    * Renews the session when it is at or past expiry, then persists the result. A
    * failure here is a sign-in problem, not a provider problem, so it is raised as one.
    *

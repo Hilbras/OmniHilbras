@@ -71,6 +71,16 @@ export type GatewayConnection = {
   email?: string;
   /** The kind of credential this connection holds — for the account row's badge. Never the value. */
   credentialType?: 'oauth' | 'api-key' | 'none';
+  /**
+   * When the stored OAuth credential ends, and what that means right now.
+   *
+   * The gateway kept this in the vault all along — `expiresAt` is the same field its renewal pass filters on —
+   * but never reported it, so a session that was about to lapse looked exactly like one that had just been
+   * accepted, until a request failed. `expiring` means the pass will renew it inside its window; `expired`
+   * means renewal did not happen or was refused, which is the one state a person has to act on.
+   */
+  credentialExpiresAt?: string;
+  credentialState?: 'valid' | 'expiring' | 'expired' | 'unknown' | 'none';
   modelPolicy: 'free' | 'all';
   modelIds: string[];
   customModelIds: string[];

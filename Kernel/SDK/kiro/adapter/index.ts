@@ -1177,15 +1177,20 @@ export class KiroAdapter implements ProviderAdapter {
    * probes, so a token quietly passed its expiry while the gateway was idle and the next request paid for
    * it. The renewed credential is written back through `onTokensRefreshed`, which is the same path a
    * request-triggered renewal uses — so there is one way a token is replaced, not two.
+   *
+   * It returns the credential it minted rather than only writing it. The write-back hook is per adapter and
+   * optional, and this used to hand the caller `void`, so the pass could not store what the renewal produced.
+   * Kiro re-registers its OAuth client when the stored pair is refused, which makes the returned credential the
+   * only copy of the new pair outside this object until it is stored.
    */
-  async renewCredential(credential: ProviderCredential | undefined): Promise<void> {
+  async renewCredential(credential: ProviderCredential | undefined): Promise<ProviderCredential> {
     if (credential?.type !== 'oauth' || !credential.refreshToken) {
       throw new ProviderError('AUTHENTICATION_FAILED', 'This Kiro session cannot be renewed. Sign in again.', {
         providerId: this.id,
         publicMessage: 'This Kiro session cannot be renewed. Sign in again.',
       });
     }
-    await this.renew(credential);
+    return this.renew(credential);
   }
 
   async validateCredential(credential: ProviderCredential | undefined): Promise<CredentialValidation> {

@@ -140,8 +140,8 @@ export class HealthManager {
     this.registry.recordSuccess(connectionId ?? providerId, latencyMs, checkedAt);
   }
 
-  noteLoginRefused(providerId: string, reason: string) {
-    this.registry.noteLoginRefused(providerId, reason);
+  noteLoginRefused(providerId: string, reason: string, connectionId?: string) {
+    this.registry.noteLoginRefused(connectionId ?? providerId, reason);
   }
 
   recordFailure(providerId: string, code: string, message: string, connectionId?: string) {

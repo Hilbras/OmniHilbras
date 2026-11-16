@@ -133,8 +133,30 @@ function DetailStat({ label, value, icon: Icon, tone = 'muted' }: { label: strin
   return <div className="rounded-xl border border-line bg-bg-soft/70 p-3.5"><Icon className={`h-4 w-4 ${toneClass}`} aria-hidden="true" /><p className="muted mt-3 text-[10px] uppercase tracking-[0.1em]">{label}</p><p className="mt-1 truncate font-mono text-sm font-semibold">{value}</p></div>;
 }
 
+/**
+ * When this account's session ends, in the words the operator needs rather than a timestamp.
+ *
+ * Reported as *"the auth does not save, it lasts about an hour"*: the row said "credential accepted" and
+ * nothing else, so an OAuth session that was about to lapse was indistinguishable from one that had just been
+ * signed in. `expired` is the state that needs a person — the gateway cannot renew a refresh token the provider
+ * has already refused, so "sign in again" is the honest instruction there. Everything else is on a timer.
+ */
+function credentialExpiryLabel(connection?: GatewayConnection): { text: string; tone: 'ok' | 'warn' | 'bad' } | undefined {
+  const state = connection?.credentialState;
+  if (!state || state === 'none' || state === 'unknown') return undefined;
+  const at = connection?.credentialExpiresAt ? Date.parse(connection.credentialExpiresAt) : Number.NaN;
+  const minutes = Number.isFinite(at) ? Math.round((at - Date.now()) / 60_000) : undefined;
+  if (state === 'expired') return { text: 'session expired · sign in again', tone: 'bad' };
+  if (state === 'expiring') {
+    return { text: minutes !== undefined && minutes > 0 ? `renews in ${minutes} min` : 'renewing now', tone: 'warn' };
+  }
+  const span = minutes === undefined ? undefined : minutes >= 90 ? `${Math.round(minutes / 60)} h` : `${Math.max(minutes, 1)} min`;
+  return { text: span ? `valid for ${span} · renews automatically` : 'renews automatically', tone: 'ok' };
+}
+
 function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest, onEdit, onReconnect, onToggleEnabled, togglingEnabled, onDelete, deleting }: { provider: ProviderRecord; connection?: GatewayConnection; healthy: boolean; pingMs?: number; testing: boolean; onTest: () => void; onEdit?: () => void; onReconnect?: () => void; onToggleEnabled?: () => void; togglingEnabled?: boolean; onDelete?: () => void; deleting?: boolean }) {
   const connectionName = connection?.name ?? provider.name;
+  const expiry = credentialExpiryLabel(connection);
   const endpoint = connection?.endpoint ?? provider.endpoint;
   const priority = connection?.priority ?? 1;
   return (
@@ -151,6 +173,15 @@ function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest,
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[9px] ${healthy ? 'border-success/20 bg-success/10 text-success' : 'border-gold/30 bg-gold-soft text-gold-text'}`}><span className={`h-1.5 w-1.5 rounded-full ${healthy ? 'bg-success' : 'bg-gold'}`} />{healthy ? 'credential accepted' : 'not checked'}</span>
             {connection?.email && <span className="truncate font-mono text-[10px] text-muted" title={connection.email}>{connection.email}</span>}
+            {expiry && (
+              <span
+                data-credential-state={connection?.credentialState}
+                title={connection?.credentialExpiresAt ? `expires ${new Date(connection.credentialExpiresAt).toISOString()}` : undefined}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[9px] ${expiry.tone === 'ok' ? 'border-success/20 bg-success/10 text-success' : expiry.tone === 'warn' ? 'border-gold/30 bg-gold-soft text-gold-text' : 'border-danger/25 bg-danger/10 text-danger'}`}
+              >
+                <Clock3 className="h-3 w-3" aria-hidden="true" />{expiry.text}
+              </span>
+            )}
             {pingMs !== undefined && <span className="inline-flex items-center gap-1 rounded-full border border-line-strong bg-surface px-2 py-0.5 font-mono text-[9px] text-muted"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {pingMs} ms</span>}
             <span className="rounded-full border border-line-strong px-2 py-0.5 font-mono text-[9px] text-muted">{provider.auth}</span>
             <span className="font-mono text-[10px] text-muted">priority #{priority}</span>

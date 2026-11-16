@@ -38,7 +38,7 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
   const { request, response, url, service, origin, options, signal } = ctx;
 
     if (request.method === 'GET' && url.pathname === '/v1/connections') {
-      sendJson(response, 200, { object: 'list', data: await service.listConnections(), build: gatewayBuild() }, origin);
+      sendJson(response, 200, { object: 'list', data: await service.listConnectionsWithExpiry(), build: gatewayBuild() }, origin);
       return true;
     }
 

@@ -342,6 +342,18 @@ export class CodexAdapter implements ProviderAdapter {
     if (!received) throw new ProviderError('INVALID_RESPONSE', 'Codex returned no streamed response text.', { providerId: this.id });
   }
 
+  /**
+   * The scheduler's entry point: the same renewal a request performs, reachable without one.
+   *
+   * The value returned is what the vault stores, so a rotated refresh token survives a restart.
+   */
+  async renewCredential(credential: ProviderCredential): Promise<ProviderCredential> {
+    if (credential.type !== 'oauth' || !credential.refreshToken) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'The Codex session has expired. Sign in again.', { providerId: this.id });
+    }
+    return this.credential({ credential });
+  }
+
   private async credential(context: ProviderRequestContext): Promise<Extract<ProviderCredential, { type: 'oauth' }>> {
     const current = context.credential;
     if (!current || current.type !== 'oauth' || !current.value) throw new ProviderError('AUTHENTICATION_FAILED', 'A Codex OAuth connection is required.', { providerId: this.id });

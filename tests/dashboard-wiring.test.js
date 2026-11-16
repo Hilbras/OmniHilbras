@@ -244,3 +244,17 @@ test('a stopped playground turn is not replayed to the model', () => {
   assert.match(playground, /!turn\.failed && !turn\.stopped/, 'a stopped turn is still in the next request history');
   assert.match(playground, /stopped: true/, 'stopping still overwrites the partial answer');
 });
+
+test('the account row says when the session ends, not only that it was accepted', () => {
+  // Both states rendered as "credential accepted", so an OAuth session about to lapse looked exactly like one
+  // signed in a second ago — and the report was "the auth does not save, it lasts about an hour". The gateway
+  // reports `credentialState`/`credentialExpiresAt`; the row has to read them or the fields are decoration.
+  const page = read('src/pages/ProviderDetailPage.tsx');
+  assert.match(page, /credentialExpiryLabel\(connection\)/, 'the row does not compute an expiry label');
+  assert.match(page, /data-credential-state=\{connection\?\.credentialState\}/, 'the state is not on the row for a test or a user to see');
+  assert.match(page, /session expired · sign in again/, 'the one state that needs a person is not stated');
+  assert.match(page, /renews automatically/, 'a renewable session does not say it renews');
+  const client = read('src/lib/gatewayClient.ts');
+  assert.match(client, /credentialState\?: 'valid' \| 'expiring' \| 'expired' \| 'unknown' \| 'none'/, 'the client type drops the field the gateway sends');
+  assert.match(client, /credentialExpiresAt\?: string/, 'the client type drops the expiry');
+});

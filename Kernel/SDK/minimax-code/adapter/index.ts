@@ -380,6 +380,18 @@ class MinimaxCodeAdapter implements ProviderAdapter {
     return at - this.refreshLeadMs <= (now ?? this.now());
   }
 
+  /**
+   * The scheduler's entry point: the same renewal a request performs, reachable without one.
+   *
+   * The value returned is what the vault stores, so a rotated refresh token survives a restart.
+   */
+  async renewCredential(credential: ProviderCredential): Promise<ProviderCredential> {
+    if (credential.type !== 'oauth' || !credential.refreshToken) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'The MiniMax Code session has expired. Sign in again.', { providerId: this.id });
+    }
+    return this.credential({ credential });
+  }
+
   private async credential(context: ProviderRequestContext): Promise<ProviderCredential> {
     const current = context.credential;
     if (!current || current.type !== 'oauth' || !current.value) {

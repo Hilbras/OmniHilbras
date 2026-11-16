@@ -297,6 +297,19 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     }
   }
 
+  /**
+   * The scheduler's entry point: the same renewal a request performs, reachable without one.
+   *
+   * The token this returns is what the vault stores, which is why the value crosses instead of being renewed
+   * in place — a rotated refresh token that stays inside the process is a session that dies at the next restart.
+   */
+  async renewCredential(credential: ProviderCredential): Promise<ProviderCredential> {
+    if (credential.type !== 'oauth' || !credential.refreshToken) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'The Claude Code session has expired. Sign in again.', { providerId: this.id });
+    }
+    return this.credential({ credential });
+  }
+
   /** The token, renewed without asking the user to sign in again. */
   private async credential(context: ProviderRequestContext): Promise<ProviderCredential> {
     const current = context.credential;

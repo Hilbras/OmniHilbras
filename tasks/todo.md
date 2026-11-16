@@ -5970,3 +5970,63 @@ independently of the React app" is now measured over every provider manifest, an
   Nous Research API key"* for its token. Repair is **Reconnect on that row**, which 3.59.0 taught to target the
   row it was clicked on instead of minting a second account. Nothing in the gateway can renew a rejected refresh
   token, so this is a dashboard action, not a code fix.
+
+## 3.61.0 — a sign-in that stays signed in
+
+- **What was asked, and what was true.** *"The auth system does not save, it lasts only an hour, I need it saved
+  forever."* The credential **is** saved permanently — an encrypted blob in
+  `~/.config/omnihilbras/secrets.enc.json`, written once and read back field-for-field after a restart
+  (`connection-credential-round-trip.test.js`), and nothing in `Kernel/API/src` puts an hour on it: the only
+  `3_600_000` constants are the health recovery window and a usage bucket. What ends in about an hour is the
+  **access token the provider issues**. So "forever" can only mean: renew before it lapses, and keep the rotated
+  refresh token. Four things stopped that from happening, and each is a separate defect.
+- **Four adapters were never renewed at all.** The pass (`service.ts`, `buildTokenRenewal`) returned early unless
+  `adapter.isCredentialExpired` existed — and claude-code, codex, kimi-code and opencode-console do not implement it,
+  whatever their `expiresAt` says. claude-code's own comment calls its tokens short-lived. The pass now decides
+  due-ness from the credential's `expiresAt` when the adapter cannot answer, and still believes an adapter that can
+  answer precisely (each carries its own lead time, 60 s to 15 min).
+- **`renewCredential` was a cast, not a contract.** `ProviderAdapter` declared `validateCredential` and
+  `isCredentialExpired` but not `renewCredential`; `service.ts` reached for it with
+  `as { renewCredential?: (…) => Promise<void> }`, typing the result as `void` and dropping it. A rotated refresh
+  token could therefore only reach the vault through the adapter's own `onTokensRefreshed` hook — and a provider
+  that forgot the hook kept a refresh token the provider had already replaced, which is exactly the measured
+  `AUTHENTICATION_FAILED / This refresh token was already rejected`. The contract is now
+  `(credential) => Promise<ProviderCredential | void>` on the interface, and what the adapter returns is what the
+  pass stores.
+- **Ten adapters now expose the renewal they already had.** claude-code, cline, clinepass (whose `ClineAdapter` is
+  the **vendored** copy in `clinepass/lib/cline.ts`, not the one in `cline/adapter/`), codex, kimi-code, codebuddy,
+  minimax-code, nous (refresh **and** a fresh agent key), opencode-console, and kiro — whose `renewCredential`
+  returned `void` and discarded the credential it had just minted, including the OAuth client pair it re-registers
+  when the stored one is refused.
+- **The expiry layer was dead code, and it is now the refusal.** `CredentialLifecycle.standing()`,
+  `needsNetworkCheck()` and `expiredRefusal()` (`core/credential-lifecycle.ts`) were called from nothing on a
+  request path, so an expired credential was sent, refused by the provider, and reported as a provider error — the
+  one message that does not tell the operator to sign in again. `CredentialManager.context()` now does three things
+  in one place for every request path: send it unchanged when it is not expired or the adapter cannot say, renew it
+  once and store the result when it is expired, and otherwise refuse with *"This connection's session expired on
+  <date>. Sign in again."* Renewal is tried once, not in a loop: a refresh the provider already refused does not
+  become likelier by asking again.
+- **A refused refresh marked the provider, not the account.** `noteLoginRefused(providerId, reason)` wrote its
+  reason under the provider id (`routing.ts`), while its own comment said the fact belongs to one connection — so
+  with two accounts, one dead row made the healthy sibling read as needing a sign-in. It takes the connection id
+  now, and the provider id is only the fallback, matching `recordFailure` one method up. **Two tests asserted the
+  old behaviour and were rewritten rather than deleted**, because the assertion was the bug: the dashboard test
+  said *"the service's own renewal of a dead login does not eject the provider"* and then read
+  `snapshot('deadlogin')`.
+- **The dashboard can finally say when a session ends.** `GET /v1/connections` reports `credentialExpiresAt` and
+  `credentialState` (`valid`, `expiring`, `expired`, `unknown`, `none`), and the account row renders
+  *"valid for 3 h · renews automatically"*, *"renews in 12 min"* or *"session expired · sign in again"* instead of
+  *"credential accepted"* for all three. The plain `listConnections()` stays undecrypted on purpose: the routing and
+  renewal paths ask for it far more often than a dashboard page asks for a label.
+- **What no code can fix, stated rather than papered over.** Cookie providers (ChatGPT Web, DeepSeek Web, Qwen Web,
+  DuckDuckGo, Grok Web, Perplexity Web, TokenHarbor) have a cookie lifetime the provider sets; when it ends the row
+  says "sign in again" and that is the honest answer. A refresh the provider refuses — measured on `nous`:
+  *"This refresh token was already rejected; please re-authenticate"*, and on its sibling account *"Invalid or
+  inactive Nous Research API key"* — needs a person. **Reconnect** on that row is the repair.
+- **Guarded, and each guard revert-checked** (removing the fix fails the test, measured):
+  `Kernel/API/test/token-renewal-persistence.test.js` (4 tests: the pass renews what expires inside the window and
+  stores the rotated token; an adapter with no `isCredentialExpired` is still renewed; a refused account does not
+  stop the pass or rewrite its sibling; the refusal is recorded against the account),
+  `connection-credential-expiry.test.js` (2 tests: the five states, and that the hot list carries none of them), and
+  the dashboard guard that the row reads the fields. Reverting the store write-back failed 3 tests, restoring the
+  `isCredentialExpired` gate failed 4, and dropping the connection id from `noteLoginRefused` failed 1.

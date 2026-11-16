@@ -41,6 +41,18 @@ export class CredentialManager {
   constructor(
     private readonly secrets: CredentialReader,
     private readonly connections: ConnectionManager,
+    /**
+     * Called with a credential whose expiry has already passed, before anything is sent with it.
+     *
+     * The type is the whole contract: it either answers with a credential that is usable now — the renewed one,
+     * which carries the provider's rotated refresh token — or it throws. It is supplied by the service because
+     * renewing needs three things this class deliberately does not own: the adapter, the credential lifecycle, and
+     * the store to write the result to.
+     *
+     * Without it, an expired credential was sent, refused by the provider, and reported as a provider error — the
+     * one message that does not tell the operator they have to sign in again.
+     */
+    private readonly refresh?: (connectionId: string, providerId: string, credential: ProviderCredential, options: { refuseWhenExpired: boolean }) => Promise<ProviderCredential>,
   ) {}
 
   /**
@@ -49,16 +61,26 @@ export class CredentialManager {
    * The credential and the policy are read together because they come from two places and belong
    * to one decision: a request is made with this credential *under this policy*, and reading one
    * without the other is how a `free` connection comes back in full.
+   *
+   * `renew: false` is for the renewal pass's own reads: it is about to decide whether this credential is due, and a
+   * renewal triggered while it looks would be the pass calling itself.
    */
-  async context(connectionId: string, providerId: string, signal?: AbortSignal): Promise<ProviderRequestContext> {
-    const [credential, policy] = await Promise.all([
+  async context(connectionId: string, providerId: string, signal?: AbortSignal, options: { renew?: boolean; refuseWhenExpired?: boolean } = {}): Promise<ProviderRequestContext> {
+    const [stored, policy] = await Promise.all([
       this.secrets.get(connectionId, providerId),
       // A store without `list` simply has no policy to honour, so this is optional rather than
       // fatal: an embedded service with a bare credential source is a supported shape.
       this.connections.list().then((all) => all.find((entry) => entry.id === connectionId)?.modelPolicy),
     ]);
+    const refreshable = stored && this.refresh && options.renew !== false
+      // A probe reads the credential to *report* on it. `refuseWhenExpired: false` therefore keeps the stale
+      // credential in hand instead of throwing, because a health sweep that dies on an expired session cannot tell
+      // the dashboard which one expired — and the rejection surfaces after the sweep's own await, where nothing
+      // catches it.
+      ? await this.refresh(connectionId, providerId, stored, { refuseWhenExpired: options.refuseWhenExpired !== false })
+      : stored;
     return {
-      credential,
+      credential: refreshable,
       ...(policy ? { importPolicy: policy as ModelImportPolicy } : {}),
       ...(signal ? { signal } : {}),
     };
@@ -72,13 +94,13 @@ export class CredentialManager {
    * id and the adapter's own "no credential" path reports it. Failing instead would make an
    * unconnected provider look broken rather than unconnected.
    */
-  async contextForProvider(providerId: string, signal?: AbortSignal, scope?: RequestScope): Promise<ProviderRequestContext> {
+  async contextForProvider(providerId: string, signal?: AbortSignal, scope?: RequestScope, options: { renew?: boolean; refuseWhenExpired?: boolean } = {}): Promise<ProviderRequestContext> {
     // A provider that shares another's credential reads the owner's connection. The **provider id stays
     // this one** — it is passed to `context()` unchanged — so the adapter, and any failure it reports,
     // is still attributed to the card the user asked for. Only the *lookup* follows the alias.
     const canonical = providerAlias(providerId) ?? providerId;
     const owner = await this.connections.firstWithCredentialFor(canonical);
-    const context = await this.context(owner?.id ?? providerId, providerId, signal);
+    const context = await this.context(owner?.id ?? providerId, providerId, signal, options);
     // Optional, because an embedded caller that does not track request identity still works — the
     // context is the SDK's type and the adapter boundary is published, so this only ever *adds* a
     // field that already existed.

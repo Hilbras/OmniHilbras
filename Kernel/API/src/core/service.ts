@@ -600,7 +600,45 @@ export class GatewayService {
       credentialFingerprint: (providerId, credential) => this.connectionStore?.credentialFingerprint(providerId, credential) ?? Promise.resolve(''),
       canonicalProviderId: (providerId) => providerAlias(providerId) ?? providerId,
     });
-    this.credentials = new CredentialManager(this.secretStore, this.connections);
+    /**
+     * The one place an expired credential is handled before it is sent.
+     *
+     * Without this the flow was: send a token the credential itself said had ended, have the provider refuse it, and
+     * report the provider's words as a provider error — which is the one message that does not tell the operator they
+     * have to sign in again. `CredentialLifecycle.expiredRefusal` existed for exactly this and was called from nowhere.
+     *
+     * Three outcomes, and the middle one is the point:
+     *
+     * - not expired, or the adapter cannot say → hand it over unchanged and let the provider answer;
+     * - expired and the adapter can renew → renew, store what it returned, and use that;
+     * - expired and renewal did not produce a credential → refuse with the date, in the words that name the fix.
+     *
+     * `renew` is tried once per request, not in a loop: a refresh the provider has already refused is not made more
+     * likely to work by asking again, and an expired token retried is a request the user waits for twice.
+     */
+    this.credentials = new CredentialManager(this.secretStore, this.connections, async (connectionId, providerId, credential, { refuseWhenExpired }) => {
+      if (credential.type !== 'oauth' || typeof credential.expiresAt !== 'string') return credential;
+      const expiry = Date.parse(credential.expiresAt);
+      if (!Number.isFinite(expiry)) return credential;
+      const adapter = await this.resolveAdapter(providerId, undefined, connectionId).catch(() => undefined);
+      // An adapter that can answer precisely is believed over the raw date, because it knows its own lead time.
+      const expired = adapter?.isCredentialExpired ? adapter.isCredentialExpired(credential, now()) : expiry <= now();
+      if (expired !== true) return credential;
+      if (adapter?.renewCredential) {
+        try {
+          const renewed = await adapter.renewCredential(credential);
+          if (renewed) {
+            await this.connectionStore?.set(connectionId, renewed).catch(() => undefined);
+            return renewed;
+          }
+        } catch {
+          // Swallowed on purpose: the refusal below is what the operator needs, and it names the expiry.
+        }
+      }
+      if (refuseWhenExpired) throw this.credentialLifecycle.expiredRefusal(providerId, { state: 'expired', expiresAt: credential.expiresAt });
+      // A probe asks "what is this credential", not "give me a usable one": the stale value is the answer it needs.
+      return credential;
+    });
     this.routing = new RoutingEngine({
       health: { getFailureThreshold: () => this.healthManager.getFailureThreshold(), registry: () => this.healthManager.snapshotRegistry() },
       rateLimiter: this.rateLimiter,
@@ -692,12 +730,12 @@ export class GatewayService {
     this.healthManager = new HealthManager(
       {
         adapters: () => this.activeAdapters(),
-        contextFor: (adapterId, signal) => this.contextForAdapter(adapterId, signal),
+        contextFor: (adapterId, signal) => this.contextForAdapter(adapterId, signal, undefined, { refuseWhenExpired: false }),
         // The third question the health probe can ask, and the only one that costs nothing. Asked
         // before the adapter's own check so an expired session is not discovered by launching a
         // browser to be told what the credential already said.
         credentialStanding: async (adapterId) => {
-          const context = await this.contextForAdapter(adapterId);
+          const context = await this.contextForAdapter(adapterId, undefined, undefined, { refuseWhenExpired: false });
           return this.credentialLifecycle.standing(adapterId, context.credential);
         },
       },
@@ -774,7 +812,9 @@ export class GatewayService {
         const due: Array<{ id: string; providerId: string; expiresAt?: string }> = [];
         for (const connection of await this.listConnections()) {
           if (!connection.enabled || !connection.hasCredential) continue;
-          const context = await this.credentials.context(connection.id, connection.providerId);
+          // `renew: false` because this pass is the thing that decides renewal: a read that renewed here would
+        // be the pass calling itself, once per connection, before it had even looked at the expiry.
+        const context = await this.credentials.context(connection.id, connection.providerId, undefined, { renew: false, refuseWhenExpired: false });
           const credential = context.credential;
           if (!credential || credential.type !== 'oauth' || typeof credential.expiresAt !== 'string') continue;
           due.push({ id: connection.id, providerId: connection.providerId, expiresAt: credential.expiresAt });
@@ -783,23 +823,42 @@ export class GatewayService {
       },
       renew: async (connection) => {
         const adapter = await this.resolveAdapter(connection.providerId, undefined, connection.id);
-        const context = await this.credentials.context(connection.id, connection.providerId);
+        // `renew: false` because this pass is the thing that decides renewal: a read that renewed here would
+        // be the pass calling itself, once per connection, before it had even looked at the expiry.
+        const context = await this.credentials.context(connection.id, connection.providerId, undefined, { renew: false, refuseWhenExpired: false });
         const credential = context.credential;
-        if (!credential || credential.type !== 'oauth' || !adapter.isCredentialExpired) return;
-        const expiring = adapter.isCredentialExpired(credential, Date.now() + renewalWindowMs);
-        if (expiring !== true) return;
+        if (!credential || credential.type !== 'oauth' || typeof credential.expiresAt !== 'string') return;
         /**
-         * Renew when the adapter can, probe when it cannot.
+         * Due-ness is read from the credential when the adapter cannot answer, instead of from the adapter alone.
+         *
+         * This returned early unless `adapter.isCredentialExpired` existed, and four adapters do not implement
+         * it — claude-code, codex, kimi-code and opencode-console — so **no renewal pass ever touched them**,
+         * whatever their `expiresAt` said. claude-code's own comment calls its tokens short-lived, which is what
+         * "the sign-in lasts about an hour" was for those providers. The credential states when it ends, and the
+         * pass already filtered on that field a few lines above; an adapter that can answer precisely is still
+         * believed over the raw date.
+         */
+        const horizon = Date.now() + renewalWindowMs;
+        const due = typeof adapter.isCredentialExpired === 'function'
+          ? adapter.isCredentialExpired(credential, horizon)
+          : Date.parse(credential.expiresAt) <= horizon;
+        if (due !== true) return;
+        /**
+         * Renew when the adapter can, probe when it cannot — and **store what the renewal returned**.
          *
          * Calling only `validateCredential` was a silent no-op for renewal: it asks the provider whether a
          * token works, and never replaces one that is about to expire. An idle connection therefore drifted
          * past its expiry and the next request paid for it — which is what "the session only lasts a few
          * hours" actually was. `renewCredential` is optional, so a provider that cannot renew still gets the
          * probe and behaves exactly as before.
+         *
+         * The return value goes to the connection that owns the credential, because a provider that rotates its
+         * refresh token leaves the stored one dead the moment it hands a new one out. An adapter may also write
+         * through its own `onTokensRefreshed`; writing the same value twice is harmless, and losing it is not.
          */
-        const renewable = adapter as { renewCredential?: (credential: ProviderCredential) => Promise<void> };
-        if (typeof renewable.renewCredential === 'function') {
-          await renewable.renewCredential(credential);
+        if (typeof adapter.renewCredential === 'function') {
+          const renewed = await adapter.renewCredential(credential);
+          if (renewed) await this.connectionStore?.set(connection.id, renewed);
           return;
         }
         await adapter.validateCredential?.(credential, context);
@@ -809,7 +868,7 @@ export class GatewayService {
       ...(intervalMs === undefined ? {} : { intervalMs }),
       onError: (connection, error) => {
         if (classifyRenewalFailure(error) !== 'needs-sign-in') return;
-        this.healthManager.noteLoginRefused(connection.providerId, 'The login needs sign-in again: refresh was refused.');
+        this.healthManager.noteLoginRefused(connection.providerId, 'The login needs sign-in again: refresh was refused.', connection.id);
       },
     });
   }
@@ -2895,6 +2954,41 @@ export class GatewayService {
     return this.connections.list();
   }
 
+  /**
+   * The connection list plus the one fact the dashboard cannot otherwise know: when each credential ends.
+   *
+   * Reported as *"the sign-in lasts about an hour and then I have to sign in again"* — and from the outside
+   * there was no way to tell an expiring credential from a revoked one, or from a working one, until a request
+   * failed an hour later. The information was already stored: every OAuth credential carries `expiresAt`, the
+   * same field the renewal pass filters on. So this exposes it rather than inventing a second guess.
+   *
+   * Five states, and the two that matter are `expiring` (the pass will renew it within `renewalWindowMs`) and
+   * `expired` (it should already have been renewed or refused). `unknown` is honest for a credential whose
+   * expiry cannot be read, and `none` is a keyless connection — not the same thing as an expired one.
+   *
+   * A separate method from `listConnections()` on purpose: this decrypts every credential, and the routing and
+   * renewal paths ask for the list far more often than a dashboard asks for this.
+   */
+  async listConnectionsWithExpiry() {
+    const now = Date.now();
+    const records = await this.connections.list();
+    return Promise.all(records.map(async (record) => {
+      const credential = await this.secretStore.get(record.id, record.providerId).catch(() => undefined);
+      const expiresAt = credential?.type === 'oauth' && typeof credential.expiresAt === 'string' ? credential.expiresAt : undefined;
+      let credentialState: 'valid' | 'expiring' | 'expired' | 'unknown' | 'none' = credential ? 'unknown' : 'none';
+      // A keyless connection states that it is keyless rather than reporting an unreadable expiry: `{ type: 'none' }`
+      // is a deliberate save, and calling it `unknown` would send its operator looking for a session to renew.
+      if (credential?.type === 'none') return { ...record, credentialExpiresAt: undefined, credentialState: 'none' };
+      if (expiresAt) {
+        const at = Date.parse(expiresAt);
+        if (Number.isFinite(at)) {
+          credentialState = at <= now ? 'expired' : at <= now + renewalWindowMs ? 'expiring' : 'valid';
+        }
+      }
+      return { ...record, credentialExpiresAt: expiresAt, credentialState };
+    }));
+  }
+
   async addConnectionModels(connectionId: string, modelIds: string[]) {
     return this.connections.setModels(connectionId, modelIds);
   }
@@ -3891,8 +3985,8 @@ export class GatewayService {
    * the request path uses. One place builds a request context, so a credential cannot be
    * assembled one way for a health check and another for a real request.
    */
-  private async contextForAdapter(providerId: string, signal?: AbortSignal, scope?: RequestScope): Promise<ProviderRequestContext> {
-    return this.credentials.contextForProvider(providerId, signal, scope);
+  private async contextForAdapter(providerId: string, signal?: AbortSignal, scope?: RequestScope, options: { refuseWhenExpired?: boolean } = {}): Promise<ProviderRequestContext> {
+    return this.credentials.contextForProvider(providerId, signal, scope, options);
   }
 
 

@@ -527,6 +527,18 @@ class CodeBuddyAdapter implements ProviderAdapter {
     return at - refreshLeadMs <= (now ?? this.now());
   }
 
+  /**
+   * The scheduler's entry point: the same renewal a request performs, reachable without one.
+   *
+   * The value returned is what the vault stores, so a rotated refresh token survives a restart.
+   */
+  async renewCredential(credential: ProviderCredential): Promise<ProviderCredential> {
+    if (credential.type !== 'oauth' || !credential.refreshToken) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'The CodeBuddy session has expired. Sign in again.', { providerId: this.id });
+    }
+    return this.credential({ credential });
+  }
+
   /** The credential to send, renewed first if it is near or past its expiry. */
   private async credential(context: ProviderRequestContext): Promise<ProviderCredential> {
     const current = context.credential;
