@@ -276,6 +276,19 @@ that is not on `main`.
   is ever killed: the desktop app talks to the same service. The provider page carries the button that
   calls `/install` and shows the gateway's own answer; `tests/opencode-runtime-ui.test.js` fails if that
   card ever reports a state the gateway did not send, or sets one inside a timer.
+  **The gateway's own instance is adopted when both of its records are lost, and never by accident.** A
+  leaked `opencode serve --service --port 49390` with the pid file and the registration both gone used to
+  read `running false | owned false | portOccupied true` and leave the provider down until a person killed
+  the pid by hand — three times in one day. Now, when the port answers and nothing is registered in the
+  gateway's own state directory, `/proc/<pid>/cmdline` **and** `/proc/<pid>/environ` are read: a process is
+  ours only when the command line carries `opencode`, `serve`, `--service` and *our* port **and** the
+  environment carries *our* `XDG_STATE_HOME`. Either half alone can be the user's own OpenCode app on 49374,
+  which this code must never touch, so both are required and the environment one is what makes it
+  identification rather than a guess. The pid is then written to `service.pid` and an endpoint is built from
+  the port and the config password — adoption signals nothing, and a holder that fails either half keeps the
+  same refusal and the same sentence. No `/proc` (macOS, Windows) means no identification, so the conflict
+  report is what remains. `options.procRoot` exists so the tests fabricate a process table —
+  `Kernel/API/test/opencode-orphan-adoption.test.js` — instead of depending on what is running on the machine.
   **Reasoning is forwarded only until the first text delta.** The parts are concurrent — measured
   `reasoning.delta` … `text.started` … `text.delta` ×18 … `reasoning.ended` — so arrival order renders
   as thinking, answer, thinking, answer-continued-in-the-first-block. One thinking block, then the

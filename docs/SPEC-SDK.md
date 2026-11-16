@@ -365,9 +365,9 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
   `XDG_STATE_HOME` pointed inside the local data directory — `<local data>/runtime/opencode/service/{config,state}`
   — on port `49390` (`OMNIHILBRAS_OPENCODE_PORT` moves it), started when the gateway starts and stopped when
   it stops, with the pid recorded in `<local data>/runtime/opencode/service/service.pid`. `serviceOwned` is
-  true only when that pid file names the process the registration names, and the process is still there: an
-  instance someone started by hand against the gateway's paths is discovered and used, and is never killed by
-  a gateway that did not start it.
+  true when that pid file names the process the registration names and the process is still there, or when an
+  orphan of the gateway's own was adopted from `/proc` (see below): an instance someone started by hand
+  against the gateway's paths is discovered and used, and is never killed by a gateway that did not start it.
   **Owning the state directory is what keeps the instance alive.** OpenCode reaps the occupant of the
   *canonical* registration file when it starts, so an instance registered there is killed whenever the app is
   opened — measured: ours died within seconds of the app opening, and the canonical file had been rewritten to
@@ -382,6 +382,18 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
   there, not whether a file says so: a file outlives the process that wrote it, and treating one as
   running is what made a boot report a running service on an empty port and answer its first turn `502`.
   Stale registrations are skipped and a fresh instance is started instead.
+  **An instance of ours that is still answering is adopted, not reported as a conflict.** Both of the
+  gateway's records can be lost while the process it started is alive and serving — found three times in one
+  day on this machine, once after 42 minutes, with the status reading `running false | owned false |
+  portOccupied true` and the OpenCode providers down until a person killed the pid by hand. When the port
+  answers and nothing is registered in the gateway's own state directory, Linux `/proc` is read for a process
+  whose command line carries the service markers on *our* port **and** whose environment carries **our**
+  `XDG_STATE_HOME` (the directory `opencodeOwnServiceEnv` gives the instance we spawn); that pid is written to
+  `service.pid` and an endpoint is built from the port and the config password, so the providers work
+  immediately even if the instance never registers again. Nothing is signalled — adoption is the opposite of
+  the conflict report — and a holder that fails either half (the user's own OpenCode app serves the same
+  binary on 49374) keeps the same refusal and the same message it always had. Where there is no `/proc` the
+  process table is simply unreadable, and the conflict report is what remains.
   **A remembered endpoint is re-checked before it is used again.** The endpoint used to be cached for the life
   of the process, so the app being closed left every later turn against a dead port — measured, the turn after
   it failed in 14 ms with `502` and no instance was ever started. A TCP probe now drops a dead endpoint and

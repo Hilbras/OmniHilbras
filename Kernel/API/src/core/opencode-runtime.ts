@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { access, chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -27,13 +27,16 @@ import { defaultLocalDataDir } from './runtime.js';
  * ## Boundaries
  *
  * - **Nothing is killed here.** A service this process started is left running: the desktop app starts
- *   the same one, and a gateway that stops it would break the app it borrowed it from.
+ *   the same one, and a gateway that stops it would break the app it borrowed it from. Adoption follows the
+ *   same rule from the other end — a process the gateway cannot identify as its own is reported as a
+ *   conflict and never signalled, and one it *can* identify is recorded and used, not reaped.
  * - **No checksum is verified against upstream, because upstream publishes none.** The official
  *   installer checks only that the release asset exists. This module records the artifact's SHA-256
  *   beside it, and verifies the installed binary by running `--version` and keeping what it said —
  *   which is a real check of a different kind, and is not dressed up as a signature check.
  * - Everything happens under the gateway's own data directory; `PATH` and the user's `~/.opencode` are
- *   only ever read.
+ *   only ever read. `/proc` is read for one purpose — identifying a service this gateway itself started,
+ *   when both of its own records are gone — and a process whose table says it is not ours is left alone.
  */
 
 export type OpencodeRuntimeOptions = {
@@ -43,6 +46,15 @@ export type OpencodeRuntimeOptions = {
   /** Overridable so a test can name a platform it is not running on. */
   platform?: NodeJS.Platform;
   arch?: string;
+  /**
+   * Where the process table is read from, default `/proc`.
+   *
+   * Injectable so a test can hand this a directory it built — a pid-shaped folder holding a `cmdline`
+   * and an `environ` — instead of depending on which processes happen to be running on the machine the
+   * suite is executed on. A root that is not there is "this platform has no process table", which is
+   * the honest answer on macOS and Windows, where `/proc` does not exist.
+   */
+  procRoot?: string;
 };
 
 export class OpencodeRuntimeError extends Error {
@@ -236,18 +248,24 @@ export type OpencodeRuntimeStatus = {
   /** Where a binary would be installed, so the dashboard can name the path before it exists. */
   installPath: string;
   /**
-   * Whether the registered service is **this gateway's own instance**.
+   * Whether the running service is **this gateway's own instance**.
    *
    * The distinction the dashboard could not make before: "running" answered whether a service was
    * reachable, not whether it was ours — so a borrowed instance and an owned one looked identical, and
    * the user's own OpenCode app was indistinguishable from a service this gateway started and would stop.
+   *
+   * Two things make a service ours: our pid file naming the process our registration names, or an orphan
+   * identified from `/proc` and adopted (both records gone, the process still ours — `inspectOwnService`).
    */
   serviceOwned: boolean;
   /** The port our own instance uses, so a person can find it without opening the registration file. */
   servicePort: number;
   /** Our registration file, named so a support question can be answered without guessing the path. */
   ownServiceFile: string;
-  /** Something answers on our port that this gateway did not start, so starting one cannot succeed. */
+  /**
+   * Something answers on our port that this gateway **cannot identify as its own**, so starting one cannot
+   * succeed. An adopted orphan never sets this: that instance is used, not reported as a conflict.
+   */
   portOccupied?: boolean;
   /** Why nothing can start, when that is the case. Never a guess: read from a probe. */
   message?: string;
@@ -259,14 +277,173 @@ export type OpencodeRuntimeStatus = {
  * `owned` requires **our pid file to name the process the registration names**. Registering in our
  * directory is not the same thing: someone can run the binary by hand against our paths, and that instance
  * is discovered and used but must never be killed by a gateway that did not start it.
+ *
+ * ## The third way an instance becomes ours: an orphan we adopt
+ *
+ * Both of our records can be gone while the process we started is still answering — three times in one day
+ * on this machine, and each time the OpenCode-backed providers stayed down until a person killed it by pid:
+ *
+ * ```
+ * an `opencode serve --service --port 49390` process is alive,
+ *   its environment carries OUR XDG_CONFIG_HOME / XDG_STATE_HOME (so we spawned it),
+ *   our pid file is gone, and its registration file in our state dir is gone too
+ *
+ * status: running false | owned false | portOccupied true
+ * ...most recent orphan: alive 42 minutes, 38 of them before the current gateway started
+ * ```
+ *
+ * Refusing that instance was correct while it could not be identified — but it can be, from `/proc`, and
+ * "nothing is registered" then means "no *record*", not "not ours". So a holder that both looks like our
+ * service and carries our own state directory is adopted: the pid is written to our pid file, which is what
+ * makes it stop-able, and an endpoint is built from the port and password we already have. Adoption never
+ * signals anything; it is the opposite of the conflict report.
  */
 export async function inspectOwnService(options: OpencodeRuntimeOptions = {}): Promise<{ endpoint?: OpencodeServiceEndpoint; owned: boolean }> {
   const endpoint = await discoverOpencodeService({ file: opencodeOwnServiceFile(options) });
-  const recorded = Number.parseInt(await readFile(opencodeOwnServicePidFile(options), 'utf8').then((text) => text.trim()).catch(() => ''), 10);
-  return {
-    ...(endpoint ? { endpoint } : {}),
-    owned: Boolean(endpoint) && Number.isInteger(recorded) && recorded === endpoint?.pid && endpointAlive(endpoint),
-  };
+  const recorded = await readOwnServicePid(options);
+  if (endpoint && Number.isInteger(recorded) && recorded === endpoint.pid && endpointAlive(endpoint)) {
+    return { endpoint, owned: true };
+  }
+  /**
+   * A registration that names a live process we have no pid record for stays **not ours** — the test at
+   * `ownership is claimed only when our own pid file names the registered process` pins that, and it is the
+   * case a person creates by running the binary by hand against our paths. Adoption is only for the case
+   * where nothing is registered at all: a record that exists and disagrees with us is not an orphan.
+   */
+  if (!endpoint) {
+    const adopted = await adoptOrphanedOwnService(options);
+    if (adopted) return { endpoint: adopted, owned: true };
+  }
+  return { ...(endpoint ? { endpoint } : {}), owned: false };
+}
+
+async function readOwnServicePid(options: OpencodeRuntimeOptions): Promise<number> {
+  const text = await readFile(opencodeOwnServicePidFile(options), 'utf8').catch(() => '');
+  return Number.parseInt(text.trim(), 10);
+}
+
+/** Writing the pid is what makes an instance stoppable later, so it is one function, used twice. */
+async function recordOwnServicePid(pid: number, options: OpencodeRuntimeOptions): Promise<void> {
+  await writeFile(opencodeOwnServicePidFile(options), String(pid), { mode: 0o600 }).catch(() => undefined);
+}
+
+/**
+ * Adopts the process holding our port when it is identifiably ours, and never before that.
+ *
+ * The order matters and each step is a refusal: **something has to answer** on our port (a process that is
+ * there but silent is the `502` a stale registration used to cause, and adopting it would be the same
+ * mistake), and the holder has to be ours by the rule in `findOwnServiceProcess`. Nothing is killed here:
+ * an instance that answers is an instance we can use, and the gateway gets it back under its own records so
+ * the ordinary shutdown path can stop it later.
+ *
+ * `ensureOwnServiceConfig` is what supplies the password, and it is the same file our spawn wrote before
+ * starting the instance — so an endpoint built here is the one this instance actually authenticates. On a
+ * machine where that config file is gone too, the instance keeps the password it read at startup and this
+ * returns a fresh one; that is unproven, and the honest failure is the provider's own `401`, not a silent
+ * second instance fighting this one for the port.
+ */
+async function adoptOrphanedOwnService(options: OpencodeRuntimeOptions = {}): Promise<OpencodeServiceEndpoint | undefined> {
+  const port = opencodeOwnServicePort(options.env ?? process.env);
+  if (!(await opencodeEndpointListening(`http://127.0.0.1:${port}`))) return undefined;
+  const pid = await findOwnServiceProcess(options);
+  if (pid === undefined) return undefined;
+  const config = await ensureOwnServiceConfig(options).catch(() => undefined);
+  if (!config) return undefined;
+  await recordOwnServicePid(pid, options);
+  return { url: `http://127.0.0.1:${port}`, password: config.password, pid };
+}
+
+/**
+ * The pid of a process that is **identifiably this gateway's own service**, or nothing.
+ *
+ * ## The rule, and why it has two halves
+ *
+ * A process is ours only when **both** hold:
+ *
+ * 1. its `/proc/<pid>/cmdline` carries the service's own markers — the binary, `serve`, `--service`, and
+ *    **our** port; and
+ * 2. its `/proc/<pid>/environ` carries **our** `XDG_STATE_HOME` — the state directory
+ *    `opencodeOwnServiceEnv` gave the instance we spawned.
+ *
+ * Neither half is enough on its own, and both failure modes are the user's own OpenCode app, which runs the
+ * same binary and must never be touched: it serves on the canonical 49374 rather than our 49390, so the
+ * command line alone would be a way to mistake it for ours, and a machine where the ports happened to
+ * coincide would still be separated by the environment. This codebase's rule — never signal a process the
+ * gateway did not start — is only kept if the identification is something the process cannot share by
+ * accident.
+ *
+ * The `OMNIHILBRAS_OPENCODE_SERVICE_SPAWNED` marker our spawn also sets is deliberately **not** required:
+ * an orphan left by a gateway that predates that marker is exactly the machine this fix exists for, and the
+ * two halves above are already the pair nothing else produces by chance.
+ *
+ * Off Linux there is no `/proc`; a process table that cannot be listed is not evidence of anything, so both
+ * reach the same answer — nothing found — and the caller keeps today's conflict report rather than guessing.
+ * That is also what a `procRoot` pointed at a directory that is not there reports, which is how the test for
+ * it is written.
+ *
+ * **The command line is read first, and the environment only for a process that got that far.** This runs on
+ * every supervisor tick that finds a port answering with nothing of ours on it, so the cheap filter has to
+ * come before the expensive read: `environ` is a second open per process — and on a machine with an instance
+ * on the port from another data directory, none of them pass the first filter at all.
+ *
+ * **What this does not prove, stated rather than assumed:** that the matched process is the one *holding* the
+ * port. Two processes cannot both bind it, and the spawn gate in `startOpencodeService` is what keeps a loser
+ * from being spawned, so a machine with two matches should not exist — but if one did, this returns the first
+ * the table lists and the pid file would name a process that is not the listener. Matching a pid to a
+ * listening socket would need `/proc/net/tcp` inode parsing, which is not written here because the ambiguity
+ * is not reachable today; a person reading this file after seeing a stop that did not stop anything should
+ * look here first.
+ */
+async function findOwnServiceProcess(options: OpencodeRuntimeOptions = {}): Promise<number | undefined> {
+  const procRoot = options.procRoot ?? '/proc';
+  const entries = await readdir(procRoot, { withFileTypes: true }).catch(() => undefined);
+  if (!entries) return undefined;
+  const stateHome = ownServiceStateHome(options);
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry.name)) continue;
+    const dir = join(procRoot, entry.name);
+    const cmdline = await readFile(join(dir, 'cmdline'), 'utf8').catch(() => undefined);
+    if (cmdline === undefined) continue;
+    if (!commandLineIsOwnService(cmdline.split('\0').join(' '), options)) continue;
+    // A process whose environment is not readable to this user (another account's, or one that has exited
+    // between the listing and the read) is skipped: "cannot prove it is ours" and "is not ours" have to reach
+    // the same answer here, which is that nothing is adopted.
+    const environ = await readFile(join(dir, 'environ'), 'utf8').catch(() => undefined);
+    if (environ === undefined) continue;
+    if (!environmentNamesOwnStateHome(environ, stateHome)) continue;
+    return Number.parseInt(entry.name, 10);
+  }
+  return undefined;
+}
+
+/** The state directory our spawn hands the instance; the scan compares against exactly this. */
+function ownServiceStateHome(options: OpencodeRuntimeOptions): string {
+  return String(opencodeOwnServiceEnv(options).XDG_STATE_HOME ?? '');
+}
+
+/** `environ` is NUL-separated `KEY=value`, so the value is compared where the key is, not by substring. */
+function environmentNamesOwnStateHome(environ: string, stateHome: string): boolean {
+  const expected = stateHome.replace(/\/+$/, '');
+  if (!expected) return false;
+  return environ.split('\0').some((entry) => {
+    if (!entry.startsWith('XDG_STATE_HOME=')) return false;
+    return entry.slice('XDG_STATE_HOME='.length).trim().replace(/\/+$/, '') === expected;
+  });
+}
+
+/**
+ * The markers a command line has to carry, shared by the scan and by the stop path.
+ *
+ * One function, so the pid file and the process table cannot hold two opinions about what our service looks
+ * like. The command the gateway spawns is `opencode serve --service --port <our port>`, and all four of those
+ * are required: a second OpenCode instance on another port is somebody else's even when the binary is the
+ * same one, and the `serve` subcommand is what this gateway starts.
+ */
+function commandLineIsOwnService(commandLine: string, options: OpencodeRuntimeOptions): boolean {
+  return commandLine.includes('opencode')
+    && commandLine.includes('serve')
+    && commandLine.includes('--service')
+    && commandLine.includes(String(opencodeOwnServicePort(options.env ?? process.env)));
 }
 
 /**
@@ -275,6 +452,10 @@ export async function inspectOwnService(options: OpencodeRuntimeOptions = {}): P
  * The two questions a registration file cannot answer on its own: is the process there, and is it ours. Ours
  * comes first, because it is the one this gateway started and will stop; a live registration filed by
  * somebody else — the user's own OpenCode app — is used and left alone.
+ *
+ * "Ours" includes an orphan adopted from `/proc`, so a machine whose records were lost reports a running,
+ * owned service while the instance is still answering — which is the state the supervisor and the dashboard
+ * both read as "nothing to do here" instead of fighting the instance for its port.
  */
 export async function liveOpencodeService(options: OpencodeRuntimeOptions = {}): Promise<{ endpoint: OpencodeServiceEndpoint; owned: boolean } | undefined> {
   const own = await inspectOwnService(options);
@@ -307,6 +488,10 @@ export async function liveOpencodeService(options: OpencodeRuntimeOptions = {}):
  *
  * Recovery used to be a person's job: closing the app left the gateway pointing at a dead port until it was
  * restarted. This is that job, done every `intervalMs`, and it is a no-op whenever a service is live.
+ *
+ * "A service is live" now includes an orphan of ours, because the tick's check goes through
+ * `liveOpencodeService`: a machine whose pid file and registration were both lost gets its instance adopted
+ * and recorded here, and the tick then does nothing — which is the right answer, since the instance is up.
  */
 export function startOpencodeSupervisor(options: OpencodeRuntimeOptions & {
   intervalMs?: number;
@@ -326,7 +511,28 @@ export function startOpencodeSupervisor(options: OpencodeRuntimeOptions & {
     try {
       if (opencodeServiceMode(env) === 'off') return;
       if (await liveOpencodeService(options)) return;
+      /**
+       * Asked again after the awaits above, because they are not instant and a supervisor that was stopped
+       * while one was in flight must not start anything: `stop()` is what a shutdown calls, and a start that
+       * lands after it outlives the gateway that owns it. Measured by the test this file already had — "the
+       * supervisor starts an instance when nothing is running, and stops when told" — once the live check
+       * began reading `/proc`, a tick in flight when `stop()` ran still reached `ensure`, and the count of
+       * starts went up after the stop.
+       */
+      if (stopped) return;
       if (!(await resolveOpencodeBinary(options))) return;
+      /**
+       * And asked a third time, **immediately before the one side effect this function has**.
+       *
+       * The check above is separated from `ensure` by another await, and a `stop()` landing in that gap still
+       * started an instance: a tick that had passed the previous guard, awaited the binary lookup, and then
+       * found itself stopped, started the gateway's service anyway — outliving the gateway that owned it.
+       * The supervisor test caught it as `6 !== 5` (one more start than the snapshot taken at `stop()`),
+       * which is why the guard moved here rather than staying two awaits earlier.
+       *
+       * Nothing may sit between this check and the call: no `await`, no callback, nothing that yields.
+       */
+      if (stopped) return;
       log("OmniHilbras gateway: no OpenCode service is running; starting the gateway's own instance.");
       await ensure(options);
     } catch (error) {
@@ -359,11 +565,13 @@ export async function opencodeRuntimeStatus(options: OpencodeRuntimeOptions = {}
   const serviceOwned = live?.owned ?? false;
   const port = opencodeOwnServicePort(options.env ?? process.env);
   /**
-   * Nothing is registered, but something answers where our instance would be.
+   * Nothing is registered **and nothing about it is ours**, but something answers where our instance would be.
    *
    * That is a fact about the machine, and without it the panel says "installed, not running" for a port that is
    * busy — which reads as a button that does nothing when it is clicked, because starting a second instance
-   * there cannot succeed.
+   * there cannot succeed. It is reached only when the holder is not ours: an orphan this gateway can identify
+   * arrives here as `endpoint` and `serviceOwned: true` instead, which is the whole point of the adoption in
+   * `inspectOwnService`.
    */
   const portOccupied = endpoint === undefined && await opencodeEndpointListening(`http://127.0.0.1:${port}`);
   return {
@@ -421,6 +629,17 @@ export async function ensureOpencodeService(options: EnsureServiceOptions = {}):
   // adopting it is how a working machine ends up answering `502` with nothing listening on the port.
   const ours = await discoverOpencodeService({ file: opencodeOwnServiceFile(options) });
   if (ours && endpointAlive(ours)) return ours;
+  /**
+   * Then the instance we started whose records are both gone but which is still answering our port.
+   *
+   * The port guard below used to be the whole answer here — a conflict report and no service — which left the
+   * OpenCode-backed providers down until a person found the pid by hand. An instance that answers is an
+   * instance we can use, and `/proc` is what turns "not recorded" into "identifiably ours"; see
+   * `adoptOrphanedOwnService`. It is tried before the user's registration for the same reason our own
+   * registration is: a machine that has both must use the one this gateway will stop again.
+   */
+  const adopted = await adoptOrphanedOwnService(options);
+  if (adopted) return adopted;
   const discovered = await discoverOpencodeService(env === process.env ? {} : { env });
   if (discovered && endpointAlive(discovered)) return discovered;
 
@@ -444,6 +663,10 @@ export async function ensureOpencodeService(options: EnsureServiceOptions = {}):
    * This is what "Start service does nothing" was: the route spawned a second instance into an occupied port,
    * the child died, the wait polled for twenty seconds, and the answer was the same status the badge was
    * already showing.
+   *
+   * An orphan of ours no longer reaches this line — `adoptOrphanedOwnService` above has already taken it, so
+   * whatever holds the port here is something the gateway cannot identify and must not start a second
+   * instance against.
    */
   if (await opencodeEndpointListening(`http://127.0.0.1:${opencodeOwnServicePort(env)}`)) return undefined;
 
@@ -494,18 +717,21 @@ export async function startOpencodeService(binary: string, options: OpencodeRunt
      *
      * Whatever is there is not ours to duplicate: a second bind fails, and the only evidence is a pid file
      * naming a process that no longer exists. The status reports the conflict instead (see
-     * `opencodeRuntimeStatus`), which is the difference between "not running" and "cannot start".
+     * `opencodeRuntimeStatus`), which is the difference between "not running" and "cannot start". An orphan
+     * of ours is adopted rather than duplicated — `ensureOpencodeService` does that before it ever gets here,
+     * and `adoptOrphanedOwnService` is what this repeats for a caller that starts a service directly.
      */
-    if (await opencodeEndpointListening(`http://127.0.0.1:${port}`)) return;
+    if (await opencodeEndpointListening(`http://127.0.0.1:${port}`)) {
+      await adoptOrphanedOwnService(options);
+      return;
+    }
     const child = nodeSpawn(binary, ['serve', '--service', '--port', String(port)], {
       detached: true,
       stdio: 'ignore',
       env: opencodeOwnServiceEnv(options),
     });
     child.on('error', () => undefined);
-    if (child.pid !== undefined) {
-      await writeFile(opencodeOwnServicePidFile(options), String(child.pid), { mode: 0o600 }).catch(() => undefined);
-    }
+    if (child.pid !== undefined) await recordOwnServicePid(child.pid, options);
     child.unref();
   })().finally(() => { startingOwnService = undefined; });
   return startingOwnService;
@@ -591,15 +817,17 @@ function processAlive(pid: number): boolean {
   }
 }
 
-/** Whether that pid is the runtime we started, by its command line rather than its number. */
+/**
+ * Whether that pid is the runtime we started, by its command line rather than its number.
+ *
+ * The same markers the adoption scan uses, from the same function: a pid file and a process table have to
+ * agree about what our service looks like, or one of them is a promise the other does not keep.
+ */
 async function commandLooksLikeOpencode(pid: number, options: OpencodeRuntimeOptions): Promise<boolean> {
   if (options.platform === 'win32' || process.platform === 'win32') return true;
   try {
-    const text = await readFile(`/proc/${pid}/cmdline`, 'utf8');
-    const commandLine = text.split('\0').join(' ');
-    // It has to be the service *and* our port: a second OpenCode instance on another port is somebody
-    // else's, even when the binary is the same one.
-    return commandLine.includes('opencode') && commandLine.includes('--service') && commandLine.includes(String(opencodeOwnServicePort(options.env ?? process.env)));
+    const text = await readFile(`${options.procRoot ?? '/proc'}/${pid}/cmdline`, 'utf8');
+    return commandLineIsOwnService(text.split('\0').join(' '), options);
   } catch {
     return false;
   }
