@@ -63,6 +63,21 @@ test('the desktop window carries the brand icon', () => {
   assert.match(main, /icon: join\(projectRoot, 'brand\/logo-512\.png'\)/, 'the window has no icon');
 });
 
+test('Update models re-reads the list the page renders, not only the account it refreshed', () => {
+  // Measured in a browser before this guard existed: with the store one model ahead of the open page, the
+  // click toasted "Updated Coarena models — 20 available." while the Models stat stayed at 19. The page
+  // renders the union over every account of the provider (`importedModels`), and the click was setting only
+  // the singular `connection`, so the request succeeded, the store changed, and the screen did not — which is
+  // a button a user correctly calls broken. `addModel` in the same file already re-reads the list after its
+  // write; this asserts the refresh does too.
+  const page = read('src/pages/ProviderDetailPage.tsx');
+  const start = page.indexOf('async function refreshModels()');
+  assert.notEqual(start, -1, 'refreshModels is gone');
+  const body = page.slice(start, page.indexOf('async function toggleConnectionEnabled', start));
+  assert.match(body, /refreshGatewayConnectionModels\(connection\.id\)/, 'the button does not ask the provider');
+  assert.match(body, /await loadConnection\(\)/, 'the refresh does not re-read the list the page renders');
+});
+
 test('the Servers page offers first run, diagnostics, and a filtered feed', () => {
   const page = read('src/pages/AppHomePage.tsx');
   assert.match(page, /No provider connections yet/, 'an empty vault has no first-run guidance');

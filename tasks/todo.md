@@ -5830,3 +5830,31 @@ independently of the React app" is now measured over every provider manifest, an
   table's `service.ts` line count, and a UI guard that matched the sentence "Import replaces every connection
   and API key" — it now asserts what the page must *say* (that import replaces what the file carries and
   cannot be undone) instead of one sentence a rewrite would break.
+
+## 3.58.1 — Update models re-reads the list it renders
+
+- **The button updated the store and the toast, and moved nothing on screen.** Reproduced in a browser with
+  the store one model ahead of the open page: the click toasted *"Updated Coarena models — 20 available."*
+  while the page's **Models** stat stayed at `19`. The page renders the union over *every* account of the
+  provider (`importedModels`, `ProviderDetailPage.tsx:722`), and `refreshModels` was setting only the singular
+  `connection` — so `setConnection(updated)` changed state nothing rendered. `addModel` in the same file had
+  already been fixed for exactly this (its comment records the toast claiming a model "added to the provider
+  catalog" while the model vanished on reload); the refresh never got the same step.
+- Fixed by re-reading the list after the write (`await loadConnection()`), verified in the same browser
+  experiment: page stat `19 → 21` where it previously stayed `19` with the toast reading 21.
+- Guarded in `tests/dashboard-wiring.test.js` ("Update models re-reads the list the page renders"), and
+  revert-checked: removing the `await loadConnection()` line fails that test with *"the refresh does not
+  re-read the list the page renders"*.
+- **The sweep that found it, per connection, all fourteen:** the route itself is healthy — `coarena` 10 → 18,
+  `opencode-console` 52 → 53, `beatapi` 18 → 19, `numes` 155 → 151 → 148 across the session, `groq`/`kiro`/
+  `codebuddy-intl`/`zcode` unchanged because their catalogs had not. Four connections returned `502` **only
+  under a burst of fourteen consecutive calls** and answered `200` when retried individually, so that is rate
+  limiting rather than a fault. Two are genuine provider states, not button faults: `nous` answers `401 This
+  refresh token was already rejected; please re-authenticate`, and `agentrouter` is refused by its own edge
+  (`401 unauthorized client detected`, and `403 private address` through the gateway's SSRF guard when its
+  host resolves locally).
+- Two adjacent gaps found while measuring, reported rather than changed here: `POST /v1/connections/:id/models`
+  refuses an empty array, so a manually added model ID can never be removed through the API; and the page's
+  `customModels` state has no setter (`useState<string[]>([])`, `ProviderDetailPage.tsx:631`), so it is
+  permanently empty and `allModels` is always `importedModels`.
+

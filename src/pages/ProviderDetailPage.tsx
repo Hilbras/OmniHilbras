@@ -1047,6 +1047,12 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     try {
       const updated = await refreshGatewayConnectionModels(connection.id);
       setConnection(updated);
+      // The list this page renders is the union over **every** account of the provider (`importedModels`),
+      // not this one connection's — so updating the singular alone left the page showing what it had before
+      // the click. Measured in a browser: the toast read "Updated Coarena models — 20 available." while the
+      // Models stat stayed at 19, which is a button the user rightly calls broken. `addModel` below re-reads
+      // the list for the same reason, and this is the same step it takes.
+      await loadConnection();
       const count = updated.modelIds.length;
       flash(`Updated ${provider.name} models — ${count} available.`);
     } catch (error) {
