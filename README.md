@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.57.2**
+**Current version: 3.58.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -393,7 +393,16 @@ The desktop shell owns the local gateway so the app can start and stop it withou
   a browser, which has no updater, asks GitHub for the newest release and offers the release page and the
   install command instead of a button that would do nothing. A check that fails says it failed — it never
   renders "up to date".
-- **Encrypted backup** import and export through the About/Settings surfaces.
+- **Encrypted backup** import and export through the About/Settings surfaces. The file carries every store the
+  gateway keeps — connections with their credentials (API keys, OAuth sign-ins, keyless providers), provider
+  strategies and model aliases, the gateway's API keys, usage history, virtual models, skills, workspaces,
+  tunnels, proxy pools, provider nodes, the MITM policy, and the session files of the ChatGPT Web and Gemini Web
+  browser profiles. The master key and the dashboard token are deliberately excluded: credentials travel
+  decrypted inside the AES-256-GCM envelope and are re-wrapped under the destination's own master key, so no
+  backup carries the key that opens the machine it came from. Import replaces every section the file carries,
+  leaves a store the file does not mention untouched, validates the whole payload before writing anything, and
+  reports the sections it applied. Files from older releases, whose payload carried connections, strategies and
+  API keys only, still import.
 
 The renderer never holds the dashboard token and never calls `127.0.0.1` directly: requests, chat streams and
 logs cross a narrow preload bridge. The packaged dashboard is served from `app://omnihilbras` out of `dist/`

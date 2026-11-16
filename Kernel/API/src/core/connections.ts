@@ -226,7 +226,52 @@ export interface ConnectionStore extends ConnectionCredentialStore {
   listCooldowns(): Promise<Record<string, ModelCooldown>>;
   /** Writes one cooldown; `undefined` clears it. Expired entries are dropped rather than accumulating. */
   setCooldown(key: string, cooldown: ModelCooldown | undefined): Promise<void>;
+  /**
+   * Backup support: the vault's whole configuration — every connection with its credential, the
+   * provider strategies and the model aliases.
+   *
+   * Optional, as on `ApiKeyStore`, so an embedded store need not offer it. A section a store cannot
+   * export is a section the backup leaves out and says it left out, rather than one it silently
+   * pretends to carry.
+   */
+  exportState?(): Promise<ConnectionsBackupState>;
+  /** Replaces the whole vault from a backup section, validating before it mutates. See `parseConnectionsBackupState`. */
+  importState?(state: ConnectionsBackupState): Promise<void>;
 }
+
+/**
+ * A connection as a backup carries it.
+ *
+ * The record's own configuration, less the fields the store derives, because carrying those is how a
+ * backup starts lying about the machine it lands on:
+ *
+ * - `hasCredential`, `credentialType` and `email` are recomputed from the credential by `withPreview`,
+ *   so a stored copy is a second answer to a question the credential already answers;
+ * - `credentialFingerprint` is keyed by **this** vault's master key. A fingerprint copied from another
+ *   vault names a credential this installation has never seen, and an in-memory store's fingerprint is
+ *   an unkeyed hash of the same value — so a carried one could match a key the user pastes later and
+ *   refuse it as a duplicate. Dropped; the next save mints one here;
+ * - `requestCount` and `lastUsed` count traffic that happened on the source machine, which is usage, not
+ *   configuration. Model cooldowns are the same kind of thing and are not carried either.
+ */
+export type BackupConnection = {
+  connection: Omit<ConnectionRecord, 'hasCredential' | 'credentialFingerprint' | 'credentialType' | 'email' | 'requestCount' | 'lastUsed'>;
+  /**
+   * Absent when the connection has no credential at all.
+   *
+   * Absent, not skipped: the version-1 export dropped such a connection from the payload entirely, so a
+   * keyless connection — the canonical one being Ollama — vanished on import. A connection is
+   * configuration whether or not a secret sits behind it.
+   */
+  credential?: ProviderCredential;
+};
+
+/** One vault's configuration, as a backup section holds it. */
+export type ConnectionsBackupState = {
+  connections: BackupConnection[];
+  strategies: Record<string, ProviderStrategy>;
+  aliases: Record<string, ModelAlias>;
+};
 
 export type LocalConnectionStoreOptions = {
   directory?: string;
@@ -488,10 +533,104 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     else this.modelCooldowns.set(key, cooldown);
   }
 
+  /**
+   * The connections and credentials this store holds. Empty strategy and alias maps, because this store
+   * has neither — an in-memory vault keeps no strategies to export, and saying so is better than a
+   * section that claims a configuration it cannot hold.
+   */
+  async exportState(): Promise<ConnectionsBackupState> {
+    return {
+      connections: [...this.connections.values()].map((record) => backupConnection(record, this.credentials.get(record.id))),
+      strategies: {},
+      aliases: {},
+    };
+  }
+
+  /** Replaces every connection and credential. Validated first, so a malformed section changes nothing. */
+  async importState(state: ConnectionsBackupState): Promise<void> {
+    const next = parseConnectionsBackupState(state);
+    this.connections.clear();
+    this.credentials.clear();
+    this.modelCooldowns.clear();
+    for (const entry of next.connections) {
+      this.connections.set(entry.connection.id, asStoredRecord(entry));
+      if (entry.credential) this.credentials.set(entry.connection.id, storedCredential(entry.credential));
+    }
+  }
+
   private findIdForProvider(providerId: ProviderId) {
     return [...this.connections.values()]
       .find((connection) => connection.providerId === providerId || connection.providers?.includes(providerId))?.id;
   }
+}
+
+/** One record and the credential behind it, in the shape a backup carries. */
+function backupConnection(record: ConnectionRecord, credential: ProviderCredential | undefined): BackupConnection {
+  return { connection: backupRecord(record), ...(credential ? { credential: { ...credential } } : {}) };
+}
+
+/**
+ * The record without the fields the store derives — see `BackupConnection` for why each one is left out.
+ *
+ * `credentialFingerprint` is non-enumerable on records that came through `list()`, so it has to be removed
+ * by destructuring rather than by deleting a key: a spread would have carried it anyway, which is the trap
+ * the record's own comment warns about.
+ */
+function backupRecord(record: ConnectionRecord): BackupConnection['connection'] {
+  const { hasCredential: _hasCredential, credentialFingerprint: _fingerprint, credentialType: _credentialType, email: _email, requestCount: _requestCount, lastUsed: _lastUsed, ...configuration } = record;
+  return configuration;
+}
+
+/** The inverse of `backupRecord`: the stored form, with `hasCredential` answered by the credential beside it. */
+function asStoredRecord(entry: BackupConnection): ConnectionRecord {
+  return { ...entry.connection, hasCredential: entry.credential !== undefined };
+}
+
+/**
+ * Reads a backup's connection section, strictly.
+ *
+ * Every credential goes through `storedCredential` — the one function the save path also writes through —
+ * so a payload this function accepts is one every store in the gateway can hold. Strict, too: per-record
+ * tolerance belongs on load, where a hand-edited file must not make the vault unopenable, and not here,
+ * where the input is a whole vault about to replace this one. An import that quietly skips a record it
+ * cannot read is an import that reports success while losing a connection, which is the version-1
+ * behaviour this replaces.
+ */
+export function parseConnectionsBackupState(value: unknown): ConnectionsBackupState {
+  if (!isRecord(value) || !Array.isArray(value.connections)) throw new Error('The backup\'s connection section is not readable.');
+  if (value.connections.length > resolveMaxConnections()) throw new ConnectionLimitError();
+  const connections: BackupConnection[] = [];
+  const seen = new Set<string>();
+  for (const entry of value.connections) {
+    if (!isRecord(entry) || !isRecord(entry.connection)) throw new Error('The backup contains an unreadable connection.');
+    let credential: ProviderCredential | undefined;
+    try {
+      credential = entry.credential === undefined ? undefined : storedCredential(entry.credential);
+    } catch (error) {
+      throw new Error(`The backup contains an unreadable credential: ${error instanceof Error ? error.message : 'unknown'}.`);
+    }
+    const record = parseRecord({ ...entry.connection, hasCredential: credential !== undefined });
+    if (seen.has(record.id)) throw new Error(`The backup contains two connections with the id ${record.id}.`);
+    seen.add(record.id);
+    connections.push(backupConnection(record, credential));
+  }
+  const strategies: Record<string, ProviderStrategy> = {};
+  if (value.strategies !== undefined) {
+    if (!isRecord(value.strategies)) throw new Error('The backup has an invalid provider strategy map.');
+    for (const [providerId, strategy] of Object.entries(value.strategies)) {
+      if (!providerStrategies.includes(strategy as ProviderStrategy)) throw new Error('The backup contains an unknown provider strategy.');
+      strategies[providerId] = strategy as ProviderStrategy;
+    }
+  }
+  const aliases: Record<string, ModelAlias> = {};
+  if (value.aliases !== undefined) {
+    if (!isRecord(value.aliases)) throw new Error('The backup has an invalid model alias map.');
+    for (const [name, target] of Object.entries(value.aliases)) {
+      if (!isRecord(target) || typeof target.providerId !== 'string' || typeof target.model !== 'string' || !target.model.trim()) throw new Error('The backup contains an invalid model alias.');
+      aliases[name] = { providerId: target.providerId, model: target.model };
+    }
+  }
+  return { connections, strategies, aliases };
 }
 
 /**
@@ -894,6 +1033,74 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
         throw error;
       }
       return true;
+    });
+  }
+
+  /**
+   * This vault's whole configuration: connections with their credentials, strategies, aliases.
+   *
+   * Credentials are decrypted here because that is what makes a backup restorable, and the only place they
+   * go is the encrypted envelope. What is *not* here is deliberate and documented on `BackupConnection`.
+   */
+  async exportState(): Promise<ConnectionsBackupState> {
+    await this.mutationQueue;
+    await this.ensureLoaded();
+    return {
+      connections: [...this.connections.values()].map((record) => backupConnection(record, this.credentials.get(record.id))),
+      strategies: Object.fromEntries(this.strategies),
+      aliases: Object.fromEntries(this.aliasMap),
+    };
+  }
+
+  /**
+   * Replaces every connection, credential, strategy and alias.
+   *
+   * Two files are written from the new state inside one mutation, so the vault cannot be observed
+   * half-replaced, and a failure — the metadata size bound, a full disk, a refused symlink — restores the
+   * previous maps and writes them back. `importBackup` needs that: it calls this once per store in turn,
+   * and a store that failed part-way would leave an installation whose connections came from one machine
+   * and whose tunnels came from another.
+   *
+   * Cooldowns are cleared rather than imported. Each one is keyed `<connectionId>:<modelId>` for an
+   * account that this import has just replaced, so keeping them would stand down accounts that never
+   * earned it — a cooldown is about what happened on the *source* machine, and the vault already drops an
+   * expired one as meaningless.
+   */
+  async importState(state: ConnectionsBackupState): Promise<void> {
+    const next = parseConnectionsBackupState(state);
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = {
+        connections: this.connections,
+        credentials: this.credentials,
+        strategies: this.strategies,
+        aliases: this.aliasMap,
+        cooldowns: this.modelCooldowns,
+      };
+      const connections = new Map<string, ConnectionRecord>();
+      const credentials = new Map<ProviderId, ProviderCredential>();
+      for (const entry of next.connections) {
+        connections.set(entry.connection.id, asStoredRecord(entry));
+        if (entry.credential) credentials.set(entry.connection.id, storedCredential(entry.credential));
+      }
+      this.connections = connections;
+      this.credentials = credentials;
+      this.strategies = new Map(Object.entries(next.strategies));
+      this.aliasMap = new Map(Object.entries(next.aliases));
+      this.modelCooldowns = new Map();
+      try {
+        await this.persistSecrets();
+        await this.persistMetadata();
+      } catch (error) {
+        this.connections = previous.connections;
+        this.credentials = previous.credentials;
+        this.strategies = previous.strategies;
+        this.aliasMap = previous.aliases;
+        this.modelCooldowns = previous.cooldowns;
+        await this.persistSecrets().catch(() => undefined);
+        await this.persistMetadata().catch(() => undefined);
+        throw error;
+      }
     });
   }
 

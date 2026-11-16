@@ -25,6 +25,46 @@ export interface ProxyPoolStore {
   get(id: string): Promise<ProxyPool | undefined>;
   save(input: ProxyPoolInput): Promise<ProxyPool>;
   remove(id: string): Promise<boolean>;
+  /** Encrypted-backup support, in this store's own file shape. Optional, like `ApiKeyStore`'s pair. */
+  exportState?(): Promise<ProxyPoolsBackupState>;
+  /** Replaces every pool. Validates before it mutates; see `parseProxyPoolState`. */
+  importState?(state: ProxyPoolsBackupState): Promise<void>;
+}
+
+/** The store's own file shape, so a backup is the file it already writes rather than a second format. */
+export type ProxyPoolsBackupState = ProxyPoolsFile;
+
+/**
+ * Reads a backup's proxy-pool section — strictly, where the load path is tolerant.
+ *
+ * **An entry may embed `user:pass@`**, which is why this section travels at all: a pool whose credentials
+ * were stripped restores into something that does not route, and the entries go only into the encrypted
+ * envelope. They are never logged, and `redactProxyEntry` is what a caller is shown.
+ */
+export function parseProxyPoolState(value: unknown): ProxyPoolsBackupState {
+  if (!isRecord(value) || !Array.isArray(value.proxyPools)) throw new Error('The backup\'s proxy pool section is not readable.');
+  const proxyPools = new Map<string, ProxyPool>();
+  for (const candidate of value.proxyPools) {
+    if (!isStoredProxyPool(candidate)) throw new Error('The backup contains an unreadable proxy pool.');
+    proxyPools.set(candidate.id, normalize(candidate, candidate));
+  }
+  return { version: 1, proxyPools: [...proxyPools.values()] };
+}
+
+/** Every field the writer puts on a record. A backup is read strictly, so one missing field is refused. */
+function isStoredProxyPool(value: unknown): value is ProxyPool {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.name === 'string'
+    && Array.isArray(value.proxies) && value.proxies.every((entry) => typeof entry === 'string')
+    && typeof value.strategy === 'string'
+    && typeof value.enabled === 'boolean'
+    && typeof value.createdAt === 'string'
+    && typeof value.updatedAt === 'string';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 
@@ -104,9 +144,15 @@ export class InMemoryProxyPoolStore implements ProxyPoolStore {
     return next;
   }
   async remove(id: string) { return this.items.delete(id); }
+  async exportState(): Promise<ProxyPoolsBackupState> { return { version: 1, proxyPools: [...this.items.values()] }; }
+  async importState(state: ProxyPoolsBackupState) {
+    const next = parseProxyPoolState(state);
+    this.items.clear();
+    for (const pool of next.proxyPools) this.items.set(pool.id, pool);
+  }
 }
 
-type File = { version: 1; proxyPools: ProxyPool[] };
+type ProxyPoolsFile = { version: 1; proxyPools: ProxyPool[] };
 
 export class LocalProxyPoolStore implements ProxyPoolStore {
   private readonly path: string;
@@ -135,7 +181,7 @@ export class LocalProxyPoolStore implements ProxyPoolStore {
   }
 
   private persist() {
-    return atomicWrite(this.path, `${JSON.stringify({ version: 1, proxyPools: [...this.items.values()] } satisfies File, null, 2)}\n`);
+    return atomicWrite(this.path, `${JSON.stringify({ version: 1, proxyPools: [...this.items.values()] } satisfies ProxyPoolsFile, null, 2)}\n`);
   }
 
   private withMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -169,6 +215,29 @@ export class LocalProxyPoolStore implements ProxyPoolStore {
       const removed = this.items.delete(id);
       if (removed) await this.persist();
       return removed;
+    });
+  }
+
+  async exportState(): Promise<ProxyPoolsBackupState> {
+    await this.mutationQueue;
+    await this.ensureLoaded();
+    return { version: 1, proxyPools: [...this.items.values()] };
+  }
+
+  /** Replaces every pool in one write; the previous map is put back if that write fails. */
+  async importState(state: ProxyPoolsBackupState): Promise<void> {
+    const next = parseProxyPoolState(state);
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = this.items;
+      this.items = new Map(next.proxyPools.map((pool) => [pool.id, pool] as const));
+      try {
+        await this.persist();
+      } catch (error) {
+        this.items = previous;
+        await this.persist().catch(() => undefined);
+        throw error;
+      }
     });
   }
 }

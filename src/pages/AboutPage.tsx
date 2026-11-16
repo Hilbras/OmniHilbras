@@ -68,7 +68,11 @@ function BackupPanel() {
     setMessage('');
     try {
       const result = await importGatewayBackup(passphrase, file.envelope);
-      setMessage(`Imported ${result.connections} connections, ${result.apiKeys} API keys and ${result.strategies} strategies. Reloading.`);
+      // Named per section rather than summarised: a restore that silently skipped a store is the failure
+      // this whole file exists to make visible, and "imported" alone is what hid it before.
+      const carried = Object.keys(result.sections ?? {}).map((name) => `${name} ${result.sections[name]}`).join(', ');
+      const untouched = (result.notCarried ?? []).length > 0 ? ` The file carried no ${result.notCarried.join(', ')}, so those stores were left as they were.` : '';
+      setMessage(`Imported ${result.connections} connections, ${result.apiKeys} API keys and ${result.strategies} strategies. Sections replaced: ${carried}.${untouched} Reloading.`);
       setFile(undefined);
       setConfirmed(false);
       window.setTimeout(() => window.location.reload(), 1_200);
@@ -84,9 +88,19 @@ function BackupPanel() {
     <section className="card p-5" aria-labelledby="backup-title">
       <h2 id="backup-title" className="flex items-center gap-2 text-sm font-semibold"><FileKey2 className="h-4 w-4 text-gold-text" aria-hidden="true" />Encrypted backup</h2>
       <p className="muted mt-1 text-xs leading-relaxed">
-        Exports connections, their provider credentials, model policy, resilience, strategies and the API-key
-        store. The file is AES-256-GCM with a scrypt-derived key; the passphrase is not stored anywhere.
-        API keys are exported as their stored hashes, so they keep working after import but cannot be shown again.
+        Exports every store this gateway keeps: connections and their credentials (API keys, OAuth sign-ins and
+        keyless providers such as Ollama), provider strategies, model aliases, the API-key store, usage history,
+        virtual models, skills, workspaces, tunnels, proxy pools, provider nodes, the MITM policy, and the
+        signed-in browser sessions of ChatGPT Web and Gemini Web (their session files only — never Chromium's
+        caches). The file is
+        AES-256-GCM with a scrypt-derived key; the passphrase is not stored anywhere. API keys are exported as
+        their stored hashes, so they keep working after import but cannot be shown again.
+      </p>
+      <p className="muted mt-2 text-xs leading-relaxed">
+        Not in the file, deliberately: the master key and this installation's dashboard token. Credentials travel
+        decrypted inside the envelope and are re-wrapped under the destination's own master key, so a backup never
+        carries the key that opens the machine it came from. Settings are environment variables rather than stored
+        state, and the token saver's cache lives only in memory, so neither has anything to export.
       </p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <label className="block text-xs font-medium">Passphrase
@@ -104,7 +118,12 @@ function BackupPanel() {
       </div>
       <hr className="my-5 border-line" />
       <p className="text-xs font-semibold">Import</p>
-      <p className="muted mt-1 text-[11px] leading-relaxed">Import replaces every connection and API key on this gateway. There is no merge and no undo.</p>
+      <p className="muted mt-1 text-[11px] leading-relaxed">
+        Import replaces every store the file carries — connections, credentials, gateway API keys, usage history,
+        virtual models and the rest — with what the file holds. There is no merge and no undo. A store the file
+        does not carry is left exactly as it is: silence in the file is not an instruction to delete. If any part
+        of the file is unreadable, nothing is written at all and your gateway keeps what it has.
+      </p>
       <div className="mt-3 flex flex-col gap-3">
         <input type="file" accept="application/json,.json" onChange={async (event) => {
           const selected = event.target.files?.[0];

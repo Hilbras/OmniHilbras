@@ -5779,3 +5779,54 @@ independently of the React app" is now measured over every provider manifest, an
 ## 3.9.2 — TokenHarbor Web copy fallback
 
 - Made the browser console snippet log the value and show a prompt dialog, so it can be copied even when `copy()` is unavailable or blocked.
+
+## 3.58.0 — the backup carries every store, not three
+
+- **The payload went from three sections to eleven.** Version 1 carried `connections`, `strategies` and
+  `apiKeys`; the usage history, virtual models, skills, workspaces, tunnels, proxy pools, provider nodes and
+  the MITM policy were not in the file at all, so a restore rebuilt the connections and left the rest on the
+  machine it came from while the dashboard called it a success. Measured before the change, by decrypting an
+  export from the running gateway: `payload keys: format, version, createdAt, connections, strategies,
+  apiKeys` — three of eleven. The export's own comment called that "everything needed to rebuild this
+  gateway", which is the sentence that made it survivable for so long.
+- **Every store gained an `exportState`/`importState` pair, and each one shares its parser with its file
+  reader** (`parseConnectionsBackupState`, `parseApiKeyState`, `parseUsageState`, and so on). Two readers of
+  one shape is how a credential lost three of its nine fields between its writer and its reader twice in this
+  repository; an accepted payload is now a payload the store would load on the next restart. The usage store
+  keeps its id sequence across a restore, so a restored `req_1` cannot collide with a newly minted one.
+- **Import validates every carried section before writing any of them.** The stores each validate their own
+  part, but a store that took its part and then failed on the sixth of ten would leave an installation whose
+  connections came from one machine and whose tunnels came from another — while the user, told the import
+  failed, looks at a gateway that half-believes it succeeded.
+- **A section the file does not carry is left alone rather than cleared**, and the result names both what
+  travelled (`sections`) and what did not (`notCarried`). Silence in a file is not an instruction to delete.
+- **Version-1 files still import**, translated into the new shape rather than served by a second apply path.
+  Their keyless connections are no longer dropped: version 1 required a credential per entry, which is why an
+  Ollama connection vanished on import, and the translation carries the record with no credential rather than
+  inventing a `{ type: 'none' }` the file never had.
+- **The ChatGPT Web and Gemini Web sessions travel — their files, not their caches.** An interactive sign-in
+  writes the session into the browser profile, so leaving it out restores an installation that asks the user
+  to sign in again. Measured on this machine: **6.9 MB of Chromium cache per profile against ~40 KB of
+  `Cookies` / `Local Storage` / `Session Storage` / `IndexedDB`**, inside a payload capped at 20 MiB — so two
+  or three signed-in web providers would have broken the export for exactly the people using it most. Every
+  path in that section is refused unless it sits under a carried subtree and cannot climb out of it, and a
+  duplicate connection id is refused rather than letting the last profile win.
+- **Deleting a Gemini Web connection now removes its profile.** ChatGPT Web had that and Gemini Web did not,
+  so a delete left a signed-in Google session on disk — and an orphaned `chatgpt-web` profile was found
+  sitting on this machine exactly that way, a credential its operator believed they had removed.
+- **Deliberately excluded, and now named in the UI, the spec and the README**: `secrets.key` and the dashboard
+  token (credentials travel decrypted and are re-wrapped under the destination's own master key, so no backup
+  carries the key that opens the machine it came from), settings (environment variables with no store) and the
+  token saver's cache (memory only).
+- **Verified as a real round trip against a clean data directory**, not by reading code: export from the live
+  gateway → import into a second gateway with its own empty config and data dir. All eleven sections applied
+  (connections 14 with 4 OAuth among them, one gateway API key, 1000 usage records, one virtual model, the
+  rest present and empty because this installation keeps none), ten of ten store files written, every store
+  readable through the API afterwards, and a real provider turn through an **imported combo whose target is an
+  imported OAuth connection** answered `"imported"`. The same file's raw bytes were searched for nine
+  credential, model and host probes: none present. Two 502s in the same run were reproduced against the live
+  gateway first, which is what makes them upstream failures rather than import failures.
+- The two guards that pinned the old behaviour were corrected rather than worked around: the architecture
+  table's `service.ts` line count, and a UI guard that matched the sentence "Import replaces every connection
+  and API key" — it now asserts what the page must *say* (that import replaces what the file carries and
+  cannot be undone) instead of one sentence a rewrite would break.

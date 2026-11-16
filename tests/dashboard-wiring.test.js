@@ -79,7 +79,11 @@ test('About exists in the web and desktop app, with encrypted backup actions', (
   assert.match(shell, /to: '\/about'/, 'no About nav entry');
   assert.match(about, /exportGatewayBackup/, 'no backup export');
   assert.match(about, /importGatewayBackup/, 'no backup import');
-  assert.match(about, /confirmReplace|replaces every connection/, 'import does not warn that it replaces data');
+  // The wording changed in 3.58.0: the payload now carries every store, not only the connections, and the
+  // guard is written against what the page must *say* — that the import replaces what the file carries and
+  // cannot be undone — rather than against one sentence that a rewrite of that sentence would break.
+  assert.match(about, /Import replaces every store the file carries/, 'import does not warn that it replaces data');
+  assert.match(about, /no merge and no undo/, 'import does not say the replacement cannot be undone');
   assert.match(about, /bridge\.diagnostics\.export/, 'the desktop diagnostics action is missing');
 });
 

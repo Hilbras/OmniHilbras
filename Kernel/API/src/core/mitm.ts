@@ -25,6 +25,44 @@ export interface MitmStore {
   get(id: string): Promise<Mitm | undefined>;
   save(input: MitmInput): Promise<Mitm>;
   remove(id: string): Promise<boolean>;
+  /** Encrypted-backup support, in this store's own file shape. Optional, like `ApiKeyStore`'s pair. */
+  exportState?(): Promise<MitmBackupState>;
+  /** Replaces every entry. Validates before it mutates; see `parseMitmState`. */
+  importState?(state: MitmBackupState): Promise<void>;
+}
+
+/** The store's own file shape, so a backup is the file it already writes rather than a second format. */
+export type MitmBackupState = MitmFile;
+
+/**
+ * Reads a backup's MITM section — strictly, where the load path is tolerant: a corrupt file is an empty
+ * list and one bad record is skipped, but neither applies to a whole section being swapped in. Every record
+ * goes through the same `normalize` the writer uses.
+ */
+export function parseMitmState(value: unknown): MitmBackupState {
+  if (!isRecord(value) || !Array.isArray(value.mitm)) throw new Error('The backup\'s MITM section is not readable.');
+  const mitm = new Map<string, Mitm>();
+  for (const candidate of value.mitm) {
+    if (!isStoredMitm(candidate)) throw new Error('The backup contains an unreadable MITM entry.');
+    mitm.set(candidate.id, normalize(candidate, candidate));
+  }
+  return { version: 1, mitm: [...mitm.values()] };
+}
+
+/** Every field the writer puts on a record. A backup is read strictly, so one missing field is refused. */
+function isStoredMitm(value: unknown): value is Mitm {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.name === 'string'
+    && typeof value.port === 'number'
+    && typeof value.enabled === 'boolean'
+    && typeof value.certPath === 'string'
+    && typeof value.createdAt === 'string'
+    && typeof value.updatedAt === 'string';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
@@ -55,9 +93,15 @@ export class InMemoryMitmStore implements MitmStore {
     return next;
   }
   async remove(id: string) { return this.items.delete(id); }
+  async exportState(): Promise<MitmBackupState> { return { version: 1, mitm: [...this.items.values()] }; }
+  async importState(state: MitmBackupState) {
+    const next = parseMitmState(state);
+    this.items.clear();
+    for (const entry of next.mitm) this.items.set(entry.id, entry);
+  }
 }
 
-type File = { version: 1; mitm: Mitm[] };
+type MitmFile = { version: 1; mitm: Mitm[] };
 
 export class LocalMitmStore implements MitmStore {
   private readonly path: string;
@@ -86,7 +130,7 @@ export class LocalMitmStore implements MitmStore {
   }
 
   private persist() {
-    return atomicWrite(this.path, `${JSON.stringify({ version: 1, mitm: [...this.items.values()] } satisfies File, null, 2)}\n`);
+    return atomicWrite(this.path, `${JSON.stringify({ version: 1, mitm: [...this.items.values()] } satisfies MitmFile, null, 2)}\n`);
   }
 
   private withMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -120,6 +164,29 @@ export class LocalMitmStore implements MitmStore {
       const removed = this.items.delete(id);
       if (removed) await this.persist();
       return removed;
+    });
+  }
+
+  async exportState(): Promise<MitmBackupState> {
+    await this.mutationQueue;
+    await this.ensureLoaded();
+    return { version: 1, mitm: [...this.items.values()] };
+  }
+
+  /** Replaces every entry in one write; the previous map is put back if that write fails. */
+  async importState(state: MitmBackupState): Promise<void> {
+    const next = parseMitmState(state);
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = this.items;
+      this.items = new Map(next.mitm.map((entry) => [entry.id, entry] as const));
+      try {
+        await this.persist();
+      } catch (error) {
+        this.items = previous;
+        await this.persist().catch(() => undefined);
+        throw error;
+      }
     });
   }
 }

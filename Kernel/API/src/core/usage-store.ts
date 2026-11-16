@@ -146,6 +146,50 @@ export interface UsageStore {
   /** Total records retained, for the bounded-by-construction test and the dashboard's own honesty. */
   size(): Promise<number>;
   clear(): Promise<void>;
+  /** Encrypted-backup support, in the store's own file shape. Optional, like `ApiKeyStore`'s pair. */
+  exportState?(): Promise<UsageBackupState>;
+  /** Replaces every record, bounded by this store's `maxRecords` exactly as the load path is. */
+  importState?(state: UsageBackupState): Promise<void>;
+}
+
+/** The store's own file shape, so a backup is the file it already writes rather than a second format. */
+export type UsageBackupState = { version: number; records: UsageRecord[] };
+
+const usageFileVersion = 1;
+
+/**
+ * Reads a backup's usage section.
+ *
+ * Strict about the records and about the version, where the load path is tolerant about both: a
+ * hand-edited file must not make the gateway unopenable, and a whole section being swapped in is a
+ * different question from one bad line. A record is only readable if `isUsageRecord` says so — the same
+ * function the file's reader applies — so a backup cannot introduce a record shape this store would
+ * refuse to load on the next restart.
+ */
+export function parseUsageState(value: unknown): UsageBackupState {
+  if (!isRecord(value) || value.version !== usageFileVersion || !Array.isArray(value.records)) {
+    throw new Error('The backup\'s usage section is not readable.');
+  }
+  const records: UsageRecord[] = [];
+  for (const record of value.records) {
+    if (!isUsageRecord(record)) throw new Error('The backup contains an unreadable usage record.');
+    records.push(normalizeRecord(record));
+  }
+  return { version: usageFileVersion, records };
+}
+
+/**
+ * The highest id this set of records implies, so ids stay unique after a restore.
+ *
+ * Shared by the load path and the import path: a sequence reset to 0 would mint `req_1` again, and two
+ * records with one id is a row the dashboard cannot tell from another.
+ */
+function highestSequence(records: readonly UsageRecord[]): number {
+  return records.reduce((max, record) => {
+    const parsedId = /^req_([0-9a-z]+)$/.exec(record.id);
+    const value = parsedId ? parseInt(parsedId[1]!, 36) : 0;
+    return value > max ? value : max;
+  }, 0);
 }
 
 /** Fields that must never appear on a record. Asserted in tests, and the reason this list exists. */
@@ -286,6 +330,18 @@ export class InMemoryUsageStore implements UsageStore {
   async clear(): Promise<void> {
     this.records.length = 0;
   }
+
+  async exportState(): Promise<UsageBackupState> {
+    return { version: usageFileVersion, records: this.records.map((record) => ({ ...record })) };
+  }
+
+  /** Replaces every record, keeping the newest `maxRecords` — the same bound the load path applies. */
+  async importState(state: UsageBackupState): Promise<void> {
+    const next = parseUsageState(state);
+    this.records.length = 0;
+    this.records.push(...next.records.slice(0, this.maxRecords));
+    this.sequence.value = highestSequence(this.records);
+  }
 }
 
 /**
@@ -332,13 +388,8 @@ export class LocalUsageStore implements UsageStore {
             .filter(isUsageRecord)
             .slice(0, this.maxRecords)
             .map(normalizeRecord);
-          const highest = this.records.reduce((max, record) => {
-            const parsedId = /^req_([0-9a-z]+)$/.exec(record.id);
-            const value = parsedId ? parseInt(parsedId[1]!, 36) : 0;
-            return value > max ? value : max;
-          }, 0);
           // Continue past the highest id seen, so ids stay unique across a restart instead of restarting at 1.
-          this.sequence = highest;
+          this.sequence = highestSequence(this.records);
         }
       } catch {
         // A corrupt file must not stop the gateway from serving requests. Usage is a report, and a missing
@@ -350,7 +401,7 @@ export class LocalUsageStore implements UsageStore {
   }
 
   private async persist(): Promise<void> {
-    await atomicWrite(this.path, `${JSON.stringify({ version: 1, records: this.records })}\n`);
+    await atomicWrite(this.path, `${JSON.stringify({ version: usageFileVersion, records: this.records })}\n`);
   }
 
   private withMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -399,6 +450,39 @@ export class LocalUsageStore implements UsageStore {
       await this.ensureLoaded();
       this.records = [];
       await this.persist();
+    });
+  }
+
+  async exportState(): Promise<UsageBackupState> {
+    await this.mutationQueue;
+    await this.ensureLoaded();
+    return { version: usageFileVersion, records: this.records.map((record) => ({ ...record })) };
+  }
+
+  /**
+   * Replaces every record.
+   *
+   * Bounded on the way in, which is the one place this differs from `ApiKeyStore.importState` refusing a
+   * too-large state: a usage file is a report, and refusing to restore a whole vault because this
+   * installation keeps a shorter history would be trading a real restore for a bookkeeping bound. The
+   * newest records are the ones kept, which is the end of the history a person looks at.
+   */
+  async importState(state: UsageBackupState): Promise<void> {
+    const next = parseUsageState(state);
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = this.records;
+      const previousSequence = this.sequence;
+      this.records = next.records.slice(0, this.maxRecords);
+      this.sequence = highestSequence(this.records);
+      try {
+        await this.persist();
+      } catch (error) {
+        this.records = previous;
+        this.sequence = previousSequence;
+        await this.persist().catch(() => undefined);
+        throw error;
+      }
     });
   }
 }

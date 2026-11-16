@@ -27,8 +27,8 @@ import { OpencodeConsoleAdapter } from '@omnihilbras/sdk-opencode-console';
 import { createQoderAdapter } from '@omnihilbras/sdk-qoder';
 import { probeQwenWeb } from '@omnihilbras/sdk-qwen-web';
 import { TokenHarborWebAdapter, tokenHarborWebCredential, tokenHarborWebProviderId } from '@omnihilbras/sdk-tokenharbor-web';
-import type { ApiKeyRecord, ApiKeyStore } from './api-keys.js';
-import { type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ResilienceSettings } from './connections.js';
+import { parseApiKeyState, type ApiKeyRecord, type ApiKeyStore } from './api-keys.js';
+import { parseConnectionsBackupState, type ConnectionInput, type ConnectionRecord, type ConnectionStore, type ConnectionsBackupState, type ResilienceSettings } from './connections.js';
 import type { GatewayConfig } from './config.js';
 import { ClineSessionStore, beginClineAuthorization, clineCallbackPathFor, createClineAdapter, exchangeClineCode, providerSaid, toClineCredential } from './oauth.js';
 import { KimiCodeSessionStore, kimiCodeProviderId, type KimiCodeSessionStatus } from '../providers/kimiCode.js';
@@ -69,13 +69,13 @@ import { localDeployment, type ConnectionSecretStore, type DeploymentConfig } fr
 import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
 import { TimeoutPolicy } from './timeout-policy.js';
-import { type VirtualModel, type VirtualModelStore } from './virtual-models.js';
-import { type SkillStore } from './skills.js';
-import { type WorkspaceStore } from './workspaces.js';
-import { type TunnelStore } from './tunnels.js';
-import { type MitmStore } from './mitm.js';
-import { type ProxyPoolStore } from './proxy-pools.js';
-import { type ProviderNodeStore } from './provider-nodes.js';
+import { parseVirtualModelState, type VirtualModel, type VirtualModelStore } from './virtual-models.js';
+import { parseSkillState, type SkillStore } from './skills.js';
+import { parseWorkspaceState, type WorkspaceStore } from './workspaces.js';
+import { parseTunnelState, type TunnelStore } from './tunnels.js';
+import { parseMitmState, type MitmStore } from './mitm.js';
+import { parseProxyPoolState, type ProxyPoolStore } from './proxy-pools.js';
+import { parseProviderNodeState, type ProviderNodeStore } from './provider-nodes.js';
 import {
   compressMessages,
   headroomCompress,
@@ -90,13 +90,68 @@ import {
 } from '@omnihilbras/token-saver';
 import { startRequestScope, withRequestScope, type RequestScope } from './request-context.js';
 import { decryptBackup, encryptBackup } from './backup.js';
+import { exportWebProfiles, importWebProfiles, parseWebProfilesState } from './web-profiles.js';
+import { removeGeminiWebProfile } from '../providers/geminiWeb.js';
 import { notSupported } from './capability.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayImageOutcome, type GatewayAudioOutcome, type GatewayTranscriptionOutcome, type GatewayStreamOutcome } from './request-executor.js';
 import { providerAlias, sharedCatalogProviders } from './provider-alias.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
-import type { UsageRecord, UsageStore } from './usage-store.js';
+import { parseUsageState, type UsageRecord, type UsageStore } from './usage-store.js';
 import { modelMetaPriceOrder } from './connections.js';
+
+/**
+ * The backup format this build writes, and the versions its reader understands.
+ *
+ * Version 1 carried three sections — the connections, their provider strategies and the API keys. Everything
+ * else an installation holds stayed behind: usage history, virtual models, skills, workspaces, tunnels,
+ * proxy pools, provider nodes and the MITM policy were all absent from the file, so a restore rebuilt the
+ * connections and left the rest on the machine it came from while the UI called it a success.
+ *
+ * Version 2 carries every file-backed store as a section named after it. Version 1 still imports: it is
+ * translated into that same shape rather than served by a second apply path, because two importers are two
+ * places for the question "what is a credential" to be answered differently.
+ */
+const backupFormat = 'omnihilbras-gateway-backup';
+const backupVersion = 2;
+
+/** A JSON object, which is the only thing an envelope's payload can be. */
+function isBackupRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The one refusal every malformed payload gets, so the reader has a single answer for "not a backup". */
+function notAGatewayBackup() {
+  return new ProviderError('INVALID_REQUEST', 'The backup payload is not a gateway backup.', { publicMessage: 'The backup payload is not a gateway backup.' });
+}
+
+/**
+ * A version-1 payload rewritten in version-2 shape.
+ *
+ * Version 1 held `connections` as a bare array with `strategies` beside it, and an entry's credential was
+ * mandatory — which is why a keyless connection vanished on import, Ollama being the canonical one. The
+ * translation carries such a connection with no credential rather than dropping the record, and the
+ * `aliases` map version 1 never had arrives empty.
+ */
+function legacyBackupSections(payload: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(payload.connections)) throw notAGatewayBackup();
+  return {
+    connections: { connections: payload.connections, strategies: isBackupRecord(payload.strategies) ? payload.strategies : {}, aliases: {} },
+    ...(payload.apiKeys === undefined ? {} : { apiKeys: payload.apiKeys }),
+  };
+}
+
+/**
+ * How many records a validated section holds.
+ *
+ * A section's records are its arrays: every backup state is one array of records beside scalar settings and
+ * lookup maps. A counter written per store would be ten more places to forget when a store's shape changes,
+ * and the number is only ever a sentence in the UI.
+ */
+function countSectionRecords(state: unknown): number {
+  if (!isBackupRecord(state)) return 0;
+  return Object.values(state).reduce<number>((total, value) => total + (Array.isArray(value) ? value.length : 0), 0);
+}
 
 function pricingFromConnection(connection: ConnectionRecord | undefined, model: string): ModelPricing | undefined {
   const prices = connection?.modelMeta?.[model]?.p;
@@ -2839,6 +2894,7 @@ export class GatewayService {
   async removeConnection(connectionId: string) {
     const removed = await this.connections.remove(connectionId);
     await removeChatGptWebProfile(connectionId).catch(() => undefined);
+    await removeGeminiWebProfile(connectionId).catch(() => undefined);
     return removed;
   }
 
@@ -2865,87 +2921,157 @@ export class GatewayService {
   }
 
   /**
-   * Everything needed to rebuild this gateway, encrypted under a passphrase.
+   * Every file-backed store this gateway holds, encrypted under a passphrase.
    *
-   * Connections carry their decrypted credential on purpose: that is what makes the backup useful, and
-   * the envelope is the only place it travels. The API-key section holds hashes, not plaintext — the
-   * plaintext existed once, at creation, and a backup cannot invent it.
+   * Connections carry their decrypted credential on purpose: that is what makes the backup useful, and the
+   * envelope is the only place it travels. The API-key section holds hashes, not plaintext — the plaintext
+   * existed once, at creation, and a backup cannot invent it.
+   *
+   * Which sections travel is decided by `backupSections()`, so a store added to the gateway is one visible
+   * edit here rather than a category that quietly stops travelling — which is how version 1 came to carry
+   * three of eleven while its own comment called the file everything needed to rebuild the gateway.
+   *
+   * Deliberately not carried, and named so nobody has to infer it from a missing key: `secrets.key` and the
+   * dashboard token are this installation's identity rather than its configuration — credentials travel
+   * decrypted and are re-wrapped under the target's own master key on import, so shipping the source key
+   * would let a backup decrypt a machine it does not belong to. Settings are environment variables with no
+   * store behind them, and the token saver's cache lives in memory only. A store this gateway was never
+   * given contributes nothing, and its absence from the file says exactly that.
    */
   async exportBackup(passphrase: string) {
-    const connections: Array<{ connection: Record<string, unknown>; credential: unknown }> = [];
-    for (const connection of await this.connections.list()) {
-      const credential = await this.secretStore.get(connection.id, connection.providerId);
-      if (!credential) continue;
-      const { credentialFingerprint: _fingerprint, hasCredential: _hasCredential, credentialType: _credentialType, email: _email, ...metadata } = connection as typeof connection & Record<string, unknown>;
-      connections.push({ connection: metadata, credential });
+    const sections: Record<string, unknown> = {};
+    for (const section of this.backupSections()) {
+      if (section.store?.exportState) sections[section.name] = await section.store.exportState();
     }
-    const apiKeys = this.apiKeyStore?.exportState ? await this.apiKeyStore.exportState() : undefined;
     return encryptBackup({
-      format: 'omnihilbras-gateway-backup',
-      version: 1,
+      format: backupFormat,
+      version: backupVersion,
       createdAt: new Date().toISOString(),
-      connections,
-      strategies: Object.fromEntries(this.providerStrategies),
-      apiKeys,
+      ...sections,
     }, passphrase);
   }
 
   /**
-   * Replaces connections, strategies and API keys with a decrypted backup.
+   * The stores a backup carries, each paired with the parser that reads its section back.
+   *
+   * The parser is the store's own — the same function that reads its file — so a payload accepted here is
+   * one the store would accept on the next restart, and a field cannot be carried by one reader and dropped
+   * by the other. Two readers of one shape is how a credential lost three of its nine fields between its
+   * writer and its reader, twice, in this repository.
+   */
+  private backupSections(): Array<{
+    name: string;
+    store: { exportState?: () => Promise<unknown>; importState?: (state: never) => Promise<void> } | undefined;
+    parse: (value: unknown) => unknown;
+  }> {
+    return [
+      { name: 'connections', store: this.connectionStore, parse: parseConnectionsBackupState },
+      { name: 'apiKeys', store: this.apiKeyStore, parse: parseApiKeyState },
+      { name: 'usage', store: this.usageStore, parse: parseUsageState },
+      { name: 'virtualModels', store: this.virtualModelStore, parse: parseVirtualModelState },
+      { name: 'skills', store: this.skillStore, parse: parseSkillState },
+      { name: 'workspaces', store: this.workspaceStore, parse: parseWorkspaceState },
+      { name: 'tunnels', store: this.tunnelStore, parse: parseTunnelState },
+      { name: 'proxyPools', store: this.proxyPoolStore, parse: parseProxyPoolState },
+      { name: 'providerNodes', store: this.providerNodeStore, parse: parseProviderNodeState },
+      { name: 'mitm', store: this.mitmStore, parse: parseMitmState },
+      // Last on purpose: a profile belongs to a connection that the connections section has already
+      // installed, so this one writes sessions for the vault the import just put in place.
+      { name: 'webProfiles', store: this.webProfileStore(), parse: parseWebProfilesState },
+    ];
+  }
+
+  /**
+   * The web-profile section, shaped like a store so the backup loop needs no second pass.
+   *
+   * It is not a store: a browser profile is a directory the ChatGPT Web and Gemini Web drivers own, keyed by
+   * connection id, and only part of it travels (`core/web-profiles.ts` says which part and why).
+   */
+  private webProfileStore(): { exportState: () => Promise<unknown>; importState: (state: never) => Promise<void> } {
+    return {
+      exportState: async () => exportWebProfiles(await this.connections.list()),
+      importState: async (state: never) => {
+        const connections = await this.connections.list();
+        const providers = new Map(connections.map((connection) => [connection.id, connection.providerId] as const));
+        await importWebProfiles(state, connections.map((connection) => connection.id), (id) => providers.get(id));
+      },
+    };
+  }
+
+  /**
+   * Replaces this installation's configuration with a decrypted backup.
    *
    * Replace, not merge: a backup is a snapshot of one gateway, and merging two snapshots by id leaves
    * credentials from the old machine attached to records from the new one. The caller has to say yes to
    * that; the route passes the confirmation through.
+   *
+   * Every section is validated before any store is written. The stores validate their own section too, but a
+   * store that took its part and then failed on the sixth of ten would leave an installation whose
+   * connections came from one machine and whose tunnels came from another — while the user, told the import
+   * failed, looks at a gateway that half-believes it succeeded. Reading the whole payload through the same
+   * parsers first is what makes the refusal total.
+   *
+   * A section the file does not carry is left alone rather than cleared. An absent section means the source
+   * installation had no such store, which is not the same statement as "this installation should have none";
+   * clearing on the strength of silence would destroy data the file never spoke about. The result names both
+   * what travelled and what did not.
    */
   async importBackup(passphrase: string, envelope: unknown) {
     if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'This gateway has no connection store to import into.');
-    const payload = decryptBackup(envelope, passphrase) as {
-      format?: unknown;
-      version?: unknown;
-      connections?: Array<{ connection?: Record<string, unknown>; credential?: unknown }>;
-      strategies?: Record<string, unknown>;
-      apiKeys?: unknown;
-    };
-    if (payload?.format !== 'omnihilbras-gateway-backup' || payload.version !== 1 || !Array.isArray(payload.connections)) {
-      throw new ProviderError('INVALID_REQUEST', 'The backup payload is not a gateway backup.', { publicMessage: 'The backup payload is not a gateway backup.' });
+    const decrypted = decryptBackup(envelope, passphrase);
+    if (!isBackupRecord(decrypted) || decrypted.format !== backupFormat) throw notAGatewayBackup();
+    let payload: Record<string, unknown>;
+    if (decrypted.version === 1) payload = legacyBackupSections(decrypted);
+    else if (decrypted.version === backupVersion) payload = decrypted;
+    else throw notAGatewayBackup();
+
+    // Validation first, writes second: every carried section is read into a store's own state before any
+    // store is touched, so a payload that fails anywhere in the file changes nothing anywhere in the vault.
+    const sections = this.backupSections();
+    const validated = new Map<string, unknown>();
+    for (const section of sections) {
+      const value = payload[section.name];
+      if (value === undefined) continue;
+      validated.set(section.name, section.parse(value));
     }
-    for (const entry of payload.connections) {
-      if (!entry?.connection || typeof entry.connection.id !== 'string' || typeof entry.connection.providerId !== 'string' || !entry.credential) {
-        throw new ProviderError('INVALID_REQUEST', 'The backup contains an unreadable connection.', { publicMessage: 'The backup contains an unreadable connection.' });
-      }
+    if (!validated.has('connections')) throw notAGatewayBackup();
+    const cannotImport = sections.filter((section) => validated.has(section.name) && !section.store?.importState).map((section) => section.name);
+    if (cannotImport.length > 0) {
+      throw new ProviderError('CONFIGURATION_ERROR', `This gateway cannot import ${cannotImport.join(', ')}.`);
     }
+
     const previous = await this.connectionStore.list();
-    for (const connection of previous) await this.connectionStore.remove(connection.id);
-    let imported = 0;
-    for (const entry of payload.connections) {
-      await this.connectionStore.save(entry.connection as never, entry.credential as never);
-      imported += 1;
+    for (const section of sections) {
+      const state = validated.get(section.name);
+      if (state === undefined) continue;
+      await section.store!.importState!(state as never);
     }
-    // Read back what the store actually holds. A save that resolves but writes nothing is the failure
-    // mode that looks exactly like "import did nothing"; the counts must describe the store, not a loop.
+
+    // Read back what the store actually holds. A write that resolves but stores nothing is the failure mode
+    // that looks exactly like "the import did nothing"; the counts must describe the store, not a loop.
+    const connections = validated.get('connections') as ConnectionsBackupState;
     const persisted = new Set((await this.connectionStore.list()).map((connection) => connection.id));
-    const missing = payload.connections
-      .map((entry) => entry.connection?.id)
-      .filter((id): id is string => typeof id === 'string' && !persisted.has(id));
+    const missing = connections.connections.map((entry) => entry.connection.id).filter((id) => !persisted.has(id));
     if (missing.length > 0) {
       throw new ProviderError('CONFIGURATION_ERROR', `The connection store did not persist: ${missing.join(', ')}.`);
     }
-    let strategies = 0;
-    const store = this.connectionStore as { setStrategy?: (providerId: string, strategy: string) => Promise<void> };
-    for (const [providerId, strategy] of Object.entries(payload.strategies ?? {})) {
-      if (strategy !== 'priority' && strategy !== 'round-robin' && strategy !== 'fastest') continue;
-      if (!store.setStrategy) break;
-      await store.setStrategy(providerId, strategy);
-      this.providerStrategies.set(providerId, strategy);
-      strategies += 1;
-    }
-    let keys = 0;
-    if (payload.apiKeys && this.apiKeyStore?.importState) {
-      const state = payload.apiKeys as { keys?: unknown[] };
-      await this.apiKeyStore.importState(payload.apiKeys as never);
-      keys = Array.isArray(state.keys) ? state.keys.length : 0;
-    }
-    return { connections: imported, strategies, apiKeys: keys, removed: previous.length };
+
+    // Routing reads this map on every request, so it has to describe the strategies that just arrived rather
+    // than the ones the previous installation had.
+    this.providerStrategies.clear();
+    for (const [providerId, strategy] of Object.entries(connections.strategies)) this.providerStrategies.set(providerId, strategy);
+
+    const counts: Record<string, number> = {};
+    for (const [name, state] of validated) counts[name] = countSectionRecords(state);
+    return {
+      connections: counts.connections ?? 0,
+      strategies: Object.keys(connections.strategies).length,
+      aliases: Object.keys(connections.aliases).length,
+      apiKeys: counts.apiKeys ?? 0,
+      removed: previous.length,
+      sections: counts,
+      notCarried: sections.filter((section) => payload[section.name] === undefined).map((section) => section.name),
+    };
   }
 
   /**

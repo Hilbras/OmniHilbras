@@ -25,6 +25,47 @@ export interface SkillStore {
   get(id: string): Promise<Skill | undefined>;
   save(input: SkillInput): Promise<Skill>;
   remove(id: string): Promise<boolean>;
+  /** Encrypted-backup support, in this store's own file shape. Optional, like `ApiKeyStore`'s pair. */
+  exportState?(): Promise<SkillsBackupState>;
+  /** Replaces every skill. Validates before it mutates; see `parseSkillState`. */
+  importState?(state: SkillsBackupState): Promise<void>;
+}
+
+/** The store's own file shape, so a backup is the file it already writes rather than a second format. */
+export type SkillsBackupState = SkillsFile;
+
+/**
+ * Reads a backup's skill section.
+ *
+ * Strict where the load path is tolerant. A missing or corrupt file is an empty catalog rather than an
+ * unstartable gateway, and a single malformed record is skipped so it cannot hide the rest; neither is
+ * true of a whole section being swapped in, where a record that cannot be read means the section is not
+ * one this store can hold. Every record then goes through the same `normalize` the writer uses.
+ */
+export function parseSkillState(value: unknown): SkillsBackupState {
+  if (!isRecord(value) || !Array.isArray(value.skills)) throw new Error('The backup\'s skill section is not readable.');
+  const skills = new Map<string, Skill>();
+  for (const candidate of value.skills) {
+    if (!isStoredSkill(candidate)) throw new Error('The backup contains an unreadable skill.');
+    skills.set(candidate.id, normalize(candidate, candidate));
+  }
+  return { version: 1, skills: [...skills.values()] };
+}
+
+/** Every field the writer puts on a record. A backup is read strictly, so one missing field is refused. */
+function isStoredSkill(value: unknown): value is Skill {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.name === 'string'
+    && typeof value.description === 'string'
+    && typeof value.content === 'string'
+    && typeof value.enabled === 'boolean'
+    && typeof value.createdAt === 'string'
+    && typeof value.updatedAt === 'string';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
@@ -56,6 +97,12 @@ export class InMemorySkillStore implements SkillStore {
     return next;
   }
   async remove(id: string) { return this.skills.delete(id); }
+  async exportState(): Promise<SkillsBackupState> { return { version: 1, skills: [...this.skills.values()] }; }
+  async importState(state: SkillsBackupState) {
+    const next = parseSkillState(state);
+    this.skills.clear();
+    for (const skill of next.skills) this.skills.set(skill.id, skill);
+  }
 }
 
 type SkillsFile = { version: 1; skills: Skill[] };
@@ -121,6 +168,34 @@ export class LocalSkillStore implements SkillStore {
       const removed = this.skills.delete(id);
       if (removed) await this.persist();
       return removed;
+    });
+  }
+
+  async exportState(): Promise<SkillsBackupState> {
+    await this.mutationQueue;
+    await this.ensureLoaded();
+    return { version: 1, skills: [...this.skills.values()] };
+  }
+
+  /**
+   * Replaces every skill, in one write.
+   *
+   * The previous map is held while the file is written and put back if the write fails, so a failed import
+   * leaves the store as it was — which is what lets `importBackup` undo a half-applied restore.
+   */
+  async importState(state: SkillsBackupState): Promise<void> {
+    const next = parseSkillState(state);
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = this.skills;
+      this.skills = new Map(next.skills.map((skill) => [skill.id, skill] as const));
+      try {
+        await this.persist();
+      } catch (error) {
+        this.skills = previous;
+        await this.persist().catch(() => undefined);
+        throw error;
+      }
     });
   }
 }

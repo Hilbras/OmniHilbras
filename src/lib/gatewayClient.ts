@@ -1576,7 +1576,17 @@ export function exportGatewayBackup(passphrase: string, signal?: AbortSignal) {
 }
 
 export function importGatewayBackup(passphrase: string, backup: unknown, signal?: AbortSignal) {
-  return requestJson<{ connections: number; strategies: number; apiKeys: number; removed: number }>('/v1/backup/import', {
+  return requestJson<{
+    connections: number;
+    strategies: number;
+    aliases: number;
+    apiKeys: number;
+    removed: number;
+    /** Records applied per section, so the page can name what was replaced instead of only the connections. */
+    sections: Record<string, number>;
+    /** Sections the file did not carry. Those stores keep what they hold; the page says which. */
+    notCarried: string[];
+  }>('/v1/backup/import', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ passphrase, backup, confirmReplace: true }),

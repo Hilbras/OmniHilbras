@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { GEMINI_WEB, GEMINI_WEB_PRIMARY_COOKIE, geminiWebProviderId, mergeRotatedGeminiWebCookies, normalizeGeminiWebCookie, parseGeminiWebCookieHeader, parseGeminiWebStreamResponse, type GeminiWebCookie, type GeminiWebDriver, type GeminiWebModel } from '@omnihilbras/sdk-gemini-web';
@@ -85,10 +86,26 @@ async function loadPlaywright(): Promise<PlaywrightModule | undefined> {
   return playwrightPromise;
 }
 
-/** A profile directory per connection, so a session's profile is not another session's. */
-function profileDir(connectionKey: string): string {
+/**
+ * A profile directory per connection, so a session's profile is not another session's.
+ *
+ * Exported because the profile is where an interactive sign-in writes the session, so the backup carries
+ * these files and the connection delete has to remove them — see `core/web-profiles.ts`.
+ */
+export function geminiWebProfileDir(connectionKey: string): string {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
   return join(base, 'omnihilbras', 'gemini-web', createHash('sha256').update(connectionKey).digest('hex').slice(0, 32));
+}
+
+/**
+ * Forgets one connection's profile.
+ *
+ * ChatGPT Web had this and Gemini Web did not, so deleting the Gemini connection left a signed-in Google
+ * session on disk — a credential the operator believed they had removed. The two drivers drifted because
+ * only one of them was asked to clean up; this is the other half.
+ */
+export async function removeGeminiWebProfile(connectionKey: string): Promise<void> {
+  await rm(geminiWebProfileDir(connectionKey), { recursive: true, force: true }).catch(() => undefined);
 }
 
 /**
@@ -301,7 +318,7 @@ export function createGeminiWebDriver(connectionKey = 'default'): GeminiWebDrive
       const message = 'Gemini Web needs a browser, and Playwright is not installed. Run `pnpm add playwright-core` in the gateway, then `npx playwright install chromium`.';
       throw new ProviderError('PROVIDER_UNAVAILABLE', message, { providerId: geminiWebProviderId, retryable: false, publicMessage: message });
     }
-    const context = await playwright.chromium.launchPersistentContext(profileDir(key), {
+    const context = await playwright.chromium.launchPersistentContext(geminiWebProfileDir(key), {
       headless: true,
       userAgent: BROWSER_USER_AGENT,
       locale: BROWSER_LOCALE,

@@ -25,6 +25,44 @@ export interface ProviderNodeStore {
   get(id: string): Promise<ProviderNode | undefined>;
   save(input: ProviderNodeInput): Promise<ProviderNode>;
   remove(id: string): Promise<boolean>;
+  /** Encrypted-backup support, in this store's own file shape. Optional, like `ApiKeyStore`'s pair. */
+  exportState?(): Promise<ProviderNodesBackupState>;
+  /** Replaces every node. Validates before it mutates; see `parseProviderNodeState`. */
+  importState?(state: ProviderNodesBackupState): Promise<void>;
+}
+
+/** The store's own file shape, so a backup is the file it already writes rather than a second format. */
+export type ProviderNodesBackupState = ProviderNodesFile;
+
+/**
+ * Reads a backup's provider-node section — strictly, where the load path is tolerant: a corrupt file is an
+ * empty list and one bad record is skipped, but neither applies to a whole section being swapped in. Every
+ * record goes through the same `normalize` the writer uses.
+ */
+export function parseProviderNodeState(value: unknown): ProviderNodesBackupState {
+  if (!isRecord(value) || !Array.isArray(value.providerNodes)) throw new Error('The backup\'s provider node section is not readable.');
+  const providerNodes = new Map<string, ProviderNode>();
+  for (const candidate of value.providerNodes) {
+    if (!isStoredProviderNode(candidate)) throw new Error('The backup contains an unreadable provider node.');
+    providerNodes.set(candidate.id, normalize(candidate, candidate));
+  }
+  return { version: 1, providerNodes: [...providerNodes.values()] };
+}
+
+/** Every field the writer puts on a record. A backup is read strictly, so one missing field is refused. */
+function isStoredProviderNode(value: unknown): value is ProviderNode {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.name === 'string'
+    && typeof value.providerId === 'string'
+    && typeof value.connectionId === 'string'
+    && typeof value.enabled === 'boolean'
+    && typeof value.createdAt === 'string'
+    && typeof value.updatedAt === 'string';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
@@ -54,9 +92,15 @@ export class InMemoryProviderNodeStore implements ProviderNodeStore {
     return next;
   }
   async remove(id: string) { return this.items.delete(id); }
+  async exportState(): Promise<ProviderNodesBackupState> { return { version: 1, providerNodes: [...this.items.values()] }; }
+  async importState(state: ProviderNodesBackupState) {
+    const next = parseProviderNodeState(state);
+    this.items.clear();
+    for (const node of next.providerNodes) this.items.set(node.id, node);
+  }
 }
 
-type File = { version: 1; providerNodes: ProviderNode[] };
+type ProviderNodesFile = { version: 1; providerNodes: ProviderNode[] };
 
 export class LocalProviderNodeStore implements ProviderNodeStore {
   private readonly path: string;
@@ -85,7 +129,7 @@ export class LocalProviderNodeStore implements ProviderNodeStore {
   }
 
   private persist() {
-    return atomicWrite(this.path, `${JSON.stringify({ version: 1, providerNodes: [...this.items.values()] } satisfies File, null, 2)}\n`);
+    return atomicWrite(this.path, `${JSON.stringify({ version: 1, providerNodes: [...this.items.values()] } satisfies ProviderNodesFile, null, 2)}\n`);
   }
 
   private withMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -119,6 +163,29 @@ export class LocalProviderNodeStore implements ProviderNodeStore {
       const removed = this.items.delete(id);
       if (removed) await this.persist();
       return removed;
+    });
+  }
+
+  async exportState(): Promise<ProviderNodesBackupState> {
+    await this.mutationQueue;
+    await this.ensureLoaded();
+    return { version: 1, providerNodes: [...this.items.values()] };
+  }
+
+  /** Replaces every node in one write; the previous map is put back if that write fails. */
+  async importState(state: ProviderNodesBackupState): Promise<void> {
+    const next = parseProviderNodeState(state);
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = this.items;
+      this.items = new Map(next.providerNodes.map((node) => [node.id, node] as const));
+      try {
+        await this.persist();
+      } catch (error) {
+        this.items = previous;
+        await this.persist().catch(() => undefined);
+        throw error;
+      }
     });
   }
 }

@@ -130,6 +130,18 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
     this.enforced = value;
     return value;
   }
+
+  /** The keys and the enforcement flag, in the file shape — the same state `LocalApiKeyStore` writes. */
+  async exportState(): Promise<ApiKeyBackupState> {
+    return { version: fileVersion, requireApiKey: this.enforced, keys: [...this.keys.values()].map((key) => ({ ...key })) };
+  }
+
+  /** Replaces every key. Validated first, so an unreadable state leaves the keys that are here. */
+  async importState(state: ApiKeyBackupState): Promise<void> {
+    const parsed = parseApiKeyState(state);
+    this.keys = new Map(parsed.keys.map((key) => [key.id, key] as const));
+    this.enforced = parsed.requireApiKey;
+  }
 }
 
 export class LocalApiKeyStore implements ApiKeyStore {
@@ -281,25 +293,13 @@ export class LocalApiKeyStore implements ApiKeyStore {
 
   /** Replaces every key and the enforcement switch. Validation happens before anything is mutated. */
   async importState(state: ApiKeyBackupState) {
-    if (!state || state.version !== fileVersion || typeof state.requireApiKey !== 'boolean' || !Array.isArray(state.keys)) {
-      throw new Error('The API-key backup is not readable.');
-    }
-    if (state.keys.length > maxKeys) throw new Error('The API-key backup contains too many keys.');
-    const next = new Map<string, StoredApiKey>();
-    for (const key of state.keys) {
-      if (!key || typeof key.id !== 'string' || typeof key.name !== 'string' || typeof key.keyHash !== 'string'
-        || typeof key.prefix !== 'string' || typeof key.enabled !== 'boolean'
-        || typeof key.createdAt !== 'string' || typeof key.updatedAt !== 'string') {
-        throw new Error('The API-key backup contains an unreadable record.');
-      }
-      next.set(key.id, { ...key });
-    }
+    const parsed = parseApiKeyState(state);
     await this.withMutation(async () => {
       await this.ensureLoaded();
       const previous = new Map(this.keys);
       const previousEnforced = this.enforced;
-      this.keys = next;
-      this.enforced = state.requireApiKey;
+      this.keys = new Map(parsed.keys.map((key) => [key.id, key] as const));
+      this.enforced = parsed.requireApiKey;
       try {
         await this.persist();
       } catch (error) {
@@ -416,6 +416,33 @@ function toRecord(stored: StoredApiKey): ApiKeyRecord {
     updatedAt: stored.updatedAt,
     ...(stored.lastUsedAt === undefined ? {} : { lastUsedAt: stored.lastUsedAt }),
   };
+}
+
+/**
+ * Reads an exported key state — what `exportState` produced, from this store or from another installation's.
+ *
+ * The record rule is `parseStoredKey`, which is what the file's own reader uses, so a state one accepts is a
+ * state the other accepts. That sharing is the point: two readers of one format is how a credential's fields
+ * got dropped between its writer and its reader twice in this repository.
+ *
+ * A duplicate id is refused rather than collapsed: into a `Map` the second would win silently, and a
+ * restored key store that lost one key is a key store whose `authenticate` refuses a key the user still has.
+ */
+export function parseApiKeyState(value: unknown): ApiKeyBackupState {
+  if (!isRecord(value) || value.version !== fileVersion || typeof value.requireApiKey !== 'boolean' || !Array.isArray(value.keys)) {
+    throw new Error('The API-key backup is not readable.');
+  }
+  if (value.keys.length > maxKeys) throw new Error('The API-key backup contains too many keys.');
+  const keys: StoredApiKey[] = [];
+  for (const item of value.keys) {
+    try {
+      keys.push(parseStoredKey(item));
+    } catch (error) {
+      throw new Error(`The API-key backup contains an unreadable record: ${error instanceof Error ? error.message : 'unknown'}`);
+    }
+  }
+  if (new Set(keys.map((key) => key.id)).size !== keys.length) throw new Error('The API-key backup contains two keys with the same id.');
+  return { version: fileVersion, requireApiKey: value.requireApiKey, keys };
 }
 
 function parseApiKeyFile(text: string | undefined) {

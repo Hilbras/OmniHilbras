@@ -42,6 +42,48 @@ export interface TunnelStore {
   get(id: string): Promise<Tunnel | undefined>;
   save(input: TunnelInput): Promise<Tunnel>;
   remove(id: string): Promise<boolean>;
+  /** Encrypted-backup support, in this store's own file shape. Optional, like `ApiKeyStore`'s pair. */
+  exportState?(): Promise<TunnelsBackupState>;
+  /** Replaces every tunnel. Validates before it mutates; see `parseTunnelState`. */
+  importState?(state: TunnelsBackupState): Promise<void>;
+}
+
+/** The store's own file shape, so a backup is the file it already writes rather than a second format. */
+export type TunnelsBackupState = TunnelsFile;
+
+/**
+ * Reads a backup's tunnel section — strictly, where the load path is tolerant.
+ *
+ * **This section carries a credential in clear**: `token` is a cloudflared token, and holding one is
+ * enough to attach to the operator's named tunnel. It is exported because a tunnel without its token is a
+ * tunnel that does not work after a restore, and it goes only into the encrypted envelope. It must never
+ * be logged, echoed in an error, or returned to a browser — `publicTunnel` is the shape a caller sees.
+ */
+export function parseTunnelState(value: unknown): TunnelsBackupState {
+  if (!isRecord(value) || !Array.isArray(value.tunnels)) throw new Error('The backup\'s tunnel section is not readable.');
+  const tunnels = new Map<string, Tunnel>();
+  for (const candidate of value.tunnels) {
+    if (!isStoredTunnel(candidate)) throw new Error('The backup contains an unreadable tunnel.');
+    tunnels.set(candidate.id, normalize(candidate, candidate));
+  }
+  return { version: 1, tunnels: [...tunnels.values()] };
+}
+
+/** Every field the writer puts on a record. A backup is read strictly, so one missing field is refused. */
+function isStoredTunnel(value: unknown): value is Tunnel {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.name === 'string'
+    && typeof value.provider === 'string'
+    && typeof value.token === 'string'
+    && typeof value.publicUrl === 'string'
+    && typeof value.enabled === 'boolean'
+    && typeof value.createdAt === 'string'
+    && typeof value.updatedAt === 'string';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
@@ -72,9 +114,15 @@ export class InMemoryTunnelStore implements TunnelStore {
     return next;
   }
   async remove(id: string) { return this.items.delete(id); }
+  async exportState(): Promise<TunnelsBackupState> { return { version: 1, tunnels: [...this.items.values()] }; }
+  async importState(state: TunnelsBackupState) {
+    const next = parseTunnelState(state);
+    this.items.clear();
+    for (const tunnel of next.tunnels) this.items.set(tunnel.id, tunnel);
+  }
 }
 
-type File = { version: 1; tunnels: Tunnel[] };
+type TunnelsFile = { version: 1; tunnels: Tunnel[] };
 
 export class LocalTunnelStore implements TunnelStore {
   private readonly path: string;
@@ -103,7 +151,7 @@ export class LocalTunnelStore implements TunnelStore {
   }
 
   private persist() {
-    return atomicWrite(this.path, `${JSON.stringify({ version: 1, tunnels: [...this.items.values()] } satisfies File, null, 2)}\n`);
+    return atomicWrite(this.path, `${JSON.stringify({ version: 1, tunnels: [...this.items.values()] } satisfies TunnelsFile, null, 2)}\n`);
   }
 
   private withMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -137,6 +185,29 @@ export class LocalTunnelStore implements TunnelStore {
       const removed = this.items.delete(id);
       if (removed) await this.persist();
       return removed;
+    });
+  }
+
+  async exportState(): Promise<TunnelsBackupState> {
+    await this.mutationQueue;
+    await this.ensureLoaded();
+    return { version: 1, tunnels: [...this.items.values()] };
+  }
+
+  /** Replaces every tunnel in one write; the previous map is put back if that write fails. */
+  async importState(state: TunnelsBackupState): Promise<void> {
+    const next = parseTunnelState(state);
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = this.items;
+      this.items = new Map(next.tunnels.map((tunnel) => [tunnel.id, tunnel] as const));
+      try {
+        await this.persist();
+      } catch (error) {
+        this.items = previous;
+        await this.persist().catch(() => undefined);
+        throw error;
+      }
     });
   }
 }

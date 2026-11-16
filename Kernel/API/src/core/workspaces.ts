@@ -23,6 +23,44 @@ export interface WorkspaceStore {
   get(id: string): Promise<Workspace | undefined>;
   save(input: WorkspaceInput): Promise<Workspace>;
   remove(id: string): Promise<boolean>;
+  /** Encrypted-backup support, in this store's own file shape. Optional, like `ApiKeyStore`'s pair. */
+  exportState?(): Promise<WorkspacesBackupState>;
+  /** Replaces every workspace. Validates before it mutates; see `parseWorkspaceState`. */
+  importState?(state: WorkspacesBackupState): Promise<void>;
+}
+
+/** The store's own file shape, so a backup is the file it already writes rather than a second format. */
+export type WorkspacesBackupState = WorkspacesFile;
+
+/**
+ * Reads a backup's workspace section — strictly, where the load path is tolerant: a corrupt file is an
+ * empty list rather than an unstartable gateway, and one bad record is skipped rather than hiding the
+ * rest, but neither applies to a whole section being swapped in. Every record goes through the same
+ * `normalize` the writer uses.
+ */
+export function parseWorkspaceState(value: unknown): WorkspacesBackupState {
+  if (!isRecord(value) || !Array.isArray(value.workspaces)) throw new Error('The backup\'s workspace section is not readable.');
+  const workspaces = new Map<string, Workspace>();
+  for (const candidate of value.workspaces) {
+    if (!isStoredWorkspace(candidate)) throw new Error('The backup contains an unreadable workspace.');
+    workspaces.set(candidate.id, normalize(candidate, candidate));
+  }
+  return { version: 1, workspaces: [...workspaces.values()] };
+}
+
+/** Every field the writer puts on a record. A backup is read strictly, so one missing field is refused. */
+function isStoredWorkspace(value: unknown): value is Workspace {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.name === 'string'
+    && typeof value.description === 'string'
+    && typeof value.enabled === 'boolean'
+    && typeof value.createdAt === 'string'
+    && typeof value.updatedAt === 'string';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
@@ -52,9 +90,15 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return next;
   }
   async remove(id: string) { return this.items.delete(id); }
+  async exportState(): Promise<WorkspacesBackupState> { return { version: 1, workspaces: [...this.items.values()] }; }
+  async importState(state: WorkspacesBackupState) {
+    const next = parseWorkspaceState(state);
+    this.items.clear();
+    for (const workspace of next.workspaces) this.items.set(workspace.id, workspace);
+  }
 }
 
-type File = { version: 1; workspaces: Workspace[] };
+type WorkspacesFile = { version: 1; workspaces: Workspace[] };
 
 export class LocalWorkspaceStore implements WorkspaceStore {
   private readonly path: string;
@@ -83,7 +127,7 @@ export class LocalWorkspaceStore implements WorkspaceStore {
   }
 
   private persist() {
-    return atomicWrite(this.path, `${JSON.stringify({ version: 1, workspaces: [...this.items.values()] } satisfies File, null, 2)}\n`);
+    return atomicWrite(this.path, `${JSON.stringify({ version: 1, workspaces: [...this.items.values()] } satisfies WorkspacesFile, null, 2)}\n`);
   }
 
   private withMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -117,6 +161,29 @@ export class LocalWorkspaceStore implements WorkspaceStore {
       const removed = this.items.delete(id);
       if (removed) await this.persist();
       return removed;
+    });
+  }
+
+  async exportState(): Promise<WorkspacesBackupState> {
+    await this.mutationQueue;
+    await this.ensureLoaded();
+    return { version: 1, workspaces: [...this.items.values()] };
+  }
+
+  /** Replaces every workspace in one write; the previous map is put back if that write fails. */
+  async importState(state: WorkspacesBackupState): Promise<void> {
+    const next = parseWorkspaceState(state);
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = this.items;
+      this.items = new Map(next.workspaces.map((workspace) => [workspace.id, workspace] as const));
+      try {
+        await this.persist();
+      } catch (error) {
+        this.items = previous;
+        await this.persist().catch(() => undefined);
+        throw error;
+      }
     });
   }
 }

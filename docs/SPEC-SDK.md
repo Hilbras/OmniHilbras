@@ -322,12 +322,26 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
 - `GET /v1/oauth/zcode/session/:id` — one poll of that sign-in: `pending`, `expired`, `failed`, or `ready`. On `ready` the gateway proves a 1-token turn with `data.token` (the `zcodejwttoken` the OAuth server returns), then saves the connection; a plan that cannot infer on the Start Plan lane is reported instead of stored.
 - `PUT /v1/settings/require-api-key` — turn LLM-surface enforcement on or off.
 - `POST /v1/backup/export` — body `{"passphrase": "..."}`; returns `{"backup": envelope}`. The envelope is
-  AES-256-GCM with a scrypt-derived key and contains connections with their credentials, provider
-  strategies, and the API-key store's hashes and enforcement flag. The passphrase is not stored; a lost
-  passphrase means the backup is unreadable. Management route.
+  AES-256-GCM with a scrypt-derived key; its payload is version 2 and carries one section per file-backed
+  store: `connections` (every connection with its credential — API key, OAuth sign-in or keyless — plus the
+  provider strategies and model aliases), `apiKeys` (hashes and the enforcement flag), `usage`,
+  `virtualModels`, `skills`, `workspaces`, `tunnels`, `proxyPools`, `providerNodes` and `mitm`, plus
+  `webProfiles` — the session files (`Default/Cookies`, `Default/Local Storage`, `Default/Session Storage`,
+  `Default/IndexedDB`) of the ChatGPT Web and Gemini Web browser profiles, which is where an interactive
+  sign-in writes its session. Chromium's caches are deliberately not carried: 6.9 MB per profile against
+  ~40 KB of session files, measured, inside a 20 MiB payload. The
+  passphrase is not stored; a lost passphrase means the backup is unreadable. **Not carried, deliberately:**
+  `secrets.key` and the dashboard token (credentials travel decrypted and are re-wrapped under the
+  destination's own master key on import), settings (environment variables, not stored state) and the token
+  saver's cache (memory only). A payload version 1 — which carried only `connections`, `strategies` and
+  `apiKeys` — still imports. Management route.
 - `POST /v1/backup/import` — body `{"passphrase": "...", "backup": envelope, "confirmReplace": true}`.
-  **Replaces** every connection, strategy and API key. Returns counts. A missing confirmation is a 400;
-  a wrong passphrase or a damaged envelope is refused before anything is changed. Management route.
+  **Replaces every section the file carries** and leaves a store the file does not mention untouched. Every
+  section is validated before any store is written, so an unreadable payload changes nothing anywhere rather
+  than half-replacing the installation. Returns `{connections, strategies, aliases, apiKeys, removed,
+  sections, notCarried}` — counts per section, plus the names of the sections the file did not carry. A
+  missing confirmation is a 400; a wrong passphrase or a damaged envelope is refused before anything is
+  changed. Management route.
 - `POST /v1/images/generations` — generate images, OpenAI shape `{model, prompt, n?, size?, quality?, response_format?, user?}`; returns `{created, data:[{url?, b64_json?, revised_prompt?}], provider, gateway}`. Authenticated like the LLM surface.
 - `GET /v1/virtual-models` — every persisted virtual model, enabled or disabled. A virtual model id must
   start with `oh/`; a target names a saved connection and an upstream model that connection lists.

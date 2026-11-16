@@ -46,6 +46,51 @@ export interface VirtualModelStore {
   get(id: string): Promise<VirtualModel | undefined>;
   save(input: VirtualModelInput): Promise<VirtualModel>;
   remove(id: string): Promise<boolean>;
+  /** Encrypted-backup support, in this store's own file shape. Optional, like `ApiKeyStore`'s pair. */
+  exportState?(): Promise<VirtualModelsBackupState>;
+  /** Replaces every virtual model. Validates before it mutates; see `parseVirtualModelState`. */
+  importState?(state: VirtualModelsBackupState): Promise<void>;
+}
+
+/** The store's own file shape, so a backup is the file it already writes rather than a second format. */
+export type VirtualModelsBackupState = VirtualModelsFile;
+
+/**
+ * Reads a backup's virtual-model section — strictly, where the load path is tolerant: a corrupt file is an
+ * empty catalog and one malformed record stays out until rewritten, but neither applies to a whole section
+ * being swapped in. Every record goes through the same `normalizeVirtualModelInput` the writer uses, so an
+ * imported model is one a save would have produced.
+ */
+export function parseVirtualModelState(value: unknown): VirtualModelsBackupState {
+  if (!isRecord(value) || !Array.isArray(value.models)) throw new Error('The backup\'s virtual model section is not readable.');
+  const models = new Map<string, VirtualModel>();
+  for (const candidate of value.models) {
+    if (!isStoredVirtualModel(candidate)) throw new Error('The backup contains an unreadable virtual model.');
+    const model = normalizeVirtualModelInput(candidate as VirtualModelInput, candidate as VirtualModel);
+    models.set(model.id, model);
+  }
+  return { version: 1, models: [...models.values()] };
+}
+
+/** Every field the writer puts on a record. A backup is read strictly, so one missing field is refused. */
+function isStoredVirtualModel(value: unknown): value is VirtualModel {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.name === 'string'
+    && typeof value.enabled === 'boolean'
+    && typeof value.strategy === 'string'
+    && typeof value.createdAt === 'string'
+    && typeof value.updatedAt === 'string'
+    && Array.isArray(value.targets)
+    && value.targets.every((target) => isRecord(target)
+      && typeof target.connectionId === 'string'
+      && typeof target.upstreamModelId === 'string'
+      && typeof target.priority === 'number'
+      && typeof target.enabled === 'boolean');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 const virtualIdPattern = /^oh\/[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
@@ -115,6 +160,12 @@ export class InMemoryVirtualModelStore implements VirtualModelStore {
 
   async remove(id: string) {
     return this.models.delete(id);
+  }
+  async exportState(): Promise<VirtualModelsBackupState> { return { version: 1, models: [...this.models.values()] }; }
+  async importState(state: VirtualModelsBackupState) {
+    const next = parseVirtualModelState(state);
+    this.models.clear();
+    for (const model of next.models) this.models.set(model.id, model);
   }
 }
 
@@ -189,6 +240,29 @@ export class LocalVirtualModelStore implements VirtualModelStore {
       const removed = this.models.delete(id);
       if (removed) await this.persist();
       return removed;
+    });
+  }
+
+  async exportState(): Promise<VirtualModelsBackupState> {
+    await this.mutationQueue;
+    await this.ensureLoaded();
+    return { version: 1, models: [...this.models.values()] };
+  }
+
+  /** Replaces every virtual model in one write; the previous map is put back if that write fails. */
+  async importState(state: VirtualModelsBackupState): Promise<void> {
+    const next = parseVirtualModelState(state);
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const previous = this.models;
+      this.models = new Map(next.models.map((model) => [model.id, model] as const));
+      try {
+        await this.persist();
+      } catch (error) {
+        this.models = previous;
+        await this.persist().catch(() => undefined);
+        throw error;
+      }
     });
   }
 }

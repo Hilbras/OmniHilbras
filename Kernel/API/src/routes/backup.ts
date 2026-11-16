@@ -33,7 +33,7 @@ export async function handleBackupRoute(ctx: RouteContext): Promise<boolean> {
     const body = await readJsonBody(request, maxBackupBytes);
     if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
     if (body.confirmReplace !== true) {
-      throw invalidRequest('Import replaces every connection and API key. Send confirmReplace: true to proceed.');
+      throw invalidRequest('Import replaces every store the backup carries — connections and their credentials, gateway API keys, usage history, virtual models and the rest. Send confirmReplace: true to proceed.');
     }
     const passphrase = readRequiredString(body, 'passphrase');
     if (!isRecord(body.backup)) throw invalidRequest('backup must be an envelope object.');
