@@ -23,6 +23,7 @@ import { UpdateIndicator } from './UpdateIndicator';
 import { WindowControls } from './WindowControls';
 import { FailureNotifications } from './FailureNotifications';
 import { dashboardRoutes } from '../lib/routes';
+import { prefetchRoute } from '../lib/pageChunks';
 import { useGatewayStatus } from '../lib/useGatewayStatus';
 import { desktopBridge } from '../lib/electronBridge';
 import { PAGE_VERSION } from '../lib/pageVersion';
@@ -113,6 +114,11 @@ function SidebarLink({ item, activePage, collapsed, onNavigate }: { item: Sideba
     <Link
       to={item.to}
       onClick={onNavigate}
+      // The page is its own chunk, so the download can start before the click lands. Pointer first because that
+      // is what a mouse does; focus covers the keyboard, where the link is reached by Tab and the download would
+      // otherwise only start on Enter — after the user has already committed to waiting.
+      onMouseEnter={() => prefetchRoute(item.to)}
+      onFocus={() => prefetchRoute(item.to)}
       className={`${baseClass} ${isActive ? 'bg-gold-soft text-gold-text' : 'text-muted hover:bg-surface hover:text-text'}`}
       aria-current={isActive ? 'page' : undefined}
       aria-label={collapsed ? item.label : undefined}

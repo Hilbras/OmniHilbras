@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { DashboardShell } from '../components/DashboardShell';
 import { getGatewaySystemStats, listGatewayConnections, openGatewayLogStream, type GatewayLogEvent, type GatewaySystemStats } from '../lib/gatewayClient';
 import { desktopBridge, type DesktopServerLog, type DesktopServerSnapshot } from '../lib/electronBridge';
+import { badgeTone } from '../ui/primitives';
 
 const MAX_PROCESS_LINES = 200;
 const MAX_EVENTS = 100;
@@ -16,10 +17,10 @@ function timeOf(value: string | undefined) {
 
 const STATE_TONE: Record<DesktopServerSnapshot['state'], string> = {
   running: 'border-success/25 bg-success/10 text-success',
-  starting: 'border-gold/30 bg-gold-soft text-gold-text',
-  stopping: 'border-gold/30 bg-gold-soft text-gold-text',
+  starting: badgeTone.warn,
+  stopping: badgeTone.warn,
   stopped: 'border-line bg-bg-soft text-muted',
-  failed: 'border-danger/25 bg-danger/10 text-danger',
+  failed: badgeTone.bad,
 };
 
 function formatBytes(value: number | undefined) {
@@ -274,7 +275,7 @@ export function AppHomeContent() {
                 CPU and memory of the machine running the gateway{systemStats ? ` · sampled ${timeOf(systemStats.sampledAt)}` : ''}.
               </p>
             </div>
-            <span className={`rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase ${systemError ? 'border-danger/25 bg-danger/10 text-danger' : systemStats ? 'border-success/25 bg-success/10 text-success' : 'border-line bg-bg-soft text-muted'}`}>
+            <span className={`rounded-full border px-2 py-0.5 font-mono text-[10px] uppercase ${systemError ? badgeTone.bad : systemStats ? 'border-success/25 bg-success/10 text-success' : 'border-line bg-bg-soft text-muted'}`}>
               {systemError ? 'stale' : systemStats ? 'live' : 'waiting'}
             </span>
           </div>

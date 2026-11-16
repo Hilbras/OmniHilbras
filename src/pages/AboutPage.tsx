@@ -4,6 +4,7 @@ import { DashboardShell } from '../components/DashboardShell';
 import { desktopBridge, type OmniBridge } from '../lib/electronBridge';
 import { exportGatewayBackup, importGatewayBackup } from '../lib/gatewayClient';
 import { useGatewayStatus } from '../lib/useGatewayStatus';
+import { badgeTone } from '../ui/primitives';
 
 type AppInfo = Awaited<ReturnType<NonNullable<OmniBridge>['appInfo']>>;
 
@@ -125,7 +126,7 @@ function BackupPanel() {
         of the file is unreadable, nothing is written at all and your gateway keeps what it has.
       </p>
       <div className="mt-3 flex flex-col gap-3">
-        <input type="file" accept="application/json,.json" onChange={async (event) => {
+        <input type="file" accept="application/json,.json" aria-label="Backup file to import" onChange={async (event) => {
           const selected = event.target.files?.[0];
           if (!selected) return;
           try {
@@ -153,7 +154,7 @@ function BackupPanel() {
           <Upload className="h-3.5 w-3.5" aria-hidden="true" />{busy === 'import' ? 'Importing' : 'Import and replace'}
         </button>
       </div>
-      {message && <p role="status" className={`mt-3 rounded-lg border px-3 py-2 text-[11px] ${failed ? 'border-danger/25 bg-danger/10 text-danger' : 'border-success/25 bg-success/10 text-success'}`}>{message}</p>}
+      {message && <p role="status" className={`mt-3 rounded-lg border px-3 py-2 text-[11px] ${failed ? badgeTone.bad : 'border-success/25 bg-success/10 text-success'}`}>{message}</p>}
     </section>
   );
 }

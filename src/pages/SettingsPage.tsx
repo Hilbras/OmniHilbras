@@ -9,6 +9,7 @@ import {
 } from '../lib/gatewayClient';
 import { desktopBridge, type DesktopAppSettings, type UpdateState } from '../lib/electronBridge';
 import { z } from 'zod';
+import { badgeTone } from '../ui/primitives';
 
 /**
  * Settings that are real.
@@ -31,7 +32,7 @@ function Toggle({ label, detail, checked, disabled, onChange }: { label: string;
         <span className="block text-xs font-medium">{label}</span>
         {detail && <span className="muted mt-0.5 block text-[11px] leading-relaxed">{detail}</span>}
       </span>
-      <button type="button" role="switch" aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)} className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors disabled:opacity-40 ${checked ? 'border-gold/60 bg-gold/70' : 'border-line bg-bg-soft'}`}>
+      <button type="button" role="switch" aria-label={label} aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)} className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors disabled:opacity-40 ${checked ? 'border-gold/60 bg-gold/70' : 'border-line bg-bg-soft'}`}>
         <span className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-text transition-[left] ${checked ? 'left-[18px]' : 'left-0.5'}`} />
       </button>
     </label>
@@ -181,7 +182,7 @@ export function SettingsContent() {
   return (
     <div id="settings" className="space-y-5">
       {notice && (
-        <div role="status" className={`flex items-center gap-2 rounded-xl border px-3.5 py-3 text-xs ${failed ? 'border-danger/25 bg-danger/10 text-danger' : 'border-success/25 bg-success/10 text-success'}`}>
+        <div role="status" className={`flex items-center gap-2 rounded-xl border px-3.5 py-3 text-xs ${failed ? badgeTone.bad : 'border-success/25 bg-success/10 text-success'}`}>
           {failed ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}
           {notice}
           <button type="button" onClick={() => setNotice(undefined)} className="ml-auto text-[10px] underline">dismiss</button>

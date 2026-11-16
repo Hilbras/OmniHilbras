@@ -511,7 +511,7 @@
 @keyframes page-enter {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
@@ -552,8 +552,22 @@
   }
 }
 
-.page-enter {
-  animation: page-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+/*
+ * The page entrance, and both halves of it were wrong before 3.62.0.
+ *
+ * It ran at **420 ms** on every navigation, which is long enough to feel like waiting rather than like motion, and
+ * the whole point of a route transition is that the page is already there — 180 ms reads as *change*, 420 ms reads
+ * as *load*. The travel is 4 px, down from 8: enough for the eye to catch the direction, small enough that the
+ * header does not appear to move.
+ *
+ * It also ran **regardless of `prefers-reduced-motion`**, which is the one setting that exists to turn this off.
+ * Every other animation in this file is already inside `@media (prefers-reduced-motion: no-preference)`; this one
+ * was outside it and therefore the one that could not be switched off.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .page-enter {
+    animation: page-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
 }
 
 @media (prefers-reduced-motion: no-preference) {

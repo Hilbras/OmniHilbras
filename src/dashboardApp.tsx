@@ -1,18 +1,21 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { Suspense, useEffect, useRef, type ReactNode } from 'react';
 import { DashboardShell } from './components/DashboardShell';
 import { getProviderById } from './data/providers';
-import { ApiKeysContent } from './pages/ApiKeysPage';
-import { AboutContent } from './pages/AboutPage';
-import { TokenSaverContent } from './pages/TokenSaverPage';
-import { AppHomeContent } from './pages/AppHomePage';
-import { ProviderDetailContent, fallbackProvider } from './pages/ProviderDetailPage';
-import { ProvidersContent } from './pages/ProvidersPage';
-import { ModelsContent } from './pages/ModelsPage';
-import { RoutingContent } from './pages/RoutingPage';
-import { UsageContent } from './pages/UsagePage';
-import { LogsContent } from './pages/LogsPage';
-import { SettingsContent } from './pages/SettingsPage';
+import { fallbackProvider } from './data/providerFallback';
+import {
+  AboutContent,
+  ApiKeysContent,
+  AppHomeContent,
+  LogsContent,
+  ModelsContent,
+  ProviderDetailContent,
+  ProvidersContent,
+  RoutingContent,
+  SettingsContent,
+  TokenSaverContent,
+  UsageContent,
+} from './lib/pageChunks';
 
 /** Public path the dashboard is served under. Android bundles it at the app root. */
 const dashboardBase = import.meta.env.VITE_ANDROID === '1' ? '' : '/dashboard';
@@ -79,6 +82,24 @@ function PageTransition({ children }: { children: ReactNode }) {
   return <div ref={ref} className="page-enter">{children}</div>;
 }
 
+/**
+ * What the page area shows while a route's module downloads.
+ *
+ * A spinner would be wrong here: the shell, the header and the nav are already painted, and the only thing missing
+ * is the page body — so the honest placeholder is the body's shape. Three muted blocks reserve roughly the layout
+ * the content will occupy, which keeps the header from jumping when it arrives. `aria-busy` says the region is
+ * filling in rather than empty; without it a screen reader is told the page has no content.
+ */
+function PageSkeleton() {
+  return (
+    <div aria-busy="true" aria-live="polite" className="space-y-3">
+      <div className="h-6 w-40 animate-pulse rounded-md bg-surface" />
+      <div className="h-24 animate-pulse rounded-xl border border-line bg-bg-soft/40" />
+      <div className="h-24 animate-pulse rounded-xl border border-line bg-bg-soft/40" />
+    </div>
+  );
+}
+
 function DashboardRoutes() {
   const location = useLocation();
   const isProviderDetail = location.pathname.startsWith('/providers/');
@@ -116,7 +137,11 @@ function DashboardRoutes() {
         * the page keeps its state.
         */}
       <PageTransition>
-        <Routes>
+        {/* Every page is a separate chunk (`lib/pageChunks.ts`), so the boundary has to exist — and it sits
+            inside `PageTransition`, not outside it, so the entrance animation and the skeleton share one
+            wrapper and the transition is not restarted by the load. */}
+        <Suspense fallback={<PageSkeleton />}>
+          <Routes>
           <Route path="/" element={<AppHomeContent />} />
           <Route path="/providers" element={<ProvidersContent />} />
           <Route path="/providers/:providerId" element={<ProviderRoute />} />
@@ -131,7 +156,8 @@ function DashboardRoutes() {
           <Route path="/about" element={<AboutContent />} />
           <Route path="/token-saver" element={<TokenSaverContent />} />
           <Route path="*" element={<Navigate to="/providers" replace />} />
-        </Routes>
+          </Routes>
+        </Suspense>
       </PageTransition>
     </DashboardShell>
   );

@@ -22,6 +22,7 @@ import {
   type GatewayApiKey,
 } from '../lib/gatewayClient';
 import { useGatewayReload } from '../lib/useGatewayStatus';
+import { badgeTone } from '../ui/primitives';
 
 const gatewayUrl = gatewayOrigin();
 
@@ -255,7 +256,7 @@ export function ApiKeysContent() {
 
       <div className="mb-5 min-h-[3.25rem]" aria-live="polite">
         {notice && (
-          <div role={noticeError ? 'alert' : 'status'} className={`flex items-center gap-2 rounded-xl border px-3.5 py-3 text-xs ${noticeError ? 'border-danger/25 bg-danger/10 text-danger' : 'border-success/25 bg-success/10 text-success'}`}>
+          <div role={noticeError ? 'alert' : 'status'} className={`flex items-center gap-2 rounded-xl border px-3.5 py-3 text-xs ${noticeError ? badgeTone.bad : 'border-success/25 bg-success/10 text-success'}`}>
             {noticeError ? <CircleAlert className="h-4 w-4 shrink-0" aria-hidden="true" /> : <Check className="h-4 w-4 shrink-0" aria-hidden="true" />}
             {notice}
           </div>

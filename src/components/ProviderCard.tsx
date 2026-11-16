@@ -1,6 +1,7 @@
 import { ArrowUpRight, CheckCircle2, CircleAlert, Clock3, Cpu, KeyRound, Server, Zap } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ProviderMark } from './ProviderMark';
+import { badgeTone } from '../ui/primitives';
 
 /**
  * `planned` is a card whose provider is real and catalogued but has no working connection.
@@ -124,7 +125,7 @@ function statusMeta(status: ProviderStatus) {
     return {
       label: 'Needs attention',
       icon: CircleAlert,
-      className: 'border-gold/30 bg-gold-soft text-gold-text',
+      className: badgeTone.warn,
       dot: 'bg-gold',
     };
   }

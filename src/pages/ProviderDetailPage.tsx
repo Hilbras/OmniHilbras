@@ -45,25 +45,9 @@ import { getProviderById } from '../data/providers';
 import { dashboardRoutes, providerRoute, providerUsageRoute } from '../lib/routes';
 import { UsageContent } from './UsagePage';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
+import { fallbackProvider } from '../data/providerFallback';
+import { badgeTone } from '../ui/primitives';
 
-export const fallbackProvider: ProviderRecord = {
-  id: 'custom',
-  name: 'Custom provider',
-  description: 'An OpenAI-compatible provider connected to the local gateway.',
-  category: 'Custom endpoint',
-  group: 'custom',
-  status: 'available',
-  auth: 'API key',
-  models: '—',
-  latency: '—',
-  requests: '0',
-  lastUsed: 'never',
-  health: 0,
-  color: '#9c9584',
-  initial: 'C',
-  endpoint: 'http://localhost:8000/v1',
-  modelList: [],
-};
 
 function providerFromLocation(): ProviderRecord {
   const id = new URLSearchParams(window.location.search).get('provider');
@@ -84,7 +68,7 @@ const CONNECTION_LOAD_TIMEOUT_MS = 10_000;
 
 function statusMeta(status: ProviderStatus) {
   if (status === 'connected') return { label: 'Connected', className: 'border-success/25 bg-success/10 text-success', dot: 'bg-success' };
-  if (status === 'attention') return { label: 'Needs attention', className: 'border-gold/30 bg-gold-soft text-gold-text', dot: 'bg-gold' };
+  if (status === 'attention') return { label: 'Needs attention', className: badgeTone.warn, dot: 'bg-gold' };
   return { label: 'Not connected', className: 'border-line-strong bg-surface-2 text-muted', dot: 'bg-muted' };
 }
 
@@ -97,7 +81,7 @@ function statusMeta(status: ProviderStatus) {
  */
 function unknownStatusMeta(state: 'loading' | 'failed') {
   if (state === 'failed') {
-    return { label: "Couldn't read the gateway", className: 'border-gold/30 bg-gold-soft text-gold-text', dot: 'bg-gold' };
+    return { label: "Couldn't read the gateway", className: badgeTone.warn, dot: 'bg-gold' };
   }
   return { label: 'Checking…', className: 'border-line-strong bg-surface-2 text-muted', dot: 'bg-muted animate-pulse' };
 }
@@ -167,17 +151,17 @@ function ConnectionRow({ provider, connection, healthy, pingMs, testing, onTest,
       {/* The account's own description is dimmed when it is off — it is still there, and still this
           row, but it is not in play. The switch is left at full contrast, because it is the way back. */}
       <div className={`flex min-w-0 items-start gap-3 ${connection && !connection.enabled ? 'opacity-55' : ''}`}>
-        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border ${connection && !connection.enabled ? 'border-line/50 bg-surface/50 text-muted' : 'border-success/20 bg-success/10 text-success'}`}><KeyRound className="h-4 w-4" aria-hidden="true" /></span>
+        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg border ${connection && !connection.enabled ? 'border-line/50 bg-surface/50 text-muted' : badgeTone.ok}`}><KeyRound className="h-4 w-4" aria-hidden="true" /></span>
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">{connectionName} · account</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[9px] ${healthy ? 'border-success/20 bg-success/10 text-success' : 'border-gold/30 bg-gold-soft text-gold-text'}`}><span className={`h-1.5 w-1.5 rounded-full ${healthy ? 'bg-success' : 'bg-gold'}`} />{healthy ? 'credential accepted' : 'not checked'}</span>
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[9px] ${healthy ? badgeTone.ok : badgeTone.warn}`}><span className={`h-1.5 w-1.5 rounded-full ${healthy ? 'bg-success' : 'bg-gold'}`} />{healthy ? 'credential accepted' : 'not checked'}</span>
             {connection?.email && <span className="truncate font-mono text-[10px] text-muted" title={connection.email}>{connection.email}</span>}
             {expiry && (
               <span
                 data-credential-state={connection?.credentialState}
                 title={connection?.credentialExpiresAt ? `expires ${new Date(connection.credentialExpiresAt).toISOString()}` : undefined}
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[9px] ${expiry.tone === 'ok' ? 'border-success/20 bg-success/10 text-success' : expiry.tone === 'warn' ? 'border-gold/30 bg-gold-soft text-gold-text' : 'border-danger/25 bg-danger/10 text-danger'}`}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[9px] ${expiry.tone === 'ok' ? badgeTone.ok : expiry.tone === 'warn' ? badgeTone.warn : badgeTone.bad}`}
               >
                 <Clock3 className="h-3 w-3" aria-hidden="true" />{expiry.text}
               </span>
@@ -260,7 +244,7 @@ function ModelRow({ model, prefix, facets, onCopy, onTest, onRemove, testing, re
       className="flex flex-col gap-3 rounded-xl border border-line bg-bg-soft/45 p-3.5 sm:flex-row sm:items-center sm:justify-between"
     >
       <div className="flex min-w-0 items-center gap-3">
-        <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? 'border-danger/25 bg-danger/10 text-danger' : 'border-line bg-surface text-muted'}`}>
+        <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? badgeTone.bad : 'border-line bg-surface text-muted'}`}>
           {testing ? <LoaderCircle className="h-4 w-4 animate-spin text-gold-text" aria-hidden="true" /> : testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
         </span>
         <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><p className="truncate text-xs font-semibold" title={`${prefix}/${model}`}>{prefix}/{model}</p>{facets.displayName && facets.displayName !== model && <p className="truncate text-[10px] text-muted">{facets.displayName}</p>}{testLatencyMs !== undefined && testState === 'ok' && <span title={testNote || undefined} className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms{testNote ? ' · reasoning only' : ''}</span>}{testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}{badges.map((badge) => <span key={badge} className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[9px] text-muted">{badge}</span>)}</div><code className="mt-1 block truncate font-mono text-[10px] text-muted">{prefix}/{model}</code>{testState === 'error' && testError && <p className="mt-1 text-[10px] leading-relaxed text-danger/90">{testError}</p>}</div>
@@ -373,7 +357,7 @@ function OpencodeRuntimeCard() {
             <Server className="h-4 w-4 text-gold-text" aria-hidden="true" />
             OpenCode runtime
             {status && (
-              <span className={`rounded-full border px-2 py-0.5 font-mono text-[10px] ${running ? 'border-success/25 bg-success/10 text-success' : status.installed ? 'border-line bg-surface text-muted' : 'border-danger/25 bg-danger/10 text-danger'}`}>
+              <span className={`rounded-full border px-2 py-0.5 font-mono text-[10px] ${running ? 'border-success/25 bg-success/10 text-success' : status.installed ? 'border-line bg-surface text-muted' : badgeTone.bad}`}>
                 {running ? 'service running' : status.installed ? 'installed, not running' : 'not installed'}
               </span>
             )}

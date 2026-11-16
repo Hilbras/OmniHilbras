@@ -25,6 +25,7 @@ import {
 } from '../lib/gatewayClient';
 import { resolveProviderOption } from '../lib/providerOptions';
 import { useGatewayReload } from '../lib/useGatewayStatus';
+import { badgeTone } from '../ui/primitives';
 
 const strategies: Array<{ value: GatewayVirtualModel['strategy']; label: string; hint: string }> = [
   { value: 'priority', label: 'Priority', hint: 'Try the lowest-numbered target first.' },
@@ -194,7 +195,7 @@ export function ModelsContent() {
   const toneClass = (tone: 'ok' | 'warn' | 'bad' | 'unknown') => (tone === 'ok'
     ? 'border-success/25 bg-success/10 text-success'
     : tone === 'warn'
-      ? 'border-gold/30 bg-gold-soft text-gold-text'
+      ? badgeTone.warn
       : tone === 'bad'
         ? 'border-danger/30 bg-danger/10 text-danger'
         : 'border-line bg-bg text-muted');

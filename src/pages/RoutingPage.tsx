@@ -15,6 +15,7 @@ import { DashboardShell } from '../components/DashboardShell';
 import { getGatewayRoutingState, type GatewayRoutingState } from '../lib/gatewayClient';
 import { routingVerdict, eligibleCount } from '../lib/routingVerdict';
 import { useGatewayReload } from '../lib/useGatewayStatus';
+import { badgeTone } from '../ui/primitives';
 
 /**
  * The routing control plane, showing what routing can actually use.
@@ -59,8 +60,8 @@ type Health = 'healthy' | 'degraded' | 'unavailable' | 'unknown';
 
 const HEALTH_TONE: Record<Health, { label: string; className: string }> = {
   healthy: { label: 'healthy', className: 'border-success/25 bg-success/10 text-success' },
-  degraded: { label: 'degraded', className: 'border-gold/30 bg-gold-soft text-gold-text' },
-  unavailable: { label: 'unavailable', className: 'border-danger/25 bg-danger/10 text-danger' },
+  degraded: { label: 'degraded', className: badgeTone.warn },
+  unavailable: { label: 'unavailable', className: badgeTone.bad },
   unknown: { label: 'not checked yet', className: 'border-line bg-bg-soft text-muted' },
 };
 
@@ -223,8 +224,8 @@ export function RoutingContent() {
         <>
           <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Routing summary">
             <SummaryCard label="Connections" value={state ? String(connections.length) : '—'} detail="saved" icon={GitBranch} tone="border-gold/25 bg-gold-soft text-gold-text" />
-            <SummaryCard label="Eligible" value={state ? String(eligible) : '—'} detail="routing may choose" icon={ShieldCheck} tone="border-success/20 bg-success/10 text-success" />
-            <SummaryCard label="At their limit" value={state ? String(cooling) : '—'} detail="cooling down" icon={TimerOff} tone="border-gold/30 bg-gold-soft text-gold-text" />
+            <SummaryCard label="Eligible" value={state ? String(eligible) : '—'} detail="routing may choose" icon={ShieldCheck} tone={badgeTone.ok} />
+            <SummaryCard label="At their limit" value={state ? String(cooling) : '—'} detail="cooling down" icon={TimerOff} tone={badgeTone.warn} />
             <SummaryCard label="Failure threshold" value={state ? String(state.failureThreshold) : '—'} detail="consecutive failures" icon={Gauge} tone="border-[#83b7ff]/25 bg-[#83b7ff]/10 text-[#5d98e8]" />
             <SummaryCard label="Health checks" value={state ? String(connections.filter((c) => c.lastCheckedAt).length) : '—'} detail="reported" icon={Timer} tone="border-[#b995e8]/25 bg-[#b995e8]/10 text-[#9b7bd1]" />
           </section>

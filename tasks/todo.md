@@ -6030,3 +6030,44 @@ independently of the React app" is now measured over every provider manifest, an
   `connection-credential-expiry.test.js` (2 tests: the five states, and that the hot list carries none of them), and
   the dashboard guard that the row reads the fields. Reverting the store write-back failed 3 tests, restoring the
   `isCredentialExpired` gate failed 4, and dropping the connection id from `noteLoginRefused` failed 1.
+
+## 3.62.0 — the dashboard stops downloading pages nobody opened
+
+- **Measured first.** `pnpm analyze` on the built dashboard: the entry chunk `dashboardApp` was **416,488 B raw /
+  108,512 B gzip**, and `src/pages` alone was 289 KB of it — because `dashboardApp.tsx` imported all eleven pages
+  eagerly, so opening `/providers` downloaded the settings page, the token saver and everything they pull in.
+- **Each page is its own chunk.** `src/lib/pageChunks.ts` owns the `lazy()` map and the prefetch map; `Suspense`
+  sits inside the existing `PageTransition` with a shape-matching skeleton (`aria-busy`, three muted blocks) so the
+  header does not jump when the body arrives. The sidebar preloads a page on pointer-enter **and** on focus — a
+  keyboard user who Tabs to a link and presses Enter was otherwise the one case that always waited.
+  `fallbackProvider` moved to `src/data/providerFallback.ts`: the router needs that record synchronously, and
+  importing it from the page module dragged the page — and zod, and the model editors — into first paint.
+- **After: 72,433 B raw / 23,844 B gzip** on the entry chunk, an 82 % / 78 % reduction, with 58 JS chunks where there
+  were 16. The rest of first paint is `react-dom` (218 KB raw) and the CSS, which lazy loading cannot touch.
+- **The entrance animation was wrong twice.** It ran at **420 ms** — long enough to read as *loading* rather than
+  motion, and the point of a route transition is that the page is already there — and it ran **regardless of
+  `prefers-reduced-motion`**, while every other animation in `index.css` was already gated. Now 180 ms, 4 px of
+  travel, inside the reduced-motion block. `motion` was deliberately not used for this: the wrapper is persistent
+  and one keyframe, so a JS animation library would subscribe per navigation to do what CSS does for free — and
+  this dashboard has already measured what per-navigation work costs (37→61 fps by removing a remount).
+- **The e2e suite was testing the marketing page.** The `/dashboard` fallback lived in `configureServer` only, so
+  `vite preview` served `index.html` for `/dashboard/*` — and `smoke.spec.ts` asserted `body` was visible, which the
+  landing page satisfies. It now registers on `configurePreviewServer` too, the smoke walks **eight routes**
+  asserting the skeleton clears, `main` paints and the console is clean, and it stubs `/v1/**` with the gateway's
+  own response shapes (a stub with a plausible-but-wrong shape blank-screens a page — measured twice while writing
+  it). Also fixed: Playwright consults the **last** registered route first, so a catch-all registered after a
+  specific stub answers everything.
+- **Accessibility is now a check, and it found one defect.** Four rules hold and are guarded — every `role="dialog"`
+  is `aria-modal` and named, every icon-only button is named, every `<img>` has `alt`, every form field is named.
+  The one that did not: the backup **file input** on the About page had no label; it has one now. (An earlier note
+  in this session claimed three dialogs were missing `aria-modal` — that came from a line-level grep, and the
+  attribute is on the following line in all three. Measured, not assumed, is the difference.)
+- **30 hand-rolled badge tones collapsed into one file.** `border-success/20 bg-success/10 text-success` appeared 7
+  times, the gold 11, the danger 12. `src/ui/primitives.ts` names them once; `pnpm verify` fails if a page spells
+  one out again. Not a component library: the CSS layer already owns `btn-gold`, `card`, `input`, and a second
+  implementation in TSX would be a second thing to keep in step.
+- **Guarded, each revert-checked:** `tests/frontend-upgrade.test.js` (5 — no eager page import, eleven lazy chunks,
+  every route prefetchable, entrance ≤200 ms and inside the reduced-motion block, badge tones named once),
+  `tests/accessibility.test.js` (4), and `tests/e2e/smoke.spec.ts` (3, browser). Reverting each fix fails its
+  guard: an eager import, a missing prefetch entry, 420 ms, a spelled-out tone, an unnamed switch, a dialog without
+  `aria-modal`, an unlabelled file input.

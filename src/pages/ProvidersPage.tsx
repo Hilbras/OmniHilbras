@@ -34,6 +34,7 @@ import { customOption } from '../lib/providerOptions';
 import { providerSlug } from '@omnihilbras/kernel-api/public';
 import { providerCatalog } from '../data/providers';
 import { mergeGatewayConnections } from '../lib/providerCards';
+import { badgeTone } from '../ui/primitives';
 
 type Filter = 'all' | 'connected' | 'attention' | 'available';
 
@@ -117,7 +118,7 @@ const modelResultLimit = 12;
 /** `serving` only when health agrees; a saved connection is never "not connected". */
 function connectionBadge(provider: ProviderRecord, saved: boolean) {
   if (provider.status === 'connected') return { label: 'serving', tone: 'border-success/30 bg-success/10 text-success' };
-  if (saved) return { label: 'saved · needs attention', tone: 'border-gold/30 bg-gold-soft text-gold-text' };
+  if (saved) return { label: 'saved · needs attention', tone: badgeTone.warn };
   return { label: 'not connected', tone: 'border-line bg-bg-soft text-muted' };
 }
 
@@ -469,11 +470,11 @@ export function ProvidersContent() {
           </div>
         </div>
 
-        {notice && <div role="status" className={`mb-5 flex items-center gap-2 rounded-xl border px-3.5 py-3 text-xs ${noticeError ? 'border-danger/25 bg-danger/10 text-danger' : 'border-success/25 bg-success/10 text-success'}`}>{noticeError ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}{notice}</div>}
+        {notice && <div role="status" className={`mb-5 flex items-center gap-2 rounded-xl border px-3.5 py-3 text-xs ${noticeError ? badgeTone.bad : 'border-success/25 bg-success/10 text-success'}`}>{noticeError ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}{notice}</div>}
 
         {cardMode === 'advanced' && (
           <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Provider summary">
-            <SummaryCard label="Connected" value={String(connectedCount)} detail="live" icon={Network} tone="border-success/20 bg-success/10 text-success" />
+            <SummaryCard label="Connected" value={String(connectedCount)} detail="live" icon={Network} tone={badgeTone.ok} />
             <SummaryCard label="Needs attention" value={String(attentionCount)} detail="review" icon={CircleAlert} tone="border-gold/25 bg-gold-soft text-gold-text" />
             <SummaryCard label="Available" value={String(availableCount)} detail="ready to add" icon={Server} tone="border-line-strong bg-surface-2 text-muted" />
             {/*

@@ -14,6 +14,7 @@ import {
 import { DashboardShell } from '../components/DashboardShell';
 import { getGatewayUsage, getProviderQuota, isNotSupported, type GatewayProviderQuota, type GatewayUsage, type GatewayUsageRecord } from '../lib/gatewayClient';
 import { useGatewayReload } from '../lib/useGatewayStatus';
+import { badgeTone } from '../ui/primitives';
 
 const REQUESTS_PER_PAGE = 10;
 
@@ -249,8 +250,8 @@ function formatWhen(iso: string): string {
 }
 
 const outcomeTone: Record<GatewayUsageRecord['outcome'], string> = {
-  success: 'border-success/20 bg-success/10 text-success',
-  failure: 'border-danger/25 bg-danger/10 text-danger',
+  success: badgeTone.ok,
+  failure: badgeTone.bad,
   cancelled: 'border-line bg-bg-soft text-muted',
 };
 
@@ -476,14 +477,14 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
               value={totals ? String(totals.succeeded) : '—'}
               detail="answered"
               icon={CircleCheck}
-              tone="border-success/20 bg-success/10 text-success"
+              tone={badgeTone.ok}
             />
             <SummaryCard
               label="Failed"
               value={totals ? String(totals.failed) : '—'}
               detail="provider fault"
               icon={CircleAlert}
-              tone="border-danger/25 bg-danger/10 text-danger"
+              tone={badgeTone.bad}
             />
             {/* Cancellations get their own card because they are neither of the other two, and folding them
                 into "failed" is what the v1.52.0 fix removed from the health counter. */}

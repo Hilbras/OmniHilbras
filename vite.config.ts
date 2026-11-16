@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PNG } from 'pngjs';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, type Connect, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { dashboardTokenPath } from './Kernel/API/src/core/dashboard-token.js';
@@ -25,44 +25,59 @@ const legacyRoutes: Record<string, (search: URLSearchParams) => string> = {
 };
 
 function dashboardFallback(): Plugin {
+  /**
+   * The rewrite itself, registered on **both** servers.
+   *
+   * It used to live inside `configureServer` alone, which meant `vite preview` served the marketing
+   * `index.html` for `/dashboard/*` — no `/dashboard` route, no SPA. That went unnoticed because the
+   * Playwright specs asserted `body` was visible, and the landing page has a body: the e2e suite was
+   * checking the wrong page and reported green. A test that can pass against the wrong document is not
+   * a test of the document.
+   */
+  const rewrite: Connect.NextHandleFunction = (request, response, next) => {
+    const [rawPath = '', rawSearch = ''] = (request.url ?? '').split('?');
+    // `/home` and `/download` are real pages with clean URLs in production; the dev server
+    // serves their shells for the same paths.
+    if (rawPath === '/home' || rawPath === '/home/') {
+      request.url = '/index.html';
+      next();
+      return;
+    }
+    if (rawPath === '/download' || rawPath === '/download/') {
+      request.url = '/site/download.html';
+      next();
+      return;
+    }
+    const marketingPage = rawPath.replace(/^\/+|\/+$/g, '');
+    if ((marketingPages as readonly string[]).includes(marketingPage)) {
+      request.url = `/site/${marketingPage}.html`;
+      next();
+      return;
+    }
+    const legacy = legacyRoutes[rawPath];
+    if (legacy) {
+      response.statusCode = 302;
+      response.setHeader('location', legacy(new URLSearchParams(rawSearch)));
+      response.end();
+      return;
+    }
+    if (rawPath !== dashboardPrefix && !rawPath.startsWith(`${dashboardPrefix}/`)) {
+      next();
+      return;
+    }
+    // The SPA reads the real path, so only the HTML shell is rewritten.
+    request.url = '/dashboard.html';
+    next();
+  };
+
   return {
     name: 'omnihilbras-dashboard-fallback',
     configureServer(server) {
-      server.middlewares.use((request, response, next) => {
-        const [rawPath = '', rawSearch = ''] = (request.url ?? '').split('?');
-        // `/home` and `/download` are real pages with clean URLs in production; the dev server
-        // serves their shells for the same paths.
-        if (rawPath === '/home' || rawPath === '/home/') {
-          request.url = '/index.html';
-          next();
-          return;
-        }
-        if (rawPath === '/download' || rawPath === '/download/') {
-          request.url = '/site/download.html';
-          next();
-          return;
-        }
-        const marketingPage = rawPath.replace(/^\/+|\/+$/g, '');
-        if ((marketingPages as readonly string[]).includes(marketingPage)) {
-          request.url = `/site/${marketingPage}.html`;
-          next();
-          return;
-        }
-        const legacy = legacyRoutes[rawPath];
-        if (legacy) {
-          response.statusCode = 302;
-          response.setHeader('location', legacy(new URLSearchParams(rawSearch)));
-          response.end();
-          return;
-        }
-        if (rawPath !== dashboardPrefix && !rawPath.startsWith(`${dashboardPrefix}/`)) {
-          next();
-          return;
-        }
-        // The SPA reads the real path, so only the HTML shell is rewritten.
-        request.url = '/dashboard.html';
-        next();
-      });
+      server.middlewares.use(rewrite);
+    },
+    // `vite preview` is what the e2e suite runs against, so it needs the same routing the dev server has.
+    configurePreviewServer(server) {
+      server.middlewares.use(rewrite);
     },
   };
 }
