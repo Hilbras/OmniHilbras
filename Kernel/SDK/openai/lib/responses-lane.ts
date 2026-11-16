@@ -1,4 +1,4 @@
-import { ProviderError } from './errors.js';
+import { ProviderError, isProviderError } from './errors.js';
 import type { ChatMessage, ChatRequest, ChatResponse, FinishReason, TokenUsage, ToolCallDelta } from './types.js';
 
 /**
@@ -135,7 +135,18 @@ function refusalText(error: ProviderError): string {
  * The **status** excludes only the four cases where a retry is wrong whatever the body says.
  */
 export function responsesLaneRefusal(error: unknown): error is ProviderError {
-  if (!(error instanceof ProviderError)) return false;
+  /**
+   * Structural, not `instanceof`, and that is not a style preference.
+   *
+   * The runtime transport is the **gateway's** (`FetchHttpTransport`), and it throws the gateway's
+   * `Kernel/API/src/core/provider-error.ts` — a different class object from this package's vendored
+   * `./errors.js`, because this repository vendors its shared machinery per package. So `instanceof` was
+   * **false in production and true in every test here**, where the error was constructed from this package's
+   * own class: the retry silently never fired against AgentRouter, and the live turn returned the chat
+   * surface's refusal. Both packages already ship `isProviderError` for exactly this reason; this call site
+   * simply did not use it.
+   */
+  if (!isProviderError(error)) return false;
   if (error.statusCode !== undefined && laneRefusalExcludedStatuses.has(error.statusCode)) return false;
   const text = refusalText(error);
   return /\/chat\/completions/.test(text) && /\/responses\b/.test(text);

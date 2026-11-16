@@ -80,6 +80,23 @@ export function publicProviderMessage(code: ProviderErrorCode) {
   }
 }
 
+/**
+ * Whether this error is one of ours, **structurally** rather than by `instanceof`.
+ *
+ * At runtime the transport is the gateway's, and it throws the gateway's own `ProviderError` — a different
+ * class object from this package's vendored copy, because shared machinery is vendored per package. So
+ * `instanceof` is false across that boundary while being true in every test that builds the error from this
+ * package's class. That is not hypothetical: it is how the Responses lane silently never fired for AgentRouter
+ * while its own tests passed — measured 2026-11-16, a live turn came back with the chat surface's refusal and
+ * the lane untouched. The gateway's copy of this helper has been structural for the same reason; this brings
+ * every vendored copy in line with it.
+ */
 export function isProviderError(error: unknown): error is ProviderError {
-  return error instanceof ProviderError;
+  if (error instanceof ProviderError) return true;
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { name?: unknown }).name === 'ProviderError' &&
+    typeof (error as { code?: unknown }).code === 'string'
+  );
 }

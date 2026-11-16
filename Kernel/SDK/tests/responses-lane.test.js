@@ -103,6 +103,61 @@ test('a model the relay refuses on the chat path is answered on the Responses pa
   assert.equal(response.usage.inputTokens, 3);
 });
 
+test('the lane fires when the transport throws the gateway’s own ProviderError class', async () => {
+  /**
+   * The bug this pins, found by a live turn after **every test in this file passed**.
+   *
+   * At runtime the transport is the gateway's `FetchHttpTransport`, so the error it throws is the gateway's
+   * `Kernel/API/src/core/provider-error.ts` — a different class object from this package's vendored
+   * `./errors.js`, because this repository vendors shared machinery per package. The predicate read
+   * `error instanceof ProviderError`: **false across that boundary, true in all the tests above**, where the
+   * error came from this package's own class. So the retry fired in tests and never in production — a real
+   * turn on `agr/gpt-6-astra` came back with the chat surface's refusal and the lane untouched.
+   *
+   * Both packages already ship `isProviderError` (a structural check) for exactly this reason; the call site
+   * simply did not use it. This test throws the *other* package's class on purpose.
+   */
+  const { ProviderError: GatewayProviderError } = await import('../../API/dist/src/core/provider-error.js');
+  forgetResponsesLanes();
+  const paths = [];
+  const transport = {
+    async request(request) {
+      paths.push(new URL(request.url).pathname);
+      if (new URL(request.url).pathname.endsWith('/chat/completions')) {
+        throw new GatewayProviderError('PROVIDER_REQUEST_FAILED', 'The provider request failed.', {
+          statusCode: 400,
+          details: { providerMessage: LANE_REFUSAL },
+        });
+      }
+      return {
+        status: 200,
+        headers: new Headers(),
+        data: {
+          id: 'resp-1',
+          model: 'gpt-6-astra',
+          created_at: 1,
+          status: 'completed',
+          output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hello from responses' }] }],
+          usage: { input_tokens: 3, output_tokens: 4, total_tokens: 7 },
+        },
+      };
+    },
+    async *stream() { throw new Error('this test does not stream'); },
+  };
+  const adapter = new OpenAICompatibleAdapter({
+    id: 'agentrouter',
+    name: 'AgentRouter',
+    baseUrl: 'https://agentrouter.org/v1',
+    auth: { header: 'Authorization', prefix: 'Bearer' },
+    responsesPath: '/responses',
+  }, { transport });
+
+  const response = await adapter.chat(turn('gpt-6-astra'), { credential: CREDENTIAL });
+
+  assert.deepEqual(paths, ['/v1/chat/completions', '/v1/responses'], 'the gateway’s class is recognised, so the lane fires');
+  assert.equal(response.message.content, 'hello from responses');
+});
+
 test('the second turn for the same model goes straight to the Responses path', async () => {
   forgetResponsesLanes();
   const script = scriptedFetch({ refusesChat: (body) => (body.model === 'gpt-6-astra' ? laneRefusal() : undefined) });
