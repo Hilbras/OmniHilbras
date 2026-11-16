@@ -542,7 +542,17 @@ export class RequestExecutor {
       // Counted here for the same reason as the sequential path: a hedge that loses was still sent
       // and still cost money, and the ledger records it as such.
       this.deps.recordRateLimitUse(candidate.connectionId);
-      const done = this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.deps.chat(candidate.providerId, request, deadline, scope))
+      /**
+       * The connection id is not optional here, and leaving it out was a bug rather than an omission.
+       *
+       * Without it the service resolves a credential by **provider** — the first connection that has one — so
+       * every hedged attempt went to that connection whatever candidate the race had picked. Measured with two
+       * accounts of one provider whose first was revoked: hedging on, a request failed
+       * `AUTHENTICATION_FAILED / This refresh token was already rejected` while the same sibling account
+       * answered fine when asked on its own, because both attempts were the first account. The ledger named the
+       * candidate, so the attempt list read as two accounts and the request was one account twice.
+       */
+      const done = this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.deps.chat(candidate.providerId, request, deadline, scope, candidate.connectionId))
         .then(
           (response): Outcome => ({ candidate, ok: true, latencyMs: Date.now() - startedAt, response }),
           (error: unknown): Outcome => ({ candidate, ok: false, latencyMs: Date.now() - startedAt, error }),

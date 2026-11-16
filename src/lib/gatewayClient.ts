@@ -973,6 +973,26 @@ export function addGatewayConnectionModels(connectionId: string, modelIds: strin
 }
 
 /**
+ * Forgets model ids this gateway added to a connection.
+ *
+ * The inverse of the call above, and the pair the add-model control needs: an id typed by hand was permanent,
+ * because the route that writes one refuses an empty list. An empty array means "every model I added" — the
+ * provider's own catalog is never touched, which is why this cannot clear a connection's whole list.
+ *
+ * The body and its media type are explicit rather than going through the client's write path, which covers
+ * POST, PUT and PATCH: a DELETE with a body is legal, and the gateway parses one, but it is not the shape that
+ * path was written for.
+ */
+export function removeGatewayConnectionModels(connectionId: string, modelIds: string[], signal?: AbortSignal) {
+  return requestJson<{ connection: GatewayConnection }>(`/v1/connections/${encodeURIComponent(connectionId)}/models`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ modelIds }),
+    ...(signal ? { signal } : {}),
+  }).then((body) => body.connection);
+}
+
+/**
  * Ask the provider what models this connection can serve right now, and save the answer.
  *
  * A card's model list is what the provider said when the connection was saved, so it goes stale

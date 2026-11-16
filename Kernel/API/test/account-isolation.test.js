@@ -106,25 +106,29 @@ test('an authentication failure stops when there is no other account left', asyn
 
 test('a hedge on one account does not skip the provider’s other account', async () => {
   // Measured before this test existed, with hedging on and the first account's credential refused: three
-  // requests in a row failed `AUTHENTICATION_FAILED` and the healthy account was never dispatched to. The
-  // race's failed attempt was recorded against the *provider*, and the walk past what the race already tried
-  // is keyed on that — so one account's hedge marked its sibling as raced too. Two accounts of one provider
-  // are two routes, and racing one of them says nothing about the other.
-  const captured = [];
+  // requests in a row failed `AUTHENTICATION_FAILED` — *"This refresh token was already rejected"* — and the
+  // healthy account was never dispatched to, while the same account answered when asked on its own.
+  //
+  // Two separate reasons, and the test has to catch both: the race's failed attempt was recorded against the
+  // **provider**, so the walk skipped its sibling; and the race dispatched with a provider id and no
+  // connection id, so a hedged attempt resolved the provider's *first* credential and both attempts were the
+  // same account. Which is why this asserts the credential each dispatch carried rather than a count — two
+  // dispatches to one account satisfies a count.
+  const dispatched = [];
   const store = new InMemoryConnectionStore();
-  const save = (id, priority) => store.save({
+  const save = (id, priority, value) => store.save({
     id, providerId: 'p', name: id, endpoint: 'https://p.example/v1', priority, proxyPool: 'none', enabled: true, modelIds: ['m'], resilience: { hedgeAfterMs: 300 },
-  }, { type: 'api-key', value: 'key' });
-  await save('first', 1);
-  await save('second', 2);
+  }, { type: 'api-key', value });
+  await save('first', 1, 'key-first');
+  await save('second', 2, 'key-second');
   const registry = new ProviderRegistry().register({
     id: 'p', name: 'P', capabilities: { chat: true, streaming: false, models: true, embeddings: false },
     async listModels() { return [{ id: 'm', providerId: 'p' }]; },
     async healthCheck() { return { status: 'healthy', checkedAt: new Date().toISOString(), latencyMs: 1, verified: 'credential' }; },
-    async chat(request) {
-      captured.push(request);
-      // The first dispatch is the dead account; the second is the sibling that must answer.
-      if (captured.length === 1) throw new ProviderError('AUTHENTICATION_FAILED', 'The credential was refused.', { publicMessage: 'The credential was refused.' });
+    async chat(request, context) {
+      dispatched.push(context?.credential?.value);
+      // The account whose credential was refused is the one that got here first.
+      if (dispatched.length === 1) throw new ProviderError('AUTHENTICATION_FAILED', 'The credential was refused.', { publicMessage: 'The credential was refused.' });
       return { id: 'r', providerId: 'p', model: request.model, createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'ok' }, finishReason: 'stop' };
     },
   });
@@ -132,7 +136,41 @@ test('a hedge on one account does not skip the provider’s other account', asyn
 
   const outcome = await service.chatWithFailover(request(), undefined);
   assert.equal(outcome.response.message.content, 'ok', 'the healthy account must answer');
-  assert.equal(captured.length, 2, 'both accounts are dispatched, each once');
+  assert.deepEqual(dispatched, ['key-first', 'key-second'], 'each account is dispatched as itself, once each');
+});
+
+test('a hedged attempt is sent as the account it was planned for, not the provider’s first', async () => {
+  // The case the previous test cannot see: there the leader *fails* before the hedge timer, so the walk does
+  // the work and the connection id is never needed. When the leader is merely **slow**, the race dispatches the
+  // sibling while the leader is still in flight — and that dispatch resolved its credential by provider id
+  // alone, so it went to the first account a second time. Measured live with two accounts of one provider: a
+  // request failed `AUTHENTICATION_FAILED / This refresh token was already rejected` naming the account whose
+  // sibling answered fine on its own.
+  const dispatched = [];
+  const store = new InMemoryConnectionStore();
+  const save = (id, priority, value) => store.save({
+    id, providerId: 'p', name: id, endpoint: 'https://p.example/v1', priority, proxyPool: 'none', enabled: true, modelIds: ['m'], resilience: { hedgeAfterMs: 150 },
+  }, { type: 'api-key', value });
+  await save('slow', 1, 'key-slow');
+  await save('fast', 2, 'key-fast');
+  const registry = new ProviderRegistry().register({
+    id: 'p', name: 'P', capabilities: { chat: true, streaming: false, models: true, embeddings: false },
+    async listModels() { return [{ id: 'm', providerId: 'p' }]; },
+    async healthCheck() { return { status: 'healthy', checkedAt: new Date().toISOString(), latencyMs: 1, verified: 'credential' }; },
+    async chat(request, context) {
+      const value = context?.credential?.value;
+      dispatched.push(value);
+      // The first account is slow rather than refused, which is the only shape in which a hedge fires.
+      if (value === 'key-slow') await new Promise((resolve) => setTimeout(resolve, 2_000));
+      return { id: 'r', providerId: 'p', model: request.model, createdAt: new Date().toISOString(), message: { role: 'assistant', content: value === 'key-fast' ? 'from the sibling' : 'from the slow one' }, finishReason: 'stop' };
+    },
+  });
+  const service = new GatewayService(registry, store, store, new InMemoryApiKeyStore(), {});
+
+  const outcome = await service.chatWithFailover(request(), undefined);
+  assert.equal(outcome.response.message.content, 'from the sibling', 'the hedge did not reach the second account');
+  assert.equal(dispatched[0], 'key-slow', 'the leader is the first account');
+  assert.equal(dispatched[1], 'key-fast', 'the hedged attempt must carry the account it was planned for');
 });
 
 test('one account at its concurrency limit refuses without blocking another account', async () => {

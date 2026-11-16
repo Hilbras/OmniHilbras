@@ -2900,6 +2900,18 @@ export class GatewayService {
   }
 
   /**
+   * Forgets model ids this gateway added to a connection.
+   *
+   * The inverse of `addConnectionModels`, and the pair the provider page's add-model control needs: an id
+   * typed by hand used to be permanent, because the route that writes one refuses an empty list and there is no
+   * way to name a removal. An empty `modelIds` clears every addition, which is the "forget what I added"
+   * action; the provider's own catalog is never touched by either.
+   */
+  async removeConnectionModels(connectionId: string, modelIds: string[]) {
+    return this.connections.removeModels(connectionId, modelIds);
+  }
+
+  /**
    * Removes a connection, and the traces of it that are not credentials.
    *
    * A browser-driver profile is a signed-in third-party session on disk; leaving it behind after a delete

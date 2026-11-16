@@ -188,7 +188,13 @@ The first local gateway exposes:
   uses this for every provider**, and reports only what comes back; a check that cannot be performed is
   stated in the UI rather than simulated.
 - `PUT /v1/connections/openrouter` — validate again, discover the selected model policy, then upsert the single local OpenRouter connection.
-- `POST /v1/connections/:id/models` — add validated model IDs to a saved connection.
+- `POST /v1/connections/:id/models` — add validated model IDs to a saved connection. A non-empty array is
+  required: adding nothing is a mistake.
+- `DELETE /v1/connections/:id/models` — body `{"modelIds": ["…"]}`; forgets model IDs **this gateway added**,
+  which is the operator's own list (`customModelIds`) and the reason a hand-typed ID is no longer permanent. An
+  empty or absent `modelIds` clears every added ID. A model the provider reported cannot be removed this way —
+  the next `POST …/models/refresh` republishes the provider's catalogue, so a removal there would come back.
+  A request naming nothing that was added is a 404 rather than a silent success.
 - `POST /v1/connections/:id/probe` — validate **one** saved connection with its own stored credential, returning `valid`, `checkedAt` and a measured `latencyMs`. `/v1/health/:providerId` answers about a provider, and a provider with several accounts has no single answer — the resolver picks the first connection — so a row's Test button calls this and tests its own account.
 - **A model test spends the account it was clicked on.** `POST /v1/chat/completions` accepts `x-omnihilbras-connection`, and the model-test button sends it. It did not, so the test carried only `x-omnihilbras-provider` and was routed to whichever account came first: with two accounts, testing a model on account B spent account A, and when A was out of quota the refusal was reported against B. A provider pin (`x-omnihilbras-provider`) is deliberately *not* narrowed to one account — it returns every usable account of that provider as a candidate, which is what lets a rate-limited account hand off to its sibling. The account pin is the narrower verb and the one a per-row test must use.
 - **Accounts are tried one by one, and an exhausted one is not the request's failure.** With several accounts for a provider the gateway walks them in order — the pinned account first, then the rest by priority — until one answers. Three rules decide whether a failure means "try the next account":

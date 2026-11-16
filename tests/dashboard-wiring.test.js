@@ -63,6 +63,16 @@ test('the desktop window carries the brand icon', () => {
   assert.match(main, /icon: join\(projectRoot, 'brand\/logo-512\.png'\)/, 'the window has no icon');
 });
 
+test('a model the gateway added can be taken back from the page, and only those', () => {
+  // `customModels` was `useState<string[]>([])` with **no setter** — permanently empty, so nothing on the page
+  // could tell an id the operator typed from one the provider reported, and an id typed by hand was permanent.
+  const page = read('src/pages/ProviderDetailPage.tsx');
+  assert.doesNotMatch(page, /const \[customModels\] = useState/, 'the dead state is back');
+  assert.match(page, /const customModels = useMemo\(\(\) => connection\?\.customModelIds/, 'the added ids are not read from the connection');
+  assert.match(page, /removeGatewayConnectionModels\(connection\.id, \[model\]\)/, 'the page cannot forget an added model');
+  assert.match(page, /customModels\.includes\(entry\.model\) \? \{ onRemove:/, 'removal is offered on rows the provider reported, which the next rescan would undo');
+});
+
 test('Reconnect repairs the row it was clicked on instead of adding a second account', () => {
   // Reported from the field: "when I click on the account reconnect and log in with the same email it adds a
   // new one". The row's Reconnect called `openAddConnection` — the Add path, which sets `addAccount` whenever

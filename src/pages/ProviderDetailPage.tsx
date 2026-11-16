@@ -24,6 +24,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   X,
   Zap,
 } from 'lucide-react';
@@ -39,7 +40,7 @@ import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, f
 import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { ProviderPlayground } from '../components/ProviderPlayground';
-import { addGatewayConnectionModels, deleteGatewayConnection, getGatewayProviderHealth, getOpencodeRuntime, installOpencodeRuntime, startOpencodeRuntime, getGatewayRoutingState, listGatewayConnections, probeGatewayConnection, refreshGatewayConnectionModels, saveGatewayConnectionDetailed, saveOpenRouterConnection, setGatewayConnectionEnabled, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayOpencodeRuntime, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
+import { addGatewayConnectionModels, deleteGatewayConnection, removeGatewayConnectionModels, getGatewayProviderHealth, getOpencodeRuntime, installOpencodeRuntime, startOpencodeRuntime, getGatewayRoutingState, listGatewayConnections, probeGatewayConnection, refreshGatewayConnectionModels, saveGatewayConnectionDetailed, saveOpenRouterConnection, setGatewayConnectionEnabled, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayOpencodeRuntime, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
 import { getProviderById } from '../data/providers';
 import { dashboardRoutes, providerRoute, providerUsageRoute } from '../lib/routes';
 import { UsageContent } from './UsagePage';
@@ -212,7 +213,7 @@ function omitNumberKey(record: Record<string, number>, key: string) {
   return next;
 }
 
-function ModelRow({ model, prefix, facets, onCopy, onTest, testing, disabled, testState, testError, testLatencyMs, testNote }: { model: string; prefix: string; facets: ModelFacets; onCopy: () => void; onTest: () => void; testing: boolean; disabled: boolean; testState: ModelTestState; testError?: string; testLatencyMs?: number; testNote?: string }) {
+function ModelRow({ model, prefix, facets, onCopy, onTest, onRemove, testing, removing, disabled, testState, testError, testLatencyMs, testNote }: { model: string; prefix: string; facets: ModelFacets; onCopy: () => void; onTest: () => void; onRemove?: () => void; removing?: boolean; testing: boolean; disabled: boolean; testState: ModelTestState; testError?: string; testLatencyMs?: number; testNote?: string }) {
   const input = priceLabel(facets.prices, 'input');
   const output = priceLabel(facets.prices, 'output');
   const context = contextLabel(facets.contextWindow);
@@ -236,6 +237,9 @@ function ModelRow({ model, prefix, facets, onCopy, onTest, testing, disabled, te
       <div className="flex items-center gap-1.5">
         <button type="button" onClick={onCopy} aria-label={`Copy ${model} model ID`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-gold-text"><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>
         <button type="button" onClick={onTest} disabled={disabled || testing} aria-label={`Test ${model}`} aria-busy={testing} className="btn-quiet !px-2 !py-2 text-[11px]">{testing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Zap className="h-3.5 w-3.5" aria-hidden="true" />}{testing ? 'Testing' : 'Test'}</button>
+        {/* Only an id this gateway added can be removed: a discovered one is the provider's answer, and the
+            next "Update models" would only publish it again. The caller passes `onRemove` for those rows. */}
+        {onRemove && <button type="button" onClick={onRemove} disabled={removing} aria-label={`Remove added model ${model}`} aria-busy={removing} title="Forget this model — it was added by hand, not reported by the provider" className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-danger disabled:opacity-40">{removing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />}</button>}
       </div>
     </div>
   );
@@ -628,7 +632,15 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   const bulkAbortRef = useRef<AbortController | null>(null);
   const bulkRunRef = useRef(false);
   const scrollAnchorRef = useRef<number | null>(null);
-  const [customModels] = useState<string[]>([]);
+  /**
+   * The ids this gateway added by hand, read from the connection.
+   *
+   * This was `useState<string[]>([])` with **no setter** — permanently empty, so the union below was always
+   * just the accounts' own lists and nothing on the page could tell an id the operator typed from one the
+   * provider reported. Which is also what made an added id impossible to take back: no list to remove from.
+   */
+  const customModels = useMemo(() => connection?.customModelIds ?? [], [connection?.customModelIds]);
+  const [removingModel, setRemovingModel] = useState<string | null>(null);
   const [filters, setFilters] = useState<ModelFilterState>(defaultModelFilters);
   const { notify } = useToast();
   const [copiedModel, setCopiedModel] = useState<string | null>(null);
@@ -1267,6 +1279,31 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     flash(`${model} added to the provider catalog.`);
   }
 
+  /**
+   * Forgets a model id this gateway added.
+   *
+   * The other half of `addModel`, and the reason it was worth a route: an id typed by hand was permanent, so a
+   * typo or a retired id stayed in the catalogue for good. The row only offers this for ids in
+   * `connection.customModelIds` — a discovered model is the provider's answer, and removing it would be undone
+   * by the next "Update models".
+   *
+   * The list is re-read for the same reason the refresh does it: what the page renders is the union over every
+   * account, not this one connection's list.
+   */
+  async function removeModel(model: string) {
+    if (!connection || removingModel) return;
+    setRemovingModel(model);
+    try {
+      await removeGatewayConnectionModels(connection.id, [model]);
+      await loadConnection();
+      flash(`${model} is no longer in the catalog.`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : `${model} could not be removed.`, 'error');
+    } finally {
+      setRemovingModel(null);
+    }
+  }
+
   async function testModel(model: string) {
     if (testing || testingConnection) return;
     scrollAnchorRef.current = window.scrollY;
@@ -1703,7 +1740,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
             region keeps the controls in place and the section a predictable size.
           */}
           <div className="rise-in mt-3 max-h-[min(60vh,32rem)] space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
-            {visibleModels.length > 0 ? visibleModels.map((entry) => <ModelRow key={entry.model} model={entry.model} prefix={providerSlug(provider.id)} facets={entry.facets} onCopy={() => void copyModel(`${providerSlug(provider.id)}/${entry.model}`)} onTest={() => void testModel(entry.model)} testing={testingSet.has(entry.model)} disabled={testing || testingConnection} testState={modelTests[entry.model] ?? 'idle'} testError={modelTestErrors[entry.model]} testLatencyMs={modelTestLatencies[entry.model]} testNote={modelTestNotes[entry.model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{filters.query ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{filters.query ? <>Nothing in {allModels.length} models matches &ldquo;{filters.query.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}
+            {visibleModels.length > 0 ? visibleModels.map((entry) => <ModelRow key={entry.model} model={entry.model} prefix={providerSlug(provider.id)} facets={entry.facets} onCopy={() => void copyModel(`${providerSlug(provider.id)}/${entry.model}`)} onTest={() => void testModel(entry.model)} {...(customModels.includes(entry.model) ? { onRemove: () => void removeModel(entry.model), removing: removingModel === entry.model } : {})} testing={testingSet.has(entry.model)} disabled={testing || testingConnection} testState={modelTests[entry.model] ?? 'idle'} testError={modelTestErrors[entry.model]} testLatencyMs={modelTestLatencies[entry.model]} testNote={modelTestNotes[entry.model]} />) : <div className="rounded-xl border border-dashed border-line-strong px-5 py-9 text-center"><Cpu className="mx-auto h-6 w-6 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">{filters.query ? 'No matching models' : 'No models discovered'}</p><p className="muted mt-1 text-xs">{filters.query ? <>Nothing in {allModels.length} models matches &ldquo;{filters.query.trim()}&rdquo;.</> : 'Connect the provider or add a custom model ID below.'}</p></div>}
           </div>
           <div className="mt-4 border-t border-line pt-5"><AddModelForm onAdd={addModel} providerId={provider.id} /></div>
           {copiedModel && <p role="status" className="mt-3 flex items-center gap-1.5 text-[11px] text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copied {copiedModel}</p>}

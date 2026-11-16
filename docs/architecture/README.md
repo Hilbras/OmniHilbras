@@ -72,12 +72,12 @@ that holds is one a machine re-derives.
 | --- | --- | --- | --- |
 | `Kernel/API/src/core/routing.ts` | 785 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
 | `Kernel/API/src/core/provider-resolver.ts` | 306 | 1 | enforced by a test that greps the file; the per-provider tables live in `provider-client-identity.ts` and `provider-responses-lane.ts` it reads |
-| `Kernel/API/src/core/request-executor.ts` | 899 | **0** | the failover loop, the attempt ledger, the ordering |
-| `Kernel/API/src/core/connection-manager.ts` | 335 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 3889 | 26 | all twenty-six `.onDemand()` registrations, in one constructor |
+| `Kernel/API/src/core/request-executor.ts` | 909 | **0** | the failover loop, the attempt ledger, the ordering |
+| `Kernel/API/src/core/connection-manager.ts` | 350 | **0** | one error mapper, one catalog merge, one lock scope |
+| `Kernel/API/src/core/service.ts` | 3901 | 26 | all twenty-six `.onDemand()` registrations, in one constructor |
 | `Kernel/API/src/core/http.ts` | 340 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 857 | 13 | the module a provider split would help most |
-| `Kernel/API/src/routes/connections.ts` | 358 | 1 | one OpenRouter save shortcut, the generic quota route, and the build stamp |
+| `Kernel/API/src/routes/connections.ts` | 395 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
 | `Kernel/API/src/routes/inference.ts` | 1280 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and the auth gate |
 | `Kernel/API/src/routes/api-keys.ts` | 74 | **0** | |
 | `Kernel/API/src/routes/status.ts` | 106 | **0** | `/health`, `/v1/system`, `/v1/routing`, and the build stamp |

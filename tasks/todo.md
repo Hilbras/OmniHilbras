@@ -5929,3 +5929,44 @@ independently of the React app" is now measured over every provider manifest, an
   Both revert-checked: dropping the target from the poll's decision fails the first, and restoring the old
   Reconnect wiring fails the dashboard guard.
 
+
+## 3.60.0 — an added model can be taken back, and a hedge reaches the account it was planned for
+
+- **A model typed by hand was permanent.** `connection.customModelIds` was written by
+  `POST /v1/connections/:id/models` and had no inverse: no route, no store method, no button. A typo in a model id
+  was in the catalog for the life of the connection. There is now `DELETE /v1/connections/:id/models` taking
+  `{ modelIds: string[] }`, `ConnectionStore.removeModels` + `mergeRemovedModelIds`, `ConnectionManager.removeModels`
+  (which answers `NOT_FOUND` when nothing was actually removed rather than reporting a success it did not have),
+  `GatewayService.removeConnectionModels`, and `removeGatewayConnectionModels` in the dashboard client.
+  An empty array means **every** id the operator added — and it can never remove an id the provider itself
+  reports, because a rescan publishes that list again and a delete would be undone silently on the next refresh.
+  The route is registered **before** the generic `DELETE /v1/connections/:id`, which is not cosmetic: with the
+  order reversed the model delete removes the whole connection. `Kernel/API/test/connection-model-removal.test.js`
+  pins exactly that (a model delete leaves the connection standing), plus the empty-array semantics, the
+  provider-reported id refusal, and the `NOT_FOUND`.
+- **`customModels` was dead state.** `ProviderDetailPage` held `const [customModels] = useState<string[]>([])` —
+  no setter, so permanently empty, so no row could tell an id the operator typed from one the provider reported,
+  and the Trash2 button had nothing to decide on. It is now `useMemo(() => connection?.customModelIds ?? [], …)`,
+  and the row's remove action renders only for those ids. Guarded in `tests/dashboard-wiring.test.js`, which fails
+  if the dead `useState` returns or if removal is offered on a provider-reported row.
+- **A hedged attempt was sent to the wrong account.** Reported: *"if the first account not work it not try on
+  second"* with hedging on, and — the tell — the sibling answered `AUTHENTICATION_FAILED` where the same account
+  **succeeds when asked alone**. The race's dispatch passed a provider id and **no connection id**
+  (`this.deps.chat(candidate.providerId, request, deadline, scope)`), while the sequential path passes one
+  (`… , candidate.connectionId`). Without it the service resolves a credential by *provider* — the first
+  connection that has one — so every hedged attempt went to that connection whatever candidate the race had
+  picked, while the ledger recorded the candidate. Two accounts, one account asked twice, and the sibling never
+  reached. Fixed by passing the candidate's connection id, with the reason and the measurement in a comment.
+  `a hedged attempt is sent as the account it was planned for, not the provider's first` in
+  `Kernel/API/test/account-isolation.test.js` gives each account a distinct credential and asserts **which one**
+  each dispatch carried — the previous test counted dispatches, which two dispatches to one account satisfy.
+  Revert-checked: without the connection id the slow-leader test fails after 2013 ms; with it, 153 ms.
+- **Measured live after the fix**, both `nous` accounts enabled, `hedgeAfterMs` 400: the request returns HTTP 200
+  served by `nous-dc4b01cc7adf`, ledger `attempts=2` — `nous: AUTHENTICATION_FAILED` then
+  `nous-dc4b01cc7adf: success`. The wall time (13.9 s) is that provider's own generation on a free model, not the
+  hand-off; the earlier "racing breaks the sibling" report is resolved, and the cause was this, not concurrency.
+- **The two `nous` accounts are both `oauth` and both need a fresh sign-in.** Row `nous`: *"This refresh token was
+  already rejected; please re-authenticate"*. Row `nous-dc4b01cc7adf`: the provider answers *"Invalid or inactive
+  Nous Research API key"* for its token. Repair is **Reconnect on that row**, which 3.59.0 taught to target the
+  row it was clicked on instead of minting a second account. Nothing in the gateway can renew a rejected refresh
+  token, so this is a dashboard action, not a code fix.

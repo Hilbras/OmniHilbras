@@ -207,6 +207,19 @@ export interface ConnectionStore extends ConnectionCredentialStore {
    *   is the default, because that is what the "add model" control means.
    */
   updateModels(connectionId: string, modelIds: string[], modelMeta?: ModelMetaMap, options?: { replace?: boolean }): Promise<ConnectionRecord | undefined>;
+  /**
+   * Removes model ids, and only ones this gateway added.
+   *
+   * `customModelIds` is the record of what the add-model control wrote, so that is the list which shrinks —
+   * removing an id the *provider* reported would be undone by the next "Update models", which republishes the
+   * provider's catalog, so pretending otherwise would be a removal that comes back. An **empty** `modelIds`
+   * means every addition: the operator clearing their own list. It cannot mean "empty the catalog", because
+   * that catalogue is the provider's answer and not the operator's to erase.
+   *
+   * Returns `undefined` when nothing was removed, which is what makes "there was nothing to remove" different
+   * from "removed an empty set" for a caller that reports either.
+   */
+  removeModels(connectionId: string, modelIds: string[]): Promise<ConnectionRecord | undefined>;
   updateResilience(connectionId: string, resilience: Partial<ResilienceSettings>): Promise<ConnectionRecord | undefined>;
   /** Writes the ownership note; `undefined` clears it. */
   setResponsibility(connectionId: string, responsibility: ConnectionResponsibility | undefined): Promise<ConnectionRecord | undefined>;
@@ -471,6 +484,16 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     // not gated on the id list having changed.
     if (!merged && !modelMeta) return cloneRecord(record);
     const updated = { ...record, ...merged, ...(modelMeta ? { modelMeta } : {}), updatedAt: new Date().toISOString() };
+    this.connections.set(connectionId, updated);
+    return cloneRecord(updated);
+  }
+
+  async removeModels(connectionId: string, modelIds: string[]) {
+    const record = this.connections.get(connectionId);
+    if (!record) return undefined;
+    const removed = mergeRemovedModelIds(record, modelIds);
+    if (!removed) return undefined;
+    const updated = { ...record, ...removed, updatedAt: new Date().toISOString() };
     this.connections.set(connectionId, updated);
     return cloneRecord(updated);
   }
@@ -856,6 +879,27 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       if (!merged && !modelMeta) return cloneRecord(record);
       const previous = record;
       const updated = { ...record, ...merged, ...(modelMeta ? { modelMeta } : {}), updatedAt: new Date().toISOString() };
+      this.connections.set(connectionId, updated);
+      try {
+        await this.persistMetadata();
+      } catch (error) {
+        this.connections.set(connectionId, previous);
+        await this.persistMetadata().catch(() => undefined);
+        throw error;
+      }
+      return cloneRecord(updated);
+    });
+  }
+
+  async removeModels(connectionId: string, modelIds: string[]) {
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const record = this.connections.get(connectionId);
+      if (!record) return undefined;
+      const removed = mergeRemovedModelIds(record, modelIds);
+      if (!removed) return undefined;
+      const previous = record;
+      const updated = { ...record, ...removed, updatedAt: new Date().toISOString() };
       this.connections.set(connectionId, updated);
       try {
         await this.persistMetadata();
@@ -1347,6 +1391,25 @@ function mergeAddedModelIds(record: ConnectionRecord, additions: string[]) {
     modelIds: normalizeModelIds([...record.modelIds, ...newAdditions], maxConnectionModelIds),
     customModelIds: normalizeModelIds([...record.customModelIds, ...newAdditions], maxCustomModelIds),
   };
+}
+
+/**
+ * The inverse of `mergeAddedModelIds`: the record without the ids named, and without ones it never added.
+ *
+ * Only ids in `customModelIds` can be removed, so an id the provider reported is left alone even when it is
+ * named — a removal the next rescan would undo is not a removal. The union beside it shrinks too, because the
+ * served list is what the page and the router read; leaving the id there would make the removal invisible and
+ * look exactly like the button doing nothing.
+ */
+function mergeRemovedModelIds(record: ConnectionRecord, removals: string[]) {
+  const named = removals.length === 0
+    // No ids named: every addition. Read off `customModelIds` rather than the served list, so "clear my
+    // additions" cannot empty a catalogue the provider publishes.
+    ? new Set(record.customModelIds)
+    : new Set(normalizeModelIds(removals, maxCustomModelIds));
+  const customModelIds = record.customModelIds.filter((id) => !named.has(id));
+  if (customModelIds.length === record.customModelIds.length) return undefined;
+  return { customModelIds, modelIds: record.modelIds.filter((id) => !named.has(id)) };
 }
 
 function isSafeModelId(value: string) {

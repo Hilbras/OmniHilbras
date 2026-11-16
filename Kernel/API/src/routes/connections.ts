@@ -187,6 +187,21 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
       return true;
     }
 
+    // Forgetting a model this gateway added. It has to be tried **before** the delete below, which matches
+    // every path under `/v1/connections/` — the same ordering `/models/refresh` relies on.
+    if (request.method === 'DELETE' && url.pathname.endsWith('/models') && url.pathname.startsWith('/v1/connections/')) {
+      const connectionId = decodeConnectionId(url.pathname.slice('/v1/connections/'.length, -'/models'.length));
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxConnectionBodyBytes));
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['modelIds']);
+      // An empty list is legal here and refused by the add route: adding nothing is a mistake, while removing
+      // nothing *of ours* is "forget every model I added". Either way the provider's own catalog is untouched.
+      const modelIds = parseModelIdsToRemove(body.modelIds);
+      const connection = await service.removeConnectionModels(connectionId, modelIds);
+      sendJson(response, 200, { connection }, origin);
+      return true;
+    }
+
     if (request.method === 'DELETE' && url.pathname.startsWith('/v1/connections/')) {
       const connectionId = decodeConnectionId(url.pathname.slice('/v1/connections/'.length));
       await service.removeConnection(connectionId);
@@ -329,6 +344,28 @@ export function parseModelIds(value: unknown) {
     if (modelIds.length > 2_000) throw invalidRequest('modelIds must contain at most 2,000 unique entries.');
   }
   if (modelIds.length === 0) throw invalidRequest('modelIds must contain at least one unique model ID.');
+  return modelIds;
+}
+
+/**
+ * The ids to forget, where an empty or absent list means "every model this gateway added".
+ *
+ * The empty list is legal here and refused above, and the difference is the verb: adding nothing is a mistake,
+ * while removing nothing of ours means clearing what the add-model control wrote. Every id is still validated,
+ * so a malformed body is refused rather than silently treated as "clear everything".
+ */
+export function parseModelIdsToRemove(value: unknown) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw invalidRequest('modelIds must be an array.');
+  const modelIds = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (typeof item !== 'string' || item !== item.trim() || !/^[a-z0-9~][a-z0-9._:/~-]{0,255}$/i.test(item)) throw invalidRequest('modelIds contains an invalid model ID.');
+    if (seen.has(item)) continue;
+    seen.add(item);
+    modelIds.push(item);
+    if (modelIds.length > 2_000) throw invalidRequest('modelIds must contain at most 2,000 unique entries.');
+  }
   return modelIds;
 }
 

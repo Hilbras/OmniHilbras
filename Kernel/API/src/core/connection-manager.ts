@@ -273,6 +273,21 @@ export class ConnectionManager {
     });
   }
 
+  /**
+   * Removes model ids the gateway added.
+   *
+   * `NOT_FOUND` covers both "no such connection" and "nothing was an addition": the store answers `undefined`
+   * for either, and a caller that asked to remove an id the provider published is being told the truth — there
+   * was nothing of ours to remove.
+   */
+  async removeModels(connectionId: string, modelIds: string[]): Promise<ConnectionRecord> {
+    return this.deps.lock(async () => {
+      const updated = await this.storeCall('The local model catalog', (store) => store.removeModels(connectionId, modelIds));
+      if (!updated) throw new ProviderError('NOT_FOUND', 'No added model on that connection matched.');
+      return updated;
+    });
+  }
+
   async remove(connectionId: string): Promise<void> {
     const removed = await this.deps.lock(() => this.storeCall('The local connection', (store) => store.remove(connectionId)));
     if (!removed) throw new ProviderError('NOT_FOUND', 'The local connection was not found.');

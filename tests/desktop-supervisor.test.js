@@ -150,7 +150,8 @@ test('server output is persisted to the log file', async () => {
   }
 });
 
-test('restart attempts stop at the configured limit', async () => {  const port = await freePort();
+test('restart attempts stop at the configured limit', async () => {
+  const port = await freePort();
   const supervisor = supervisorFor(port, {
     autoRestart: true,
     maxRestarts: 1,
