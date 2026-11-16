@@ -7,7 +7,9 @@ import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore } from '..
  * Multiple accounts of one provider must be separate routes.
  *
  * A `GatewayConnection` is the account. These tests pin the two properties that were missing before:
- * an explicit connection is honoured, and an authentication failure is not retried on another account.
+ * an explicit connection is honoured, and a failure on one account does not decide the request for another.
+ * A revoked credential hands off to the sibling and is reported against the account that owns it — see the
+ * hand-off test below, which asserted the opposite until the behaviour was reported from the field.
  */
 
 function adapter(captured, failAuth = false) {
@@ -63,13 +65,74 @@ test('a disabled explicit account is not replaced by another account', async () 
   assert.equal(captured.length, 0, 'a disabled account must not dispatch, and no other account may take the request');
 });
 
-test('an authentication failure stops at that account instead of trying the next one', async () => {
+test('an authentication failure hands off to the next account, without re-asking the account that failed', async () => {
+  // This asserted the opposite until the behaviour was reported from the field: with two accounts of one
+  // provider, a revoked sign-in on the first meant the request failed with a healthy second account sitting
+  // right there — *"if the first account does not work it does not try the second, I need to disable it"*.
+  //
+  // What the old rule protected is not lost: the failure is recorded against the account that owns the
+  // credential (health, and the ledger below), so it is visible and stops being asked — measured on that
+  // installation, the revoked account took seven failures and subsequent requests went straight to the
+  // sibling. Stopping the request as well only added a failure the provider did not have to cause.
   const { captured, service } = await serviceWith({ failAuth: true });
+  await assert.rejects(
+    () => service.chatWithFailover(request()),
+    (error) => {
+      assert.ok(error instanceof ProviderError && error.code === 'AUTHENTICATION_FAILED');
+      // One dispatch per account: the failing one is never asked twice, the sibling is asked once.
+      assert.deepEqual(error.details?.attempts?.map((attempt) => attempt.connectionId), ['first', 'second']);
+      return true;
+    },
+  );
+  assert.equal(captured.length, 2, 'each account is dispatched exactly once');
+});
+
+test('an authentication failure stops when there is no other account left', async () => {
+  // The walk has to end somewhere, and it ends with the caller: a single revoked account fails the request
+  // with the credential error rather than retrying a key the provider has already refused.
+  const captured = [];
+  const store = new InMemoryConnectionStore();
+  await store.save({
+    id: 'only', providerId: 'p', name: 'only', endpoint: 'https://p.example/v1', priority: 1, proxyPool: 'none', enabled: true, modelIds: ['m'],
+  }, { type: 'api-key', value: 'key' });
+  const registry = new ProviderRegistry().register(adapter(captured, true));
+  const service = new GatewayService(registry, store, store, new InMemoryApiKeyStore(), {});
   await assert.rejects(
     () => service.chatWithFailover(request()),
     (error) => error instanceof ProviderError && error.code === 'AUTHENTICATION_FAILED',
   );
-  assert.equal(captured.length, 1, 'the second account must receive zero dispatches after an auth failure');
+  assert.equal(captured.length, 1, 'a single account is asked once, not repeatedly');
+});
+
+test('a hedge on one account does not skip the provider’s other account', async () => {
+  // Measured before this test existed, with hedging on and the first account's credential refused: three
+  // requests in a row failed `AUTHENTICATION_FAILED` and the healthy account was never dispatched to. The
+  // race's failed attempt was recorded against the *provider*, and the walk past what the race already tried
+  // is keyed on that — so one account's hedge marked its sibling as raced too. Two accounts of one provider
+  // are two routes, and racing one of them says nothing about the other.
+  const captured = [];
+  const store = new InMemoryConnectionStore();
+  const save = (id, priority) => store.save({
+    id, providerId: 'p', name: id, endpoint: 'https://p.example/v1', priority, proxyPool: 'none', enabled: true, modelIds: ['m'], resilience: { hedgeAfterMs: 300 },
+  }, { type: 'api-key', value: 'key' });
+  await save('first', 1);
+  await save('second', 2);
+  const registry = new ProviderRegistry().register({
+    id: 'p', name: 'P', capabilities: { chat: true, streaming: false, models: true, embeddings: false },
+    async listModels() { return [{ id: 'm', providerId: 'p' }]; },
+    async healthCheck() { return { status: 'healthy', checkedAt: new Date().toISOString(), latencyMs: 1, verified: 'credential' }; },
+    async chat(request) {
+      captured.push(request);
+      // The first dispatch is the dead account; the second is the sibling that must answer.
+      if (captured.length === 1) throw new ProviderError('AUTHENTICATION_FAILED', 'The credential was refused.', { publicMessage: 'The credential was refused.' });
+      return { id: 'r', providerId: 'p', model: request.model, createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'ok' }, finishReason: 'stop' };
+    },
+  });
+  const service = new GatewayService(registry, store, store, new InMemoryApiKeyStore(), {});
+
+  const outcome = await service.chatWithFailover(request(), undefined);
+  assert.equal(outcome.response.message.content, 'ok', 'the healthy account must answer');
+  assert.equal(captured.length, 2, 'both accounts are dispatched, each once');
 });
 
 test('one account at its concurrency limit refuses without blocking another account', async () => {

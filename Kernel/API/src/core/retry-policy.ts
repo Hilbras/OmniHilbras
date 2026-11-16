@@ -69,6 +69,13 @@ export type RetryPolicyInput = {
   aborted: boolean;
   /** Streaming walks the chain once and does not retry. */
   canRetry: boolean;
+  /**
+   * Whether the walk has another connection left to try.
+   *
+   * Only a dead credential asks this. Every other rule is about the request, the model or the provider's own
+   * health, and answers the same way whether or not a sibling exists.
+   */
+  hasOtherRoute: boolean;
 };
 
 export class RetryPolicy {
@@ -87,14 +94,23 @@ export class RetryPolicy {
     if (input.aborted) return 'stop';
 
     /**
-     * A dead credential stops here, even though a sibling *could* answer.
+     * A dead credential hands off **while a sibling is left to try**, and stops when none is.
      *
-     * This is the one place the "move on" rule is deliberately not applied. Rotating past a revoked
-     * key would succeed — and would quietly bill a different account for every request while the
-     * operator's broken account stays broken and invisible. The failure belongs to the account that
-     * owns the credential, so it is reported against it.
+     * It used to stop unconditionally, on the reasoning that rotating past a revoked key would quietly bill
+     * the next account forever while the broken one stayed broken and invisible. Half of that is already
+     * answered elsewhere: `AUTHENTICATION_FAILED` is not a caller fault, so the executor records it against
+     * the connection, the health system ejects that account after its failures accumulate, and the dashboard
+     * shows it failing — the broken account is visible and is not paid request after request.
+     *
+     * What the unconditional stop actually bought was a failed request while a healthy sibling sat right
+     * there, and an operator who had to disable the broken account by hand to make the provider work at all.
+     * Reported from the field with two accounts of one provider: *"if the first account does not work it does
+     * not try the second, I need to disable it"*. Disabling a working account by hand is the failure this rule
+     * was meant to prevent, not the remedy for it.
      */
-    if (isProviderError(input.error) && (input.error.code === 'AUTHENTICATION_FAILED' || input.error.statusCode === 401)) return 'stop';
+    if (isProviderError(input.error) && (input.error.code === 'AUTHENTICATION_FAILED' || input.error.statusCode === 401)) {
+      return input.hasOtherRoute ? 'next-route' : 'stop';
+    }
 
     /**
      * A **local** concurrency saturation stops here too.

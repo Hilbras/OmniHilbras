@@ -103,13 +103,16 @@ test('fastest prefers the measured faster account after both have a reading', as
   assert.deepEqual(captured.map((entry) => entry.providerId), ['a', 'b', 'b'], 'the measured faster account should win');
 });
 
-test('an authentication failure in one target is not retried on another target', async () => {
+test('an authentication failure in one target hands off to the next target', async () => {
+  // The same question as two accounts of one provider, one level up: a combo whose first target's credential
+  // was refused. The second target is a different account with its own key, so it is worth asking — the old
+  // rule stopped, on the reasoning that a sibling refuses identically, which is true of a bad request and not
+  // of a refused credential.
   const { captured, service } = await setup({ failFirst: true });
-  await assert.rejects(
-    () => service.chatWithFailover(request, undefined, signal()),
-    (error) => error instanceof ProviderError && error.code === 'AUTHENTICATION_FAILED',
-  );
-  assert.deepEqual(captured.map((entry) => entry.providerId), ['a']);
+  const { response, attempts } = await service.chatWithFailover(request, undefined, signal());
+  assert.equal(response.providerId, 'b', 'the healthy target answers');
+  assert.deepEqual(captured.map((entry) => entry.providerId), ['a', 'b'], 'the refused target is asked once, then the next');
+  assert.deepEqual(attempts.map((attempt) => `${attempt.providerId}:${attempt.ok ? 'ok' : attempt.errorCode}`), ['a:AUTHENTICATION_FAILED', 'b:ok']);
 });
 
 test('an unknown or disabled virtual id does not fall through to concrete routing', async () => {

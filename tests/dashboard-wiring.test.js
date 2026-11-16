@@ -63,6 +63,35 @@ test('the desktop window carries the brand icon', () => {
   assert.match(main, /icon: join\(projectRoot, 'brand\/logo-512\.png'\)/, 'the window has no icon');
 });
 
+test('Reconnect repairs the row it was clicked on instead of adding a second account', () => {
+  // Reported from the field: "when I click on the account reconnect and log in with the same email it adds a
+  // new one". The row's Reconnect called `openAddConnection` — the Add path, which sets `addAccount` whenever
+  // the provider already holds an account — and an OAuth row renders no Edit button, so Reconnect was the only
+  // repair path a signed-in account had and it was wired to the one action that duplicates it.
+  const page = read('src/pages/ProviderDetailPage.tsx');
+  assert.match(page, /onReconnect=\{[^\n]*reconnectAccount\(item\)/, 'the row does not reconnect its own account');
+  const start = page.indexOf('function reconnectAccount(');
+  assert.notEqual(start, -1, 'reconnectAccount is gone');
+  const handler = page.slice(start, page.indexOf('function openEditConnection(', start));
+  assert.match(handler, /openEditConnection\(row\)/, 'reconnecting does not target the row it was clicked on');
+  assert.doesNotMatch(handler, /beginOauthConnection\(/, 'reconnecting still starts the add-account flow');
+});
+
+test('a sign-in start names the row it repairs, for every flow the dialog offers', () => {
+  // The same duplicate, one layer down: a start request that drops the target lets the gateway mint a fresh id
+  // beside the account the row shows. ZCode and Kiro were the two the dialog never told.
+  const dialog = read('src/components/OauthConnectDialog.tsx');
+  for (const call of ['startClaudeCodeSignIn', 'startCodexSignIn']) {
+    assert.match(dialog, new RegExp(`${call}\\(addAccount, undefined, targetConnectionId\\)`), `${call} does not name the row`);
+  }
+  assert.match(dialog, /startGatewayDeviceSignIn\(providerId, addAccount, undefined, targetConnectionId\)/, 'the device-flow start does not name the row');
+  assert.match(dialog, /startKiroSignIn\(addAccount, undefined, targetConnectionId\)/, 'the Kiro start does not name the row');
+  assert.match(dialog, /startZcodeSignIn\('zai', undefined, addAccount, targetConnectionId\)/, 'the ZCode start does not name the row');
+  const client = read('src/lib/gatewayClient.ts');
+  assert.match(client, /startZcodeSignIn\(provider: 'zai' \| 'bigmodel' = 'zai', signal\?: AbortSignal, addAccount = false, connectionId\?: string\)/, 'the ZCode client cannot send a target');
+  assert.match(client, /startKiroSignIn\(addAccount\?: boolean, signal\?: AbortSignal, connectionId\?: string\)/, 'the Kiro client cannot send a target');
+});
+
 test('Update models re-reads the list the page renders, not only the account it refreshed', () => {
   // Measured in a browser before this guard existed: with the store one model ahead of the open page, the
   // click toasted "Updated Coarena models — 20 available." while the Models stat stayed at 19. The page

@@ -24,16 +24,20 @@ const candidate = (over = {}) => ({
   resilience: { maxRetries: 1, timeoutMs: 30_000, requestsPerMinute: 60, hedgeAfterMs: 0, ...over },
 });
 
-const ask = (over = {}) => policy.afterFailure({ error: new Error('boom'), candidate: candidate(), attemptsOnThisRoute: 1, aborted: false, canRetry: true, ...over });
+// `hasOtherRoute: false` is the default here because every case below is about one connection on its own;
+// the one rule that reads it has its own test.
+const ask = (over = {}) => policy.afterFailure({ error: new Error('boom'), candidate: candidate(), attemptsOnThisRoute: 1, aborted: false, canRetry: true, hasOtherRoute: false, ...over });
 
 // ── the three answers ─────────────────────────────────────────────────────
 
-test('a permanent failure stops, because another connection refuses it identically', () => {
+test('a permanent failure stops when there is no other connection to try', () => {
   // The whole cost this avoids: an upstream request spent confirming what the first one already
   // said, and the user waits N times as long for the same refusal.
   for (const code of ['INVALID_REQUEST', 'AUTHENTICATION_FAILED', 'NOT_SUPPORTED', 'NOT_FOUND']) {
     assert.equal(ask({ error: new ProviderError(code, 'no') }), 'stop', code);
   }
+  // `AUTHENTICATION_FAILED` is in that list only because there is nothing else to try here. With a sibling
+  // account left it hands off — see "a dead credential hands off to a sibling account" below.
 });
 
 test('a cancellation stops, whatever the error says', () => {
@@ -99,7 +103,7 @@ test('every error code the SDK can raise gets an answer, and the two paths diffe
   for (const code of codes) {
     for (const retryable of [true, false]) {
       const error = new ProviderError(code, code, { retryable });
-      const shared = { error, candidate: candidate({ maxRetries: 2 }), attemptsOnThisRoute: 1, aborted: false };
+      const shared = { error, candidate: candidate({ maxRetries: 2 }), attemptsOnThisRoute: 1, aborted: false, hasOtherRoute: false };
       const chat = policy.afterFailure({ ...shared, canRetry: true });
       const stream = policy.afterFailure({ ...shared, canRetry: false });
       assert.ok(['retry', 'next-route', 'stop'].includes(chat), `${code} retryable=${retryable} produced ${chat}`);
@@ -115,14 +119,38 @@ test('every error code the SDK can raise gets an answer, and the two paths diffe
   }
 });
 
-test('the four terminal codes stop on both paths, whatever the error claims about itself', () => {
+test('the terminal codes stop on both paths, whatever the error claims about itself', () => {
   // A provider marking its own refusal `retryable` does not make it retryable: the codes below
-  // describe the request or the credential, and another connection refuses them identically. Trust
+  // describe the request, and another connection refuses them identically. Trust
   // the flag here and a mistyped code fans out across every route.
-  for (const code of ['INVALID_REQUEST', 'AUTHENTICATION_FAILED', 'NOT_SUPPORTED', 'NOT_FOUND']) {
+  for (const code of ['INVALID_REQUEST', 'NOT_SUPPORTED', 'NOT_FOUND']) {
     const error = new ProviderError(code, code, { retryable: true });
     assert.equal(ask({ error, attemptsOnThisRoute: 1 }), 'stop', `${code} with retryable: true`);
   }
+});
+
+test('a dead credential hands off to a sibling account, and only stops when there is none', () => {
+  // Reported from the field, with two accounts of one provider: "if the first account does not work it does
+  // not try the second, I need to disable it". Measured on that installation before this test existed — the
+  // first account's refresh token had been revoked and the second was fine, yet the request stopped with
+  // `attempts: 1` and `AUTHENTICATION_FAILED`.
+  //
+  // The rule used to stop unconditionally, to stop a broken account hiding behind a healthy sibling. The
+  // hiding concern is answered by health, not by failing the request: `AUTHENTICATION_FAILED` is not a caller
+  // fault, so the executor records it against the connection and the account is ejected once its failures
+  // accumulate.
+  const revoked = new ProviderError('AUTHENTICATION_FAILED', 'This refresh token was already rejected; please re-authenticate');
+  assert.equal(ask({ error: revoked, hasOtherRoute: true }), 'next-route', 'a sibling account is a different key, not the same refusal');
+  assert.equal(ask({ error: revoked, hasOtherRoute: true, canRetry: false }), 'next-route', 'and a stream walks the chain the same way');
+  assert.equal(ask({ error: revoked, hasOtherRoute: false }), 'stop', 'with nothing left to try, stop and report it');
+  // A 401 without a code is the same statement, and is how several adapters report it.
+  const bare401 = new ProviderError('PROVIDER_REQUEST_FAILED', 'unauthorized', { statusCode: 401, retryable: true });
+  assert.equal(ask({ error: bare401, hasOtherRoute: true }), 'next-route');
+  assert.equal(ask({ error: bare401, hasOtherRoute: false }), 'stop');
+  // A *restricted* account still stops with a sibling available: rotating past that flag is what the provider
+  // is complaining about, so a sibling would deepen it rather than route around it.
+  const restricted = new ProviderError('PROVIDER_REQUEST_FAILED', 'Your account has been restricted due to unusual activity', { statusCode: 403 });
+  assert.equal(ask({ error: restricted, hasOtherRoute: true }), 'stop');
 });
 
 test('the decision depends on the connection’s own budget, not on how much has been tried elsewhere', () => {

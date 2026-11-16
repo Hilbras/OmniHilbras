@@ -1404,11 +1404,13 @@ export async function deleteGatewayConnection(connectionId: string, signal?: Abo
   return requestJson<{ deleted: boolean }>(`/v1/connections/${encodeURIComponent(connectionId)}`, { method: 'DELETE', ...(signal ? { signal } : {}) });
 }
 
-export function startZcodeSignIn(provider: 'zai' | 'bigmodel' = 'zai', signal?: AbortSignal, addAccount = false) {
+export function startZcodeSignIn(provider: 'zai' | 'bigmodel' = 'zai', signal?: AbortSignal, addAccount = false, connectionId?: string) {
   return requestJson<{ authorizeUrl: string; flowId: string; expiresAt: number; pollIntervalSec: number }>('/v1/oauth/zcode/start', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ provider, addAccount }),
+    // `connectionId` repairs that row the way every other sign-in does; without it a Reconnect saved a second
+    // ZCode account beside the first.
+    body: JSON.stringify({ provider, addAccount, ...(connectionId ? { connectionId } : {}) }),
     ...(signal ? { signal } : {}),
   });
 }
@@ -1499,12 +1501,14 @@ export function getDeviceSignInStatus(providerId: string, sessionId: string, sig
 }
 
 /** Kiro signs in through AWS's device flow, so there is a code and no auth URL. */
-export function startKiroSignIn(addAccount?: boolean, signal?: AbortSignal) {
+export function startKiroSignIn(addAccount?: boolean, signal?: AbortSignal, connectionId?: string) {
   return requestJson<{ sessionId: string; userCode: string; verificationUrl: string; expiresAt: string }>('/v1/oauth/kiro/start', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     // The gateway has taken this flag since multi-account Kiro shipped; the dialog never sent it.
-    body: JSON.stringify(addAccount ? { addAccount: true } : {}),
+    // `connectionId` is the row being repaired: the sign-in then replaces that account's credential instead of
+    // saving a second one beside it, which is what a Reconnect used to do.
+    body: JSON.stringify({ ...(addAccount ? { addAccount: true } : {}), ...(connectionId ? { connectionId } : {}) }),
     ...(signal ? { signal } : {}),
   });
 }

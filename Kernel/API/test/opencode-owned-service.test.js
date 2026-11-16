@@ -202,7 +202,13 @@ test('the supervisor starts an instance when nothing is running, and stops when 
     log: () => {},
   });
   // Long enough to survive a busy machine: the assertion is "it keeps checking", not a frame budget.
-  await wait(400);
+  //
+  // It waited a fixed 400 ms until this was measured twice inside `pnpm test:gateway` (a suite that runs many
+  // files at once, on a machine that is also running the dev servers): the supervisor had ticked once and the
+  // assertion failed while it was behaving perfectly. The property is that it keeps going, so that is what is
+  // waited for — a deadline, not a stopwatch.
+  const deadline = Date.now() + 5_000;
+  while (started < 2 && Date.now() < deadline) await wait(25);
   stop();
   const settled = started;
   assert.ok(settled >= 2, `it keeps checking while the gateway lives (saw ${settled})`);

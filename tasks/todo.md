@@ -5858,3 +5858,74 @@ independently of the React app" is now measured over every provider manifest, an
   `customModels` state has no setter (`useState<string[]>([])`, `ProviderDetailPage.tsx:631`), so it is
   permanently empty and `allModels` is always `importedModels`.
 
+## 3.59.0 — a refused credential hands off to the sibling account
+
+- **A dead sign-in on one account no longer fails the whole request.** Reported from the field: *"if the first
+  account does not work it does not try the second, I need to disable it to work."* Measured on this
+  installation's `nous` provider, which carries two accounts and both enabled:
+
+  ```
+  before:  attempts: 1   tried: nous                  code: AUTHENTICATION_FAILED      (request failed)
+  after:   attempts: 2   tried: nous                  code: AUTHENTICATION_FAILED
+                         tried: nous-dc4b01cc7adf     code: PROVIDER_REQUEST_FAILED    (the sibling was asked)
+  ```
+
+  The second line is a real dispatch — the provider's own refusal came back from it — so the sibling was
+  genuinely reached rather than the walk merely continuing on paper.
+- **The rule was deliberate, and its reasoning was half right.** `RetryPolicy.afterFailure` stopped the walk on
+  any 401, reasoning that rotating past a revoked key "would quietly bill a different account for every request
+  while the operator's broken account stays broken and invisible". The invisibility half is answered by health:
+  `AUTHENTICATION_FAILED` is not a caller fault, so the executor records it against the connection, and the
+  routing state shows that account at `failures: 7` with its last error. Measured afterwards: a later request
+  made **one** attempt, going straight to the sibling, because the dead account was already ejected — the
+  "billed forever" concern does not survive the health system it was written before.
+- What the unconditional stop actually bought was a failed request with a healthy account sitting beside a
+  revoked one, and an operator disabling accounts by hand. The rule now hands off while another connection
+  remains and stops when none does, so a single dead account still reports `AUTHENTICATION_FAILED` to the
+  caller instead of retrying a key the provider has already refused. `RetryPolicyInput.hasOtherRoute` is the
+  new input, and both executor loops — chat and stream — state it.
+- **The same reasoning was wrong in two other places, and both guards are updated rather than deleted:**
+  `routing.test.js` asserted an auth failure does not fail over *across providers* (a key refused by provider A
+  says nothing about provider B's own key — the test now shows the healthy provider answering), and
+  `virtual-models-routing.test.js` asserted it does not fail over across combo targets (same question one level
+  up). `INVALID_REQUEST` still stops in both, because a bad request *is* refused identically by the next
+  provider.
+- `POST /v1/connections/:id/models` is still add-only and the page's `customModels` state is still dead code,
+  from the previous entry; neither is in the way of this fix.
+- **A flaky guard fixed while passing through**: `opencode-owned-service.test.js` demanded two supervisor ticks
+  inside a fixed 400 ms and failed inside `pnpm test:gateway` on a machine also running the dev servers while
+  passing alone. It now waits for the property ("it keeps checking") against a deadline, which is what its own
+  comment said it was about.
+- **Hedging was broken for exactly this case, and is fixed here.** Found while measuring how slow the hand-off
+  is: with `hedgeAfterMs` set on both accounts and the first one's credential refused, three requests in a row
+  failed `AUTHENTICATION_FAILED` and the healthy account was **never dispatched to**. The hedge race records a
+  failed attempt against the *provider*, and the walk skips what the race already tried — so one account's race
+  marked its sibling as raced. Measured after the fix, with the ledger as the source: `attempts=2`, both
+  `dispatched=true`. The skip is now keyed by connection, and `account-isolation.test.js` pins it.
+- **Reported, not fixed, because it needs its own investigation:** with hedging on, the sibling answered
+  `AUTHENTICATION_FAILED` where the same account **succeeds when asked alone** (measured: 4.13 s, answered).
+  Racing two accounts of one provider concurrently breaks the sibling on this provider, which is a session
+  provider — so hedging is not the recommendation for `nous` until that is understood.
+- **How slow the hand-off actually is, measured on the reported provider:** `nous`, two accounts, the first
+  revoked. Failover to the sibling costs the failed account's attempt — **0.33–0.44 s** once its credential
+  state is warm, up to **2.87 s** when it attempts a token renewal first, and about **0.25 s** in steady state
+  once health has ejected it (`0.62 s` with both enabled against `0.36 s` with the dead one disabled). The
+  ~10 s records in this installation's usage history (`nous:AUTHENTICATION_FAILED -> nous-dc4b01cc7adf:success`)
+  were that renewal cost, not the hand-off itself.
+- **Reconnect was wired to Add account.** Reported: *"when I click on the account reconnect and log in with the
+  same email it adds a new one"*. The row's Reconnect called `openAddConnection`, and `beginOauthConnection`
+  sets `addAccount` on whenever the provider already holds an account — so the one button that should repair a
+  signed-in row duplicated it, and an OAuth row renders no Edit button, so there was no way out at all. It now
+  goes through `openEditConnection(row)`, which names that row's id.
+- **Two flows dropped the target even when the dashboard sent one.** The dialog passed `targetConnectionId` to
+  Claude Code, Codex, the device flows and the generic OAuth start, but never to Kiro or ZCode — so repairing
+  those two saved a second account whatever the button did. Both clients now send it, the dialog passes it, and
+  ZCode's start route reads it through the same `readSignInTarget` parser every other start uses (its handler
+  read only `provider` and `addAccount`). The poll's id decision is `targetConnectionId ?? (addAccount ? <minted>
+  : <provider id>)`, and a target wins over the add flag because the id is what the user pointed at.
+- Pinned in `tests/dashboard-wiring.test.js` (Reconnect targets the row; every dialog start names it) and
+  `Kernel/API/test/zcode-signin-target.test.js` (a start for a row replaces that row's credential and leaves one
+  connection; the same flow without a target still mints a second account, so the repair path is what changed).
+  Both revert-checked: dropping the target from the poll's decision fails the first, and restoring the old
+  Reconnect wiring fails the dashboard guard.
+

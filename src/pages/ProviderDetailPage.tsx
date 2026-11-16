@@ -877,6 +877,27 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   }
 
   /**
+   * Repairs the account the row is showing.
+   *
+   * This called `openAddConnection` — the *Add* path, which sets `addAccount` whenever the provider already
+   * holds an account — so reconnecting an existing row signed in and saved a **second** connection beside it.
+   * Reported from the field: *"when I click on the account reconnect and log in with the same email it adds a
+   * new one"*, and there was no other way out: an OAuth row renders no Edit button, so Reconnect was the only
+   * repair path a signed-in account had and it was wired to the one action that duplicates it.
+   *
+   * Reconnecting is repairing, and the row's id is what the sign-in has to target. `openEditConnection` is the
+   * path that already does that — it sets `addAccount` off and passes the row's id to the start request. A web
+   * session has no sign-in to target, so it keeps the paste flow it had.
+   */
+  function reconnectAccount(row: GatewayConnection) {
+    if (webCookieProviders.has(provider.id)) {
+      openAddConnection();
+      return;
+    }
+    openEditConnection(row);
+  }
+
+  /**
    * Updates one account in place.
    *
    * A signed-in account has no credential the dashboard could show or patch, so editing it means
@@ -1519,7 +1540,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
                   // A web session is an auth provider too: its credential is a signed-in session, so the
                   // action is "connect again", never "edit". Without this, removing Edit would leave such a
                   // card with no way to repair a credential at all.
-                  onReconnect={(isOauth && oauthFlowAvailable) || webCookieProviders.has(provider.id) ? () => openAddConnection() : undefined}
+                  onReconnect={(isOauth && oauthFlowAvailable) || webCookieProviders.has(provider.id) ? () => reconnectAccount(item) : undefined}
                   onToggleEnabled={() => void toggleConnectionEnabled(item)}
                   togglingEnabled={togglingConnectionId === item.id}
                   onDelete={() => void deleteConnection(item)}

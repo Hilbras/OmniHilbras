@@ -400,6 +400,13 @@ export class GatewayService {
     provider: ZcodeOAuthProvider;
     /** Whether this sign-in is adding a second account rather than repairing the first. */
     addAccount: boolean;
+    /**
+     * The row this sign-in repairs, when the dashboard asked to reconnect one.
+     *
+     * Absent means the flow decides — the provider's own connection, or a fresh id for a second account. ZCode
+     * was the last sign-in without this, so reconnecting an account saved a duplicate beside it.
+     */
+    targetConnectionId?: string;
     pollToken: string;
     expiresAt: number;
     pollIntervalSec: number;
@@ -2268,7 +2275,7 @@ export class GatewayService {
    * in any browser, and the gateway polls ZCode for the resulting token. The poll token stays here;
    * the browser only ever sees the flow id and the authorize URL.
    */
-  async startZcodeSignIn(provider: ZcodeOAuthProvider = 'zai', addAccount = false) {
+  async startZcodeSignIn(provider: ZcodeOAuthProvider = 'zai', addAccount = false, targetConnectionId?: string) {
     const start = await startZcodeOAuth(provider);
     /**
      * `addAccount` is remembered on the flow, not just at the paste route.
@@ -2277,8 +2284,11 @@ export class GatewayService {
      * silently overwrote the first. The paste route already minted `<id>-<12 hex>` for a second
      * account; the sign-in route never did, and the two paths disagreed about what "another account"
      * means.
+     *
+     * `targetConnectionId` is remembered for the same reason, from the other direction: a reconnect names the
+     * row it repairs, and the poll has to save to *that* id rather than decide for itself.
      */
-    this.zcodeFlows.set(start.flowId, { provider, addAccount, pollToken: start.pollToken, expiresAt: start.expiresAt, pollIntervalSec: start.pollIntervalSec });
+    this.zcodeFlows.set(start.flowId, { provider, addAccount, ...(targetConnectionId ? { targetConnectionId } : {}), pollToken: start.pollToken, expiresAt: start.expiresAt, pollIntervalSec: start.pollIntervalSec });
     return { authorizeUrl: start.authorizeUrl, flowId: start.flowId, expiresAt: start.expiresAt, pollIntervalSec: start.pollIntervalSec };
   }
 
@@ -2316,7 +2326,12 @@ export class GatewayService {
         // identity write and the save — the same rule the rest of the gateway follows, that the
         // account is chosen when the sign-in starts rather than guessed afterwards. Writing it to a
         // provider-wide adapter is what let the last sign-in relabel every other account.
-        const connectionId = flow.addAccount ? `${zcodeProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : zcodeProviderId;
+        //
+        // A target wins over the add flag: a reconnect names the row it repairs, and a flow that was started
+        // to repair one must not mint a fresh id beside it. The dashboard cannot send both — `openEditConnection`
+        // sets the target and turns `addAccount` off — but the id is what the user pointed at, so it decides.
+        const connectionId = flow.targetConnectionId
+          ?? (flow.addAccount ? `${zcodeProviderId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : zcodeProviderId);
         if (result.accountUuid) this.zcodeAdapter(connectionId).setLocalIdentity({ accountUuid: result.accountUuid });
         // Not gated on a test turn. The OAuth server has already authenticated the account, and the
         // desktop app saves the session without a probe too; gating it here is what made a successful

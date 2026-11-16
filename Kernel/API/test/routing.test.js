@@ -120,18 +120,39 @@ test('a retryable failure fails over to the next priority connection', async () 
   assert.deepEqual(attempts.map((attempt) => `${attempt.providerId}:${attempt.ok ? 'ok' : attempt.errorCode}`), ['primary:PROVIDER_UNAVAILABLE', 'backup:ok']);
 });
 
-test('auth and validation failures fail over immediately without retrying', async () => {
-  for (const code of ['AUTHENTICATION_FAILED', 'INVALID_REQUEST']) {
-    const calls = [];
-    const primary = chattyAdapter('primary', { calls, fail: async (id) => { if (id === 'primary') throw new ProviderError(code, 'nope', { retryable: true }); } });
-    const backup = chattyAdapter('backup', { calls });
-    const store = await storeWith([{ id: 'primary', priority: 1, resilience: { maxRetries: 3 } }, { id: 'backup', priority: 2 }]);
-    const service = buildService([primary, backup], store);
+test('a validation failure stops without failing over, because another provider refuses it identically', async () => {
+  // `INVALID_REQUEST` describes the request or the model. The next provider has the same request and the same
+  // model, so it refuses for the same reason: the caller is told what is wrong with the request instead of
+  // waiting for N confirmations.
+  const code = 'INVALID_REQUEST';
+  const calls = [];
+  const primary = chattyAdapter('primary', { calls, fail: async (id) => { if (id === 'primary') throw new ProviderError(code, 'nope', { retryable: true }); } });
+  const backup = chattyAdapter('backup', { calls });
+  const store = await storeWith([{ id: 'primary', priority: 1, resilience: { maxRetries: 3 } }, { id: 'backup', priority: 2 }]);
+  const service = buildService([primary, backup], store);
 
-    await assert.rejects(() => service.chatWithFailover(chatRequest, undefined, signal()), (error) => error instanceof ProviderError && error.code === code);
-    assert.equal(calls.filter((call) => call.provider === 'primary').length, 1, `${code} is attempted once`);
-    assert.equal(calls.filter((call) => call.provider === 'backup').length, 0, `${code} does not fail over`);
-  }
+  await assert.rejects(() => service.chatWithFailover(chatRequest, undefined, signal()), (error) => error instanceof ProviderError && error.code === code);
+  assert.equal(calls.filter((call) => call.provider === 'primary').length, 1, `${code} is attempted once`);
+  assert.equal(calls.filter((call) => call.provider === 'backup').length, 0, `${code} does not fail over`);
+});
+
+test('a refused credential fails over, because the next provider holds a different key', async () => {
+  // It asserted the opposite until this was reported from the field: a revoked sign-in on one connection failed
+  // the request with a healthy sibling account beside it. The reasoning that put a credential failure next to
+  // `INVALID_REQUEST` — *"another provider refuses it identically"* — is simply not true of a key: provider B
+  // has its own key, and a 401 from A says nothing about it.
+  const calls = [];
+  const primary = chattyAdapter('primary', { calls, fail: async (id) => { if (id === 'primary') throw new ProviderError('AUTHENTICATION_FAILED', 'The credential was refused.', { retryable: true }); } });
+  const backup = chattyAdapter('backup', { calls });
+  const store = await storeWith([{ id: 'primary', priority: 1, resilience: { maxRetries: 3 } }, { id: 'backup', priority: 2 }]);
+  const service = buildService([primary, backup], store);
+
+  // The request is answered by the provider whose key works, rather than refused for the one whose key does not.
+  const { response, attempts } = await service.chatWithFailover(chatRequest, undefined, signal());
+  assert.equal(response.providerId, 'backup');
+  assert.deepEqual(attempts.map((attempt) => `${attempt.providerId}:${attempt.ok ? 'ok' : attempt.errorCode}`), ['primary:AUTHENTICATION_FAILED', 'backup:ok']);
+  assert.equal(calls.filter((call) => call.provider === 'primary').length, 1, 'the refused credential is not retried on its own provider');
+  assert.equal(calls.filter((call) => call.provider === 'backup').length, 1, 'and the next provider is asked once');
 });
 
 test('when every route fails the client gets one clear gateway error', async () => {

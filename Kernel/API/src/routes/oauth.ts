@@ -604,7 +604,10 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       const body = (await readJsonBody(request, maxConnectionBodyBytes)) as Record<string, unknown>;
       const provider = readOptionalString(body, 'provider')?.trim();
       if (provider !== undefined && provider !== 'zai' && provider !== 'bigmodel') throw invalidRequest('provider must be zai or bigmodel.');
-      sendJson(response, 200, await service.startZcodeSignIn(provider ?? 'zai', body.addAccount === true), origin);
+      // `connectionId` is the row a Reconnect is repairing, read through the same parser every other sign-in
+      // start uses — ZCode was the one that dropped it, so reconnecting an account saved a second one beside it.
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 200, await service.startZcodeSignIn(provider ?? 'zai', addAccount, targetConnectionId), origin);
       return true;
     }
 

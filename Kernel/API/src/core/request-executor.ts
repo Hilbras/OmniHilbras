@@ -196,11 +196,20 @@ export class RequestExecutor {
       if (race.response) return { response: race.response, attempts };
       // The race found no winner; continue down the normal chain.
     }
-    const racedProviders = new Set(race?.attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.providerId));
+    // The connections the race already tried, so the walk after it does not ask them again.
+    //
+    // Keyed by **connection**, not by provider, and that distinction is the whole of a bug measured here: a
+    // race that tried one account of a provider says nothing about that provider's sibling account. Keyed by
+    // provider, a hedge on the first account marked the whole provider as raced, the sibling was skipped, and
+    // the request failed with the healthy account never asked — measured with two accounts of one provider,
+    // hedging on, three requests: `ERR AUTHENTICATION_FAILED` each time and no second dispatch.
+    const racedConnections = new Set(
+      (race?.attempts ?? []).filter((attempt) => !attempt.ok && attempt.connectionId).map((attempt) => attempt.connectionId as string),
+    );
     return this.runSequential({
       candidates: decision.candidates,
       attempts,
-      racedProviders,
+      racedConnections,
       lastError: race?.lastError,
       signal,
       scope,
@@ -261,7 +270,7 @@ export class RequestExecutor {
     return this.runSequential({
       candidates: decision.candidates,
       attempts: [],
-      racedProviders: new Set(),
+      racedConnections: new Set(),
       lastError: undefined,
       signal,
       scope,
@@ -277,7 +286,7 @@ export class RequestExecutor {
     return this.runSequential({
       candidates: decision.candidates,
       attempts: [],
-      racedProviders: new Set(),
+      racedConnections: new Set(),
       lastError: undefined,
       signal,
       scope,
@@ -293,7 +302,7 @@ export class RequestExecutor {
     return this.runSequential({
       candidates: decision.candidates,
       attempts: [],
-      racedProviders: new Set(),
+      racedConnections: new Set(),
       lastError: undefined,
       signal,
       scope,
@@ -309,7 +318,7 @@ export class RequestExecutor {
     return this.runSequential({
       candidates: decision.candidates,
       attempts: [],
-      racedProviders: new Set(),
+      racedConnections: new Set(),
       lastError: undefined,
       signal,
       scope,
@@ -334,8 +343,13 @@ export class RequestExecutor {
   private async runSequential<T>(input: {
     candidates: readonly RouteCandidate[];
     attempts: GatewayFailoverAttempt[];
-    /** Candidates a hedge already tried and failed; walked past rather than paid for twice. */
-    racedProviders: ReadonlySet<string>;
+    /**
+     * The connections a hedge already tried and failed; walked past rather than paid for twice.
+     *
+     * A set of **connection** ids, not provider ids. A provider with two accounts is two routes, and a race on
+     * one of them is no reason to skip the other.
+     */
+    racedConnections: ReadonlySet<string>;
     lastError: unknown;
     signal?: AbortSignal;
     scope?: RequestScope;
@@ -345,11 +359,17 @@ export class RequestExecutor {
   }): Promise<{ response: T; attempts: GatewayFailoverAttempt[] }> {
     // `scope` is deliberately not destructured: the dispatch closure already captures it, and
     // reading an unused binding here is what `noUnusedLocals` caught when this loop was extracted.
-    const { candidates, attempts, racedProviders, signal } = input;
+    const { candidates, attempts, racedConnections, signal } = input;
     let lastError: unknown = input.lastError;
 
-    for (const candidate of candidates) {
-      if (racedProviders.has(candidate.providerId)) continue;
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index]!;
+      if (racedConnections.has(candidate.connectionId)) continue;
+      // Whether a later candidate could still serve this request. Only a credential refusal asks: a revoked
+      // sign-in belongs to one account, and a sibling account of the same provider is a different key, a
+      // different session and a different balance — so "another connection will refuse it identically" is
+      // simply not true for this code the way it is for a bad model or a refused request shape.
+      const hasOtherRoute = candidates.slice(index + 1).some((later) => !racedConnections.has(later.connectionId));
       for (let attempt = 1; attempt <= candidate.resilience.maxRetries + 1; attempt += 1) {
         if (signal?.aborted) throw new ProviderError('CANCELLED', 'The request was cancelled.', { cause: signal.reason });
         if (attempt > 1) {
@@ -459,6 +479,7 @@ export class RequestExecutor {
             attemptsOnThisRoute: attempt,
             aborted: Boolean(signal?.aborted),
             canRetry: true,
+            hasOtherRoute,
           });
           if (action === 'stop') throw attachAttempts(error, attempts);
           if (action === 'next-route') break;
@@ -631,7 +652,9 @@ export class RequestExecutor {
     const attempts: GatewayFailoverAttempt[] = [];
     let lastError: unknown;
 
-    for (const candidate of decision.candidates) {
+    for (let index = 0; index < decision.candidates.length; index += 1) {
+      const candidate = decision.candidates[index]!;
+      const hasOtherRoute = index < decision.candidates.length - 1;
       const startedAt = Date.now();
       let opening: ChatChunk | undefined;
       let rest: AsyncIterator<ChatChunk> | undefined;
@@ -686,7 +709,7 @@ export class RequestExecutor {
         //
         // `stop` leaves the loop and reports; anything else walks to the next connection, which is
         // what `continue` does here and what the old inline check was doing with its two branches.
-        const action = this.retryPolicy.afterFailure({ error, candidate, attemptsOnThisRoute: 1, aborted: Boolean(signal?.aborted), canRetry: false });
+        const action = this.retryPolicy.afterFailure({ error, candidate, attemptsOnThisRoute: 1, aborted: Boolean(signal?.aborted), canRetry: false, hasOtherRoute });
         if (action === 'stop') break;
         continue;
       }
