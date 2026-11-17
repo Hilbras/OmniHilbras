@@ -6218,3 +6218,16 @@ independently of the React app" is now measured over every provider manifest, an
   a stated result, not an error.
 - **ZCode cannot be measured today**: probing it answered `exceed quota limit`. Whether it omits `message_delta.usage`
   or merely omits it while streaming is still an open question, and a re-test needs the quota to reset.
+
+## 3.65.1 — the usage page names the window it is showing
+
+- **"24h, 7D and so on do not show the usage" was not a broken filter.** Measured on this installation: **1,000
+  records inside an 18.7-hour span** (16 Nov 20:34 → 17 Nov 15:14), so every window from 24 hours upward contains
+  all of them and returns the same figures. `Today` differed (883) only because local midnight cuts the first seven
+  hours. The buttons do refetch — `?period=24h`, `?period=30d`, `?period=today` in the network log — and the API
+  answers each of them.
+- **The page never said which window it was showing**, so five identical results read as a dead control. It now prints
+  one line under the period buttons: `24h · 1,000 records · showing 10 · newest 17/11/2026, 18:14:27`.
+- **It says "showing 10" and not "oldest …"**, which was the first thing I wrote and was wrong: the table pages ten
+  rows, so an "oldest" derived from them describes the page while sounding like the window. What the page knows is how
+  many rows it holds and which is newest; it says that.

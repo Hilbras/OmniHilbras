@@ -357,6 +357,11 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
   }, [load]);
   useGatewayReload(load);
 
+  // The newest row on screen. Deliberately not an "oldest of the window" — the table pages ten at a time, so that
+  // would describe the page while sounding like the window.
+  const recordTimes = (usage?.records ?? []).map((record) => Date.parse(record.at)).filter((at) => Number.isFinite(at));
+  const newestRecordAt = recordTimes.length ? new Date(Math.max(...recordTimes)).toLocaleString() : undefined;
+
   const chooseFilter = (next: OutcomeFilter) => {
     setPage(0);
     setFilter(next);
@@ -408,6 +413,24 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
             {loading ? 'Reading usage' : 'Refresh'}
           </button>
         </div>
+        {/*
+          Which window is on screen, and what is in it.
+
+          Without this, 24h, 7D, 30D, 60D and All read identically whenever every record is younger than the smallest
+          window — measured on this installation: 1,000 records inside an 18.7-hour span, so five selections produced
+          the same figures and the control looked dead. The numbers were right; the page simply never said what it was
+          showing.
+        */}
+        <p className="muted mt-2 text-[11px]">
+          {PERIODS.find((option) => option.value === period)?.label ?? period}
+          {' · '}
+          {summary ? `${summary.totals.requests.toLocaleString()} ${summary.totals.requests === 1 ? 'record' : 'records'}` : 'reading…'}
+          {/* "Oldest" was the oldest row on **this page**, not in the window, which is a different claim and a wrong
+              one: the table pages ten rows at a time. What the page knows is how many rows it holds and which is the
+              newest, so that is what it says. */}
+          {usage ? ` · showing ${usage.records.length}` : ''}
+          {newestRecordAt ? ` · newest ${newestRecordAt}` : ''}
+        </p>
       </div>
 
       {/*

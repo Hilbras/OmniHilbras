@@ -297,3 +297,15 @@ test('the update check asks the gateway, not GitHub, so a blocked feed is not a 
   assert.match(hook, /getGatewayLatestRelease\(/, 'the hook does not read the gateway route');
   assert.match(hook, /body\.unavailable === true/, 'an unavailable feed is not turned into a stated failure');
 });
+
+test('the usage page says which window it is showing, and what is in it', () => {
+  // Measured on this installation: 1,000 records inside an 18.7-hour span, so 24h, 7D, 30D, 60D and All all returned
+  // the same figures. The numbers were right; the page never said what it was showing, so five identical results read
+  // as a dead control.
+  const page = read('src/pages/UsagePage.tsx');
+  assert.match(page, /PERIODS\.find\(\(option\) => option\.value === period\)\?\.label/, 'the page does not name the selected window');
+  assert.match(page, /newest \$\{newestRecordAt\}/, 'the newest record in the window is not shown');
+  assert.match(page, /showing \$\{usage\.records\.length\}/, 'the page does not say how many of the records it is showing');
+  assert.doesNotMatch(page, /oldest \$\{/, 'the page claims an oldest-of-window figure it cannot know');
+  assert.match(page, /summary\.totals\.requests\.toLocaleString\(\)/, 'the window does not say how many records it contains');
+});
