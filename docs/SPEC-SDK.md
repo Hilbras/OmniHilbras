@@ -208,9 +208,9 @@ The first local gateway exposes:
 - `DELETE /v1/connections/:id` — remove a local connection. The dashboard reaches it from every
   account row: **Delete** asks first, names the account, and says the credential cannot be
   recovered, because the switch beside it is the reversible action and a delete is not.
-- `GET /v1/keys` — gateway key metadata plus the enforcement flag; never returns a secret.
+- `GET /v1/keys` — gateway key metadata plus the enforcement flag; never returns a secret. Each key carries `requests` (how many calls it has authenticated) and `lastUsedAt`; the counter moves in memory on every call and reaches disk on the same throttle as `lastUsedAt`, so it is exact for the life of the process and may lag the file by one flush interval.
 - `POST /v1/keys` — mint a key; the response is the only time the secret is returned.
-- `PATCH /v1/keys/:id` — pause or resume a key.
+- `PATCH /v1/keys/:id` — pause or resume a key with `{"enabled": boolean}`, **or** rename it with `{"name": string}` (1–80 characters, trimmed). One field per request: a body carrying both is refused, because pausing and relabelling are different intents. A rename never touches the secret, its prefix or its hash, so a client already using the key keeps working; an unknown id is 404.
 - `DELETE /v1/keys/:id` — revoke a key.
 - `PUT /v1/connections/:id/enabled` — pause or resume **one** account, body `{enabled: boolean}`. Metadata, like the responsibility note: a full `PUT /v1/connections/:id` would re-validate the credential and re-read the catalog, which is not what flipping a switch means. Routing reads `enabled` per request, so a paused account stops taking traffic at once and stays saved.
 - `PUT /v1/connections/:id/responsibility` — record who is accountable for one connection and what it is for. Two optional strings, `owner` and `purpose`, both bounded (120 and 500 characters); an empty string is normalised away rather than stored, so "cleared" and "never written" are the same state. Its own verb because this is a note about the connection, not configuration of it: saving one must never re-validate a credential or re-read a catalog, which a full `PUT /v1/connections/:id` would do. The note is how two accounts of the same provider are told apart — the connection id distinguishes them to a machine, the owner to a person.

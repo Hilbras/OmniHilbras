@@ -6071,3 +6071,62 @@ independently of the React app" is now measured over every provider manifest, an
   `tests/accessibility.test.js` (4), and `tests/e2e/smoke.spec.ts` (3, browser). Reverting each fix fails its
   guard: an eager import, a missing prefetch entry, 420 ms, a spelled-out tone, an unnamed switch, a dialog without
   `aria-modal`, an unlabelled file input.
+
+## 3.63.0 — a key can be renamed, and a key can say how much it has done
+
+- **The gap, measured on the page and the store.** `/dashboard/keys` could create, pause, resume and delete a key and
+  nothing else. Renaming was impossible end to end — `PATCH /v1/keys/:id` accepted only `{enabled}`, and an existing
+  test asserted that `{name}` was refused with **400** — so the only way to fix a wrong name was to mint a new key and
+  revoke the old one, which invalidates every client already using it. And a key could not say how much traffic it had
+  served: `lastUsedAt` was real, `requests` did not exist, which is the same gap that made provider cards claim
+  `requests: 0` forever.
+- **Rename is a first-class PATCH.** `PATCH /v1/keys/:id` takes `{enabled}` **or** `{name}` (1–80 characters,
+  trimmed) and refuses a body carrying both — pausing and relabelling are different intents, and a body with both
+  makes "which one happened" a question about field order. `ApiKeyStore.rename` + `ApiKeyManager.rename` +
+  `GatewayService.renameApiKey`; a rename never touches the secret, its prefix or its hash, an unknown id is 404, and
+  the test proves the key still authenticates after being renamed.
+- **The counter is a measurement, not a placeholder.** Every authenticated call increments `requests` in memory and
+  the total reaches disk on the same throttle as `lastUsedAt`, so it is exact for the life of the process and may lag
+  the file by one flush interval. The alternative was a disk write per request on the authentication path. A file
+  written by the previous version loads with `requests: 0` rather than being called unreadable, and the page reads
+  `requests ?? 0` so an older gateway cannot blank a row.
+- **The page**: inline rename (pencil → input → check/escape, focus moves in, `aria-label` on every control), a
+  request count beside "Last used", and the duplicate "New key" button in the card header removed — the page header
+  and the empty state already offer it, and three buttons for one action is a choice nobody needs to make.
+- **The two defects found while checking it** were fixed in the same pass: `requireApiKey` started at `useState(true)`,
+  so the enforcement switch claimed a value before the gateway answered and could be flipped on that guess (now
+  `boolean | null`, disabled while unknown, with the page saying so), and the notice timer leaked — a second notice
+  within 3.2 s was cleared early by the first one's timer, which also fired after unmount.
+- **CI finally runs the browser suite.** `.github/workflows/e2e.yml`: build the dashboard, install Chromium with
+  `--with-deps`, run `npx playwright test`, and upload `test-results/` on failure. Four Playwright specs had been
+  scheduled by memory alone, which is how the suite spent releases asserting that `body` was visible on the marketing
+  page. Separate from `verify` on purpose: a browser download must not slow the gate that runs on every push.
+- **Guarded**: `Kernel/API/test/api-keys-rename.test.js` (4 — rename keeps the secret and the prefix, unknown id is
+  undefined, three calls count to three and survive a reopen, an old file loads at zero),
+  `tests/api-keys-page.test.js` grown to 8 (rename in place, requests shown, one create button, unknown enforcement,
+  secret printed once, delete confirmed), and the route test now asserts rename-200, both-fields-400 and
+  unknown-id-404. Reverting `useState<boolean | null>` or `disabled={saving || requireApiKey === null}` fails the
+  page guard.
+- **The toggles were five different controls, and none of them had a focus ring.** Reported as "the enable/disable
+  buttons do not have a good design", and it was three defects rather than a taste question:
+  - **Focus was left to chance.** `index.css` defines one global `:focus-visible { outline: 2px solid gold }`, and the
+    five copies each rendered either without it or with a second, different treatment — so the control that matters
+    most on this page was the one whose focus state nobody had looked at. The shared switch re-states the app's own
+    outline instead of inventing another, and the guard fails if it ever sets `outline-none` without one.
+  - **Two hard-coded `#f0643b`.** `ProviderCard` and `AddProviderModal` painted their "on" state with a literal
+    orange that no token defines, so a palette change would have missed them.
+  - **`SettingsPage` animated `left`** — a layout property, re-laying-out the row every frame. This dashboard already
+    measured what per-frame work costs when it fixed a remount (37→61 fps); a thumb animated on `left` is the same
+    mistake at a smaller scale. And none of the five honoured `prefers-reduced-motion`.
+
+  `src/ui/Switch.tsx` is now the one control: `h-[22px] w-10`, gold track when on and `surface-2` when off (both
+  tokens), a `text`-coloured thumb that reads on either track, `translate-x` + `transition-transform` with
+  `motion-reduce:transition-none`, the app's global `focus-visible` outline (restated on the control, since Tailwind's
+  reset does not guarantee it), and `aria-busy` when a request is in flight. Five call sites replaced — `ApiKeysPage`, `SettingsPage`'s
+  `Toggle`, `ProviderCard` (keeping its hover reveal), `AddProviderModal`, and `EnabledSwitch`, which now delegates
+  and keeps only the power glyph that makes it readable without a caption.
+
+  Guarded by `tests/frontend-upgrade.test.js`: exactly one file may contain `role="switch"`, no file may carry
+  `#f0643b` or `transition-[left]`, and the shared control must have the focus ring, the transform and the
+  reduced-motion opt-out. Revert-checked by putting `#f0643b` back in `SettingsPage` — the guard fails. The seven
+  browser tests for the keys page still pass unchanged, because the accessible names did not move.

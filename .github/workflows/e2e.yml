@@ -1,0 +1,61 @@
+# The dashboard, in a browser, on every push.
+#
+# `pnpm verify` runs 2,300+ checks and never opens a browser, so until this file existed the four Playwright specs
+# ran only when somebody remembered. That is worse than not having them: the suite spent several releases asserting
+# that `body` was visible on a page that turned out to be the *marketing* page, because `vite preview` had no
+# `/dashboard` fallback and nobody was running the test to notice. A test that is not scheduled is a note.
+#
+# This job is deliberately separate from `verify`: it needs a production build and a browser download, and it must
+# not make the gate that runs on every push slower or flakier. It is a second opinion, not a second gate.
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 12.5.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # `vite preview` serves `dist/`, and the spec walks eleven routes that are separate chunks — so the build is
+      # not optional here, and a stale one would test the previous release.
+      - name: Build the dashboard
+        run: pnpm build:frontend
+
+      # `--with-deps` installs the shared libraries Chromium needs on a bare runner; without it the launch fails with
+      # a missing-library error that reads like a test failure.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright smoke
+        run: npx playwright test
+
+      # A failed run leaves a trace and a screenshot. They are the difference between "the smoke failed" and a fix,
+      # and the repository gitignores them so they only ever live here.
+      - name: Keep the evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-report
+          path: test-results/
+          retention-days: 7

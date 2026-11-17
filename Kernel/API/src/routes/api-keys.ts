@@ -44,7 +44,16 @@ export async function handleApiKeysRoute(ctx: RouteContext): Promise<boolean> {
       const apiKeyId = decodeApiKeyId(url.pathname.slice('/v1/keys/'.length));
       const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxKeyBodyBytes));
       if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
-      assertOnlyFields(body, ['enabled']);
+      assertOnlyFields(body, ['enabled', 'name']);
+      // One field per request: `enabled` and `name` are different intents, and a body carrying both would make
+      // "did this pause the key or just relabel it" a question about field order.
+      if (body.enabled !== undefined && body.name !== undefined) {
+        throw invalidRequest('Send either enabled or name, not both.');
+      }
+      if (body.name !== undefined) {
+        sendJson(response, 200, { apiKey: await service.renameApiKey(apiKeyId, parseBoundedString(body.name, 'name', 80)) }, origin);
+        return true;
+      }
       if (typeof body.enabled !== 'boolean') throw invalidRequest('enabled must be a boolean.');
       sendJson(response, 200, { apiKey: await service.setApiKeyEnabled(apiKeyId, body.enabled) }, origin);
       return true;

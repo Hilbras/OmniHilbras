@@ -239,12 +239,35 @@ test('API key routes create, list, pause, and delete keys without returning secr
   // longer administer anything. A second key stands in for the operator, which is also the only way
   // this works in reality: you cannot un-pause a key using that key.
   const admin = await createKey(apiKeys, 'Admin');
-  const rejected = await fetch(`${baseUrl}/v1/keys/${created.apiKey.id}`, {
+  // A rename is a first-class PATCH now, and it must not disturb the fact that the key is paused: the two fields are
+  // separate intents. Before 3.63.0 this body was refused with 400 because only `enabled` existed.
+  const renamed = await fetch(`${baseUrl}/v1/keys/${created.apiKey.id}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${admin.key}` },
     body: JSON.stringify({ name: 'renamed' }),
   });
-  assert.equal(rejected.status, 400);
+  assert.equal(renamed.status, 200);
+  const renamedBody = await renamed.json();
+  assert.equal(renamedBody.apiKey.name, 'renamed');
+  assert.equal(renamedBody.apiKey.enabled, false, 'a rename resumed a paused key');
+  assert.equal(renamedBody.apiKey.prefix, created.apiKey.prefix, 'a rename rotated the secret');
+
+  // Both fields in one body is refused rather than guessed at: pausing and relabelling are different intents, and a
+  // request that carries both makes "which one happened" a question about field order.
+  const both = await fetch(`${baseUrl}/v1/keys/${created.apiKey.id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${admin.key}` },
+    body: JSON.stringify({ name: 'renamed again', enabled: true }),
+  });
+  assert.equal(both.status, 400);
+
+  // A rename of something that does not exist is a 404, not a silent success.
+  const nobody = await fetch(`${baseUrl}/v1/keys/key_missing`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${admin.key}` },
+    body: JSON.stringify({ name: 'ghost' }),
+  });
+  assert.equal(nobody.status, 404);
 
   const removed = await fetch(`${baseUrl}/v1/keys/${created.apiKey.id}`, { method: 'DELETE', headers: { authorization: `Bearer ${admin.key}` } });
   assert.deepEqual(await removed.json(), { deleted: true, id: created.apiKey.id });

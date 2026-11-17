@@ -164,6 +164,14 @@ export type GatewayApiKey = {
   createdAt: string;
   updatedAt: string;
   lastUsedAt?: string;
+  /**
+   * Requests this key has authenticated.
+   *
+   * The gateway counts every call and persists the total on the same throttle as `lastUsedAt`, so this is a real
+   * measurement rather than a placeholder — the difference between it and the `requests: '0'` that provider cards
+   * used to show is that something writes this one.
+   */
+  requests: number;
 };
 
 export type GatewayApiKeyList = {
@@ -1572,6 +1580,20 @@ export function createGatewayApiKey(name: string, signal?: AbortSignal) {
     body: JSON.stringify({ name }),
     ...(signal ? { signal } : {}),
   }).then((body) => ({ apiKey: body.apiKey, key: body.key }));
+}
+
+/**
+ * Renames a key without rotating it.
+ *
+ * A separate call from `setGatewayApiKeyEnabled` because the gateway refuses a body carrying both — the two are
+ * different intents, and a rename must never be able to pause a client by accident.
+ */
+export function renameGatewayApiKey(id: string, name: string, signal?: AbortSignal) {
+  return requestJson<{ apiKey: GatewayApiKey }>(`/v1/keys/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+    signal,
+  }).then((body) => body.apiKey);
 }
 
 export function setGatewayApiKeyEnabled(id: string, enabled: boolean, signal?: AbortSignal) {

@@ -2,6 +2,7 @@ import { ArrowUpRight, CheckCircle2, CircleAlert, Clock3, Cpu, KeyRound, Server,
 import { Link } from 'react-router-dom';
 import { ProviderMark } from './ProviderMark';
 import { badgeTone } from '../ui/primitives';
+import { Switch } from '../ui/Switch';
 
 /**
  * `planned` is a card whose provider is real and catalogued but has no working connection.
@@ -197,9 +198,15 @@ function SimpleProviderCard({ provider, detailTo, onManage, onConnect, simpleEna
           would have been stranded below the card.
         */}
         {planned ? null : connected ? (
-          <button type="button" role="switch" aria-checked={simpleEnabled} aria-label={`${simpleEnabled ? 'Disable' : 'Enable'} ${provider.name}`} onClick={() => onToggle?.(!simpleEnabled)} disabled={!onToggle} className={`relative z-20 h-6 w-11 shrink-0 rounded-full p-1 opacity-100 transition-[colors,opacity] sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 ${simpleEnabled ? 'bg-[#f0643b]' : 'bg-line-strong'} disabled:cursor-not-allowed disabled:opacity-60`}>
-            <span className={`block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${simpleEnabled ? 'translate-x-5' : 'translate-x-0'}`} aria-hidden="true" />
-          </button>
+          <Switch
+            checked={simpleEnabled}
+            onChange={(next) => onToggle?.(next)}
+            label={`${simpleEnabled ? 'Disable' : 'Enable'} ${provider.name}`}
+            disabled={!onToggle}
+            // The hover reveal is this card's own: the switch is invisible until the row is hovered or focused, so a
+            // card full of switches does not compete with the card's name.
+            className="relative z-20 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+          />
         ) : attention ? (
           <button type="button" onClick={onManage} className="btn-quiet relative z-20 shrink-0 !px-2 !py-1.5 !text-[11px]">Review</button>
         ) : (

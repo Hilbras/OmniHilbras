@@ -12,6 +12,7 @@ import { bulkEntryName, parseBulkEntries } from '../lib/bulkEntries';
 // it — which is how the "never substitute a different vendor" rule is checked as behaviour rather than
 // inferred from source.
 import { customOption, isWebSessionProvider, providerOptions, resolveProviderOption, type ProviderOption } from '../lib/providerOptions';
+import { Switch } from '../ui/Switch';
 
 export { customOption, isWebSessionProvider, providerOptions, resolveProviderOption };
 export type { ProviderOption };
@@ -327,9 +328,12 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
                       <p className="text-xs font-semibold">Import free models</p>
                       <p className="muted mt-1 text-[11px] leading-relaxed">{importFreeModels ? 'Save will import models with zero prompt and completion pricing.' : 'Save will import all text models available from OpenRouter.'}</p>
                     </div>
-                    <button type="button" role="switch" aria-checked={importFreeModels} aria-label="Import free OpenRouter models" disabled={saving || testing} onClick={() => setImportFreeModels((current) => !current)} className={`relative h-6 w-11 shrink-0 rounded-full p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${importFreeModels ? 'bg-[#f0643b]' : 'bg-line-strong'}`}>
-                      <span className={`block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${importFreeModels ? 'translate-x-5' : 'translate-x-0'}`} aria-hidden="true" />
-                    </button>
+                    <Switch
+                      checked={importFreeModels}
+                      onChange={(next) => setImportFreeModels(next)}
+                      label="Import free OpenRouter models"
+                      disabled={saving || testing}
+                    />
                   </div>
                 )}
 

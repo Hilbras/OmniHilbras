@@ -5,6 +5,7 @@ import {
   Copy,
   KeyRound,
   LoaderCircle,
+  Pencil,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -16,6 +17,7 @@ import {
   createGatewayApiKey,
   listGatewayApiKeys,
   removeGatewayApiKey,
+  renameGatewayApiKey,
   setGatewayApiKeyEnabled,
   setGatewayRequireApiKey,
   gatewayOrigin,
@@ -23,6 +25,7 @@ import {
 } from '../lib/gatewayClient';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 import { badgeTone } from '../ui/primitives';
+import { Switch } from '../ui/Switch';
 
 const gatewayUrl = gatewayOrigin();
 
@@ -45,21 +48,6 @@ function maskPrefix(prefix: string) {
   return `${prefix}${'•'.repeat(20)}`;
 }
 
-function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors disabled:opacity-60 ${checked ? 'border-gold/50 bg-gold/70' : 'border-line-strong bg-surface-2'}`}
-    >
-      <span className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-surface shadow-sm transition-transform ${checked ? 'translate-x-[1.45rem]' : 'translate-x-0.5'}`} />
-    </button>
-  );
-}
 
 function Modal({ title, description, children, onClose, width = 'max-w-md' }: { title: string; description?: string; children: ReactNode; onClose: () => void; width?: string }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -67,9 +55,14 @@ function Modal({ title, description, children, onClose, width = 'max-w-md' }: { 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
+    // Where focus came from, so closing the dialog does not drop a keyboard user at the top of the document.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     document.addEventListener('keydown', onKeyDown);
     panelRef.current?.querySelector<HTMLElement>('input, button')?.focus();
-    return () => document.removeEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      opener?.focus();
+    };
   }, [onClose]);
 
   return (
@@ -91,27 +84,35 @@ function Modal({ title, description, children, onClose, width = 'max-w-md' }: { 
 }
 
 function CopyButton({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false);
+  // Three outcomes, not two. `failed` exists because the old fallback for "no clipboard API" was `return` — a button
+  // that did nothing at all, silently, which is the same defect as claiming a copy that never happened.
+  const [outcome, setOutcome] = useState<'idle' | 'copied' | 'failed'>('idle');
   useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 1800);
+    if (outcome === 'idle') return;
+    const timer = window.setTimeout(() => setOutcome('idle'), 1800);
     return () => window.clearTimeout(timer);
-  }, [copied]);
+  }, [outcome]);
 
   return (
     <button
       type="button"
       onClick={() => {
-        // Claiming "copied" without checking was a button that lied whenever the clipboard API was
-        // unavailable or the write was refused.
         const write = navigator.clipboard?.writeText(value);
-        if (!write) return;
-        void write.then(() => setCopied(true)).catch(() => setCopied(false));
+        if (!write) {
+          setOutcome('failed');
+          return;
+        }
+        void write.then(() => setOutcome('copied')).catch(() => setOutcome('failed'));
       }}
-      aria-label={copied ? `${label} copied` : `Copy ${label}`}
-      className="muted grid h-7 w-7 shrink-0 place-items-center rounded-lg hover:bg-surface-2 hover:text-gold-text"
+      aria-label={outcome === 'copied' ? `${label} copied` : outcome === 'failed' ? `${label} could not be copied` : `Copy ${label}`}
+      title={outcome === 'failed' ? 'The clipboard refused the write. Select the text and copy it by hand.' : undefined}
+      className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg hover:bg-surface-2 ${outcome === 'failed' ? 'text-danger' : 'muted hover:text-gold-text'}`}
     >
-      {copied ? <Check className="h-3.5 w-3.5 text-success" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+      {outcome === 'copied'
+        ? <Check className="h-3.5 w-3.5 text-success" aria-hidden="true" />
+        : outcome === 'failed'
+          ? <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+          : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
     </button>
   );
 }
@@ -128,7 +129,11 @@ function CodeRow({ label, value }: { label: string; value: string }) {
 
 export function ApiKeysContent() {
   const [keys, setKeys] = useState<GatewayApiKey[]>([]);
-  const [requireApiKey, setRequireApiKey] = useState(true);
+  // `null` is "the gateway has not said", and it is not the same as `false`.
+  // It used to start at `true`, so the switch claimed enforcement was on before anything had been read — and,
+  // because the switch was only disabled while saving, an operator could flip a setting the page had guessed at.
+  // On a gateway where enforcement was actually off, that turned "off" into a no-op that reported success.
+  const [requireApiKey, setRequireApiKey] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
@@ -138,6 +143,10 @@ export function ApiKeysContent() {
   const [creating, setCreating] = useState(false);
   const [createdKey, setCreatedKey] = useState<{ name: string; key: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  // Renaming is inline because it changes one field: a dialog for it would be a form over a string the row already
+  // shows, and the row is where the operator is looking when the name turns out to be wrong.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   const [busyKeyId, setBusyKeyId] = useState<string | null>(null);
   /** Whether the key list has been read. `keys: []` before a read is not "there are no keys". */
   const [loaded, setLoaded] = useState(false);
@@ -165,14 +174,24 @@ export function ApiKeysContent() {
   }, [load]);
   useGatewayReload(load);
 
+  const noticeTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => { if (noticeTimer.current !== undefined) window.clearTimeout(noticeTimer.current); }, []);
+
+  /**
+   * Show a notice for a moment, and never longer than its own moment.
+   *
+   * The timer used to be left running. Two notices within 3.2 s meant the first one's timer cleared the second one
+   * early, and a notice set just before a navigation cleared state on an unmounted page.
+   */
   function flash(message: string, tone: 'success' | 'error' = 'success') {
     setNotice(message);
     setNoticeError(tone === 'error');
-    window.setTimeout(() => setNotice(''), 3200);
+    if (noticeTimer.current !== undefined) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(''), 3200);
   }
 
   async function toggleEnforcement(next: boolean) {
-    if (saving) return;
+    if (saving || requireApiKey === null) return;
     setSaving(true);
     const previous = requireApiKey;
     setRequireApiKey(next);
@@ -232,6 +251,22 @@ export function ApiKeysContent() {
     }
   }
 
+  async function renameKey(apiKey: GatewayApiKey) {
+    const name = renameDraft.trim();
+    if (busyKeyId || !name || name === apiKey.name) { setRenamingId(null); return; }
+    setBusyKeyId(apiKey.id);
+    try {
+      const updated = await renameGatewayApiKey(apiKey.id, name);
+      setKeys((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setRenamingId(null);
+      flash(`${apiKey.name} is now “${updated.name}”.`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'The API key could not be renamed.', 'error');
+    } finally {
+      setBusyKeyId(null);
+    }
+  }
+
   const activeCount = keys.filter((key) => key.enabled).length;
 
   return (
@@ -275,10 +310,6 @@ export function ApiKeysContent() {
                 {loading ? 'Loading keys…' : `${activeCount} active of ${keys.length} ${keys.length === 1 ? 'key' : 'keys'}`}
               </p>
             </div>
-            <button type="button" onClick={() => setCreateOpen(true)} className="btn-ghost !px-3 !py-2 !text-xs">
-              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-              New key
-            </button>
           </div>
 
           {!loaded ? (
@@ -306,7 +337,41 @@ export function ApiKeysContent() {
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-semibold">{apiKey.name}</p>
+                        {renamingId === apiKey.id ? (
+                          <span className="flex items-center gap-1.5">
+                            <input
+                              value={renameDraft}
+                              maxLength={80}
+                              autoFocus
+                              aria-label={`New name for ${apiKey.name}`}
+                              onChange={(event) => setRenameDraft(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') { event.preventDefault(); void renameKey(apiKey); }
+                                if (event.key === 'Escape') { event.preventDefault(); setRenamingId(null); }
+                              }}
+                              className="input !h-8 !w-48 !rounded-lg !border !border-line !bg-surface-2 !px-2 !text-sm"
+                            />
+                            <button type="button" onClick={() => void renameKey(apiKey)} disabled={busyKeyId !== null || !renameDraft.trim()} aria-label={`Save name for ${apiKey.name}`} className="grid h-8 w-8 place-items-center rounded-lg text-success hover:bg-success/10 disabled:opacity-50">
+                              {busyKeyId === apiKey.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Check className="h-3.5 w-3.5" aria-hidden="true" />}
+                            </button>
+                            <button type="button" onClick={() => setRenamingId(null)} aria-label={`Cancel renaming ${apiKey.name}`} className="muted grid h-8 w-8 place-items-center rounded-lg hover:bg-surface-2 hover:text-text">
+                              <X className="h-3.5 w-3.5" aria-hidden="true" />
+                            </button>
+                          </span>
+                        ) : (
+                          <>
+                            <p className="truncate text-sm font-semibold">{apiKey.name}</p>
+                            <button
+                              type="button"
+                              onClick={() => { setRenamingId(apiKey.id); setRenameDraft(apiKey.name); }}
+                              disabled={busyKeyId !== null}
+                              aria-label={`Rename ${apiKey.name}`}
+                              className="muted grid h-6 w-6 place-items-center rounded-md hover:bg-surface-2 hover:text-gold-text disabled:opacity-50"
+                            >
+                              <Pencil className="h-3 w-3" aria-hidden="true" />
+                            </button>
+                          </>
+                        )}
                         <span className={`rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wide ${apiKey.enabled ? 'border-success/25 bg-success/10 text-success' : 'border-line-strong bg-surface-2 text-muted'}`}>
                           {apiKey.enabled ? 'active' : 'paused'}
                         </span>
@@ -315,19 +380,19 @@ export function ApiKeysContent() {
                         <code>{maskPrefix(apiKey.prefix)}</code>
                       </p>
                       <p className="muted mt-1.5 text-[11px]">
-                        Created {formatDate(apiKey.createdAt)} · Last used {relativeTime(apiKey.lastUsedAt)}
+                        Created {formatDate(apiKey.createdAt)} · Last used {relativeTime(apiKey.lastUsedAt)} · {(apiKey.requests ?? 0).toLocaleString()} {(apiKey.requests ?? 0) === 1 ? 'request' : 'requests'}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <Switch
                         checked={apiKey.enabled}
-                        disabled={busyKeyId === apiKey.id}
+                        disabled={busyKeyId !== null}
                         onChange={(next) => void toggleKey(apiKey, next)}
                         label={`${apiKey.enabled ? 'Pause' : 'Resume'} ${apiKey.name}`}
                       />
                       {pendingDelete === apiKey.id ? (
                         <div className="flex items-center gap-1.5">
-                          <button type="button" onClick={() => void deleteKey(apiKey)} disabled={busyKeyId === apiKey.id} className="rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-[11px] font-semibold text-danger disabled:opacity-60">
+                          <button type="button" onClick={() => void deleteKey(apiKey)} disabled={busyKeyId !== null} className="rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-[11px] font-semibold text-danger disabled:opacity-60">
                             {busyKeyId === apiKey.id ? 'Deleting' : 'Confirm'}
                           </button>
                           <button type="button" onClick={() => setPendingDelete(null)} className="muted rounded-lg px-2 py-1.5 text-[11px] font-semibold hover:bg-surface-2 hover:text-text">
@@ -352,15 +417,25 @@ export function ApiKeysContent() {
             <h2 id="enforcement-title" className="text-sm font-semibold">Require API key</h2>
             <div className="mt-3 flex items-start justify-between gap-4">
               <p className="muted text-xs leading-relaxed">When enforcement is on, gateway clients must send a valid key. The dashboard stays exempt so it can keep testing models.</p>
-              <Switch checked={requireApiKey} disabled={saving} onChange={(next) => void toggleEnforcement(next)} label="Require API key" />
+              <Switch
+                checked={requireApiKey === true}
+                disabled={saving || requireApiKey === null}
+                onChange={(next) => void toggleEnforcement(next)}
+                label="Require API key"
+              />
             </div>
-            {loaded && requireApiKey && keys.length === 0 && (
+            {requireApiKey === null && (
+              <p className="muted mt-3 text-[11px]" role="status">
+                {loading ? 'Reading this setting from the gateway…' : 'The gateway did not answer, so whether keys are required is unknown — and the switch is left alone until it does.'}
+              </p>
+            )}
+            {loaded && requireApiKey === true && keys.length === 0 && (
               <p className="mt-3 flex items-start gap-2 rounded-lg border border-danger/25 bg-danger/10 px-3 py-2 text-[11px] text-danger">
                 <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 Enforcement is on and no keys exist, so every gateway client is rejected.
               </p>
             )}
-            {loaded && requireApiKey && keys.length > 0 && (
+            {loaded && requireApiKey === true && keys.length > 0 && (
               <p className="mt-3 flex items-start gap-2 rounded-lg border border-gold/25 bg-gold-soft px-3 py-2 text-[11px] text-gold-text">
                 <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 {activeCount === 0 ? 'All keys are paused, so no client can authenticate.' : 'Clients authenticate with a bearer token on every request.'}

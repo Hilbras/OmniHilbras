@@ -3033,6 +3033,11 @@ export class GatewayService {
     return this.apiKeys.setEnabled(id, enabled);
   }
 
+  /** Renames a key without touching its secret, so a client using it keeps working. */
+  renameApiKey(id: string, name: string) {
+    return this.apiKeys.rename(id, name);
+  }
+
   removeApiKey(id: string) {
     return this.apiKeys.remove(id);
   }

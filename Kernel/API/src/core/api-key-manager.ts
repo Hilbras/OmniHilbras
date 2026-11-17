@@ -107,6 +107,21 @@ export class ApiKeyManager {
     });
   }
 
+  /**
+   * Renames a key.
+   *
+   * A rename is not a rotation: the secret, its hash and its prefix stay exactly as they were, so a client that is
+   * already using the key keeps working. The name is what a person sees, and this is the only field of a key that
+   * can be changed without invalidating it.
+   */
+  async rename(id: string, name: string) {
+    return this.mutate(async () => {
+      const record = await this.requireStore().rename(id, name);
+      if (!record) throw new ProviderError('NOT_FOUND', 'The API key was not found.');
+      return record;
+    });
+  }
+
   async remove(id: string) {
     return this.mutate(async () => {
       const removed = await this.requireStore().remove(id);

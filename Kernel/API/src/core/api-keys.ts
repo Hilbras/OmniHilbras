@@ -12,6 +12,14 @@ export type ApiKeyRecord = {
   createdAt: string;
   updatedAt: string;
   lastUsedAt?: string;
+  /**
+   * How many requests this key has authenticated.
+   *
+   * Counted in memory on every call and persisted on the same throttle as `lastUsedAt`, so the number is exact for
+   * the life of the process and may lag the disk by up to one flush interval — the alternative was a disk write per
+   * request on the authentication path, which is the one place I/O is least welcome.
+   */
+  requests: number;
 };
 
 /** A freshly minted key. `key` is returned exactly once, at creation time. */
@@ -24,6 +32,8 @@ export interface ApiKeyStore {
   list(): Promise<ApiKeyRecord[]>;
   create(name: string): Promise<CreatedApiKey>;
   setEnabled(id: string, enabled: boolean): Promise<ApiKeyRecord | undefined>;
+  /** Renames a key. `undefined` when no key has that id — the route answers 404 rather than inventing one. */
+  rename(id: string, name: string): Promise<ApiKeyRecord | undefined>;
   remove(id: string): Promise<boolean>;
   /** Resolves the record for an exact key match, or `undefined` when unknown or paused. */
   authenticate(key: string): Promise<ApiKeyRecord | undefined>;
@@ -101,6 +111,7 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
       enabled: true,
       createdAt: now,
       updatedAt: now,
+      requests: 0,
     };
     this.keys.set(stored.id, stored);
     return { record: toRecord(stored), key: secret };
@@ -118,8 +129,23 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
     return this.keys.delete(id);
   }
 
+  async rename(id: string, name: string) {
+    const existing = this.keys.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, name: normalizeName(name), updatedAt: new Date().toISOString() };
+    this.keys.set(id, updated);
+    return toRecord(updated);
+  }
+
   async authenticate(key: string) {
-    return matchKey(this.keys.values(), key);
+    const matched = matchKey(this.keys.values(), key);
+    if (!matched) return matched;
+    // `matchKey` hands back the public record; the counter lives on the stored entry, beside the hash.
+    const stored = this.keys.get(matched.id);
+    if (!stored) return matched;
+    const counted = { ...stored, requests: (stored.requests ?? 0) + 1 };
+    this.keys.set(counted.id, counted);
+    return toRecord(counted);
   }
 
   async isEnforced() {
@@ -212,6 +238,7 @@ export class LocalApiKeyStore implements ApiKeyStore {
         enabled: true,
         createdAt: now,
         updatedAt: now,
+        requests: 0,
       };
       const previous = new Map(this.keys);
       this.keys.set(stored.id, stored);
@@ -232,6 +259,24 @@ export class LocalApiKeyStore implements ApiKeyStore {
       const existing = this.keys.get(id);
       if (!existing) return undefined;
       const updated = { ...existing, enabled, updatedAt: new Date().toISOString() };
+      this.keys.set(id, updated);
+      try {
+        await this.persist();
+      } catch (error) {
+        this.keys.set(id, existing);
+        await this.persist().catch(() => undefined);
+        throw error;
+      }
+      return toRecord(updated);
+    });
+  }
+
+  async rename(id: string, name: string) {
+    return this.withMutation(async () => {
+      await this.ensureLoaded();
+      const existing = this.keys.get(id);
+      if (!existing) return undefined;
+      const updated = { ...existing, name: normalizeName(name), updatedAt: new Date().toISOString() };
       this.keys.set(id, updated);
       try {
         await this.persist();
@@ -265,8 +310,17 @@ export class LocalApiKeyStore implements ApiKeyStore {
     await this.mutationQueue;
     await this.ensureLoaded();
     const matched = matchKey(this.keys.values(), key);
-    // Best-effort usage tracking: a failed audit write must never fail a request.
-    if (matched) void this.touchLastUsed(matched.id);
+    // Best-effort usage tracking: a failed audit write must never fail a request. The count moves in memory on
+    // every call so it is never under-reported; `touchLastUsed` carries it to disk on its own throttle.
+    if (matched) {
+      const stored = this.keys.get(matched.id);
+      if (stored) {
+        const counted = { ...stored, requests: (stored.requests ?? 0) + 1 };
+        this.keys.set(counted.id, counted);
+        void this.touchLastUsed(counted.id);
+        return toRecord(counted);
+      }
+    }
     return matched;
   }
 
@@ -414,6 +468,7 @@ function toRecord(stored: StoredApiKey): ApiKeyRecord {
     enabled: stored.enabled,
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
+    requests: stored.requests ?? 0,
     ...(stored.lastUsedAt === undefined ? {} : { lastUsedAt: stored.lastUsedAt }),
   };
 }
@@ -469,6 +524,10 @@ function parseStoredKey(value: unknown): StoredApiKey {
     throw new Error('Local API key store contains an invalid key.');
   }
   if (value.lastUsedAt !== undefined && typeof value.lastUsedAt !== 'string') throw new Error('Local API key store contains an invalid key.');
+  // Absent in files written before the counter existed, so absent means zero rather than unreadable.
+  if (value.requests !== undefined && (typeof value.requests !== 'number' || !Number.isFinite(value.requests) || value.requests < 0)) {
+    throw new Error('Local API key store contains an invalid key.');
+  }
   return {
     id: value.id,
     name: normalizeName(value.name),
@@ -477,6 +536,7 @@ function parseStoredKey(value: unknown): StoredApiKey {
     enabled: value.enabled,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
+    requests: typeof value.requests === 'number' ? Math.floor(value.requests) : 0,
     ...(value.lastUsedAt === undefined ? {} : { lastUsedAt: value.lastUsedAt }),
   };
 }

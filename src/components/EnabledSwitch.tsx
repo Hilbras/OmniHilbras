@@ -1,4 +1,5 @@
 import { Power } from 'lucide-react';
+import { Switch } from '../ui/Switch';
 
 /**
  * The control that turns one account on and off.
@@ -30,21 +31,14 @@ export function EnabledSwitch({
   label: string;
 }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      aria-label={label}
-      disabled={busy}
-      onClick={onToggle}
-      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors disabled:cursor-wait disabled:opacity-50 ${enabled ? 'border-success/40 bg-success/30' : 'border-line-strong bg-black/60'}`}
-    >
-      <span
-        className={`block h-3.5 w-3.5 rounded-full shadow-sm transition-transform ${enabled ? 'translate-x-[18px] bg-text' : 'translate-x-[2px] bg-muted'}`}
-        aria-hidden="true"
-      />
-      {/* The power glyph lives in the track, so the control is recognisable without a caption. */}
-      <Power className={`pointer-events-none absolute h-2.5 w-2.5 ${enabled ? 'left-1 text-success' : 'right-1 text-muted/70'}`} aria-hidden="true" />
-    </button>
+    <Switch
+      checked={enabled}
+      onChange={() => onToggle()}
+      label={label}
+      busy={busy}
+      // The power glyph is what makes the control readable without a caption, which is the one thing this component
+      // adds to the shared switch.
+      glyph={<Power className="h-2.5 w-2.5" aria-hidden="true" />}
+    />
   );
 }

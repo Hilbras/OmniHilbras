@@ -107,3 +107,44 @@ test('a badge tone is named once, not spelled out per page', async () => {
   }
   assert.deepEqual(offences, [], `a badge tone was spelled out instead of named:\n${offences.join('\n')}`);
 });
+
+test('there is one switch, and it is drawn with tokens, a focus ring and a transform', async () => {
+  // Five hand-rolled switches existed, each a different size and colour, two of them a hard-coded `#f0643b` that no
+  // token defines — and not one of them had a focus ring, so a keyboard user could not see which was focused.
+  // `SettingsPage`'s animated `left`, a layout property, which is the same cost this dashboard measured when it
+  // animated a remount instead of a transform.
+  const { readdir } = await import('node:fs/promises');
+  const files = [];
+  const walk = async (dir) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) await walk(path);
+      else if (entry.name.endsWith('.tsx')) files.push(path);
+    }
+  };
+  await walk('src');
+
+  const switches = [];
+  const offences = [];
+  for (const file of files) {
+    const text = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');
+    // Comments mention `role="switch"` in prose, so they are stripped before looking for the attribute itself.
+    const code = text.split('\n').filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line)).join('\n');
+    if (/role="switch"/.test(code)) switches.push(file);
+    // Checked against the code, not the prose: the shared switch's own doc comment quotes the removed colour.
+    if (code.includes('#f0643b')) offences.push(`${file}: hard-coded switch colour`);
+    if (code.includes('transition-[left]')) offences.push(`${file}: a thumb animated on a layout property`);
+  }
+
+  assert.deepEqual(switches, ['src/ui/Switch.tsx'], 'a switch was hand-rolled again instead of using the shared one');
+  assert.deepEqual(offences, [], `a switch drifted from the shared design:\n${offences.join('\n')}`);
+
+  const shared = await readFile(new URL('../src/ui/Switch.tsx', import.meta.url), 'utf8');
+  // The file's own doc comment quotes the class it must not contain, so the code is read without the prose.
+  const sharedCode = shared.split('\n').filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line)).join('\n');
+  assert.match(sharedCode, /focus-visible:outline-2/, 'the switch sets outline-none without putting an outline back');
+  assert.doesNotMatch(sharedCode, /outline-none/, 'the switch removes the focus ring the app defines globally');
+  assert.match(sharedCode, /motion-reduce:transition-none/, 'the switch animates whatever the system setting says');
+  assert.match(sharedCode, /transition-transform/, 'the thumb does not move with a transform');
+  assert.match(sharedCode, /aria-checked=\{checked\}/, 'the switch does not announce its state');
+});
