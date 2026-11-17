@@ -39,8 +39,14 @@ jobs:
 
       # `vite preview` serves `dist/`, and the spec walks eleven routes that are separate chunks — so the build is
       # not optional here, and a stale one would test the previous release.
-      - name: Build the dashboard
-        run: pnpm build:frontend
+      #
+      # `pnpm build`, not `pnpm build:frontend`: the dashboard imports `@omnihilbras/kernel-api/public`, whose `exports`
+      # map points at `Kernel/API/dist/src/public/index.js` — a build artefact. On a checkout that does not exist, and
+      # Rolldown fails with "failed to resolve import". A working tree hides this because it already holds a `dist/` from
+      # an earlier build, which is the same shape of bug as the typecheck-before-SDK-build one in `AGENTS.md`: green
+      # locally, red on a fresh checkout, every run.
+      - name: Build the gateway and the dashboard
+        run: pnpm build
 
       # `--with-deps` installs the shared libraries Chromium needs on a bare runner; without it the launch fails with
       # a missing-library error that reads like a test failure.

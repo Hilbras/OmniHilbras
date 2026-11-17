@@ -6249,3 +6249,22 @@ independently of the React app" is now measured over every provider manifest, an
 - **Desktop app gets its own port pair**: gateway `127.0.0.1:20128`, web `20127`, so an installed app and
   `pnpm dev`/`pnpm dev:gateway` (`20137`/`20138`) never contest one port. Saves `8787`, `20137` and `20138` migrate to
   `20128`; a port already held by something else still falls back rather than killing it.
+
+## 3.66.1 — the three reasons CI was red, each reproduced locally first
+
+- **`verify` failed on a test that needed the developer's own OpenCode install.** `ensureOpencodeService` returns
+  `undefined` when no binary is found, and `resolveOpencodeBinary` looks at `OMNIHILBRAS_OPENCODE_BINARY`, our install
+  path, `~/.opencode/bin` and `PATH`. This machine has the client, so `the options reach the spawn` and `a registration
+  whose process is gone is not adopted` passed here; on a runner, `start` was never called and they failed with
+  `seen: []`. Reproduced with `env -i HOME=<empty> PATH=/usr/bin:/bin node --test
+  Kernel/API/test/opencode-owned-service.test.js` → the same two failures. The tests now create a stand-in executable
+  and name it in `OMNIHILBRAS_OPENCODE_BINARY`, so the resolution path is still exercised; under the same stripped
+  environment they pass 14/14.
+- **`e2e` never built the gateway.** The workflow ran `pnpm build:frontend`, but the dashboard imports
+  `@omnihilbras/kernel-api/public`, whose `exports` map points at `Kernel/API/dist/src/public/index.js`. A working tree
+  hides this because it already holds a `dist/`; a runner does not. Reproduced by `rm -rf Kernel/API/dist` then
+  `pnpm build:frontend` → `Rolldown failed to resolve import "@omnihilbras/kernel-api/public"`. The step is now
+  `pnpm build`, which builds the gateway first — the same fix `verify` needed for `typecheck` in 1.33.2.
+- **`docker` failed before compiling a layer.** `ghcr.io/${{ github.repository }}:latest` expands to
+  `ghcr.io/Hilbras/OmniHilbras:latest`, and a container tag may not carry a capital: `invalid tag
+  "ghcr.io/Hilbras/OmniHilbras:latest"`. The name is lowercased once in a step and used from there.

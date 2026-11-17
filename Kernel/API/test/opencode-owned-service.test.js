@@ -35,6 +35,23 @@ const tempData = async (t) => {
   return dataDir;
 };
 
+/**
+ * A stand-in binary, because these tests used to depend on the developer's own install.
+ *
+ * `ensureOpencodeService` returns `undefined` when no binary is found — correct for a machine with no OpenCode — and
+ * `resolveOpencodeBinary` looks at `OMNIHILBRAS_OPENCODE_BINARY`, our own install path, `~/.opencode/bin` and `PATH`.
+ * On a workstation with the OpenCode client installed the first two tests therefore passed; on CI, where nothing is
+ * installed, the function returned before calling `start`, and they failed with `seen: []`. The suite has been red in
+ * CI since this feature landed, for a reason that says nothing about the feature.
+ *
+ * The stand-in is a real executable file, so the resolution path is still the one under test.
+ */
+const fakeBinary = async (dir) => {
+  const path = join(dir, 'opencode');
+  await writeFile(path, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  return path;
+};
+
 test('the port is ours to choose, and deliberately not the one the user’s app holds', () => {
   /**
    * This assertion claimed the opposite an hour before it was written — that the free tier required the
@@ -129,7 +146,7 @@ test('the options reach the spawn — the bug that made the first version look b
   const seen = [];
   await ensureOpencodeService({
     dataDir,
-    env: { ...process.env, OMNIHILBRAS_OPENCODE_SERVICE: 'auto', XDG_STATE_HOME: emptyState, OMNIHILBRAS_OPENCODE_PORT: String(await freePort()) },
+    env: { ...process.env, OMNIHILBRAS_OPENCODE_SERVICE: 'auto', XDG_STATE_HOME: emptyState, OMNIHILBRAS_OPENCODE_PORT: String(await freePort()), OMNIHILBRAS_OPENCODE_BINARY: await fakeBinary(dataDir) },
     // The binary is "found" without touching the machine, and the start is watched rather than performed.
     start: (binary, options) => { seen.push({ binary, dataDir: options?.dataDir }); },
     waitForService: (options) => {
@@ -157,7 +174,7 @@ test('a registration whose process is gone is not adopted — the 502 this shipp
   let started = false;
   await ensureOpencodeService({
     dataDir,
-    env: { ...process.env, XDG_STATE_HOME: emptyState, OMNIHILBRAS_OPENCODE_SERVICE: 'auto', OMNIHILBRAS_OPENCODE_PORT: String(await freePort()) },
+    env: { ...process.env, XDG_STATE_HOME: emptyState, OMNIHILBRAS_OPENCODE_SERVICE: 'auto', OMNIHILBRAS_OPENCODE_PORT: String(await freePort()), OMNIHILBRAS_OPENCODE_BINARY: await fakeBinary(dataDir) },
     start: () => { started = true; },
     waitForService: () => undefined,
   }).catch(() => undefined);
