@@ -37,7 +37,7 @@ async function stubGateway(page: Page, initial: Key[] = [makeKey()]) {
   const state = { keys: initial.map((key) => ({ ...key })), requireApiKey: true, calls: [] as string[] };
 
   await page.route('**/v1/**', (route) => route.fulfill({ json: { object: 'list', data: [], connections: [], keys: [], requireApiKey: true, failureThreshold: 3, strategies: {} } }));
-  await page.route('**/health', (route) => route.fulfill({ json: { status: 'ok', build: { version: 'test', startedAt: new Date().toISOString() } } }));
+  await page.route('**/health', (route) => route.fulfill({ json: { status: 'ok', providers: [], build: { version: 'test', startedAt: new Date().toISOString() } } }));
   await page.route('**/v1/logs/stream*', (route) => route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: '' }));
 
   await page.route('**/v1/settings/require-api-key', async (route) => {

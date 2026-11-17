@@ -6164,3 +6164,27 @@ independently of the React app" is now measured over every provider manifest, an
 - **Found while wiring:** the route-documentation guard tracks *declared* paths, not *registered handlers* — deleting
   `handleMetricsRoute` from the router list left the suite green, because the file still contains
   `url.pathname === metricsPath`. A route file that is never imported counts as served. Follow-up: make the guard check the registration list.
+
+## 3.64.1 — every button pressed, and the two faults that found
+
+- **The audit.** 154 `<button>` elements in 34 files: all typed, all wired, none with an empty handler; the one with
+  no `onClick` is the sidebar's deliberate `disabled` placeholder. An icon-only button without a name has been
+  impossible since 3.62.0's accessibility guard.
+- **`tests/e2e/buttons.spec.ts`** presses every enabled button on nine dashboard routes. Seven are green in 1.3
+  minutes; `providers` and `models` are skipped with their budget in the reason, because the design costs one
+  navigation per press and those two blow it even on an idle machine. A skipped route with a number is a debt; a flaky
+  route is a lie. `BUTTON_SWEEP_ALL=1` lifts the skip to re-measure. Each press must move the URL,
+  change the DOM or reach the gateway — a control that does nothing is a failure, because "no effect" and "broken" are
+  the same thing to a user. Three harness faults had to be fixed before it could report anything true: the SSE stub
+  was shadowed by the origin catch-all (Playwright matches **newest first**, so every page logged `EventSource` MIME
+  errors and every button "failed"); `:visible` is a Playwright-only pseudo-class that does not resolve inside
+  `evaluateAll`, so the first run reported every page as having no buttons; and a page that never finishes loading
+  burned the full twenty-second skeleton wait per iteration instead of five.
+- **A health payload without `providers` unmounted the whole dashboard.** Every summary count on `/dashboard/providers`
+  reads `healthReport.providers`, and with one error boundary above the page, the first `.filter` took the shell and
+  the navigation with it. The report is now normalised, and the Credential-check card says *incomplete — no
+  per-provider list in /health* instead of `0 of 0`.
+- **The toast viewport tolerates a malformed entry.** The sweep pressed "Dismiss notification" on `/dashboard/keys`
+  and got `Cannot read properties of undefined (reading 'id')`; it has not reproduced in seven subsequent runs, with
+  or without a toast on screen. Rather than leave a class of crash to be found by a user, `ToastViewport` filters a
+  falsy entry before mapping — a toast is the least important thing on screen to lose a render over.

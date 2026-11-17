@@ -66,7 +66,7 @@ async function prepare(page: Page, theme: 'dark' | 'light') {
   }));
   await page.route('**/v1/connections*', (route) => route.fulfill({ json: { object: 'list', data: [connection], build: { version: '3.64.0' } } }));
   await page.route('**/v1/keys', (route) => route.fulfill({ json: { object: 'list', keys: [apiKey], requireApiKey: true } }));
-  await page.route('**/health', (route) => route.fulfill({ json: { status: 'ok', build: { version: '3.64.0', startedAt: '2026-11-17T09:00:00.000Z' } } }));
+  await page.route('**/health', (route) => route.fulfill({ json: { status: 'ok', providers: [], build: { version: '3.64.0', startedAt: '2026-11-17T09:00:00.000Z' } } }));
   await page.route('**/v1/logs/stream*', (route) => route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: '' }));
 }
 

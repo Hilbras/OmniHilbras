@@ -258,3 +258,25 @@ test('the account row says when the session ends, not only that it was accepted'
   assert.match(client, /credentialState\?: 'valid' \| 'expiring' \| 'expired' \| 'unknown' \| 'none'/, 'the client type drops the field the gateway sends');
   assert.match(client, /credentialExpiresAt\?: string/, 'the client type drops the expiry');
 });
+
+test('an incomplete health report degrades the page instead of unmounting it', () => {
+  // Found by the button sweep: a `/health` payload without `providers` made every summary count below it throw on
+  // `.filter`, and with one error boundary above the whole dashboard that took the page, the shell and the navigation
+  // with it — the app rendered nothing at all.
+  const page = read('src/pages/ProvidersPage.tsx');
+  assert.match(page, /const complete = Array\.isArray\(health\.providers\)/, 'the report is trusted to have a provider list');
+  assert.match(page, /const normalized = complete \? health : \{ \.\.\.health, providers: \[\] \}/, 'an incomplete report is not normalised');
+  assert.match(page, /setHealthReportComplete\(complete\)/, 'the page cannot say that the report was incomplete');
+  assert.match(page, /: 'incomplete'/, 'the summary card claims a count from a report with no list');
+  assert.match(page, /no per-provider list in \/health/, 'the operator is not told what was missing');
+});
+
+test('the toast viewport survives an entry that is not an object', () => {
+  // The sweep pressed "Dismiss notification" on /dashboard/keys and reported `Cannot read properties of undefined
+  // (reading 'id')`. It has not reproduced since, but a crash inside the viewport is a crash inside the only error
+  // boundary above the page — and a toast is the least important thing on screen to lose a render over.
+  const toast = read('src/components/Toast.tsx');
+  assert.match(toast, /toasts\.filter\(\(toast\): toast is Toast => Boolean\(toast\)\)/, 'a malformed entry reaches the map');
+  assert.match(toast, /\{visible\.map\(\(toast\) => \{/, 'the viewport maps the unfiltered list');
+  assert.doesNotMatch(toast, /\{toasts\.map\(\(toast\) => \{/, 'the unfiltered map is back');
+});

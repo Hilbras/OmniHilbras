@@ -92,7 +92,17 @@ const TONE_STYLES: Record<ToastTone, { container: string; Icon: typeof CircleAle
 };
 
 function ToastViewport({ toasts, onDismiss }: { toasts: readonly Toast[]; onDismiss: (id: number) => void }) {
-  if (toasts.length === 0) return null;
+  /**
+   * `Boolean` filter, not a length check.
+   *
+   * A single malformed entry must not take the dashboard with it. Every component here renders inside the app's only
+   * error boundary — the one that has already cost a whole page once when a provider payload arrived without
+   * `providers` — and a toast is the least important thing on screen to lose a render over. The sweep pressed
+   * "Dismiss notification" on `/dashboard/keys` and reported `Cannot read properties of undefined (reading 'id')`;
+   * it has not reproduced since, and this makes the class impossible rather than leaving it to be re-found by a user.
+   */
+  const visible = toasts.filter((toast): toast is Toast => Boolean(toast));
+  if (visible.length === 0) return null;
   return (
     <div
       // `aria-live` on the container, so a toast is announced without stealing focus. `polite` rather
@@ -101,7 +111,7 @@ function ToastViewport({ toasts, onDismiss }: { toasts: readonly Toast[]; onDism
       aria-atomic="false"
       className="pointer-events-none fixed inset-x-0 top-20 z-[70] flex flex-col items-center gap-2 px-3 sm:inset-x-auto sm:right-4 sm:top-20 sm:items-end"
     >
-      {toasts.map((toast) => {
+      {visible.map((toast) => {
         const { container, Icon } = TONE_STYLES[toast.tone];
         return (
           <div

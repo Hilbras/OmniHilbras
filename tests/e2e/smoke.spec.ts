@@ -39,7 +39,7 @@ async function stubGateway(page: import('@playwright/test').Page) {
     json: { object: 'list', data: [], models: [], connections: [], keys: [], requireApiKey: false, failureThreshold: 3, strategies: {}, usage: [] },
   }));
   await page.route('**/v1/connections*', (route) => route.fulfill({ json: { object: 'list', data: [], build: { version: 'test' } } }));
-  await page.route('**/health', (route) => route.fulfill({ json: { status: 'ok', build: { version: 'test', startedAt: new Date().toISOString() } } }));
+  await page.route('**/health', (route) => route.fulfill({ json: { status: 'ok', providers: [], build: { version: 'test', startedAt: new Date().toISOString() } } }));
   // The live log tail is an EventSource, and a JSON body makes the browser refuse the stream with a console error
   // that is about the stub, not the dashboard. An empty event-stream keeps the connection quiet and idle.
   await page.route('**/v1/logs/stream*', (route) => route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' }, body: '' }));

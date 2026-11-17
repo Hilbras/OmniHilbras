@@ -143,6 +143,8 @@ export function ProvidersContent() {
    * which the card renders as `—` rather than a number nobody measured.
    */
   const [healthReport, setHealthReport] = useState<GatewayHealth | undefined>();
+  /** False when the gateway answered `/health` without a per-provider list; the summary says so rather than `0 of 0`. */
+  const [healthReportComplete, setHealthReportComplete] = useState(true);
   const [notice, setNotice] = useState('');
   const [noticeError, setNoticeError] = useState(false);
 
@@ -169,8 +171,20 @@ export function ProvidersContent() {
             // Retained as well as merged, so the summary card counts from the same report the cards
             // were built from. Dropping it here is what left that card showing `—` on every load and
             // only filling in after someone pressed **Test all**.
-            setHealthReport(health);
-            setProviders((current) => mergeGatewayConnections(current, connections, health));
+            /**
+             * A health payload without `providers` is *incomplete*, not fatal.
+             *
+             * The sweep found the whole dashboard unmounting when `/health` answered without that field: every count
+             * below reads `healthReport.providers`, and the first `.filter` threw — taking the page, the shell and the
+             * navigation with it, because there is one error boundary and it is above all of them. A report whose
+             * card list cannot be read is a report about nothing, so it is normalised here and the summary cards say
+             * so instead of claiming a measurement.
+             */
+            const complete = Array.isArray(health.providers);
+            const normalized = complete ? health : { ...health, providers: [] };
+            setHealthReport(normalized);
+            setHealthReportComplete(complete);
+            setProviders((current) => mergeGatewayConnections(current, connections, normalized));
           })
           .catch(() => {
             if (!active) return;
@@ -494,8 +508,8 @@ export function ProvidersContent() {
             */}
             <SummaryCard
               label="Credential check"
-              value={healthReport ? `${credentialCheckedCount} of ${healthReport.providers.length}` : '—'}
-              detail="credential accepted"
+              value={!healthReport ? '—' : healthReportComplete ? `${credentialCheckedCount} of ${healthReport.providers.length}` : 'incomplete'}
+              detail={healthReport && !healthReportComplete ? 'no per-provider list in /health' : 'credential accepted'}
               icon={Activity}
               tone="border-[#83b7ff]/25 bg-[#83b7ff]/10 text-[#5d98e8]"
             />
