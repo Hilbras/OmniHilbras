@@ -164,6 +164,11 @@ envelope and reached no client at all.
 
 The first local gateway exposes:
 
+- `GET /v1/system/update` — the newest published release, read **by the gateway** and cached for six hours. Returns
+  `{version, url, publishedAt}`, or `{unavailable: true, reason}` when GitHub cannot be reached or refuses. The dashboard
+  used to ask `api.github.com` from the browser, so a proxy or a rate limit turned every load into a console error about
+  a feed the user had not asked about; server-side it is one cached request, and a failed check is a stated result
+  rather than an error.
 - `GET /metrics` — the gateway in the Prometheus text exposition format (`text/plain; version=0.0.4`), rendered from
   the same usage records `/v1/usage` reads, so the two cannot disagree. Series: `omnihilbras_up`, `omnihilbras_build_info{version}`,
   `omnihilbras_requests_total{provider,outcome}`, `omnihilbras_attempts_total{provider}` (one request may be several

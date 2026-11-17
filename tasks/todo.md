@@ -6192,3 +6192,29 @@ independently of the React app" is now measured over every provider manifest, an
   and got `Cannot read properties of undefined (reading 'id')`; it has not reproduced in seven subsequent runs, with
   or without a toast on screen. Rather than leave a class of crash to be found by a user, `ToastViewport` filters a
   falsy entry before mapping — a toast is the least important thing on screen to lose a render over.
+
+## 3.65.0 — the usage page stops showing a dash for what it could count
+
+- **The question was "why does the usage page not appear correctly", and the page was right.** It said 1000 requests,
+  997 succeeded — and every token figure was `—` with "no provider reported usage". Measured: 500 records, all from
+  `zcode`, **none** carrying a token count. One `openrouter` probe returned `prompt_tokens: 32, completion_tokens: 4`
+  and the record immediately read `in: 32, out: 4` — so the recorder worked, and the provider was not reporting.
+- **The real defect was on the streaming path.** `handleChat`'s stream loop wrote chunks to the client and discarded
+  them: no `chunk.usage`, no accumulated text, and a `recordUsage` call with no usage argument at all. A **streamed**
+  turn through any provider therefore recorded nothing, even one that answered with exact numbers. `streamUsage` and
+  `text` are captured now, and the record receives both.
+- **A provider that reports nothing now gets a labelled estimate.** `core/token-estimate.ts` counts characters at four
+  per token, minimum one for non-empty text; the record carries `tokensEstimated`, the totals aggregate it
+  (`tokensEstimated` alongside `tokensUnmeasured`), and the page says "measured + estimated from text" rather than
+  printing a guess as a measurement. The estimate is wrong in both directions — prose is nearer 4 characters, code and
+  JSON nearer 2.5 — which is exactly why it is labelled rather than presented as a count.
+- **An empty request stays unmeasured** rather than reading as zero tokens: "no characters to count" and "counted zero"
+  are different claims, and only one of them is true.
+- **`GET /metrics` counts the gap**: `omnihilbras_usage_unreported_total{provider}` says how many answers carried no
+  usage, so the hole is visible in a scrape instead of only in a page.
+- **The update check moved to the gateway.** The dashboard called `api.github.com` itself, so a proxy or a rate limit
+  put a red `403` in the console on every load — noise about a feed nobody had asked about. `GET /v1/system/update`
+  reads it server-side, caches for six hours and answers `{unavailable: true, reason}` when it cannot; a failed check is
+  a stated result, not an error.
+- **ZCode cannot be measured today**: probing it answered `exceed quota limit`. Whether it omits `message_delta.usage`
+  or merely omits it while streaming is still an open question, and a re-test needs the quota to reset.

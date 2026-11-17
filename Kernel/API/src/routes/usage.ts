@@ -55,7 +55,7 @@ export async function handleUsageRoute(context: RouteContext): Promise<boolean> 
     sendJson(response, 200, {
       recording: false,
       reason: 'This gateway was started without a usage store, so no request has been recorded.',
-      totals: { requests: 0, succeeded: 0, failed: 0, cancelled: 0, inputTokens: 0, outputTokens: 0, tokensUnmeasured: true },
+      totals: { requests: 0, succeeded: 0, failed: 0, cancelled: 0, inputTokens: 0, outputTokens: 0, tokensUnmeasured: true, tokensEstimated: false },
       records: [],
     }, origin);
     return true;

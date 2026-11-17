@@ -131,6 +131,14 @@ export type UsageTotals = {
   reasoningTokens: number;
   /** True when **no** record carried token counts, so the token totals are an absence and not a zero. */
   tokensUnmeasured: boolean;
+  /**
+   * True when **any** figure in the totals came from an estimate rather than a provider's own count.
+   *
+   * The page needs both facts to be honest: `tokensUnmeasured` says nothing was recorded at all, and this says part of
+   * what was recorded was guessed. A single flag rather than a per-record breakdown because the question the page asks
+   * is "can I trust this number", and the answer is no if even one request contributed a guess.
+   */
+  tokensEstimated: boolean;
 };
 
 export type UsageSummary = {
@@ -241,6 +249,7 @@ export function summarizeUsage(records: readonly UsageRecord[]): UsageTotals {
   let cacheWriteTokens = 0;
   let reasoningTokens = 0;
   let metered = 0;
+  let estimated = 0;
 
   for (const record of records) {
     if (record.outcome === 'success') succeeded += 1;
@@ -251,6 +260,7 @@ export function summarizeUsage(records: readonly UsageRecord[]): UsageTotals {
     // an unmetered provider indistinguishable from a free one.
     if (record.inputTokens !== undefined || record.outputTokens !== undefined) {
       metered += 1;
+      if (record.tokensEstimated === true) estimated += 1;
       inputTokens += record.inputTokens ?? 0;
       outputTokens += record.outputTokens ?? 0;
       cacheReadTokens += record.cacheReadTokens ?? 0;
@@ -270,6 +280,7 @@ export function summarizeUsage(records: readonly UsageRecord[]): UsageTotals {
     cacheWriteTokens,
     reasoningTokens,
     tokensUnmeasured: metered === 0,
+    tokensEstimated: estimated > 0,
   };
 }
 

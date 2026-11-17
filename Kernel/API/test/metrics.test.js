@@ -89,3 +89,50 @@ test('GET /metrics is a management path: refused without a credential', async (t
   assert.match(answered.headers.get('content-type') ?? '', /text\/plain; version=0\.0\.4/, 'the registered exposition content type');
   assert.match(await answered.text(), /^omnihilbras_up 1$/m);
 });
+
+test('a scrape counts answers whose provider reported no usage', async () => {
+  // The page now shows a labelled estimate for these, and this is how an operator sees the gap without opening records:
+  // 500 records through one provider had no token counts and nothing said so outside the page.
+  const text = renderPrometheusMetrics({
+    version: '3.65.0',
+    records: [
+      { at: 'now', model: 'm', providerId: 'zcode', outcome: 'success', attempts: 1, latencyMs: 10 },
+      { at: 'now', model: 'm', providerId: 'openrouter', outcome: 'success', attempts: 1, latencyMs: 10, inputTokens: 5, outputTokens: 2 },
+    ],
+  });
+  assert.match(text, /^omnihilbras_usage_unreported_total\{provider="zcode"\} 1$/m);
+  assert.doesNotMatch(text, /omnihilbras_usage_unreported_total\{provider="openrouter"\}/, 'a reported figure was counted as unreported');
+});
+
+test('the release route is answered by the gateway, and an unreachable feed is a stated result', async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  // The gateway's own call to GitHub is stubbed; the dashboard's call to the gateway is not.
+  globalThis.fetch = async (input, init) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.startsWith('https://api.github.com/')) return new Response('{}', { status: 403 });
+    return original(input, init);
+  };
+
+  const apiKeys = new InMemoryApiKeyStore();
+  const service = new GatewayService(
+    new ProviderRegistry().register({ id: 'p', name: 'P', capabilities: { chat: true, streaming: false, models: true }, async listModels() { return []; } }),
+    new InMemorySecretStore({}),
+    new InMemoryConnectionStore(),
+    apiKeys,
+    {},
+  );
+  const { createGatewayServer } = await import('../dist/src/index.js');
+  const server = createGatewayServer(service, { corsOrigin: 'http://localhost:5173' });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+
+  // Management path, like every `/v1/system` route: it is answered for a credential, not for anyone who asks.
+  const created = await apiKeys.create('update-check');
+  const response = await fetch(`http://127.0.0.1:${port}/v1/system/update`, { headers: { authorization: `Bearer ${created.key}` } });
+  assert.equal(response.status, 200, 'a blocked feed is a 500 rather than an answer');
+  const body = await response.json();
+  assert.equal(body.unavailable, true);
+  assert.match(String(body.reason), /403/);
+});

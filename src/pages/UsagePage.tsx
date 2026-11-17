@@ -503,14 +503,14 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
             <SummaryCard
               label="Input tokens"
               value={totals?.tokensUnmeasured ? '—' : formatTokens(totals?.inputTokens)}
-              detail={totals?.tokensUnmeasured ? 'no provider reported usage' : 'measured'}
+              detail={totals?.tokensUnmeasured ? 'no provider reported usage' : totals?.tokensEstimated ? 'measured + estimated from text' : 'measured'}
               icon={Cpu}
               tone="border-line bg-bg-soft text-text"
             />
             <SummaryCard
               label="Output tokens"
               value={totals?.tokensUnmeasured ? '—' : formatTokens(totals?.outputTokens)}
-              detail={totals?.tokensUnmeasured ? 'no provider reported usage' : 'measured'}
+              detail={totals?.tokensUnmeasured ? 'no provider reported usage' : totals?.tokensEstimated ? 'measured + estimated from text' : 'measured'}
               icon={Cpu}
               tone="border-line bg-bg-soft text-text"
             />

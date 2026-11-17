@@ -1135,6 +1135,8 @@ export type GatewayUsageTotals = {
    * cannot tell them apart reports "$0 spent" for a connection that was never asked.
    */
   tokensUnmeasured: boolean;
+  /** True when any counted record was an estimate rather than a provider's own count. */
+  tokensEstimated: boolean;
 };
 
 export type GatewayUsageCost = {
@@ -1313,6 +1315,16 @@ export type GatewayTokenSaverStats = {
 
 export function getGatewayTokenSaverStats(period = '7d', signal?: AbortSignal) {
   return requestJson<GatewayTokenSaverStats>(`/v1/token-saver/stats?period=${encodeURIComponent(period)}`, { signal });
+}
+
+/**
+ * The newest published release, as the **gateway** read it.
+ *
+ * The browser used to ask GitHub itself, so a proxy or a rate limit produced a red `403` in the console on every load.
+ * `{ unavailable: true }` is a real answer: it says the check could not be made, and the caller says so.
+ */
+export function getGatewayLatestRelease(signal?: AbortSignal) {
+  return requestJson<{ version?: string; url?: string; unavailable?: boolean; reason?: string }>('/v1/system/update', { signal });
 }
 
 export function getGatewayUsage(query?: { period?: string; provider?: string; connection?: string; outcome?: 'success' | 'failure' | 'cancelled'; limit?: number; offset?: number }, signal?: AbortSignal) {

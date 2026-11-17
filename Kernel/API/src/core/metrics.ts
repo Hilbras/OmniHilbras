@@ -79,6 +79,17 @@ export function renderPrometheusMetrics({ records, version, now = Date.now() }: 
     }
   }
 
+  help('omnihilbras_usage_unreported_total', 'counter', 'Answers whose provider reported no token usage, by provider. The page shows a labelled estimate for these.');
+  const unreported = new Map<string, number>();
+  for (const record of records) {
+    if (record.inputTokens !== undefined || record.outputTokens !== undefined) continue;
+    const provider = record.providerId ?? 'unattributed';
+    unreported.set(provider, (unreported.get(provider) ?? 0) + 1);
+  }
+  for (const provider of [...unreported.keys()].sort()) {
+    lines.push(`omnihilbras_usage_unreported_total{provider="${escapeLabel(provider)}"} ${unreported.get(provider)}`);
+  }
+
   help('omnihilbras_attempts_total', 'counter', 'Provider attempts, including the ones a failover abandoned. One request may be several attempts.');
   for (const provider of providers) lines.push(`omnihilbras_attempts_total{provider="${escapeLabel(provider)}"} ${byProvider.get(provider)!.attempts}`);
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { version as repoVersion } from 'virtual:omnihilbras-version';
 import { desktopBridge, type UpdateState } from './electronBridge';
 import { compareVersions } from './versionCompare.mjs';
+import { getGatewayLatestRelease } from './gatewayClient';
 
 /**
  * One answer to "is there a newer version?", wherever the dashboard is running.
@@ -31,7 +32,6 @@ export type UpdateView = UpdateState & {
   releaseUrl?: string;
 };
 
-const GITHUB_LATEST_RELEASE = 'https://api.github.com/repos/Hilbras/OmniHilbras/releases/latest';
 const RELEASE_PAGE = 'https://github.com/Hilbras/OmniHilbras/releases/latest';
 
 /** How long a browser's answer is trusted before asking again. */
@@ -105,13 +105,11 @@ async function fetchLatestRelease(): Promise<UpdateState> {
 
   inFlight = (async () => {
     try {
-      const response = await fetch(GITHUB_LATEST_RELEASE, {
-        headers: { accept: 'application/vnd.github+json' },
-        signal: AbortSignal.timeout(RELEASE_TIMEOUT_MS),
-      });
-      if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
-      const body = (await response.json()) as { tag_name?: string; html_url?: string };
-      const latest = body.tag_name?.trim();
+      // Through the gateway, not straight to GitHub: one cached request on the server beats a cross-origin call from
+      // every dashboard load that a proxy turns into a console error about nothing the user did.
+      const body = await getGatewayLatestRelease(AbortSignal.timeout(RELEASE_TIMEOUT_MS));
+      if (body.unavailable === true) throw new Error(body.reason ?? 'the update check could not reach GitHub');
+      const latest = body.version?.trim();
       if (!latest) throw new Error('the release has no tag');
       const state: UpdateState = compareVersions(latest, repoVersion) > 0
         ? { status: 'available', version: latest.replace(/^v/i, ''), canInstall: false }

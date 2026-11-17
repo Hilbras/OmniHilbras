@@ -55,6 +55,22 @@ export async function handleStatusRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
+    /**
+     * The latest published release, asked for by the **gateway** rather than the browser.
+     *
+     * The dashboard used to call `api.github.com` directly, which meant every load made a cross-origin request that a
+     * proxy, an offline machine or a rate limit turned into a red `403` in the console — noise about the update feed,
+     * on a page about something else. Server-side it is one request the gateway can cache, time out and fail quietly,
+     * and it works when the browser's network path to GitHub does not.
+     *
+     * `unavailable` is a result, not an error: the caller is told the check could not be made and says so, which is the
+     * same honesty rule the dashboard already applies to a provider that reports no usage.
+     */
+    if (request.method === 'GET' && url.pathname === '/v1/system/update') {
+      sendJson(response, 200, await readLatestRelease(signal), origin);
+      return true;
+    }
+
     if (url.pathname === gatewayShutdownPath) {
       if (request.method !== 'POST') {
         sendJson(response, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: `${gatewayShutdownPath} answers POST.` } }, origin);
@@ -103,4 +119,41 @@ export async function handleStatusRoute(ctx: RouteContext): Promise<boolean> {
 
 
   return false;
+}
+
+/** How long a release answer is reused. GitHub's unauthenticated limit is 60 requests an hour; this asks twice a day. */
+const RELEASE_CACHE_MS = 6 * 60 * 60 * 1000;
+const RELEASE_FETCH_TIMEOUT_MS = 4_000;
+let releaseCache: { at: number; body: Record<string, unknown> } | undefined;
+
+/**
+ * `GET /v1/system/update` — the newest release tag, or a plain statement that it could not be read.
+ *
+ * No token, no retry storm: a failure is cached for the same six hours, because a gateway that cannot reach GitHub
+ * should not try again on every dashboard load. The dashboard's own retry cadence is what decides when to ask again.
+ */
+async function readLatestRelease(signal?: AbortSignal): Promise<Record<string, unknown>> {
+  if (releaseCache && Date.now() - releaseCache.at < RELEASE_CACHE_MS) return releaseCache.body;
+  const remember = (body: Record<string, unknown>) => {
+    releaseCache = { at: Date.now(), body };
+    return body;
+  };
+  try {
+    const timeout = AbortSignal.timeout(RELEASE_FETCH_TIMEOUT_MS);
+    const response = await fetch('https://api.github.com/repos/Hilbras/OmniHilbras/releases/latest', {
+      headers: { accept: 'application/vnd.github+json' },
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+    if (!response.ok) return remember({ unavailable: true, reason: `GitHub answered ${response.status}` });
+    const body = (await response.json()) as { tag_name?: string; html_url?: string; published_at?: string };
+    const version = body.tag_name?.trim();
+    if (!version) return remember({ unavailable: true, reason: 'the release has no tag' });
+    return remember({
+      version: version.replace(/^v/i, ''),
+      url: body.html_url ?? 'https://github.com/Hilbras/OmniHilbras/releases/latest',
+      ...(body.published_at ? { publishedAt: body.published_at } : {}),
+    });
+  } catch (error) {
+    return remember({ unavailable: true, reason: error instanceof Error ? error.message : 'the update check failed' });
+  }
 }

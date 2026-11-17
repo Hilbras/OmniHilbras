@@ -280,3 +280,20 @@ test('the toast viewport survives an entry that is not an object', () => {
   assert.match(toast, /\{visible\.map\(\(toast\) => \{/, 'the viewport maps the unfiltered list');
   assert.doesNotMatch(toast, /\{toasts\.map\(\(toast\) => \{/, 'the unfiltered map is back');
 });
+
+test('the usage page says when a token figure was estimated rather than measured', () => {
+  // 500 records through one provider, none with a token count, so every figure read "—" while the answer *was* counted.
+  // The page now prints which of the two it is, because "measured + estimated from text" is a different claim from
+  // "measured", and an operator pricing a month needs to know which one they have.
+  const page = read('src/pages/UsagePage.tsx');
+  assert.match(page, /tokensEstimated \? 'measured \+ estimated from text'/, 'the page does not label an estimated figure');
+  const client = read('src/lib/gatewayClient.ts');
+  assert.match(client, /tokensEstimated: boolean/, 'the client type drops the flag the gateway sends');
+});
+
+test('the update check asks the gateway, not GitHub, so a blocked feed is not a console error', () => {
+  const hook = read('src/lib/useUpdateState.ts');
+  assert.doesNotMatch(hook, /api\.github\.com/, 'the browser is calling GitHub again');
+  assert.match(hook, /getGatewayLatestRelease\(/, 'the hook does not read the gateway route');
+  assert.match(hook, /body\.unavailable === true/, 'an unavailable feed is not turned into a stated failure');
+});

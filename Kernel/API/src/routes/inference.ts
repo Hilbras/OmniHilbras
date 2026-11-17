@@ -7,6 +7,7 @@ import { requestIdOf } from '../core/http.js';
  * the wrong thing.
  */
 
+import { estimatePromptTokens, estimateTokens } from '../core/token-estimate.js';
 import { ProviderError, canonicalizeUsage, isLoopbackHostname, isPrivateHostname, isProviderError, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type MessageContent, type Model, type ProviderId, type ToolCall, type ToolDefinition } from '../core/index.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
@@ -522,6 +523,10 @@ function recordUsage(
     latencyMs: number;
     errorCode?: string;
     usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number; estimated?: boolean };
+    /** The prompt, for a provider that reports nothing. Used only when `usage` is absent. */
+    messages?: readonly unknown[];
+    /** The answer text, for the same reason. */
+    responseText?: string;
     requestId?: string;
     ledger?: readonly GatewayFailoverAttempt[];
   },
@@ -530,7 +535,23 @@ function recordUsage(
   if (!store) return;
   // One convention at the recording boundary: input includes cache, cache read/write are subsets. Adapters
   // report their provider's own shape; the store must not.
-  const usage = canonicalizeUsage(input.usage);
+  /**
+   * Measured if the provider said so; estimated if it said nothing and we have text to count.
+   *
+   * A provider's own number always wins — the estimate only fills a hole, because `—` for every request through a
+   * provider that reports nothing tells an operator nothing at all. The record carries `tokensEstimated` either way,
+   * so the page can print "measured" or "estimated from text" and mean it.
+   */
+  const measured = canonicalizeUsage(input.usage);
+  const estimated = measured === undefined
+    ? (() => {
+      const inputTokens = estimatePromptTokens(input.messages);
+      const outputTokens = estimateTokens(input.responseText);
+      if (inputTokens === undefined && outputTokens === undefined) return undefined;
+      return { inputTokens, outputTokens, estimated: true } as const;
+    })()
+    : undefined;
+  const usage = measured ?? (estimated ? { ...estimated } : undefined);
   const compression = service.takeCompressionTelemetry(input.requestId);
   // **No requirement that a provider was reached.** The first version returned early when `providerId` was
   // missing, which silently dropped every request that ended before a route was tried — a client that
@@ -631,6 +652,9 @@ async function handleChatRequest(input: {
       attempts: attempts.length,
       latencyMs: Date.now() - startedAt,
       usage: completion.usage,
+      // The text, so a provider that reports nothing still produces a labelled estimate instead of a dash.
+      messages: chatRequest.messages,
+      responseText: typeof completion.message.content === 'string' ? completion.message.content : undefined,
       requestId: scope.id,
       ledger: attempts,
     });
@@ -656,7 +680,20 @@ async function handleChatRequest(input: {
   response.flushHeaders();
 
   try {
+    /**
+     * Two things the streaming path used to throw away, and both were invisible until the usage page was read closely.
+     *
+     * `streamUsage` is the provider's own count, when it sends one (Anthropic sends it on `message_delta`, OpenAI only
+     * when `stream_options.include_usage` is asked for). The record below never received it, so a **streamed** request
+     * reported nothing even from a provider that had answered with exact numbers.
+     *
+     * `text` is what lets a provider that reports nothing still produce a labelled estimate instead of a dash.
+     */
+    let streamUsage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
+    let text = '';
     for await (const chunk of outcome.chunks) {
+      if (chunk.usage) streamUsage = chunk.usage;
+      if (typeof chunk.delta === 'string') text += chunk.delta;
       await writeStreamData(response, `data: ${JSON.stringify(toOpenAIChunk(chunk))}\n\n`, signal);
     }
     // **The signal is checked before success is claimed** (1.60.0).
@@ -696,6 +733,9 @@ async function handleChatRequest(input: {
       outcome: 'success',
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
+      ...(streamUsage ? { usage: streamUsage } : {}),
+      messages: chatRequest.messages,
+      responseText: text,
       requestId: scope.id,
     });
     response.end();
