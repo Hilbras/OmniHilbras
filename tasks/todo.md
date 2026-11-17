@@ -6231,3 +6231,21 @@ independently of the React app" is now measured over every provider manifest, an
 - **It says "showing 10" and not "oldest …"**, which was the first thing I wrote and was wrong: the table pages ten
   rows, so an "oldest" derived from them describes the page while sounding like the window. What the page knows is how
   many rows it holds and which is newest; it says that.
+
+## 3.66.0 — OpenCode Go is its own provider, and it carries the session the lane routes by
+
+- **Go's paid models were refused with a message about routing, not about the key**:
+  `Request is missing x-opencode-session and cannot be routed efficiently.` Go was
+  `new ZenAdapter({ id: 'opencode-go', base: 'https://opencode.ai/zen/go' })`, and `ZenAdapter` only applied the CLI
+  identity headers on its **free-tier** path, so a paid model went out through the plain chat lane without them.
+- **Split into three packages**: `opencode-console`, `opencode-go` (new) and `opencode-zen` (renamed from `zen`).
+  A lane with its own base, entitlement and header contract is a provider, not a flag on another one.
+- **Go now sends `x-opencode-session` on every provider-bound request** — chat, messages, responses, streaming — with
+  the session derived from the first user turn plus the model, so a conversation keeps one session and a different
+  conversation gets another. The whole-message seed used by the free tier changes as the conversation grows and is
+  useless as a session id.
+- **Proof**: `Kernel/SDK/tests/opencode-go.test.js` (6 tests, one of them on a loopback socket; 5 fail if the headers
+  are removed — revert-checked) and `Kernel/API/test/opencode-go-wiring.test.js` (the gateway's own request carries it).
+- **Desktop app gets its own port pair**: gateway `127.0.0.1:20128`, web `20127`, so an installed app and
+  `pnpm dev`/`pnpm dev:gateway` (`20137`/`20138`) never contest one port. Saves `8787`, `20137` and `20138` migrate to
+  `20128`; a port already held by something else still falls back rather than killing it.

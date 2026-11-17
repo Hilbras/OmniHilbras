@@ -116,7 +116,7 @@ test('the opencode-console capture pins both responses its model list is built f
 });
 
 test('every capture records how it was taken and carries no credential', () => {
-  for (const name of ['openrouter-models.json', 'cline-models.json', 'opencode-console-models.json', 'zen-models.json']) {
+  for (const name of ['openrouter-models.json', 'cline-models.json', 'opencode-console-models.json', 'opencode-zen-models.json']) {
     const captured = capture(name);
     const meta = captured._capture;
 
@@ -139,15 +139,15 @@ test('every capture records how it was taken and carries no credential', () => {
 test('every capture is small enough to read and stable enough not to churn', () => {
   // A fixture nobody opens is a fixture nobody trusts, and a 1.28MB one is a merge conflict generator.
   // The untrimmed OpenRouter response was 1,286,456 bytes; this is the shape of it.
-  for (const name of ['openrouter-models.json', 'cline-models.json', 'opencode-console-models.json', 'zen-models.json']) {
+  for (const name of ['openrouter-models.json', 'cline-models.json', 'opencode-console-models.json', 'opencode-zen-models.json']) {
     const bytes = readFileSync(new URL(name, FIXTURES)).byteLength;
     assert.ok(bytes < 20_000, `${name} is ${bytes} bytes — a snapshot, not a shape; trim it`);
   }
 });
 test("Zen's model listing: the pinned shape is what the adapter reads", async () => {
-  const { ZenAdapter } = await import('../zen/dist/adapter/index.js');
-  const { FetchHttpTransport } = await import('../zen/dist/lib/transport.js');
-  const zen = capture('zen-models.json').responses[0];
+  const { ZenAdapter } = await import('../opencode-zen/dist/adapter/index.js');
+  const { FetchHttpTransport } = await import('../opencode-zen/dist/lib/transport.js');
+  const zen = capture('opencode-zen-models.json').responses[0];
   assert.equal(zen.status, 200);
   assert.equal(zen.shape.data, 'array', 'the listing carries its models in data');
   const item = Object.keys(zen.itemShape);

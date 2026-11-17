@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.65.1**
+**Current version: 3.66.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -379,6 +379,11 @@ location /dashboard { try_files $uri /dashboard.html; }
 
 The desktop shell owns the local gateway so the app can start and stop it without a terminal.
 
+- **Its own port pair** — the packaged app runs its gateway on `127.0.0.1:20128` and refers to the web dashboard
+  on `20127`, so it never competes with the development pair (`pnpm dev` on `20137`, `pnpm dev:gateway` on
+  `20138`) for the same port. An install that saved one of the older defaults (`8787`, `20137`, `20138`) is
+  migrated to `20128` on launch. If something else already holds `20128`, the supervisor takes a free port and
+  the Servers page says which one — it refuses to kill a process it did not start.
 - **Frameless on Windows/Linux**, with the dashboard header as the title bar and custom window controls.
   macOS keeps its traffic lights.
 - **Gateway lifecycle** — start, stop, restart, port changes, and a bounded restart policy: a crash is a

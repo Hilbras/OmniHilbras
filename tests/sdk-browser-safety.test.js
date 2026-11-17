@@ -211,7 +211,7 @@ test('the dashboard really does import the SDK barrel, so the rule above is not 
 test('the module that caused it says why it avoids node:crypto', () => {
   // A rule with no reason attached is a superstition, and this one was learned from a blank page. The
   // comment is what stops the next person from "simplifying" it back to `node:crypto`.
-  const source = readFileSync(join(SDK_SRC, 'zen/lib/zen-free-tier.ts'), 'utf8');
+  const source = readFileSync(join(SDK_SRC, 'opencode-zen/lib/zen-free-tier.ts'), 'utf8');
   assert.match(source, /node:crypto/, 'the reason the import is avoided is written down');
   assert.match(source, /getRandomValues/, 'and the replacement actually used');
 });

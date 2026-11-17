@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
 import { NousAdapter } from '@omnihilbras/sdk-nous';
-import { ZenAdapter, ZEN_GO_BASE_URL } from '@omnihilbras/sdk-zen';
+import { ZenAdapter } from '@omnihilbras/sdk-opencode-zen';
+import { OpenCodeGoAdapter } from '@omnihilbras/sdk-opencode-go';
 import { ZcodeAdapter, zcodeProviderId } from '@omnihilbras/sdk-zcode-start-plan';
 import { readZcodeLocalCredential, type ZcodeLocalCredential } from './zcode-local.js';
 import { pollZcodeOAuth, startZcodeOAuth, type ZcodeOAuthProvider } from './zcode-oauth.js';
@@ -1980,9 +1981,15 @@ export class GatewayService {
     return adapter;
   }
 
+  /**
+   * OpenCode Go is its own package, not this adapter with a different base.
+   *
+   * It used to be `new ZenAdapter({ base: ZEN_GO_BASE_URL })`, which is how Go's paid models went out without the
+   * `x-opencode-session` the lane routes by: the class only applied those headers on the free-tier path.
+   */
   opencodeGoAdapter(): ProviderAdapter {
     if (!this.opencodeGo) {
-      this.opencodeGo = new ZenAdapter({ id: 'opencode-go', name: 'OpenCode Go', base: ZEN_GO_BASE_URL, transport: this.transport });
+      this.opencodeGo = new OpenCodeGoAdapter({ transport: this.transport });
     }
     return this.opencodeGo;
   }

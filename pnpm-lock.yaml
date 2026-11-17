@@ -317,6 +317,12 @@ importers:
       '@omnihilbras/sdk-opencode-console':
         specifier: workspace:*
         version: link:../SDK/opencode-console
+      '@omnihilbras/sdk-opencode-go':
+        specifier: workspace:*
+        version: link:../SDK/opencode-go
+      '@omnihilbras/sdk-opencode-zen':
+        specifier: workspace:*
+        version: link:../SDK/opencode-zen
       '@omnihilbras/sdk-openrouter':
         specifier: workspace:*
         version: link:../SDK/openrouter
@@ -335,9 +341,6 @@ importers:
       '@omnihilbras/sdk-zcode-start-plan':
         specifier: workspace:*
         version: link:../SDK/zcode-start-plan
-      '@omnihilbras/sdk-zen':
-        specifier: workspace:*
-        version: link:../SDK/zen
       '@omnihilbras/token-saver':
         specifier: workspace:*
         version: link:../TokenSaver
@@ -478,6 +481,18 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  Kernel/SDK/opencode-go:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/opencode-zen:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   Kernel/SDK/openrouter:
     devDependencies:
       typescript:
@@ -509,12 +524,6 @@ importers:
         version: 5.9.3
 
   Kernel/SDK/zcode-start-plan:
-    devDependencies:
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-
-  Kernel/SDK/zen:
     devDependencies:
       typescript:
         specifier: ^5.9.3

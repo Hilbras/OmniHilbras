@@ -147,6 +147,10 @@ const NO_CAPTURE_YET = {
   'grok-web': 'the only captureable body is a live conversation NDJSON stream from a signed-in grok.com subscription; this machine has no such session, so the token/modelResponse/fingerprint frames are replayed from the old executor\'s measured fixture in `grok-web.test.js`',
   'zcode-start-plan': 'its `/messages` endpoint needs a signed-in Start Plan account, i.e. a session token this machine does not have; the request shape (stock system, effort mapping, dual auth headers) is pinned against a scripted transport in `zcode.test.js`',
   codex: 'a real Responses SSE capture requires an approved Codex account and locally configured OAuth client; no live sign-in was authorized, so request and terminal-frame behavior is covered by scripted tests without claiming a provider capture',
+  // Split out of `zen` in 3.66.0. Its completion path is the same OpenAI-compatible wire the base class serves, so a
+  // capture would duplicate Zen's; what differs on Go is the **headers**, and those are pinned as behaviour in
+  // `opencode-go.test.js` (session id present, stable across a conversation's turns, different between conversations).
+  'opencode-go': 'the same completion wire as `opencode-zen`, so a capture would duplicate that one; the difference is the required CLI identity headers, pinned as behaviour in `opencode-go.test.js` rather than as a frozen payload',
 };
 
 test('the fixtures directory holds only captures, named for the adapter they came from', () => {

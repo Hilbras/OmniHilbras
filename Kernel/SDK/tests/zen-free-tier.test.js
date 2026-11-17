@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ProviderError } from '../zen/dist/lib/errors.js';
-import { ZenAdapter } from '../zen/dist/adapter/index.js';
-import { zenSessionId, zenFreeTierHeaders, zenFingerprintTools, zenContractSatisfied, satisfiesZenUserAgentContract, ZEN_FINGERPRINT_TOOL_NAMES } from '../zen/dist/lib/zen-free-tier.js';
+import { ProviderError } from '../opencode-zen/dist/lib/errors.js';
+import { ZenAdapter } from '../opencode-zen/dist/adapter/index.js';
+import { zenSessionId, zenFreeTierHeaders, zenFingerprintTools, zenContractSatisfied, satisfiesZenUserAgentContract, ZEN_FINGERPRINT_TOOL_NAMES } from '../opencode-zen/dist/lib/zen-free-tier.js';
 
 /**
  * OpenCode Zen's free-tier request contract.
@@ -203,7 +203,7 @@ test('the user-agent rule is the upstream\'s, not a guess', () => {
 });
 
 test('the free-tier quartet is declared in lowercase, and a caller\'s casing variant is renamed, not duplicated', async () => {
-  const { gatedTools } = await import('../zen/dist/adapter/index.js');
+  const { gatedTools } = await import('../opencode-zen/dist/adapter/index.js');
   assert.deepEqual(zenFingerprintTools().map((tool) => tool.function.name), ['bash', 'glob', 'grep', 'read']);
 
   const merged = gatedTools([

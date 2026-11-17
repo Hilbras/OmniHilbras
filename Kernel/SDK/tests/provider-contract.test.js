@@ -24,7 +24,8 @@ import { KiroAdapter } from '../kiro/dist/adapter/index.js';
 import { KimiCodeAdapter } from '../kimi-code/dist/adapter/index.js';
 import { ClaudeCodeAdapter } from '../claude-code/dist/adapter/index.js';
 import { OpencodeConsoleAdapter } from '../opencode-console/dist/adapter/index.js';
-import { ZenAdapter } from '../zen/dist/adapter/index.js';
+import { ZenAdapter } from '../opencode-zen/dist/adapter/index.js';
+import { OpenCodeGoAdapter } from '../opencode-go/dist/adapter/index.js';
 import { NousAdapter } from '../nous/dist/adapter/index.js';
 import { ProviderRegistry } from '../../API/dist/src/core/registry.js';
 
@@ -156,10 +157,17 @@ const providers = [
     },
   },
   {
-    name: 'zen',
+    name: 'opencode-zen',
     make: () => {
       const { stub, transport: t } = transport('openai');
       return { adapter: new ZenAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    name: 'opencode-go',
+    make: () => {
+      const { stub, transport: t } = transport('openai');
+      return { adapter: new OpenCodeGoAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
     },
   },
   {

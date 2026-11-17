@@ -883,12 +883,30 @@ formats (chat/completions, messages, responses) and the same per-model lane tabl
 as a separate provider (`ocg`) and so does this one — a Zen key is not a Go key, and the card, the slug
 (`ocg/`) and the stored credential are all separate.
 
-It is one adapter class with a different base and id, not a copy: `ZenAdapter` takes `{ id, name, base }`,
-which is what made the second lane a configuration rather than a second implementation. Its catalog is
-read from `/zen/go/v1/models`, and its usage from `/zen/go/v1/usage`, where the plan reports three
-percentage meters — `rolling`, `weekly` and `monthly` — each `{ percent, resetsAt }`. `percent` is the
-**used** side, so it is carried as `used` against a limit of 100; a meter the account does not report is
-left out rather than drawn as zero.
+Its catalog is read from `/zen/go/v1/models`, and its usage from `/zen/go/v1/usage`, where the plan reports
+three percentage meters — `rolling`, `weekly` and `monthly` — each `{ percent, resetsAt }`. `percent` is the
+**used** side, so it is carried as `used` against a limit of 100; a meter the account does not report is left
+out rather than drawn as zero.
+
+**It is its own package, `Kernel/SDK/opencode-go/`, and that is a correction.** It used to be one class with a
+different base — `new ZenAdapter({ id: 'opencode-go', base: 'https://opencode.ai/zen/go' })` — and the class only
+applied the CLI identity headers (`x-opencode-session`, `x-opencode-client`, `x-opencode-project`,
+`x-opencode-request`, the `opencode/…` user agent) on the **free-tier** path. A paid Go model went out through
+the plain chat lane without them and was answered:
+
+```
+Request is missing x-opencode-session and cannot be routed efficiently.
+https://opencode.ai/v2/docs/console/go/#where-can-i-use-it
+```
+
+A message about routing, not about the key, which is why it read as a broken provider. Go now sends the identity
+on every provider-bound request — chat, messages, responses and streaming — and derives the session from the
+**first user turn plus the model**, so a conversation's turns share one session (the whole-message seed the free
+tier uses changes as the conversation grows, which is right for a per-request id and useless as a session).
+
+`opencode-zen`, `opencode-go` and `opencode-console` are therefore three packages with three header contracts,
+not one family sharing a flag. `Kernel/SDK/tests/opencode-go.test.js` pins the header on a loopback socket, and
+`Kernel/API/test/opencode-go-wiring.test.js` pins that the gateway hands Go's adapter the transport it configured.
 
 ### Why a Zen refusal looks like a bare status code
 
@@ -3324,7 +3342,7 @@ measurement, and `Kernel/API/test/spec-success-criteria.mjs` fails if any stops 
       `build` script; every `Kernel/SDK/<provider>/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **171 files** in `Kernel/SDK/` — 28 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url` and `bounded-map` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 27: it measures providers, this counts files.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **180 files** in `Kernel/SDK/` — 29 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url` and `bounded-map` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 28: it measures providers, this counts files.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and
