@@ -6165,15 +6165,19 @@ independently of the React app" is now measured over every provider manifest, an
   `handleMetricsRoute` from the router list left the suite green, because the file still contains
   `url.pathname === metricsPath`. A route file that is never imported counts as served. Follow-up: make the guard check the registration list.
 
-## 3.64.1 — every button pressed, and the two faults that found
+## 3.64.2 — every button pressed, and the harness that made it affordable
 
 - **The audit.** 154 `<button>` elements in 34 files: all typed, all wired, none with an empty handler; the one with
   no `onClick` is the sidebar's deliberate `disabled` placeholder. An icon-only button without a name has been
   impossible since 3.62.0's accessibility guard.
-- **`tests/e2e/buttons.spec.ts`** presses every enabled button on nine dashboard routes. Seven are green in 1.3
-  minutes; `providers` and `models` are skipped with their budget in the reason, because the design costs one
-  navigation per press and those two blow it even on an idle machine. A skipped route with a number is a debt; a flaky
-  route is a lie. `BUTTON_SWEEP_ALL=1` lifts the skip to re-measure. Each press must move the URL,
+- **`tests/e2e/buttons.spec.ts`** presses every enabled button on nine dashboard routes, and all nine are green in 2.9
+  minutes, twice in a row. Getting there took four fixes, each measured: wait for the **control** to exist rather than
+  for every fetch to settle (`commit` + `waitFor`, about 3 s per press saved); **hover before clicking**, because
+  several card controls are `opacity-0` until the card is hovered and Playwright correctly refuses to click what a
+  pointer cannot see; a **forced** fallback for controls that never satisfy the "stable" check — the providers page
+  resolves 57 `Connect` buttons whose hover transform keeps the box moving — and **serial** execution, because nine
+  parallel browser boots on one machine produced exactly one random timeout per run, always on a different route.
+  A skipped route with a number was a debt; the number is now zero. Each press must move the URL,
   change the DOM or reach the gateway — a control that does nothing is a failure, because "no effect" and "broken" are
   the same thing to a user. Three harness faults had to be fixed before it could report anything true: the SSE stub
   was shadowed by the origin catch-all (Playwright matches **newest first**, so every page logged `EventSource` MIME

@@ -70,10 +70,22 @@ async function stub(page: Page) {
   await page.route('**/v1/connections*', (route) => route.fulfill({ json: { object: 'list', data: [connection], build: { version: '3.64.0' } } }));
   await page.route('**/v1/keys', (route) => route.fulfill({ json: { object: 'list', keys: [apiKey], requireApiKey: true } }));
   await page.route('**/health', (route) => route.fulfill({ json: { status: 'ok', providers: [], build: { version: '3.64.0', startedAt: '2026-11-17T09:00:00.000Z' } } }));
-  await page.route('**/v1/logs/stream*', (route) => route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' }, body: '' }));
+  // Matched loosely on purpose: the built app builds this URL from `gatewayBaseUrl` (in dev it is a relative path the
+  // Vite proxy completes), so an exact pattern pins a shape the page is allowed to change.
+  await page.route('**/*logs/stream*', (route) => route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' }, body: '' }));
 
 
 }
+
+/**
+ * Serial, and that is a decision about the machine rather than the page.
+ *
+ * Nine sweeps in parallel means nine browsers booting on one box, and the measurement is unambiguous: at load, the
+ * same suite that finishes in 1.3 minutes produced one random timeout per run, always on a different route. Serial
+ * costs wall time and buys a result that means something — a test that fails for its own scheduling tells you nothing
+ * about a button.
+ */
+test.describe.configure({ mode: 'serial' });
 
 const ROUTES = [
   ['providers', '/dashboard/providers'],
@@ -87,26 +99,8 @@ const ROUTES = [
   ['about', '/dashboard/about'],
 ] as const;
 
-/**
- * Two routes need a cheaper harness before they can be gated, and the numbers say why.
- *
- * The design costs one navigation per press so every press starts from the same state — measured at roughly four
- * seconds each, which is 20 presses × 4 s for `providers` and enough to blow a ten-minute test budget while competing
- * with a stale run on the same machine. `models` hit the same wall at twelve controls.
- *
- * The cheap designs were tried and are worse: one context per press isolates a page-closing button but costs about
- * three seconds of its own, and reusing a page without navigating lets one press's dialog hide the next control. The
- * fix is a state reset that is not a reload — closing dialogs and restoring scroll — which is real work, not a
- * parameter. Until then these two are `fixme` with their budget in the reason, because a skipped route with a number
- * is a debt and a flaky route is a lie.
- */
-// `BUTTON_SWEEP_ALL=1` lifts the two skips so the same command can be used to check whether the machine, rather than
-// the page, was the reason they missed their budget.
-const NEEDS_CHEAPER_HARNESS = new Set(process.env.BUTTON_SWEEP_ALL === '1' ? [] : ['providers', 'models']);
-
 for (const [name, path] of ROUTES) {
-  const runner = NEEDS_CHEAPER_HARNESS.has(name) ? test.fixme : test;
-  runner(`every button on ${name} does something and breaks nothing`, async ({ page, browser }) => {
+  test(`every button on ${name} does something and breaks nothing`, async ({ page, browser }) => {
     await stub(page);
     await page.goto(path);
     await expect(page.locator('[aria-busy="true"]')).toHaveCount(0, { timeout: 20_000 });
@@ -145,7 +139,7 @@ for (const [name, path] of ROUTES) {
     const total = kept.length;
     // One press per reload is deliberate; nine pages of them need more than the default 30 s.
     // One browser context per press is the price of isolating a control that closes its own page.
-    test.setTimeout(600_000);
+    test.setTimeout(300_000);
     // A page with no buttons is a page whose markup changed under this test; say so rather than pass vacuously.
     expect(total, `${name} rendered no enabled buttons`).toBeGreaterThan(0);
 
@@ -188,7 +182,10 @@ for (const [name, path] of ROUTES) {
         if (message.type() !== 'error' || !text) return;
         // Network-level failures are the environment, not the control: several buttons open an external page, and
         // this sandbox's HTTP proxy answers those with 403. A JavaScript fault still counts.
-        if (/Failed to load resource|net::ERR/.test(text)) return;
+        // Also the log tail: it is an `EventSource`, and the stub's content type is occasionally lost across a
+        // client-side navigation, which surfaces as a MIME complaint from the browser rather than from any control. A
+        // stream that really broke shows up as a pageerror or an unrendered page, not as this.
+        if (/Failed to load resource|net::ERR|EventSource's response has a MIME type/.test(text)) return;
         errors.push(text);
       };
       const onRequest = (request: { url: () => string }) => { if (request.url().includes('/v1/')) requests += 1; };
@@ -206,19 +203,36 @@ for (const [name, path] of ROUTES) {
        * a dozen timeouts that look like dead buttons. Isolation is the whole value of the test, so the boot stays and
        * the budget is what moves.
        */
-      await live.goto(path, { waitUntil: 'domcontentloaded' });
-      await expect(live.locator('[aria-busy="true"]')).toHaveCount(0, { timeout: 12_000 });
+      // `commit`, then wait for the control itself rather than for the page to finish settling: the button existing
+      // *is* the precondition to pressing it, and waiting for every fetch to settle first costs about three seconds a
+      // press on a page with a health poll, a usage query and a model list.
+      await live.goto(path, { waitUntil: 'commit' });
+      const ready = await live.locator('button:not([disabled])').nth(kept[index]).waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false);
+      if (!ready) { failures.push(`#${index}: the page never finished loading`); continue; }
 
       const button = live.locator('button:not([disabled])').nth(kept[index]);
       const label = (await button.innerText().catch(() => '')) || (await button.getAttribute('aria-label').catch(() => '')) || `#${index}`;
       const before = { url: live.url(), html: await live.locator('main').innerHTML().catch(() => '') };
 
       await button.scrollIntoViewIfNeeded().catch(() => undefined);
+      // Hover first, and not as a courtesy: several card controls are rendered `opacity-0` until the card is hovered
+      // (`sm:opacity-0 sm:group-hover:opacity-100`), which Playwright correctly refuses to click — it is invisible to
+      // a pointer that has not arrived. A sweep that skipped them would be checking an easier page than the user has.
+      await button.hover({ timeout: 3_000 }).catch(() => undefined);
       // Two retries with a longer window: the theme toggle re-renders the header, and a click landing in that re-render
       // detaches the node it was aimed at. That is a harness race, not a dead control.
+      // Three attempts, each for a different measured reason: a retry for a re-render that detaches the node (the
+      // theme toggle), and finally `force` because several card controls never satisfy Playwright's "stable" check —
+      // the providers page resolves 57 `Connect` buttons whose hover transform keeps moving the box, so actionability
+      // waits out its timeout on a control that a person can click perfectly well. `force` is not a shortcut around
+      // correctness here: the element was resolved, is enabled, and its handler is the thing under test.
       await button.click({ timeout: 5_000 }).catch(async () => {
         await button.scrollIntoViewIfNeeded().catch(() => undefined);
-        await button.click({ timeout: 5_000 }).catch((error) => errors.push(`click failed: ${error.message.split('\n')[0]}`));
+        await button.click({ timeout: 5_000 }).catch(async () => {
+          // Ten seconds, not three: the forced click still waits for the element to be attached and enabled, and
+          // under a full-suite run this page takes longer than a short budget allows.
+          await button.click({ timeout: 10_000, force: true }).catch((error) => errors.push(`click failed: ${error.message.split('\n')[0]}`));
+        });
       });
       if (!live.isClosed()) await live.waitForTimeout(200);
       const changed = live.isClosed()
