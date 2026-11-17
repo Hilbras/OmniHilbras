@@ -154,9 +154,27 @@ Provider modules may share small protocol-family helpers, but provider-specific 
 
 ## Gateway API
 
+**Every response carries `x-request-id`** — one 32-character hex id generated at the entry, before any route can
+answer, so a 200, a 401, a 403 and a 404 all quote the same kind of id. It is the same string that appears as
+`gateway.requestId` on a chat or Responses reply, as `error.requestId` in a refusal envelope, and as `requestId` on the
+usage record — which is what makes "my request failed, here is the id" a sentence an operator can act on. The header is
+listed in `access-control-expose-headers` for an allowlisted origin, because a browser decides per-header whether a
+script may read it and `x-request-id` is not CORS-safelisted. Before this, the id existed on the record and in the
+envelope and reached no client at all.
+
 The first local gateway exposes:
 
-- `GET /health` — gateway and configured adapter health, plus a **`build`** object naming the version
+- `GET /metrics` — the gateway in the Prometheus text exposition format (`text/plain; version=0.0.4`), rendered from
+  the same usage records `/v1/usage` reads, so the two cannot disagree. Series: `omnihilbras_up`, `omnihilbras_build_info{version}`,
+  `omnihilbras_requests_total{provider,outcome}`, `omnihilbras_attempts_total{provider}` (one request may be several
+  attempts), `omnihilbras_request_duration_ms_sum{provider}` with `_count` (a quantile computed here could not be
+  aggregated across instances, so the sum and count are given instead), and `omnihilbras_tokens_total{provider,kind}`
+  only for providers that actually reported tokens. A record no provider served is counted under
+  `provider="unattributed"` rather than dropped, and a gateway with no usage store answers with only `up` and
+  `build_info` instead of inventing zeros. **A management path**, like `/v1/usage`: it names every provider the gateway
+  can reach and how it is failing, so it is refused with 401 without a credential.
+- `GET /health` — gateway and configured adapter health
+, plus a **`build`** object naming the version
   this process is and, when supplied at build time, the commit — read once at startup and never
   re-read. It is here, and not only on the admin-gated settings route, because health is the call an
   operator makes when something looks wrong: twice during the Codex work a change was reported live
@@ -210,7 +228,8 @@ The first local gateway exposes:
   recovered, because the switch beside it is the reversible action and a delete is not.
 - `GET /v1/keys` — gateway key metadata plus the enforcement flag; never returns a secret. Each key carries `requests` (how many calls it has authenticated) and `lastUsedAt`; the counter moves in memory on every call and reaches disk on the same throttle as `lastUsedAt`, so it is exact for the life of the process and may lag the file by one flush interval.
 - `POST /v1/keys` — mint a key; the response is the only time the secret is returned.
-- `PATCH /v1/keys/:id` — pause or resume a key with `{"enabled": boolean}`, **or** rename it with `{"name": string}` (1–80 characters, trimmed). One field per request: a body carrying both is refused, because pausing and relabelling are different intents. A rename never touches the secret, its prefix or its hash, so a client already using the key keeps working; an unknown id is 404.
+- `PATCH /v1/keys/:id` — **exactly one of four intents per request**: `{"enabled": boolean}` pauses or resumes, `{"name": string}` renames (1–80 characters, trimmed), `{"rpm": number | null}` sets or clears a per-minute limit (1–100000), `{"expiresAt": ISO string | null}` sets or clears an expiry. A body carrying two is refused, because each answers a different question and "which one happened" must not depend on field order. A rename never touches the secret, its prefix or its hash, so a client already using the key keeps working; an unknown id is 404.
+  Both limits are enforced at the **auth gate**, before routing: an expired key is `AUTHENTICATION_FAILED` naming the date (the fix is a new key), and a key over its rate is `RATE_LIMITED` with `retryable` (the fix is waiting). The counter is a sliding minute held in memory — exact per process, reset by a restart — because a disk write per request to enforce a limit measured in minutes is the worse trade.
 - `DELETE /v1/keys/:id` — revoke a key.
 - `PUT /v1/connections/:id/enabled` — pause or resume **one** account, body `{enabled: boolean}`. Metadata, like the responsibility note: a full `PUT /v1/connections/:id` would re-validate the credential and re-read the catalog, which is not what flipping a switch means. Routing reads `enabled` per request, so a paused account stops taking traffic at once and stays saved.
 - `PUT /v1/connections/:id/responsibility` — record who is accountable for one connection and what it is for. Two optional strings, `owner` and `purpose`, both bounded (120 and 500 characters); an empty string is normalised away rather than stored, so "cleared" and "never written" are the same state. Its own verb because this is a note about the connection, not configuration of it: saving one must never re-validate a credential or re-read a catalog, which a full `PUT /v1/connections/:id` would do. The note is how two accounts of the same provider are told apart — the connection id distinguishes them to a machine, the owner to a person.

@@ -130,9 +130,25 @@ export function setCors(response: ServerResponse, origin: string | undefined) {
 }
 
 
+/**
+ * The id the server announced on this request, or `undefined` when there is no HTTP request behind the call.
+ *
+ * Set once at the entry (`server.ts`), before any route can answer, so a 401 and a 200 quote the same kind of id. The
+ * inference handlers read it back here and hand it to `service.startScope`, which is how the header, the error
+ * envelope and the usage record end up carrying one string instead of three that look alike.
+ */
+export function requestIdOf(request: IncomingMessage): string | undefined {
+  return (request as IncomingMessage & { requestId?: string }).requestId;
+}
+
 export function sendJson(response: ServerResponse, status: number, body: unknown, origin?: string) {
   const payload = JSON.stringify(body);
-  if (origin) response.setHeader('access-control-allow-origin', origin);
+  if (origin) {
+    response.setHeader('access-control-allow-origin', origin);
+    // Without this a browser on another origin cannot read the id even though it was sent: CORS decides *which*
+    // response headers a script may see, and `x-request-id` is not a CORS-safelisted one.
+    response.setHeader('access-control-expose-headers', 'x-request-id');
+  }
   response.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(payload),

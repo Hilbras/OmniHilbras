@@ -65,6 +65,7 @@ import { completeSignIn, describeSignInFailure } from './sign-in-coordinator.js'
 import { assertPublicDestination } from './destination-check.js';
 import { CredentialManager } from './credential-manager.js';
 import { CredentialLifecycle } from './credential-lifecycle.js';
+import { CircuitBreaker, type BreakerConfig } from './circuit-breaker.js';
 import { localDeployment, type ConnectionSecretStore, type DeploymentConfig } from './runtime.js';
 import { RoutingEngine } from './routing-engine.js';
 import { ModelCatalog } from './model-catalog.js';
@@ -261,6 +262,11 @@ export type GatewayServiceOptions = {
    * accumulating records, and "records nothing" would stop being a state anyone chose.
    */
   usageStore?: UsageStore;
+  /**
+   * Per-connection breaker policy. Absent means `defaultBreakerConfig` — four consecutive failures, then fifteen
+   * seconds, doubling to five minutes.
+   */
+  breaker?: BreakerConfig;
   /** Virtual models, when this gateway is wired with persistence. Absent means concrete routing only. */
   virtualModels?: VirtualModelStore;
   /** Workspaces, when wired. */
@@ -450,6 +456,7 @@ export class GatewayService {
    * the credential already said in writing.
    */
   private readonly credentialLifecycle: CredentialLifecycle;
+  private readonly breakers: CircuitBreaker;
   /**
    * Which routes a request may take, given the current health and limits.
    *
@@ -616,6 +623,11 @@ export class GatewayService {
      * `renew` is tried once per request, not in a loop: a refresh the provider has already refused is not made more
      * likely to work by asking again, and an expired token retried is a request the user waits for twice.
      */
+    /**
+     * The per-connection breaker. Configurable because the useful threshold depends on the app: a gateway whose routes
+     * have four retries each wants to stop before the fourth, and a test proving that needs two.
+     */
+    this.breakers = new CircuitBreaker(options.breaker);
     this.credentials = new CredentialManager(this.secretStore, this.connections, async (connectionId, providerId, credential, { refuseWhenExpired }) => {
       if (credential.type !== 'oauth' || typeof credential.expiresAt !== 'string') return credential;
       const expiry = Date.parse(credential.expiresAt);
@@ -675,6 +687,11 @@ export class GatewayService {
       transcribe: (providerId, request, signal, scope, connectionId) => this.transcribe(providerId, request, signal, scope, connectionId),
       withDeadline: (signal, timeoutMs, providerId, run) => this.withDeadline(signal, timeoutMs, providerId, run),
       enforceRateLimit: (candidate) => this.enforceRateLimit(candidate),
+      breaker: {
+        allows: (connectionId) => this.breakers.allows(connectionId),
+        recordSuccess: (connectionId) => this.breakers.recordSuccess(connectionId),
+        recordFailure: (connectionId) => { this.breakers.recordFailure(connectionId); },
+      },
       recordSuccess: (providerId, latencyMs, at, connectionId) => {
         this.healthManager.recordSuccess(providerId, latencyMs, at, connectionId);
         if (connectionId && !connectionId.startsWith('unmanaged:')) this.connectionLatency.record(connectionId, latencyMs);
@@ -3038,6 +3055,11 @@ export class GatewayService {
     return this.apiKeys.rename(id, name);
   }
 
+  /** Sets or clears a key's rate limit and expiry. `null` clears; an omitted field is left alone. */
+  setApiKeyLimits(id: string, limits: { rpm?: number | null; expiresAt?: string | null }) {
+    return this.apiKeys.setLimits(id, limits);
+  }
+
   removeApiKey(id: string) {
     return this.apiKeys.remove(id);
   }
@@ -3631,11 +3653,14 @@ export class GatewayService {
    * Public because the HTTP layer is the only place that knows a request has been accepted, and it
    * needs to hand the id to the client *and* to the providers it will be sent to.
    */
-  startScope(requestedModel: string, explicitProviderId?: string, tokenSaver?: boolean): RequestScope {
+  startScope(requestedModel: string, explicitProviderId?: string, tokenSaver?: boolean, id?: string): RequestScope {
     return startRequestScope({
       requestedModel,
       ...(explicitProviderId === undefined ? {} : { explicitProviderId }),
       ...(tokenSaver === undefined ? {} : { tokenSaver }),
+      // The id the server already announced on the response, so the header, the error envelope and the usage record
+      // carry one string. Absent for a caller with no HTTP request behind it (a test, an embedded service).
+      ...(id === undefined ? {} : { id }),
     });
   }
 

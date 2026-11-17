@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { canonicalLoopbackHost, isLoopbackHostname, loopbackBaseUrl } from './core/index.js';
@@ -7,6 +8,7 @@ import { createDashboardToken, dashboardTokenHeader, publishDashboardToken, toke
 import { isTrustedDashboard, type AuthContext } from './core/runtime.js';
 import { RateLimiter, resolveRequestsPerMinute } from './core/rate-limit.js';
 import { handleApiKeysRoute } from './routes/api-keys.js';
+import { handleMetricsRoute } from './routes/metrics.js';
 import { handleConnectionsRoute } from './routes/connections.js';
 import { handleBackupRoute } from './routes/backup.js';
 import { handleTokenSaverRoute } from './routes/token-saver.js';
@@ -85,6 +87,7 @@ export type GatewayServerOptions = {
  */
 const routes = [
   handleStatusRoute,
+  handleMetricsRoute,
   handleConnectionsRoute,
   handleBackupRoute,
   handleTokenSaverRoute,
@@ -161,6 +164,17 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
   const limiter = new RateLimiter({ perMinute: options.requestsPerMinute ?? resolveRequestsPerMinute(options.env) });
   let prunedAt = 0;
   return createServer((request, response) => {
+    /**
+     * One id per request, announced before anything else can answer.
+     *
+     * It is generated here rather than in each route because a 401, a 403, a 404 and a cached model list all need an
+     * id a user can quote, and the routes that never reach an inference handler have no scope to take one from. The
+     * inference handlers read it back off the request so the id in the response header, the id in the error envelope
+     * and the id on the usage record are the same string rather than three that look alike.
+     */
+    const requestId = randomUUID().replace(/-/g, '');
+    response.setHeader('x-request-id', requestId);
+    (request as IncomingMessage & { requestId?: string }).requestId = requestId;
     if (!isLoopbackHostHeader(request.headers.host)) {
       sendJson(response, 421, { error: { code: 'MISDIRECTED_REQUEST', message: 'This gateway only answers on a loopback host name.' } });
       return;
@@ -374,7 +388,7 @@ export async function startGatewayServer(options: {
  * were already reachable, because `authorize()` returns before it can refuse anything. What changed is that
  * a gateway *with* keys enforced now answers the navigation the same way a gateway without them does.
  */
-const MANAGEMENT_PREFIXES = ['/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search'] as const;
+const MANAGEMENT_PREFIXES = ['/metrics', '/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search'] as const;
 
 function isManagementPath(pathname: string) {
   return MANAGEMENT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));

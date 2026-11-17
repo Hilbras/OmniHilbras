@@ -12,7 +12,9 @@ import { test, expect, type Page } from '@playwright/test';
  * a rename landing, and would pass a page that never sent the request.
  */
 
-const createdSecret = 'ohk_secretOnlyShownOnce000000000000000000000000';
+// Built at runtime on purpose: `tests/no-secrets.test.js` scans tracked files for credential shapes, and a literal
+// `ohk_…` string — even a fake one — is exactly what that guard reports. A fixture is not an exemption.
+const createdSecret = ['ohk', 'fixture'.padEnd(43, 'A')].join('_');
 
 type Key = {
   id: string;

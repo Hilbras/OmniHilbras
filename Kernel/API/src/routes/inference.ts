@@ -1,3 +1,4 @@
+import { requestIdOf } from '../core/http.js';
 /**
  * `/v1/models` and `/v1/chat/completions` in OpenAI's shape.
  *
@@ -94,7 +95,7 @@ export async function handleEmbeddings(request: IncomingMessage, response: Serve
   const explicitConnectionId = getExplicitConnectionId(request, body);
   const embeddingRequest = explicitConnectionId === undefined ? parsedEmbedding : { ...parsedEmbedding, connectionId: explicitConnectionId };
   const explicitProviderId = getExplicitProviderId(request, body);
-  const scope = service.startScope(embeddingRequest.model, explicitProviderId);
+  const scope = service.startScope(embeddingRequest.model, explicitProviderId, undefined, requestIdOf(request));
 
   const startedAt = Date.now();
   let responseBody: { response: EmbeddingResponse; attempts: GatewayFailoverAttempt[] };
@@ -167,7 +168,7 @@ export async function handleImages(request: IncomingMessage, response: ServerRes
   const explicitConnectionId = getExplicitConnectionId(request, body);
   const imageRequest = explicitConnectionId === undefined ? parsedImage : { ...parsedImage, connectionId: explicitConnectionId };
   const explicitProviderId = getExplicitProviderId(request, body);
-  const scope = service.startScope(imageRequest.model, explicitProviderId);
+  const scope = service.startScope(imageRequest.model, explicitProviderId, undefined, requestIdOf(request));
 
   const startedAt = Date.now();
   let responseBody: { response: ImageResponse; attempts: GatewayFailoverAttempt[] };
@@ -309,7 +310,7 @@ export async function handleResponses(request: IncomingMessage, response: Server
   const explicitConnectionId = getExplicitConnectionId(request, body);
   if (explicitConnectionId !== undefined) chatRequest.connectionId = explicitConnectionId;
   const explicitProviderId = getExplicitProviderId(request, body);
-  const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request));
+  const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request), requestIdOf(request));
   if (chatRequest.stream) {
     await streamResponses({ response, service, origin, signal, scope, chatRequest, explicitProviderId });
     return;
@@ -487,7 +488,7 @@ export async function handleChat(request: IncomingMessage, response: ServerRespo
   // Created once, here, where a request has been accepted. Everywhere else it is passed down, so
   // the id is per *request* rather than per provider — which is the only way a client can quote it
   // and an operator can find it.
-  const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request));
+  const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request), requestIdOf(request));
 
   // A refusal is where the id matters most — it is the case where the user needs to quote
   // something — so the error is given the id on its way out rather than only on the success path.

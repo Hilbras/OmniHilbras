@@ -1,5 +1,5 @@
 import type { RouteContext } from './route-context.js';
-import { readJsonBody, invalidRequest, sendJson } from '../core/http.js';
+import { readJsonBody, invalidRequest, requestIdOf, sendJson } from '../core/http.js';
 import { ProviderError } from '../core/provider-error.js';
 import { attachRequestId } from '../core/request-context.js';
 import { getExplicitProviderId, getExplicitConnectionId, toPublicAttempt } from './inference.js';
@@ -27,7 +27,7 @@ export async function handleMediaRoute(ctx: RouteContext): Promise<boolean> {
     const explicitConnectionId = getExplicitConnectionId(request, body);
     const audioRequest = explicitConnectionId === undefined ? parsed : { ...parsed, connectionId: explicitConnectionId };
     const explicitProviderId = getExplicitProviderId(request, body);
-    const scope = service.startScope(audioRequest.model, explicitProviderId);
+    const scope = service.startScope(audioRequest.model, explicitProviderId, undefined, requestIdOf(request));
 
     const startedAt = Date.now();
     try {
@@ -65,7 +65,7 @@ export async function handleMediaRoute(ctx: RouteContext): Promise<boolean> {
     const explicitConnectionId = getExplicitConnectionId(request, body);
     const transcriptionRequest = explicitConnectionId === undefined ? parsed : { ...parsed, connectionId: explicitConnectionId };
     const explicitProviderId = getExplicitProviderId(request, body);
-    const scope = service.startScope(transcriptionRequest.model, explicitProviderId);
+    const scope = service.startScope(transcriptionRequest.model, explicitProviderId, undefined, requestIdOf(request));
 
     try {
       const responseBody = await service.transcribeWithFailover(transcriptionRequest, explicitProviderId, signal, scope);

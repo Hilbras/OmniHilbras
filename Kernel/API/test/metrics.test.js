@@ -1,0 +1,91 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { InMemorySecretStore, ProviderRegistry } from '../dist/src/core/index.js';
+import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore, InMemoryUsageStore, createGatewayServer } from '../dist/src/index.js';
+import { renderPrometheusMetrics } from '../dist/src/core/metrics.js';
+
+/**
+ * The gateway as Prometheus sees it.
+ *
+ * Before this file, `grep prometheus|/metrics Kernel/API/src` returned nothing: a person could read `/v1/usage` and
+ * an alerting system could read nothing at all. Every series below is rendered from the usage records the gateway
+ * already writes, so this endpoint and the page cannot disagree — they are two renderings of one store.
+ */
+
+const record = (overrides = {}) => ({
+  at: new Date().toISOString(),
+  model: 'm',
+  outcome: 'success',
+  attempts: 1,
+  latencyMs: 100,
+  ...overrides,
+});
+
+test('a scrape names its own liveness and its version', () => {
+  const text = renderPrometheusMetrics({ records: [], version: '3.64.0' });
+  assert.match(text, /^# TYPE omnihilbras_up gauge$/m);
+  assert.match(text, /^omnihilbras_up 1$/m);
+  assert.match(text, /^omnihilbras_build_info\{version="3\.64\.0"\} 1$/m);
+  // A body with no records still names the gateway: an empty store is a configuration, not an outage.
+  // The HELP/TYPE preamble is always present so a scraper knows the series exists; what must not appear is a *sample*.
+  assert.doesNotMatch(text, /^omnihilbras_requests_total\{/m, 'an empty store invented a series');
+});
+
+test('outcomes are counters per provider, not an average', () => {
+  const text = renderPrometheusMetrics({
+    version: '3.64.0',
+    records: [
+      record({ providerId: 'groq' }),
+      record({ providerId: 'groq' }),
+      record({ providerId: 'groq', outcome: 'failure', errorCode: 'RATE_LIMITED', latencyMs: 300 }),
+      record({ providerId: 'nous', outcome: 'cancelled', attempts: 2, latencyMs: 50 }),
+    ],
+  });
+  assert.match(text, /^omnihilbras_requests_total\{provider="groq",outcome="success"\} 2$/m);
+  assert.match(text, /^omnihilbras_requests_total\{provider="groq",outcome="failure"\} 1$/m);
+  assert.match(text, /^omnihilbras_requests_total\{provider="nous",outcome="cancelled"\} 1$/m);
+  // Attempts are counted separately: one request can be several provider calls, and a count of requests is not one.
+  assert.match(text, /^omnihilbras_attempts_total\{provider="nous"\} 2$/m);
+});
+
+test('latency is exported as a sum and a count, so Prometheus can rate it', () => {
+  const text = renderPrometheusMetrics({ version: '1', records: [record({ providerId: 'a', latencyMs: 100 }), record({ providerId: 'a', latencyMs: 200 })] });
+  assert.match(text, /^omnihilbras_request_duration_ms_sum\{provider="a"\} 300$/m);
+  assert.match(text, /^omnihilbras_request_duration_ms_count\{provider="a"\} 2$/m);
+  // A quantile computed here would be a number no scraper could aggregate across instances.
+  assert.doesNotMatch(text, /quantile=/);
+});
+
+test('a request no provider served is counted, not dropped', () => {
+  const text = renderPrometheusMetrics({ version: '1', records: [record({ providerId: undefined, outcome: 'cancelled' })] });
+  assert.match(text, /^omnihilbras_requests_total\{provider="unattributed",outcome="cancelled"\} 1$/m);
+});
+
+test('a label value that could break the exposition format is escaped', () => {
+  const text = renderPrometheusMetrics({ version: '1', records: [record({ providerId: 'we"ird\\name' })] });
+  assert.match(text, /provider="we\\"ird\\\\name"/, 'a quote or backslash in a label value corrupts the scrape');
+});
+
+test('GET /metrics is a management path: refused without a credential', async (t) => {
+  const apiKeys = new InMemoryApiKeyStore();
+  const service = new GatewayService(
+    new ProviderRegistry().register({ id: 'p', name: 'P', capabilities: { chat: true, streaming: false, models: true }, async listModels() { return []; } }),
+    new InMemorySecretStore({}),
+    new InMemoryConnectionStore(),
+    apiKeys,
+    { usageStore: new InMemoryUsageStore() },
+  );
+  const server = createGatewayServer(service, { corsOrigin: 'http://localhost:5173' });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+
+  const refused = await fetch(`http://127.0.0.1:${port}/metrics`);
+  assert.equal(refused.status, 401, 'anything that can read this knows every provider the gateway can reach');
+
+  const created = await apiKeys.create('scraper');
+  const answered = await fetch(`http://127.0.0.1:${port}/metrics`, { headers: { authorization: `Bearer ${created.key}` } });
+  assert.equal(answered.status, 200);
+  assert.match(answered.headers.get('content-type') ?? '', /text\/plain; version=0\.0\.4/, 'the registered exposition content type');
+  assert.match(await answered.text(), /^omnihilbras_up 1$/m);
+});

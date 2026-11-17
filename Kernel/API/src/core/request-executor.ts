@@ -136,6 +136,15 @@ export type RequestExecutorDeps = {
   withDeadline: <T>(signal: AbortSignal | undefined, timeoutMs: number, providerId: string, run: (signal: AbortSignal | undefined) => Promise<T>) => Promise<T>;
   /** Refuses an attempt that would exceed the connection's per-minute limit. */
   enforceRateLimit: (candidate: RouteCandidate) => void;
+  /**
+   * The per-connection breaker. Optional so an embedded caller without one keeps working, but the gateway always
+   * supplies it — see `circuit-breaker.ts` for why the middle state is half-open rather than a timer.
+   */
+  breaker?: {
+    allows(connectionId: string): boolean;
+    recordSuccess(connectionId: string): void;
+    recordFailure(connectionId: string): void;
+  };
   recordSuccess: (providerId: string, latencyMs: number, at: string, connectionId?: string) => void;
   recordSticky?: (model: string, connectionId: string) => void;
   /** Stamps a successful turn against the connection that served it. */
@@ -414,6 +423,15 @@ export class RequestExecutor {
         // `RetryPolicy` already stops on `RATE_LIMITED`, so nothing was retried; the ledger entry and the
         // status code were the whole of it. Throwing a `ProviderError` rather than the limiter's own error
         // means the code survives to `statusForError`, which maps `RATE_LIMITED` to 429.
+        /**
+         * An open breaker refuses **without a dispatch**, and that is the whole saving: the attempt the gateway would
+         * have spent a timeout on is not spent, and the next route is tried immediately. The ledger records it as
+         * `CIRCUIT_OPEN` rather than as a provider failure, because the provider was never asked.
+         */
+        if (candidate.connectionId && this.deps.breaker && !this.deps.breaker.allows(candidate.connectionId)) {
+          attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs: 0, errorCode: 'CIRCUIT_OPEN' });
+          break;
+        }
         try {
           this.deps.enforceRateLimit(candidate);
         } catch (error) {
@@ -451,6 +469,7 @@ export class RequestExecutor {
           // Keyed by the connection as well as the provider: latency is a property of the account that
           // served the request, and two accounts of one vendor are not equally fast.
           this.deps.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString(), candidate.connectionId);
+          if (candidate.connectionId) this.deps.breaker?.recordSuccess(candidate.connectionId);
           if (input.model) this.deps.clearModelCooldown?.(candidate.providerId, input.model);
           if (input.stickyEligible !== false && input.model && candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordSticky?.(input.model, candidate.connectionId);
           if (candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordUsage?.(candidate.connectionId);
@@ -470,7 +489,12 @@ export class RequestExecutor {
            * roughly half an hour. The router then skipped the healthy account as `unhealthy` and the
            * request failed with "Tried: zcode" while that account was working the whole time.
            */
-          if (!isCallerFault(code) && !isAllowanceRefusal(error)) this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.', candidate.connectionId);
+          if (!isCallerFault(code) && !isAllowanceRefusal(error)) {
+            this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.', candidate.connectionId);
+            // The same condition, deliberately: an allowance refusal or a caller fault is not evidence about the
+            // connection, and counting it here would open the breaker on a quota wall instead of an outage.
+            if (candidate.connectionId) this.deps.breaker?.recordFailure(candidate.connectionId);
+          }
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs, errorCode: code });
           lastError = error;
           const action = this.retryPolicy.afterFailure({

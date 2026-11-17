@@ -172,6 +172,10 @@ export type GatewayApiKey = {
    * used to show is that something writes this one.
    */
   requests: number;
+  /** Requests per minute this key may make. Absent means no limit. */
+  rpm?: number;
+  /** ISO 8601; after this the key is refused. */
+  expiresAt?: string;
 };
 
 export type GatewayApiKeyList = {
@@ -1592,6 +1596,20 @@ export function renameGatewayApiKey(id: string, name: string, signal?: AbortSign
   return requestJson<{ apiKey: GatewayApiKey }>(`/v1/keys/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify({ name }),
+    signal,
+  }).then((body) => body.apiKey);
+}
+
+/**
+ * Sets or clears a key's limits.
+ *
+ * One call per intent, because the gateway refuses a body that carries two: `rpm` and `expiresAt` are different
+ * questions and a request that answered both would make "which one did I just change" a matter of field order.
+ */
+export function setGatewayApiKeyLimits(id: string, limits: { rpm?: number | null; expiresAt?: string | null }, signal?: AbortSignal) {
+  return requestJson<{ apiKey: GatewayApiKey }>(`/v1/keys/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(limits),
     signal,
   }).then((body) => body.apiKey);
 }

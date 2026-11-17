@@ -44,11 +44,29 @@ export async function handleApiKeysRoute(ctx: RouteContext): Promise<boolean> {
       const apiKeyId = decodeApiKeyId(url.pathname.slice('/v1/keys/'.length));
       const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxKeyBodyBytes));
       if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
-      assertOnlyFields(body, ['enabled', 'name']);
-      // One field per request: `enabled` and `name` are different intents, and a body carrying both would make
-      // "did this pause the key or just relabel it" a question about field order.
-      if (body.enabled !== undefined && body.name !== undefined) {
-        throw invalidRequest('Send either enabled or name, not both.');
+      assertOnlyFields(body, ['enabled', 'name', 'rpm', 'expiresAt']);
+      // One intent per request. Four fields, four meanings, and a body carrying two makes "which one happened" a
+      // question about field order — the answer to which nobody should have to read this file to find.
+      const present = ['enabled', 'name', 'rpm', 'expiresAt'].filter((field) => body[field] !== undefined);
+      if (present.length !== 1) {
+        throw invalidRequest('Send exactly one of enabled, name, rpm or expiresAt.');
+      }
+      if (body.rpm !== undefined || body.expiresAt !== undefined) {
+        const rpm = body.rpm === undefined ? undefined : body.rpm;
+        if (rpm !== undefined && rpm !== null && (!Number.isInteger(rpm) || (rpm as number) <= 0 || (rpm as number) > 100_000)) {
+          throw invalidRequest('rpm must be a positive whole number of at most 100000, or null to remove the limit.');
+        }
+        if (body.expiresAt !== undefined && body.expiresAt !== null) {
+          if (typeof body.expiresAt !== 'string' || Number.isNaN(Date.parse(body.expiresAt))) {
+            throw invalidRequest('expiresAt must be an ISO date, or null to remove the expiry.');
+          }
+        }
+        const limits = {
+          ...(body.rpm === undefined ? {} : { rpm: body.rpm as number | null }),
+          ...(body.expiresAt === undefined ? {} : { expiresAt: body.expiresAt as string | null }),
+        };
+        sendJson(response, 200, { apiKey: await service.setApiKeyLimits(apiKeyId, limits) }, origin);
+        return true;
       }
       if (body.name !== undefined) {
         sendJson(response, 200, { apiKey: await service.renameApiKey(apiKeyId, parseBoundedString(body.name, 'name', 80)) }, origin);

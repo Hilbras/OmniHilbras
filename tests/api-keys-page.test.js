@@ -90,3 +90,13 @@ test('a row control cannot accept a click that it would silently ignore', () => 
   assert.doesNotMatch(page, /disabled=\{busyKeyId === apiKey\.id\}/, 'a control is enabled while its handler would ignore it');
   assert.match(page, /disabled=\{busyKeyId !== null\}/, 'the row controls are not gated on the global busy state');
 });
+
+test('a key can be given a limit, and the row says which one it has', () => {
+  assert.match(page, /setGatewayApiKeyLimits\(limitsFor\.id, \{ rpm:/, 'the rpm limit does not reach the gateway');
+  assert.match(page, /setGatewayApiKeyLimits\(limitsFor\.id, \{ expiresAt \}\)/, 'the expiry does not reach the gateway');
+  // Two calls, because the gateway refuses a body carrying two intents — a page that sent both would 400.
+  assert.doesNotMatch(page, /setGatewayApiKeyLimits\([^)]*\{ rpm: [^}]*expiresAt/, 'the page sends both intents in one request');
+  assert.match(page, /no rate limit/, 'the row does not say that a key has no limit');
+  assert.match(page, /no expiry/, 'the row does not say that a key never expires');
+  assert.match(page, /expires \$\{formatDate\(apiKey\.expiresAt\)\}/, 'the expiry is not shown as a date');
+});

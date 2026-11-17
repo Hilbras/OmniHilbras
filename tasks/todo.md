@@ -6130,3 +6130,37 @@ independently of the React app" is now measured over every provider manifest, an
   `#f0643b` or `transition-[left]`, and the shared control must have the focus ring, the transform and the
   reduced-motion opt-out. Revert-checked by putting `#f0643b` back in `SettingsPage` — the guard fails. The seven
   browser tests for the keys page still pass unchanged, because the accessible names did not move.
+
+## 3.64.0 — an id you can quote, a scrape you can alert on, a breaker, and keys with limits
+
+- **`x-request-id` on every response.** The id already existed — on every usage record, on every error envelope,
+  inside each adapter's context — and reached **no client**, so the one string that could join "my request failed" to a
+  row in `/v1/usage` was invisible to the person holding the failure. `service.startScope`'s own comment said the HTTP
+  layer "needs to hand the id to the client"; nothing did. It is generated once at the server entry, before any route
+  can answer, so 200/401/403/404 all carry one, and it is in `access-control-expose-headers` because a browser decides
+  per header what a script may read. Wiring it per inference handler first was wrong and the tests said so: a 401 came
+  back without an id.
+- **`GET /metrics`.** `grep prometheus|/metrics Kernel/API/src` returned nothing before this: a person could read
+  `/v1/usage`, an alerting system could read nothing. Every series is rendered from the usage records that already
+  exist, so the page and the scrape cannot disagree. Sum and count rather than a quantile — a `p95` computed here from
+  a store re-read on each scrape is not rateable and cannot be aggregated. `provider="unattributed"` rather than a
+  disappearing series, and no invented zeros for a gateway with no store. Management-gated: it names every provider the
+  gateway can reach.
+- **A circuit breaker per connection.** The first version of the integration test failed because `HealthManager`
+  already ejects a failing route *between* requests — so the assumed win was not there. The measured win is **inside
+  one request**: three retries against a failing route dispatched **4 times without the breaker and 2 with it**, with
+  the control in the same file. Half-open allows exactly one probe, because a cooldown that ends with every queued
+  request probing at once is the burst the breaker exists to prevent. A skipped attempt is recorded as `CIRCUIT_OPEN`,
+  so a route that health quietly removed and a route the breaker refused are finally distinguishable in the ledger.
+- **Keys with limits.** A leaked key was unlimited: `rpm` and `expiresAt` now exist per key and are enforced at the
+  **auth gate** — expired is `AUTHENTICATION_FAILED` naming the date, over-rate is `RATE_LIMITED` with `retryable`,
+  because one is fixed by a new key and the other by waiting. Limits persist in the key file (a test reopens the store),
+  old files load unlimited, `PATCH` takes exactly one of `enabled`/`name`/`rpm`/`expiresAt`, and the page shows the
+  limits and offers a dialog that sends one intent per request.
+- **Screenshot baselines** for `/dashboard/providers`, `/dashboard/keys` and `/dashboard/settings` in both themes, with
+  the page clock fixed so `Last used 5 min ago` does not repaint the baseline every morning. Tolerance is **40 pixels**,
+  not a ratio: at 1% a change of the gold token to magenta slipped under a 1280×720 shot and the guard passed while the
+  dashboard was the wrong colour. Revert-checked by doing exactly that.
+- **Found while wiring:** the route-documentation guard tracks *declared* paths, not *registered handlers* — deleting
+  `handleMetricsRoute` from the router list left the suite green, because the file still contains
+  `url.pathname === metricsPath`. A route file that is never imported counts as served. Follow-up: make the guard check the registration list.

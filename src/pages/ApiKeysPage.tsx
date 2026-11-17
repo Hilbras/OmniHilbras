@@ -18,6 +18,7 @@ import {
   listGatewayApiKeys,
   removeGatewayApiKey,
   renameGatewayApiKey,
+  setGatewayApiKeyLimits,
   setGatewayApiKeyEnabled,
   setGatewayRequireApiKey,
   gatewayOrigin,
@@ -147,6 +148,12 @@ export function ApiKeysContent() {
   // shows, and the row is where the operator is looking when the name turns out to be wrong.
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  // A key with no limit is the case a leaked key makes expensive, so the control to set one sits on the row rather
+  // than behind a settings page.
+  const [limitsFor, setLimitsFor] = useState<GatewayApiKey | null>(null);
+  const [rpmDraft, setRpmDraft] = useState('');
+  const [expiryDraft, setExpiryDraft] = useState('');
+  const [savingLimits, setSavingLimits] = useState(false);
   const [busyKeyId, setBusyKeyId] = useState<string | null>(null);
   /** Whether the key list has been read. `keys: []` before a read is not "there are no keys". */
   const [loaded, setLoaded] = useState(false);
@@ -267,6 +274,32 @@ export function ApiKeysContent() {
     }
   }
 
+  function openLimits(apiKey: GatewayApiKey) {
+    setLimitsFor(apiKey);
+    setRpmDraft(apiKey.rpm === undefined ? '' : String(apiKey.rpm));
+    // `datetime-local` wants `YYYY-MM-DDTHH:mm`; the stored value is an ISO instant.
+    setExpiryDraft(apiKey.expiresAt === undefined ? '' : new Date(apiKey.expiresAt).toISOString().slice(0, 16));
+  }
+
+  async function saveLimits() {
+    if (!limitsFor || savingLimits) return;
+    setSavingLimits(true);
+    try {
+      // Two PATCHes because the gateway accepts one intent per request, and clear-the-limit is `null`, not empty.
+      const rpm = rpmDraft.trim() === '' ? null : Number(rpmDraft);
+      const updated = await setGatewayApiKeyLimits(limitsFor.id, { rpm: rpm !== null && Number.isFinite(rpm) && rpm > 0 ? Math.floor(rpm) : null });
+      const expiresAt = expiryDraft.trim() === '' ? null : new Date(expiryDraft).toISOString();
+      const withExpiry = await setGatewayApiKeyLimits(limitsFor.id, { expiresAt });
+      setKeys((current) => current.map((item) => (item.id === updated.id ? withExpiry : item)));
+      setLimitsFor(null);
+      flash(`Limits saved for ${withExpiry.name}.`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'The limits could not be saved.', 'error');
+    } finally {
+      setSavingLimits(false);
+    }
+  }
+
   const activeCount = keys.filter((key) => key.enabled).length;
 
   return (
@@ -382,6 +415,17 @@ export function ApiKeysContent() {
                       <p className="muted mt-1.5 text-[11px]">
                         Created {formatDate(apiKey.createdAt)} · Last used {relativeTime(apiKey.lastUsedAt)} · {(apiKey.requests ?? 0).toLocaleString()} {(apiKey.requests ?? 0) === 1 ? 'request' : 'requests'}
                       </p>
+                      <p className="muted mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+                        <span className={`rounded-full border px-2 py-0.5 font-mono text-[9px] ${apiKey.rpm === undefined ? 'border-line-strong bg-surface-2 text-muted' : badgeTone.warn}`}>
+                          {apiKey.rpm === undefined ? 'no rate limit' : `${apiKey.rpm} rpm`}
+                        </span>
+                        <span className={`rounded-full border px-2 py-0.5 font-mono text-[9px] ${apiKey.expiresAt === undefined ? 'border-line-strong bg-surface-2 text-muted' : Date.parse(apiKey.expiresAt) <= Date.now() ? badgeTone.bad : badgeTone.neutral}`}>
+                          {apiKey.expiresAt === undefined ? 'no expiry' : `expires ${formatDate(apiKey.expiresAt)}`}
+                        </span>
+                        <button type="button" onClick={() => openLimits(apiKey)} disabled={busyKeyId !== null} aria-label={`Set limits for ${apiKey.name}`} className="rounded-md px-1.5 py-0.5 font-mono text-[9px] text-gold-text hover:bg-gold-soft disabled:opacity-50">
+                          change
+                        </button>
+                      </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <Switch
@@ -493,6 +537,42 @@ export function ApiKeysContent() {
               {creating ? 'Creating' : 'Create'}
             </button>
             <button type="button" onClick={() => { setCreateOpen(false); setNewKeyName(''); }} className="btn-ghost flex-1 !py-2.5 !text-xs">Cancel</button>
+          </div>
+        </Modal>
+      )}
+
+      {limitsFor && (
+        <Modal title="Key limits" description={`What ${limitsFor.name} may do, and for how long. Leave a field empty to remove that limit.`} onClose={() => setLimitsFor(null)}>
+          <div className="mt-4 space-y-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold">Requests per minute</span>
+              <input
+                type="number"
+                min={1}
+                max={100000}
+                value={rpmDraft}
+                onChange={(event) => setRpmDraft(event.target.value)}
+                placeholder="unlimited"
+                className="input !h-10 !w-full !rounded-lg !border !border-line !bg-surface-2 !px-3 !text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold">Expires at</span>
+              <input
+                type="datetime-local"
+                value={expiryDraft}
+                onChange={(event) => setExpiryDraft(event.target.value)}
+                className="input !h-10 !w-full !rounded-lg !border !border-line !bg-surface-2 !px-3 !text-sm"
+              />
+            </label>
+            <p className="muted text-[11px] leading-relaxed">A key past its expiry is refused and has to be replaced. A rate limit refuses with 429 and works again a minute later.</p>
+          </div>
+          <div className="mt-5 flex gap-2">
+            <button type="button" onClick={() => void saveLimits()} disabled={savingLimits} className="btn-gold flex-1 !py-2.5 !text-xs disabled:opacity-60">
+              {savingLimits ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Check className="h-3.5 w-3.5" aria-hidden="true" />}
+              {savingLimits ? 'Saving' : 'Save limits'}
+            </button>
+            <button type="button" onClick={() => setLimitsFor(null)} className="btn-ghost flex-1 !py-2.5 !text-xs">Cancel</button>
           </div>
         </Modal>
       )}

@@ -54,6 +54,8 @@ class MutationLock {
  * refactor's clothes — which is the one thing this phase is explicitly not supposed to do.
  */
 export class ApiKeyManager {
+  /** One sliding minute per key id. See `enforceLimits` for what it does and does not guarantee. */
+  private readonly rateWindow = new Map<string, number[]>();
   private readonly lock = new MutationLock();
 
   constructor(private readonly store?: ApiKeyStore) {}
@@ -139,12 +141,58 @@ export class ApiKeyManager {
    * Callers that are already-trusted local administration surfaces — the dashboard — must not call
    * this. It exists for embedders and unit tests that construct a gateway without key storage,
    * where the absence of a store means "not configured" rather than "accept anything".
+   *
+   * The two limits are enforced **here**, at the gate, rather than further in: a key that may not use the gateway
+   * should not reach routing, and the refusal must be the same whichever endpoint it was aimed at.
    */
   async authorize(presentedKey: string | undefined) {
     if (!this.store || !(await this.store.isEnforced())) return;
     if (!presentedKey) throw new ProviderError('AUTHENTICATION_FAILED', missingApiKeyMessage, { publicMessage: missingApiKeyMessage });
-    if (!(await this.store.authenticate(presentedKey))) {
+    const record = await this.store.authenticate(presentedKey);
+    if (!record) {
       throw new ProviderError('AUTHENTICATION_FAILED', invalidApiKeyMessage, { publicMessage: invalidApiKeyMessage });
     }
+    this.enforceLimits(record);
+  }
+
+  /**
+   * Whether this key may still be used, and whether it may be used *now*.
+   *
+   * Expiry is absolute: a key past its date is refused with `AUTHENTICATION_FAILED` and a message that says so,
+   * because the fix is a new key, not a retry. The rate limit is `RATE_LIMITED`, because that one *is* a retry.
+   *
+   * The counter is a sliding minute held in memory, and its limits are stated rather than implied: it is exact per
+   * process and resets on restart. A durable counter would put a disk write on the authentication path of every
+   * request to enforce a limit measured in minutes, which is a worse trade than a burst after a restart.
+   */
+  private enforceLimits(record: Awaited<ReturnType<ApiKeyStore['authenticate']>> & object) {
+    if (record.expiresAt !== undefined) {
+      const expires = Date.parse(record.expiresAt);
+      if (Number.isFinite(expires) && expires <= Date.now()) {
+        const message = `This API key expired on ${new Date(expires).toISOString()}. Create another one.`;
+        throw new ProviderError('AUTHENTICATION_FAILED', message, { publicMessage: message });
+      }
+    }
+    if (typeof record.rpm !== 'number' || record.rpm <= 0) return;
+    const now = Date.now();
+    const window = this.rateWindow.get(record.id) ?? [];
+    // Keep only the last minute, which is what "per minute" means; the array stays small because it is pruned here.
+    const recent = window.filter((at) => now - at < 60_000);
+    if (recent.length >= record.rpm) {
+      this.rateWindow.set(record.id, recent);
+      const message = `This API key is limited to ${record.rpm} requests a minute. Try again shortly.`;
+      throw new ProviderError('RATE_LIMITED', message, { publicMessage: message, retryable: true });
+    }
+    recent.push(now);
+    this.rateWindow.set(record.id, recent);
+  }
+
+  /** Sets or clears a key's limits. `null` clears a field; omitting it leaves that field alone. */
+  async setLimits(id: string, limits: { rpm?: number | null; expiresAt?: string | null }) {
+    return this.mutate(async () => {
+      const record = await this.requireStore().setLimits(id, limits);
+      if (!record) throw new ProviderError('NOT_FOUND', 'The API key was not found.');
+      return record;
+    });
   }
 }
