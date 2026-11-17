@@ -6268,3 +6268,21 @@ independently of the React app" is now measured over every provider manifest, an
 - **`docker` failed before compiling a layer.** `ghcr.io/${{ github.repository }}:latest` expands to
   `ghcr.io/Hilbras/OmniHilbras:latest`, and a container tag may not carry a capital: `invalid tag
   "ghcr.io/Hilbras/OmniHilbras:latest"`. The name is lowercased once in a step and used from there.
+
+## 3.66.2 — the e2e suite could not pick a port, and two lines blanked the usage page
+
+- **The free-port probe returned a colourised number.** Measured: `execFileSync` answered
+  `"\u001b[33m44815\u001b[39m\n"`, so `Number(...)` was `NaN`, `baseURL` became `http://127.0.0.1:NaN`, and every spec
+  failed with "Cannot navigate to invalid URL" before a page loaded. The child now writes its own digits and colour is
+  switched off for it, so neither behaviour can decide the port.
+- **The runner and its workers each chose their own port.** Playwright evaluates the config in every worker, so the
+  server came up on `37093` while the spec navigated to `40901` (`ERR_CONNECTION_REFUSED`). The chosen port is
+  published into `E2E_PORT`, which the worker's own evaluation then reads. `--host 127.0.0.1` is named explicitly
+  because `baseURL` is `127.0.0.1` and Vite's default is `localhost`: measured with `--host ::1`, `127.0.0.1` answered
+  `000` while `[::1]` answered `200`, and a refused connection is not a startup error to Playwright — it waits out the
+  timeout and reports "Timed out waiting from config.webServer".
+- **The usage window line blanked the page twice.** `summary.totals.requests` (3.65.1) and `usage.records.length`
+  (3.65.1) both assumed fields a response may omit; the e2e stub answers `{ object: 'list', data: [] }` and every
+  route but `usage` painted. Measured per route against that stub: `usage` was the only one with no `<main>`. The line
+  now reads the page's derived `totals` and `records`, and `tests/dashboard-wiring.test.js` fails if either
+  dereference comes back.

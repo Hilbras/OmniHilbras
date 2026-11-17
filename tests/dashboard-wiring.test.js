@@ -305,7 +305,11 @@ test('the usage page says which window it is showing, and what is in it', () => 
   const page = read('src/pages/UsagePage.tsx');
   assert.match(page, /PERIODS\.find\(\(option\) => option\.value === period\)\?\.label/, 'the page does not name the selected window');
   assert.match(page, /newest \$\{newestRecordAt\}/, 'the newest record in the window is not shown');
-  assert.match(page, /showing \$\{usage\.records\.length\}/, 'the page does not say how many of the records it is showing');
+  assert.match(page, /showing \$\{records\.length\}/, 'the page does not say how many of the records it is showing');
+  assert.doesNotMatch(page, /usage\.records\.length/, 'a body without a records array blanks the page');
   assert.doesNotMatch(page, /oldest \$\{/, 'the page claims an oldest-of-window figure it cannot know');
-  assert.match(page, /summary\.totals\.requests\.toLocaleString\(\)/, 'the window does not say how many records it contains');
+  assert.match(page, /totals \? `\$\{totals\.requests\.toLocaleString\(\)\}/, 'the window does not say how many records it contains');
+  // `summary.totals` dereferenced directly blanked the page when a response carried no totals — measured against the
+  // e2e stub, which answers `{ object: 'list', data: [] }`. A missing figure is a dash, never a crash.
+  assert.doesNotMatch(page, /summary\.totals\./, 'the window line dereferences a totals object that may be absent');
 });

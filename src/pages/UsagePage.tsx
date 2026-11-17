@@ -424,11 +424,14 @@ export function UsageContent({ providerId, connectionId }: { providerId?: string
         <p className="muted mt-2 text-[11px]">
           {PERIODS.find((option) => option.value === period)?.label ?? period}
           {' · '}
-          {summary ? `${summary.totals.requests.toLocaleString()} ${summary.totals.requests === 1 ? 'record' : 'records'}` : 'reading…'}
+          {/* `totals`, not `summary`: a gateway that answers without a `totals` object — an older build, a truncated
+              body, a stub in a test — made this line throw `Cannot read properties of undefined (reading 'requests')`
+              and blank the whole page. The page's own rule is that a missing figure is a dash, never a crash. */}
+          {totals ? `${totals.requests.toLocaleString()} ${totals.requests === 1 ? 'record' : 'records'}` : 'reading…'}
           {/* "Oldest" was the oldest row on **this page**, not in the window, which is a different claim and a wrong
               one: the table pages ten rows at a time. What the page knows is how many rows it holds and which is the
               newest, so that is what it says. */}
-          {usage ? ` · showing ${usage.records.length}` : ''}
+          {usage ? ` · showing ${records.length}` : ''}
           {newestRecordAt ? ` · newest ${newestRecordAt}` : ''}
         </p>
       </div>
