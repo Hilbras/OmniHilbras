@@ -104,6 +104,9 @@ export function compressMessages(
       index < protectedFrom
       && (message.role === 'tool' || message.role === 'assistant' || (message.role === 'system' && config.compressSystem) || (message.role === 'user' && config.compressUsers));
     if (!shouldCompress) return message;
+    // 9router's rule, now asserted here: an error result is the trace a reader needs when the turn failed.
+    // Compressing it would keep the shape but lose the sentence that says what went wrong.
+    if (message.isError === true) return message;
     const allowRtk = message.role === 'tool' || message.role === 'assistant';
     const toolName = typeof message.name === 'string' ? message.name : undefined;
 

@@ -337,6 +337,15 @@ test('compressMessages routes tool and assistant output through RTK with the fil
   assert.equal(retrieve(store, id), diffFixture);
 });
 
+test('compressMessages leaves an error tool result verbatim, as a trace', () => {
+  const store = new MemoryCcrStore();
+  const result = compressMessages([
+    { role: 'tool', name: 'git diff', content: diffFixture, isError: true },
+  ], { protectRecent: 0, ccr: store });
+  assert.equal(result.value[0].content, diffFixture, 'the error result was compressed');
+  assert.equal(result.stats.routes.length, 0);
+});
+
 test('compressMessages keeps JSON-aware compression for content that parses as JSON', () => {
   const rows = Array.from({ length: 40 }, (_, index) => ({ id: index, status: 'ok', payload: 'x'.repeat(200) }));
   const text = JSON.stringify(rows);

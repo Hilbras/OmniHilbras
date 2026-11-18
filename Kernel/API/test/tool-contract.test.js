@@ -108,6 +108,17 @@ test('a forced call keeps only the caller’s tools, never the generated declara
   assert.deepEqual((request.tools ?? []).map((entry) => entry.name), ['write']);
 });
 
+test('tool history is healed before it reaches a provider', async () => {
+  const { requests, service } = harness();
+  await service.chat('openai', {
+    model: 'm',
+    messages: [{ role: 'assistant', content: '', toolCalls: [call('read', '{}', 'bad id!')] }],
+  });
+  const sent = requests.at(-1).messages;
+  assert.equal(sent[0].toolCalls[0].id, 'badid', 'the provider received a malformed tool id');
+  assert.deepEqual(sent[1], { role: 'tool', content: '', toolCallId: 'badid' }, 'the unanswered call was not filled under the healed id');
+});
+
 test('a definition dropped by sanitisation is not a tool the model may call', async () => {
   // `declared` used to be read from the raw request, before sanitisation. A rejected definition (a name with a space)
   // therefore stayed on the allow list, and a provider that called it was believed to be calling something the client

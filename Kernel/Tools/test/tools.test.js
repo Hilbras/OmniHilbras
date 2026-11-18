@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { GATEWAY_TOOL_NAMES, GATEWAY_TOOL_PROVIDERS, LOCAL_TOOL_PROMPT, MAX_SCHEMA_BYTES, PROVIDER_TOOLS, WEB_PROVIDERS, gatewayToolDefinitions, guardToolStream, localToolDefinitions, normalizeToolsRequest, parseNativeToolCall, parsePromptToolCall, repairArguments, toolCaps, validateToolCalls, withGatewayTools } from '../dist/index.js';
+import { GATEWAY_TOOL_NAMES, GATEWAY_TOOL_PROVIDERS, LOCAL_TOOL_PROMPT, MAX_SCHEMA_BYTES, PROVIDER_TOOLS, WEB_PROVIDERS, dedupeToolDefinitions, gatewayToolDefinitions, guardToolStream, localToolDefinitions, normalizeToolsRequest, parseNativeToolCall, parsePromptToolCall, repairArguments, toolCaps, validateToolCalls, withGatewayTools } from '../dist/index.js';
 
 /**
  * The tool contract, on its own.
@@ -231,6 +231,19 @@ test('gateway tools are appended without replacing the caller’s definitions', 
 
   const forced = withGatewayTools([{ name: 'write', parameters: {} }], 'required');
   assert.deepEqual(forced.map((tool) => tool.name), ['write'], 'a generated tool could win a forced call');
+});
+
+test('a Claude client with MCP web tools does not also declare built-in web tools', () => {
+  const tools = [
+    { name: 'WebSearch', parameters: { type: 'object' } },
+    { name: 'mcp__exa__search', parameters: { type: 'object' } },
+    { name: 'read', parameters: { type: 'object' } },
+  ];
+  const claude = dedupeToolDefinitions(tools, 'anthropic');
+  assert.deepEqual(claude.tools.map((tool) => tool.name), ['mcp__exa__search', 'read']);
+  assert.match(claude.dropped[0].reason, /MCP web tool/);
+  const openai = dedupeToolDefinitions(tools, 'openai');
+  assert.deepEqual(openai.tools.map((tool) => tool.name), ['WebSearch', 'mcp__exa__search', 'read'], 'a non-Claude provider lost a definition');
 });
 
 test('the local tool catalog is read-only and has no shell', () => {

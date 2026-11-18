@@ -845,6 +845,22 @@ answered in prose.
 `Kernel/Tools` owns the decision now. One table states, per provider, whether tools are served and which `tool_choice`
 values can be honoured; the gateway applies it before the request and validates the answer after it.
 
+### Tool history healing (9router translation layer)
+
+Tool definitions are client-owned; the gateway translates and heals the history before every provider turn:
+
+- tool-call ids are sanitized to `^[A-Za-z0-9_-]+$` and a deterministic fallback (`call_msgN_tcM_<name>`) replaces a
+  missing, invalid or duplicate id; the same healed id is written to the matching `role: "tool"` result;
+- an assistant tool call with no following result gets an empty result inserted under that healed id, so DeepSeek
+  and Anthropic do not refuse the replayed turn;
+- Claude-family providers that already declare an Exa/Tavily/Claude-in-Chrome MCP web tool do not also receive the
+  built-in `WebSearch`/`WebFetch` definitions — a measured 400 in 9router;
+- an `isError: true` tool result is never compressed by the token saver: the failure sentence is the trace a reader
+  needs.
+
+These are translation decisions, not new provider capabilities; the caps table, explicit `501` refusals, returned-call
+validation and no-shell boundary are unchanged.
+
 ### Gateway-local read-only tools (opt-in)
 
 Some providers cannot call functions at all: the web sessions drive a page, and Codex refuses tool definitions on

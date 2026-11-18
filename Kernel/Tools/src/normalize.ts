@@ -1,5 +1,6 @@
 import { repairArguments } from './args.js';
 import { toolCaps } from './caps.js';
+import { dedupeToolDefinitions } from './toolDedupe.js';
 import type { NormalizedToolRequest, ToolCall, ToolDefinition, ToolRequest, ToolRequestNotes } from './types.js';
 
 /**
@@ -125,8 +126,9 @@ export function normalizeToolsRequest<T extends ToolRequest>(request: T, provide
 
   if (choice === 'required' && !hasTools) throw forcedWithoutDefinitions(providerId);
   if (!hasTools) return { request, notes };
-  const { tools, dropped } = sanitizeDefinitions(request.tools ?? []);
-  notes.dropped = dropped;
+  const sanitized = sanitizeDefinitions(request.tools ?? []);
+  const { tools, dropped } = dedupeToolDefinitions(sanitized.tools, providerId);
+  notes.dropped = [...sanitized.dropped, ...dropped];
   if (choice === 'required' && tools.length === 0) throw forcedWithoutDefinitions(providerId);
   // Every definition rejected is not "no tools declared": the caller asked for tools and none survived.
   return { request: { ...request, tools } as T, notes };

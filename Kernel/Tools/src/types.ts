@@ -33,6 +33,10 @@ export type ToolMessage = {
   content: unknown;
   toolCalls?: readonly ToolCall[];
   toolCallId?: string;
+  /** The tool name, for a result the provider wants labelled. */
+  name?: string;
+  /** A failed result, which must not be compressed away by a token saver. */
+  isError?: boolean;
 };
 
 export type ToolRequest = {
