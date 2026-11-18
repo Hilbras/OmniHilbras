@@ -72,6 +72,11 @@ export function AppHomeContent() {
   const bridge = desktopBridge();
   const [snapshot, setSnapshot] = useState<DesktopServerSnapshot | undefined>();
   const [systemStats, setSystemStats] = useState<GatewaySystemStats | undefined>();
+  // A gateway that answered with a partial sample is not the same as one that answered with a full one. Optional
+  // chaining on `systemStats` alone still dereferenced `.cpu.percent` and took the shell down — the same class of
+  // crash the usage page had when `summary.totals` was missing. Normalise the shape before reading it.
+  const cpu = systemStats?.cpu;
+  const memory = systemStats?.memory;
   const [systemError, setSystemError] = useState<string | undefined>();
   const [processLogs, setProcessLogs] = useState<DesktopServerLog[]>([]);
   const [events, setEvents] = useState<GatewayLogEvent[]>([]);
@@ -282,13 +287,13 @@ export function AppHomeContent() {
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <ResourceMeter
               label="CPU"
-              percent={systemStats?.cpu.percent}
-              detail={systemStats ? `${systemStats.cpu.cores} cores · load ${systemStats.cpu.loadAverage.map((value) => value.toFixed(2)).join(' / ')}` : 'Waiting for the gateway to answer.'}
+              percent={cpu?.percent}
+              detail={cpu ? `${cpu.cores ?? '—'} cores · load ${(Array.isArray(cpu.loadAverage) ? cpu.loadAverage : []).map((value) => Number(value).toFixed(2)).join(' / ') || '—'}` : 'Waiting for the gateway to answer.'}
             />
             <ResourceMeter
               label="Memory"
-              percent={systemStats?.memory.percent}
-              detail={systemStats ? `${formatBytes(systemStats.memory.usedBytes)} of ${formatBytes(systemStats.memory.totalBytes)} used` : 'Waiting for the gateway to answer.'}
+              percent={memory?.percent}
+              detail={memory && Number.isFinite(memory.usedBytes) && Number.isFinite(memory.totalBytes) ? `${formatBytes(memory.usedBytes)} of ${formatBytes(memory.totalBytes)} used` : 'Waiting for the gateway to answer.'}
             />
           </div>
           {systemError && <p className="mt-3 text-[11px] text-danger">{systemError}</p>}

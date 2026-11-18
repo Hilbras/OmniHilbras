@@ -79,6 +79,15 @@ test('a toast can be dismissed without a JavaScript fault', async ({ page }) => 
   expect(errors, `the page reported errors: ${errors.join(' | ')}`).toEqual([]);
 });
 
+test('the servers page paints an honest empty state for a partial system sample', async ({ page }) => {
+  await stubGateway(page);
+  await page.route('**/v1/system*', (route) => route.fulfill({ json: { object: 'system' } }));
+  await page.goto('/dashboard');
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0, { timeout: 20_000 });
+  await expect(page.locator('main')).toBeVisible();
+  await expect(page.getByText(/Waiting for the gateway to answer/).first()).toBeVisible();
+});
+
 test('the token saver page paints an honest empty state for a partial stats body', async ({ page }) => {
   await stubGateway(page);
   await page.route('**/v1/token-saver/stats*', (route) => route.fulfill({ json: { totalTokensSaved: 12 } }));

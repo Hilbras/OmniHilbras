@@ -20,6 +20,14 @@ test('the provider switch writes enabled state through the gateway', () => {
   assert.doesNotMatch(page, /disabledProviderIds/, 'the old local-only disabled set is back');
 });
 
+test('the Servers page does not dereference a nested system sample it may not have', () => {
+  const page = read('src/pages/AppHomePage.tsx');
+  assert.doesNotMatch(page, /systemStats\?\.cpu\./, 'a partial sample blanks the Servers page');
+  assert.doesNotMatch(page, /systemStats\?\.memory\./, 'a partial sample blanks the Servers page');
+  assert.match(page, /const cpu = systemStats\?\.cpu/, 'the CPU shape is not normalised');
+  assert.match(page, /const memory = systemStats\?\.memory/, 'the memory shape is not normalised');
+});
+
 test('card and routing accents use theme tokens, not anonymous hex values', () => {
   for (const file of ['src/components/ProviderCard.tsx', 'src/pages/ProviderDetailPage.tsx', 'src/pages/RoutingPage.tsx']) {
     const source = read(file);
