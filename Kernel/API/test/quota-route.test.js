@@ -74,7 +74,10 @@ test('the route carries no provider of its own, so another one needs no edit her
   // source because the property *is* the absence of a literal, which no response shape could show.
   const { readFileSync } = await import('node:fs');
   const source = readFileSync(new URL('../src/routes/connections.ts', import.meta.url), 'utf8');
-  assert.ok(source.includes('[^/]+\\/quota'), 'the generic quota route is gone');
+  assert.ok(
+    source.includes("const quotaSuffix = '/quota'") || source.includes('[^/]+\\/quota'),
+    'the generic quota route is gone',
+  );
   // The one provider that used to have its own quota route must no longer appear at all.
   assert.doesNotMatch(source, /'kiro'/, 'a provider id is back in this file, so the next metered provider needs another branch');
 });

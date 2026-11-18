@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isPrivateHostname } from '../dist/src/core/index.js';
+import { isLoopbackHostname, isPrivateHostname } from '../dist/src/core/index.js';
 
 /**
  * The address ranges a saved provider endpoint may not reach.
@@ -14,6 +14,16 @@ import { isPrivateHostname } from '../dist/src/core/index.js';
 test('reserved and special-purpose IPv4 ranges are refused', () => {
   for (const address of ['192.0.0.192', '198.18.0.1', '198.19.255.255', '240.0.0.1', '224.0.0.1', '255.255.255.255']) {
     assert.equal(isPrivateHostname(address), true, `${address} must be refused`);
+  }
+});
+
+test('an IPv4-mapped metadata address is private even when written in hex', () => {
+  // `new URL()` normalises `::ffff:169.254.169.254` to `[::ffff:a9fe:a9fe]` before the guard sees it. Both spellings
+  // reached a real TCP listener once while the plain IPv4 form was correctly refused, so the embedded IPv4 — not the
+  // IPv6 prefix — is what decides. The loopback check is deliberately narrower because it permits cleartext HTTP.
+  for (const address of ['::ffff:169.254.169.254', '[::ffff:a9fe:a9fe]', '::ffff:127.0.0.1', '::1']) {
+    assert.equal(isPrivateHostname(address), true, `${address} must be refused`);
+    assert.equal(isLoopbackHostname(address), address === '::1', `${address} must not widen the cleartext exception`);
   }
 });
 

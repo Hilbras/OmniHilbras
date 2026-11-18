@@ -145,6 +145,27 @@ binary it then executes. The version is pinned in the repository (`pinnedOpencod
 A driver profile is a signed-in third-party session on disk. It is created `0700`, keyed per connection so
 two accounts never share one, and **removed when the connection is deleted**.
 
+### Accepted limitations (2026-11-18 deep scan)
+
+These were re-read against the current tree and are recorded as accepted with a reason, not as bugs nobody
+owns. Changing one is a design decision, not a patch:
+
+- **DNS rebinding.** Destination checks narrow what a saved endpoint may name, but the transport resolves the
+  host again when it connects. Closing the window needs resolution at request time and a policy for failed
+  lookups; that adds a lookup to every provider call. `localtest.me` resolving to loopback is allowed for the
+  same reason. (`Kernel/API/src/core/destination-check.ts:105`, `docs/SPEC-SDK.md:93`.)
+- **`Origin`-based dashboard trust.** `kind: 'dashboard'` is derived from a header a local process can forge.
+  A per-launch token closes it only when an embedder supplies one; the browser dev proxy remains a loopback
+  trust boundary, not an authenticated one. (`Kernel/API/src/server.ts:201`, `core/dashboard-token.ts:8`.)
+- **Unauthenticated OAuth callback GET carve-outs** answer status-page polls by design; they carry no
+  credential material. (`Kernel/API/src/server.ts:362`.)
+- **OpenCode install integrity.** Upstream publishes no checksum, so the gateway records the SHA of the
+  artifact it installed and proves the binary by running `--version`. That is a record, not verification.
+  `OMNIHILBRAS_OPENCODE_SERVICE_TOOLS=all` restores the client's ruleset, which allows `shell`: the whole
+  machine, and deliberately opt-in. (`core/opencode-runtime.ts:33`.)
+- **`OPTIONS` preflight** is answered before auth and the management gate. That is how CORS is required to
+  work; it grants no data.
+
 ### Open, with the reason
 
 - **Release signing** — no keys exist yet. The consent path is what is available; the verification is not

@@ -161,6 +161,26 @@ test('every path the gateway serves has a line in the spec', () => {
   );
 });
 
+test('a route file that is never registered cannot claim a served path', () => {
+  // Deleting `handleMetricsRoute` from the registration array left the suite green: the file still contained
+  // `url.pathname === metricsPath`, so the spec guard saw a served route that the server never called. A handler
+  // file with a path is only a route if the router registers it.
+  const server = readFileSync(join(SOURCE_DIR, 'server.ts'), 'utf8');
+  const block = server.slice(server.indexOf('const routes = ['), server.indexOf('];', server.indexOf('const routes = [')));
+  const registered = new Set([...block.matchAll(/^\s+(handle\w+),/gm)].map((match) => match[1]));
+  assert.ok(registered.size > 10, `no handlers parsed from server.ts (${registered.size}); the guard would pass vacuously`);
+
+  const orphans = [];
+  for (const file of readdirSync(join(SOURCE_DIR, 'routes')).filter((name) => name.endsWith('.ts'))) {
+    const source = readFileSync(join(SOURCE_DIR, 'routes', file), 'utf8');
+    if (!/url\.pathname\s*(?:===|\.startsWith\(|\.endsWith\()/.test(source)) continue;
+    const handlers = [...source.matchAll(/export async function (handle\w+)/g)].map((match) => match[1]);
+    if (handlers.length === 0) continue;
+    if (!handlers.some((handler) => registered.has(handler))) orphans.push(`${file}: ${handlers.join(', ')}`);
+  }
+  assert.deepEqual(orphans, [], `route modules whose handlers are never registered: ${orphans.join(' | ')}`);
+});
+
 test('every route path is text a machine can read, so it can be checked against the spec', () => {
   // A path assembled from something this guard cannot resolve — a function call, a computed
   // segment — is invisible to every check here, and an invisible route is an undocumented one. This

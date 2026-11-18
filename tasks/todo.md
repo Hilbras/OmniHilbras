@@ -6286,3 +6286,19 @@ independently of the React app" is now measured over every provider manifest, an
   route but `usage` painted. Measured per route against that stub: `usage` was the only one with no `<main>`. The line
   now reads the page's derived `totals` and `records`, and `tests/dashboard-wiring.test.js` fails if either
   dereference comes back.
+
+## 3.67.0 — the tool contract: one table, one refusal, one validator
+
+- **`Kernel/Tools` is new**, alongside `Kernel/TokenSaver`: a capability table, request normalisation, bounded argument
+  repair and a streaming name guard. The gateway calls it before and after every adapter, and re-decides nothing.
+- **`tool_choice` was ignored by half the adapters.** Gemini had no mapping at all; `codex` refuses tools on its wire;
+  the web adapters dropped them. The table now says which is which, and the behavioural guard drives each adapter and
+  asserts the body it built — which is how the first version of the table was caught claiming Anthropic could not
+  force a call when `toAnthropicToolChoice` had been sending `{type:"any"}` all along.
+- **A forced call that cannot be honoured is refused by name** (`400 NOT_SUPPORTED`), not forwarded and ignored.
+  `tool_choice: "none"` removes the definitions before the adapter sees them.
+- **Returned calls are validated**: a declared name, a JSON object after bounded repair, size caps. A turn whose only
+  call was rejected no longer claims `finish_reason: "tool_calls"`.
+- **Web providers are out of the contract on purpose** and say so: `tools: false` in the model listing,
+  `gateway.tools: "unsupported"` in the body, and the same note on a stream's first empty-delta chunk because the head is
+  written before the provider is known.

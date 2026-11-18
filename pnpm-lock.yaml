@@ -344,6 +344,9 @@ importers:
       '@omnihilbras/token-saver':
         specifier: workspace:*
         version: link:../TokenSaver
+      '@omnihilbras/tools':
+        specifier: workspace:*
+        version: link:../Tools
       playwright-core:
         specifier: 1.62.1
         version: 1.62.1
@@ -533,6 +536,12 @@ importers:
     devDependencies:
       typescript:
         specifier: ^5.9.0
+        version: 5.9.3
+
+  Kernel/Tools:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
         version: 5.9.3
 
 packages:

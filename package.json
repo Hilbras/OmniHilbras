@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "3.66.2",
+  "version": "3.67.0",
   "description": "Provider-neutral local gateway and desktop dashboard",
   "author": {
     "name": "Hilbras",
@@ -23,16 +23,16 @@
     "app:build": "pnpm build && electron-builder --dir",
     "app:exe": "pnpm build && electron-builder --win nsis --config.nsis.packElevateHelper=false --config.win.signExecutable=false",
     "app:pack": "pnpm build && electron-builder",
-    "build": "pnpm build:sdk && pnpm build:token-saver && pnpm build:gateway && pnpm build:frontend",
+    "build": "pnpm build:sdk && pnpm build:token-saver && pnpm build:tools && pnpm build:gateway && pnpm build:frontend",
     "build:frontend": "vite build",
     "build:landing": "vite build --config vite.landing.config.ts",
     "build:sdk": "node scripts/clean-sdk-dist.mjs && pnpm -r --workspace-concurrency=2 --filter \"./Kernel/SDK/*\" build",
     "build:token-saver": "pnpm --filter @omnihilbras/token-saver build",
     "build:gateway": "node scripts/clean-sdk-dist.mjs --gateway && pnpm --filter @omnihilbras/kernel-api build",
     "preview": "vite preview",
-    "typecheck": "pnpm build:sdk && pnpm build:token-saver && pnpm build:gateway && tsc --noEmit && pnpm typecheck:gateway",
+    "typecheck": "pnpm build:sdk && pnpm build:token-saver && pnpm build:tools && pnpm build:gateway && tsc --noEmit && pnpm typecheck:gateway",
     "typecheck:gateway": "pnpm --filter @omnihilbras/kernel-api typecheck",
-    "test": "pnpm build:sdk && pnpm build:token-saver && pnpm build:gateway && pnpm test:repo && pnpm test:sdk && pnpm test:gateway && pnpm test:token-saver",
+    "test": "pnpm build:sdk && pnpm build:token-saver && pnpm build:tools && pnpm build:gateway && pnpm test:repo && pnpm test:sdk && pnpm test:gateway && pnpm test:token-saver && pnpm test:tools",
     "test:repo": "node --test tests/*.test.js",
     "test:token-saver": "node --test Kernel/TokenSaver/test/*.test.js",
     "test:sdk": "node --test Kernel/SDK/tests/*.test.js",
@@ -49,7 +49,9 @@
     "android:add": "pnpm build:android && cap add android",
     "android:sync": "pnpm build:android && cap sync android",
     "android:apk": "pnpm android:sync && cd android && ./gradlew assembleDebug",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:tools": "pnpm --filter @omnihilbras/tools build",
+    "test:tools": "node --test Kernel/Tools/test/*.test.js"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",
@@ -101,6 +103,7 @@
       "dist/**",
       "Kernel/API/dist/**",
       "Kernel/SDK/*/dist/**",
+      "Kernel/Tools/dist/**",
       "node_modules/**",
       "package.json"
     ],

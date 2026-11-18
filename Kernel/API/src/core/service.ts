@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
 import { NousAdapter } from '@omnihilbras/sdk-nous';
+import { ToolContractError, guardToolStream, normalizeToolsRequest, validateToolCalls } from '@omnihilbras/tools';
 import { ZenAdapter } from '@omnihilbras/sdk-opencode-zen';
 import { OpenCodeGoAdapter } from '@omnihilbras/sdk-opencode-go';
 import { ZcodeAdapter, zcodeProviderId } from '@omnihilbras/sdk-zcode-start-plan';
@@ -3467,12 +3468,67 @@ export class GatewayService {
     };
   }
 
+  /**
+   * The tool contract, applied before anything is sent.
+   *
+   * `null` means the request carried no tools and no `tool_choice`, which is the common case: the whole cost of this
+   * feature for a client that does not use tools is one map lookup.
+   */
+  private applyToolContract(providerId: string, request: ChatRequest): { request: ChatRequest; declared: readonly string[] } {
+    try {
+      const { request: normalized, notes } = normalizeToolsRequest(request, providerId);
+      if (notes.stripped) console.warn(`[tools] ${providerId} does not serve tools; ${(request.tools ?? []).length} definition(s) removed`);
+      if (notes.assumed) console.warn(`[tools] ${providerId} has no capability row; assuming tools with auto/none`);
+      for (const drop of notes.dropped) console.warn(`[tools] ${providerId} dropped "${drop.name}": ${drop.reason}`);
+      // Only definitions that survived sanitisation reached the adapter, so only those may be called. Reading the
+      // raw request here used to leave a rejected name on the allow list, which forwarded a call the client never
+      // offered — the exact class of call the guard exists to stop.
+      const kept = (normalized.tools ?? []).map((tool) => tool.name);
+      const declared = kept.length > 0 || (request.tools ?? []).length === 0
+        ? kept
+        // An empty allow list means "the client did not constrain calls" (providers inject their own tools), so it
+        // cannot also mean "every definition was rejected". A name outside the sanitised alphabet blocks all calls.
+        : ['\u0000no-definitions-forwarded'];
+      return { request: normalized, declared };
+    } catch (error) {
+      if (error instanceof ToolContractError) {
+        throw new ProviderError('NOT_SUPPORTED', error.message, { providerId: error.providerId, publicMessage: error.publicMessage });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * The calls a client may run.
+   *
+   * A provider can return a call naming a tool the client never declared, or arguments that are not an object. Both used
+   * to reach the client untouched, which is how an agent runs the wrong command and blames the model. What survives is
+   * forwarded; what does not is dropped and logged, and a turn whose only call was dropped no longer claims
+   * `finish_reason: tool_calls`.
+   */
+  private validatedToolResponse(providerId: string, declared: readonly string[], response: ChatResponse): ChatResponse {
+    const calls = response.message.toolCalls;
+    if (!calls?.length) return response;
+    const { calls: valid, issues, repaired } = validateToolCalls(calls, declared);
+    for (const issue of issues) console.warn(`[tools] ${providerId} returned a call that was not forwarded: ${issue.name} — ${issue.reason}`);
+    for (const fix of repaired) console.log(`[tools] ${providerId} repaired arguments on call ${fix.index}: ${fix.repairs.join(', ')}`);
+    if (valid.length === calls.length && repaired.length === 0) return response;
+    const { toolCalls: _dropped, ...rest } = response.message;
+    return {
+      ...response,
+      message: valid.length > 0 ? { ...rest, toolCalls: valid } : rest,
+      ...(valid.length === 0 && response.finishReason === 'tool_calls' ? { finishReason: 'stop' as const } : {}),
+    };
+  }
+
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
+    const contracted = this.applyToolContract(providerId, request);
     const release = await this.acquireConcurrency(connectionId);
     try {
-      return await adapter.chat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: await this.preparedMessages(request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+      const response = await adapter.chat(this.withRequestLimits({ ...contracted.request, model: bareModelFor(this.resolvedModel(contracted.request.model), providerId), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+      return this.validatedToolResponse(providerId, contracted.declared, response);
     } finally {
       release();
     }
@@ -3481,9 +3537,18 @@ export class GatewayService {
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
+    const contracted = this.applyToolContract(providerId, request);
     const release = await this.acquireConcurrency(connectionId);
     try {
-      yield* adapter.streamChat(this.withRequestLimits({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId), messages: await this.preparedMessages(request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+      const chunks = adapter.streamChat(this.withRequestLimits({ ...contracted.request, model: bareModelFor(this.resolvedModel(contracted.request.model), providerId), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+      const report: { allowed: string[]; blocked: { index: number; name: string }[] } = { allowed: [], blocked: [] };
+      try {
+        yield* guardToolStream(chunks, contracted.declared, report);
+      } finally {
+        for (const blocked of report.blocked) {
+          console.warn(`[tools] ${providerId} streamed a call to "${blocked.name}", which the client did not declare; its deltas were dropped`);
+        }
+      }
     } finally {
       release();
     }

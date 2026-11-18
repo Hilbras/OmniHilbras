@@ -346,28 +346,8 @@ function repoVersion(): Plugin {
   };
 }
 
-/**
- * Pages that export a non-component alongside their component cannot be hot-replaced, so Vite
- * invalidates them and the screen never updates. This turns that silent no-op into a reload.
- */
-const RELOAD_ON_CHANGE = [/src\/pages\/ProviderDetailPage\.tsx$/];
-
-const fullReloadForInvalidatableModules = () => ({
-  name: 'omnihilbras-full-reload',
-  // `configureServer` hooks the watcher Vite already runs; `handleHotUpdate` alone only fires for modules
-  // in the module graph, and an *invalidated* module has been dropped from it.
-  configureServer(server: { watcher: { on: (event: string, cb: (file: string) => void) => void }; ws: { send: (payload: unknown) => void } }) {
-    server.watcher.on('change', (file: string) => {
-      if (RELOAD_ON_CHANGE.some((pattern) => pattern.test(file))) {
-        server.ws.send({ type: 'full-reload', path: '*' });
-      }
-    });
-  },
-});
-
 export default defineConfig({
   plugins: [
-    fullReloadForInvalidatableModules(),
     dashboardFallback(), gatewayProxy(), logoPolarity(), react(), tailwindcss(), repoVersion()],
   server: {
     /**
@@ -389,18 +369,6 @@ export default defineConfig({
      * unless it asked for one.
      */
     strictPort: Boolean(process.env.OMNIHILBRAS_DASHBOARD_PORT),
-    /**
-     * Full reload for the modules Fast Refresh cannot handle.
-     *
-     * `ProviderDetailPage.tsx` exports a component **and** `fallbackProvider`, which the React plugin
-     * refuses: "Could not Fast Refresh (\"fallbackProvider\" export is incompatible)". Vite then
-     * *invalidates* the module instead of updating it, and an invalidated module never repaints — so
-     * every edit to that page looked like it had not been saved. Measured: the server was serving the new
-     * markup while the browser still showed the old, which cost several rounds of "refresh the page".
-     *
-     * A reload is a coarse answer, but it is honest: the change is visible immediately rather than
-     * silently not applied.
-     */
     hmr: { overlay: true },
     /**
      * The SDK's build output is a dependency of this dev server, and Vite watches it like source.

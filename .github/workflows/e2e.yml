@@ -1,6 +1,6 @@
 # The dashboard, in a browser, on every push.
 #
-# `pnpm verify` runs 2,300+ checks and never opens a browser, so until this file existed the four Playwright specs
+# `pnpm verify` never opens a browser, so until this file existed the Playwright specs
 # ran only when somebody remembered. That is worse than not having them: the suite spent several releases asserting
 # that `body` was visible on a page that turned out to be the *marketing* page, because `vite preview` had no
 # `/dashboard` fallback and nobody was running the test to notice. A test that is not scheduled is a note.

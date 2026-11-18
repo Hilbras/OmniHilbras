@@ -75,13 +75,13 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/circuit-breaker.ts` | 180 | **0** | per-connection closed → open → half-open; counts what it refused |
 | `Kernel/API/src/core/request-executor.ts` | 933 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 350 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 4032 | 27 | every `.onDemand()` registration, in one constructor |
+| `Kernel/API/src/core/service.ts` | 4097 | 27 | every `.onDemand()` registration, in one constructor |
 | `Kernel/API/src/core/http.ts` | 356 | **0** | the vocabulary every route shares |
-| `Kernel/API/src/routes/oauth.ts` | 857 | 14 | the module a provider split would help most |
-| `Kernel/API/src/routes/connections.ts` | 395 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
-| `Kernel/API/src/routes/inference.ts` | 1321 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and the auth gate |
+| `Kernel/API/src/routes/oauth.ts` | 862 | 14 | the module a provider split would help most |
+| `Kernel/API/src/routes/connections.ts` | 400 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
+| `Kernel/API/src/routes/inference.ts` | 1371 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and the auth gate |
 | `Kernel/API/src/routes/api-keys.ts` | 101 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
-| `Kernel/API/src/routes/status.ts` | 159 | **0** | `/health`, `/v1/system`, `/v1/routing`, and the build stamp |
+| `Kernel/API/src/routes/status.ts` | 160 | **0** | `/health`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
 | `Kernel/API/src/server.ts` | 444 | **1** | refuses a half-configured Codex OAuth override at startup, and gives every request the id its record will carry |
 
@@ -345,6 +345,20 @@ Every contract test needs a harness per style, so a single seam here would remov
 largest piece of the refactor still outstanding — `resolveAdapter` is closed, since it now delegates to
 the resolver's registrations and the branches that named providers are gone — and it ranks above
 decomposing the service.
+
+### Decision, 2026-11-18: the two remaining seams are deferred
+
+The deep scan recorded two unresolved architecture seams and chose **not** to implement either in this plan:
+
+- **`CredentialProvisioner`** (`create` / `refresh` / `revoke` / `describe`) would replace the per-adapter
+  renewal hooks with one contract. It is real work across every SDK package, and the current renewal pass is
+  tested and working; doing it here would mix a wide refactor into a release whose purpose is honesty of
+  claims. Deferred to a separate `3.68.0` effort if a provider with a third credential shape arrives.
+- **One adapter harness seam.** Three injection styles exist (transport double, driver double, fetch double)
+  because the providers genuinely differ; a single seam would need to emulate all three. It ranks above
+  decomposing the service, but below a verified provider contract, so it stays outstanding.
+
+Neither is a blocker for the current release. Both are recorded here rather than in a stale task checkbox.
 
 ## Contracts worth keeping
 

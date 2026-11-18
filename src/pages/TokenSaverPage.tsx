@@ -43,6 +43,13 @@ export function TokenSaverContent() {
   }, [load]);
   useGatewayReload(load);
 
+  // A response can omit a section without being a failed request: an older gateway, a partial read, or an
+  // endpoint that has not gathered that table yet. The page must say "no data", not blank the shell — the same
+  // class of crash that blanked the usage page when `summary.totals` was missing (3.66.2).
+  const cache = stats?.cache;
+  const savers = Array.isArray(stats?.savers) ? stats.savers : [];
+  const byProvider = Array.isArray(stats?.byProvider) ? stats.byProvider : [];
+
   return (
     <div id="token-saver" className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -63,18 +70,18 @@ export function TokenSaverContent() {
         <div className="card p-4"><p className="muted text-[10px] uppercase tracking-wide">Estimated saved</p><p className="mt-1 font-mono text-xl">{loading ? '…' : formatTokens(stats?.totalTokensSaved ?? 0)}</p><p className="muted mt-1 text-[10px]">tokens</p></div>
         <div className="card p-4"><p className="muted text-[10px] uppercase tracking-wide">Bytes avoided</p><p className="mt-1 font-mono text-xl">{loading ? '…' : formatBytes(stats?.totalBytesSaved ?? 0)}</p><p className="muted mt-1 text-[10px]">prompt payload</p></div>
         <div className="card p-4"><p className="muted text-[10px] uppercase tracking-wide">Requests compressed</p><p className="mt-1 font-mono text-xl">{loading ? '…' : `${stats?.requestsWithSavings ?? 0} / ${stats?.requests ?? 0}`}</p><p className="muted mt-1 text-[10px]">with savings / all requests</p></div>
-        <div className="card p-4"><p className="muted text-[10px] uppercase tracking-wide">Provider cache</p><p className="mt-1 font-mono text-xl">{loading ? '…' : `${formatTokens(stats?.cache.read ?? 0)} / ${formatTokens(stats?.cache.write ?? 0)}`}</p><p className="muted mt-1 text-[10px]">read / write tokens</p></div>
+        <div className="card p-4"><p className="muted text-[10px] uppercase tracking-wide">Provider cache</p><p className="mt-1 font-mono text-xl">{loading ? '…' : `${formatTokens(cache?.read ?? 0)} / ${formatTokens(cache?.write ?? 0)}`}</p><p className="muted mt-1 text-[10px]">read / write tokens</p></div>
       </section>
 
       <section className="card overflow-hidden" aria-label="Savings by saver">
         <div className="flex items-center gap-2 border-b border-line p-4"><BarChart3 className="h-4 w-4 text-muted" aria-hidden="true" /><h2 className="text-sm font-semibold">By saver</h2></div>
-        {!stats || stats.savers.length === 0 ? (
+        {savers.length === 0 ? (
           <p className="muted px-4 py-8 text-center text-xs">{loading ? 'Loading…' : 'No compression telemetry in this period. Enable a saver and send a request with tool output.'}</p>
         ) : (
           <table className="w-full text-left text-[11px]">
             <thead className="muted border-b border-line text-[10px] uppercase tracking-wide"><tr><th className="px-4 py-2">Saver</th><th className="px-4 py-2">Saved / requests</th><th className="px-4 py-2">Ran / skipped</th><th className="px-4 py-2">Saved</th><th className="px-4 py-2">Bytes</th></tr></thead>
             <tbody className="divide-y divide-line font-mono">
-              {stats.savers.map((saver) => (
+              {savers.map((saver) => (
                 <tr key={saver.id}><td className="px-4 py-2">{saver.id} <span className="muted">· {saver.kind}</span></td><td className="px-4 py-2">{saver.requestsWithSavings} / {saver.requests}</td><td className="px-4 py-2">{saver.ran ?? saver.requests} / {saver.skipped ?? 0}</td><td className="px-4 py-2">{formatTokens(saver.tokensSaved)}</td><td className="px-4 py-2">{formatBytes(saver.bytesSaved)}</td></tr>
               ))}
             </tbody>
@@ -84,11 +91,11 @@ export function TokenSaverContent() {
 
       <section className="card overflow-hidden" aria-label="Savings by provider">
         <div className="flex items-center gap-2 border-b border-line p-4"><Database className="h-4 w-4 text-muted" aria-hidden="true" /><h2 className="text-sm font-semibold">By provider</h2></div>
-        {!stats || stats.byProvider.length === 0 ? (
+        {byProvider.length === 0 ? (
           <p className="muted px-4 py-8 text-center text-xs">No per-provider savings in this period.</p>
         ) : (
           <ul className="divide-y divide-line text-[11px]">
-            {stats.byProvider.map((provider) => (
+            {byProvider.map((provider) => (
               <li key={provider.providerId} className="grid grid-cols-3 gap-3 px-4 py-2 font-mono"><span>{provider.providerId}</span><span>{formatTokens(provider.tokensSaved)} tokens</span><span className="muted">{formatBytes(provider.bytesSaved)}</span></li>
             ))}
           </ul>

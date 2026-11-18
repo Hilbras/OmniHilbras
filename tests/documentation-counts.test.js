@@ -229,6 +229,20 @@ test('every dashboard route the README lists is one the router serves', () => {
     `the README lists ${phantoms.map((route) => `/dashboard/${route}`).join(', ')}, which the router does not ` +
       `serve. Routes it does: ${[...known].map((route) => `/dashboard/${route}`).join(', ')}`,
   );
+
+  // The reverse direction was missing: `/about` and `/token-saver` were served and linked from the sidebar for
+  // releases while absent from both `routes.ts` and the README, and the one-way guard passed. Read the router's
+  // own `<Route path>` declarations, not a guess derived from page filenames.
+  const router = read('src/dashboardApp.tsx');
+  const routeValues = new Map([...served.map((route) => [route.name, route.path])]);
+  const declared = [...router.matchAll(/<Route\s+path=(?:"([^"]+)"|\{dashboardRoutes\.(\w+)\})/g)]
+    .map((match) => match[1] ?? routeValues.get(match[2]))
+    .filter((path) => path && path !== '*' && path !== '/');
+  assert.ok(declared.length > 0, 'no router paths parsed; the reverse guard would pass vacuously');
+  const undocumented = declared.filter((path) => !known.has(path.replace(/^\//, '')));
+  assert.deepEqual(undocumented, [], `the router serves paths that are neither constants nor documented: ${undocumented.join(', ')}`);
+  const missingFromReadme = [...new Set(claimed)].length === 0 ? [] : declared.filter((path) => path !== '/' && ![...new Set(claimed)].includes(path.replace(/^\//, '')));
+  assert.deepEqual(missingFromReadme, [], `routes the router serves but the README does not list: ${missingFromReadme.join(', ')}`);
 });
 
 /**

@@ -57,7 +57,7 @@ export function SettingsContent() {
   const [settings, setSettings] = useState<GatewaySettings | undefined>();
   const [preferences, setPreferences] = useState<DesktopAppSettings | undefined>();
   const [update, setUpdate] = useState<UpdateState | undefined>();
-  const [requireApiKey, setRequireApiKey] = useState<boolean | undefined>();
+  const [requireApiKey, setRequireApiKey] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | undefined>();
@@ -86,15 +86,17 @@ export function SettingsContent() {
     setFailed(error);
   }, []);
 
-  const loadGateway = useCallback(async (signal?: AbortSignal) => {
+  const loadGateway = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     setLoading(true);
     try {
       const [resolved, keys] = await Promise.all([getGatewaySettings(signal), listGatewayApiKeys(signal)]);
       setSettings(resolved.settings ?? undefined);
       setRequireApiKey(keys.requireApiKey);
+      return true;
     } catch (error) {
-      if (signal?.aborted) return;
+      if (signal?.aborted) return false;
       flash(error instanceof Error ? error.message : 'The gateway did not answer.', true);
+      return false;
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
@@ -230,13 +232,24 @@ export function SettingsContent() {
       </Section>
 
       <Section icon={<ShieldCheck className="h-4 w-4 text-gold-text" aria-hidden="true" />} title="Gateway access" description="The one gateway setting that can change without a restart.">
-        <Toggle label="Require an API key" detail="When on, every LLM and management request must present a key created on the API keys page." checked={requireApiKey ?? true} disabled={loading || Boolean(saving)} onChange={(next) => void toggleRequireApiKey(next)} />
+        <Toggle
+          label="Require an API key"
+          detail={requireApiKey === null
+            ? 'Unknown until the gateway answers; the switch stays off and inert rather than claiming a value nobody measured.'
+            : 'When on, every LLM and management request must present a key created on the API keys page.'}
+          checked={requireApiKey === true}
+          disabled={requireApiKey === null || loading || Boolean(saving)}
+          onChange={(next) => void toggleRequireApiKey(next)}
+        />
         <div className="flex items-center gap-2 py-3">
           <button type="button" onClick={async () => {
             setTesting(true);
-            try { await loadGateway(); flash('Gateway connection OK.'); }
-            catch (e) { flash(e instanceof Error ? e.message : 'Gateway unreachable.', true); }
-            finally { setTesting(false); }
+            try {
+              // `loadGateway` reports failure itself, through the same notice the page already shows. Its old
+              // signature was `void` and this handler flashed OK unconditionally, so a dead gateway was reported as
+              // healthy — the error notice was written first and immediately overwritten.
+              if (await loadGateway()) flash('Gateway connection OK.');
+            } finally { setTesting(false); }
           }} disabled={Boolean(saving) || testing} className="btn-ghost !px-3 !py-2 !text-xs disabled:opacity-40">Test connection</button>
           <span className="muted text-[10px]">Re-reads the gateway to confirm it answers.</span>
         </div>

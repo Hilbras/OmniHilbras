@@ -146,6 +146,12 @@ that is not on `main`.
   for every provider except OpenRouter, so a key that was any string at all produced a green
   "Key looks valid" — and only one provider's key was really checked. It now asks the gateway, for
   every provider. If a check cannot be performed, say so; do not simulate the result.
+- **A provider's tool support is a row, not a habit.** `Kernel/Tools/src/caps.ts` is the one place that says whether a
+  provider serves tools and whether it can be told to force a call; the gateway asks it and does not re-decide. Adding a
+  catalogue card without a row fails `tests/tools-caps.test.js`, and a row that claims forcing the adapter does not send
+  fails `tests/tools-behaviour.test.js` — both deliberately, because that pair of silences is how `tool_choice` came to
+  be declared in a type and dropped on the wire. Web sessions are `tools: false` by contract: they drive a page, and a
+  schema pasted into a chat box is not function calling.
 - New gateway routes need tests in `Kernel/API/test/` and a line in
   `docs/SPEC-SDK.md`. **Both are now checked, not requested:**
   `tests/gateway-routes.test.js` fails if a served path has no spec line, if the spec

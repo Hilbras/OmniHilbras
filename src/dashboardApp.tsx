@@ -3,6 +3,7 @@ import { Suspense, useEffect, useRef, type ReactNode } from 'react';
 import { DashboardShell } from './components/DashboardShell';
 import { getProviderById } from './data/providers';
 import { fallbackProvider } from './data/providerFallback';
+import { dashboardRoutes } from './lib/routes';
 import {
   AboutContent,
   ApiKeysContent,
@@ -37,7 +38,7 @@ const activePageTitles = {
   models: 'Models',
   routing: 'Routing',
   keys: 'API keys',
-  // Added in 1.64.0 with the page itself. `overview` remains only as the fallback for an unrouted path,
+  // Added in 1.64.0 with the page itself; `overview` is only a fallback title, never a route,
   // which the catch-all `<Route path="*">` redirects to Providers — so it is a title nothing can reach.
   usage: 'Usage',
   logs: 'Request log',
@@ -153,8 +154,8 @@ function DashboardRoutes() {
           <Route path="/usage" element={<UsageContent />} />
           <Route path="/logs" element={<LogsContent />} />
           <Route path="/settings" element={<SettingsContent />} />
-          <Route path="/about" element={<AboutContent />} />
-          <Route path="/token-saver" element={<TokenSaverContent />} />
+          <Route path={dashboardRoutes.about} element={<AboutContent />} />
+          <Route path={dashboardRoutes.tokenSaver} element={<TokenSaverContent />} />
           <Route path="*" element={<Navigate to="/providers" replace />} />
           </Routes>
         </Suspense>

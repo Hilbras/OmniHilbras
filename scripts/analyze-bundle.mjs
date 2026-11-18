@@ -94,7 +94,11 @@ console.log('\nper page (the chunks that page statically loads):');
 const entries = chunks.filter((chunk) => chunk.isEntry);
 const pageCost = new Map();
 for (const entry of entries) {
-  const page = (entry.facadeModuleId ?? '').split('/').pop() ?? entry.fileName;
+  // HTML entries are named after their source document, which is what the budget below checks. A virtual or
+  // generated entry has no `facadeModuleId` ending in `.html`, so fall back to Vite's own `entry.name` rather
+  // than splitting an empty path and measuring a page under the name ''.
+  const facade = (entry.facadeModuleId ?? '').split('/').pop() ?? '';
+  const page = facade.endsWith('.html') ? facade : (entry.name ?? facade ?? entry.fileName);
   const loaded = chunksForEntry(chunksById, entry);
   const merged = new Map();
   let total = 0;

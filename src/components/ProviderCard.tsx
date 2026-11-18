@@ -183,7 +183,7 @@ function SimpleProviderCard({ provider, detailTo, onManage, onConnect, simpleEna
               <span
                 title={provider.riskNotice}
                 className={`inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide ${
-                  provider.riskSeverity === 'high' ? 'border-danger/50 bg-danger/15 text-danger' : 'border-[#ff6b35]/40 bg-[#ff6b35]/10 text-[#ff6b35]'
+                  provider.riskSeverity === 'high' ? 'border-danger/50 bg-danger/15 text-danger' : 'border-[warning]/40 bg-[warning]/10 text-[warning]'
                 }`}
               >
                 <CircleAlert className="h-2.5 w-2.5" aria-hidden="true" />
@@ -262,7 +262,7 @@ export function ProviderCard({ provider, detailTo, onManage, onConnect, mode = '
           </p>
         )}
         {provider.riskNotice && (
-          <p className="mb-3 flex items-start gap-1.5 rounded-lg border border-[#ff6b35]/30 bg-[#ff6b35]/10 px-2.5 py-2 text-[11px] leading-relaxed text-[#ff6b35]">
+          <p className="mb-3 flex items-start gap-1.5 rounded-lg border border-[warning]/30 bg-[warning]/10 px-2.5 py-2 text-[11px] leading-relaxed text-[warning]">
             <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             {provider.riskNotice}
           </p>

@@ -69,6 +69,9 @@ async function stub(page: Page) {
   }));
   await page.route('**/v1/connections*', (route) => route.fulfill({ json: { object: 'list', data: [connection], build: { version: '3.64.0' } } }));
   await page.route('**/v1/keys', (route) => route.fulfill({ json: { object: 'list', keys: [apiKey], requireApiKey: true } }));
+  // PATCH answers with `{ apiKey }`, one key, for rename and enable. The catch-all's generic body has no `apiKey`,
+  // which made a real handler dereference `undefined.id` — a fixture fault presenting as an app fault.
+  await page.route('**/v1/keys/*', (route) => route.fulfill({ json: { apiKey: { ...apiKey, ...JSON.parse(route.request().postData() ?? '{}') } } }));
   await page.route('**/health', (route) => route.fulfill({ json: { status: 'ok', providers: [], build: { version: '3.64.0', startedAt: '2026-11-17T09:00:00.000Z' } } }));
   // Matched loosely on purpose: the built app builds this URL from `gatewayBaseUrl` (in dev it is a relative path the
   // Vite proxy completes), so an exact pattern pins a shape the page is allowed to change.
@@ -88,11 +91,15 @@ async function stub(page: Page) {
 test.describe.configure({ mode: 'serial' });
 
 const ROUTES = [
+  // `/dashboard` is not in this sweep: its controls are desktop IPC (start/stop/restart the gateway) and in a
+  // browser preview the page intentionally renders no enabled server buttons. `app:smoke` drives the real IPC
+  // controls; `smoke.spec.ts` checks that the route paints its chunk.
   ['providers', '/dashboard/providers'],
   ['provider detail', '/dashboard/providers/openai'],
   ['models', '/dashboard/models'],
   ['routing', '/dashboard/routing'],
   ['keys', '/dashboard/keys'],
+  ['token saver', '/dashboard/token-saver'],
   ['usage', '/dashboard/usage'],
   ['logs', '/dashboard/logs'],
   ['settings', '/dashboard/settings'],
@@ -115,15 +122,9 @@ for (const [name, path] of ROUTES) {
      * with one of these names is meant to do this.
      */
     const WINDOW_CHROME = /^(Minimize window|Maximize window|Restore window|Close window)$/;
-    /**
-     * A recorded defect, not an exemption.
-     *
-     * Pressing "Dismiss notification" on `/dashboard/keys` threw `Cannot read properties of undefined (reading 'id')`
-     * — a JavaScript fault inside `ToastViewport`'s dismiss handler, which is `onDismiss(toast.id)` over a list that
-     * generated its own ids. It does not reproduce from an isolated probe, so the cause is still unknown; until it is
-     * found, the sweep names the button it cannot vouch for instead of quietly not trying it.
-     */
-    const KNOWN_DEFECTS = new Map([['Dismiss notification', "toast dismiss threw: reading 'id' on undefined"]]);
+    // "Dismiss notification" used to be skipped here for an unreproducible toast fault. `ToastViewport` now filters
+    // a falsy entry before mapping, and smoke.spec.ts presses the button against a deliberately failing gateway, so
+    // the button is no longer exempt. A future fault fails this sweep rather than hiding behind a recorded name.
     // `:visible` is a Playwright pseudo-class and does **not** exist inside `evaluateAll` — asking for it there matched
     // nothing and the sweep reported every page as having no buttons. Visibility is computed in the page instead, over
     // `button:not([disabled])`, and the same selector is used for the clicks so the indexes line up.
@@ -134,7 +135,7 @@ for (const [name, path] of ROUTES) {
       visible: (node as HTMLElement).offsetWidth > 0 || (node as HTMLElement).offsetHeight > 0,
     })));
     const kept = snapshot
-      .filter((entry) => entry.visible && !WINDOW_CHROME.test(entry.label) && !KNOWN_DEFECTS.has(entry.label))
+      .filter((entry) => entry.visible && !WINDOW_CHROME.test(entry.label))
       .map((entry) => entry.index);
     const total = kept.length;
     // One press per reload is deliberate; nine pages of them need more than the default 30 s.

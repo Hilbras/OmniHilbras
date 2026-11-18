@@ -18,7 +18,7 @@ export const providerLogoMap = {
   xkiro: '/providers/xkiro-logo.svg',
   apmix: '/providers/apmix.png',
   apinex: '/providers/apinex.png',
-  tiarina: '/providers/Tirina.webp',
+  tiarina: '/providers/Tirina.png',
   // The free-tier wave (2026-11): the vendors' own marks, pulled from their sites and committed
   // here. Nous Research's mark is carried over from the reference project, which had it bundled —
   // the portal itself publishes no favicon — so no card in this group is left on its initial.
@@ -27,7 +27,7 @@ export const providerLogoMap = {
   'aion-labs': '/providers/aion-labs.png',
   nous: '/providers/nous.png',
   anyrouter: '/providers/anyrouter.png',
-  beatapi: '/providers/beatapi.webp',
+  beatapi: '/providers/beatapi.png',
   kiraai: '/providers/kiraai.png',
   vengetic: '/providers/vengetic.svg',
   zro: '/providers/zro.svg',

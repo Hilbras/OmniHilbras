@@ -11,6 +11,7 @@ import { estimatePromptTokens, estimateTokens } from '../core/token-estimate.js'
 import { ProviderError, canonicalizeUsage, isLoopbackHostname, isPrivateHostname, isProviderError, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type MessageContent, type Model, type ProviderId, type ToolCall, type ToolDefinition } from '../core/index.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
+import { toolCaps } from '@omnihilbras/tools';
 import { attachRequestId, type RequestScope } from '../core/request-context.js';
 import { isTrustedDashboard } from '../core/runtime.js';
 import type { GatewayServerOptions } from '../server.js';
@@ -362,7 +363,14 @@ export async function handleResponses(request: IncomingMessage, response: Server
     ...(completion.message.toolCalls ? { toolCalls: completion.message.toolCalls } : {}),
     ...(completion.usage ? { usage: completion.usage } : {}),
   });
-  sendJson(response, 200, { ...responsesBody, gateway: { requestId: scope.id, ...(attempts.length > 1 ? { attempts: attempts.map(toPublicAttempt) } : {}) } }, origin);
+  sendJson(response, 200, {
+    ...responsesBody,
+    gateway: {
+      requestId: scope.id,
+      ...(attempts.length > 1 ? { attempts: attempts.map(toPublicAttempt) } : {}),
+      ...toolSupportNote(chatRequest.tools, completion.providerId),
+    },
+  }, origin);
 }
 
 /**
@@ -447,7 +455,7 @@ async function streamResponses(input: {
       ...(completedCalls.length ? { toolCalls: completedCalls } : {}),
       ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens } } : {}),
     });
-    await writeStreamData(response, `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: { ...completed, gateway: { requestId: scope.id } } })}\n\n`, signal);
+    await writeStreamData(response, `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: { ...completed, gateway: { requestId: scope.id, ...toolSupportNote(chatRequest.tools, servingOf()?.providerId) } } })}\n\n`, signal);
     recordUsage(service, {
       model,
       providerId: servingOf()?.providerId,
@@ -662,7 +670,11 @@ async function handleChatRequest(input: {
       ...toOpenAICompletion(completion, serving?.connectionId),
       // Always present, even on a success with one attempt. A client that was refused gets it from
       // the error; a client that succeeded and wants to quote a conversation gets it from here.
-      gateway: { requestId: scope.id, ...(attempts.length > 1 ? { attempts: attempts.map(toPublicAttempt) } : {}) },
+      gateway: {
+        requestId: scope.id,
+        ...(attempts.length > 1 ? { attempts: attempts.map(toPublicAttempt) } : {}),
+        ...toolSupportNote(chatRequest.tools, completion.providerId),
+      },
     }, origin);
     return;
   }
@@ -691,7 +703,25 @@ async function handleChatRequest(input: {
      */
     let streamUsage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
     let text = '';
+    /**
+     * The streaming answer says it in the stream, because a header cannot.
+     *
+     * The head is written before the first chunk arrives, and `outcome.attempts` is empty at that point — measured: the
+     * header simply never appeared. By the first chunk the serving provider is known, so the note goes out as an
+     * empty-delta chunk carrying `gateway.tools`, which is a shape every OpenAI client already tolerates (it is how a
+     * role announcement is sent) and which a client that does not care about it ignores.
+     */
+    let toolsNoteSent = false;
     for await (const chunk of outcome.chunks) {
+      if (!toolsNoteSent) {
+        toolsNoteSent = true;
+        // A failed attempt still carries a providerId, so `find` with a truthy predicate named the provider that
+        // refused the turn rather than the one that answered it — on failover the client was told the wrong story.
+        const servingId = outcome.attempts.find((attempt) => attempt.ok)?.providerId;
+        if (chatRequest.tools?.length && servingId && !toolCaps(servingId).tools) {
+          await writeStreamData(response, `data: ${JSON.stringify({ id: chunk.id, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model: chunk.model, choices: [{ index: 0, delta: {}, finish_reason: null }], gateway: { tools: 'unsupported' } })}\n\n`, signal);
+        }
+      }
       if (chunk.usage) streamUsage = chunk.usage;
       if (typeof chunk.delta === 'string') text += chunk.delta;
       await writeStreamData(response, `data: ${JSON.stringify(toOpenAIChunk(chunk))}\n\n`, signal);
@@ -1233,9 +1263,29 @@ export function toOpenAIModel(model: Model) {
     ...(model.contextWindow ? { context_window: model.contextWindow } : {}),
     ...(model.virtual ? { virtual: true } : {}),
     ...(model.providers?.length ? { providers: model.providers } : {}),
+    /**
+     * Present only when this model's provider does **not** serve tools.
+     *
+     * An extension field, like `display_name`. It is omitted rather than set to `true` because supporting tools is the
+     * norm and saying so on every model is noise a client has to filter; the negative is the one worth a sentence, and
+     * it is what lets an agent be told "this model cannot call tools" before spending a turn discovering it.
+     */
+    ...(toolCaps(model.providerId).tools ? {} : { tools: false as const }),
   };
 }
 
+
+/**
+ * Whether the client asked for tools and the provider that served it cannot use them.
+ *
+ * The failure this answers is silence: an agent sends `tools`, a web session ignores them, the model writes prose and
+ * the agent concludes the model is confused. The request is still served — that is not the change — but the answer says
+ * what happened, and `/v1/models` says it before the first token.
+ */
+export function toolSupportNote(requested: readonly ToolDefinition[] | undefined, providerId: string | undefined): { tools?: 'unsupported' } {
+  if (!requested?.length || !providerId) return {};
+  return toolCaps(providerId).tools ? {} : { tools: 'unsupported' };
+}
 
 export async function writeStreamData(response: ServerResponse, data: string, signal: AbortSignal) {
   if (signal.aborted || response.destroyed || response.writableEnded) {

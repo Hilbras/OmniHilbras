@@ -48,8 +48,13 @@ export async function handleConnectionsRoute(ctx: RouteContext): Promise<boolean
     //
     // This was a single provider's route before, and generalising it is the point: a second metered
     // provider now needs an adapter that implements `quota`, not an edit to this file.
-    if (request.method === 'GET' && /^\/v1\/connections\/[^/]+\/quota$/.test(url.pathname)) {
-      const connectionId = decodeConnectionId(url.pathname.slice('/v1/connections/'.length, -'/quota'.length));
+    const quotaPath = '/v1/connections/';
+    const quotaSuffix = '/quota';
+    const quotaConnection = url.pathname.startsWith(quotaPath) && url.pathname.endsWith(quotaSuffix)
+      ? url.pathname.slice(quotaPath.length, -quotaSuffix.length)
+      : '';
+    if (request.method === 'GET' && quotaConnection && !quotaConnection.includes('/')) {
+      const connectionId = decodeConnectionId(quotaConnection);
       sendJson(response, 200, { object: 'quota', ...(await service.connectionQuota(connectionId, signal)) }, origin);
       return true;
     }

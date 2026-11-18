@@ -107,6 +107,15 @@ function trackedPaths() {
   }
 }
 
+test('every rendered mark is polarity-classified, including the two former webp marks', () => {
+  const cards = readFileSync(join(ROOT, 'src/data/providers.ts'), 'utf8');
+  assert.doesNotMatch(cards, /\/providers\/[^'"]+\.webp/, 'a webp mark bypasses the polarity plugin');
+  const generated = readFileSync(join(ROOT, 'src/lib/logoPolarity.generated.ts'), 'utf8');
+  for (const name of ['beatapi.png', 'Tirina.png']) {
+    assert.match(generated, new RegExp(JSON.stringify(name)), `${name} has no measured polarity tile`);
+  }
+});
+
 test('every provider mark the catalog renders exists on disk', () => {
   const missing = referencedAssets().filter((asset) => !existsSync(join(ROOT, 'public', asset.slice(1))));
   assert.deepEqual(missing, [], `the dashboard renders these paths and nothing serves them: ${missing.join(', ')}`);

@@ -20,6 +20,32 @@ test('the provider switch writes enabled state through the gateway', () => {
   assert.doesNotMatch(page, /disabledProviderIds/, 'the old local-only disabled set is back');
 });
 
+test('card and routing accents use theme tokens, not anonymous hex values', () => {
+  for (const file of ['src/components/ProviderCard.tsx', 'src/pages/ProviderDetailPage.tsx', 'src/pages/RoutingPage.tsx']) {
+    const source = read(file);
+    assert.doesNotMatch(source, /\[#[0-9a-fA-F]{6}\]/, `${file} paints an accent a token cannot theme`);
+  }
+  const css = read('src/index.css');
+  for (const token of ['--color-warning', '--color-info', '--color-violet']) {
+    assert.match(css, new RegExp(token), `${token} is used in a component but not defined as a token`);
+  }
+});
+
+test('provider notices share one timer, so a later notice is not cleared early', () => {
+  const page = read('src/pages/ProvidersPage.tsx');
+  assert.doesNotMatch(page, /window\.setTimeout\(\(\) => setNotice\(''\)/, 'a bare notice timer is back');
+  assert.match(page, /const noticeTimer = useRef/, 'there is no single notice timer');
+  assert.match(page, /clearTimeout\(noticeTimer\.current\)/, 'a new notice does not cancel the previous one');
+  assert.match(page, /setNotice\(''\);[\s\S]{0,80}noticeTimer\.current = undefined/, 'an expired timer does not clear its handle');
+});
+
+test('the Settings connection check uses the gateway answer, and the switch states the unknown', () => {
+  const page = read('src/pages/SettingsPage.tsx');
+  assert.match(page, /if \(await loadGateway\(\)\) flash\('Gateway connection OK\.'\)/, 'the OK notice is unconditional again');
+  assert.match(page, /useState<boolean \| null>\(null\)/, 'the enforcement switch still guesses a value');
+  assert.match(page, /Unknown until the gateway answers/, 'an unmeasured switch no longer says so');
+});
+
 test('bulk add mints a connection id per entry', () => {
   const page = read('src/pages/ProvidersPage.tsx');
   assert.match(page, /provider\.connectionId \?\? `\$\{provider\.providerId\.slice\(0, 40\)\}-\$\{crypto\.randomUUID/, 'bulk entries still overwrite one row');
@@ -129,7 +155,7 @@ test('About exists in the web and desktop app, with encrypted backup actions', (
   const app = read('src/dashboardApp.tsx');
   const shell = read('src/components/DashboardShell.tsx');
   const about = read('src/pages/AboutPage.tsx');
-  assert.match(app, /path="\/about"/, 'no About route');
+  assert.match(app, /path=\{dashboardRoutes\.about\}|path="\/about"/, 'no About route');
   assert.match(shell, /to: '\/about'/, 'no About nav entry');
   assert.match(about, /exportGatewayBackup/, 'no backup export');
   assert.match(about, /importGatewayBackup/, 'no backup import');
@@ -227,7 +253,7 @@ test('the Token Saver page is wired to the stats route', () => {
   const app = read('src/dashboardApp.tsx');
   const shell = read('src/components/DashboardShell.tsx');
   const page = read('src/pages/TokenSaverPage.tsx');
-  assert.match(app, /path="\/token-saver"/, 'no Token Saver route');
+  assert.match(app, /path=\{dashboardRoutes\.tokenSaver\}|path="\/token-saver"/, 'no Token Saver route');
   assert.match(shell, /to: '\/token-saver'/, 'no Token Saver nav entry');
   assert.match(page, /getGatewayTokenSaverStats/, 'the page does not read the stats route');
   assert.match(page, /requestsWithSavings/, 'the page does not distinguish savings from telemetry');

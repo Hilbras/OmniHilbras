@@ -119,6 +119,25 @@ test('a caller\'s own tools are kept — the placeholder never displaces a real 
   assert.deepEqual(names.filter((name) => ['bash', 'glob', 'grep', 'read'].includes(name)), ['bash', 'glob', 'grep', 'read'], 'the quartet is appended beside it');
 });
 
+test('a forced call on a free model is refused by name instead of being downgraded to auto', async () => {
+  // The caps table says OpenCode can force a call — true on its paid lane. On a gated model the upstream accepts only
+  // `auto`/`none`, so silently sending `auto` would tell the client its constraint was honoured when it was not.
+  const t = streamingTransport();
+  const adapter = new ZenAdapter({ transport: t });
+  await assert.rejects(
+    () => adapter.chat(request('mimo-v2.6-flash-free', {
+      tools: [{ name: 'read', description: 'read', parameters: { type: 'object', properties: {} } }],
+      toolChoice: 'required',
+    }), credential),
+    (error) => {
+      assert.equal(error.code, 'NOT_SUPPORTED');
+      assert.match(error.publicMessage, /free (tier|model)/i);
+      return true;
+    },
+  );
+  assert.equal(t.requests.length, 0, 'the gated request was sent despite the impossible choice');
+});
+
 test('the gate applies to free models only', async () => {
   // A paid model must keep the ordinary JSON path. Applying the contract to it would mean streaming
   // every paid request and sending a tool the caller never declared, which is a behaviour change to a

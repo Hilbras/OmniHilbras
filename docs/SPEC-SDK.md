@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.9.2
+**Status:** Current — release 3.67.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -834,6 +834,53 @@ allowlisted browser origin. The contract:
   challenge and an actionable message.
 - `lastUsedAt` is best effort: it is written at most once per 30 seconds so
   request handling never blocks on disk.
+
+## The tool contract
+
+A client that sends `tools` and reads `tool_calls` is the shape every coding agent uses. The gateway used to forward
+whatever it was given and return whatever came back, which meant three different outcomes depending on the provider,
+none of them announced: tools worked, tools were silently dropped, or a `tool_choice` was ignored while the model
+answered in prose.
+
+`Kernel/Tools` owns the decision now. One table states, per provider, whether tools are served and which `tool_choice`
+values can be honoured; the gateway applies it before the request and validates the answer after it.
+
+### The table
+
+| Group | Providers | Behaviour |
+| --- | --- | --- |
+| Forced | OpenAI-compatible wires, `anthropic`, `gemini`, `codebuddy-*`, `kilocode`, `minimax-code*`, `zcode`, `opencode`, `opencode-go` | `auto`, `none` and `required` are honoured, each in the provider's own vocabulary; on `opencode`/`opencode-go` a **gated free model** refuses `required` by name, because its upstream accepts only `auto`/`none` |
+| No forcing | `claude-code`, `kimi-code`, `kiro`, `qoder`, `opencode-console` | tools are served; `required` is refused |
+| Refused | `codex` | the adapter throws on tools, so the table says so rather than letting the provider do it |
+| Web sessions | `chatgpt-web`, `gemini-web`, `duckduckgo-web`, `deepseek-web`, `deepseek-web-v2`, `tokenharbor-web`, `grok-web`, `perplexity-web`, `qwen-web` | tools are removed before the adapter sees them |
+
+Web sessions are excluded on purpose. They drive a page, not an API with a function-calling surface; smuggling a schema
+into a chat box produced prose that looked like a refusal and cost a turn to discover. `tests/tools-caps.test.js` fails
+if a catalogue card has no row, and `tests/tools-behaviour.test.js` fails if a row claims forcing that the adapter does
+not actually send.
+
+### What the gateway does with it
+
+- **`tool_choice: "required"` on a provider without forcing** answers `501` with code `NOT_SUPPORTED`, naming the
+  provider, the sentence a user can act on and the values it does support. It used to be forwarded and ignored, which
+  told the client its constraint had been honoured when it had not.
+- **`tool_choice: "none"`** removes the definitions before the adapter runs, whatever that adapter would have done.
+- **Definitions** are sanitised: the name must be 1–64 characters of letters, digits, `_` or `-`; a description is
+  capped at 2 000 characters; the whole schema at 32 KB; duplicates are dropped. Each drop is logged with its reason.
+- **Returned calls** are validated. A call must name a tool the client declared and carry a JSON object after bounded
+  repair (trailing comma, single quotes, bare keys, a markdown fence). Anything else is dropped and logged, and a turn
+  whose only call was dropped no longer reports `finish_reason: "tool_calls"`.
+- **Streamed calls** are checked by name as they arrive. Arguments are not repaired on a stream: that would mean
+  buffering the call, and a client that receives its tool call only when the turn ends thinks the model stalled.
+
+### How a client learns its tools were not used
+
+| Surface | What it says |
+| --- | --- |
+| `GET /v1/models` | `tools: false` on a model whose provider cannot serve them; omitted otherwise, because supporting tools is the norm |
+| `POST /v1/chat/completions` | `gateway.tools: "unsupported"` when the client sent tools to such a provider |
+| `POST /v1/chat/completions` (stream) | the same note on the stream's first, empty-delta chunk — the head is written before the provider is known |
+| `POST /v1/responses` | `gateway.tools: "unsupported"` in the response, and in the streamed `response.completed` event |
 
 ## Additional Providers
 

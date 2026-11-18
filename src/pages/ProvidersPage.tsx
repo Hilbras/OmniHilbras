@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -147,6 +147,26 @@ export function ProvidersContent() {
   const [healthReportComplete, setHealthReportComplete] = useState(true);
   const [notice, setNotice] = useState('');
   const [noticeError, setNoticeError] = useState(false);
+  /**
+   * One timer for every notice on this page.
+   *
+   * Seven bare `setTimeout(() => setNotice(''))` calls used to race: the aggregate "N saved" notice from a bulk
+   * save was cleared by the child's four-second timer before its own five-second timer had elapsed, and a notice
+   * could set state after unmount. `ApiKeysPage` already has this pattern; this page now shares it.
+   */
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const showNotice = useCallback((message: string, error = false, ms = 3500) => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNotice(message);
+    setNoticeError(error);
+    noticeTimer.current = setTimeout(() => {
+      setNotice('');
+      noticeTimer.current = undefined;
+    }, ms);
+  }, []);
+  useEffect(() => () => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+  }, []);
 
   /**
    * Connections first, health second.
@@ -292,22 +312,17 @@ export function ProvidersContent() {
     const owner = provider.connectionProviderId ?? provider.catalogId ?? provider.id;
     const connection = gatewayConnections.find((item) => item.providerId === owner);
     if (!connection) {
-      setNoticeError(true);
-      setNotice(`${provider.name} has no saved connection to turn ${enabled ? 'on' : 'off'}.`);
-      window.setTimeout(() => setNotice(''), 3000);
+      showNotice(`${provider.name} has no saved connection to turn ${enabled ? 'on' : 'off'}.`, true, 3000);
       return;
     }
     try {
       const saved = await setGatewayConnectionEnabled(connection.id, enabled);
       setGatewayConnections((current) => current.map((item) => (item.id === saved.id ? saved : item)));
       setProviders((current) => mergeGatewayConnections(current, [saved]));
-      setNoticeError(false);
-      setNotice(`${provider.name} ${enabled ? 'enabled' : 'disabled'}.`);
+      showNotice(`${provider.name} ${enabled ? 'enabled' : 'disabled'}.`, false, 2500);
     } catch (error) {
-      setNoticeError(true);
-      setNotice(error instanceof Error ? error.message : 'The gateway did not answer.');
+      showNotice(error instanceof Error ? error.message : 'The gateway did not answer.', true, 2500);
     }
-    window.setTimeout(() => setNotice(''), 2500);
   }
 
   /**
@@ -329,8 +344,7 @@ export function ProvidersContent() {
     setAddOpen(false);
     setInitialProviderId(undefined);
     setInitialModelPolicy(undefined);
-    setNotice(`${added.length} ${added.length === 1 ? 'connection was' : 'connections were'} added to the local list. Not saved to the gateway yet.`);
-    window.setTimeout(() => setNotice(''), 4000);
+    showNotice(`${added.length} ${added.length === 1 ? 'connection was' : 'connections were'} added to the local list. Not saved to the gateway yet.`, false, 4000);
   }
 
   async function handleSave(newProvider: NewProvider, apiKey?: string) {
@@ -350,9 +364,7 @@ export function ProvidersContent() {
       setAddOpen(false);
       setInitialProviderId(undefined);
       setInitialModelPolicy(undefined);
-      setNoticeError(false);
-      setNotice(`OpenRouter connection saved with ${connection.modelIds.length} models (${connection.modelPolicy === 'free' ? 'free import' : 'all import'}).`);
-      window.setTimeout(() => setNotice(''), 3500);
+      showNotice(`OpenRouter connection saved with ${connection.modelIds.length} models (${connection.modelPolicy === 'free' ? 'free import' : 'all import'}).`);
       return;
     }
 
@@ -388,9 +400,7 @@ export function ProvidersContent() {
     setAddOpen(false);
     setInitialProviderId(undefined);
     setInitialModelPolicy(undefined);
-    setNoticeError(false);
-    setNotice(`${newProvider.name} connection saved. ${connection.modelIds.length} models available.`);
-    window.setTimeout(() => setNotice(''), 4000);
+    showNotice(`${newProvider.name} connection saved. ${connection.modelIds.length} models available.`, false, 4000);
   }
 
   async function handleSaveMany(entries: Array<{ provider: NewProvider; key: string }>) {
@@ -417,13 +427,10 @@ export function ProvidersContent() {
     }
     if (failed.length > 0) {
       finishAddLocally(notSaved);
-      setNoticeError(true);
-      setNotice(`${saved.length} saved. ${failed.length} not saved — ${failed.join('; ')}`);
+      showNotice(`${saved.length} saved. ${failed.length} not saved — ${failed.join('; ')}`, true, 5000);
     } else if (saved.length > 0) {
-      setNoticeError(false);
-      setNotice(`${saved.length} ${saved.length === 1 ? 'connection was' : 'connections were'} saved.`);
+      showNotice(`${saved.length} ${saved.length === 1 ? 'connection was' : 'connections were'} saved.`, false, 5000);
     }
-    window.setTimeout(() => setNotice(''), 5000);
   }
 
   async function testAll() {
@@ -436,14 +443,11 @@ export function ProvidersContent() {
       // measured. The data was in this function the whole time.
       setHealthReport(health);
       const healthyCount = health.providers.filter((provider) => provider.status === 'healthy').length;
-      setNoticeError(false);
-      setNotice(`${healthyCount} of ${health.providers.length} provider connections are healthy.`);
+      showNotice(`${healthyCount} of ${health.providers.length} provider connections are healthy.`, false, 5000);
     } catch {
-      setNoticeError(true);
-      setNotice('Local gateway unavailable. Start it with pnpm dev:gateway.');
+      showNotice('Local gateway unavailable. Start it with pnpm dev:gateway.', true);
     } finally {
       setTestingAll(false);
-      window.setTimeout(() => setNotice(''), 3500);
     }
   }
 

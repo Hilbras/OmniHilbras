@@ -16,6 +16,7 @@
  * ## What is cleaned
  *
  * - One `Kernel/SDK/<provider>/dist` per package. There is no single `Kernel/SDK/dist` any more.
+ * - `Kernel/TokenSaver/dist` and `Kernel/Tools/dist`, which the gateway imports at runtime.
  * - `Kernel/API/dist` when `--gateway` is passed. The dashboard imports
  *   `@omnihilbras/kernel-api/public` from that directory, so it has the same stale-artifact problem;
  *   the gateway's own `build` script calls this before `tsc`.
@@ -37,4 +38,5 @@ if (gatewayOnly) {
     if (entry.isDirectory()) rmSync(join(sdkRoot, entry.name, 'dist'), { recursive: true, force: true });
   }
   rmSync(join(root, 'Kernel', 'TokenSaver', 'dist'), { recursive: true, force: true });
+  rmSync(join(root, 'Kernel', 'Tools', 'dist'), { recursive: true, force: true });
 }

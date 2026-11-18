@@ -31,12 +31,11 @@ const fixed = [];
 /**
  * Every published manifest must agree, because a mismatch ships a mismatched artifact.
  *
- * The SDK is no longer one manifest: it is one package per provider under `Kernel/SDK/`, each private and
- * versioned with the repo. `Kernel/API` is the publishable one, so it is the manifest this checks.
- *
- * `cli/package.json` is the second, and it is the one where drift would be worst: it is the manifest of
- * the package a person installs globally, so a version that disagreed with the release would ship a
- * `omnihilbras --version` that contradicted every other version in the tree.
+ * The SDK is no longer one manifest: it is one private package per provider under `Kernel/SDK/`, each
+ * versioned `0.1.0` and unpublished. `Kernel/API` and `cli/` both carry the workspace version and are the two
+ * manifests this checks — the gateway because it is what the checkout runs, and `cli/` because drift there
+ * would ship a globally installed `omnihilbras --version` that contradicted the release. `cli/` is the only
+ * publishable manifest; the gateway and every SDK package stay private.
  */
 for (const manifest of ['Kernel/API/package.json', 'cli/package.json']) {
   const found = JSON.parse(read(manifest)).version;

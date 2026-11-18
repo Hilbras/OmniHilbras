@@ -84,7 +84,7 @@ Every change ships as its own version, and the definition of done is in `AGENTS.
 2. Version bumped, and `README.md` / `docs/SPEC-SDK.md` / `docs/architecture/` / `tasks/` updated to match.
 3. Committed, tagged `v<version>`, pushed to `main`.
 4. A GitHub release for the tag, with notes saying what changed **and how to verify it**.
-5. `npm publish` is **suspended** while there is no publishable manifest; until it resumes, `pnpm release:audit` will report the npm gap rather than a step anyone can complete.
+5. `npm publish --access public` **from `cli/`**, then `npm view @hilbras/omnihilbras@<version> version` to confirm. `cli/` is the one publishable manifest — the gateway and every SDK package stay private. `pnpm release:audit` checks every tag against both npm and GitHub.
 
 Step 5 is not a formality. `npm publish` has twice reported success for a version that was absent from the
 registry, because the tarball is staged and finalised minutes later. A `409` on re-publish means *wait*, not

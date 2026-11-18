@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   Boxes,
@@ -63,6 +63,41 @@ export function ModelsContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [draft, setDraft] = useState<Draft | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const dialogOpen = draft !== null;
+  useEffect(() => {
+    if (!dialogOpen) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const panel = dialogRef.current;
+    const focusables = () => [...(panel?.querySelectorAll<HTMLElement>('input, select, textarea, button:not([disabled])') ?? [])];
+    // Defer by a frame: React's effect for this component can run before the dialog's children have been
+    // committed, and focusing an empty panel leaves the browser on whatever the pointer last touched.
+    const frame = requestAnimationFrame(() => panel?.querySelector<HTMLElement>('input')?.focus());
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setDraft(null);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener('keydown', onKeyDown);
+      opener?.focus();
+    };
+  }, [dialogOpen]);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string>();
   /**
@@ -371,11 +406,11 @@ export function ModelsContent() {
       )}
 
       {draft && (
-        <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-black/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="model-dialog-title">
+        <div ref={dialogRef} className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-black/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="model-dialog-title">
           <div className="card w-full max-w-2xl p-5 sm:p-6">
             <div className="flex items-start justify-between gap-3">
               <div><p className="eyebrow">Virtual model</p><h2 id="model-dialog-title" className="mt-1 text-lg font-semibold">{models.some((model) => model.id === draft.id) ? 'Edit model' : 'Create model'}</h2></div>
-              <button type="button" onClick={() => setDraft(null)} className="muted grid h-8 w-8 place-items-center rounded-lg hover:bg-bg-soft hover:text-text" aria-label="Close"><X className="h-4 w-4" /></button>
+              <button type="button" onClick={() => setDraft(null)} className="muted grid h-8 w-8 place-items-center rounded-lg hover:bg-bg-soft hover:text-text" aria-label="Close"><X className="h-4 w-4" aria-hidden="true" /></button>
             </div>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="block sm:col-span-2"><span className="mono-label mb-1.5 block">Public model id</span><input value={draft.id} onChange={(event) => setDraft((current) => current ? { ...current, id: event.target.value } : current)} placeholder="oh/chat" className="input font-mono" /><span className={`mt-1 block text-[10px] ${draft.id.startsWith('oh/') && draft.id.length > 3 ? 'text-muted' : 'text-danger'}`}>Must start with <code className="font-mono">oh/</code>. Clients send this exact id.</span></label>

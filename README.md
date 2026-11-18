@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.66.2**
+**Current version: 3.67.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -364,9 +364,11 @@ One React Router app mounted at `/dashboard`; client-side navigation never reloa
 | `/dashboard/usage` | Requests, tokens, cache and cost |
 | `/dashboard/logs` | Live request log |
 | `/dashboard/settings` | Loaded configuration and desktop settings |
+| `/dashboard/token-saver` | Measured savings from context compression |
+| `/dashboard/about` | Build provenance and the limits of this installation |
 
 There is no Overview page: the earlier one had no data source and was removed rather than kept. `/dashboard`
-redirects to providers.
+is the Servers page; unknown paths under it redirect to providers.
 
 A static host must send every `/dashboard/*` request to `dashboard.html`. `public/_redirects` covers Netlify
 and Cloudflare Pages; the nginx equivalent is:
@@ -398,6 +400,10 @@ The desktop shell owns the local gateway so the app can start and stop it withou
   a browser, which has no updater, asks GitHub for the newest release and offers the release page and the
   install command instead of a button that would do nothing. A check that fails says it failed — it never
   renders "up to date".
+- **Tools follow one contract.** `Kernel/Tools` decides, per provider, whether `tools` are served and which
+  `tool_choice` values can be honoured; a forced call to a provider that cannot force is a stated `400 NOT_SUPPORTED`
+  rather than a request that quietly ignores it, returned `tool_calls` are validated and bounded-repaired, and a web
+  session that cannot use the tools you sent says so — `tools: false` in `/v1/models` and `gateway.tools` in the answer.
 - **Encrypted backup** import and export through the About/Settings surfaces. The file carries every store the
   gateway keeps — connections with their credentials (API keys, OAuth sign-ins, keyless providers), provider
   strategies and model aliases, the gateway's API keys, usage history, virtual models, skills, workspaces,
@@ -503,9 +509,6 @@ are known not to:
 
 - **Installers are unsigned.** Windows and macOS builds prompt on first launch, and the updater asks before
   installing anything it cannot prove. Verifying properly needs signing keys, which do not exist yet.
-- **A few routing guards in the gateway suite are red**, and have been since before the current work. They are
-  recorded rather than hidden, and they are the next thing worth fixing — a red guard that nobody reads is
-  how a real defect survives a green build.
 - **`proxyPool` has no transport.** A non-`none` pool is refused rather than ignored, so a provider that flags
   several accounts on one address cannot be fully answered from inside the app.
 - **The npm package is the client only**; the server is the desktop app or a checkout.

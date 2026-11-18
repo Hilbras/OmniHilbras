@@ -6,7 +6,27 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The image is published under the project's name, so a tag off main must not reach the registry. This is the
+  # same gate the desktop workflow uses; without it a write-holder can push a tag at any commit and ship it.
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tagged commit must be an ancestor of main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "::error::$GITHUB_REF_NAME points at $GITHUB_SHA, which is not an ancestor of main. Publish from main."
+            exit 1
+          fi
+          echo "$GITHUB_SHA is on main."
+
   build-and-push:
+    needs: preflight
     runs-on: ubuntu-latest
     permissions:
       contents: read

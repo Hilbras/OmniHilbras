@@ -103,9 +103,10 @@ export async function handleStatusRoute(ctx: RouteContext): Promise<boolean> {
     // One provider, not thirteen. `/health` probes every active adapter, so a dashboard that
     // asked it in order to render a single provider card waited on the whole registry — long
     // enough on a loaded machine that "Test provider" looked permanently stuck.
-    const singleHealth = /^\/v1\/health\/([^/]+)$/.exec(url.pathname);
-    if (request.method === 'GET' && singleHealth?.[1]) {
-      sendJson(response, 200, { provider: await service.healthForProvider(decodeProviderId(singleHealth[1]), signal) }, origin);
+    const singleHealthPath = '/v1/health/';
+    const singleHealthId = url.pathname.startsWith(singleHealthPath) ? url.pathname.slice(singleHealthPath.length) : '';
+    if (request.method === 'GET' && singleHealthId && !singleHealthId.includes('/')) {
+      sendJson(response, 200, { provider: await service.healthForProvider(decodeProviderId(singleHealthId), signal) }, origin);
       return true;
     }
 

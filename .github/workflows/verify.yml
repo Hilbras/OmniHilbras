@@ -1,8 +1,11 @@
 # Every check that must pass before a change lands.
 #
-# There was no CI at all, which meant the 419 tests only ever ran when I happened to run them.
+# There was no CI at all, which meant the suite only ever ran when I happened to run it. The canonical
+# command below is the count; a prose number goes stale the moment a test is added.
 # That is not a safety net, it is a habit — and a habit does not run on someone else's machine,
 # or on a machine that is too loaded to be paying attention.
+# The single canonical gate: `pnpm verify` runs repo guards, SDK, gateway, TokenSaver, Tools and the
+# browser-free build checks in that order, so the new tool contract is covered here on every push.
 name: verify
 on:
   push:

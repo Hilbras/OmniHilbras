@@ -37,7 +37,6 @@ import { useGatewayReload } from '../lib/useGatewayStatus';
 import { webSessionDescriptor, webSessionProviderIds } from '../lib/webSessionProviders';
 import { OauthConnectDialog } from '../components/OauthConnectDialog';
 import { applyModelFilters, contextLabel, contextOptions, defaultModelFilters, filterAvailability, modelFacets, priceLabel, providerSlug, type ModelFacets, type ModelFilterState, type ModelMetaMap } from '@omnihilbras/kernel-api/public';
-import { DashboardShell } from '../components/DashboardShell';
 import { ProviderMark } from '../components/ProviderMark';
 import { ProviderPlayground } from '../components/ProviderPlayground';
 import { addGatewayConnectionModels, deleteGatewayConnection, removeGatewayConnectionModels, getGatewayProviderHealth, getOpencodeRuntime, installOpencodeRuntime, startOpencodeRuntime, getGatewayRoutingState, listGatewayConnections, probeGatewayConnection, refreshGatewayConnectionModels, saveGatewayConnectionDetailed, saveOpenRouterConnection, setGatewayConnectionEnabled, testGatewayModel, updateGatewayConnectionResilience, updateGatewayProviderStrategy, type GatewayConnection, type GatewayOpencodeRuntime, type GatewayProviderStrategy, type GatewayResilience, type GatewayRoutingState } from '../lib/gatewayClient';
@@ -45,14 +44,8 @@ import { getProviderById } from '../data/providers';
 import { dashboardRoutes, providerRoute, providerUsageRoute } from '../lib/routes';
 import { UsageContent } from './UsagePage';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
-import { fallbackProvider } from '../data/providerFallback';
 import { badgeTone } from '../ui/primitives';
 
-
-function providerFromLocation(): ProviderRecord {
-  const id = new URLSearchParams(window.location.search).get('provider');
-  return getProviderById(id) ?? fallbackProvider;
-}
 
 /**
  * How long to wait for the connection list before treating the read as failed.
@@ -113,7 +106,7 @@ function unknownStatusMeta(state: 'loading' | 'failed') {
 type ModelTestState = 'idle' | 'testing' | 'ok' | 'error';
 
 function DetailStat({ label, value, icon: Icon, tone = 'muted' }: { label: string; value: string; icon: typeof Activity; tone?: 'muted' | 'green' | 'gold' | 'blue' }) {
-  const toneClass = { muted: 'text-muted', green: 'text-success', gold: 'text-gold-text', blue: 'text-[#5d98e8]' }[tone];
+  const toneClass = { muted: 'text-muted', green: 'text-success', gold: 'text-gold-text', blue: 'text-[info]' }[tone];
   return <div className="rounded-xl border border-line bg-bg-soft/70 p-3.5"><Icon className={`h-4 w-4 ${toneClass}`} aria-hidden="true" /><p className="muted mt-3 text-[10px] uppercase tracking-[0.1em]">{label}</p><p className="mt-1 truncate font-mono text-sm font-semibold">{value}</p></div>;
 }
 
@@ -1471,7 +1464,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       </div>
 
       {provider.riskNotice && (
-        <div role="note" className="mb-5 flex items-start gap-2 rounded-xl border border-[#ff6b35]/30 bg-[#ff6b35]/10 px-3.5 py-3 text-xs leading-relaxed text-[#ff6b35]">
+        <div role="note" className="mb-5 flex items-start gap-2 rounded-xl border border-[warning]/30 bg-[warning]/10 px-3.5 py-3 text-xs leading-relaxed text-[warning]">
           <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           {provider.riskNotice}
         </div>
@@ -1859,14 +1852,4 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       )}
     </>
   );
-}
-
-export default function ProviderDetailPage() {
-  const provider = useMemo(providerFromLocation, []);
-
-  useEffect(() => {
-    document.title = `${provider.name} — OmniHilbras`;
-  }, [provider.name]);
-
-  return <DashboardShell activePage="providers" pageTitle={provider.name} pageDescription="Provider connection details"><ProviderDetailContent provider={provider} /></DashboardShell>;
 }

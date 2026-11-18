@@ -53,6 +53,20 @@ test('MCP initialize + tools/list + tools/call', async (t) => {
   assert.equal(unknownBody.result.isError, true);
 });
 
+test('MCP refuses an unknown method and a malformed body by name', async (t) => {
+  const gw = await gateway();
+  t.after(gw.close);
+  const unknown = await gw.call({ jsonrpc: '2.0', id: 9, method: 'tools/delete_everything', params: {} });
+  assert.equal(unknown.status, 200, 'a JSON-RPC method error is a result, not a transport failure');
+  const unknownBody = await unknown.json();
+  assert.equal(unknownBody.error?.code, -32601, 'an unknown method was not named as such');
+
+  const malformed = await fetch(`${gw.base}/v1/mcp`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${gw.key}` }, body: '{',
+  });
+  assert.equal(malformed.status, 400, 'a body that is not JSON was accepted as a tool call');
+});
+
 test('MCP requires auth', async (t) => {
   const gw = await gateway();
   t.after(gw.close);

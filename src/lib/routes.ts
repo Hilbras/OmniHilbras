@@ -32,6 +32,10 @@ export const dashboardRoutes = {
   settings: '/settings',
   /** Added in 1.81.0, with `GET /v1/logs/stream` — see `LogsPage.tsx`. */
   logs: '/logs',
+  /** Build provenance and the honest limits of this installation. */
+  about: '/about',
+  /** What the context saver actually measured, from `GET /v1/token-saver/stats`. */
+  tokenSaver: '/token-saver',
 } as const;
 
 export function providerRoute(providerId: string) {

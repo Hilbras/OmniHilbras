@@ -172,8 +172,13 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       return true;
     }
 
-    if (request.method === 'POST' && /^\/v1\/oauth\/opencode-console\/session\/[^/]+\/workspace$/.test(url.pathname)) {
-      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/opencode-console/session/'.length, -'/workspace'.length)).trim();
+    const workspacePath = '/v1/oauth/opencode-console/session/';
+    const workspaceSuffix = '/workspace';
+    const workspaceSession = url.pathname.startsWith(workspacePath) && url.pathname.endsWith(workspaceSuffix)
+      ? url.pathname.slice(workspacePath.length, -workspaceSuffix.length)
+      : '';
+    if (request.method === 'POST' && workspaceSession && !workspaceSession.includes('/')) {
+      const sessionId = decodeSessionId(workspaceSession).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const body = await readJsonBody(request, maxKeyBodyBytes);
       const workspaceId = readRequiredString(body, 'workspaceId');

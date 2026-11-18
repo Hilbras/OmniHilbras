@@ -73,6 +73,20 @@ test('one conversation keeps one session, and another conversation gets another'
   assert.notEqual(first, other, 'a different conversation reused the session id');
 });
 
+test('a forced call on a Go free model is refused by name, not downgraded', async () => {
+  const t = transport();
+  const go = new OpenCodeGoAdapter({ transport: t });
+  await assert.rejects(
+    () => go.chat({
+      model: 'mimo-v2.5-free', messages: conversation,
+      tools: [{ name: 'read', description: 'read', parameters: { type: 'object', properties: {} } }],
+      toolChoice: 'required',
+    }, { credential }),
+    (error) => error.code === 'NOT_SUPPORTED' && /free model cannot be told to force/i.test(error.publicMessage ?? ''),
+  );
+  assert.equal(t.requests.length, 0, 'the gated request was sent despite the impossible choice');
+});
+
 test('streaming carries the session too', async () => {
   const t = transport();
   const go = new OpenCodeGoAdapter({ transport: t });

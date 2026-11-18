@@ -659,6 +659,12 @@ export class OpenCodeGoAdapter implements ProviderAdapter {
    * network as the likely cause, which is the thing they can act on.
    */
   private async *streamGated(request: ChatRequest, context: ProviderRequestContext): AsyncIterable<ChatChunk> {
+    if (request.toolChoice === 'required') {
+      throw new ProviderError('NOT_SUPPORTED', 'OpenCode free models accept only tool_choice "auto" or "none"; a forced call cannot be honoured.', {
+        providerId: this.id,
+        publicMessage: 'This free model cannot be told to force a tool call. Use "auto" or choose a paid model.',
+      });
+    }
     const id = request.model.includes('/') ? request.model.slice(request.model.lastIndexOf('/') + 1) : request.model;
     const headers = this.authHeaders(context.credential, zenFreeTierHeaders(zenSessionId(zenConversationSeed(request))));
     const body: Record<string, unknown> = {

@@ -226,8 +226,8 @@ export function RoutingContent() {
             <SummaryCard label="Connections" value={state ? String(connections.length) : '—'} detail="saved" icon={GitBranch} tone="border-gold/25 bg-gold-soft text-gold-text" />
             <SummaryCard label="Eligible" value={state ? String(eligible) : '—'} detail="routing may choose" icon={ShieldCheck} tone={badgeTone.ok} />
             <SummaryCard label="At their limit" value={state ? String(cooling) : '—'} detail="cooling down" icon={TimerOff} tone={badgeTone.warn} />
-            <SummaryCard label="Failure threshold" value={state ? String(state.failureThreshold) : '—'} detail="consecutive failures" icon={Gauge} tone="border-[#83b7ff]/25 bg-[#83b7ff]/10 text-[#5d98e8]" />
-            <SummaryCard label="Health checks" value={state ? String(connections.filter((c) => c.lastCheckedAt).length) : '—'} detail="reported" icon={Timer} tone="border-[#b995e8]/25 bg-[#b995e8]/10 text-[#9b7bd1]" />
+            <SummaryCard label="Failure threshold" value={state ? String(state.failureThreshold) : '—'} detail="consecutive failures" icon={Gauge} tone="border-[info]/25 bg-[info]/10 text-[info]" />
+            <SummaryCard label="Health checks" value={state ? String(connections.filter((c) => c.lastCheckedAt).length) : '—'} detail="reported" icon={Timer} tone="border-[violet]/25 bg-[violet]/10 text-[violet]" />
           </section>
 
           <section className="mt-5 grid gap-4 md:grid-cols-2" aria-label="Connections routing can use">

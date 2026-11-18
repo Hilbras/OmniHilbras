@@ -117,9 +117,16 @@ function npmVersions() {
   return new Set(Array.isArray(parsed) ? parsed : [parsed]);
 }
 
-/** One request for every release, using the token Actions already provides. */
-function releasedTags() {
-  const out = execFileSync('gh', ['release', 'list', '--limit', '400', '--json', 'tagName', '-q', '.[].tagName'], {
+/**
+ * One request for every release, using the token Actions already provides.
+ *
+ * The old fixed `--limit 400` worked only while the project had fewer than 400 releases: the 401st would be
+ * reported missing from GitHub even with a published release sitting there. The limit is now derived from the
+ * local tag list with headroom, so a new tag cannot outgrow it without this line growing too.
+ */
+function releasedTags(tagCount) {
+  const limit = Math.max(400, tagCount + 100);
+  const out = execFileSync('gh', ['release', 'list', '--limit', String(limit), '--json', 'tagName', '-q', '.[].tagName'], {
     cwd: root,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -164,7 +171,7 @@ function main() {
 
   try {
     published = npmVersions();
-    released = releasedTags();
+    released = releasedTags(tags.length);
   } catch (error) {
     // Distinguished from a gap on purpose: an unreachable registry is not evidence that a release is
     // missing, and reporting it as one would teach the reader to ignore this command.

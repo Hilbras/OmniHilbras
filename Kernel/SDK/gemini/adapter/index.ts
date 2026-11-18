@@ -255,6 +255,23 @@ export class GeminiAdapter implements ProviderAdapter {
     if (request.stop !== undefined) generationConfig.stopSequences = [...request.stop];
     if (Object.keys(generationConfig).length > 0) body.generationConfig = generationConfig;
     if (request.tools !== undefined) body.tools = [{ functionDeclarations: request.tools.map(toGeminiTool) }];
+    /**
+     * `tool_choice`, in Gemini's own vocabulary.
+     *
+     * This was missing entirely: the definitions were sent and the choice was not, so `tool_choice: "required"` reached
+     * Gemini as an ordinary request and the model was free to answer in prose. A client cannot tell that apart from a
+     * model that decided not to call — which is the complaint the whole tool contract exists to answer.
+     *
+     * `required` is `ANY`, which is Gemini's "must call one of these"; `none` asks for no call. Both are sent even
+     * though the gateway already strips definitions for `none`, because an adapter must be correct on its own wire.
+     */
+    if (request.toolChoice !== undefined) {
+      body.toolConfig = {
+        functionCallingConfig: {
+          mode: request.toolChoice === 'required' ? 'ANY' : request.toolChoice === 'none' ? 'NONE' : 'AUTO',
+        },
+      };
+    }
     return body;
   }
 

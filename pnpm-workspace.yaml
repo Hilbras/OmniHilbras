@@ -2,6 +2,7 @@ packages:
   - Kernel/SDK/*
   - Kernel/API
   - Kernel/TokenSaver
+  - Kernel/Tools
 allowBuilds:
   electron: true
   electron-winstaller: true
