@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { GATEWAY_TOOL_NAMES, GATEWAY_TOOL_PROVIDERS, MAX_SCHEMA_BYTES, PROVIDER_TOOLS, WEB_PROVIDERS, gatewayToolDefinitions, guardToolStream, normalizeToolsRequest, repairArguments, toolCaps, validateToolCalls, withGatewayTools } from '../dist/index.js';
+import { GATEWAY_TOOL_NAMES, GATEWAY_TOOL_PROVIDERS, LOCAL_TOOL_PROMPT, MAX_SCHEMA_BYTES, PROVIDER_TOOLS, WEB_PROVIDERS, gatewayToolDefinitions, guardToolStream, localToolDefinitions, normalizeToolsRequest, parseNativeToolCall, parsePromptToolCall, repairArguments, toolCaps, validateToolCalls, withGatewayTools } from '../dist/index.js';
 
 /**
  * The tool contract, on its own.
@@ -231,6 +231,25 @@ test('gateway tools are appended without replacing the caller’s definitions', 
 
   const forced = withGatewayTools([{ name: 'write', parameters: {} }], 'required');
   assert.deepEqual(forced.map((tool) => tool.name), ['write'], 'a generated tool could win a forced call');
+});
+
+test('the local tool catalog is read-only and has no shell', () => {
+  const names = localToolDefinitions().map((tool) => tool.name);
+  assert.deepEqual(names, ['local_read', 'local_glob', 'local_grep']);
+  assert.equal(names.some((name) => /bash|shell|exec|write/i.test(name)), false, 'a command or write tool is in the catalog');
+  assert.match(LOCAL_TOOL_PROMPT, /No shell, write or network tool exists/);
+});
+
+test('a prompt tool call is parsed only from the fenced shape', () => {
+  assert.deepEqual(
+    parsePromptToolCall('thinking\n```local-tool\n{"name":"local_read","arguments":{"path":"a.txt"}}\n```\n'),
+    { name: 'local_read', path: 'a.txt' },
+  );
+  assert.equal(parsePromptToolCall('just prose'), undefined);
+  assert.equal(parsePromptToolCall('```local-tool\n{"name":"bash","arguments":{}}\n```'), undefined, 'a shell call was accepted');
+  assert.equal(parsePromptToolCall('```local-tool\nnot json\n```'), undefined);
+  assert.deepEqual(parseNativeToolCall('local_grep', '{"path":"src","pattern":"TODO","limit":5}'), { name: 'local_grep', path: 'src', pattern: 'TODO', limit: 5 });
+  assert.equal(parseNativeToolCall('bash', '{"command":"ls"}'), undefined);
 });
 
 test('every row in the table is internally consistent', () => {

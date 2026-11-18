@@ -845,6 +845,27 @@ answered in prose.
 `Kernel/Tools` owns the decision now. One table states, per provider, whether tools are served and which `tool_choice`
 values can be honoured; the gateway applies it before the request and validates the answer after it.
 
+### Gateway-local read-only tools (opt-in)
+
+Some providers cannot call functions at all: the web sessions drive a page, and Codex refuses tool definitions on
+its wire. For those, and for providers that do serve tools, the gateway can execute a small **read-only** tool set
+itself. `Kernel/Tools` owns the definitions (`local_read`, `local_glob`, `local_grep`); `Kernel/API` executes them.
+
+The surface is deliberately narrow:
+
+- no `bash`, no shell, no process execution, no write and no network tool — only file reads, globs and literal greps;
+- disabled unless `OMNIHILBRAS_LOCAL_TOOLS=1` **and** `OMNIHILBRAS_LOCAL_TOOL_ROOTS` lists absolute directories;
+- every path is resolved with `realpath` inside an approved root, so `..` and symlinks cannot escape it;
+- results are capped at 64 KiB, glob/grep results at 200 entries, and a tool round is bounded to four turns.
+
+A provider with native function calling gets the definitions in `tools` and answers with a real tool call; the gateway
+runs it, appends the `tool` result and asks again. A provider without function calling gets the same tools as an
+instruction in the system message and answers with a fenced `local-tool` JSON block, which the gateway parses and
+replays as a user message. Streaming requests never expose local tools.
+
+This is an execution surface on the machine that holds provider credentials. It is off by default, and a root list
+without the flag grants nothing.
+
 ### The table
 
 | Group | Providers | Behaviour |

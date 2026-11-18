@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { executeLocalTool, localToolRootsFromEnv } from './local-tool-executor.js';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
 import { NousAdapter } from '@omnihilbras/sdk-nous';
-import { GATEWAY_TOOL_PROVIDERS, ToolContractError, guardToolStream, normalizeToolsRequest, validateToolCalls, withGatewayTools } from '@omnihilbras/tools';
+import { GATEWAY_TOOL_PROVIDERS, LOCAL_TOOL_NAMES, LOCAL_TOOL_PROMPT, ToolContractError, guardToolStream, isLocalToolName, localToolDefinitions, normalizeToolsRequest, parseNativeToolCall, parsePromptToolCall, toolCaps, validateToolCalls, withGatewayTools } from '@omnihilbras/tools';
 import { ZenAdapter } from '@omnihilbras/sdk-opencode-zen';
 import { OpenCodeGoAdapter } from '@omnihilbras/sdk-opencode-go';
 import { ZcodeAdapter, zcodeProviderId } from '@omnihilbras/sdk-zcode-start-plan';
@@ -12,7 +13,7 @@ import { createOpencodeLocalService } from './opencode-service.js';
 import { removeChatGptWebProfile } from '../providers/chatgptWeb.js';
 import { ensureOpencodeService } from './opencode-runtime.js';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
-import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, isProviderError, toolResultBytes, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse, type ChatChunk, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type Model, type ModelImportPolicy, type ModelPricing, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext } from './index.js';
+import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, isProviderError, toolResultBytes, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type Model, type ModelImportPolicy, type ModelPricing, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext } from './index.js';
 import { ChatGptWebAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, type ChatGptWebDriver } from '@omnihilbras/sdk-chatgpt-web';
 import { CLAUDE_CODE, ClaudeCodeAdapter, claudeCodeProviderId } from '@omnihilbras/sdk-claude-code';
 import { ClinePassAdapter } from '@omnihilbras/sdk-clinepass';
@@ -515,6 +516,8 @@ export class GatewayService {
    * that read them out of module-level state could not be told otherwise.
    */
   private readonly deploymentConfig: DeploymentConfig;
+  /** Opt-in roots for gateway-local read-only tools; empty by default, so no provider sees one. */
+  private readonly localToolRoots = localToolRootsFromEnv();
   /**
    * Health, extracted so it can be tested without routing.
    *
@@ -3474,7 +3477,7 @@ export class GatewayService {
    * `null` means the request carried no tools and no `tool_choice`, which is the common case: the whole cost of this
    * feature for a client that does not use tools is one map lookup.
    */
-  private applyToolContract(providerId: string, request: ChatRequest): { request: ChatRequest; declared: readonly string[] } {
+  private applyToolContract(providerId: string, request: ChatRequest, includeLocalTools = false): { request: ChatRequest; declared: readonly string[] } {
     try {
       const { request: normalized, notes } = normalizeToolsRequest(request, providerId);
       if (notes.stripped) console.warn(`[tools] ${providerId} does not serve tools; ${(request.tools ?? []).length} definition(s) removed`);
@@ -3494,11 +3497,19 @@ export class GatewayService {
       // The declaration now comes from the one catalog in Kernel/Tools and is applied here, at the gateway, so a
       // provider package can no longer invent a tool the client never offered. A forced call keeps only the client's
       // own definitions: a generated "unavailable" tool must never be the thing a forced choice selects.
+      let declaredNames = declared;
       let outbound = normalized;
       if (GATEWAY_TOOL_PROVIDERS.has(providerId) && !(normalized.toolChoice === 'required' && kept.length > 0)) {
         outbound = { ...normalized, tools: withGatewayTools(normalized.tools) } as ChatRequest;
       }
-      return { request: outbound, declared };
+      // Local tools are exposed only when the operator opted in AND the provider can really call a function.
+      // A browser-session provider gets the prompt form instead, applied in `runLocalToolRounds`.
+      if (includeLocalTools && this.localToolRoots.length > 0 && toolCaps(providerId).tools) {
+        outbound = { ...outbound, tools: [...(outbound.tools ?? []), ...localToolDefinitions()] } as ChatRequest;
+        // The gateway declared these tools, so a call naming one is legitimate even though the client did not.
+        declaredNames = [...declaredNames, ...LOCAL_TOOL_NAMES];
+      }
+      return { request: outbound, declared: declaredNames };
     } catch (error) {
       if (error instanceof ToolContractError) {
         throw new ProviderError('NOT_SUPPORTED', error.message, { providerId: error.providerId, publicMessage: error.publicMessage });
@@ -3530,12 +3541,70 @@ export class GatewayService {
     };
   }
 
+  /**
+   * Runs gateway-local read-only tools for providers that cannot run them themselves.
+   *
+   * Native providers get real tool definitions and answer calls over their own function-calling wire; providers
+   * without that surface get an instruction in the system message and answer with a fenced JSON block. Both paths
+   * execute the call here, append the result and ask the model again, for a bounded number of rounds.
+   */
+  private async runLocalToolRounds(
+    providerId: string,
+    contracted: { request: ChatRequest; declared: readonly string[] },
+    adapter: ProviderAdapter,
+    signal: AbortSignal | undefined,
+    scope: RequestScope | undefined,
+    connectionId: string | undefined,
+  ): Promise<ChatResponse | undefined> {
+    if (this.localToolRoots.length === 0) return undefined;
+    const native = toolCaps(providerId).tools;
+    const messages: ChatMessage[] = [...(contracted.request.messages ?? [])];
+    if (!native) messages.push({ role: 'system', content: LOCAL_TOOL_PROMPT });
+    let last: ChatResponse | undefined;
+
+    for (let round = 0; round < 4; round += 1) {
+      const prepared = await this.preparedMessages({ ...contracted.request, messages }, scope, adapter.imageContext === true);
+      const context = await this.contextForRequest(providerId, connectionId, signal, scope);
+      const response = this.validatedToolResponse(providerId, contracted.declared, await adapter.chat!(
+        this.withRequestLimits({ ...contracted.request, model: bareModelFor(this.resolvedModel(contracted.request.model), providerId), messages: prepared }),
+        context,
+      ));
+      last = response;
+
+      if (native) {
+        const localCalls = (response.message.toolCalls ?? []).filter((call) => isLocalToolName(call.function.name));
+        if (localCalls.length === 0) return response;
+        messages.push({ role: 'assistant', content: response.message.content, ...(response.message.toolCalls ? { toolCalls: response.message.toolCalls } : {}) });
+        for (const call of localCalls) {
+          const parsed = parseNativeToolCall(call.function.name, call.function.arguments);
+          const result = parsed
+            ? await executeLocalTool(parsed, this.localToolRoots)
+            : { content: 'Invalid local tool call.', isError: true };
+          messages.push({ role: 'tool', content: result.content, toolCallId: call.id });
+        }
+        continue;
+      }
+
+      const text = typeof response.message.content === 'string' ? response.message.content : '';
+      const call = parsePromptToolCall(text);
+      if (!call) return response;
+      const result = await executeLocalTool(call, this.localToolRoots);
+      messages.push({ role: 'assistant', content: text });
+      messages.push({ role: 'user', content: `Local tool result${result.isError ? ' (error)' : ''}: ${result.content}` });
+    }
+
+    // A model that never settles is refused rather than answered with a half-finished tool round.
+    return last ? { ...last, finishReason: 'stop' } : last;
+  }
+
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    const contracted = this.applyToolContract(providerId, request);
+    const contracted = this.applyToolContract(providerId, request, true);
     const release = await this.acquireConcurrency(connectionId);
     try {
+      const local = await this.runLocalToolRounds(providerId, contracted, adapter, signal, scope, connectionId);
+      if (local) return local;
       const response = await adapter.chat(this.withRequestLimits({ ...contracted.request, model: bareModelFor(this.resolvedModel(contracted.request.model), providerId), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
       return this.validatedToolResponse(providerId, contracted.declared, response);
     } finally {

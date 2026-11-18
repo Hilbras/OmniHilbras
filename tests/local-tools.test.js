@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const read = (path) => readFileSync(join(ROOT, path), 'utf8');
+
+test('the local tool surface has no shell, write or network capability', () => {
+  const strip = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const catalog = strip(read('Kernel/Tools/src/localTools.ts'));
+  const executor = strip(read('Kernel/API/src/core/local-tool-executor.ts'));
+  for (const source of [catalog, executor]) {
+    assert.doesNotMatch(source, /\bbash\b/, 'a shell tool is declared');
+    assert.doesNotMatch(source, /child_process|\bspawn\(|writeFile|unlink|fetch\(|https?\.request/, 'a command, write or network call reached the local tool layer');
+  }
+  assert.match(executor, /OMNIHILBRAS_LOCAL_TOOLS/, 'the layer is not gated by the opt-in flag');
+  assert.match(executor, /realpathSync/, 'paths are not resolved against symlinks');
+});
+
+test('local tools are only added to the non-streaming chat path', () => {
+  const service = read('Kernel/API/src/core/service.ts');
+  assert.match(service, /applyToolContract\(providerId, request, true\)/, 'chat does not request local tools');
+  assert.match(service, /applyToolContract\(providerId, request\)/, 'streaming also requests local tools');
+  assert.doesNotMatch(service, /applyToolContract\(providerId, request, true,/, 'a third argument leaked into another path');
+});
