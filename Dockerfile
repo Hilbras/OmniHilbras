@@ -10,12 +10,13 @@ COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY Kernel/API/package.json Kernel/API/
 COPY Kernel/SDK Kernel/SDK
 COPY Kernel/TokenSaver Kernel/TokenSaver
+COPY Kernel/Tools Kernel/Tools
 RUN pnpm install --frozen-lockfile
 
 FROM base AS build
 COPY --from=deps /app/node_modules /app/node_modules
 COPY . .
-RUN pnpm build:sdk && pnpm build:token-saver && pnpm build:gateway
+RUN pnpm build:sdk && pnpm build:token-saver && pnpm build:tools && pnpm build:gateway
 
 FROM node:20-alpine AS runtime
 # Pinned to the version CI uses and the lockfile records. `pnpm@latest` in a build that then installs
@@ -25,6 +26,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/Kernel/API/dist /app/Kernel/API/dist
 COPY --from=build /app/Kernel/API/package.json /app/Kernel/API/
+COPY --from=build /app/Kernel/Tools/dist /app/Kernel/Tools/dist
+COPY --from=build /app/Kernel/Tools/package.json /app/Kernel/Tools/
 COPY --from=build /app/node_modules /app/node_modules
 EXPOSE 8787
 CMD ["node", "/app/Kernel/API/dist/src/main.js"]

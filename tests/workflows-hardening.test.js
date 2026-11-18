@@ -69,6 +69,15 @@ test('the pull-request job cannot lend its token to the code it runs', () => {
   assert.match(verify, /persist-credentials: false/, 'the checkout token must not be left in .git/config beside untrusted code');
 });
 
+test('the container builds every workspace the gateway imports at runtime', () => {
+  // 3.67.0 shipped with a Docker image whose build step compiled the SDK and TokenSaver but not `@omnihilbras/tools`,
+  // which `service.ts` imports. Local `pnpm verify` builds it, so only the image build failed — in CI, after release.
+  const dockerfile = readFileSync(join(root, 'Dockerfile'), 'utf8');
+  assert.match(dockerfile, /COPY Kernel\/Tools Kernel\/Tools/, 'the workspace package is not installed in the deps stage');
+  assert.match(dockerfile, /pnpm build:tools/, 'the gateway is compiled without the package it imports');
+  assert.match(dockerfile, /COPY --from=build \/app\/Kernel\/Tools\/dist/, 'the built package is absent from the runtime image');
+});
+
 test('the container toolchain is pinned to the version CI and the lockfile record', () => {
   const dockerfile = readFileSync(join(root, 'Dockerfile'), 'utf8');
   const installs = dockerfile.split('\n').filter((line) => /corepack prepare pnpm@/.test(line));
