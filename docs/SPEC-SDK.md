@@ -835,6 +835,22 @@ allowlisted browser origin. The contract:
 - `lastUsedAt` is best effort: it is written at most once per 30 seconds so
   request handling never blocks on disk.
 
+## Provider independence
+
+Every catalog provider id is a first-class provider, the way `opencode-go` is:
+
+- one row in `Kernel/Tools/src/providerRegistry.ts` owns its base URL, model catalog, auth mode and wire formats. A
+  saved connection may override the base URL with a custom endpoint, but the dashboard card is no longer the only
+  source of that fact;
+- one private package under `Kernel/SDK/<id>/` owns its adapter, id and base URL. The 24 ids that used to exist only
+  as a card plus a generic OpenAI-compatible endpoint now have packages of their own;
+- one explicit `.onDemand('<id>', …)` registration in the gateway makes the id readable to the collision guards;
+- an OAuth route surface exists for every provider whose own config declares OAuth (or that names the connection
+  owner it signs in through, as `clinepass` does). API-key providers keep the generic connection-save route instead
+  of being given a sign-in flow that does not exist.
+
+`tests/provider-registry.test.js` and `tests/provider-oauth-routes.test.js` enforce the two tables.
+
 ## The tool contract
 
 A client that sends `tools` and reads `tool_calls` is the shape every coding agent uses. The gateway used to forward
@@ -3428,7 +3444,7 @@ measurement, and `Kernel/API/test/spec-success-criteria.mjs` fails if any stops 
       `build` script; every `Kernel/SDK/<provider>/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **180 files** in `Kernel/SDK/` — 29 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url` and `bounded-map` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 28: it measures providers, this counts files.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **276 files** in `Kernel/SDK/` — 53 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url` and `bounded-map` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 52: it measures providers, this counts files.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

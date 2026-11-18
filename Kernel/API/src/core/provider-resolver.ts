@@ -1,3 +1,4 @@
+import { providerRegistryRow } from '@omnihilbras/tools';
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '@omnihilbras/sdk-openai';
 import type { ProviderAdapter, ProviderRegistry } from './index.js';
 import { providerAlias } from './provider-alias.js';
@@ -202,15 +203,18 @@ export class ProviderResolver {
      * is saved and chat reaches it.
      */
     for (const connection of connections) {
-      if (!connection.hasCredential || !connection.endpoint) continue;
+      if (!connection.hasCredential) continue;
       if (this.onDemandFactories.has(connection.providerId) || this.registry.get(connection.providerId)) continue;
+      // The registry row is the provider's own base; the connection may override it with a custom endpoint.
+      const endpoint = connection.endpoint || providerRegistryRow(connection.providerId)?.baseUrl;
+      if (!endpoint) continue;
       const cached = this.dynamic.get(connection.providerId);
-      if (cached && cached.endpoint === connection.endpoint) {
+      if (cached && cached.endpoint === endpoint) {
         adapters.push(cached.adapter);
         continue;
       }
-      const adapter = new OpenAICompatibleAdapter({ id: connection.providerId, name: connection.name ?? connection.providerId, baseUrl: connection.endpoint, ...this.identityOptions(connection.providerId), ...this.responsesOptions(connection.providerId) }, this.adapterOptions());
-      this.dynamic.set(connection.providerId, { endpoint: connection.endpoint, adapter });
+      const adapter = new OpenAICompatibleAdapter({ id: connection.providerId, name: connection.name ?? connection.providerId, baseUrl: endpoint, ...this.identityOptions(connection.providerId), ...this.responsesOptions(connection.providerId) }, this.adapterOptions());
+      this.dynamic.set(connection.providerId, { endpoint, adapter });
       adapters.push(adapter);
     }
     for (const [providerId, factory] of this.onDemandFactories) {
@@ -282,12 +286,14 @@ export class ProviderResolver {
       return factory({ providerId, ...(saved ? { connection: { id: saved.id } } : {}) });
     }
 
-    const registered = this.registry.get(providerId);
-    if (registered) return registered;
-
     // A connection being saved is not in the store yet, so the caller can pass the endpoint it is
     // about to use.
-    const endpoint = pendingEndpoint ?? (saved ? { endpoint: saved.endpoint, name: saved.name } : undefined);
+    const own = providerRegistryRow(providerId);
+    const endpoint = pendingEndpoint
+      ?? (saved?.endpoint ? { endpoint: saved.endpoint, name: saved.name } : undefined)
+      ?? (own ? { endpoint: own.baseUrl, name: own.name } : undefined);
+    const registered = this.registry.get(providerId);
+    if (registered) return registered;
     if (!endpoint) return this.registry.require(providerId);
 
     // Cached per endpoint, so a stable connection reuses one adapter — and a *changed* endpoint

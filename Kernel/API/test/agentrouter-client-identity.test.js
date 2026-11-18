@@ -111,8 +111,11 @@ test('no SDK provider inherits the identity by accident', () => {
     .map((entry) => entry.name);
   assert.ok(sdkProviders.length > 10, `the SDK listing looks wrong; only ${sdkProviders.length} directories`);
 
-  const offenders = sdkProviders.filter((id) => providerClientHeaders(id, {}) !== undefined);
+  // `agentrouter` now has its own SDK package. That package owns the adapter and the gateway passes it the
+  // identity headers, so the id appearing in the SDK listing is expected rather than an accident.
+  const offenders = sdkProviders.filter((id) => id !== 'agentrouter' && providerClientHeaders(id, {}) !== undefined);
   assert.deepEqual(offenders, [], `these providers would send another vendor's User-Agent: ${offenders.join(', ')}`);
+  assert.ok(sdkProviders.includes('agentrouter'), 'the provider that owns the identity must have its own package');
   // An id is matched as it is written, so a differently-cased id is a different provider and gets nothing.
   assert.equal(providerClientHeaders('AgentRouter', {}), undefined, 'provider ids are lower-case');
 });

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { executeLocalTool, localToolRootsFromEnv } from './local-tool-executor.js';
+import { OWN_PROVIDER_ADAPTERS } from './own-provider-adapters.js';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
 import { NousAdapter } from '@omnihilbras/sdk-nous';
@@ -710,7 +711,7 @@ export class GatewayService {
       recordRateLimitUse: (connectionId) => this.rateLimiter.record(connectionId),
       recordUsage: (connectionId) => { void this.connectionStore?.recordUsage(connectionId).catch(() => undefined); },
     });
-    this.providers = new ProviderResolver(registry, this.transport)
+    let resolver = new ProviderResolver(registry, this.transport)
       .onDemand('cline', ({ connection }) => this.clineAdapter(connection?.id ?? 'cline'), { validateOnSave: true })
       // No `validateOnSave`: ClinePass stores no credential of its own — it reads Cline's connection
       // through the alias in `credential-manager.ts` — so there is nothing to prove at save time.
@@ -745,6 +746,33 @@ export class GatewayService {
       .onDemand(grokWebProviderId, () => this.grokWebAdapter())
       .onDemand(perplexityWebProviderId, () => this.perplexityWebAdapter())
       .onDemand(zcodeProviderId, ({ providerId, connection }) => this.zcodeAdapter(connection?.id ?? providerId));
+    // Every provider id owns its adapter. These rows are the 24 ids that previously existed only as a
+    // dashboard card plus a shared OpenAI-compatible endpoint; their base URL and id now live in their own package.
+    resolver = resolver.onDemand('agnes-ai', () => OWN_PROVIDER_ADAPTERS['agnes-ai']!());
+    resolver = resolver.onDemand('agentrouter', () => OWN_PROVIDER_ADAPTERS['agentrouter']!());
+    resolver = resolver.onDemand('aion-labs', () => OWN_PROVIDER_ADAPTERS['aion-labs']!());
+    resolver = resolver.onDemand('numes', () => OWN_PROVIDER_ADAPTERS['numes']!());
+    resolver = resolver.onDemand('kiraai', () => OWN_PROVIDER_ADAPTERS['kiraai']!());
+    resolver = resolver.onDemand('vengetic', () => OWN_PROVIDER_ADAPTERS['vengetic']!());
+    resolver = resolver.onDemand('anyrouter', () => OWN_PROVIDER_ADAPTERS['anyrouter']!());
+    resolver = resolver.onDemand('zro', () => OWN_PROVIDER_ADAPTERS['zro']!());
+    resolver = resolver.onDemand('unorouter', () => OWN_PROVIDER_ADAPTERS['unorouter']!());
+    resolver = resolver.onDemand('ollama', () => OWN_PROVIDER_ADAPTERS['ollama']!());
+    resolver = resolver.onDemand('mistral', () => OWN_PROVIDER_ADAPTERS['mistral']!());
+    resolver = resolver.onDemand('nara-router', () => OWN_PROVIDER_ADAPTERS['nara-router']!());
+    resolver = resolver.onDemand('tokenharbor', () => OWN_PROVIDER_ADAPTERS['tokenharbor']!());
+    resolver = resolver.onDemand('apinex', () => OWN_PROVIDER_ADAPTERS['apinex']!());
+    resolver = resolver.onDemand('tiarina', () => OWN_PROVIDER_ADAPTERS['tiarina']!());
+    resolver = resolver.onDemand('xkiro', () => OWN_PROVIDER_ADAPTERS['xkiro']!());
+    resolver = resolver.onDemand('kimi', () => OWN_PROVIDER_ADAPTERS['kimi']!());
+    resolver = resolver.onDemand('deepseek', () => OWN_PROVIDER_ADAPTERS['deepseek']!());
+    resolver = resolver.onDemand('qwen', () => OWN_PROVIDER_ADAPTERS['qwen']!());
+    resolver = resolver.onDemand('qwen-token-plan', () => OWN_PROVIDER_ADAPTERS['qwen-token-plan']!());
+    resolver = resolver.onDemand('groq', () => OWN_PROVIDER_ADAPTERS['groq']!());
+    resolver = resolver.onDemand('grok', () => OWN_PROVIDER_ADAPTERS['grok']!());
+    resolver = resolver.onDemand('nvidia', () => OWN_PROVIDER_ADAPTERS['nvidia']!());
+    resolver = resolver.onDemand('coarena', () => OWN_PROVIDER_ADAPTERS['coarena']!());
+    this.providers = resolver;
     this.credentialLifecycle = new CredentialLifecycle({
       adapterFor: (providerId) => { try { return this.registry.get(providerId); } catch { return undefined; } },
       now,

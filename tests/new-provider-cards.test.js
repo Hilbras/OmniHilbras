@@ -76,10 +76,27 @@ function registeredProviderIds() {
       return readdirSync(dir).filter((f) => f.endsWith('.ts')).map((f) => readFileSync(join(dir, f), 'utf8'));
     }));
   const service = readFileSync(join(ROOT, 'Kernel/API/src/core/service.ts'), 'utf8');
-  const searchable = [...modules, service];
+  const config = readFileSync(join(ROOT, 'Kernel/API/src/core/config.ts'), 'utf8');
+  const searchable = [...modules, service, config];
 
-  for (const match of service.matchAll(/\.(?:onDemand|register)\(\s*([A-Za-z0-9_]+|'[a-z0-9-]+')/g)) {
-    const name = match[1];
+  const registrationSource = `${service}\n${config}`;
+  for (const match of registrationSource.matchAll(/\.(?:onDemand|register)\(\s*(new\s+)?([A-Za-z0-9_]+|'[a-z0-9-]+')/g)) {
+    if (match[1]) {
+      // A static registration: `registry.register(new OpenAIAdapter({ id: 'openai', … }))`. The id is in the
+      // adapter's config object, not the call's first argument — skipping these made openai/anthropic/gemini
+      // look like cards with no adapter.
+      const className = match[2];
+      const classNameMatch = new RegExp(`class\\s+${className}\\b`);
+      for (const text of modules) {
+        const at = text.search(classNameMatch);
+        if (at < 0) continue;
+        const inline = /id\s*[:=]\s*'([a-z0-9-]+)'/.exec(text.slice(at, at + 600));
+        if (inline) ids.add(inline[1]);
+        break;
+      }
+      continue;
+    }
+    const name = match[2];
     if (name.startsWith("'")) { ids.add(name.slice(1, -1)); continue; }
     const declared = searchable.flatMap((text) => [...text.matchAll(new RegExp(`(?:const|let)\\s+${name}\\s*(?::[^=]+)?=\\s*'([a-z0-9-]+)'`, 'g'))].map((m) => m[1]));
     for (const id of declared) ids.add(id);
@@ -99,15 +116,15 @@ test('the registered adapter ids are readable, so a collision could be detected 
   }
 });
 
-test('no NEW api-key card collides with a registered adapter', () => {
-  // `opencode` and `mistral` legitimately have both a card and an adapter: the card is the catalog entry
-  // and the adapter is how it is served. What must never happen is one of the nine *new* providers landing
-  // on an id the gateway already owns — saving that card would route to the other provider and the card's
-  // endpoint would be ignored, which is the 1.34.0 duplicate-route defect in a new place.
+test('every api-key card is its own registered adapter, not an anonymous generic endpoint', () => {
+  // The provider-independence migration inverted the old rule: a card and an adapter sharing an id is now
+  // the requirement. The card is the catalog entry, the adapter is how that same id is served, and its base
+  // URL comes from its own package and registry row. What would be a defect now is a card served only by the
+  // generic fallback because nobody registered its own adapter.
   const registered = registeredProviderIds();
   const added = ['kimi', 'deepseek', 'qwen', 'groq', 'grok', 'nvidia', 'openai', 'anthropic', 'gemini'];
-  const clashing = added.filter((id) => registered.has(id));
-  assert.deepEqual(clashing, [], `these new cards collide with a registered adapter: ${clashing.join(', ')}`);
+  const missing = added.filter((id) => !registered.has(id));
+  assert.deepEqual(missing, [], `these cards have no own adapter: ${missing.join(', ')}`);
 });
 
 test('a new provider id is one edit away from a web-session id, and stays distinct', () => {

@@ -254,9 +254,24 @@ importers:
 
   Kernel/API:
     dependencies:
+      '@omnihilbras/sdk-agentrouter':
+        specifier: workspace:*
+        version: link:../SDK/agentrouter
+      '@omnihilbras/sdk-agnes-ai':
+        specifier: workspace:*
+        version: link:../SDK/agnes-ai
+      '@omnihilbras/sdk-aion-labs':
+        specifier: workspace:*
+        version: link:../SDK/aion-labs
       '@omnihilbras/sdk-anthropic':
         specifier: workspace:*
         version: link:../SDK/anthropic
+      '@omnihilbras/sdk-anyrouter':
+        specifier: workspace:*
+        version: link:../SDK/anyrouter
+      '@omnihilbras/sdk-apinex':
+        specifier: workspace:*
+        version: link:../SDK/apinex
       '@omnihilbras/sdk-apmix':
         specifier: workspace:*
         version: link:../SDK/apmix
@@ -275,12 +290,18 @@ importers:
       '@omnihilbras/sdk-clinepass':
         specifier: workspace:*
         version: link:../SDK/clinepass
+      '@omnihilbras/sdk-coarena':
+        specifier: workspace:*
+        version: link:../SDK/coarena
       '@omnihilbras/sdk-codebuddy':
         specifier: workspace:*
         version: link:../SDK/codebuddy
       '@omnihilbras/sdk-codex':
         specifier: workspace:*
         version: link:../SDK/codex
+      '@omnihilbras/sdk-deepseek':
+        specifier: workspace:*
+        version: link:../SDK/deepseek
       '@omnihilbras/sdk-deepseek-web':
         specifier: workspace:*
         version: link:../SDK/deepseek-web
@@ -293,24 +314,51 @@ importers:
       '@omnihilbras/sdk-gemini-web':
         specifier: workspace:*
         version: link:../SDK/gemini-web
+      '@omnihilbras/sdk-grok':
+        specifier: workspace:*
+        version: link:../SDK/grok
       '@omnihilbras/sdk-grok-web':
         specifier: workspace:*
         version: link:../SDK/grok-web
+      '@omnihilbras/sdk-groq':
+        specifier: workspace:*
+        version: link:../SDK/groq
       '@omnihilbras/sdk-kilocode':
         specifier: workspace:*
         version: link:../SDK/kilocode
+      '@omnihilbras/sdk-kimi':
+        specifier: workspace:*
+        version: link:../SDK/kimi
       '@omnihilbras/sdk-kimi-code':
         specifier: workspace:*
         version: link:../SDK/kimi-code
+      '@omnihilbras/sdk-kiraai':
+        specifier: workspace:*
+        version: link:../SDK/kiraai
       '@omnihilbras/sdk-kiro':
         specifier: workspace:*
         version: link:../SDK/kiro
       '@omnihilbras/sdk-minimax-code':
         specifier: workspace:*
         version: link:../SDK/minimax-code
+      '@omnihilbras/sdk-mistral':
+        specifier: workspace:*
+        version: link:../SDK/mistral
+      '@omnihilbras/sdk-nara-router':
+        specifier: workspace:*
+        version: link:../SDK/nara-router
       '@omnihilbras/sdk-nous':
         specifier: workspace:*
         version: link:../SDK/nous
+      '@omnihilbras/sdk-numes':
+        specifier: workspace:*
+        version: link:../SDK/numes
+      '@omnihilbras/sdk-nvidia':
+        specifier: workspace:*
+        version: link:../SDK/nvidia
+      '@omnihilbras/sdk-ollama':
+        specifier: workspace:*
+        version: link:../SDK/ollama
       '@omnihilbras/sdk-openai':
         specifier: workspace:*
         version: link:../SDK/openai
@@ -332,15 +380,39 @@ importers:
       '@omnihilbras/sdk-qoder':
         specifier: workspace:*
         version: link:../SDK/qoder
+      '@omnihilbras/sdk-qwen':
+        specifier: workspace:*
+        version: link:../SDK/qwen
+      '@omnihilbras/sdk-qwen-token-plan':
+        specifier: workspace:*
+        version: link:../SDK/qwen-token-plan
       '@omnihilbras/sdk-qwen-web':
         specifier: workspace:*
         version: link:../SDK/qwen-web
+      '@omnihilbras/sdk-tiarina':
+        specifier: workspace:*
+        version: link:../SDK/tiarina
+      '@omnihilbras/sdk-tokenharbor':
+        specifier: workspace:*
+        version: link:../SDK/tokenharbor
       '@omnihilbras/sdk-tokenharbor-web':
         specifier: workspace:*
         version: link:../SDK/tokenharbor-web
+      '@omnihilbras/sdk-unorouter':
+        specifier: workspace:*
+        version: link:../SDK/unorouter
+      '@omnihilbras/sdk-vengetic':
+        specifier: workspace:*
+        version: link:../SDK/vengetic
+      '@omnihilbras/sdk-xkiro':
+        specifier: workspace:*
+        version: link:../SDK/xkiro
       '@omnihilbras/sdk-zcode-start-plan':
         specifier: workspace:*
         version: link:../SDK/zcode-start-plan
+      '@omnihilbras/sdk-zro':
+        specifier: workspace:*
+        version: link:../SDK/zro
       '@omnihilbras/token-saver':
         specifier: workspace:*
         version: link:../TokenSaver
@@ -358,7 +430,57 @@ importers:
         specifier: ^5.9.0
         version: 5.9.3
 
+  Kernel/SDK/agentrouter:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/agnes-ai:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/aion-labs:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   Kernel/SDK/anthropic:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/anyrouter:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/apinex:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -400,6 +522,16 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  Kernel/SDK/coarena:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   Kernel/SDK/codebuddy:
     devDependencies:
       typescript:
@@ -407,6 +539,16 @@ importers:
         version: 5.9.3
 
   Kernel/SDK/codex:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/deepseek:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -436,7 +578,27 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  Kernel/SDK/grok:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   Kernel/SDK/grok-web:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/groq:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -448,7 +610,27 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  Kernel/SDK/kimi:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   Kernel/SDK/kimi-code:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/kiraai:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -466,7 +648,57 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  Kernel/SDK/mistral:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/nara-router:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   Kernel/SDK/nous:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/numes:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/nvidia:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/ollama:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -514,7 +746,47 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  Kernel/SDK/qwen:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/qwen-token-plan:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   Kernel/SDK/qwen-web:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/tiarina:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/tokenharbor:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -526,7 +798,47 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  Kernel/SDK/unorouter:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/vengetic:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/xkiro:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   Kernel/SDK/zcode-start-plan:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  Kernel/SDK/zro:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
     devDependencies:
       typescript:
         specifier: ^5.9.3

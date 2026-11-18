@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.68.1**
+**Current version: 3.69.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -400,6 +400,8 @@ The desktop shell owns the local gateway so the app can start and stop it withou
   a browser, which has no updater, asks GitHub for the newest release and offers the release page and the
   install command instead of a button that would do nothing. A check that fails says it failed — it never
   renders "up to date".
+- **Every provider id owns its config and package.** `Kernel/Tools` keeps one registry row per catalog id, each id has
+  its own SDK package and gateway registration, and an OAuth route exists only where a real sign-in flow does.
 - **Tools follow one contract.** `Kernel/Tools` decides, per provider, whether `tools` are served and which
   `tool_choice` values can be honoured; a forced call to a provider that cannot force is a stated `501 NOT_SUPPORTED`
   rather than a request that quietly ignores it, returned `tool_calls` are validated and bounded-repaired, and a web

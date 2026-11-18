@@ -26,11 +26,14 @@ function recordingProvider(id, seen) {
 }
 
 async function gateway(seen) {
-  const registry = new ProviderRegistry().register(recordingProvider('tiarina', seen));
+  // An id with no own SDK package: a fake adapter registered in the gateway must win for such an id. A
+  // provider that owns a package is served by that package, so using its id here would test the package,
+  // not prefix stripping.
+  const registry = new ProviderRegistry().register(recordingProvider('fake-prefix', seen));
   const store = new InMemoryConnectionStore();
   await store.save(
     {
-      id: 'conn-t', providerId: 'tiarina', name: 'Tiarina', endpoint: 'https://t.example/v1', priority: 1,
+      id: 'conn-t', providerId: 'fake-prefix', name: 'Fake Prefix', endpoint: 'https://t.example/v1', priority: 1,
       enabled: true, proxyPool: 'none', modelPolicy: 'all',
       resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 },
     },
@@ -57,7 +60,7 @@ test('a prefixed model id reaches the provider as the bare model name', async (t
   const seen = [];
   const gw = await gateway(seen);
   t.after(gw.close);
-  const response = await gw.post('tiarina/deepseek-v4.1-flash');
+  const response = await gw.post('fake-prefix/deepseek-v4.1-flash');
   assert.equal(response.status, 200);
   assert.deepEqual(seen, ['deepseek-v4.1-flash'], 'the provider must not be sent the prefix it does not know');
 });

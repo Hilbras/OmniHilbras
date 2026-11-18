@@ -1,6 +1,6 @@
 {
   "name": "@hilbras/omnihilbras",
-  "version": "3.68.1",
+  "version": "3.69.0",
   "private": false,
   "description": "The OmniHilbras gateway client: check the runtime, inspect accounts, probe them, stream finished requests.",
   "license": "MIT",
