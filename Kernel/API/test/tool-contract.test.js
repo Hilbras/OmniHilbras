@@ -16,7 +16,7 @@ const call = (name, args, id = 'call_1') => ({ id, type: 'function', function: {
 function harness({ response } = {}) {
   const requests = [];
   const registry = new ProviderRegistry();
-  for (const id of ['kiro', 'qwen-web', 'openai']) {
+  for (const id of ['kiro', 'qwen-web', 'openai', 'opencode']) {
     registry.register({
       id,
       name: id,
@@ -37,7 +37,7 @@ function harness({ response } = {}) {
     });
   }
   const store = new InMemoryConnectionStore();
-  for (const id of ['kiro', 'qwen-web', 'openai']) {
+  for (const id of ['kiro', 'qwen-web', 'openai', 'opencode']) {
     void store.save({ id, providerId: id, name: id, endpoint: 'https://example.invalid/v1', priority: 1, proxyPool: 'none', modelIds: ['m'] }, { type: 'api-key', value: 'key' });
   }
   const service = new GatewayService(registry, store, store, new InMemoryApiKeyStore(), {});
@@ -88,6 +88,24 @@ test('a call naming a tool the client never declared is dropped, and the turn st
   const response = await service.chat('openai', { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('read')] });
   assert.equal(response.message.toolCalls, undefined, 'an undeclared tool reached the client');
   assert.equal(response.finishReason, 'stop', 'a turn with no forwarded call still reported tool_calls');
+});
+
+test('the free-tier declaration comes from the gateway and contains no shell tool', () => {
+  // `applyToolContract` is private in TypeScript but is the exact seam the gateway applies before every adapter.
+  // Driving it directly avoids resolving a real OpenCode adapter (and a real key) in a unit test.
+  const { service } = harness();
+  const { request } = service.applyToolContract('opencode', { model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+  const names = (request.tools ?? []).map((entry) => entry.name);
+  assert.deepEqual(names, ['glob', 'grep', 'read'], 'the SDKs no longer declare tools; the gateway must supply them');
+  assert.equal(names.includes('bash'), false, 'a shell tool reached a provider request');
+});
+
+test('a forced call keeps only the caller’s tools, never the generated declaration', () => {
+  const { service } = harness();
+  const { request } = service.applyToolContract('opencode', {
+    model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('write')], toolChoice: 'required',
+  });
+  assert.deepEqual((request.tools ?? []).map((entry) => entry.name), ['write']);
 });
 
 test('a definition dropped by sanitisation is not a tool the model may call', async () => {

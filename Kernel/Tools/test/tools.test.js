@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MAX_SCHEMA_BYTES, PROVIDER_TOOLS, WEB_PROVIDERS, guardToolStream, normalizeToolsRequest, repairArguments, toolCaps, validateToolCalls } from '../dist/index.js';
+import { GATEWAY_TOOL_NAMES, GATEWAY_TOOL_PROVIDERS, MAX_SCHEMA_BYTES, PROVIDER_TOOLS, WEB_PROVIDERS, gatewayToolDefinitions, guardToolStream, normalizeToolsRequest, repairArguments, toolCaps, validateToolCalls, withGatewayTools } from '../dist/index.js';
 
 /**
  * The tool contract, on its own.
@@ -209,6 +209,28 @@ test('an allowed call emitted earlier survives a later blocked chunk ending as a
   assert.deepEqual(report.allowed, ['read']);
   assert.equal(seen[0].delta.toolCalls.length, 1, 'the undeclared call was forwarded');
   assert.equal(seen[1].finishReason, 'tool_calls', 'a turn that did include a call was reported as plain stop');
+});
+
+test('the gateway tool catalog has no shell tool and is declared unavailable', () => {
+  assert.deepEqual([...GATEWAY_TOOL_NAMES], ['glob', 'grep', 'read']);
+  assert.equal(GATEWAY_TOOL_NAMES.includes('bash'), false, 'a shell tool is back in the catalog');
+  for (const tool of gatewayToolDefinitions()) {
+    assert.match(tool.description, /unavailable and must not be used/, `${tool.name} claims to work`);
+  }
+  assert.deepEqual([...GATEWAY_TOOL_PROVIDERS].sort(), ['opencode', 'opencode-console', 'opencode-go']);
+});
+
+test('gateway tools are appended without replacing the caller’s definitions', () => {
+  const merged = withGatewayTools([
+    { name: 'Read', parameters: { type: 'object' } },
+    { name: 'write', parameters: { type: 'object' } },
+  ]);
+  assert.deepEqual(merged.map((tool) => tool.name), ['read', 'write', 'glob', 'grep']);
+  assert.equal(merged[0].name, 'read', 'a casing variant was not folded onto the canonical name');
+  assert.equal(merged.filter((tool) => tool.name === 'read').length, 1, 'the caller’s tool was duplicated');
+
+  const forced = withGatewayTools([{ name: 'write', parameters: {} }], 'required');
+  assert.deepEqual(forced.map((tool) => tool.name), ['write'], 'a generated tool could win a forced call');
 });
 
 test('every row in the table is internally consistent', () => {

@@ -3,7 +3,7 @@ import { FetchHttpTransport } from '../lib/transport.js';
 import type { HttpTransport } from '../lib/transport.js';
 import { OpenAICompatibleAdapter } from '../lib/openai-compatible.js';
 import { parseSseJson, parseSseStream } from '../lib/streaming.js';
-import { ZEN_FINGERPRINT_TOOL_NAMES, isZenFreeTierRefusal, zenFingerprintTools, zenFreeTierHeaders, zenSessionId, zenContractSatisfied, zenConversationSeed, zenFreeTierRefusal, zenGatedToolChoice } from '../lib/zen-free-tier.js';
+import { isZenFreeTierRefusal, zenFreeTierHeaders, zenSessionId, zenContractSatisfied, zenConversationSeed, zenFreeTierRefusal, zenGatedToolChoice } from '../lib/zen-free-tier.js';
 import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, CredentialValidation, FinishReason, Model, ProviderQuota, ProviderResourceQuota, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, TokenUsage, ToolDefinition } from '../lib/types.js';
 
 /**
@@ -70,23 +70,10 @@ function toGatedTool(tool: ToolDefinition) {
   };
 }
 
-export function gatedTools(tools: readonly ToolDefinition[] | undefined) {
-  const quartet = new Set<string>(ZEN_FINGERPRINT_TOOL_NAMES);
-  const seen = new Set<string>();
-  const out: ReturnType<typeof toGatedTool>[] = [];
-  for (const tool of tools ?? []) {
-    const lower = tool.name.trim().toLowerCase();
-    const name = quartet.has(lower) ? lower : tool.name;
-    if (quartet.has(lower)) {
-      if (seen.has(lower)) continue;
-      seen.add(lower);
-    }
-    out.push(toGatedTool({ ...tool, name }));
-  }
-  for (const name of ZEN_FINGERPRINT_TOOL_NAMES) {
-    if (!seen.has(name)) out.push(...zenFingerprintTools().filter((tool) => tool.function.name === name));
-  }
-  return out;
+export function declaredTools(tools: readonly ToolDefinition[] | undefined) {
+  // The declarations themselves come from Kernel/Tools through the gateway. This adapter only shapes what it was
+  // given onto the upstream's `{ type: "function", function: … }` wire; it invents no tool of its own.
+  return (tools ?? []).map(toGatedTool);
 }
 
 function toGatedFinishReason(reason: string): FinishReason {
@@ -665,10 +652,9 @@ export class ZenAdapter implements ProviderAdapter {
       model: id,
       messages: request.messages.map(toGatedMessage),
       stream: true,
-      // The caller's tools, with any quartet member they lack appended. A tool the model could actually call
-      // is never removed to make room for the quartet, and a caller's own `Bash` is renamed to `bash`
-      // rather than declared twice.
-      tools: gatedTools(request.tools),
+      // The gateway has already merged its declaration into `request.tools`. This adapter sends exactly that
+      // list; it no longer invents a tool, and `bash` is not declared anywhere in the SDKs.
+      tools: declaredTools(request.tools),
       // Free models accept only "auto" (opencode-free-tool-choice.test.js), so the choice is stated
       // rather than left to whatever the caller happened to send.
       tool_choice: zenGatedToolChoice((request.tools ?? []).length > 0),

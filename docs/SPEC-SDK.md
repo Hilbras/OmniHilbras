@@ -995,8 +995,8 @@ does. `/home/gin/work/OmniRoute` serves the same free models through the same ba
 requires together:
 
 1. `stream: true` in the body,
-2. a non-empty `tools` array carrying the file-search quartet `bash`, `glob`, `grep` and `read` in lowercase
-   (a single `_noop` placeholder was measured to answer 403; the quartet answers 200 for the same request),
+2. a non-empty `tools` array (a single `_noop` placeholder was measured to answer 403; the declared tools answer 200
+   for the same request),
 3. an `x-opencode-session` header shaped `ses_` + 12 hex + 14 base62 (the shape is checked, the value is
    not),
 4. a `User-Agent` carrying `opencode/<version>` with version ≥ 1.17.
@@ -1013,10 +1013,12 @@ it needs a request from a residential IP. What is not a hypothesis is the error:
 **after** the contract was applied is not a credential problem, and the message says so rather than
 sending the operator to rotate a working key.
 
-The quartet is a constant, because it is what the gate was measured to accept. A caller's own tools are
-kept; any quartet member the caller lacks is appended, and a caller's casing variant (`Bash`) is renamed to
-the lowercase name rather than declared twice. The client version stays configurable through
-`OMNIHILBRAS_ZEN_USER_AGENT`. Which models are gated is decided by the `-free` suffix rather
+The declaration was once a per-SDK quartet including `bash`. It now lives in one catalog in
+`Kernel/Tools` (`GATEWAY_TOOL_NAMES = ['glob', 'grep', 'read']`) and is applied by `Kernel/API` before the adapter
+sees a request; no SDK declares a tool of its own, and the shell tool is gone. A caller's own tools are kept and
+a casing variant (`Read`) is folded onto the canonical name rather than declared twice. A forced call keeps only
+the caller's definitions, so a generated "unavailable" tool can never win `tool_choice: "required"`. The client
+version stays configurable through `OMNIHILBRAS_ZEN_USER_AGENT`. Which models are gated is decided by the `-free` suffix rather
 than a list, because the upstream rotates its free lineup — six models were delisted and replaced inside a
 week.
 

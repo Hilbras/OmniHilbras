@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
 import { NousAdapter } from '@omnihilbras/sdk-nous';
-import { ToolContractError, guardToolStream, normalizeToolsRequest, validateToolCalls } from '@omnihilbras/tools';
+import { GATEWAY_TOOL_PROVIDERS, ToolContractError, guardToolStream, normalizeToolsRequest, validateToolCalls, withGatewayTools } from '@omnihilbras/tools';
 import { ZenAdapter } from '@omnihilbras/sdk-opencode-zen';
 import { OpenCodeGoAdapter } from '@omnihilbras/sdk-opencode-go';
 import { ZcodeAdapter, zcodeProviderId } from '@omnihilbras/sdk-zcode-start-plan';
@@ -3489,7 +3489,16 @@ export class GatewayService {
         // An empty allow list means "the client did not constrain calls" (providers inject their own tools), so it
         // cannot also mean "every definition was rejected". A name outside the sanitised alphabet blocks all calls.
         : ['\u0000no-definitions-forwarded'];
-      return { request: normalized, declared };
+
+      // The free-tier lanes used to declare their own tool quartet — including `bash` — inside each SDK adapter.
+      // The declaration now comes from the one catalog in Kernel/Tools and is applied here, at the gateway, so a
+      // provider package can no longer invent a tool the client never offered. A forced call keeps only the client's
+      // own definitions: a generated "unavailable" tool must never be the thing a forced choice selects.
+      let outbound = normalized;
+      if (GATEWAY_TOOL_PROVIDERS.has(providerId) && !(normalized.toolChoice === 'required' && kept.length > 0)) {
+        outbound = { ...normalized, tools: withGatewayTools(normalized.tools) } as ChatRequest;
+      }
+      return { request: outbound, declared };
     } catch (error) {
       if (error instanceof ToolContractError) {
         throw new ProviderError('NOT_SUPPORTED', error.message, { providerId: error.providerId, publicMessage: error.publicMessage });

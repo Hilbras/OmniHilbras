@@ -24,7 +24,7 @@ import type { ChatRequest } from './types.js';
  *
  * The project is named because **9router uses the identical `open-sse/` directory layout** and a
  * bare path here read as 9router's file. It is not: 9router has no such file, and its Zen executor
- * hard-codes the same quartet without recording how it was arrived at.
+ * takes the declaration from Kernel/Tools through the gateway; no provider package hard-codes a tool list.
  *
  * ## The four conditions
  *
@@ -73,12 +73,9 @@ export const MINIMUM_ZEN_USER_AGENT_MINOR = 17;
  * The tools the free-tier gate accepts, in lowercase.
  *
  * Measured against the live endpoint for `mimo-v2.6-flash-free`: a single `_noop` placeholder answers
- * 403 FreeTierError, and the file-search quartet below answers 200 with a streamed answer. The same
- * quartet is what OmniRoute's `opencodeFingerprint` sends, so this is the contract both projects share.
- * Caller tools that match a name in the quartet in another case are renamed to it, never duplicated.
+ * 403 FreeTierError, and a declared read/glob/grep tool answers 200 with a streamed answer. The gateway
+ * injects that declaration from the one catalog in Kernel/Tools; this package only applies the wire shape.
  */
-export const ZEN_FINGERPRINT_TOOL_NAMES = ['bash', 'glob', 'grep', 'read'] as const;
-
 const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
 function base62(bytes: Uint8Array, length: number): string {
@@ -178,37 +175,16 @@ export function zenFreeTierHeaders(sessionId: string): Record<string, string> {
 }
 
 /**
- * The quartet, declared in the chat-completions shape, for a request that has no tools of its own.
- *
- * The **description is part of the fingerprint**, not decoration. The upstream compares the declared
- * tool against what its own client sends, and the reference's wording is
- * "This tool is currently unavailable and must not be used." (`open-sse/utils/opencodeFingerprint.js`).
- * Ours said something clearer and more truthful — that these exist to satisfy the gate — which is
- * better English and a worse fingerprint. Both say the same thing to a reader; only one of them says
- * what the upstream is looking for.
- */
-export function zenFingerprintTools() {
-  return ZEN_FINGERPRINT_TOOL_NAMES.map((name) => ({
-    type: 'function' as const,
-    function: {
-      name,
-      description: 'This tool is currently unavailable and must not be used.',
-      parameters: { type: 'object' as const, properties: {}, additionalProperties: false },
-    },
-  }));
-}
-
-/**
  * `tool_choice` for a gated request, which this adapter previously never sent at all.
  *
  * The free tier is not indifferent to it: `tests/unit/opencode-free-tool-choice.test.js` records that
  * free models accept **only** `"auto"`, and that a named, `required` or `none` choice has to be
- * demoted to it or the request is refused. A gated request that declares the quartet and omits the
+ * demoted to it or the request is refused. A gated request that declares the gateway tools and omits the
  * choice is therefore not "fine by default" — it is a different request from the one the upstream
  * accepts.
  *
  * `auto` when the caller declared its own tools, so a real tool can still be chosen; `none` when the
- * quartet is all there is, so the injected tools cannot be selected. That is the reference's rule
+ * declaration is all there is, so those tools cannot be selected. That is the reference's rule
  * (`applyFingerprintTools`), not an invention.
  */
 export function zenGatedToolChoice(hasCallerTools: boolean): 'auto' | 'none' {
@@ -299,7 +275,7 @@ export function isZenFreeTierRefusalError(error: unknown): boolean {
  */
 export function zenFreeTierRefusal(input: { providerId: string; model: string; label: string; contractSatisfied: boolean; gated: boolean; providerReason?: string }): ProviderError {
   const message = input.contractSatisfied
-    ? `${input.label} refused ${input.model} after this gateway sent everything its free-tier request contract requires — a streaming request, the tool quartet, a session header and a client version. The credential was accepted, so this is not a credential problem: OpenCode limits its free tier to non-datacenter networks, and this host's egress address is the likely cause.`
+    ? `${input.label} refused ${input.model} after this gateway sent everything its free-tier request contract requires — a streaming request, the tool declaration, a session header and a client version. The credential was accepted, so this is not a credential problem: OpenCode limits its free tier to non-datacenter networks, and this host's egress address is the likely cause.`
     : `${input.label} refused ${input.model}, and this gateway could not satisfy its free-tier request contract.`;
   // `PROVIDER_UNAVAILABLE` for the gate, because a lane that refuses every caller on this network is
   // unreachable rather than broken — and the code is what the retry policy reads. A refusal that is

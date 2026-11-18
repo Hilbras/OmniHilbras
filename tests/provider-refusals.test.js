@@ -96,13 +96,31 @@ test('a caller\'s real tools are never displaced by the placeholder', () => {
   // declared would trade a working request for a permitted one — and the tool would be missing from a
   // conversation that needs it.
   const source = code(readFileSync(join(ADAPTERS, 'opencode-zen', 'adapter', 'index.ts'), 'utf8'));
-  assert.match(source, /tools: gatedTools\(request\.tools\)/,
-    'the caller\'s tools go through gatedTools, which keeps them and appends the quartet');
+  assert.match(source, /tools: declaredTools\(request\.tools\)/,
+    'the caller\'s tools go through the wire shaper; no tool is invented in the SDK');
 });
 
-test('the free-tier quartet is the contract, and the client version stays configurable', () => {
-  const source = readFileSync(join(ADAPTERS, 'opencode-zen', 'lib', 'zen-free-tier.ts'), 'utf8');
-  assert.match(source, /ZEN_FINGERPRINT_TOOL_NAMES = \['bash', 'glob', 'grep', 'read'\]/,
-    'the quartet is measured against the live gate, so it is a constant, not configuration');
-  assert.match(source, /OMNIHILBRAS_ZEN_USER_AGENT/, 'the client version is still overridable');
+test('no SDK declares a shell tool; the catalog lives in Kernel/Tools and is applied by the gateway', () => {
+  const adapters = readdirSync(ADAPTERS);
+  for (const id of adapters) {
+    const tree = join(ADAPTERS, id);
+    // Read every source file under the provider once, rather than trusting a single path.
+    const sources = [];
+    const walk = (dir) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'dist' || entry.name === 'node_modules') continue;
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (entry.name.endsWith('.ts')) sources.push(readFileSync(path, 'utf8'));
+      }
+    };
+    walk(tree);
+    assert.doesNotMatch(sources.join('\n'), /ZEN_FINGERPRINT_TOOL_NAMES|zenFingerprintTools/,
+      `${id} declares its own tool list instead of taking the gateway's`);
+  }
+  const catalog = readFileSync(join(ROOT, 'Kernel/Tools/src/gatewayTools.ts'), 'utf8');
+  assert.match(catalog, /GATEWAY_TOOL_NAMES = \['glob', 'grep', 'read'\]/, 'the central catalog changed');
+  assert.doesNotMatch(catalog, /'bash'/, 'a shell tool is back in the central catalog');
+  const gateway = readFileSync(join(ROOT, 'Kernel/API/src/core/service.ts'), 'utf8');
+  assert.match(gateway, /withGatewayTools\(normalized\.tools\)/, 'the gateway no longer applies the catalog');
 });

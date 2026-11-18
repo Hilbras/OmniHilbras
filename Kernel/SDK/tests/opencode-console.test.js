@@ -3,6 +3,17 @@ import test from 'node:test';
 import { OPENCODE_CONSOLE, OpencodeConsoleAdapter, opencodeConsoleCredentialExpired, opencodeConsoleProviderId, refreshOpencodeConsoleCredential } from '../opencode-console/dist/adapter/index.js';
 import { ProviderError } from '../opencode-console/dist/lib/errors.js';
 
+// The gateway's declaration, as the SDK sees it after Kernel/API applies Kernel/Tools. Kept local so an SDK
+// test does not depend on another package's build order; the catalog itself is pinned by Kernel/Tools' own tests.
+function declaredFixture() {
+  return ['glob', 'grep', 'read'].map((name) => ({
+    name,
+    description: 'This tool is currently unavailable and must not be used.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  }));
+}
+
+
 /** Serves a script keyed by URL and records what was sent. */
 function transport(script) {
   const requests = [];
@@ -94,7 +105,7 @@ test('a free model is sent through the free-tier contract, not the plain lane', 
   };
   const adapter = new OpencodeConsoleAdapter({ transport: t });
   const response = await adapter.chat(
-    { model: 'mimo-v2.6-flash-free', messages: [{ role: 'user', content: 'hi' }], maxOutputTokens: 64 },
+    { model: 'mimo-v2.6-flash-free', messages: [{ role: 'user', content: 'hi' }], maxOutputTokens: 64, tools: declaredFixture() },
     { credential: signedIn() },
   );
   assert.equal(response.message.content, 'OK');
@@ -284,7 +295,7 @@ test('a streamed tool call on a free model reaches the caller, with its argument
   const adapter = new OpencodeConsoleAdapter({ transport: t });
   const pieces = [];
   let finish;
-  for await (const chunk of adapter.streamChat({ model: 'mimo-v2.6-flash-free', messages: [{ role: 'user', content: 'ls' }] }, { credential: signedIn() })) {
+  for await (const chunk of adapter.streamChat({ model: 'mimo-v2.6-flash-free', messages: [{ role: 'user', content: 'ls' }], tools: declaredFixture() }, { credential: signedIn() })) {
     pieces.push(...(chunk.delta.toolCalls ?? []));
     if (chunk.finishReason) finish = chunk.finishReason;
   }

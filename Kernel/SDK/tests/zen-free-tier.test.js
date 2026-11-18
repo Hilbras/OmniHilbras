@@ -2,7 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ProviderError } from '../opencode-zen/dist/lib/errors.js';
 import { ZenAdapter } from '../opencode-zen/dist/adapter/index.js';
-import { zenSessionId, zenFreeTierHeaders, zenFingerprintTools, zenContractSatisfied, satisfiesZenUserAgentContract, ZEN_FINGERPRINT_TOOL_NAMES } from '../opencode-zen/dist/lib/zen-free-tier.js';
+import { zenSessionId, zenFreeTierHeaders, zenContractSatisfied, satisfiesZenUserAgentContract } from '../opencode-zen/dist/lib/zen-free-tier.js';
+
+// The gateway's declaration, as the SDK sees it after Kernel/API applies Kernel/Tools. Kept local so an SDK
+// test does not depend on another package's build order; the catalog itself is pinned by Kernel/Tools' own tests.
+function declaredFixture() {
+  return ['glob', 'grep', 'read'].map((name) => ({
+    name,
+    description: 'This tool is currently unavailable and must not be used.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+  }));
+}
+
 
 /**
  * OpenCode Zen's free-tier request contract.
@@ -56,7 +67,9 @@ function streamingTransport({ events = [], onRequest } = {}) {
   };
 }
 
-const request = (model, over = {}) => ({ model, messages: [{ role: 'user', content: 'hi' }], maxOutputTokens: 32, ...over });
+// The gateway injects this declaration through Kernel/Tools before the adapter sees a request; SDK unit tests pass
+// it explicitly so they measure the adapter's wire shape alone.
+const request = (model, over = {}) => ({ model, messages: [{ role: 'user', content: 'hi' }], maxOutputTokens: 32, tools: declaredFixture(), ...over });
 const credential = { credential: { type: 'api-key', value: 'k' } };
 
 test('a free-tier request carries all four conditions of the contract', async () => {
@@ -76,7 +89,7 @@ test('a free-tier request carries all four conditions of the contract', async ()
   const body = JSON.parse(sent.body);
   assert.equal(body.stream, true, 'condition 1: streaming');
   assert.ok(Array.isArray(body.tools) && body.tools.length > 0, 'condition 2: a non-empty tools array');
-  assert.deepEqual(body.tools.map((tool) => tool.function.name), [...ZEN_FINGERPRINT_TOOL_NAMES], 'the file-search quartet, lowercase');
+  assert.deepEqual(body.tools.map((tool) => tool.function.name), ['glob', 'grep', 'read'], 'the gateway declaration, lowercase, with no bash');
   assert.match(headers['x-opencode-session'], /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/, 'condition 3: the session shape');
   assert.ok(satisfiesZenUserAgentContract(headers['user-agent']), `condition 4: user-agent, got ${headers['user-agent']}`);
 
@@ -116,7 +129,7 @@ test('a caller\'s own tools are kept — the placeholder never displaces a real 
   assert.ok(names.includes('read_file'), 'the caller\'s tool is still declared');
   const own = body.tools.find((tool) => tool.function.name === 'read_file');
   assert.deepEqual(own.function.parameters.properties.path, { type: 'string' }, 'and its schema survives');
-  assert.deepEqual(names.filter((name) => ['bash', 'glob', 'grep', 'read'].includes(name)), ['bash', 'glob', 'grep', 'read'], 'the quartet is appended beside it');
+  assert.deepEqual(names.filter((name) => ['bash', 'glob', 'grep', 'read'].includes(name)), [], 'the SDK appended a local tool list beside the caller’s');
 });
 
 test('a forced call on a free model is refused by name instead of being downgraded to auto', async () => {
@@ -221,24 +234,17 @@ test('the user-agent rule is the upstream\'s, not a guess', () => {
   assert.equal(satisfiesZenUserAgentContract(undefined), false);
 });
 
-test('the free-tier quartet is declared in lowercase, and a caller\'s casing variant is renamed, not duplicated', async () => {
-  const { gatedTools } = await import('../opencode-zen/dist/adapter/index.js');
-  assert.deepEqual(zenFingerprintTools().map((tool) => tool.function.name), ['bash', 'glob', 'grep', 'read']);
-
-  const merged = gatedTools([
-    { name: 'Bash', description: 'run', parameters: { type: 'object', properties: {} } },
-    { name: 'write', description: 'write', parameters: { type: 'object', properties: {} } },
-  ]);
-  const names = merged.map((tool) => tool.function.name);
-  assert.equal(names.filter((name) => name === 'bash').length, 1, 'Bash becomes bash, declared once');
-  assert.ok(!names.includes('Bash'), 'the caller spelling is not sent');
-  assert.ok(names.includes('write'), 'a non-quartet tool the caller declared is kept');
-  assert.ok(names.includes('glob') && names.includes('grep') && names.includes('read'), 'missing quartet members are appended');
+test('the SDK does not declare tools, and the gateway list contains no shell tool', async () => {
+  const { declaredTools } = await import('../opencode-zen/dist/adapter/index.js');
+  assert.deepEqual(declaredFixture().map((tool) => tool.name), ['glob', 'grep', 'read']);
+  assert.equal(declaredFixture().some((tool) => tool.name === 'bash'), false);
+  assert.deepEqual(declaredTools(undefined), [], 'the adapter invented a tool');
+  assert.deepEqual(declaredTools([{ name: 'Bash', parameters: {} }]).map((tool) => tool.function.name), ['Bash'], 'a caller tool is passed through, not renamed by the SDK');
 });
 
 test('the contract check reports honestly rather than assuming it passed', () => {
   const headers = zenFreeTierHeaders(zenSessionId());
-  const full = { stream: true, tools: zenFingerprintTools() };
+  const full = { stream: true, tools: declaredFixture() };
   assert.equal(zenContractSatisfied(headers, full), true);
   assert.equal(zenContractSatisfied(headers, { ...full, stream: false }), false, 'a non-stream body is not satisfied');
   assert.equal(zenContractSatisfied(headers, { stream: true, tools: [] }), false, 'an empty tools array is not satisfied');

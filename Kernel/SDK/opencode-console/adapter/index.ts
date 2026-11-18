@@ -5,7 +5,7 @@ import { compactPricing, normalizeContextWindow, normalizeModalities, perMillion
 import { AnthropicAdapter } from '../lib/anthropic.js';
 import { OpenAICompatibleAdapter } from '../lib/openai-compatible.js';
 import { zenConversationSeed, zenContractSatisfied, isZenFreeTierRefusalError, zenFreeTierRefusal, zenSessionId, zenGatedToolChoice, zenUserAgent } from '../lib/zen-free-tier.js';
-import { gatedTools } from '../lib/zen-adapter.js';
+import { declaredTools } from '../lib/zen-adapter.js';
 import { parseSseStream } from '../lib/streaming.js';
 import type { ChatChunk, ChatRequest, ChatResponse, CredentialValidation, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderRequestContext, ToolCall } from '../lib/types.js';
 
@@ -551,8 +551,8 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
         ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
       })),
       stream: true,
-      // The caller's tools with the free-tier quartet appended where missing; never removed to make room.
-      tools: gatedTools(request.tools),
+      // The gateway has already merged its declaration into `request.tools`; no tool is invented here.
+      tools: declaredTools(request.tools),
       // Free models accept only "auto" (opencode-free-tool-choice.test.js); stating it is part of the
       // fingerprint, not a preference — see zenGatedToolChoice.
       tool_choice: zenGatedToolChoice((request.tools ?? []).length > 0),
