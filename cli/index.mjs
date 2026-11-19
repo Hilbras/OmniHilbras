@@ -41,8 +41,9 @@ import { setup } from './commands/setup.mjs';
 import { status } from './commands/status.mjs';
 import { stop } from './commands/stop.mjs';
 import { test } from './commands/test.mjs';
+import { update } from './commands/update.mjs';
 
-export const verbs = { setup, doctor, status, ps, open, stop, restart, providers, models, test, keys, routing, logs };
+export const verbs = { setup, doctor, status, ps, open, stop, restart, update, providers, models, test, keys, routing, logs };
 
 /** Flags every verb accepts, so none of them has to re-implement them or forget one. */
 const globalFlags = new Set(['--json', '--gateway', '--api-key', '--help', '-h']);

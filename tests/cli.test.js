@@ -68,7 +68,7 @@ test('help lists the verbs and makes no request at all', async () => {
   try {
     const { code, stdout } = await runCli(['help', '--gateway', gateway.url]);
     assert.equal(code, 0);
-    for (const verb of ['setup', 'doctor', 'status', 'ps', 'open', 'stop', 'restart', 'providers', 'models', 'test', 'keys', 'routing', 'logs']) {
+    for (const verb of ['setup', 'doctor', 'status', 'ps', 'open', 'stop', 'restart', 'update', 'providers', 'models', 'test', 'keys', 'routing', 'logs']) {
       assert.match(stdout, new RegExp(`\\b${verb}\\b`), `${verb} is offered`);
     }
     // The rule the reference implementation broke by running its setup before parsing arguments: asking

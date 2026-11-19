@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { readBundledRecord, writeBundledRecord, clearBundledRecord, bundledStateDir } from '../lib/bundled-state.mjs';
 import { selectMenu, statusHeader } from '../lib/menu.mjs';
 import { restartDecision, MAX_RESTARTS } from '../lib/restart-policy.mjs';
+import { checkForUpdate, updateCommand } from '../lib/update.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8'));
@@ -95,6 +96,7 @@ and stops both on Ctrl-C.
   -n, --no-browser       do not open a browser
   -l, --log              stream both servers' output instead of capturing it
   -b, --background       start detached and exit; stop later with \`omnihilbras stop\`
+      --skip-update      do not check the registry for a newer release
       --force            kill a port holder even when it is not Node/Vite/pnpm
   -y, --yes              do not ask before replacing a previous run
   -h, --help             this text
@@ -106,7 +108,7 @@ run \\\`omnihilbras help\\\`.`);
 }
 
 function parseArgs(argv) {
-  const options = { dashboardPort: DEFAULT_DASHBOARD_PORT, gatewayPort: DEFAULT_GATEWAY_PORT, open: true, log: false, force: false, yes: false, background: false };
+  const options = { dashboardPort: DEFAULT_DASHBOARD_PORT, gatewayPort: DEFAULT_GATEWAY_PORT, open: true, log: false, force: false, yes: false, background: false, skipUpdate: false };
   const valueOf = (index, name) => {
     const next = argv[index + 1];
     if (next === undefined || (next.startsWith('-') && !/^-?\d/.test(next))) fail(`\`${name}\` needs a value.`);
@@ -119,6 +121,7 @@ function parseArgs(argv) {
     else if (arg === '-n' || arg === '--no-browser') options.open = false;
     else if (arg === '-l' || arg === '--log') options.log = true;
     else if (arg === '-b' || arg === '--background' || arg === '--detach') options.background = true;
+    else if (arg === '--skip-update') options.skipUpdate = true;
     else if (arg === '--force') options.force = true;
     else if (arg === '-y' || arg === '--yes') options.yes = true;
     else if (arg === '-h' || arg === '--help') usage(0);
@@ -329,6 +332,9 @@ process.on('SIGTERM', () => void shutdown(0));
 
 async function start() {
   stopping = false;
+  // Fired now so the registry check overlaps startup; resolved after readiness. Fail-open: a slow or
+  // unreachable registry never blocks or fails a start, and `--skip-update` opts out entirely.
+  const updatePromise = options.skipUpdate ? Promise.resolve(undefined) : checkForUpdate(PKG.version).catch(() => undefined);
   await stopRecorded();
 
   for (const [name, port] of [['dashboard', options.dashboardPort], ['gateway', options.gatewayPort]]) {
@@ -443,6 +449,11 @@ async function start() {
     return;
   }
   started = true;
+
+  const updateInfo = await updatePromise;
+  if (updateInfo?.updateAvailable) {
+    console.log(`  ${paint(DIM, `Update available: ${updateInfo.current} → ${updateInfo.latest} · run \`omnihilbras update\``)}`);
+  }
 
   const url = `http://localhost:${options.dashboardPort}`;
   const dashboardUrl = `${url}/dashboard`;

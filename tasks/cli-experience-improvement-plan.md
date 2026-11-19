@@ -110,3 +110,8 @@ need a `docs/SPEC-SDK.md` line + `Kernel/API/test/` coverage; the `gateway-route
   after startup and gives up on a crash loop; the pre-startup fail-fast path is unchanged.
   `tests/cli-restart-policy.test.js` (5 cases) and the extended smoke (background launcher exits while servers
   survive; a SIGKILLed gateway is respawned with a new pid) pass. `docs/CLI.md` updated.
+- **Phase 4 — complete in the tree (3.78.0).** `cli/lib/update.mjs` (fail-open `fetchLatestVersion` /
+  `checkForUpdate`, numeric `compareVersions`, `updateCommand`) and an opt-in `omnihilbras update [--check]`
+  verb. The launcher fires the check in parallel with startup and prints a one-line notice after readiness;
+  `--skip-update` opts out. Nothing upgrades without the person running `update`.
+  `tests/cli-update.test.js` (6 cases, mocked registry) pass; `docs/CLI.md` updated.
