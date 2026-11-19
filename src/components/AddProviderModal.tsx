@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { Check, CheckCircle2, ChevronDown, CircleAlert, LoaderCircle, LockKeyhole, ShieldCheck } from 'lucide-react';
+import { Check, CheckCircle2, ChevronDown, CircleAlert, LoaderCircle, LockKeyhole, ShieldCheck, X } from 'lucide-react';
 import { checkConnectionCredential } from '../lib/gatewayClient';
 import { bulkEntryName, parseBulkEntries } from '../lib/bulkEntries';
 
@@ -13,6 +12,7 @@ import { bulkEntryName, parseBulkEntries } from '../lib/bulkEntries';
 // inferred from source.
 import { customOption, isWebSessionProvider, providerOptions, resolveProviderOption, type ProviderOption } from '../lib/providerOptions';
 import { Switch } from '../ui/Switch';
+import { Dialog } from '../ui/Dialog';
 
 export { customOption, isWebSessionProvider, providerOptions, resolveProviderOption };
 export type { ProviderOption };
@@ -56,8 +56,6 @@ type AddProviderModalProps = {
 };
 
 export function AddProviderModal({ open, initialProviderId, initialModelPolicy, initialConnection, onClose, onSave, onSaveMany }: AddProviderModalProps) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
   const checkAbortRef = useRef<AbortController | null>(null);
   const editing = initialConnection !== undefined;
   const [selectedId, setSelectedId] = useState(initialProviderId ?? 'openai');
@@ -93,31 +91,14 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
 
   useEffect(() => {
     if (!open) return;
-    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    dialogRef.current?.focus({ preventScroll: true });
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      cancelPendingCheck();
-      previousFocusRef.current?.focus({ preventScroll: true });
-      previousFocusRef.current = null;
-    };
+    // Dialog owns focus, scroll lock and Escape; this effect only releases an in-flight check.
+    return () => cancelPendingCheck();
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
     setImportFreeModels(initialModelPolicy !== 'all');
   }, [open, initialModelPolicy]);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !saving) onClose();
-    };
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [open, onClose, saving]);
 
   if (!open) return null;
 
@@ -265,17 +246,13 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
     }
   }
 
-  // Keep the fixed overlay at the viewport root; route transitions use transforms.
-  return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-3 backdrop-blur-[2px]" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="add-provider-title" aria-describedby="add-provider-description" className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[430px] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-2xl outline-none">
-        <div className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-3">
-          <div className="flex items-center gap-1.5" aria-label="Window controls">
-            <button type="button" onClick={onClose} aria-label="Close add connection dialog" title="Close" className="h-3.5 w-3.5 rounded-full bg-danger transition-transform hover:scale-110" />
-            <span className="h-3.5 w-3.5 rounded-full bg-[#d8a443]" aria-hidden="true" />
-            <span className="h-3.5 w-3.5 rounded-full bg-muted/50" aria-hidden="true" />
-          </div>
+  return (
+    <Dialog open onClose={onClose} labelledBy="add-provider-title" busy={saving} className="!p-0 flex max-h-[calc(100dvh-1.5rem)] max-w-[430px] flex-col overflow-hidden">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-4 py-3">
           <h2 id="add-provider-title" className="min-w-0 flex-1 truncate text-sm font-semibold tracking-[-0.01em]">{title}</h2>
+          <button type="button" onClick={onClose} disabled={saving} aria-label="Close add connection dialog" className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted hover:bg-bg-soft hover:text-text disabled:opacity-40">
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         </div>
 
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
@@ -397,8 +374,6 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
             <button type="button" onClick={onClose} disabled={saving} className="btn-ghost !h-10 !flex-1 !rounded-lg !px-3 !text-xs disabled:cursor-not-allowed disabled:opacity-40">Cancel</button>
           </div>
         </form>
-      </div>
-    </div>,
-    document.body,
+    </Dialog>
   );
 }

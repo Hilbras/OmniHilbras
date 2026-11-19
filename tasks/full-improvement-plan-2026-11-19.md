@@ -29,8 +29,9 @@
   storing text; Logs is a real history + live page with search, outcome filter, pause, export and detail; backup has
   a dry-run verify endpoint and a preview in the import flow.
 - **Phase 6 — partially implemented**: the two web-session group headings are gone in favour of one grid, Settings has
-  live reload and a copy-URL action, Token Saver/Logs have skeletons, and the shared `Dialog` primitive now backs the
-  connection-method chooser. The remaining modal migrations and exit animations are still to do.
+  live reload, a section rail and a copy-URL action, Token Saver/Logs have skeletons, and the shared `Dialog` primitive
+  now backs the connection-method chooser and the add-provider form (focus trap, scroll lock, Escape, focus restore,
+  one close control). The remaining modal migrations and exit animations are still to do.
 - **Phase 7 — baseline and first optimization done**: `pnpm benchmark:gateway` records the local gateway overhead
   floor (`docs/reports/gateway-overhead-2026-11-19.json`: p50 ~2 ms, p95 ~4.6 ms for non-streaming on this machine);
   the credential path no longer lists and clones the whole vault to read one record. The dry-run verify is in; the
