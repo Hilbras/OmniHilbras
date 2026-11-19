@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { AddProviderModal, isWebSessionProvider, providerOptions, type NewProvider } from '../components/AddProviderModal';
 import { DashboardShell } from '../components/DashboardShell';
-import { ProviderCard, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
+import { ProviderCard, providerGroupBadges, providerGroupLabels, providerGroupOrder, type ProviderCardMode, type ProviderGroup, type ProviderRecord, type ProviderStatus } from '../components/ProviderCard';
 import {
   getGatewayHealth,
   listGatewayConnections,
@@ -287,6 +287,22 @@ export function ProvidersContent() {
       return matchesQuery && matchesStatus(provider.status, filter);
     });
   }, [filter, modelMatches, normalizedQuery, providers]);
+
+  /**
+   * The two web-session sections are hidden by request; the **group system stays**.
+   *
+   * This is deliberately a filter over the shared group order, not a rewrite of it: OAuth,
+   * Free Tier, API Key and the rest render exactly as before, and the hidden groups' cards are
+   * omitted with their headings. Removing the headings alone would have left those cards nowhere
+   * to render; deleting the group metadata would have removed a system the user asked to keep.
+   */
+  const visibleGroups = useMemo(
+    () => providerGroupOrder.filter((group) => group !== 'web-cookie' && group !== 'v2-web'),
+    [],
+  );
+  const groupedProviders = useMemo(() => visibleGroups
+    .map((group) => ({ group, providers: filteredProviders.filter((provider) => provider.group === group) }))
+    .filter((group) => group.providers.length > 0), [filteredProviders, visibleGroups]);
 
   function openAdd(providerId?: string) {
     // This modal collects an API key. A web-session provider is signed into instead, and an OAuth-only
@@ -607,15 +623,26 @@ export function ProvidersContent() {
               </div>
             )}
 
-            {filteredProviders.length > 0 ? (
-              <div className="space-y-3 p-4 sm:p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold">All providers</h3>
-                  <span className="muted font-mono text-[10px]">{filteredProviders.length} {filteredProviders.length === 1 ? 'provider' : 'providers'}</span>
-                </div>
-                <div className={`grid gap-3 ${cardMode === 'simple' ? 'grid-cols-[repeat(auto-fit,minmax(272px,1fr))] xl:grid-cols-4' : 'grid-cols-[repeat(auto-fit,minmax(320px,1fr))] xl:grid-cols-3 2xl:grid-cols-4'}`}>
-                  {filteredProviders.map((provider, index) => renderProviderCard(provider, index))}
-                </div>
+            {groupedProviders.length > 0 ? (
+              <div className="space-y-6 p-4 sm:p-5">
+                {groupedProviders.map(({ group, providers: grouped }) => (
+                  <section key={group} aria-labelledby={`provider-group-${group}`}>
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <h3 id={`provider-group-${group}`} className="flex items-center gap-2 text-sm font-semibold">
+                        {providerGroupLabels[group]}
+                        {providerGroupBadges[group] && (
+                          <span className="rounded-full border border-gold/30 bg-gold-soft px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-gold-text">
+                            {providerGroupBadges[group]}
+                          </span>
+                        )}
+                      </h3>
+                      <span className="muted font-mono text-[10px]">{grouped.length} {grouped.length === 1 ? 'provider' : 'providers'}</span>
+                    </div>
+                    <div className={`grid gap-3 ${cardMode === 'simple' ? 'grid-cols-[repeat(auto-fit,minmax(272px,1fr))] xl:grid-cols-4' : 'grid-cols-[repeat(auto-fit,minmax(320px,1fr))] xl:grid-cols-3 2xl:grid-cols-4'}`}>
+                      {grouped.map((provider, index) => renderProviderCard(provider, index))}
+                    </div>
+                  </section>
+                ))}
               </div>
             ) : <div className="px-5 py-14 text-center"><Search className="mx-auto h-7 w-7 text-muted" aria-hidden="true" /><p className="mt-3 text-sm font-semibold">No providers found</p><p className="muted mt-1 text-xs">{normalizedQuery ? `Nothing matches “${query.trim()}”.` : 'Try a different status filter.'}</p></div>}
           </div>
