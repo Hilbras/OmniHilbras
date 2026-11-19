@@ -535,6 +535,8 @@ pnpm build
 pnpm analyze          # per-page bundle cost, attributed per package
 pnpm verify           # version, brand, typecheck, test, SPEC guard, build, bundle budget
 pnpm release:audit    # every tag: pushed, released on GitHub, published to npm
+pnpm audit:catalogs   # refresh saved provider catalogs; metadata reads only, no inference
+pnpm benchmark:gateway --n 100   # local adapter only: gateway overhead floor
 ```
 
 `pnpm verify` is the release gate: the same command CI runs, in the order that fails fastest.

@@ -38,7 +38,9 @@ export function LogsContent() {
     setLoading(true);
     getGatewayUsage({ period: '24h', limit: keptEvents }, controller.signal)
       .then((usage) => {
-        setHistory(usage.records);
+        // A partial or older response is not a reason to blank the page: the usage endpoint may omit
+        // `records`, and the live stream can still fill the list.
+        setHistory(Array.isArray(usage.records) ? usage.records : []);
         setError(undefined);
       })
       .catch((cause: unknown) => {
