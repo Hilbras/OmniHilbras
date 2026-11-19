@@ -6,14 +6,42 @@
  * makes this safe to run anywhere, including in a script or on someone else's machine.
  */
 
+import { createRequire } from 'node:module';
 import { inspect } from '../lib/detect.mjs';
 import { inspectShortcut } from '../lib/shortcut.mjs';
+import { hasBundledServer } from '../lib/bundled.mjs';
+import { readBundledRecord, isPidAlive } from '../lib/bundled-state.mjs';
+import { readDashboardToken } from '../lib/config.mjs';
+import { checkForUpdate } from '../lib/update.mjs';
+
+const { version } = createRequire(import.meta.url)('../package.json');
 
 const SEVERITY_LABEL = {
   blocking: 'blocking',
   'needed-from-source': 'from source',
   optional: 'optional',
 };
+
+/**
+ * The local bundled-server facts, composed from the same helpers the verbs use so doctor and `ps` cannot
+ * disagree. Exported for testing: `present` honours the bundled-server override, the token and record are
+ * read from the given environment, and liveness is checked per pid. Nothing here starts or stops anything.
+ */
+export function bundledFacts(env = process.env) {
+  const record = readBundledRecord(env);
+  return {
+    present: hasBundledServer(env),
+    tokenPresent: Boolean(readDashboardToken(env)),
+    run: record
+      ? {
+          dashboardPort: record.dashboardPort,
+          gatewayPort: record.gatewayPort,
+          gatewayAlive: isPidAlive(record.gatewayPid),
+          dashboardAlive: isPidAlive(record.staticPid),
+        }
+      : null,
+  };
+}
 
 export const doctor = {
   name: 'doctor',
@@ -34,7 +62,9 @@ export const doctor = {
     }
 
     const blocking = report.gaps.filter((gap) => gap.severity === 'blocking');
-    out.data({ ...report, gateway, blocking: blocking.length });
+    const bundled = bundledFacts();
+    const updateInfo = await checkForUpdate(version).catch(() => undefined);
+    out.data({ ...report, gateway, bundled, update: updateInfo, blocking: blocking.length });
 
     if (out.json) return blocking.length > 0 ? 1 : 0;
 
@@ -46,6 +76,19 @@ export const doctor = {
     out.line(`  ${out.muted('pnpm')}      ${runtime.pnpm ?? out.warn('not found')}`);
     out.line(`  ${out.muted('git')}       ${runtime.git ?? out.warn('not found')}`);
     out.line(`  ${out.muted('gateway')}   ${gateway.reachable ? out.ok(`${gateway.version} at ${gateway.url}`) : out.warn(`not running (${gateway.url})`)}`);
+    out.line();
+
+    out.title('Bundled server');
+    out.line(`  ${out.muted('server')}    ${bundled.present ? out.ok('present') : out.warn('not staged — reinstall @hilbras/omnihilbras, or run from a checkout')}`);
+    out.line(`  ${out.muted('token')}     ${bundled.tokenPresent ? out.ok('readable') : out.muted('none yet (no gateway has run)')}`);
+    if (bundled.run) {
+      out.line(`  ${out.muted('run')}       dashboard :${bundled.run.dashboardPort} ${bundled.run.dashboardAlive ? out.ok('up') : out.warn('down')} · gateway :${bundled.run.gatewayPort} ${bundled.run.gatewayAlive ? out.ok('up') : out.warn('down')}`);
+    } else {
+      out.line(`  ${out.muted('run')}       ${out.muted('none recorded — start one with `omnihilbras`')}`);
+    }
+    if (updateInfo?.updateAvailable) {
+      out.line(`  ${out.muted('update')}    ${out.warn(`${updateInfo.current} → ${updateInfo.latest} · run \`omnihilbras update\``)}`);
+    }
     out.line();
 
     /**

@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { bundledRecordPath, readBundledRecord, stopBundledServers, looksLikeOurServer } from '../cli/lib/bundled-state.mjs';
+import { bundledRecordPath, readBundledRecord, writeBundledRecord, stopBundledServers, looksLikeOurServer } from '../cli/lib/bundled-state.mjs';
 import { verbs } from '../cli/index.mjs';
+import { bundledFacts } from '../cli/commands/doctor.mjs';
 
 /**
  * Lifecycle control over the bundled run (3.75.0): `stop`, `restart`, `open`, `ps`.
@@ -105,4 +107,38 @@ test('the lifecycle verbs are registered with the flags they accept', () => {
   assert.deepEqual(verbs.restart.flags, ['--force']);
   assert.deepEqual(verbs.open.flags, []);
   assert.deepEqual(verbs.ps.flags, []);
+});
+
+test('doctor bundledFacts reports an empty installation truthfully', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'omni-doctor-'));
+  try {
+    const env = { XDG_CONFIG_HOME: path.join(dir, 'config'), XDG_STATE_HOME: path.join(dir, 'state'), OMNIHILBRAS_BUNDLED_SERVER: path.join(dir, 'no-server.mjs') };
+    const facts = bundledFacts(env);
+    assert.equal(facts.present, false, 'no bundled server staged');
+    assert.equal(facts.tokenPresent, false, 'no gateway has run');
+    assert.equal(facts.run, null, 'no run recorded');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('doctor bundledFacts sees a staged server, a token, and a recorded run', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'omni-doctor-'));
+  try {
+    const serverFile = path.join(dir, 'main.mjs');
+    fs.writeFileSync(serverFile, '// stand-in\n');
+    const env = { XDG_CONFIG_HOME: path.join(dir, 'config'), XDG_STATE_HOME: path.join(dir, 'state'), OMNIHILBRAS_BUNDLED_SERVER: serverFile };
+    fs.mkdirSync(path.join(env.XDG_CONFIG_HOME, 'omnihilbras'), { recursive: true });
+    fs.writeFileSync(path.join(env.XDG_CONFIG_HOME, 'omnihilbras', 'dashboard-token'), 'a-token\n');
+    // A record whose pids are not alive: doctor must report the run but not claim it is up.
+    writeBundledRecord({ gatewayPid: 999999, staticPid: 999998, dashboardPort: 20137, gatewayPort: 20138, startedAt: new Date().toISOString() }, env);
+    const facts = bundledFacts(env);
+    assert.equal(facts.present, true);
+    assert.equal(facts.tokenPresent, true);
+    assert.equal(facts.run.dashboardPort, 20137);
+    assert.equal(facts.run.gatewayAlive, false);
+    assert.equal(facts.run.dashboardAlive, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

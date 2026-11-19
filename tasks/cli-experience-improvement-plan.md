@@ -1,6 +1,6 @@
 # CLI experience improvement plan — 9router parity, on our terms
 
-**Created:** 2026-11-19 · **Baseline:** `3.74.1` (the installed-dashboard fix) · **Status:** starting Phase 1.
+**Created:** 2026-11-19 · **Baseline:** `3.74.1` (the installed-dashboard fix) · **Status:** all five phases shipped (3.75.0 → 3.78.1).
 
 ## Goal
 
@@ -115,3 +115,8 @@ need a `docs/SPEC-SDK.md` line + `Kernel/API/test/` coverage; the `gateway-route
   verb. The launcher fires the check in parallel with startup and prints a one-line notice after readiness;
   `--skip-update` opts out. Nothing upgrades without the person running `update`.
   `tests/cli-update.test.js` (6 cases, mocked registry) pass; `docs/CLI.md` updated.
+- **Phase 5 — complete in the tree (3.78.1).** `doctor` gains a "Bundled server" section (server present,
+  dashboard token readable, the recorded run's ports/liveness, update availability) via an exported,
+  testable `bundledFacts` composed from the same helpers the verbs use. `docs/CLI.md` records the **deliberate
+  choices** (loopback-only, zero-dep, no postinstall, JSON-first, refuse-never-kill, opt-in update) so they are
+  not later "fixed". `tests/cli-lifecycle.test.js` grows to 10 cases (bundledFacts empty + populated).

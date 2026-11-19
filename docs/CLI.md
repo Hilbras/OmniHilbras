@@ -127,3 +127,24 @@ Write `cli/commands/<name>.mjs` exporting `{ name, summary, usage, flags, run }`
 `cli/index.mjs`, and add a case to `tests/cli.test.js` that drives the built command against a fake
 gateway. A verb's `flags` list is what stops an unknown flag being silently ignored — a dropped
 `--strict` is a check that never ran, which is worse than one that is missing.
+
+## Deliberate choices — kept, not gaps
+
+The CLI was compared against the reference launcher (`9router`) and adopts its convenience (lifecycle
+verbs, an arrow-key menu, a live header, background mode, update awareness) **without** adopting the
+choices below. These are intentional; a change that "fixes" one is a regression, not an improvement.
+
+- **Loopback-only by default.** The gateway binds `127.0.0.1`, not `0.0.0.0`. LAN exposure is an explicit
+  opt-in (`OMNIHILBRAS_CONTAINER=1` / `--host`), never the default.
+- **Zero runtime dependencies.** Menus, spinners and tables are hand-rolled. No `enquirer`, no native tray
+  binary. Background mode is achieved by detaching, not a system tray.
+- **No install-time bootstrap.** `prepack` bundles everything; `npm i -g` is a pure file copy. There is no
+  `postinstall` that downloads native deps into a user runtime directory.
+- **JSON-first, colour-for-people.** Every verb honours `--json` (the whole answer) and drops colour off a
+  terminal / `NO_COLOR`. The **dashboard** is the management UI; the CLI is a thin client, not a nested TUI.
+- **Refuse, never kill, a foreign port holder.** Lifecycle control verifies a pid is ours before signalling
+  it, and never kills something it did not start.
+- **Update is opt-in.** The launcher only *notices* a newer release; `omnihilbras update` is the explicit act
+  that installs it. Nothing upgrades the global package silently.
+
+See `tasks/cli-experience-improvement-plan.md` for the full comparison and the reasoning.
