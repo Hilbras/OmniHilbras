@@ -17,7 +17,8 @@ This package is the **client**: the verbs below, over HTTP, against a gateway on
 dependencies** and does not download a runtime.
 
 It **cannot start a server**, and that is not an oversight: a globally installed package has no checkout to
-run. `omnihilbras` with no verb prints the help.
+run. `omnihilbras` with no verb prints the help and says how to start one — the desktop app, or a checkout
+linked with `npm link`.
 
 | You want | Get it from |
 | --- | --- |
@@ -29,7 +30,7 @@ run. `omnihilbras` with no verb prints the help.
 
 | Verb | What it answers |
 | --- | --- |
-| `setup` | First run: what is missing on this machine, install it (printing each command before running it), install the `omnihilbras` command, start the servers |
+| `setup` | First run: what is missing on this machine, install it (printing each command before running it), install the `omnihilbras` command, and start the servers when this is a checkout (the published client has none to start) |
 | `doctor` | The same checks as a report that **changes nothing** — safe in a script or on someone else's machine |
 | `status` | Is the gateway up, what version, which providers are unhealthy (`--strict` exits `1`) |
 | `providers` | Every saved account: enabled, priority, credential kind, models, ejection, last error |

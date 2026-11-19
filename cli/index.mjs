@@ -74,7 +74,16 @@ export function parseArgv(argv) {
   return { args, flags };
 }
 
-export function usage() {
+/**
+ * What the command is, in the words that decide whether "no verb" can start anything.
+ *
+ * The two entry points share this text. `bin/omnihilbras.js` in a checkout is the **launcher**: no
+ * verb starts the gateway and the dashboard. The published `cli/bin/omnihilbras.js` is the **client**:
+ * there is no checkout, so no verb cannot start a server. The footer used to say the launcher's line in
+ * both cases, and a person who followed `npm i -g` and typed `omnihilbras` was told it had just started
+ * servers it cannot start.
+ */
+export function usage({ launcher = false } = {}) {
   const rows = Object.values(verbs).map((verb) => [`  ${verb.usage.replace('omnihilbras ', '')}`, verb.summary]);
   return `omnihilbras — the gateway's client
 
@@ -90,10 +99,21 @@ Options
   -h, --help           this text
   -v, --version        print the version
 
-Run \`omnihilbras\` with no verb to start the gateway and the dashboard.`;
+${launcher
+    ? 'Run `omnihilbras` with no verb to start the gateway and the dashboard.'
+    : 'This installed command is the gateway client: it asks a gateway that is already running.\nTo start the servers, open the OmniHilbras desktop app, or from a checkout run\n`pnpm install && npm link`, then `omnihilbras`.'}`;
 }
 
-export async function run(argv, { version } = {}) {
+/** Shown only by the published client, before the verb list. */
+function clientOnlyNotice() {
+  return `This is the gateway client. It cannot start a gateway or the dashboard.
+
+To start the servers:
+  • open the OmniHilbras desktop app, or
+  • from a checkout: pnpm install && npm link, then run \`omnihilbras\``;
+}
+
+export async function run(argv, { version, launcher = false } = {}) {
   const { args, flags } = parseArgv(argv);
   const name = args.shift();
 
@@ -101,9 +121,11 @@ export async function run(argv, { version } = {}) {
     process.stdout.write(`${version ?? 'unknown'}\n`);
     return 0;
   }
+  const bare = name === undefined && !flags.help;
   if (flags.help || name === undefined || name === 'help') {
-    process.stdout.write(`${usage()}\n`);
-    return name === undefined && !flags.help ? 2 : 0;
+    if (bare && !launcher) process.stdout.write(`${clientOnlyNotice()}\n\n`);
+    process.stdout.write(`${usage({ launcher })}\n`);
+    return bare ? 2 : 0;
   }
 
   const verb = verbs[name];
@@ -127,9 +149,9 @@ export async function run(argv, { version } = {}) {
 }
 
 /** The entry used by `bin/omnihilbras.js`; owns the exit code and the error rendering. */
-export async function main(argv, { version } = {}) {
+export async function main(argv, { version, launcher = false } = {}) {
   try {
-    const code = await run(argv, { version });
+    const code = await run(argv, { version, launcher });
     process.exitCode = code;
     return code;
   } catch (error) {

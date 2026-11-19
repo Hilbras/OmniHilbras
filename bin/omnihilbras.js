@@ -341,7 +341,7 @@ async function main() {
     // Every bare word is the CLI's to judge, including a misspelled verb: letting an unknown word fall
     // through to the launcher's option parser reported it as a bad flag with exit 1, when what the person
     // needs is "that is not a verb, here are the verbs" and the usage exit code.
-    process.exit(await cli.main(argv, { version: PKG.version }));
+    process.exit(await cli.main(argv, { version: PKG.version, launcher: true }));
   }
 
   const options = parseArgs(argv);

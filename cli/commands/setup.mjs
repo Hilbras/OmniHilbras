@@ -18,10 +18,9 @@
  */
 
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import readline from 'node:readline/promises';
 import { inspect } from '../lib/detect.mjs';
-import { inspectShortcut, installShortcut } from '../lib/shortcut.mjs';
+import { inspectShortcut, installShortcut, shortcutTarget } from '../lib/shortcut.mjs';
 
 const SEVERITY_LABEL = { blocking: 'blocking', 'needed-from-source': 'from source', optional: 'optional' };
 
@@ -71,6 +70,11 @@ export const setup = {
      * has. The count of "other installations" above and this line are usually about the same thing.
      */
     const shortcut = inspectShortcut();
+    // The checkout's launcher can start the servers; the published package's client cannot. Deciding
+    // this from `shortcutTarget()` is the same answer the shortcut itself uses, so setup cannot offer a
+    // start that the linked command would not perform.
+    const startTarget = shortcutTarget();
+    const canStart = startTarget?.kind === 'launcher';
     if (!shortcut.present) {
       const foreign = shortcut.foreign[0];
       // "Not on PATH" alone was false where an older global install still provides the command, so where
@@ -111,6 +115,10 @@ export const setup = {
           out.line(`  ${out.warn(`Note: ${shortcut.foreign[0]} also provides \`omnihilbras\`; whichever directory comes first on PATH wins.`)}`);
         }
       }
+      if (!canStart) {
+        out.line(out.muted('Starting the servers is the desktop app, or a checkout linked with `npm link`;'));
+        out.line(out.muted('this installed command is the client.'));
+      }
       if (report.gaps.length > 0) {
         out.title('Run these to finish setting up');
         for (const gap of report.gaps) out.line(`  ${gap.fix}   ${out.muted(`# ${gap.title}`)}`);
@@ -131,9 +139,14 @@ export const setup = {
         if (!shortcut.pointsAtUs) options.push(['install the `omnihilbras` command', 'shortcut']);
         options.push(['show the full report', 'report']);
         if (report.otherVersionCount > 0) options.push(['remove another version on this machine', 'uninstall']);
-        options.push(['start the gateway and dashboard', 'start']);
+        // Only the checkout launcher can start both halves. Offering it from the published client
+        // spawned `node_modules/bin/omnihilbras.js`, a path that does not exist in the tarball.
+        if (canStart) options.push(['start the gateway and dashboard', 'start']);
         options.push(['exit', 'exit']);
 
+        if (!canStart) {
+          out.line(out.muted('The servers start from the desktop app or a checkout (`npm link`); this command is the client.'));
+        }
         out.line(out.muted('What next?'));
         options.forEach(([label], index) => out.line(`  ${index + 1}. ${label}`));
         const answer = (await rl.question('  > ')).trim();
@@ -208,13 +221,13 @@ export const setup = {
           case 'start': {
             // Started through the checkout's own entry point rather than through whatever `omnihilbras`
             // resolves to: this verb's job is to start *these* servers, and the command on PATH may be the
-            // published client, which cannot.
-            const bin = fileURLToPath(new URL('../../bin/omnihilbras.js', import.meta.url));
+            // published client, which cannot. `canStart` above is the same check, so this path exists.
+            if (!startTarget || startTarget.kind !== 'launcher') break;
             out.line();
             out.line(out.muted('  Starting. Ctrl-C stops both servers.'));
             out.line();
             rl.close();
-            const child = spawn(process.execPath, [bin], { stdio: 'inherit' });
+            const child = spawn(process.execPath, [startTarget.path], { stdio: 'inherit' });
             return await new Promise((resolve) => child.on('close', (code) => resolve(code ?? 0)));
           }
           default:

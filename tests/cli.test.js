@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { usage } from '../cli/index.mjs';
 
 /**
  * The CLI, driven the way a person drives it: as a child process with a real gateway on the other end.
@@ -41,9 +43,9 @@ async function fakeGateway(handler) {
   };
 }
 
-function runCli(args, extraEnv = {}) {
+function runBin(binPath, args, extraEnv = {}) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [bin, ...args], {
+    const child = spawn(process.execPath, [binPath, ...args], {
       cwd: root,
       env: { ...process.env, NO_COLOR: '1', ...extraEnv },
     });
@@ -53,6 +55,10 @@ function runCli(args, extraEnv = {}) {
     child.stderr.on('data', (chunk) => (stderr += chunk));
     child.on('close', (code) => resolve({ code, stdout, stderr }));
   });
+}
+
+function runCli(args, extraEnv = {}) {
+  return runBin(bin, args, extraEnv);
 }
 
 test('help lists the verbs and makes no request at all', async () => {
@@ -69,6 +75,37 @@ test('help lists the verbs and makes no request at all', async () => {
   } finally {
     await gateway.close();
   }
+});
+
+test('the installed client says what it cannot do, and the launcher help still says what it can', async () => {
+  // Reported from a real install: `npm i -g @hilbras/omnihilbras`, then `omnihilbras` printed the verb
+  // list and the launcher's footer — "run with no verb to start the gateway and the dashboard" — which
+  // the published package cannot do. The person read that as "the command is broken".
+  const client = path.join(root, 'cli', 'bin', 'omnihilbras.js');
+  const bare = await runBin(client, []);
+  assert.equal(bare.code, 2);
+  assert.match(bare.stdout, /This is the gateway client\. It cannot start a gateway or the dashboard\./);
+  assert.match(bare.stdout, /desktop app/);
+  assert.doesNotMatch(bare.stdout, /with no verb to start/, 'the client must not repeat the launcher’s promise');
+
+  const help = await runBin(client, ['help']);
+  assert.equal(help.code, 0);
+  assert.match(help.stdout, /This installed command is the gateway client/);
+  assert.doesNotMatch(help.stdout, /with no verb to start/);
+
+  // The checkout's launcher is the one entry point for which the promise is true.
+  assert.match(usage({ launcher: true }), /with no verb to start/);
+  assert.doesNotMatch(usage(), /with no verb to start/);
+});
+
+test('setup only offers a start target it can actually run', () => {
+  // In the published layout `../../bin/omnihilbras.js` resolved to `node_modules/bin/omnihilbras.js`,
+  // which is not in the tarball. `shortcutTarget()` already knows the difference between a checkout
+  // launcher and the client, so setup asks it instead of assuming the checkout's layout.
+  const setup = readFileSync(path.join(root, 'cli', 'commands', 'setup.mjs'), 'utf8');
+  assert.match(setup, /shortcutTarget\(\)/, 'setup must ask which entry point it has');
+  assert.match(setup, /startTarget\?\.kind === 'launcher'/, 'only the launcher may be offered as a start');
+  assert.doesNotMatch(setup, /new URL\('\.\.\/\.\.\/bin\/omnihilbras\.js'/, 'the checkout-relative start path is back');
 });
 
 test('an unknown verb is refused with the way out, and exit code 2', async () => {
