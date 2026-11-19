@@ -494,7 +494,7 @@ async function start() {
         health = body.status;
         version = body.build?.version;
       } catch { /* fail-open: the menu still works when the gateway is slow or down */ }
-      return statusHeader({ dashboardUrl, gatewayUrl, health, version });
+      return statusHeader({ dashboardUrl, gatewayUrl, health, version, update: updateInfo });
     };
     const loop = async () => {
       while (!stopping) {

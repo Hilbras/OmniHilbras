@@ -39,6 +39,17 @@ test('statusHeader reports the gateway truthfully, never inventing health', () =
   assert.match(down, /○ unknown/, 'a gateway that did not answer is unknown, not healthy');
 });
 
+test('statusHeader puts an available update first, and omits it when up to date', () => {
+  const withUpdate = statusHeader({ dashboardUrl: 'd', gatewayUrl: 'g', health: 'healthy', update: { updateAvailable: true, current: '3.78.1', latest: '3.79.0' } });
+  const lines = withUpdate.split('\n');
+  assert.match(lines[0], /Update\s+3\.78\.1 → 3\.79\.0/, 'the update notice is the first line');
+  assert.match(lines[0], /omnihilbras update/, 'and names the opt-in command');
+  const noUpdate = statusHeader({ dashboardUrl: 'd', gatewayUrl: 'g', health: 'healthy', update: { updateAvailable: false } });
+  assert.doesNotMatch(noUpdate, /Update/, 'no update line when up to date');
+  const none = statusHeader({ dashboardUrl: 'd', gatewayUrl: 'g' });
+  assert.doesNotMatch(none, /Update/, 'no update line when the check failed open');
+});
+
 /** A TTY-like stream pair; selectMenu guards setRawMode, which a PassThrough does not have. */
 function tty() {
   const input = new PassThrough();

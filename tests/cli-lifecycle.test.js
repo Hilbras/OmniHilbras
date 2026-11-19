@@ -104,7 +104,7 @@ test('the lifecycle verbs are registered with the flags they accept', () => {
     assert.ok(Array.isArray(verbs[name].flags));
   }
   assert.deepEqual(verbs.stop.flags, ['--force']);
-  assert.deepEqual(verbs.restart.flags, ['--force']);
+  assert.deepEqual(verbs.restart.flags, ['--force', '--skip-update']);
   assert.deepEqual(verbs.open.flags, []);
   assert.deepEqual(verbs.ps.flags, []);
 });
@@ -141,4 +141,39 @@ test('doctor bundledFacts sees a staged server, a token, and a recorded run', ()
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/** Runs restart with an isolated, unstaged install so it refuses AFTER the update check — proving order. */
+async function restartWithMockedRegistry({ flags = {}, latest = '99.0.0' } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'omni-restart-'));
+  const keys = ['XDG_STATE_HOME', 'XDG_CONFIG_HOME', 'OMNIHILBRAS_BUNDLED_SERVER'];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  const savedFetch = globalThis.fetch;
+  const lines = [];
+  const out = { json: false, data: (v) => v, line: (t) => lines.push(t), title: (t) => lines.push(t), muted: (t) => t, warn: (t) => t, ok: (t) => t, bad: (t) => t };
+  let fetchCalls = 0;
+  try {
+    process.env.XDG_STATE_HOME = path.join(dir, 'state');
+    process.env.XDG_CONFIG_HOME = path.join(dir, 'config');
+    process.env.OMNIHILBRAS_BUNDLED_SERVER = path.join(dir, 'no-server.mjs');
+    globalThis.fetch = async () => { fetchCalls += 1; return { ok: true, json: async () => ({ version: latest }) }; };
+    await assert.rejects(() => verbs.restart.run({ out, flags }), /no bundled server/i);
+    return { lines, fetchCalls };
+  } finally {
+    for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+    globalThis.fetch = savedFetch;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('restart checks for an update first, before touching the servers', async () => {
+  const { lines, fetchCalls } = await restartWithMockedRegistry();
+  assert.equal(fetchCalls, 1, 'the registry was consulted');
+  assert.match(lines.join('\n'), /Update available.*99\.0\.0/, 'the update notice is printed before the restart proceeds');
+});
+
+test('restart --skip-update does not consult the registry', async () => {
+  const { lines, fetchCalls } = await restartWithMockedRegistry({ flags: { skipUpdate: true } });
+  assert.equal(fetchCalls, 0, 'no registry call with --skip-update');
+  assert.doesNotMatch(lines.join('\n'), /Update available/, 'no update notice');
 });

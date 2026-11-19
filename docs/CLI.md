@@ -76,7 +76,7 @@ account can serve this" without a browser. Both want the answer as data, which i
 | `ps` | The **bundled run** this command started: its pids, ports, uptime, and whether each process is still alive and still *ours*, plus the gateway's health when it answers. Distinct from `status`, which asks a gateway what it is. |
 | `open` | Opens the running bundled dashboard in a browser, at the port it actually listens on (from the run record, never a guess). Says so when nothing is running rather than opening a dead URL. |
 | `stop [--force]` | Stops the bundled gateway and dashboard. Each pid is **verified to be ours before it is signalled** — a reused or foreign pid is reported and left alone unless `--force`. The counterpart to the launcher's Ctrl-C, for a run started in another terminal. |
-| `restart [--force]` | `stop`, then start the bundled launcher again. Refuses rather than killing a foreign pid and starting a second copy. |
+| `restart [--force] [--skip-update]` | **Checks for an update first** (fail-open; only notices — installing stays `omnihilbras update`), then `stop` and start the bundled launcher again. Refuses rather than killing a foreign pid and starting a second copy. `--skip-update` skips the check. The launcher's live header also shows an available update at the top. |
 | `update [--check]` | Checks the registry for a newer release (**fail-open** — a slow or unreachable registry never blocks). `--check` only reports; without it, installs `npm i -g @hilbras/omnihilbras@latest`. This is the **opt-in** upgrade: the launcher only *notices* a newer version and points here, it never upgrades on its own. |
 | `providers [provider] [--all]` | Every saved **account** — which is what routing actually chooses between — with its enabled state, priority, model count, credential kind, and live routing state (ejected, waiting, last error). |
 | `models [--provider <id>] [--limit <n>]` | The model ids the gateway serves, grouped by provider prefix. These are the ids a client pastes into its config, e.g. `zc/glm-5.3-flash`. |
@@ -108,6 +108,22 @@ is shown once on purpose.
 
 Point it elsewhere with `--gateway <url>` or `OMNIHILBRAS_GATEWAY_URL`. A remote gateway has no dashboard
 token to find, so it needs an API key.
+
+## Token saver — opt-in, off by default
+
+Requests do **not** pass through the token saver unless it is enabled. The gateway only compresses a
+conversation when a saver is active (`OMNIHILBRAS_TOKEN_SAVER=1`, or `OMNIHILBRAS_HISTORY_TRIM_TOKENS`,
+`OMNIHILBRAS_HEADROOM_URL`, `OMNIHILBRAS_PXPIPE_URL`, etc.); otherwise messages are forwarded unchanged.
+This matches the reference launcher, which gates compression behind its `headroomEnabled`/`pxpipeEnabled`
+settings.
+
+- **Check whether requests are being compressed:** `GET /v1/token-saver/stats` (or the dashboard's Token Saver
+  page). `requestsWithTelemetry` counts requests that carried compression telemetry; `0` means none went
+  through a saver. `totalTokensSaved` / `savers[]` show what was saved when it is on.
+- **Try it without a provider call:** `POST /v1/token-saver/analyze` with a `messages` array runs the
+  configured savers in memory and reports before/after — no request is sent and nothing is stored.
+- **Enable it:** set `OMNIHILBRAS_TOKEN_SAVER=1` (plus `OMNIHILBRAS_TOKEN_SAVER_RATIO`, `_PROTECT_RECENT`,
+  `_USERS`, `_CODE` as desired) and restart the gateway. It is a startup setting, not a runtime toggle.
 
 ## Where the code lives
 

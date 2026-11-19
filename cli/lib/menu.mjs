@@ -41,15 +41,19 @@ export function renderMenu({ title, items, selected = 0, header = '', colour = t
  * `health` is the gateway's reported status string (or undefined when it did not answer); nothing here is
  * invented — a gateway that is down reads as unknown, not as healthy.
  */
-export function statusHeader({ dashboardUrl, gatewayUrl, health, version }) {
+export function statusHeader({ dashboardUrl, gatewayUrl, health, version, update }) {
   const dot = health === 'healthy' ? '●' : health ? '◐' : '○';
   const state = health ?? 'unknown';
   const build = version ? ` · ${version}` : '';
-  return [
+  const lines = [];
+  // An available update goes first, like the reference launcher's top menu item — noticed, never auto-run.
+  if (update?.updateAvailable) lines.push(`  Update     ${update.current} → ${update.latest} · run \`omnihilbras update\``);
+  lines.push(
     `  Dashboard  ${dashboardUrl}`,
     `  Gateway    ${gatewayUrl}`,
     `  Status     ${dot} ${state}${build}`,
-  ].join('\n');
+  );
+  return lines.join('\n');
 }
 
 /**

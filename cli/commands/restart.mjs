@@ -6,16 +6,29 @@
  * start half hands the terminal to the bundled launcher, which owns the menu, spinner and Ctrl-C.
  */
 
+import { createRequire } from 'node:module';
 import { CliError } from '../lib/client.mjs';
 import { readBundledRecord, stopBundledServers, waitPidGone, clearBundledRecord } from '../lib/bundled-state.mjs';
 import { hasBundledServer, runBundledServer } from '../lib/bundled.mjs';
+import { checkForUpdate } from '../lib/update.mjs';
+
+const { version } = createRequire(import.meta.url)('../package.json');
 
 export const restart = {
   name: 'restart',
-  summary: 'Stop the bundled servers, then start them again',
-  usage: 'omnihilbras restart [--force]',
-  flags: ['--force'],
+  summary: 'Check for an update, then stop and start the bundled servers',
+  usage: 'omnihilbras restart [--force] [--skip-update]',
+  flags: ['--force', '--skip-update'],
   async run({ out, flags }) {
+    // First thing on restart: check for a newer release, like the reference launcher does at every launch.
+    // Fail-open and opt-in — it only notices; installing stays the explicit `omnihilbras update`.
+    if (!flags.skipUpdate) {
+      const updateInfo = await checkForUpdate(version).catch(() => undefined);
+      if (updateInfo?.updateAvailable) {
+        out.line(out.warn(`Update available: ${updateInfo.current} → ${updateInfo.latest}. Run \`omnihilbras update\` to install it.`));
+      }
+    }
+
     const record = readBundledRecord();
     if (record) {
       const result = stopBundledServers(record, { force: Boolean(flags.force) });

@@ -120,3 +120,11 @@ need a `docs/SPEC-SDK.md` line + `Kernel/API/test/` coverage; the `gateway-route
   testable `bundledFacts` composed from the same helpers the verbs use. `docs/CLI.md` records the **deliberate
   choices** (loopback-only, zero-dep, no postinstall, JSON-first, refuse-never-kill, opt-in update) so they are
   not later "fixed". `tests/cli-lifecycle.test.js` grows to 10 cases (bundledFacts empty + populated).
+- **Follow-up (3.79.0) — update-first restart + token-saver clarity.** `omnihilbras restart` now checks for
+  an update **first** (fail-open, opt-in, `--skip-update` to skip), mirroring 9router's check-at-every-launch;
+  the launcher's live header shows an available update at the top (`statusHeader` `update`). Verified the
+  token saver question empirically: **0 of 224** real usage records carry compression telemetry, so requests
+  are **not** going through TokenSaver — it is opt-in (`OMNIHILBRAS_TOKEN_SAVER`), default off, exactly like
+  9router's `headroomEnabled`/`pxpipeEnabled`. `docs/CLI.md` documents how to check (`/v1/token-saver/stats`),
+  dry-run (`/v1/token-saver/analyze`), and enable it. Tests: menu 9, lifecycle 12 (restart update-first +
+  `--skip-update`), cli 14 — all pass.
