@@ -54,7 +54,7 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       assertOnlyFields(body, ['redirectUri', 'addAccount', 'connectionId']);
       const redirectUri = typeof body.redirectUri === 'string' ? body.redirectUri : defaultClineRedirect(options.publicBaseUrl);
       const { addAccount, targetConnectionId } = readSignInTarget(body);
-      sendJson(response, 201, service.startClineSignIn(redirectUri, addAccount, targetConnectionId), origin);
+      sendJson(response, 201, service.startClineSignIn('cline', redirectUri, addAccount, targetConnectionId), origin);
       return true;
     }
 
@@ -108,6 +108,48 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
         redirectUri: typeof body.redirectUri === 'string' ? body.redirectUri : defaultClineRedirect(options.publicBaseUrl),
         ...(typeof body.name === 'string' ? { name: body.name } : {}),
         ...(body.priority === undefined ? {} : { priority: parsePriority(body.priority) }),
+        providerId: 'cline',
+      }, signal);
+      sendJson(response, 201, { connection }, origin);
+      return true;
+    }
+
+    // ClinePass is its own provider and its own account. Its sign-in uses Cline's WorkOS grant
+    // (there is no second identity provider) but the session records the ClinePass provider, so the
+    // resulting connection, credential and model tier belong to this card.
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/clinepass/start') {
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['redirectUri', 'addAccount', 'connectionId']);
+      const redirectUri = typeof body.redirectUri === 'string' ? body.redirectUri : defaultClineRedirect(options.publicBaseUrl);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, service.startClineSignIn('clinepass', redirectUri, addAccount, targetConnectionId), origin);
+      return true;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/clinepass/session/')) {
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/clinepass/session/'.length)).trim();
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
+      const status = service.clineSignInStatus(sessionId);
+      if (!status) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
+        return true;
+      }
+      sendJson(response, 200, status, origin);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/clinepass/exchange') {
+      const body = await readJsonBody(request, Math.min(options.maxBodyBytes ?? maxConnectionBodyBytes, maxKeyBodyBytes));
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['code', 'callback', 'redirectUri', 'name', 'priority']);
+      const connection = await service.connectCline({
+        code: parseBoundedString(body.code ?? body.callback ?? '', 'code', 8192),
+        ...(typeof body.callback === 'string' ? { callback: body.callback } : {}),
+        redirectUri: typeof body.redirectUri === 'string' ? body.redirectUri : defaultClineRedirect(options.publicBaseUrl),
+        ...(typeof body.name === 'string' ? { name: body.name } : {}),
+        ...(body.priority === undefined ? {} : { priority: parsePriority(body.priority) }),
+        providerId: 'clinepass',
       }, signal);
       sendJson(response, 201, { connection }, origin);
       return true;

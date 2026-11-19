@@ -2,8 +2,9 @@ import { CLINE_OAUTH, ClineAdapter, clineHeaders, type ClineAdapterOptions } fro
 import type { ChatRequest, ChatResponse, ChatChunk, Model, ProviderRequestContext } from '../lib/types.js';
 
 /**
- * ClinePass is Cline's paid model tier, and it is **the same account as Cline** — not a second
- * credential, not a pasted key.
+ * ClinePass is Cline's paid model tier. It is a **separate provider and a separate connection** from
+ * Cline — that is the product decision this package implements — while the wire format and the account
+ * vendor are Cline's.
  *
  * ## What the vendor source says
  *
@@ -21,26 +22,28 @@ import type { ChatRequest, ChatResponse, ChatChunk, Model, ProviderRequestContex
  *   `cline-pass`) share this AI SDK provider and the same Cline API."* Same host, same
  *   `Authorization: Bearer`, same client headers.
  *
+ * ## Why this is a separate connection anyway
+ *
+ * Cline's client stores one token for one account, and the gateway used to mirror that: ClinePass
+ * borrowed Cline's record and read Cline's credential through an alias. The visible result was two
+ * cards showing the same catalog and the same usage, and a ClinePass card that could not say which
+ * tier it was. A second **sign-in** is a second WorkOS authorization grant for the same account, so
+ * each connection holds its own refresh token; rotation is per grant, not per account. The two cards
+ * therefore keep separate connection records, separate credentials and separate model lists.
+ *
  * So this adapter **subclasses** `ClineAdapter` rather than reimplementing it. Everything about the
- * wire format is Cline's — including the OAuth token renewal a shared connection needs — and the only
- * things that differ are:
+ * wire format is Cline's — including the OAuth token renewal a grant needs — and the only things that
+ * differ are:
  *
  * 1. the **id and name** it reports, so a failure is attributed to the right card; and
  * 2. the **model filter**, because Cline answers a ClinePass request with the *whole* catalog.
  *
- * ## Why there is no cookie path and no sign-in of its own
- *
- * Nothing in Cline's SDK reads a cookie; `app.cline.bot` is only ever opened in a real browser. And a
- * separate ClinePass sign-in would mint a *second* token for one account — WorkOS rotates refresh
- * tokens, so the two would invalidate each other. ClinePass is signed into by signing into Cline; the
- * gateway stores that one credential and this adapter reads it through the gateway's alias.
- *
  * ## What health can and cannot prove
  *
  * Cline decides entitlement server-side, per request, from the subscription — there is no endpoint that
- * answers "is this subscription current". A health check therefore proves the Cline token is live and
- * **nothing about whether the ClinePass tier is unlocked**. The `cline-pass/` filter below is what keeps
- * the *model list* honest; the health status does not.
+ * answers "is this subscription current". A health check therefore proves this connection's Cline token
+ * is live and **nothing about whether the ClinePass tier is unlocked**. The `cline-pass/` filter below
+ * is what keeps the *model list* honest; the health status does not.
  */
 
 /** The model prefix that is ClinePass. Everything else on this host is the free tier. */

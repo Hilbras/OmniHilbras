@@ -164,6 +164,33 @@ for (const providerId of ['minimax-code', 'minimax-code-global']) {
     });
   });
 
+  test(`MiniMax Code (${providerId}): a completed sign-in is saved when the catalog cannot be read`, async () => {
+    /**
+     * Regression: 3.70.0 added `validateOnSave` for both MiniMax cards, and the pre-flight probe read
+     * the agent host's catalog. A grant the token endpoint had just approved then failed to save, and
+     * the dialog reported "Sign-in did not finish". The exchange is the proof; catalog discovery is
+     * tolerated and must not turn a completed sign-in into a failure.
+     */
+    const { service, key } = await buildService((request) => {
+      if (request.url.includes('/oauth2/device/code')) {
+        return { data: { user_code: 'MM-1', device_code: 'mm-dev', verification_uri: 'https://account.minimax.io/user/code', expires_in: 600 } };
+      }
+      if (request.url.includes('/oauth2/token')) {
+        return { data: { access_token: 'mm-access', refresh_token: 'mm-refresh', expires_in: 3600 } };
+      }
+      // The catalog endpoint answers something this adapter refuses, which is what a region or a
+      // changed response shape looks like.
+      return { data: {} };
+    });
+    await withServer(service, async (base) => {
+      const start = await (await startFlow(base, providerId, key)).json();
+      const status = await (await poll(base, providerId, start.sessionId, key)).json();
+      assert.equal(status.status, 'connected', status.error);
+      assert.equal(status.connection.providerId, providerId);
+      assert.equal(status.connection.modelIds.length, 0, 'an unreadable catalog leaves the list empty rather than inventing one');
+    });
+  });
+
   test(`MiniMax Code (${providerId}): a denied {status} envelope fails with a reason`, async () => {
     const { service, key } = await buildService((request) => {
       if (request.url.includes('/oauth2/device/code')) return { data: { user_code: 'MM-1', device_code: 'mm-dev', verification_uri: 'https://account.minimax.io/user/code' } };

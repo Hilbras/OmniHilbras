@@ -13,10 +13,11 @@
 - **Phase 2 — complete except Docker runtime proof**: usage and connection counters coalesced with a flush on
   close, container bind opt-in (`OMNIHILBRAS_CONTAINER=1`), `EXPOSE 20138`, docs/version drift fixed. Docker could not
   be started here (no Docker binary); CI workflow is the remaining proof.
-- **Phase 3 — substantially implemented, live checks outstanding**: Cline/ClinePass now have separate connection
-  records, model lists and usage attribution; both advertise API key + OAuth; a `credentialConnectionId` link replaces
-  the global alias, with API-key ClinePass independent. MiniMax refresh de-duplication, forced renewal, expiry
-  normalisation, save tolerance and CN verification URL fixed; Aion has a real one-token credential check;
+- **Phase 3 — substantially implemented, live checks outstanding**: Cline/ClinePass have separate connection
+  records, credentials, sign-in routes, model lists and usage attribution, and both advertise API key + OAuth. The
+  global alias is gone, and a save with its own credential clears a migration-era `credentialConnectionId`. MiniMax
+  refresh de-duplication, forced renewal, expiry normalisation, save tolerance and CN verification URL fixed, and
+  `validateOnSave` was removed because it failed an approved sign-in; Aion has a real one-token credential check;
   100milionseek has a package, card, registry row, caps row, slug, logo and tests. Live Cline/MiniMax/Aion/100m
   checks need credentials.
 - **Phase 4 — implemented offline, live audit outstanding**: Codex sends the account/user-agent headers, has a
@@ -37,7 +38,21 @@
   floor (`docs/reports/gateway-overhead-2026-11-19.json`: p50 ~2 ms, p95 ~4.6 ms for non-streaming on this machine);
   the credential path no longer lists and clones the whole vault to read one record. The dry-run verify is in; the
   full UI wizard and the remaining transport measurements are still to do.
-- **E2E**: not run locally — Playwright's Chromium is not installed on this machine (`browserType.launch`). CI carries it.
+- **E2E**: run locally after installing Playwright's Chromium — 30 passed, 2 skipped visual baselines.
+
+## Follow-up pass — `3.71.0` (2026-11-19)
+
+Two reports after `3.70.0` shipped:
+
+- **“Still not separate the Cline and Cline Pass.”** `3.70.0` gave ClinePass its own record but linked it to Cline's
+  credential and read Cline's catalog, so the card still showed one account. `3.71.0` removes the alias and the
+  shared-catalog live read, adds `/v1/oauth/clinepass/start|session|exchange`, writes a second WorkOS grant to the
+  ClinePass record, and lists only the `cline-pass/…` tier from that record. A save that stores its own credential
+  clears an inherited `credentialConnectionId`, so the migration-era link cannot outlive the separation.
+- **“MiniMax: Sign-in did not finish.”** The cause was `validateOnSave: true` added in `3.70.0`: after the device
+  flow was approved, a pre-flight catalog read failed and the save was discarded. Both MiniMax cards no longer
+  validate on save; the exchange is the proof and discovery is tolerated. A regression test completes a poll with
+  an unreadable catalog and expects `connected` with an empty model list.
 
 
 This plan covers everything from the review and the feedback. It is ordered by risk and by

@@ -281,13 +281,13 @@ const DEFAULT_RESILIENCE: GatewayResilience = { timeoutMs: 0, maxRetries: 1, req
 /**
  * OAuth providers the gateway can actually complete a sign-in for today.
  *
- * **A card that shares another's connection is not listed.** `clinepass` reads Cline's connection
- * through `connectionProviderId`, and there is no `clinepass` sign-in route — its sign-in *is* Cline's.
- * Listing it here would have enabled a flow that calls `/v1/oauth/clinepass/start`, which the gateway
- * does not serve: the request 404s, the tab opened for it is never navigated, and the button looks dead
- * with a blank page. The dialog is sent to the connection owner instead (see `signInProviderId`).
+ * Every id here is checked against a real start route by `tests/provider-cards.test.js`. The list used
+ * to omit `clinepass` because its sign-in *was* Cline's and the gateway served no route for it; it is
+ * a separate provider now and has `/v1/oauth/clinepass/start`, so it is listed on its own id. A card
+ * may still name a `connectionProviderId` if it genuinely shares another card's account, and the
+ * dialog is sent to that owner (see `signInProviderId`) — no card does today.
  */
-const oauthProvidersWithFlow = new Set(['cline', 'opencode-console', 'opencode', 'opencode-go', 'kiro', 'claude-code', 'codex', 'kimi-code', 'kilocode', 'minimax-code', 'minimax-code-global', 'qoder', 'codebuddy-cn', 'codebuddy-intl', 'nous', 'zcode']);
+const oauthProvidersWithFlow = new Set(['cline', 'clinepass', 'opencode-console', 'opencode', 'opencode-go', 'kiro', 'claude-code', 'codex', 'kimi-code', 'kilocode', 'minimax-code', 'minimax-code-global', 'qoder', 'codebuddy-cn', 'codebuddy-intl', 'nous', 'zcode']);
 
 /** Providers whose flow is a pasted credential rather than a browser sign-in. */
 const webCookieProviders = new Set(webSessionProviderIds());
@@ -516,8 +516,8 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     void listGatewayConnections(AbortSignal.timeout(CONNECTION_LOAD_TIMEOUT_MS))
       .then((connections) => {
         if (!active) return;
-        // A provider's own connection wins. A card that shares another's connection names its owner
-        // via `connectionProviderId`; that is the fallback when no own account exists yet.
+        // A provider's own connection wins. A card that deliberately shares another's account names its
+        // owner via `connectionProviderId`; that is the fallback when no own account exists yet.
         const ownId = provider.catalogId ?? provider.id;
         const owner = provider.connectionProviderId ?? ownId;
         const own = connections.filter((item) => item.providerId === ownId && item.hasCredential);
@@ -1500,10 +1500,10 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
 
       {tab === 'usage' ? (
         /*
-          A card whose credential belongs to another provider records its usage under the **owner's** id — the
-          gateway attributes a request to the provider that served it, and for a shared connection that is the
-          owner. So the filter follows the connection, not the card, or `clinepass` would show an empty tab while
-          its requests sit under `cline`. `ProviderRecord.connectionProviderId` exists for exactly this.
+          The filter follows the **connection**, not the card. For an ordinary card those are the same id; for
+          a card that deliberately shares another account (`connectionProviderId`) the gateway records usage
+          under the owner, and filtering by the card would show an empty tab. ClinePass no longer shares —
+          it has its own connection — so this is the general rule rather than a workaround for one card.
         */
         <div>
           <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -1839,9 +1839,8 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       )}
       {isOauth && oauthFlowAvailable && addOpen && !apiKeyMode && signInProviderId !== 'kiro' && (
         <OauthConnectDialog
-          // The connection owner's id, not this card's: `clinepass` signs in through Cline's route, and
-          // the one saved connection is what both cards read. Passing this card's id here is what sent the
-          // flow to a route the gateway does not serve, leaving the opened tab blank.
+          // The card's own id unless it deliberately shares an account (`connectionProviderId`). Cline
+          // and ClinePass share neither a connection nor a route now, so each starts its own flow.
           providerId={signInProviderId}
           providerName={provider.name}
           {...(provider.riskNotice ? { riskNotice: provider.riskNotice } : {})}

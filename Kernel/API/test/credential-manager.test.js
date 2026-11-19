@@ -85,15 +85,19 @@ test('an unconnected provider is still asked, with the provider id standing in',
   assert.deepEqual(vault.reads, [['p', 'p']], 'and the read happens once, under the id that is available');
 });
 
-test('a provider that shares another’s credential reads the owner’s connection', async () => {
-  // `clinepass` reads `cline`'s one connection — Cline's own auth registry registers `cline-pass` as an
-  // alias of the `cline` handler. The lookup follows the alias; the **provider id stays this one**, so the
-  // adapter is ClinePass's and a failure names the right card.
-  const vault = secrets({ 'cline-conn': credential });
-  const manager = new CredentialManager(vault, connections([record({ id: 'cline-conn', providerId: 'cline' })]));
+test('a sibling provider reads its own connection, not another vendor card’s', async () => {
+  // `clinepass` used to read `cline`'s connection through an alias. It is a separate provider now:
+  // same vendor and wire format, different connection, grant and model tier. The lookup must use the
+  // card's own record even when a sibling card exists with a credential.
+  const tier = { type: 'api-key', value: 'tier-secret' };
+  const vault = secrets({ 'cline-conn': credential, 'clinepass-conn': tier });
+  const manager = new CredentialManager(vault, connections([
+    record({ id: 'cline-conn', providerId: 'cline' }),
+    record({ id: 'clinepass-conn', providerId: 'clinepass' }),
+  ]));
   const context = await manager.contextForProvider('clinepass');
-  assert.deepEqual(context.credential, credential, 'the shared credential is used');
-  assert.deepEqual(vault.reads, [['cline-conn', 'clinepass']], 'read under the owner’s connection, labelled with this provider');
+  assert.deepEqual(context.credential, tier, 'its own credential is used');
+  assert.deepEqual(vault.reads, [['clinepass-conn', 'clinepass']], 'read under its own connection');
 });
 
 test('the alias does not let an unrelated provider borrow a credential', async () => {

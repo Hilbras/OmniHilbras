@@ -99,7 +99,7 @@ import { exportWebProfiles, importWebProfiles, parseWebProfilesState } from './w
 import { removeGeminiWebProfile } from '../providers/geminiWeb.js';
 import { notSupported } from './capability.js';
 import { RequestExecutor, type GatewayChatOutcome, type GatewayEmbedOutcome, type GatewayImageOutcome, type GatewayAudioOutcome, type GatewayTranscriptionOutcome, type GatewayStreamOutcome } from './request-executor.js';
-import { providerAlias, sharedCatalogProviders } from './provider-alias.js';
+import { providerAlias } from './provider-alias.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ApiKeyManager } from './api-key-manager.js';
 import { parseUsageState, type UsageRecord, type UsageStore } from './usage-store.js';
@@ -714,9 +714,11 @@ export class GatewayService {
     });
     let resolver = new ProviderResolver(registry, this.transport)
       .onDemand('cline', ({ connection }) => this.clineAdapter(connection?.id ?? 'cline'), { validateOnSave: true })
-      // No `validateOnSave`: ClinePass stores no credential of its own — it reads Cline's connection
-      // through the alias in `credential-manager.ts` — so there is nothing to prove at save time.
-      .onDemand('clinepass', ({ connection }) => this.clinepassAdapter(connection?.id ?? 'clinepass'), { validateOnSave: true })
+      // No `validateOnSave`. The exchange has already proved the grant, and the inherited check reads
+      // the account endpoint — which says nothing about the tier and is one more way for a completed
+      // sign-in to be reported as a failure. Discovery imports the tier with a tolerated failure, as
+      // every other OAuth flow does.
+      .onDemand('clinepass', ({ connection }) => this.clinepassAdapter(connection?.id ?? 'clinepass'))
       .onDemand('apmix', () => this.apmixAdapter())
       .onDemand('beatapi', () => this.beatapiAdapter())
       // `validateOnSave`: Nous publishes its model catalog unauthenticated, so a save that only read
@@ -733,8 +735,13 @@ export class GatewayService {
       .onDemand(codexProviderId, ({ providerId, connection }) => this.codexAdapter(connection?.id ?? providerId))
       .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId))
       .onDemand(kilocodeProviderId, ({ providerId, connection }) => this.kilocodeAdapter(connection?.id ?? providerId))
-      .onDemand(minimaxCodeProviderId, ({ providerId, connection }) => this.minimaxCodeAdapter(connection?.id ?? providerId), { validateOnSave: true })
-      .onDemand(minimaxCodeGlobalProviderId, ({ providerId, connection }) => this.minimaxCodeAdapter(connection?.id ?? providerId), { validateOnSave: true })
+      // **No `validateOnSave`.** It was added in 3.70.0 and is the reason both MiniMax sign-ins ended
+      // at "Sign-in did not finish": the device flow completed, then the pre-flight probe read the
+      // agent host's catalog — which is not what the sign-in proved — and any refusal there discarded
+      // a grant the provider had just approved. The token exchange is the proof. Discovery still reads
+      // the catalog afterwards, with a tolerated failure, so a slow catalog cannot lose a real session.
+      .onDemand(minimaxCodeProviderId, ({ providerId, connection }) => this.minimaxCodeAdapter(connection?.id ?? providerId))
+      .onDemand(minimaxCodeGlobalProviderId, ({ providerId, connection }) => this.minimaxCodeAdapter(connection?.id ?? providerId))
       .onDemand(codebuddyCnProviderId, ({ providerId, connection }) => this.codebuddyAdapter(connection?.id ?? providerId))
       .onDemand(codebuddyIntlProviderId, ({ providerId, connection }) => this.codebuddyAdapter(connection?.id ?? providerId))
       .onDemand(qoderProviderId, ({ providerId, connection }) => this.qoderAdapter(connection?.id ?? providerId))
@@ -1124,93 +1131,34 @@ export class GatewayService {
    * `saveConnection` wraps this for the many callers that only want the record.
    */
   async saveConnectionDetailed(input: ConnectionInput, credential: ProviderCredential, signal?: AbortSignal, options: { tolerateDiscoveryFailure?: boolean } = {}): Promise<{ connection: ConnectionRecord; duplicate: 'none' | 'identical' | 'updated' }> {
-    const saved = await this.connections.save(input, credential, signal, options);
-    // A provider whose catalog lives on a **shared** record has no connection of its own until this
-    // runs: ClinePass was reachable by the gateway but absent from the model list and, at routing time,
-    // skipped as `no-models`. It is created here — after Cline's catalog imported, with the same
-    // credential, which the record shares rather than duplicates — and its tier is imported now.
-    await this.ensureSharedCatalogConnections(signal);
-    return saved;
+    // **No catalog reconciliation and no alias lookup.** A save belongs to exactly one provider: the
+    // record is written under its own id, the credential is stored under it, and its own adapter
+    // imports its own catalog. Cline and ClinePass used to be the exception — one record borrowing the
+    // other's credential and a live tier read — and the consequence was a second card that showed the
+    // first card's models. They are separate accounts now, so the store is the whole save path.
+    return this.connections.save(input, credential, signal, options);
   }
 
   /**
-   * Creates the record for every provider whose catalog is not stored on the connection it shares.
+   * Completes a Cline sign-in: exchanges the code for tokens, then stores the connection under the
+   * provider that started it.
    *
-   * Deliberately best-effort: a tier that will not read must not fail a sign-in that was already
-   * approved. What it must not do is *borrow* the owner's credential — `providers` is what makes the
-   * credential shared, and the tier is listed from the adapter instead.
+   * The exchange is the proof: a code that Cline refuses never becomes a credential. Cline also asks
+   * its account endpoint at save time (`validateOnSave`), while ClinePass does not — its tier catalog
+   * is not an entitlement check, and a failure there must not discard a grant WorkOS just approved.
+   * Catalog discovery is tolerated for both, so an unreadable feed leaves a connected account with an
+   * empty model list, which "Update models" can fill later.
    */
-  async ensureSharedCatalogConnections(signal?: AbortSignal) {
-    for (const [aliasId, ownerId] of Object.entries(sharedCatalogProviders)) {
-      const connections = await this.connections.list();
-      const existing = connections.find((connection) => connection.providerId === aliasId);
-      const owner = connections.find((connection) => connection.providerId === ownerId && connection.hasCredential);
-      if (!owner) continue;
-      if (existing) {
-        // Migrate the pre-link alias record. A record with its own API key has a credential type of
-        // `api-key`; only the deliberate `none` record is linked.
-        if (!existing.credentialConnectionId && existing.credentialType === 'none') {
-          try {
-            await this.connections.save({
-              id: existing.id,
-              providerId: aliasId,
-              name: existing.name,
-              endpoint: existing.endpoint,
-              priority: existing.priority,
-              proxyPool: existing.proxyPool,
-              modelPolicy: existing.modelPolicy,
-              credentialConnectionId: owner.id,
-            }, { type: 'none' }, signal, { tolerateDiscoveryFailure: true });
-          } catch (error) {
-            console.warn(`[shared-catalog] could not link ${aliasId}: ${error instanceof Error ? error.message : 'unknown error'}`);
-          }
-        }
-        continue;
-      }
-      try {
-        /**
-         * A `none` credential, not a copy of the owner's.
-         *
-         * This record is a **catalog alias**: `CredentialManager` resolves the alias for the request
-         * path, so the token is read from Cline's connection. Copying it here is what the old code did,
-         * and it both invalidated one of two copies on refresh and failed outright with "Connection ID
-         * is already used by another provider" — a failure the bare `catch` then hid, so the shared
-         * card simply never existed.
-         */
-        await this.connections.save({
-          id: aliasId,
-          providerId: aliasId,
-          name: aliasId === 'clinepass' ? 'ClinePass (linked to Cline)' : aliasId,
-          endpoint: owner.endpoint,
-          priority: owner.priority,
-          proxyPool: owner.proxyPool,
-          modelPolicy: owner.modelPolicy ?? 'all',
-          // A per-record link, not a global alias. ClinePass reads this exact account's credential;
-          // an API-key ClinePass connection has its own and carries no link.
-          credentialConnectionId: owner.id,
-        }, { type: 'none' }, signal, { tolerateDiscoveryFailure: true });
-      } catch (error) {
-        // Best-effort still, but not silent: a shared card that could not be created is a real
-        // missing capability, and the sign-in it followed has already succeeded.
-        console.warn(`[shared-catalog] could not create ${aliasId}: ${error instanceof Error ? error.message : 'unknown error'}`);
-      }
-    }
-  }
-
-  /**
-   * Completes a Cline sign-in: exchanges what the user pasted for tokens,
-   * proves them against Cline, and only then stores the connection.
-   */
-  async connectCline(input: { code: string; callback?: string; redirectUri: string; connectionId?: string; name?: string; priority?: number }, signal?: AbortSignal): Promise<ConnectionRecord> {
+  async connectCline(input: { code: string; callback?: string; redirectUri: string; connectionId?: string; name?: string; priority?: number; providerId?: 'cline' | 'clinepass' }, signal?: AbortSignal): Promise<ConnectionRecord> {
     if (!this.connectionStore) throw new ProviderError('CONFIGURATION_ERROR', 'Local connection storage is not configured.');
     const tokens = await exchangeClineCode(input, this.transport, signal);
     const credential = toClineCredential(tokens);
-    // `saveConnection` proves the token against Cline and imports the catalog
-    // before anything reaches the vault, so nothing is stored on a bad sign-in.
+    const providerId = input.providerId ?? 'cline';
+    const fallbackName = providerId === 'clinepass' ? 'ClinePass' : 'Cline';
     return this.saveConnection({
-      id: input.connectionId ?? 'cline',
-      providerId: 'cline',
-      name: input.name?.trim() || (tokens.email ? `Cline (${tokens.email})` : 'Cline'),
+      id: input.connectionId ?? providerId,
+      providerId,
+      name: input.name?.trim() || (tokens.email ? `${fallbackName} (${tokens.email})` : fallbackName),
       endpoint: CLINE_OAUTH.apiBaseUrl,
       priority: input.priority ?? 1,
       proxyPool: 'none',
@@ -1232,12 +1180,7 @@ export class GatewayService {
    * in again, which for a device flow means a browser approval.
    */
   async refreshConnectionModels(connectionId: string, signal?: AbortSignal): Promise<ConnectionRecord> {
-    const refreshed = await this.connections.refreshModels(connectionId, signal);
-    // A refresh is also the moment an account signed in before this existed — or before its tier was
-    // importable — gets its shared record. Doing it here is what makes the fix self-healing instead of
-    // a migration only the code that runs at sign-in time would perform.
-    await this.ensureSharedCatalogConnections(signal);
-    return refreshed;
+    return this.connections.refreshModels(connectionId, signal);
   }
 
 
@@ -1939,11 +1882,16 @@ export class GatewayService {
    * session id is how the dashboard learns the outcome; the `state` is what
    * ties the callback to this sign-in when Cline hands one back at all.
    */
-  startClineSignIn(redirectUri: string, addAccount = false, targetConnectionId?: string) {
+  startClineSignIn(providerId: 'cline' | 'clinepass', redirectUri: string, addAccount = false, targetConnectionId?: string) {
     // The session id goes in the redirect path, because the path is the one
     // part of the callback Cline has to honour verbatim.
     // The same redirect is what gets sent to the token endpoint later.
-    const { sessionId, state, redirectUri: callback } = this.clineSessions.start((id) => redirectUri.replace(/\/v1\/oauth\/cline\/callback\/?$/, clineCallbackPathFor(id)), targetConnectionId ?? (addAccount ? `cline-${randomUUID().replace(/-/g, '').slice(0, 12)}` : 'cline'));
+    const defaultId = providerId === 'clinepass' ? 'clinepass' : 'cline';
+    const { sessionId, state, redirectUri: callback } = this.clineSessions.start(
+      (id) => redirectUri.replace(/\/v1\/oauth\/cline\/callback\/?$/, clineCallbackPathFor(id)),
+      targetConnectionId ?? (addAccount ? `${defaultId}-${randomUUID().replace(/-/g, '').slice(0, 12)}` : defaultId),
+      providerId,
+    );
     return { ...this.beginClineAuthorization(callback, state), sessionId, state };
   }
 
@@ -1981,7 +1929,12 @@ export class GatewayService {
       return { ok: false, message };
     }
     try {
-      const connection = await this.connectCline({ code: input.code, redirectUri: session.redirectUri, connectionId: session.connectionId }, signal);
+      const connection = await this.connectCline({
+        code: input.code,
+        redirectUri: session.redirectUri,
+        connectionId: session.connectionId,
+        providerId: session.providerId ?? 'cline',
+      }, signal);
       // The whole record, so the dashboard can render the provider page from it
       // without a second fetch. It is metadata-only; the token stays in the vault.
       this.clineSessions.resolve(session.id, { status: 'connected', connection });
@@ -3019,9 +2972,10 @@ export class GatewayService {
   }
 
   /**
-   * ClinePass is the same account as Cline, reached through the same sign-in, so it carries **Cline's**
-   * OAuth token rather than a key of its own. The renewal is wired back to the `cline` vault entry — the
-   * one connection the two cards share — because the token it renews is that connection's.
+   * ClinePass is its own card, connection and grant, so a renewed token is written back to **this**
+   * connection's vault entry. The `credentialConnectionId` fallback remains for a record that
+   * deliberately reads another account's credential — no card does that today — and writing the renewed
+   * token to the owner is the only correct target when it does.
    */
   clinepassAdapter(connectionId = 'clinepass'): ProviderAdapter {
     const memo = this.clinepassAdapters.get(connectionId);

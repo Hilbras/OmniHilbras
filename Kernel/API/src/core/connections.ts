@@ -42,19 +42,19 @@ export type ConnectionRecord = {
   /**
    * The **other** providers this one connection also serves, when they share its credential.
    *
-   * ClinePass is the case: one Cline sign-in, one credential, but two catalogs — Cline's 436 models and
-   * the `cline-pass/…` tier. Storing the tier on its own connection is what lets it be routed and shown
-   * on its own page, but a second credential would be a second token for one account, and WorkOS rotates
-   * refresh tokens so each would invalidate the other. So the record keeps Cline's credential and names
-   * the extra provider here; credential lookup follows this list, catalogue and routing do not.
+   * The general mechanism for one account behind two cards. No card uses it today: Cline and ClinePass
+   * were the case, and they are separate connections, grants and catalogs now. It remains because it is
+   * still the expressible shape for a genuine shared account, and because credential lookup has to
+   * honour records written while it was in use.
    */
   providers?: ProviderId[];
   /**
    * The connection whose stored credential this one uses, when it deliberately shares one.
    *
    * Unlike `providerAlias`, this is a per-record link: it names the exact account, it is visible on
-   * the card, and it does not make every request for the provider follow a global map. A ClinePass
-   * OAuth account uses this; an API-key ClinePass account has its own credential and no link.
+   * the card, and it does not make every request for the provider follow a global map. The link is
+   * carried only by a record with no credential of its own (`type: 'none'`); a save that stores a real
+   * credential clears it, so a migration-era alias cannot keep serving the owner's token.
    */
   credentialConnectionId?: string;
   name: string;
@@ -491,7 +491,7 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     // The fingerprint rides with the record so a later save can recognise the same credential without
     // decrypting anything to compare.
     const fingerprint = credentialFingerprintFor(normalized.providerId, credential.type === 'none' ? 'none' : credential.value);
-    const record = buildRecord({ ...normalized, id, credentialFingerprint: fingerprint }, existing);
+    const record = buildRecord({ ...normalized, id, credentialFingerprint: fingerprint }, existing, credential);
     this.connections.set(id, record);
     this.credentials.set(id, storedCredential(credential));
     return this.withPreview(record);
@@ -704,15 +704,29 @@ function credentialFingerprintFor(providerId: string, value: string, masterKey?:
   return digest.slice(0, 32);
 }
 
-function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefined): ConnectionRecord {
+function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefined, credential: ProviderCredential): ConnectionRecord {
   const normalized = normalizeInput(input);
   const now = new Date().toISOString();
   const modelLists = mergeModelLists(normalized.modelIds ?? existing?.modelIds, normalized.customModelIds ?? existing?.customModelIds);
+  /**
+   * A record that stores a credential of its own is not a linked record.
+   *
+   * This used to fall back to `existing.credentialConnectionId` unconditionally, so overwriting a
+   * migration-era alias (`clinepass` → `cline`) with the card's own token kept the link: the new
+   * credential was written under `clinepass`, and `CredentialManager` went on reading Cline's. The
+   * card looked signed in and was served by another provider's account — the exact defect that made
+   * Cline and ClinePass look like one provider. Only a `none` credential (a deliberate alias) may
+   * carry a link, and an explicit `credentialConnectionId` on a real-credential save is ignored rather
+   * than trusted, because the invariant belongs to the store and not to every caller remembering it.
+   */
+  const linkedConnectionId = credential.type === 'none'
+    ? (normalized.credentialConnectionId ?? existing?.credentialConnectionId)
+    : undefined;
   return {
     id: input.id!,
     providerId: normalized.providerId,
     ...(normalized.providers && normalized.providers.length > 0 ? { providers: normalized.providers } : {}),
-    ...(normalized.credentialConnectionId ?? existing?.credentialConnectionId ? { credentialConnectionId: normalized.credentialConnectionId ?? existing?.credentialConnectionId } : {}),
+    ...(linkedConnectionId ? { credentialConnectionId: linkedConnectionId } : {}),
     name: normalized.name,
     endpoint: normalized.endpoint,
     priority: normalized.priority,
@@ -879,7 +893,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       // Keyed by the vault's master key, so the value is meaningless in another vault.
       const masterKey = await this.getMasterKey();
       const fingerprint = credentialFingerprintFor(normalized.providerId, credential.type === 'none' ? 'none' : credential.value, masterKey);
-      const record = buildRecord({ ...normalized, id, credentialFingerprint: fingerprint }, existing);
+      const record = buildRecord({ ...normalized, id, credentialFingerprint: fingerprint }, existing, credential);
 
       this.credentials.set(id, storedCredential(credential));
       this.connections.set(id, record);

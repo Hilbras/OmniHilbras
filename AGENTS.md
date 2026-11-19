@@ -200,23 +200,30 @@ that is not on `main`.
   extends a base card's" as a duplicate rejects a real card, and one that treated them as the same
   provider would hide it. `tests/new-provider-cards.test.js` now asserts the real property instead: a
   card that resembles another must be a web session, an OAuth card the gateway serves a start route for,
-  **or a card that names the base's stored connection** via `connectionProviderId`. That last clause is
-  `clinepass`, which shares `cline`'s connection — the same account, signed in once. Check the near-miss
-  explicitly rather than trusting a prefix comparison either way.
-  **Two cards may share one connection.** `connectionProviderId` names the provider whose saved
-  connection a card reads, so `clinepass` sets it to `cline`. It is deliberately **not** `catalogId`:
-  `ProvidersPage` routes `detailTo` from `catalogId`, so pointing that at `cline` would send the
-  ClinePass card's link to the Cline page. The gateway mirrors the sharing with the alias in
-  `provider-alias.ts`, which is the one deliberate cross-provider credential lookup — a provider id on
-  the request path stays its own, so failures name the right card.
-  **A shared card must sign in as the connection owner, not as itself.** There is no
-  `/v1/oauth/clinepass/start`; a shared card signs in through Cline's route, so `ProviderDetailPage`
-  passes `signInProviderId` (the owner) to the dialog and does not list the card in
-  `oauthProvidersWithFlow` on its own id alone. Getting this wrong is silent in the worst way: the click
-  opens a tab that is never navigated, and the button just looks dead — no error, because the failure is
-  a 404 on a request whose response was never awaited into the UI.
-  `tests/provider-cards.test.js` now checks the dashboard's OAuth set against the gateway's real routes
-  and fails if the dialog is not handed the owner's id.
+  **or a card that names the base's stored connection** via `connectionProviderId`. `clinepass` is the
+  first of those today — it has its own `/v1/oauth/clinepass/start` — and the third clause remains the
+  general mechanism for a genuinely shared account. Check the near-miss explicitly rather than trusting
+  a prefix comparison either way.
+  **Two cards may share one connection; two cards may also be separate accounts on one vendor.**
+  `connectionProviderId` names the provider whose saved connection a card reads. It is deliberately
+  **not** `catalogId`: `ProvidersPage` routes `detailTo` from `catalogId`, so pointing that at another
+  card would send this card's link to that card's page. The gateway honours the same relationship
+  through `provider-alias.ts`, whose map is **empty today**; a provider id on the request path stays its
+  own either way, so failures name the right card. **Cline and ClinePass are separate cards, connections,
+  credentials and model tiers** — the user asked for that twice after an earlier pass left them sharing
+  one record, which made the ClinePass card show Cline's catalog and usage. A second sign-in is a second
+  WorkOS grant, so rotation does not invalidate the first. A save that stores its own credential clears
+  any `credentialConnectionId` left on the record; otherwise a migration-era alias keeps serving the
+  owner's token after the card has its own.
+  **A card signs in as itself when it has a route; a shared card signs in as the owner.** There is now a
+  `/v1/oauth/clinepass/start`, so ClinePass is listed in `oauthProvidersWithFlow` on its own id. When a
+  card does name a `connectionProviderId`, `ProviderDetailPage` passes `signInProviderId` (the owner) to
+  the dialog rather than the card's id. Getting that wrong is silent in the worst way: the click opens a
+  tab that is never navigated, and the button just looks dead — no error, because the failure is a 404
+  on a request whose response was never awaited into the UI.
+  `tests/provider-cards.test.js` checks the dashboard's OAuth set against the gateway's real routes, and
+  `tests/provider-oauth-routes.test.js` checks that every OAuth card has either its own start route or a
+  real owner route.
   **A card may only show what was measured.** `lib/providerCards.ts` folds gateway state into the
   catalog, and it sets only what a connection or a health poll actually reports — `endpoint`, `latency`,
   `status`, `health`, `models`, `modelList`. `lastUsed` and `requests` are deliberately left as

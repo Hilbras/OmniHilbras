@@ -106,7 +106,7 @@ export type ConnectionManagerDeps = {
   noteDiscoveryFailure: (error: unknown) => void;
   /** The vault-local fingerprint of a credential, so a saved account is recognised on the next save. */
   credentialFingerprint: (providerId: string, credential: ProviderCredential) => Promise<string>;
-  /** The provider whose stored connection a card reads (`clinepass` → `cline`), or the id itself. */
+  /** The provider whose stored credential a card reads, or the id itself. The alias map is empty today. */
   canonicalProviderId: (providerId: string) => string;
 };
 
@@ -163,9 +163,10 @@ export class ConnectionManager {
 
   /** The first connection for a provider that actually holds a credential. */
   async firstWithCredentialFor(providerId: string): Promise<ConnectionRecord | undefined> {
-    // A record that shares its credential names the extra providers in `providers` — ClinePass reads the
-    // connection signed in as Cline. Matching only `providerId` left every shared provider with no
-    // credential at all, which surfaced as "no-models" at routing time and an empty page at read time.
+    // A record that shares its credential names the extra providers in `providers`. No card does that
+    // today — Cline and ClinePass have separate connections — but the field is still honoured, because
+    // matching only `providerId` left a shared provider with no credential at all: "no-models" at
+    // routing time and an empty page at read time.
     const matches = (await this.list()).filter(
       (connection) => (connection.providerId === providerId || connection.providers?.includes(providerId)) && connection.hasCredential,
     );
@@ -215,14 +216,14 @@ export class ConnectionManager {
    * The connection already holding this credential, if any.
    *
    * Compared within one provider, because the fingerprint is keyed by provider id: the same string
-   * used against two vendors is two credentials, not one. A provider whose card reads another's
-   * connection (`clinepass` → `cline`) is compared under its owner, which is where the credential
-   * actually lives.
+   * used against two vendors is two credentials, not one. A card that genuinely reads another's
+   * connection is compared under its owner, which is where the credential actually lives; the alias
+   * map is empty today, so that is every card's own id.
    */
   private async findSameCredential(providerId: string, credential: ProviderCredential): Promise<ConnectionRecord | undefined> {
     // Fingerprinted under the **owner**, because that is the id the record was saved under. Keying it
-    // on the card's own id made a shared card (`clinepass`) hash a different string than the `cline`
-    // credential it reads, so the same sign-in was saved twice and neither row could see the other.
+    // on a shared card's own id hashed a different string than the credential it read, so the same
+    // sign-in was saved twice and neither row could see the other.
     const owner = this.deps.canonicalProviderId(providerId);
     const fingerprint = await this.deps.credentialFingerprint(owner, credential);
     const connections = await this.require().list();

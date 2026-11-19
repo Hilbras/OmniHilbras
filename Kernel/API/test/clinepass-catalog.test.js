@@ -3,31 +3,33 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 
 /**
- * ClinePass must show **its own tier**, and be reachable at all.
+ * ClinePass must show **its own tier**, on **its own connection**.
  *
- * Measured failure: signing into Cline exposed 436 Cline models and `/v1/models` carried **zero**
- * `cline-pass/…` ids. The tier shares Cline's connection, so it has no stored record of its own — and
- * the model list was built from stored records alone. The tier was then unreachable by any client
- * even though the adapter could list it.
+ * The measured failure this file started from: signing into Cline exposed 436 Cline models and
+ * `/v1/models` carried zero `cline-pass/…` ids. The tier shared Cline's connection, so it had no
+ * stored record of its own, and the model list was built from stored records alone — the tier was
+ * unreachable by any client even though the adapter could list it. The fix then was a live read of
+ * the tier through Cline's credential. The user rejected the sharing itself: two providers with
+ * different models must not be one card reading another's account. So the tier now has its own
+ * connection, its own grant and its own imported catalog, and no cross-provider read exists.
  */
 
 const read = (relative) => readFileSync(new URL(relative, import.meta.url), 'utf8');
 
-test('the model list reads a shared provider’s catalog from its adapter', () => {
+test('the model list reads each provider’s own stored catalog', () => {
   const catalog = read('../src/core/model-catalog.ts');
-  assert.match(
+  assert.match(catalog, /connection\.modelIds\.map/, 'stored catalogs are what /v1/models serves');
+  assert.doesNotMatch(
     catalog,
     /sharedCatalogProviders/,
-    'listAll must merge the catalogs of providers that share another’s connection, or ClinePass is invisible in /v1/models',
+    'a shared-provider live read would let one card serve another provider’s models again',
   );
-  assert.match(catalog, /sharedCatalogProviders\)/, 'the shared catalogs must actually be iterated');
-  assert.match(catalog, /unavailable\.push/, 'a tier that could not be read must be named, not silently empty');
 });
 
-test('ClinePass shares Cline’s connection and has a catalog of its own', () => {
+test('ClinePass is not an alias of Cline', () => {
   const alias = read('../src/core/provider-alias.ts');
-  assert.match(alias, /clinepass:\s*'cline'/, 'ClinePass must read Cline’s credential');
-  assert.match(alias, /sharedCatalogProviders[\s\S]*clinepass:\s*'cline'/, 'ClinePass must be listed as having its own catalog');
+  assert.doesNotMatch(alias, /clinepass:\s*'cline'/, 'ClinePass must not read Cline’s credential');
+  assert.doesNotMatch(alias, /sharedCatalogProviders/, 'there is no shared catalog to reconcile');
 });
 
 test('the ClinePass adapter filters the tier rather than returning Cline’s catalog', () => {
@@ -45,21 +47,28 @@ test('the callback page tells the tab that opened it', () => {
   assert.match(routes, /clineCallbackPage\(outcome\.ok, outcome\.message, nonce, sessionId\)/, 'the session id must reach the page, beside the nonce the CSP names');
 });
 
-test('a shared provider gets a connection of its own, so it can be routed', () => {
-  const service = read('../src/core/service.ts');
-  assert.match(service, /ensureSharedCatalogConnections/, 'saving a connection must reconcile shared providers');
+test('a ClinePass sign-in starts, polls and saves under its own provider id', () => {
+  const routes = read('../src/routes/oauth.ts');
+  assert.match(routes, /url\.pathname === '\/v1\/oauth\/clinepass\/start'/, 'no start route for the card');
+  assert.match(routes, /startsWith\('\/v1\/oauth\/clinepass\/session\/'\)/, 'no session route for the card');
   assert.match(
-    service,
-    /refreshConnectionModels[\s\S]{0,900}ensureSharedCatalogConnections/,
-    'a model refresh must reconcile too, or an account signed in earlier never gets its tier',
+    routes,
+    /clinepass\/exchange[\s\S]{0,900}providerId: 'clinepass'/,
+    'the exchange route must save the connection under clinepass, not cline',
   );
+  const service = read('../src/core/service.ts');
+  assert.match(service, /startClineSignIn\(providerId: 'cline' \| 'clinepass'/, 'the session must record its provider');
+  assert.match(service, /providerId: session\.providerId \?\? 'cline'/, 'the callback must use the provider the session recorded');
 });
 
-test('the credential lookup follows a shared record', () => {
-  const manager = read('../src/core/connection-manager.ts');
-  // Measured: routing skipped ClinePass as `no-models` and its page showed Cline's catalog, because the
-  // only connection it could see was Cline's and nothing pointed from one to the other.
-  assert.match(manager, /connection\.providers\?\.includes\(providerId\)/, 'firstWithCredentialFor must match a shared provider');
+test('saving a connection does not reconcile another provider’s catalog', () => {
+  const service = read('../src/core/service.ts');
+  assert.doesNotMatch(service, /ensureSharedCatalogConnections/, 'the shared-record migration must be gone');
+  assert.match(
+    service,
+    /saveConnectionDetailed[\s\S]{0,1600}this\.connections\.save\(input, credential, signal, options\)/,
+    'a save belongs to exactly one provider and its own record',
+  );
 });
 
 test('the store round-trips `providers`, or it is dropped on the next load', () => {

@@ -241,8 +241,9 @@ export class ProviderResolver {
   ): Promise<SavedConnection | undefined> {
     if (!listConnections) return undefined;
     const all = await listConnections();
-    // A shared card (ClinePass) reads the owner's connection. The provider id stays the shared card's,
-    // so the adapter and its failures still name the card the user asked for.
+    // A card that deliberately shares an account reads the owner's connection. The provider id stays
+    // the card's, so the adapter and its failures still name what the user asked for. No card aliases
+    // another today; Cline and ClinePass have separate records.
     const owner = providerAlias(providerId);
     return all.find((item) => item.providerId === providerId) ?? (owner ? all.find((item) => item.providerId === owner) : undefined);
   }

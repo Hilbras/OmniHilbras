@@ -1444,19 +1444,32 @@ export type GatewayOauthSignInStatus = {
   verificationUrl?: string;
 };
 
-/** Starts a sign-in and returns the URL to send the browser to. */
-export function startGatewayOauthSignIn(providerId: string, signal?: AbortSignal, connectionId?: string) {
+/**
+ * Starts a sign-in and returns the URL to send the browser to.
+ *
+ * `addAccount` is not decoration: the gateway mints a fresh connection id only when it is set, so
+ * omitting it made "Add account" overwrite the account already on the card. The device-flow and Codex
+ * starts have always sent it; this one is the redirect flow shared by Cline and ClinePass.
+ */
+export function startGatewayOauthSignIn(providerId: string, signal?: AbortSignal, connectionId?: string, addAccount = false) {
   return requestJson<GatewayOauthSignIn>(`/v1/oauth/${encodeURIComponent(providerId)}/start`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(connectionId ? { connectionId } : {}),
+    body: JSON.stringify({ ...(connectionId ? { connectionId } : {}), ...(addAccount ? { addAccount: true } : {}) }),
     ...(signal ? { signal } : {}),
   });
 }
 
-/** Whether a sign-in started earlier has finished, and how it went. */
-export function getClineSignInStatus(sessionId: string, signal?: AbortSignal) {
-  return requestJson<GatewayOauthSignInStatus>(`/v1/oauth/cline/session/${encodeURIComponent(sessionId)}`, { signal });
+/**
+ * Whether a redirect-flow sign-in started earlier has finished, and how it went.
+ *
+ * `providerId` is the card that started it, not the route's owner. Cline and ClinePass used to share
+ * one session store and one path; they are separate providers now, each with its own session route,
+ * so polling Cline for a ClinePass session would answer `404 Unknown sign-in session` and the dialog
+ * would wait out its timeout beside a sign-in that had already succeeded.
+ */
+export function getClineSignInStatus(sessionId: string, providerId = 'cline', signal?: AbortSignal) {
+  return requestJson<GatewayOauthSignInStatus>(`/v1/oauth/${encodeURIComponent(providerId)}/session/${encodeURIComponent(sessionId)}`, { signal });
 }
 
 /**

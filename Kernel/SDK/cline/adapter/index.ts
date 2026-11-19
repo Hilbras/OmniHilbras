@@ -87,7 +87,7 @@ const inFlightRefreshesRegistry = globalThis as unknown as Record<symbol, Map<st
 const inFlightRefreshes = (inFlightRefreshesRegistry[inFlightRefreshesKey] ??= new Map());
 
 /** Reported to Cline as this client's version. */
-const omnihilbrasVersion = '3.70.0';
+const omnihilbrasVersion = '3.71.0';
 
 /** Cline only accepts WorkOS JWTs with an explicit prefix. */
 export function toClineAccessToken(token: string) {
@@ -470,8 +470,9 @@ export class ClineAdapter implements ProviderAdapter {
       throw new ProviderError('AUTHENTICATION_FAILED', 'A Cline access token is required.', { providerId: this.id, publicMessage: 'A Cline access token is required.' });
     }
     if (!this.needsRefresh(credential)) return credential;
-    // One refresh per login, across every adapter that reads it: Cline and ClinePass hold separate adapter instances
-    // over the same login, and a per-instance promise let each spend the refresh grant.
+    // One refresh per login, across every adapter that reads it. Keyed by the refresh token, so two
+    // independent Cline grants never share a renewal, while a record that deliberately reads another's
+    // credential still cannot spend the same grant twice.
     const login = credential.refreshToken ?? credential.value;
     const existing = inFlightRefreshes.get(login);
     if (existing) return existing;

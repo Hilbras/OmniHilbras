@@ -148,10 +148,9 @@ test('a card may claim OAuth only where the gateway has an OAuth flow to sign in
   const cardById = new Map(allCards.map((card) => [card.id, card]));
   /**
    * A card is signed into if the gateway serves a start route for it **or** for the card whose
-   * connection it shares. `clinepass` is the second case: it has no route of its own because its sign-in
-   * *is* Cline's — Cline's auth registry registers `cline-pass` as an alias of the `cline` handler — so
-   * `connectionProviderId: 'cline'` points at the route that serves it. Reading only the card's own id
-   * would call a correctly-signed-in card "unsupported".
+   * connection it shares. No card uses the second case today: ClinePass has its own route now that it
+   * is a separate provider. The fallback remains because a genuinely shared account is still expressible
+   * with `connectionProviderId`, and reading only the card's own id would call such a card "unsupported".
    */
   const servedBy = (card) => capable.has(card.id) || (card.connectionProviderId ? capable.has(card.connectionProviderId) : false);
   // `authModes` is the truth when a card offers more than one way in (Nous Research: sign-in **and**
@@ -181,12 +180,10 @@ test('a card may claim OAuth only where the gateway has an OAuth flow to sign in
 
 test('the dashboard offers a sign-in only for a card whose route the gateway actually serves', () => {
   /**
-   * The regression this exists for: `clinepass` is an OAuth card that shares `cline`'s connection, so it
-   * has no start route of its own. When the page naively added every OAuth card to `oauthProvidersWithFlow`
-   * and told the dialog to sign in as the card's own id, "Add connection" called
-   * `/v1/oauth/clinepass/start`, which the gateway does not serve. The tab opened for the click sat blank
-   * and nothing happened — a dead button with no error, which is exactly the failure the blank-tab shape
-   * hides.
+   * The regression this exists for: an OAuth card whose start route the gateway did not serve used to
+   * enable "Add connection", call the missing path, and open a tab that was never navigated — a dead
+   * button with no error. ClinePass was the case while it borrowed Cline's connection; it has its own
+   * route now and is listed on its own id.
    *
    * So the dashboard's OAuth set is checked against the gateway's real routes: each entry either has its
    * own start route, or names a `connectionProviderId` that does.
@@ -304,10 +301,10 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // card, the same split as Anthropic versus Claude Code: one vendor, two credentials. (This line said
   // 1.73.0 until 1.85.1; there is no `v1.73.0` tag, and the card's commit is first contained by
   // `v1.75.0`, so the version a reader would look it up under did not exist.)
-  // 26 from 1.76.0, which added `clinepass` — the *same* account as the `cline` OAuth card, not a second
-  // credential: same vendor, same host, and Cline's own auth registry registers `cline-pass` as an alias
-  // of the `cline` handler reusing the identical stored credential. So it is a second *card* over one
-  // connection (`connectionProviderId: 'cline'`), the opposite of every pair above.
+  // 26 from 1.76.0, which added `clinepass` — Cline's paid tier. It was modelled as a second card over
+  // one connection because Cline's own client stores one token for the account; 3.71.0 makes it a
+  // separate provider with its own connection, grant and model tier, after the shared record made its
+  // card show Cline's catalog and usage.
   // 30 from 1.78.0, which added four free-tier aggregators — `apinex`, `apmix`, `tiarina`, `xkiro`, each
   // one key in front of other vendors' models over an OpenAI- or Anthropic-compatible path.
   // 31 from 1.85.0, which added `gemini-web` — a web session driving gemini.google.com with cookies the
@@ -331,11 +328,10 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // old tree; both have their own adapter and committed mark.
   // 55 from 3.28.0: `zcode`, a ZCode Start Plan OAuth card with its own adapter and standalone sign-in.
   assert.equal(all.length, 58, `the catalog now has ${all.length} cards`);
-  // Seventeen cards claim OAuth, and the gateway serves sixteen start routes: `clinepass` shares
-  // `cline`'s, `claude-code` and `codex` sign in through `server.ts` routes this scan reads too, and
-  // `zcode` claims OAuth and serves its own start route. The counts of claims and routes do not have
-  // to coincide, which is why both are asserted.
-  assert.equal(oauthCapableProviders().size, 16, 'the gateway serves an OAuth start route for sixteen providers');
+  // Seventeen cards claim OAuth and the gateway serves seventeen start routes. `clinepass` used to be
+  // the odd one out when it shared Cline's connection; it has its own route now. `claude-code` and
+  // `codex` sign in through `server.ts` routes this scan reads too.
+  assert.equal(oauthCapableProviders().size, 17, 'the gateway serves an OAuth start route for seventeen providers');
   const oauthClaiming = all.filter((card) => card.auth === 'OAuth' || card.authModes?.includes('oauth'));
   assert.equal(oauthClaiming.length, 17, 'seventeen cards claim an OAuth sign-in: fifteen named OAuth, and Nous Research and the two OpenCode cards which offer it beside a key');
   console.log(`    cards: ${all.length}   claiming OAuth: ${oauthClaiming.length}   gateway OAuth routes: ${oauthCapableProviders().size}   claiming a measurement: 0`);

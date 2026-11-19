@@ -110,6 +110,8 @@ type ClineSession = {
   result: ClineSessionStatus;
   /** The connection this sign-in saves to, chosen when it starts (add-account vs repair). */
   connectionId?: string;
+  /** The provider this sign-in belongs to. Cline and ClinePass are separate accounts now. */
+  providerId?: 'cline' | 'clinepass';
 };
 
 function randomToken(bytes: number) {
@@ -137,7 +139,7 @@ export class ClineSessionStore {
    * sent to the token endpoint: OAuth requires the `redirect_uri` at exchange
    * time to match the one the authorize request carried.
    */
-  start(buildRedirect: (sessionId: string) => string, connectionId?: string) {
+  start(buildRedirect: (sessionId: string) => string, connectionId?: string, providerId?: 'cline' | 'clinepass') {
     this.prune();
     const id = randomToken(32);
     const session: ClineSession = {
@@ -150,6 +152,7 @@ export class ClineSessionStore {
       // The target is chosen when the sign-in starts: the provider id for a repair, a fresh unique
       // id for an add-account grant — the rule every multi-account flow states.
       ...(connectionId ? { connectionId } : {}),
+      ...(providerId ? { providerId } : {}),
     };
     this.sessions.set(id, session);
     return { sessionId: id, state: session.state as string, redirectUri: session.redirectUri };

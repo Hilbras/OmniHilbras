@@ -119,8 +119,9 @@ test('every provider the client names in a path is a real card, on a route the g
   // I asserted "no provider may appear in a client path", expecting the OAuth surface to be as uniform
   // as the credential check turned out to be. It is not, and the difference matters:
   // `startGatewayOauthSignIn(providerId)` and `startGatewayDeviceSignIn(providerId)` are both generic,
-  // but `getClineSignInStatus` hits a `/session/` route Cline alone has, and the device flows answer with
-  // a `userCode` and a `verificationUrl` rather than an auth URL. **Different endpoints with different
+  // but `getClineSignInStatus(sessionId, providerId)` hits the redirect flow's `/session/` route — served
+  // by the Cline-family cards, each under its own provider id — and the device flows answer with a
+  // `userCode` and a `verificationUrl` rather than an auth URL. **Different endpoints with different
   // payloads are not two spellings of one decision** — that is what made the credential check wrong, where
   // the request and the response were identical and only the path differed.
   //

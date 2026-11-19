@@ -267,8 +267,9 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
         // poll is still running and will conclude on its own, so a failure here stays silent.
         void listGatewayConnections()
           .then((connections) => {
-            // ClinePass reads Cline's connection, so either id can be the owner of the record.
-            const saved = connections.find((item) => (item.providerId === 'cline' || item.providerId === providerId) && item.hasCredential);
+            // The card's own record, and only that one: ClinePass is a separate account now, so
+            // accepting Cline's connection here would close the dialog on the wrong provider.
+            const saved = connections.find((item) => item.providerId === providerId && item.hasCredential);
             if (saved) finish({ status: 'connected', connection: saved });
           })
           .catch(() => undefined);
@@ -442,7 +443,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
     }
 
     try {
-      const signIn = await startGatewayOauthSignIn(providerId, undefined, targetConnectionId);
+      const signIn = await startGatewayOauthSignIn(providerId, undefined, targetConnectionId, addAccount);
       if (settledRef.current) return;
       startedSessionRef.current = signIn.sessionId;
       const sentToOpenTab = navigateTo(signIn.authUrl);
@@ -450,7 +451,7 @@ export function OauthConnectDialog({ providerId, providerName, riskNotice, signI
       setMessage(sentToOpenTab
         ? `Approve the request in your browser. This tab will finish the connection.`
         : 'Your browser blocked the sign-in tab. Open the link below to continue.');
-      watch(signIn.sessionId, getClineSignInStatus, 'The sign-in timed out. Start again, or paste the code if your browser did not return here.');
+      watch(signIn.sessionId, (id) => getClineSignInStatus(id, providerId), 'The sign-in timed out. Start again, or paste the code if your browser did not return here.');
     } catch (startError) {
       settledRef.current = true;
       discardSignInTab();

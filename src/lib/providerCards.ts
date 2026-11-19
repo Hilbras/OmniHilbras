@@ -65,10 +65,11 @@ export function mergeGatewayConnections(providers: ProviderRecord[], connections
   }
   const healthByProvider = new Map(health?.providers.map((provider) => [provider.providerId, provider]));
   return providers.map((provider) => {
-    // `connectionProviderId` first: a card that shares another card's account (`clinepass` reads
-    // `cline`'s one connection) names its owner there. Otherwise a card's own id, or the catalog id it
-    // was written under. Getting this wrong is silent — the card simply keeps its placeholders and reads
-    // as unconnected — so the field is what makes sharing a deliberate statement rather than a guess.
+    // `connectionProviderId` first: a card that genuinely shares another card's account names its
+    // owner there. No card does today — Cline and ClinePass are separate accounts with their own
+    // connections — but the mechanism stays because it is the difference between sharing deliberately
+    // and guessing from a similar id. Otherwise a card's own id, or the catalog id it was written
+    // under. Getting this wrong is silent: the card keeps its placeholders and reads as unconnected.
     const ownId = provider.catalogId ?? provider.id;
     const accounts = connectionsByProvider.get(ownId)
       ?? (provider.connectionProviderId ? connectionsByProvider.get(provider.connectionProviderId) : undefined)

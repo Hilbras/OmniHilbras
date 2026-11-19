@@ -3,7 +3,6 @@ import { ProviderError, qualifiedModelId, type Model, type ModelImportPolicy, ty
 import { notSupported } from './capability.js';
 import type { ConnectionManager } from './connection-manager.js';
 import type { CredentialManager } from './credential-manager.js';
-import { sharedCatalogProviders } from './provider-alias.js';
 import type { VirtualModelStore } from './virtual-models.js';
 
 /**
@@ -43,26 +42,8 @@ export type GatewayModelList = {
   unavailable: Array<{ providerId: string; code: string }>;
 };
 
-/** How long a live shared-provider catalog is trusted. `OMNIHILBRAS_MODEL_CATALOG_TTL_MS=0` disables it. */
-function sharedCatalogTtlMs(): number {
-  const raw = process.env.OMNIHILBRAS_MODEL_CATALOG_TTL_MS?.trim();
-  if (raw === undefined || raw === '') return 60_000;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 60_000;
-}
-
 export class ModelCatalog {
   constructor(private readonly deps: ModelCatalogDeps) {}
-
-  /**
-   * Live catalogs for a provider whose list lives on a **shared** record (ClinePass), cached briefly.
-   *
-   * Those providers have no stored `modelIds` to read, so `listAll` asks the provider every time —
-   * a network round trip on every `/v1/models`. Measured at 0.3–1.5 s of a request that should be a
-   * local read, and an agent app fetches the model list on connect. A short TTL keeps the catalog
-   * fresh enough for a sign-in while removing the round trip from the common path.
-   */
-  private readonly sharedCatalog = new Map<string, { models: readonly Model[]; expiresAt: number }>();
 
   /**
    * What a client should see.
@@ -88,32 +69,6 @@ export class ModelCatalog {
         };
       }));
       const unavailable: GatewayModelList['unavailable'] = [];
-      // A provider that **shares** another's connection has a catalog of its own that is not in that
-      // connection's record. ClinePass is the case: one `cline` sign-in stores 436 Cline models, and
-      // the ClinePass tier is a separate `cline-pass/…` list its adapter reads live. Without this the
-      // tier was reachable by the gateway but absent from `/v1/models` — so a client, and the provider
-      // page, saw only Cline's catalog. Read live because there is no stored record to read it from.
-      for (const [aliasId, ownerId] of Object.entries(sharedCatalogProviders)) {
-        if (!connections.some((connection) => connection.providerId === ownerId)) continue;
-        const adapter = await this.deps.resolveAdapter(aliasId);
-        if (!adapter.listModels || adapter.capabilities.models !== true) continue;
-        const ttl = sharedCatalogTtlMs();
-        const cached = ttl > 0 ? this.sharedCatalog.get(aliasId) : undefined;
-        if (cached && cached.expiresAt > Date.now()) {
-          for (const model of cached.models) models.push({ ...model, id: qualifiedModelId(aliasId, model.id), modelId: model.id, providerId: aliasId });
-          continue;
-        }
-        try {
-          const listed = await adapter.listModels(await this.deps.credentials.contextForProvider(aliasId, signal));
-          if (ttl > 0) this.sharedCatalog.set(aliasId, { models: listed, expiresAt: Date.now() + ttl });
-          for (const model of listed) models.push({ ...model, id: qualifiedModelId(aliasId, model.id), modelId: model.id, providerId: aliasId });
-        } catch (error) {
-          // Named, not swallowed: a tier that could not be read must not look like a tier that is empty.
-          // A failure is not cached, so the next request tries again rather than serving a stale miss.
-          this.sharedCatalog.delete(aliasId);
-          unavailable.push({ providerId: aliasId, code: isProviderError(error) ? error.code : 'PROVIDER_REQUEST_FAILED' });
-        }
-      }
       const virtualModels = await this.deps.virtualModels?.list();
       if (virtualModels) {
         const providerByConnection = new Map(connections.map((connection) => [connection.id, connection.providerId]));

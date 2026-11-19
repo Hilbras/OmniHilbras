@@ -71,13 +71,13 @@ that holds is one a machine re-derives.
 | Surface | Lines | Provider ids named | Note |
 | --- | --- | --- | --- |
 | `Kernel/API/src/core/routing.ts` | 790 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
-| `Kernel/API/src/core/provider-resolver.ts` | 311 | 1 | enforced by a test that greps the file; the per-provider tables live in `provider-client-identity.ts` and `provider-responses-lane.ts` it reads |
+| `Kernel/API/src/core/provider-resolver.ts` | 312 | 1 | enforced by a test that greps the file; the per-provider tables live in `provider-client-identity.ts` and `provider-responses-lane.ts` it reads |
 | `Kernel/API/src/core/circuit-breaker.ts` | 192 | **0** | per-connection closed → open → half-open; counts what it refused |
 | `Kernel/API/src/core/request-executor.ts` | 1012 | **0** | the failover loop, the attempt ledger, the ordering |
-| `Kernel/API/src/core/connection-manager.ts` | 355 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 4419 | 52 | every `.onDemand()` registration, in one constructor |
+| `Kernel/API/src/core/connection-manager.ts` | 356 | **0** | one error mapper, one catalog merge, one lock scope |
+| `Kernel/API/src/core/service.ts` | 4373 | 52 | every `.onDemand()` registration, in one constructor |
 | `Kernel/API/src/core/http.ts` | 356 | **0** | the vocabulary every route shares |
-| `Kernel/API/src/routes/oauth.ts` | 862 | 19 | the module a provider split would help most |
+| `Kernel/API/src/routes/oauth.ts` | 904 | 20 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 400 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
 | `Kernel/API/src/routes/inference.ts` | 1371 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and the auth gate |
 | `Kernel/API/src/routes/api-keys.ts` | 101 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |

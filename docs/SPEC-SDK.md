@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.70.0
+**Status:** Current — release 3.71.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -250,7 +250,7 @@ The first local gateway exposes:
 - **Bare model names.** A bare name (no `provider/` prefix) that no connection lists is routed only to a provider that declares its family (`claude`, `gpt`, `gemini`). A `claude-*` name with only an OpenAI connection is refused, not billed to OpenAI. A name a connection lists still routes to that connection.
 - `GET /v1/logs/stream` — a server-sent event stream of each finished request, as it is recorded. Each event is the usage record's fields: time, model, provider, connection, outcome, error code, attempt count and request id. It carries no message content, prompt or credential. Management route: requires a key when management enforcement is on.
 - `PUT /v1/providers/:providerId/strategy` — set how a provider's connections share traffic: `priority` (the default, the first connection by priority serves), `round-robin` (connections at one priority take turns), or `fastest` (prefer the lowest measured latency). Body `{"strategy": "round-robin"}`; any other value is a 400. Management route: requires a key when management enforcement is on. `GET /v1/routing` reports each set strategy under `strategies`.
-- `PUT /v1/connections/:id` — save or update a connection. Credentials are stated as **`apiKey`**, or as **`credential: "none"`** for a provider that needs no key at all: the two are mutually exclusive and the gateway refuses a body that carries both, an unknown `credential` value, or neither — a missing key is still an error, so "no credential" cannot be reached by forgetting. Before 1.86.0 the route called the API-key parser unconditionally, which made every keyless provider unsavable; Ollama is the card that exercises this. A discovered **model metadata map** (display name, context window, modalities, and per-1M prices) is preserved across a save that does not supply one, and replaced by one that does; it was silently dropped on every save before 1.62.0. An **`id`** names the account to write, which is how **Edit** updates one row instead of adding a second; omitting it reuses the provider's existing connection. The response carries **`duplicate`** when the credential is already saved — `identical` for an API key that is already stored (the existing account comes back and nothing is written) and `updated` for the same sign-in again (it renews the account that holds it) — so a client can say which account this is rather than appearing to add a twin. The check compares a vault-local **fingerprint** of the credential within the provider that owns it, so two accounts of one vendor stay distinct and a shared card (`clinepass` → `cline`) is recognised under its owner.
+- `PUT /v1/connections/:id` — save or update a connection. Credentials are stated as **`apiKey`**, or as **`credential: "none"`** for a provider that needs no key at all: the two are mutually exclusive and the gateway refuses a body that carries both, an unknown `credential` value, or neither — a missing key is still an error, so "no credential" cannot be reached by forgetting. Before 1.86.0 the route called the API-key parser unconditionally, which made every keyless provider unsavable; Ollama is the card that exercises this. A discovered **model metadata map** (display name, context window, modalities, and per-1M prices) is preserved across a save that does not supply one, and replaced by one that does; it was silently dropped on every save before 1.62.0. An **`id`** names the account to write, which is how **Edit** updates one row instead of adding a second; omitting it reuses the provider's existing connection. The response carries **`duplicate`** when the credential is already saved — `identical` for an API key that is already stored (the existing account comes back and nothing is written) and `updated` for the same sign-in again (it renews the account that holds it) — so a client can say which account this is rather than appearing to add a twin. The check compares a vault-local **fingerprint** of the credential within the provider that owns it, so two accounts of one vendor stay distinct. A record that stores its own credential is compared under its own provider id; a migration-era alias that carries `credentialConnectionId` is compared under the owner whose vault entry it reads.
   - **What the vault itself refuses, and how it says so.** Two bounds, both stated rather than inferred: a vault holds **250** connections (`OMNIHILBRAS_MAX_CONNECTIONS`), and its metadata file may reach **4 MiB** (`OMNIHILBRAS_MAX_METADATA_BYTES`). A value that is not a positive integer in either keeps the default, because a typo must not leave a vault nobody can open. The metadata is written **compact** — the pretty-printing was about 42% of the payload, spent on a file nothing reads by eye — and both refusals name the limit *and* the way out. These numbers were forced by a real vault: it held **262,137 bytes of the 262,144** the old 256 KiB ceiling allowed, so the next provider could not be added at all, and what that told the person adding it was "The request is invalid." A ceiling an ordinary vault reaches is not a bound, it is a surprise.
 - `GET /v1/system` — live CPU and memory of the machine running the gateway. CPU is measured over a short interval (two counter reads, not a boot-average), and memory is host total/free, not a provider or gateway-process figure: `cpu.percent`, `cpu.cores`, `cpu.loadAverage`, `memory.totalBytes`, `memory.usedBytes`, `memory.freeBytes`, `memory.percent`, `uptimeSeconds`, and `sampledAt`. It carries no hostname, credential or request content. Management route: requires a key when management enforcement is on.
 
@@ -323,6 +323,9 @@ The first local gateway exposes:
 - `GET /v1/oauth/cline/callback` — where the provider redirects the browser; completes the exchange and reports the outcome.
 - `GET /v1/oauth/cline/session/:id` — whether a started sign-in is pending, connected, failed, or expired.
 - `POST /v1/oauth/cline/exchange` — exchange a pasted callback URL or code, prove the token against Cline, then save the connection.
+- `POST /v1/oauth/clinepass/start` — begin the ClinePass sign-in. It uses Cline's WorkOS grant and callback, but the session records `clinepass`, so the saved connection, credential and model tier belong to this card.
+- `GET /v1/oauth/clinepass/session/:id` — whether a started ClinePass sign-in is pending, connected, failed, or expired.
+- `POST /v1/oauth/clinepass/exchange` — exchange a pasted callback URL or code, prove the token, then save the connection under `clinepass`.
 - `POST /v1/oauth/kiro/start` — begin a Kiro sign-in. A company IAM Identity Center tenant supplies its own `startUrl`; a plain Builder ID sign-in omits it and gets the public one.
 - `GET /v1/oauth/kiro/session/:id` — whether a Kiro sign-in is pending, connected, failed, or expired.
 - `POST /v1/oauth/kiro/import-token` — spend a refresh token the user exported from Kiro. **The pasted
@@ -826,7 +829,7 @@ allowlisted browser origin. The contract:
   and a callback can only act on a session this gateway minted — the session id
   carries 256 random bits for Cline and 122 for Claude Code — with the provider's
   code as the other half. The routes that carry the result, `/v1/oauth/*/session/*`,
-  and the ones that mint credentials, `/*/start` and `/cline/exchange`, stay
+  and the ones that mint credentials, `/*/start` and `/cline/exchange` (and `/clinepass/exchange`), stay
   gated. The predicate is GET-only and path-exact, so a `POST` to a callback path
   is refused like any other management route.
 - **Known limitation, recorded not papered over.** `kind: 'dashboard'` is derived
@@ -851,9 +854,9 @@ Every catalog provider id is a first-class provider, the way `opencode-go` is:
 - one private package under `Kernel/SDK/<id>/` owns its adapter, id and base URL. The 24 ids that used to exist only
   as a card plus a generic OpenAI-compatible endpoint now have packages of their own;
 - one explicit `.onDemand('<id>', …)` registration in the gateway makes the id readable to the collision guards;
-- an OAuth route surface exists for every provider whose own config declares OAuth (or that names the connection
-  owner it signs in through, as `clinepass` does). API-key providers keep the generic connection-save route instead
-  of being given a sign-in flow that does not exist.
+- an OAuth route surface exists for every provider whose own config declares OAuth (including `clinepass`, whose
+  start, session and exchange routes save under its own id). API-key providers keep the generic connection-save
+  route instead of being given a sign-in flow that does not exist.
 
 `tests/provider-registry.test.js` and `tests/provider-oauth-routes.test.js` enforce the two tables.
 
@@ -3086,21 +3089,26 @@ which is the only one that actually checks.
 
 ### ClinePass
 
-ClinePass is Cline's paid model tier, and it is **the same account as Cline**, not a
-second credential. Cline's own client registers `cline` and `cline-pass` against the
-same host and the same AI SDK provider, and its auth registry registers `cline-pass`
-as an **alias** of the `cline` handler (`storageProviderId: "cline"`), reusing the
-identical stored credential; `isOAuthProvider("cline-pass")` is true, and Cline's own
-CLI opens a **sign-in** for it. So it is registered here as an **OAuth** provider whose
-sign-in is Cline's: the ClinePass card is signed into by signing into Cline, and
-nothing in Cline's SDK reads a cookie — `app.cline.bot` is only ever opened in a real
+ClinePass is Cline's paid model tier, and it is a **separate provider with its own
+connection**, its own sign-in and its own model list. Cline's own client registers
+`cline` and `cline-pass` against the same host and the same AI SDK provider, and its
+auth registry stores one token for them (`storageProviderId: "cline"`). The gateway
+used to mirror that literally: the ClinePass card named Cline as its connection owner
+and read Cline's credential through an alias. The visible result was two cards showing
+the same catalog and the same usage, and a ClinePass card that could not say which
+tier it was.
+
+A second sign-in is a second WorkOS authorization grant on the same account, so each
+connection holds its own refresh token — rotation is per grant, not per account. The
+two cards therefore keep separate connection records, credentials and model lists.
+Nothing in Cline's SDK reads a cookie; `app.cline.bot` is only ever opened in a real
 browser.
 
 `ClinePassAdapter` therefore **subclasses `ClineAdapter`** and changes only two things:
 the id and name it reports (so a failure names the ClinePass card), and the model
-filter below. Everything else — the host, the client headers, and crucially the OAuth
-**token renewal** — is Cline's, because the shared connection carries Cline's token
-with its own expiry and a ClinePass request has to renew it like a Cline one.
+filter below. Everything else — the host, the client headers, and the OAuth **token
+renewal** — is Cline's, because the wire format and vendor are shared even when the
+account records are not.
 
 What distinguishes the two is not on the wire. Same host, same `Authorization:
 Bearer`, same client headers; the only difference is the `cline-pass/` model
@@ -3108,16 +3116,15 @@ prefix and whether the account is entitled to it.
 
 Three consequences, all load-bearing:
 
-- **One connection, two cards.** The gateway's `provider-alias.ts` maps `clinepass`
-  to `cline`, so a request made for ClinePass reads the `cline` connection's stored
-  credential. This is the one deliberate cross-provider credential lookup in the
-  gateway; the provider id on the request path stays `clinepass` so the adapter and
-  its errors name the right card. On the dashboard the card carries
-  `connectionProviderId: 'cline'`, which is what makes the one connection light up
-  both cards.
+- **One card, one connection.** `/v1/oauth/clinepass/start` records a session whose
+  `providerId` is `clinepass`; the callback exchanges the code and saves the record
+  under `clinepass`. The gateway's alias map is empty — there is no cross-provider
+  credential lookup left — and the dashboard card carries no `connectionProviderId`.
+  A save that stores its own credential clears any `credentialConnectionId` left on
+  the record, so a migration-era alias cannot keep serving another provider's token.
 - **The list is the recommended feed's tier.** `GET /api/v1/models` does not carry
-  the ClinePass tier for every account: an unsubscribed account gets the 469-model
-  Cline catalog and no `cline-pass/` id at all. So `listModels` reads the `clinePass`
+  the ClinePass tier for every account: an unsubscribed account gets the Cline
+  catalog and no `cline-pass/` id at all. So `listModels` reads the `clinePass`
   array of `GET /api/v1/ai/cline/recommended-models`, which is the list Cline's own
   CLI shows, and keeps only ids beginning `cline-pass/`. The feed's tiers sit at the
   top level of the body, with no `data` envelope. An account with no tier gets an
@@ -3125,13 +3132,12 @@ Three consequences, all load-bearing:
 - **Entitlement cannot be pre-checked.** It is decided server-side per request,
   from the subscription, and stated in the response body (*"no access to clinepass
   subscription models yet"*). There is no endpoint that answers "is this
-  subscription current", so a health check proves the Cline token is live and
+  subscription current", so a health check proves this connection's token is live and
   **nothing more** — a green card is not an entitlement check. The model filter is
   what keeps the *model list* honest; the health status does not.
 
-A failed renewal reads as *"sign in again"*, which is now the correct instruction:
-ClinePass shares Cline's sign-in, so there is a sign-in to repeat even though there
-is no ClinePass sign-in of its own.
+A failed renewal reads as *"sign in again"*, and it refers to this card's sign-in:
+ClinePass has its own route, session store entry and connection.
 
 ## Model Routing and the Client Catalog
 

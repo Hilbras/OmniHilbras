@@ -244,21 +244,26 @@ test('THE INVARIANT: the catalog names no provider', () => {
   assert.deepEqual(found, [], `the model-catalog must name no provider, found: ${found.join(', ')}`);
 });
 
-test('a shared provider’s live catalog is cached instead of fetched on every model list', async () => {
-  // A shared provider has no stored `modelIds`, so `listAll` asks it live — a network round trip on
-  // every `/v1/models`, measured at 0.3–1.5 s. An agent app fetches the model list on connect, so the
-  // repeated fetch is pure latency. The first call fetches, the second is served from the cache.
-  const behind = adapter('clinepass', { models: [{ id: 'cline-pass/one' }] });
-  let calls = 0;
-  const counting = { ...behind, async listModels(context) { calls += 1; return behind.listModels(context); } };
-  const { instance } = catalog({
-    connections: [connection({ providerId: 'cline', modelIds: ['cline-model'] })],
-    adapters: [counting],
+test('each card serves its own stored catalog, even beside a sibling on the same vendor', async () => {
+  // The shared-catalog read used to make ClinePass's models appear on a `cline` connection. Two cards on
+  // one vendor are two providers here, so the list is the stored record's own `modelIds` — and no adapter
+  // is asked, which is also what stops `/v1/models` from billing a provider for a local read.
+  const { instance, adapters } = catalog({
+    connections: [
+      connection({ id: 'cline-conn', providerId: 'cline', modelIds: ['cline-model'] }),
+      connection({ id: 'clinepass-conn', providerId: 'clinepass', modelIds: ['tier-model'] }),
+    ],
+    adapters: [
+      adapter('cline', { models: [{ id: 'live-cline' }] }),
+      adapter('clinepass', { models: [{ id: 'live-tier' }] }),
+    ],
   });
 
-  const first = await instance.listAll();
-  const second = await instance.listAll();
-  assert.equal(calls, 1, 'the shared catalog was fetched again instead of read from the cache');
-  assert.ok(first.models.some((model) => model.providerId === 'clinepass'), 'the shared models are missing');
-  assert.deepEqual(second.models, first.models, 'the cached list differed from the live one');
+  const list = await instance.listAll();
+  assert.deepEqual(
+    list.models.map((model) => model.id).sort(),
+    ['cl/cline-model', 'clp/tier-model'],
+    'each provider must serve only what its own connection imported',
+  );
+  assert.equal(adapters.reduce((total, item) => total + item.asked.length, 0), 0, 'no provider is asked live');
 });

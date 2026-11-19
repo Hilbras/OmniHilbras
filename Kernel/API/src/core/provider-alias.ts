@@ -1,44 +1,27 @@
 /**
  * Providers that share another provider's stored credential.
  *
- * ## Why this exists
+ * ## Why the mechanism exists, and why it is empty
  *
- * Two cards can be one account. `cline` and `clinepass` are that case: Cline's own auth registry
- * registers `cline-pass` as an **alias** of the `cline` handler (`storageProviderId: "cline"`), reusing
- * the identical stored credential, and its client signs in once for both. Our cards mirror that — the
- * ClinePass card is signed into by signing into Cline — so a request made for `clinepass` has to use the
- * credential the `cline` connection stores.
+ * Two cards can be one account. When that is true, a request made for the second card has to use the
+ * credential the first one stores, and this map is the one place that says so: a named entry rather
+ * than a special case inside the resolver.
  *
- * The gateway had **no** cross-provider credential lookup before this: every request resolves only its
- * own provider's first credentialed connection, plus an environment fallback under the same id. This is
- * the one deliberate exception, and it is a named map rather than a special case inside the resolver so
- * there is exactly one place to read what the aliases are.
+ * **No provider is an alias today.** Cline and ClinePass were the case, and they are not one any more:
+ * ClinePass is a separate card with its own connection, its own sign-in (a separate WorkOS grant on
+ * the same account) and its own `cline-pass/…` model tier. Reading Cline's credential made its card
+ * show Cline's catalog and Cline's usage, which is precisely what a separate provider must not do.
  *
  * ## What it is not
  *
- * It does not merge the two providers. They keep separate cards, separate ids on the request path, and
- * separate model lists; only the credential is shared. A provider that merely *resembles* another — the
- * `kimi` API key versus the `kimi-code` subscription token, or `anthropic` versus `claude-code` — is a
- * different account and must **not** be listed here.
+ * It does not merge two providers. They keep separate cards, separate ids on the request path, and
+ * separate model lists; only the credential is shared. A provider that merely *resembles* another —
+ * the `kimi` API key versus the `kimi-code` subscription token, or `anthropic` versus `claude-code` —
+ * is a different account and must **not** be listed here.
  */
-const providerAliases: Readonly<Record<string, string>> = {
-  // ClinePass reads Cline's connection. See the module comment, and `clinepass.ts` in the SDK.
-  clinepass: 'cline',
-};
+const providerAliases: Readonly<Record<string, string>> = {};
 
 /** The provider whose credential this one uses, or `undefined` when it uses its own. */
 export function providerAlias(providerId: string): string | undefined {
   return providerAliases[providerId];
 }
-
-/**
- * Providers whose model catalog is **not** stored on the connection they share.
- *
- * `clinepass` reads `cline`'s credential, but its tier is a `cline-pass/…` list its own adapter reads
- * live — the shared record holds Cline's 436 models and none of the tier. So listing models from
- * stored records alone made the tier invisible in `/v1/models` and on its page. The catalog is read
- * from the adapter instead, only when the owner is actually connected.
- */
-export const sharedCatalogProviders: Readonly<Record<string, string>> = {
-  clinepass: 'cline',
-};

@@ -39,7 +39,7 @@ export function ConnectionMethodDialog({
         >
           <span className="grid h-8 w-8 place-items-center rounded-lg border border-gold/25 bg-gold-soft text-gold-text"><LogIn className="h-4 w-4" aria-hidden="true" /></span>
           <span className="text-xs font-semibold">Sign in</span>
-          <span className="muted text-[11px] leading-relaxed">Approve a code on {providerName}&rsquo;s own page. No key to copy.</span>
+          <span className="muted text-[11px] leading-relaxed">Approve the sign-in in your browser. No key to copy.</span>
         </button>
         <button
           type="button"

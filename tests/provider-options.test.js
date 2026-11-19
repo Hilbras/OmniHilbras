@@ -157,7 +157,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // over — its group is `web-cookie`, which the keyed dialog does not offer. (This line said 1.73.0
   // until 1.85.1, and there is no `v1.73.0` tag to look it up under.)
   // Cards 25 -> 26 in 1.76.0 (`clinepass`), the first card added here whose *base* is also a card.
-  // 1.77.0 moved `clinepass` to the OAuth group — it is the same account as Cline, reached by the same
+  // 1.77.0 moved `clinepass` to the OAuth group — the same vendor and account as Cline, reached by the same
   // sign-in — so the dialog offers no option for it either: options go 17 -> 16, back to exactly the
   // count before `clinepass` existed. Both halves of that pair are now OAuth cards, and neither is keyed.
   // Cards 26 -> 30 in 1.78.0 (`apinex`, `apmix`, `tiarina`, `xkiro`), four free-tier aggregators — so

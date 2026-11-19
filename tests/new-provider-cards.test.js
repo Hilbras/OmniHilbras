@@ -163,14 +163,12 @@ test('a new provider id is one edit away from a web-session id, and stays distin
    *
    * 1. a web session — `webSessionProviders.ts` is what makes a provider sign in rather than take a key;
    * 2. an OAuth flow the gateway really serves a start route for;
-   * 3. **the derived card reads the base's connection.** Added for `cline`/`clinepass`, where ClinePass is
-   *    the *same account* as Cline rather than a different way into it — Cline's own auth registry
-   *    registers `cline-pass` as an alias of the `cline` handler reusing the identical stored credential,
-   *    so our `clinepass` card carries `connectionProviderId: 'cline'` and is signed into by signing into
-   *    Cline. This is what the near-miss is protecting here: a `clinepass` card that did *not* share the
-   *    connection would either need a sign-in of its own (a second token for one account) or read as
-   *    unconnected. An earlier version excluded `opencode-console` from this loop to keep the narrow rule
-   *    green; it satisfies (2) outright, so the exclusion went with the rest.
+   * 3. **the derived card reads the base's connection.** This is the general mechanism for a genuinely
+   *    shared account: the card carries `connectionProviderId` and is signed into as the owner. It was
+   *    added for `cline`/`clinepass`; `clinepass` satisfies (2) now that it has its own route and
+   *    connection, so no card uses (3) today. It stays because deleting the shared-account option would
+   *    leave a future pair with no expressible shape. An earlier version excluded `opencode-console`
+   *    from this loop to keep the narrow rule green; it satisfies (2) outright, so the exclusion went.
    *
    * What all three have in common is that the derived card cannot be collected by the form that collects
    * the base's credential, and cannot silently borrow the base's *name* — (3) makes the sharing explicit

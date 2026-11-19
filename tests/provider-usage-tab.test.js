@@ -42,10 +42,12 @@ test('the usage tab narrows the query to one provider, and drops the whole-catal
   assert.match(page, /providerId \? null : \([\s\S]{0,200}?aria-label="Provider connections"/, 'the provider canvas is no longer dropped for a single provider');
 });
 
-test('the tab follows the connection owner, so a shared-credential card is not empty', () => {
+test('the tab follows the connection that served the card, so a shared-credential card is not empty', () => {
   const detail = read('src/pages/ProviderDetailPage.tsx');
-  // `clinepass` shares Cline's connection, and the gateway records its usage under `cline`. Filtering by the
-  // card's own id would show an empty tab while the requests sat under the owner.
+  // The connection's own provider id is the authority. It matches the card's id for an ordinary card
+  // (ClinePass is one now that it has its own connection), and it follows the owner for a card that
+  // deliberately shares another's account. Filtering by the card id alone would show an empty tab
+  // whenever those two differ.
   assert.match(
     detail,
     /<UsageContent providerId=\{connection\?\.providerId \?\? provider\.connectionProviderId \?\? provider\.id\}/,

@@ -129,11 +129,14 @@ test('a sign-in start names the row it repairs, for every flow the dialog offers
     assert.match(dialog, new RegExp(`${call}\\(addAccount, undefined, targetConnectionId\\)`), `${call} does not name the row`);
   }
   assert.match(dialog, /startGatewayDeviceSignIn\(providerId, addAccount, undefined, targetConnectionId\)/, 'the device-flow start does not name the row');
+  assert.match(dialog, /startGatewayOauthSignIn\(providerId, undefined, targetConnectionId, addAccount\)/, 'the redirect-flow start does not name the row or say it is adding one');
   assert.match(dialog, /startKiroSignIn\(addAccount, undefined, targetConnectionId\)/, 'the Kiro start does not name the row');
   assert.match(dialog, /startZcodeSignIn\('zai', undefined, addAccount, targetConnectionId\)/, 'the ZCode start does not name the row');
   const client = read('src/lib/gatewayClient.ts');
   assert.match(client, /startZcodeSignIn\(provider: 'zai' \| 'bigmodel' = 'zai', signal\?: AbortSignal, addAccount = false, connectionId\?: string\)/, 'the ZCode client cannot send a target');
   assert.match(client, /startKiroSignIn\(addAccount\?: boolean, signal\?: AbortSignal, connectionId\?: string\)/, 'the Kiro client cannot send a target');
+  assert.match(client, /startGatewayOauthSignIn\(providerId: string, signal\?: AbortSignal, connectionId\?: string, addAccount = false\)/, 'the redirect-flow client cannot say "add"');
+  assert.match(client, /addAccount \? \{ addAccount: true \} : \{\}/, 'the redirect-flow start never sends addAccount, so it overwrites the existing account');
 });
 
 test('Update models re-reads the list the page renders, not only the account it refreshed', () => {
