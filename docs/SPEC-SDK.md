@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.71.1
+**Status:** Current — release 3.71.2
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -586,6 +586,14 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
   connected, failed or expired.
 - `POST /v1/oauth/minimax-code-global/start` — begin a MiniMax Code (Global) sign-in. The same flow as the
   China variant, against `account.minimax.io` and `agent.minimax.io`.
+- **MiniMax's catalog shape is `providers[].config.models`, not `data[]`.** Measured from a signed-in
+  account on 2026-11-19: the body carries `version`, `ttlSeconds` and a `providers` array, whose first
+  entry has `config.models` (an object keyed by model id, each with `name` and `limit.context`),
+  `model_order` and `whitelist`. The adapter reads `model_order` first, then any table entry it did not
+  name, and a non-empty `whitelist` gates the result because it is the account's entitlement. The legacy
+  `data` array is still accepted. An unrecognised shape is refused; a recognised shape with an empty
+  table is an empty list, not a failure. The previous parser required `data[]`, so a live sign-in saved
+  a valid credential with zero models and its health read "unreadable model catalog".
 - `GET /v1/oauth/minimax-code-global/session/:id` — whether the MiniMax Code (Global) sign-in is pending,
   connected, failed or expired.
 - `POST /v1/oauth/qoder/start` — begin a Qoder sign-in. A custom device flow with a locally-minted PKCE

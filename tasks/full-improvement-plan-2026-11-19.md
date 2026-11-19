@@ -53,6 +53,11 @@ Two reports after `3.70.0` shipped:
   flow was approved, a pre-flight catalog read failed and the save was discarded. Both MiniMax cards no longer
   validate on save; the exchange is the proof and discovery is tolerated. A regression test completes a poll with
   an unreadable catalog and expects `connected` with an empty model list.
+- **The MiniMax catalog then read as empty.** The live body is
+  `providers[].config.models` (plus `model_order` and `whitelist`), not `data[]`. The parser accepts the live shape,
+  the legacy array and a top-level map, reads `limit.context` as the context window, gates on a non-empty whitelist,
+  and refuses only a shape it cannot recognise. Re-read live: the Global connection now has `MiniMax-M3` and
+  `MiniMax-M3.1-Flash`, and its health is `healthy`.
 
 
 This plan covers everything from the review and the feedback. It is ordered by risk and by

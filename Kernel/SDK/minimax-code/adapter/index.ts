@@ -66,6 +66,86 @@ type TokenResponse = {
 
 type ModelItem = { id?: string; name?: string };
 
+/**
+ * The catalog MiniMax actually answers with, measured on 2026-11-19:
+ *
+ * ```json
+ * { "version": "...", "ttlSeconds": 3600, "providers": [
+ *   { "providerId": "minimax", "config": {
+ *     "name": "MiniMax",
+ *     "models": { "MiniMax-M3": { "name": "M3", "limit": { "context": 512000, "output": 128000 }, ... } },
+ *     "model_order": ["MiniMax-M3", "MiniMax-M3.1-Flash"],
+ *     "whitelist": ["MiniMax-M3", "MiniMax-M3.1-Flash"]
+ *   } }
+ * ] }
+ * ```
+ *
+ * The adapter used to require `{ data: [{ id, name }] }`, so a live account read as "unreadable" and a
+ * successful sign-in saved a connection with zero models. The legacy `data` array is still accepted,
+ * because some lanes and older captures use it.
+ */
+type CatalogModelMeta = { name?: unknown; limit?: { context?: unknown } };
+type CatalogProvider = {
+  providerId?: string;
+  config?: {
+    models?: Record<string, CatalogModelMeta>;
+    model_order?: unknown;
+    whitelist?: unknown;
+  };
+};
+type CatalogBody = {
+  data?: ModelItem[];
+  models?: Record<string, CatalogModelMeta>;
+  providers?: CatalogProvider[];
+};
+
+/**
+ * Every model the body names, from any of the shapes MiniMax has used.
+ *
+ * `model_order` is the order its own client shows, so it is read first; ids present in `models` but
+ * absent from the order still count. A non-empty `whitelist` is the account's entitlement, so it gates
+ * the other two — a model the endpoint lists but the account may not run is not advertised.
+ */
+function catalogModels(providerId: string, body: CatalogBody): Model[] {
+  const models: Model[] = [];
+  const seen = new Set<string>();
+  const add = (rawId: unknown, meta?: CatalogModelMeta) => {
+    if (typeof rawId !== 'string' || !rawId || seen.has(rawId)) return;
+    seen.add(rawId);
+    const context = meta && typeof meta.limit === 'object' && meta.limit && typeof meta.limit.context === 'number'
+      ? meta.limit.context
+      : undefined;
+    const displayName = meta && typeof meta.name === 'string' && meta.name ? meta.name : undefined;
+    models.push({
+      id: rawId,
+      providerId,
+      ...(displayName ? { displayName } : {}),
+      ...(context ? { contextWindow: context } : {}),
+    });
+  };
+
+  if (Array.isArray(body.data)) for (const row of body.data) add(row?.id, row);
+
+  for (const provider of Array.isArray(body.providers) ? body.providers : []) {
+    const config = provider?.config;
+    if (!config) continue;
+    const table = config.models && typeof config.models === 'object' ? config.models : {};
+    const whitelist = Array.isArray(config.whitelist)
+      ? new Set(config.whitelist.filter((id): id is string => typeof id === 'string'))
+      : undefined;
+    const allowed = (id: string) => !whitelist || whitelist.size === 0 || whitelist.has(id);
+    for (const id of Array.isArray(config.model_order) ? config.model_order : []) {
+      if (typeof id === 'string' && allowed(id)) add(id, table[id]);
+    }
+    for (const [id, meta] of Object.entries(table)) if (allowed(id)) add(id, meta);
+  }
+
+  if (body.models && typeof body.models === 'object') {
+    for (const [id, meta] of Object.entries(body.models)) add(id, meta);
+  }
+  return models;
+}
+
 type ClaudeOrOpenAiResponse = {
   id?: string;
   model?: string;
@@ -233,18 +313,24 @@ class MinimaxCodeAdapter implements ProviderAdapter {
     return { status: 'valid', checkedAt: new Date().toISOString(), latencyMs: Math.round(performance.now() - startedAt) };
   }
 
-  async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {    const credential = await this.credential(context);
-    const response = await this.transport.request<{ data?: ModelItem[] }>({
+  async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
+    const credential = await this.credential(context);
+    const response = await this.transport.request<CatalogBody>({
       method: 'GET',
       providerId: this.id,
       url: `${this.site.agent}/mavis/api/v1/models?region=en&buildEnv=prod`,
       headers: this.requestHeaders(credential),
       ...(context.signal ? { signal: context.signal } : {}),
     });
-    const rows = response.data?.data;
+    const body = response.data ?? {};
+    const recognized = Array.isArray(body.data)
+      || Array.isArray(body.providers)
+      || Boolean(body.models && typeof body.models === 'object');
     // Inventing a catalog from a malformed response made a changed shape look like a healthy account.
-    if (!Array.isArray(rows)) throw invalidResponse(this.id, 'MiniMax returned an unreadable model catalog.');
-    return rows.flatMap((row) => (row.id ? [{ id: row.id, providerId: this.id, ...(row.name ? { displayName: row.name } : {}) }] : []));
+    // A recognised shape with no models is different: it is an account with nothing entitled, and it is
+    // returned as an empty list rather than as a failure to read.
+    if (!recognized) throw invalidResponse(this.id, 'MiniMax returned an unreadable model catalog.');
+    return catalogModels(this.id, body);
   }
 
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {
