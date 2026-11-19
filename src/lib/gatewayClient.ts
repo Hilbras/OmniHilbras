@@ -186,7 +186,10 @@ export type GatewayApiKeyList = {
 };
 
 // In development the dashboard calls its own origin, and Vite forwards `/v1` to the gateway with the
-// per-launch dashboard token attached. In a production build there is no such proxy, so the gateway URL is used.
+// per-launch dashboard token attached. The bundled CLI server does the same (`cli/server-src/static.mjs`),
+// and its shell injects the gateway URL as the page's own origin so those calls reach the proxy. Other
+// production builds — desktop, Android — carry no such proxy, so `__OMNIHILBRAS_GATEWAY_URL__` is their
+// gateway's real address and they authenticate via the bridge or a device token instead.
 const gatewayBaseUrl = import.meta.env.DEV && typeof window !== 'undefined'
   ? normalizeGatewayBaseUrl(window.location.origin)
   : normalizeGatewayBaseUrl(

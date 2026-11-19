@@ -6302,3 +6302,24 @@ independently of the React app" is now measured over every provider manifest, an
 - **Web providers are out of the contract on purpose** and say so: `tools: false` in the model listing,
   `gateway.tools: "unsupported"` in the body, and the same note on a stream's first empty-delta chunk because the head is
   written before the provider is known.
+
+## 3.74.1 — the installed dashboard could no longer read its own gateway
+
+- **`omnihilbras` shipped a dashboard that locked itself out.** Since 3.73.0 the published CLI bundles and
+  starts both servers, but `cli/server-src/static.mjs` only injected the gateway *URL* and let the browser call
+  the gateway **directly** — no proxy, and the per-launch dashboard token is by design never in the browser. So
+  with key enforcement on (the documented local-mode default, and the default of a store that has minted a key),
+  every management call answered `401`, the badge read *"Gateway needs sign-in"* and the hint said *"reload the
+  dashboard"* — advice that cannot work, because reloading cannot put a token into a browser that was never
+  given one. A fresh `npm i -g` was unusable the moment a key existed.
+- **The shipped server now does what the dev proxy does.** `static.mjs` serves the shell with the gateway
+  address set to the page's own origin, and forwards `/v1` and `/health` to the gateway, attaching the
+  `Origin` and `x-omnihilbras-dashboard-token` headers itself — but only when the browser's `sec-fetch-site`
+  says `same-origin`. A cross-site page on the dashboard's port gets no token and is refused; the gateway's
+  trust rule (`server.ts`) is untouched, so nothing was loosened to make the fix.
+- **Asserted, not promised.** `tests/cli-dashboard-proxy.test.js` starts a real gateway that publishes its token
+  through the gateway's own writer and drives the shipped proxy against it. It pins four properties: a fresh
+  install opens its dashboard with enforcement on; the value that grants trust is the token the gateway itself
+  published (an allowlisted Origin *without* it is still `401`); a cross-site request is not served as the
+  dashboard; and the served shell points the browser at its own origin. The reader and the writer in
+  `dashboardTokenPath` cannot now drift to two files without this failing.

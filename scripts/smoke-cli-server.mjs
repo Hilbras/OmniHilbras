@@ -56,9 +56,31 @@ try {
   const health = await fetch(`http://127.0.0.1:${gatewayPort}/health`).then((response) => response.json());
   if (health.service !== 'omnihilbras-gateway') throw new Error(`unexpected health: ${JSON.stringify(health)}`);
   const shell = await fetch(`http://127.0.0.1:${dashboardPort}/dashboard`).then((response) => response.text());
-  if (!shell.includes('__OMNIHILBRAS_GATEWAY_URL__')) throw new Error('the dashboard shell has no gateway URL injection');
-  if (!shell.includes(String(gatewayPort))) throw new Error(`the dashboard shell does not point at port ${gatewayPort}`);
-  console.log(`✔ bundled server: gateway ${health.build.version}, dashboard injected`);
+  if (!shell.includes('__OMNIHILBRAS_GATEWAY_URL__')) throw new Error('the dashboard shell has no gateway address injection');
+  // The shell must point the browser at its OWN origin, not the gateway port: that is what makes management
+  // calls same-origin so the proxy below can attach the token. Asserting the old literal port is exactly the
+  // design this replaces.
+  if (!/globalThis\.__OMNIHILBRAS_GATEWAY_URL__\s*=\s*window\.location\.origin/.test(shell)) {
+    throw new Error('the dashboard shell does not point the browser at window.location.origin');
+  }
+
+  // The fix, end to end. A management call the browser marks same-origin must be served by the gateway through
+  // the shipped proxy, which presents the token the freshly-started gateway just published. This is the call
+  // that answered 401 ("Gateway needs sign-in") before 3.74.1 on any install with key enforcement on — which is
+  // the default. The temp config dir has no api-keys.json, so enforcement is on here, which is the point.
+  const proxied = await fetch(`http://127.0.0.1:${dashboardPort}/v1/connections`, {
+    headers: { 'sec-fetch-site': 'same-origin', accept: 'application/json' },
+  });
+  if (proxied.status !== 200) throw new Error(`a same-origin management call through the shipped proxy must be served, got ${proxied.status}`);
+
+  // And a request the browser would not mark same-origin is not served as the dashboard: enforcement stays on,
+  // the token is only presented for the page's own origin.
+  const crossSite = await fetch(`http://127.0.0.1:${dashboardPort}/v1/connections`, {
+    headers: { 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' },
+  });
+  if (crossSite.status === 200) throw new Error('a cross-site request must not be served as the dashboard');
+
+  console.log(`✔ bundled server: gateway ${health.build.version}, dashboard same-origin-proxied with enforcement on`);
   code = 0;
 } catch (error) {
   console.error(`✖ ${error.message}`);

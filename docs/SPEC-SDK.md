@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.74.0
+**Status:** Current — release 3.74.1
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -855,6 +855,17 @@ allowlisted browser origin. The contract:
   patch. Until then the gate raises the bar from *any local process* to *a local
   process that also knows the key* — the difference between an accidental
   postinstall script and a deliberate attacker.
+- **The bundled CLI server presents that secret the way the dev proxy does (3.74.1).** The published
+  `@hilbras/omnihilbras` ships the gateway and the dashboard and starts both; the dashboard token is, by
+  design, never in the browser. So `cli/server-src/static.mjs` does what Vite's dev proxy does — it serves the
+  shell with the gateway address set to the page's own origin, and forwards `/v1` and `/health` to the gateway,
+  adding the `Origin` and `x-omnihilbras-dashboard-token` headers itself, **only for a request the browser
+  marks `sec-fetch-site: same-origin`**. A cross-site page reaching the dashboard's port gets no token and is
+  refused, and the gateway's trust rule is unchanged. Without this the shipped dashboard could only run with
+  enforcement off: a fresh install that minted a key answered *"Gateway needs sign-in"* forever, because the
+  browser had no token to present and "reload" cannot supply one. `tests/cli-dashboard-proxy.test.js` starts a
+  real gateway that publishes its token through the gateway's own writer and drives the shipped proxy against
+  it, so the reader and the writer cannot drift to two files.
 - `AUTHENTICATION_FAILED` maps to `401` with a `WWW-Authenticate: Bearer`
   challenge and an actionable message.
 - `lastUsedAt` is best effort: it is written at most once per 30 seconds so
