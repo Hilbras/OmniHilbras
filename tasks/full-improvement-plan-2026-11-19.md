@@ -1,8 +1,39 @@
 # Full improvement plan — 2026-11-19
 
-**Status:** proposed. Nothing in this document has been implemented.
+**Status:** in progress. The first implementation pass is committed at `9a5d6ae8`; see “Execution status” below.
 **Baseline:** `3.69.0`, `pnpm verify` green in CI, 2,477 tests passing locally.
 **Inputs:** the deep-look review (findings **D1–D8**) and the user feedback items (**U1–U14**).
+
+## Execution status (2026-11-19)
+
+- **Phase 1 — complete** in the tree: virtual-model override on stream/hedge, stream failover/breaker/cooldown/sticky,
+  cooldown cleared by connection id, half-open breaker settlement, disabled virtual model 400, MCP version from
+  build info, human `lastUsed`, documentation corrections. New tests: `stream-parity`, `virtual-models-routing`,
+  `model-cooldowns`, `circuit-breaker`, `mcp-route`.
+- **Phase 2 — complete except Docker runtime proof**: usage and connection counters coalesced with a flush on
+  close, container bind opt-in (`OMNIHILBRAS_CONTAINER=1`), `EXPOSE 20138`, docs/version drift fixed. Docker could not
+  be started here (no Docker binary); CI workflow is the remaining proof.
+- **Phase 3 — substantially implemented, live checks outstanding**: Cline/ClinePass now have separate connection
+  records, model lists and usage attribution; both advertise API key + OAuth; a `credentialConnectionId` link replaces
+  the global alias, with API-key ClinePass independent. MiniMax refresh de-duplication, forced renewal, expiry
+  normalisation, save tolerance and CN verification URL fixed; Aion has a real one-token credential check;
+  100milionseek has a package, card, registry row, caps row, slug, logo and tests. Live Cline/MiniMax/Aion/100m
+  checks need credentials.
+- **Phase 4 — partially implemented**: Codex sends the account/user-agent headers, has a current default version and
+  wider catalog shapes; the registry URL is fixed. Ollama is keyless again and honours a saved endpoint. Generic
+  OpenAI-shaped catalogs now keep context/modalities/pricing. The all-provider live audit script and
+  `catalogRefreshedAt` UI are still to do.
+- **Phase 5 — partially implemented**: token-saver shortener/cache/telemetry/no-store defects fixed; stats now expose
+  before/after bytes and skip reasons; Logs is a real history + live page with search, outcome filter, pause, export
+  and detail. The `/v1/analyze` lab endpoint and full backup UI are still to do.
+- **Phase 6 — partially implemented**: the two web-session group headings are gone in favour of one grid, Settings has
+  live reload and a copy-URL action, Token Saver/Logs have skeletons. The shared `Dialog` primitive, full form
+  conversion and exit animations are still to do.
+- **Phase 7 — partially implemented**: backup import rolls back on a later write failure and export self-checks the
+  envelope; desktop backup save chmods an overwrite. The dry-run verify endpoint/UI, benchmark script and measured
+  connection-speed work are still to do.
+- **E2E**: not run locally — Playwright's Chromium is not installed on this machine (`browserType.launch`). CI carries it.
+
 
 This plan covers everything from the review and the feedback. It is ordered by risk and by
 dependency, not by how visible a change is. Every phase ships completely: version bump, tag,
