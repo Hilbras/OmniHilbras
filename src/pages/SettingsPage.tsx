@@ -39,9 +39,9 @@ function Toggle({ label, detail, checked, disabled, onChange }: { label: string;
   );
 }
 
-function Section({ icon, title, description, children }: { icon: ReactNode; title: string; description: string; children: ReactNode }) {
+function Section({ icon, title, description, children, id }: { icon: ReactNode; title: string; description: string; children: ReactNode; id?: string }) {
   return (
-    <section className="card p-5">
+    <section id={id} className="card scroll-mt-24 p-5">
       <h2 className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</h2>
       <p className="muted mt-1 text-xs leading-relaxed">{description}</p>
       <div className="mt-3 divide-y divide-line">{children}</div>
@@ -193,7 +193,20 @@ export function SettingsContent() {
         </div>
       )}
 
-      <Section icon={<Palette className="h-4 w-4 text-gold-text" aria-hidden="true" />} title="Appearance" description="Saved in this browser. The desktop app uses the same renderer.">
+      <nav aria-label="Settings sections" className="sticky top-0 z-10 -mx-1 flex gap-1 overflow-x-auto rounded-xl border border-line bg-bg p-1.5">
+        {[
+          ['settings-appearance', 'Appearance'],
+          ['settings-desktop', 'Desktop'],
+          ['settings-gateway', 'Gateway'],
+          ['settings-updates', 'Updates'],
+          ['settings-startup', 'Startup'],
+          ['settings-data', 'Data'],
+        ].map(([id, label]) => (
+          <a key={id} href={`#${id}`} className="shrink-0 rounded-lg px-3 py-1.5 text-[11px] text-muted hover:bg-bg-soft hover:text-text">{label}</a>
+        ))}
+      </nav>
+
+      <Section icon={<Palette className="h-4 w-4 text-gold-text" aria-hidden="true" />} id="settings-appearance" title="Appearance" description="Saved in this browser. The desktop app uses the same renderer.">
         <div className="flex flex-wrap items-center gap-2 py-3">
           {([['light', Sun], ['dark', Moon], ['system', MonitorCog]] as const).map(([value, Icon]) => (
             <button key={value} type="button" onClick={() => applyTheme(value)} className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[11px] capitalize ${theme === value ? 'border-gold/40 bg-gold-soft text-gold-text' : 'border-line text-muted hover:text-text'}`}>
@@ -204,7 +217,7 @@ export function SettingsContent() {
         <Toggle label="Reduce motion" detail="Disables page transitions, hover lifts and animated icons." checked={reduceMotion} onChange={applyReduceMotion} />
       </Section>
 
-      <Section icon={<Wrench className="h-4 w-4 text-gold-text" aria-hidden="true" />} title="Desktop app" description={bridge ? 'Saved to the app config and applied in the main process.' : 'These settings exist only in the desktop app. The browser dashboard is managed by pnpm dev.'}>
+      <Section icon={<Wrench className="h-4 w-4 text-gold-text" aria-hidden="true" />} id="settings-desktop" title="Desktop app" description={bridge ? 'Saved to the app config and applied in the main process.' : 'These settings exist only in the desktop app. The browser dashboard is managed by pnpm dev.'}>
         <Toggle label="Close to tray" detail="Closing the window hides the app; the gateway keeps serving." checked={preferences?.closeToTray ?? true} disabled={!bridge || Boolean(saving)} onChange={(next) => void saveDesktop({ closeToTray: next }, 'Close to tray')} />
         <Toggle label="Start gateway on launch" detail="When off, the app opens with the gateway stopped." checked={preferences?.autoStartGateway ?? true} disabled={!bridge || Boolean(saving)} onChange={(next) => void saveDesktop({ autoStartGateway: next }, 'Start gateway on launch')} />
         <Toggle label="Check for updates on launch" detail="Checks five seconds after startup. A skipped or failed check is reported honestly." checked={preferences?.checkUpdatesOnLaunch ?? true} disabled={!bridge || Boolean(saving)} onChange={(next) => void saveDesktop({ checkUpdatesOnLaunch: next }, 'Update check on launch')} />
@@ -223,7 +236,7 @@ export function SettingsContent() {
         </div>
       </Section>
 
-      <Section icon={<RefreshCw className="h-4 w-4 text-gold-text" aria-hidden="true" />} title="Updates" description="The app checks the release feed. Windows, signed macOS and the Linux AppImage install from here; a .deb downloads and opens the system installer.">
+      <Section icon={<RefreshCw className="h-4 w-4 text-gold-text" aria-hidden="true" />} id="settings-updates" title="Updates" description="The app checks the release feed. Windows, signed macOS and the Linux AppImage install from here; a .deb downloads and opens the system installer.">
         <KeyValue label="Status" value={update ? `${update.status}${update.version ? ` · ${update.version}` : ''}${typeof update.percent === 'number' ? ` · ${update.percent}%` : ''}` : 'not checked'} />
         {update?.reason && <KeyValue label="Reason" value={update.reason} />}
         <div className="flex flex-wrap gap-2 py-3">
@@ -234,7 +247,7 @@ export function SettingsContent() {
         </div>
       </Section>
 
-      <Section icon={<ShieldCheck className="h-4 w-4 text-gold-text" aria-hidden="true" />} title="Gateway access" description="The one gateway setting that can change without a restart.">
+      <Section icon={<ShieldCheck className="h-4 w-4 text-gold-text" aria-hidden="true" />} id="settings-gateway" title="Gateway access" description="The one gateway setting that can change without a restart.">
         <Toggle
           label="Require an API key"
           detail={requireApiKey === null
@@ -271,7 +284,7 @@ export function SettingsContent() {
         </div>
       </Section>
 
-      <Section icon={<ClockIcon />} title="Loaded at startup" description={loading ? 'Reading the configuration this process resolved.' : 'These come from the environment. Change them in the launch configuration and restart the gateway.'}>
+      <Section icon={<ClockIcon />} id="settings-startup" title="Loaded at startup" description={loading ? 'Reading the configuration this process resolved.' : 'These come from the environment. Change them in the launch configuration and restart the gateway.'}>
         {settings ? (
           <>
             <KeyValue label="Listen" value={`${settings.host}:${settings.port}`} />
@@ -296,7 +309,7 @@ export function SettingsContent() {
         ) : <p className="muted py-3 text-xs">{loading ? 'Loading…' : 'No configuration was returned.'}</p>}
       </Section>
 
-      <Section icon={<Terminal className="h-4 w-4 text-gold-text" aria-hidden="true" />} title="Data and recovery" description="Backups and diagnostics are on About; they are not duplicated here.">
+      <Section icon={<Terminal className="h-4 w-4 text-gold-text" aria-hidden="true" />} id="settings-data" title="Data and recovery" description="Backups and diagnostics are on About; they are not duplicated here.">
         <div className="flex flex-wrap gap-2 py-3">
           <a href="/dashboard/about" className="btn-ghost !px-3 !py-2 !text-xs">Encrypted backup</a>
           {bridge && <button type="button" onClick={() => void bridge.diagnostics.export()} className="btn-ghost !px-3 !py-2 !text-xs">Export diagnostics</button>}
