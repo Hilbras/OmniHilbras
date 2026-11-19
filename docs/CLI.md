@@ -18,7 +18,10 @@ There are three entry points with one verb set:
   gateway and the static dashboard server, clears an occupied port when its holder is Node/Vite/pnpm,
   and shows an **arrow-key menu** (Open dashboard / Restart / Exit) under a live status header read from
   the gateway's `/health`. The menu and header are dependency-free (`cli/lib/menu.mjs`); off a terminal it
-  falls back to a numbered prompt.
+  falls back to a numbered prompt. With **`--background`** (alias `--detach`, `-b`) it starts the servers
+  detached and exits, leaving them running to be controlled with `omnihilbras ps|stop`; their output goes to
+  `bundled-*.log` under the state directory. A server that crashes after startup is **restarted a bounded
+  number of times** (`cli/lib/restart-policy.mjs`), and a crash loop is reported rather than spun forever.
 - **The checkout launcher** (`bin/omnihilbras.js`, private root package) runs `pnpm dev` and
   `pnpm dev:gateway` instead; it is used when the bundle is not staged and a checkout is registered.
 

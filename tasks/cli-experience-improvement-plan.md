@@ -104,3 +104,9 @@ need a `docs/SPEC-SDK.md` line + `Kernel/API/test/` coverage; the `gateway-route
   fallback) and a truthful `statusHeader`. The launcher's numbered prompt is replaced by the menu under a
   live header read from `/health` (fail-open). `tests/cli-menu.test.js` (8 cases) drives the selector with a
   fake keypress stream; the non-TTY smoke run is unaffected. `docs/CLI.md` updated.
+- **Phase 3 — complete in the tree (3.77.0).** `--background`/`--detach`/`-b` starts the servers detached
+  (log files under the state dir) and exits after readiness; `omnihilbras ps|stop` control them. A bounded
+  supervised restart (`cli/lib/restart-policy.mjs`, `MAX_RESTARTS=2`, reset after 30s up) recovers a crash
+  after startup and gives up on a crash loop; the pre-startup fail-fast path is unchanged.
+  `tests/cli-restart-policy.test.js` (5 cases) and the extended smoke (background launcher exits while servers
+  survive; a SIGKILLed gateway is respawned with a new pid) pass. `docs/CLI.md` updated.

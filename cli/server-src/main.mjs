@@ -20,8 +20,9 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readBundledRecord, writeBundledRecord, clearBundledRecord } from '../lib/bundled-state.mjs';
+import { readBundledRecord, writeBundledRecord, clearBundledRecord, bundledStateDir } from '../lib/bundled-state.mjs';
 import { selectMenu, statusHeader } from '../lib/menu.mjs';
+import { restartDecision, MAX_RESTARTS } from '../lib/restart-policy.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8'));
@@ -93,6 +94,7 @@ and stops both on Ctrl-C.
       --gateway-port <n> gateway port          (default ${DEFAULT_GATEWAY_PORT})
   -n, --no-browser       do not open a browser
   -l, --log              stream both servers' output instead of capturing it
+  -b, --background       start detached and exit; stop later with \`omnihilbras stop\`
       --force            kill a port holder even when it is not Node/Vite/pnpm
   -y, --yes              do not ask before replacing a previous run
   -h, --help             this text
@@ -104,7 +106,7 @@ run \\\`omnihilbras help\\\`.`);
 }
 
 function parseArgs(argv) {
-  const options = { dashboardPort: DEFAULT_DASHBOARD_PORT, gatewayPort: DEFAULT_GATEWAY_PORT, open: true, log: false, force: false, yes: false };
+  const options = { dashboardPort: DEFAULT_DASHBOARD_PORT, gatewayPort: DEFAULT_GATEWAY_PORT, open: true, log: false, force: false, yes: false, background: false };
   const valueOf = (index, name) => {
     const next = argv[index + 1];
     if (next === undefined || (next.startsWith('-') && !/^-?\d/.test(next))) fail(`\`${name}\` needs a value.`);
@@ -116,6 +118,7 @@ function parseArgs(argv) {
     else if (arg === '--gateway-port') { options.gatewayPort = Number(valueOf(index, arg)); index += 1; }
     else if (arg === '-n' || arg === '--no-browser') options.open = false;
     else if (arg === '-l' || arg === '--log') options.log = true;
+    else if (arg === '-b' || arg === '--background' || arg === '--detach') options.background = true;
     else if (arg === '--force') options.force = true;
     else if (arg === '-y' || arg === '--yes') options.yes = true;
     else if (arg === '-h' || arg === '--help') usage(0);
@@ -336,55 +339,90 @@ async function start() {
   }
 
   const tails = { gateway: [], dashboard: [] };
-  const stdio = options.log ? 'inherit' : ['ignore', 'pipe', 'pipe'];
-  const gateway = spawn(process.execPath, [GATEWAY], {
-    env: {
-      ...process.env,
-      OMNIHILBRAS_PORT: String(options.gatewayPort),
-      OMNIHILBRAS_BUILD_VERSION: PKG.version,
-      // So `GET /` on the gateway port sends a browser to the dashboard instead of a 404. The
-      // launcher is the only thing that knows both ports.
-      OMNIHILBRAS_DASHBOARD_URL: `http://localhost:${options.dashboardPort}/dashboard`,
-      OMNIHILBRAS_CORS_ORIGINS: [...new Set([
-        ...(process.env.OMNIHILBRAS_CORS_ORIGINS ?? '').split(',').map((origin) => origin.trim()).filter(Boolean),
-        `http://localhost:${options.dashboardPort}`,
-        `http://127.0.0.1:${options.dashboardPort}`,
-      ])].join(','),
-    },
-    stdio,
-  });
-  const dashboard = spawn(process.execPath, [STATIC], {
-    env: {
-      ...process.env,
-      OMNIHILBRAS_DASHBOARD_PORT: String(options.dashboardPort),
-      OMNIHILBRAS_GATEWAY_PORT: String(options.gatewayPort),
-    },
-    stdio,
-  });
+  const gatewayEnv = {
+    ...process.env,
+    OMNIHILBRAS_PORT: String(options.gatewayPort),
+    OMNIHILBRAS_BUILD_VERSION: PKG.version,
+    // So `GET /` on the gateway port sends a browser to the dashboard instead of a 404. The
+    // launcher is the only thing that knows both ports.
+    OMNIHILBRAS_DASHBOARD_URL: `http://localhost:${options.dashboardPort}/dashboard`,
+    OMNIHILBRAS_CORS_ORIGINS: [...new Set([
+      ...(process.env.OMNIHILBRAS_CORS_ORIGINS ?? '').split(',').map((origin) => origin.trim()).filter(Boolean),
+      `http://localhost:${options.dashboardPort}`,
+      `http://127.0.0.1:${options.dashboardPort}`,
+    ])].join(','),
+  };
+  const dashboardEnv = {
+    ...process.env,
+    OMNIHILBRAS_DASHBOARD_PORT: String(options.dashboardPort),
+    OMNIHILBRAS_GATEWAY_PORT: String(options.gatewayPort),
+  };
+  // In the background the servers outlive this launcher, so they are detached and their output goes to a
+  // log file under the state directory rather than to a pipe this process owns and would close on exit.
+  const childStdio = (name) => {
+    if (options.background) {
+      const fd = fs.openSync(path.join(bundledStateDir(), `bundled-${name}.log`), 'a');
+      return ['ignore', fd, fd];
+    }
+    return options.log ? 'inherit' : ['ignore', 'pipe', 'pipe'];
+  };
+  const spawnGateway = () => spawn(process.execPath, [GATEWAY], { env: gatewayEnv, stdio: childStdio('gateway'), detached: options.background });
+  const spawnDashboard = () => spawn(process.execPath, [STATIC], { env: dashboardEnv, stdio: childStdio('dashboard'), detached: options.background });
+
+  const gateway = spawnGateway();
+  const dashboard = spawnDashboard();
   children = { gateway, dashboard };
-  if (!options.log) {
+  if (!options.log && !options.background) {
     captureTail(gateway.stderr, 'gateway', tails.gateway);
     captureTail(gateway.stdout, 'gateway', tails.gateway);
     captureTail(dashboard.stderr, 'dashboard', tails.dashboard);
     captureTail(dashboard.stdout, 'dashboard', tails.dashboard);
   }
 
-  writePidFile({
-    gatewayPid: gateway.pid,
-    staticPid: dashboard.pid,
+  const recordRun = () => writePidFile({
+    gatewayPid: children.gateway.pid,
+    staticPid: children.dashboard.pid,
     dashboardPort: options.dashboardPort,
     gatewayPort: options.gatewayPort,
     startedAt: new Date().toISOString(),
   });
+  recordRun();
 
-  let failed = false;
+  // `started` flips once both ports answer. Before that, a child exit is a startup failure and fails fast
+  // (the original behaviour). After that, it is a crash the restart policy may recover — bounded, so a
+  // process that keeps dying immediately is reported rather than spun in a loop.
+  let started = false;
+  const childState = { gateway: { restarts: 0, startedAt: Date.now() }, dashboard: { restarts: 0, startedAt: Date.now() } };
+  const respawn = { gateway: spawnGateway, dashboard: spawnDashboard };
   const onExit = (label) => (code) => {
-    if (stopping || failed) return;
-    failed = true;
-    spinner?.stop();
-    console.error(`${paint(RED, '✖')} the ${label} exited (code ${code}) before startup finished.`);
-    for (const line of tails[label] ?? []) console.error(line);
-    void shutdown(1);
+    if (stopping || options.background) return;
+    if (!started) {
+      spinner?.stop();
+      console.error(`${paint(RED, '✖')} the ${label} exited (code ${code}) before startup finished.`);
+      for (const line of tails[label] ?? []) console.error(line);
+      void shutdown(1);
+      return;
+    }
+    const state = childState[label];
+    const decision = restartDecision({ restarts: state.restarts, uptimeMs: Date.now() - state.startedAt });
+    if (decision.action === 'stop') {
+      spinner?.stop();
+      console.error(`${paint(RED, '✖')} the ${label} exited (code ${code}) after ${MAX_RESTARTS} restarts; giving up.`);
+      for (const line of tails[label] ?? []) console.error(line);
+      void shutdown(1);
+      return;
+    }
+    state.restarts = decision.restarts;
+    state.startedAt = Date.now();
+    console.error(`${paint(DIM, `the ${label} exited (code ${code}); restarting (${decision.restarts}/${MAX_RESTARTS})`)}`);
+    const child = respawn[label]();
+    children[label] = child;
+    if (!options.log) {
+      captureTail(child.stderr, label, tails[label]);
+      captureTail(child.stdout, label, tails[label]);
+    }
+    child.on('close', onExit(label));
+    recordRun();
   };
   gateway.on('close', onExit('gateway'));
   dashboard.on('close', onExit('dashboard'));
@@ -404,22 +442,32 @@ async function start() {
     await shutdown(1);
     return;
   }
+  started = true;
 
   const url = `http://localhost:${options.dashboardPort}`;
   const dashboardUrl = `${url}/dashboard`;
   spinner.succeed(`${paint(BOLD, 'OmniHilbras')} is running`);
+  const stopHint = options.background ? 'omnihilbras stop' : 'Ctrl-C';
   if (process.stdout.isTTY) {
     summaryBox(`${paint(BOLD, 'OmniHilbras')} ${PKG.version}`, [
       `Dashboard  ${dashboardUrl}`,
       `Gateway    http://${LOOPBACK}:${options.gatewayPort}`,
-      `Stop       Ctrl-C`,
+      `Stop       ${stopHint}`,
     ]);
   } else {
     console.log(`  dashboard  ${dashboardUrl}`);
     console.log(`  gateway    http://${LOOPBACK}:${options.gatewayPort}`);
-    console.log(`  ${paint(DIM, 'Ctrl-C stops both.')}`);
+    console.log(`  ${paint(DIM, options.background ? 'Running in background. Stop with `omnihilbras stop`.' : 'Ctrl-C stops both.')}`);
   }
   if (options.open) openBrowser(dashboardUrl);
+
+  // Background: the servers are detached and outlive this process. Unref them and exit without the shutdown
+  // path (which would kill them); the run record is already written, so `omnihilbras ps|stop` find them.
+  if (options.background) {
+    children.gateway.unref();
+    children.dashboard.unref();
+    process.exit(0);
+  }
 
   if (process.stdin.isTTY && process.stdout.isTTY && !options.log) {
     const gatewayUrl = `http://${LOOPBACK}:${options.gatewayPort}`;

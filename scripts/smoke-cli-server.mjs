@@ -55,10 +55,16 @@ let output = '';
 child.stdout.on('data', (chunk) => { output += chunk; });
 child.stderr.on('data', (chunk) => { output += chunk; });
 const childClosed = new Promise((resolve) => child.once('close', resolve));
+let bgChild;
+let bgClosed;
 
 /** Runs a client verb against this isolated run and parses its `--json` answer. */
 function verb(...args) {
   const stdout = execFileSync(process.execPath, [bin, ...args, '--json'], { env: verbEnv, encoding: 'utf8', timeout: 20000 });
+  return JSON.parse(stdout);
+}
+function bgVerb(env, ...args) {
+  const stdout = execFileSync(process.execPath, [bin, ...args, '--json'], { env, encoding: 'utf8', timeout: 20000 });
   return JSON.parse(stdout);
 }
 
@@ -87,6 +93,21 @@ try {
   if (before.running !== true) throw new Error(`ps should report the run as running, got ${JSON.stringify(before)}`);
   if (before.dashboardPort !== dashboardPort || before.gatewayPort !== gatewayPort) throw new Error(`ps reported the wrong ports: ${JSON.stringify(before)}`);
 
+  // Supervised restart (3.77.0): kill the gateway and the launcher must respawn it (bounded) and serve again.
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const oldGatewayPid = before.processes.find((entry) => entry.role === 'gateway').pid;
+  process.kill(oldGatewayPid, 'SIGKILL');
+  let respawned = false;
+  for (let attempt = 0; attempt < 40 && !respawned; attempt += 1) {
+    await sleep(250);
+    const answered = await fetch(`http://127.0.0.1:${gatewayPort}/health`).then((r) => r.ok).catch(() => false);
+    if (!answered) continue;
+    const now = verb('ps');
+    const newPid = now.processes?.find((entry) => entry.role === 'gateway')?.pid;
+    respawned = Boolean(now.running && newPid && newPid !== oldGatewayPid);
+  }
+  if (!respawned) throw new Error('the gateway was not respawned after a crash');
+
   const stopped = verb('stop');
   if (stopped.refused?.length) throw new Error(`stop refused its own pids: ${JSON.stringify(stopped.refused)}`);
   // The launcher cascades a shutdown when its gateway exits; wait for it to finish.
@@ -95,7 +116,24 @@ try {
   const after = verb('ps');
   if (after.running !== false) throw new Error(`ps after stop should report not running, got ${JSON.stringify(after)}`);
 
-  console.log(`✔ bundled server: gateway ${health.build.version}, same-origin proxy, ps/stop lifecycle`);
+  // Background mode (3.77.0): the launcher must EXIT after readiness while the servers keep running, and
+  // remain controllable through the record. Different ports so this run is independent of the one above.
+  const bgDashboardPort = 20439;
+  const bgGatewayPort = 20440;
+  const bgEnv = { ...verbEnv, OMNIHILBRAS_GATEWAY_URL: `http://127.0.0.1:${bgGatewayPort}` };
+  bgChild = spawn(process.execPath, [main, '--background', '--no-browser', '--port', String(bgDashboardPort), '--gateway-port', String(bgGatewayPort)], { env: bgEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+  bgClosed = new Promise((resolve) => bgChild.once('close', resolve));
+  const bgExit = await Promise.race([bgClosed, new Promise((resolve) => setTimeout(() => resolve('timeout'), 20000))]);
+  if (bgExit === 'timeout') throw new Error('the background launcher did not exit after starting the servers');
+  if (!(await waitPort(bgGatewayPort)) || !(await waitPort(bgDashboardPort))) throw new Error('background servers did not survive the launcher exit');
+  const bgPs = bgVerb(bgEnv, 'ps');
+  if (bgPs.running !== true) throw new Error(`ps should see the background run, got ${JSON.stringify(bgPs)}`);
+  const bgStop = bgVerb(bgEnv, 'stop');
+  if (bgStop.refused?.length) throw new Error(`stop refused the background pids: ${JSON.stringify(bgStop.refused)}`);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  if (await waitPort(bgGatewayPort, 1500)) throw new Error('the background gateway is still answering after stop');
+
+  console.log(`✔ bundled server: gateway ${health.build.version}, same-origin proxy, ps/stop lifecycle, background mode`);
   code = 0;
 } catch (error) {
   console.error(`✖ ${error.message}`);
@@ -103,6 +141,12 @@ try {
 } finally {
   child.kill('SIGTERM');
   await Promise.race([childClosed, new Promise((resolve) => setTimeout(resolve, 3000))]);
+  if (bgChild) {
+    bgChild.kill('SIGTERM');
+    // The background servers are detached; stop them through the record so none is left behind on a failure.
+    try { execFileSync(process.execPath, [bin, 'stop', '--force', '--json'], { env: { ...process.env, XDG_CONFIG_HOME: config, XDG_STATE_HOME: state }, encoding: 'utf8', timeout: 15000 }); } catch { /* already stopped */ }
+    if (bgClosed) await Promise.race([bgClosed, new Promise((resolve) => setTimeout(resolve, 2000))]);
+  }
   rmSync(config, { recursive: true, force: true });
   rmSync(state, { recursive: true, force: true });
 }
