@@ -16,9 +16,15 @@ omnihilbras help            # the rest
 This package is the **client**: the verbs below, over HTTP, against a gateway on your machine. It has **no
 dependencies** and does not download a runtime.
 
-It **cannot start a server**, and that is not an oversight: a globally installed package has no checkout to
-run. `omnihilbras` with no verb prints the help and says how to start one — the desktop app, or a checkout
-linked with `npm link`.
+It **cannot start a server on its own**, and that is not an oversight: a globally installed package has no
+server code and no checkout to run. There are two ways to get a bare `omnihilbras` that starts the servers:
+
+- run `omnihilbras setup` in a checkout; it records that launcher, and this client hands a bare
+  invocation to it;
+- or `npm link` the checkout, which puts the launcher itself on `PATH`.
+
+With neither, a bare `omnihilbras` prints the help and says how to start the servers — the desktop app is
+the zero-checkout option.
 
 | You want | Get it from |
 | --- | --- |

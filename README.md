@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.71.2**
+**Current version: 3.72.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -111,9 +111,10 @@ npm i -g @hilbras/omnihilbras
 ```
 
 It installs the **client**: `status`, `providers`, `models`, `test`, `keys`, `routing`, `logs`, `setup`,
-`doctor`. It **cannot start a server** — a globally installed package has no checkout to run. The server is
-the desktop app; a command that also starts the servers comes from a checkout (`npm link`, then
-`omnihilbras setup`).
+`doctor`. The package contains no server, so by itself it cannot start one. The server is the desktop
+app; a command that also starts the servers comes from a checkout (`npm link`, then `omnihilbras setup`).
+That setup records the checkout launcher, and this installed client hands a bare `omnihilbras` to it —
+so the bare command starts both servers without replacing the client on `PATH`.
 
 > Versions before `3.0.0` under this name are a **different program** (the previous project, whose
 > `omnihilbras` started a server). They are deprecated with that warning. See

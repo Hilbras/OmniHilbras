@@ -101,16 +101,17 @@ Options
 
 ${launcher
     ? 'Run `omnihilbras` with no verb to start the gateway and the dashboard.'
-    : 'This installed command is the gateway client: it asks a gateway that is already running.\nTo start the servers, open the OmniHilbras desktop app, or from a checkout run\n`pnpm install && npm link`, then `omnihilbras`.'}`;
+    : 'This installed command is the gateway client. With a checkout launcher registered\n(`omnihilbras setup` in the checkout), no verb starts the servers; otherwise it says how.\nThe desktop app is the zero-checkout way to start them.'}`;
 }
 
-/** Shown only by the published client, before the verb list. */
-function clientOnlyNotice() {
+/** Shown only by the published client when no launcher is registered, before the verb list. */
+export function clientOnlyNotice() {
   return `This is the gateway client. It cannot start a gateway or the dashboard.
 
 To start the servers:
   • open the OmniHilbras desktop app, or
-  • from a checkout: pnpm install && npm link, then run \`omnihilbras\``;
+  • from a checkout: pnpm install && npm link, then run \`omnihilbras\`
+    (the checkout's \`omnihilbras setup\` records it for this installed client)`;
 }
 
 export async function run(argv, { version, launcher = false } = {}) {

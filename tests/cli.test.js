@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { usage } from '../cli/index.mjs';
+import { findLauncher, readRegisteredLauncher, registerLauncher } from '../cli/lib/launcher.mjs';
 
 /**
  * The CLI, driven the way a person drives it: as a child process with a real gateway on the other end.
@@ -43,10 +45,10 @@ async function fakeGateway(handler) {
   };
 }
 
-function runBin(binPath, args, extraEnv = {}) {
+function runBin(binPath, args, extraEnv = {}, cwd = root) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [binPath, ...args], {
-      cwd: root,
+      cwd,
       env: { ...process.env, NO_COLOR: '1', ...extraEnv },
     });
     let stdout = '';
@@ -81,14 +83,19 @@ test('the installed client says what it cannot do, and the launcher help still s
   // Reported from a real install: `npm i -g @hilbras/omnihilbras`, then `omnihilbras` printed the verb
   // list and the launcher's footer — "run with no verb to start the gateway and the dashboard" — which
   // the published package cannot do. The person read that as "the command is broken".
+  //
+  // Run outside the checkout with an empty config so no launcher is discoverable: inside this repo the
+  // client would correctly delegate to the checkout launcher, which is a different assertion.
   const client = path.join(root, 'cli', 'bin', 'omnihilbras.js');
-  const bare = await runBin(client, []);
+  const isolated = mkdtempSync(path.join(os.tmpdir(), 'omnihilbras-client-'));
+  const env = { XDG_CONFIG_HOME: path.join(isolated, 'config') };
+  const bare = await runBin(client, [], env, isolated);
   assert.equal(bare.code, 2);
   assert.match(bare.stdout, /This is the gateway client\. It cannot start a gateway or the dashboard\./);
   assert.match(bare.stdout, /desktop app/);
   assert.doesNotMatch(bare.stdout, /with no verb to start/, 'the client must not repeat the launcher’s promise');
 
-  const help = await runBin(client, ['help']);
+  const help = await runBin(client, ['help'], env, isolated);
   assert.equal(help.code, 0);
   assert.match(help.stdout, /This installed command is the gateway client/);
   assert.doesNotMatch(help.stdout, /with no verb to start/);
@@ -96,6 +103,43 @@ test('the installed client says what it cannot do, and the launcher help still s
   // The checkout's launcher is the one entry point for which the promise is true.
   assert.match(usage({ launcher: true }), /with no verb to start/);
   assert.doesNotMatch(usage(), /with no verb to start/);
+});
+
+test('bare invocation delegates to a registered launcher, and start strips its own word', async () => {
+  // The published client and the checkout launcher are separate files. `setup` records the launcher;
+  // this asserts the client actually hands over, because a record nobody reads is the same defect as
+  // the help text promising a start that never happens.
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'omnihilbras-delegate-'));
+  const fake = path.join(directory, 'fake-launcher.js');
+  writeFileSync(fake, "console.log(`FAKE ${JSON.stringify(process.argv.slice(2))}`);\n");
+  const client = path.join(root, 'cli', 'bin', 'omnihilbras.js');
+  const env = { XDG_CONFIG_HOME: path.join(directory, 'config'), OMNIHILBRAS_LAUNCHER: fake };
+
+  const bare = await runBin(client, [], env, directory);
+  assert.equal(bare.code, 0);
+  assert.match(bare.stdout, /FAKE \[\]/, 'a bare invocation did not reach the launcher');
+
+  const start = await runBin(client, ['start', '--no-browser'], env, directory);
+  assert.match(start.stdout, /FAKE \["--no-browser"\]/, 'start must not pass its own word through');
+
+  const help = await runBin(client, ['help'], env, directory);
+  assert.doesNotMatch(help.stdout, /FAKE/, 'a verb must stay in the client');
+});
+
+test('setup records the launcher so a reinstalled client still starts the servers', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'omnihilbras-record-'));
+  const launcher = path.join(directory, 'bin', 'omnihilbras.js');
+  mkdirSync(path.dirname(launcher), { recursive: true });
+  writeFileSync(launcher, '');
+  const env = { XDG_CONFIG_HOME: path.join(directory, 'config') };
+
+  assert.equal(readRegisteredLauncher(env), undefined, 'a fresh config has no record');
+  assert.equal(registerLauncher(launcher, env), launcher);
+  assert.equal(readRegisteredLauncher(env), launcher);
+  assert.equal(findLauncher({ env, cwd: directory })?.path, launcher);
+
+  const setup = readFileSync(path.join(root, 'cli', 'commands', 'setup.mjs'), 'utf8');
+  assert.match(setup, /registerLauncher\(startTarget\.path\)/, 'setup does not record the launcher it found');
 });
 
 test('setup only offers a start target it can actually run', () => {

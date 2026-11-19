@@ -308,6 +308,29 @@ function createSpinner(text) {
   };
 }
 
+/** Box drawing for the startup summary; ASCII when a terminal cannot be trusted with the glyphs. */
+const BOX = process.stdout.isTTY && process.env.TERM !== 'dumb'
+  ? { topLeft: '╭', topRight: '╮', bottomLeft: '╰', bottomRight: '╯', horizontal: '─', vertical: '│' }
+  : { topLeft: '+', topRight: '+', bottomLeft: '+', bottomRight: '+', horizontal: '-', vertical: '|' };
+
+const visibleWidth = (text) => text.replace(/\x1b\[[0-9;]*m/g, '').length;
+
+/**
+ * The startup block, in the shape a person reads once and then recognises.
+ *
+ * The old output was three bare lines. It said the URLs but not what the command had just done, and
+ * there was no visual edge to separate the summary from the server logs that follow it. The box is
+ * drawn only on a TTY; a captured or backgrounded run keeps plain lines so a log stays a log.
+ */
+function summaryBox(title, rows) {
+  const lines = [title, ...rows];
+  const width = Math.max(...lines.map(visibleWidth));
+  const edge = (left, right) => `${left}${BOX.horizontal.repeat(width + 2)}${right}`;
+  console.log(edge(BOX.topLeft, BOX.topRight));
+  for (const line of lines) console.log(`${BOX.vertical} ${line}${' '.repeat(width - visibleWidth(line))} ${BOX.vertical}`);
+  console.log(edge(BOX.bottomLeft, BOX.bottomRight));
+}
+
 const KEEP_LINES = 40;
 function captureTail(stream, label, lines = []) {
   stream?.on('data', (chunk) => {
@@ -490,10 +513,22 @@ async function main() {
   });
 
   const url = `http://localhost:${options.dashboardPort}`;
+  const dashboardUrl = `${url}/dashboard`;
   spinner.succeed(`${paint(BOLD, 'OmniHilbras')} is running`);
-  console.log(`  dashboard  ${url}`);
-  console.log(`  gateway    http://${LOOPBACK}:${options.gatewayPort}`);
-  console.log(`  ${paint(DIM, 'Ctrl-C stops both.')}`);
+  if (process.stdout.isTTY) {
+    summaryBox(
+      `${paint(BOLD, 'OmniHilbras')} ${PKG.version}`,
+      [
+        `Dashboard  ${dashboardUrl}`,
+        `Gateway    http://${LOOPBACK}:${options.gatewayPort}`,
+        `Stop       Ctrl-C`,
+      ],
+    );
+  } else {
+    console.log(`  dashboard  ${dashboardUrl}`);
+    console.log(`  gateway    http://${LOOPBACK}:${options.gatewayPort}`);
+    console.log(`  ${paint(DIM, 'Ctrl-C stops both.')}`);
+  }
 
   if (options.open) {
     // `start` is a cmd.exe builtin, not an executable: `spawn('start', ...)` is ENOENT on Windows.

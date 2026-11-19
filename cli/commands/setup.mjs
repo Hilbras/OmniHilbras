@@ -20,6 +20,7 @@
 import { spawn } from 'node:child_process';
 import readline from 'node:readline/promises';
 import { inspect } from '../lib/detect.mjs';
+import { registerLauncher } from '../lib/launcher.mjs';
 import { inspectShortcut, installShortcut, shortcutTarget } from '../lib/shortcut.mjs';
 
 const SEVERITY_LABEL = { blocking: 'blocking', 'needed-from-source': 'from source', optional: 'optional' };
@@ -75,6 +76,22 @@ export const setup = {
     // start that the linked command would not perform.
     const startTarget = shortcutTarget();
     const canStart = startTarget?.kind === 'launcher';
+    /**
+     * Record the launcher even when the shortcut cannot be installed.
+     *
+     * The shortcut and the delegation answer different questions: the shortcut decides what `PATH`
+     * runs, while this record lets the **published client** — which may still own `PATH` — hand a
+     * bare invocation to the checkout. Recording it here is what makes `npm i -g` followed by
+     * `omnihilbras setup` survive a later reinstall of the client.
+     */
+    if (canStart && startTarget) {
+      try {
+        registerLauncher(startTarget.path);
+      } catch {
+        // A read-only config directory is reported by the shortcut's own failure below; the verbs
+        // still work, and a launcher that cannot be recorded is not a reason to fail setup.
+      }
+    }
     if (!shortcut.present) {
       const foreign = shortcut.foreign[0];
       // "Not on PATH" alone was false where an older global install still provides the command, so where

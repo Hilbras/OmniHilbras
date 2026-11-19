@@ -4,8 +4,10 @@
 
 - **The checkout launcher** (`bin/omnihilbras.js`, private root package) starts the gateway and the
   dashboard when run with no verb. A verb asks a running gateway something.
-- **The published client** (`npm i -g @hilbras/omnihilbras`, `cli/bin/omnihilbras.js`) has no checkout
-  to run, so it cannot start a server. With no verb it prints the help and says how to start one: the
+- **The published client** (`npm i -g @hilbras/omnihilbras`, `cli/bin/omnihilbras.js`) has no server
+  code in the package. Once a checkout launcher is registered — `omnihilbras setup` in the checkout
+  records it, and `npm link` puts it on `PATH` — a bare invocation hands over to that launcher and
+  starts both servers. With no launcher registered it prints the help and says how to start one: the
   desktop app, or a checkout linked with `npm link`.
 
 The rest of this document is the verb set, which both share.
