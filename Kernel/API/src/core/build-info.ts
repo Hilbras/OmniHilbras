@@ -32,6 +32,15 @@ export type GatewayBuild = {
 };
 
 function readPackageVersion(): string {
+  /**
+   * A bundled gateway has no `Kernel/API/package.json` three levels above it.
+   *
+   * The published CLI bundles this entry point and sets the version it is shipping, so the package
+   * can answer `/health` with the version a person installed rather than `unknown`. An unbundled
+   * gateway ignores this and reads its own manifest, as before.
+   */
+  const declared = process.env.OMNIHILBRAS_BUILD_VERSION?.trim();
+  if (declared) return declared;
   try {
     const manifest = JSON.parse(
       readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8'),

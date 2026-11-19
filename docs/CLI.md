@@ -1,16 +1,26 @@
 # The CLI
 
-`omnihilbras` is two entry points with one verb set, and they differ in exactly one way:
+`omnihilbras` starts the gateway and the dashboard with no verb, and with a verb it **asks a running
+gateway something**. Since `3.73.0` the published npm package contains the server, so both halves work
+after only `npm i -g @hilbras/omnihilbras`:
 
-- **The checkout launcher** (`bin/omnihilbras.js`, private root package) starts the gateway and the
-  dashboard when run with no verb. A verb asks a running gateway something.
-- **The published client** (`npm i -g @hilbras/omnihilbras`, `cli/bin/omnihilbras.js`) has no server
-  code in the package. Once a checkout launcher is registered — `omnihilbras setup` in the checkout
-  records it, and `npm link` puts it on `PATH` — a bare invocation hands over to that launcher and
-  starts both servers. With no launcher registered it prints the help and says how to start one: the
-  desktop app, or a checkout linked with `npm link`.
+```bash
+omnihilbras                 # bundled gateway :20138, dashboard :20137, opens the dashboard
+omnihilbras --no-browser    # same, without opening a browser
+omnihilbras status          # ask the running gateway something
+```
 
-The rest of this document is the verb set, which both share.
+There are three entry points with one verb set:
+
+- **The published CLI** (`cli/bin/omnihilbras.js`) starts the bundled `cli/server/main.mjs` on a bare
+  invocation, or runs a verb itself.
+- **The bundled launcher** (`cli/server/main.mjs`, staged at pack time) spawns the esbuild-bundled
+  gateway and the static dashboard server, clears an occupied port when its holder is Node/Vite/pnpm,
+  and shows a small menu.
+- **The checkout launcher** (`bin/omnihilbras.js`, private root package) runs `pnpm dev` and
+  `pnpm dev:gateway` instead; it is used when the bundle is not staged and a checkout is registered.
+
+The rest of this document is the verb set, which all three share.
 
 ```bash
 omnihilbras status              # is it up, what is it, what is wrong with it

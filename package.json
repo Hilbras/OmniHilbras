@@ -1,7 +1,7 @@
 {
   "name": "omnihilbras-site",
   "private": true,
-  "version": "3.72.0",
+  "version": "3.73.0",
   "description": "Provider-neutral local gateway and desktop dashboard",
   "author": {
     "name": "Hilbras",
@@ -23,7 +23,7 @@
     "app:build": "pnpm build && electron-builder --dir",
     "app:exe": "pnpm build && electron-builder --win nsis --config.nsis.packElevateHelper=false --config.win.signExecutable=false",
     "app:pack": "pnpm build && electron-builder",
-    "build": "pnpm build:sdk && pnpm build:token-saver && pnpm build:tools && pnpm build:gateway && pnpm build:frontend",
+    "build": "pnpm build:sdk && pnpm build:token-saver && pnpm build:tools && pnpm build:gateway && pnpm build:frontend && pnpm build:cli",
     "build:frontend": "vite build",
     "build:landing": "vite build --config vite.landing.config.ts",
     "build:sdk": "node scripts/clean-sdk-dist.mjs && pnpm -r --workspace-concurrency=2 --filter \"./Kernel/SDK/*\" build",
@@ -41,7 +41,7 @@
     "version:fix": "node scripts/check-version.mjs --fix",
     "analyze": "node scripts/analyze-bundle.mjs",
     "analyze:check": "node scripts/analyze-bundle.mjs --check",
-    "verify": "pnpm version:check && pnpm test:brand && pnpm typecheck && pnpm test && node Kernel/API/test/spec-success-criteria.mjs && pnpm build && pnpm analyze:check",
+    "verify": "pnpm version:check && pnpm test:brand && pnpm typecheck && pnpm test && node Kernel/API/test/spec-success-criteria.mjs && pnpm build && pnpm smoke:cli && pnpm analyze:check",
     "test:brand": "BRAND_STRICT=1 node --test tests/brand-assets.test.js",
     "brand": "node scripts/generate-brand.mjs",
     "release:audit": "node scripts/audit-release-trail.mjs",
@@ -53,7 +53,9 @@
     "android:apk": "pnpm android:sync && cd android && ./gradlew assembleDebug",
     "test:e2e": "playwright test",
     "build:tools": "pnpm --filter @omnihilbras/tools build",
-    "test:tools": "node --test Kernel/Tools/test/*.test.js"
+    "test:tools": "node --test Kernel/Tools/test/*.test.js",
+    "build:cli": "node scripts/build-cli-server.mjs --skip-builds",
+    "smoke:cli": "node scripts/smoke-cli-server.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",
@@ -81,6 +83,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^45.2.3",
     "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
     "playwright": "^1.65.0",
     "pngjs": "^7.0.0",
     "tailwindcss": "^4.3.3",

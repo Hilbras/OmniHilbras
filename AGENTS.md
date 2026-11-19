@@ -24,12 +24,12 @@ The workspace version is kept in step across `package.json` and
 and it is the only manifest here that is not private. `Kernel/API` (the gateway)
 and every package under `Kernel/SDK/` are still private and still unpublished, so
 the restructure's original problem is unchanged for them; what changed is that the
-name on npm is a real part of this project rather than the previous one. Note what
-the published command is and is not: it runs the verbs and **cannot start a
-server**, because a globally installed package has no checkout to run. The
-server ships as the desktop app, and a command that starts the servers comes from
-`npm link` plus `omnihilbras setup`. Versions before 3.0.0 are deprecated with a
-message saying exactly that. `NPM-PUBLISH.md` is the process.
+name on npm is a real part of this project rather than the previous one. Since
+`3.73.0` the published command also **starts the servers**: `scripts/build-cli-server.mjs` bundles the
+gateway into one ESM file and copies the built dashboard into `cli/server/` before `npm pack`, and bare
+`omnihilbras` starts both with an interactive menu. Before that it was verbs only, and the server was
+the desktop app or a checkout (`npm link` plus `omnihilbras setup`). Versions before 3.0.0 are
+deprecated with a message saying exactly that. `NPM-PUBLISH.md` is the process.
 
 ## Definition of done for a change
 

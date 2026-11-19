@@ -8,14 +8,16 @@ This is the process for the **one** publishable manifest in this repository: `cl
 It is the gateway **client**: the verbs in [`docs/CLI.md`](./docs/CLI.md) — `status`, `providers`, `models`,
 `test`, `keys`, `routing`, `logs`, `setup`, `doctor`.
 
-It **cannot start a server**. A globally installed package has no checkout to run, so `omnihilbras` with no
-verb prints the help rather than launching anything. The server ships as the desktop app, and a command that
-also starts the servers comes from `npm link` in a checkout plus `omnihilbras setup`.
+Since `3.73.0` it also **starts the servers**. `npm pack` runs `prepack`, which stages `cli/server/` with
+an esbuild-bundled gateway, the built dashboard and the locales; bare `omnihilbras` then starts both halves
+on `127.0.0.1:20138` and `localhost:20137`, clears an occupied port when its holder looks like this
+project's runtime, and shows a small menu. The desktop app remains the other way to run the server.
 
-That distinction is not a footnote. The name previously held a different program — `2.9.x`, "OmniHilbras CLI
-- Start and manage OmniHilbras server" — whose `omnihilbras` *did* start a server. Publishing over `latest`
-changed what the name does for anyone on those versions, so they are deprecated with a message saying so,
-and `docs/INSTALL.md` leads with it.
+That history is not a footnote. The name previously held a different program — `2.9.x`, "OmniHilbras CLI
+- Start and manage OmniHilbras server" — whose `omnihilbras` *did* start a server. Between `3.0.0` and
+`3.72.0` the package was verbs only, and publishing over `latest` changed what the name did for anyone on
+those versions; they are deprecated with a message saying so, and `docs/INSTALL.md` leads with it. From
+`3.73.0` the bare command starts a server again, but the vault format, ports and verbs are this project's.
 
 ## Publish a version
 

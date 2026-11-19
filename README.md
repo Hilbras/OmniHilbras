@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.72.0**
+**Current version: 3.73.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -111,10 +111,9 @@ npm i -g @hilbras/omnihilbras
 ```
 
 It installs the **client**: `status`, `providers`, `models`, `test`, `keys`, `routing`, `logs`, `setup`,
-`doctor`. The package contains no server, so by itself it cannot start one. The server is the desktop
-app; a command that also starts the servers comes from a checkout (`npm link`, then `omnihilbras setup`).
-That setup records the checkout launcher, and this installed client hands a bare `omnihilbras` to it —
-so the bare command starts both servers without replacing the client on `PATH`.
+`doctor`. Since `3.73.0` the package also contains the server: `npm pack` stages a bundled gateway,
+the built dashboard and its locales, so `omnihilbras` with no verb starts both halves and opens the
+dashboard. The desktop app remains another way to run it.
 
 > Versions before `3.0.0` under this name are a **different program** (the previous project, whose
 > `omnihilbras` started a server). They are deprecated with that warning. See
@@ -521,7 +520,7 @@ are known not to:
   installing anything it cannot prove. Verifying properly needs signing keys, which do not exist yet.
 - **`proxyPool` has no transport.** A non-`none` pool is refused rather than ignored, so a provider that flags
   several accounts on one address cannot be fully answered from inside the app.
-- **The npm package is the client only**; the server is the desktop app or a checkout.
+- **The npm package ships a bundled server** since `3.73.0`; the desktop app is the alternative.
 - **The Android build is a debug shell** — no release signing, no physical-device verification yet.
 
 ## Development

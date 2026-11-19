@@ -1,36 +1,37 @@
 # @hilbras/omnihilbras
 
-**The OmniHilbras gateway client.** One part of
-[a larger project](https://github.com/Hilbras/OmniHilbras) — see what this package is *not*, below.
+**The OmniHilbras command: gateway, dashboard and client in one install.** One part of
+[a larger project](https://github.com/Hilbras/OmniHilbras).
 
 ```bash
 npm i -g @hilbras/omnihilbras
-omnihilbras status          # is a gateway running, and what does it say
+omnihilbras                 # starts the gateway and dashboard, opens the dashboard
+omnihilbras status          # or ask a running gateway something
 omnihilbras providers       # every saved account, and which ones can serve
 omnihilbras test zcode      # probe one account, or all of them
 omnihilbras help            # the rest
 ```
 
-## What this is, and what it is not
+## What is installed
 
-This package is the **client**: the verbs below, over HTTP, against a gateway on your machine. It has **no
-dependencies** and does not download a runtime.
+Bare `omnihilbras` is a launcher. It starts two processes that ship in the package:
 
-It **cannot start a server on its own**, and that is not an oversight: a globally installed package has no
-server code and no checkout to run. There are two ways to get a bare `omnihilbras` that starts the servers:
+- `server/gateway.mjs` — the gateway, bundled from the workspace by esbuild;
+- `server/static.mjs` — a small static server for the built dashboard, which points at the gateway.
 
-- run `omnihilbras setup` in a checkout; it records that launcher, and this client hands a bare
-  invocation to it;
-- or `npm link` the checkout, which puts the launcher itself on `PATH`.
+It waits for both ports, prints a summary, opens `http://localhost:20137/dashboard`, and shows a menu
+to open the dashboard again, restart both, or exit. `Ctrl-C` stops both. If a port is already held by
+a Node/Vite/pnpm process it is stopped first; a different program is left alone unless you pass
+`--force`.
 
-With neither, a bare `omnihilbras` prints the help and says how to start the servers — the desktop app is
-the zero-checkout option.
+The **verbs** below are the other half: they call the gateway's routes, so a change to a route breaks
+the CLI and the dashboard in the same way. Check `omnihilbras status --json` to see the running gateway.
 
 | You want | Get it from |
 | --- | --- |
-| The gateway, dashboard, desktop app, providers, routing | [The project](https://github.com/Hilbras/OmniHilbras) — [releases and installers](https://github.com/Hilbras/OmniHilbras/releases/latest) |
-| A command that also **starts** the servers | A checkout: `npm link`, then `omnihilbras setup` |
-| Just the verbs, against a gateway you already run | This package |
+| The gateway, dashboard and CLI in one command | `npm i -g @hilbras/omnihilbras`, then `omnihilbras` |
+| A packaged desktop app | [Releases and installers](https://github.com/Hilbras/OmniHilbras/releases/latest) |
+| To run from source | [The project](https://github.com/Hilbras/OmniHilbras) |
 
 ## Verbs
 

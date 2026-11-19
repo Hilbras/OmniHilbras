@@ -17,6 +17,7 @@
  */
 
 import { clientOnlyNotice, main } from '../index.mjs';
+import { hasBundledServer, runBundledServer } from '../lib/bundled.mjs';
 import { clientEntryPath, findLauncher, runLauncher } from '../lib/launcher.mjs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -35,9 +36,15 @@ const startAlias = first === 'start';
 /** A verb is a bare word this client may know; `start` is stripped before delegation. */
 const hasVerb = first !== undefined && !first.startsWith('-') && !startAlias;
 
-// Bare `omnihilbras` (and `omnihilbras start`, and options such as `--port`) belong to the launcher
-// when one is registered. A client that printed help here is the defect this delegation exists for.
+// Bare `omnihilbras` (and `omnihilbras start`, and options such as `--port`) belong to a launcher. A
+// client that printed help here is the defect this delegation exists for.
+//
+// The **bundled** server is preferred: a published install should not need a checkout at all. The
+// registered checkout launcher is the fallback for a source tree whose bundle has not been staged.
 if (!hasVerb) {
+  if (hasBundledServer()) {
+    process.exit(await runBundledServer(startAlias ? argv.slice(1) : argv));
+  }
   const launcher = findLauncher();
   const self = path.resolve(clientEntryPath());
   if (launcher && path.resolve(launcher.path) !== self) {

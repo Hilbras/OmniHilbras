@@ -1,8 +1,8 @@
 {
   "name": "@hilbras/omnihilbras",
-  "version": "3.72.0",
+  "version": "3.73.0",
   "private": false,
-  "description": "The OmniHilbras gateway client: check the runtime, inspect accounts, probe them, stream finished requests.",
+  "description": "The OmniHilbras gateway, dashboard and CLI in one command.",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -16,6 +16,7 @@
     "bin",
     "commands",
     "lib",
+    "server",
     "index.mjs",
     "README.md"
   ],
@@ -36,6 +37,11 @@
   "bugs": "https://github.com/Hilbras/OmniHilbras/issues",
   "dependencies": {},
   "scripts": {
-    "pack:check": "node -e \"require('node:child_process').execSync('npm pack --dry-run', { stdio: 'inherit' })\""
+    "pack:check": "node -e \"require('node:child_process').execSync('npm pack --dry-run', { stdio: 'inherit' })\"",
+    "build:server": "node ../scripts/build-cli-server.mjs",
+    "prepack": "node ../scripts/build-cli-server.mjs"
+  },
+  "optionalDependencies": {
+    "playwright-core": "1.62.1"
   }
 }

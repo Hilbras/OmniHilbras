@@ -88,7 +88,12 @@ test('the installed client says what it cannot do, and the launcher help still s
   // client would correctly delegate to the checkout launcher, which is a different assertion.
   const client = path.join(root, 'cli', 'bin', 'omnihilbras.js');
   const isolated = mkdtempSync(path.join(os.tmpdir(), 'omnihilbras-client-'));
-  const env = { XDG_CONFIG_HOME: path.join(isolated, 'config') };
+  // Point past both launchers: a built checkout has `cli/server/main.mjs` staged, and this test is
+  // about the words an install with no server at all prints.
+  const env = {
+    XDG_CONFIG_HOME: path.join(isolated, 'config'),
+    OMNIHILBRAS_BUNDLED_SERVER: path.join(isolated, 'no-server.mjs'),
+  };
   const bare = await runBin(client, [], env, isolated);
   assert.equal(bare.code, 2);
   assert.match(bare.stdout, /This is the gateway client\. It cannot start a gateway or the dashboard\./);
@@ -113,7 +118,11 @@ test('bare invocation delegates to a registered launcher, and start strips its o
   const fake = path.join(directory, 'fake-launcher.js');
   writeFileSync(fake, "console.log(`FAKE ${JSON.stringify(process.argv.slice(2))}`);\n");
   const client = path.join(root, 'cli', 'bin', 'omnihilbras.js');
-  const env = { XDG_CONFIG_HOME: path.join(directory, 'config'), OMNIHILBRAS_LAUNCHER: fake };
+  const env = {
+    XDG_CONFIG_HOME: path.join(directory, 'config'),
+    OMNIHILBRAS_LAUNCHER: fake,
+    OMNIHILBRAS_BUNDLED_SERVER: path.join(directory, 'no-server.mjs'),
+  };
 
   const bare = await runBin(client, [], env, directory);
   assert.equal(bare.code, 0);
@@ -124,6 +133,30 @@ test('bare invocation delegates to a registered launcher, and start strips its o
 
   const help = await runBin(client, ['help'], env, directory);
   assert.doesNotMatch(help.stdout, /FAKE/, 'a verb must stay in the client');
+});
+
+test('a published install prefers its bundled server over any checkout', async () => {
+  // The whole point of staging the server inside the package: a person who only did `npm i -g` gets a
+  // command that starts both halves, with no checkout and no PATH negotiation.
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'omnihilbras-bundled-'));
+  const fake = path.join(directory, 'bundled.mjs');
+  writeFileSync(fake, "console.log(`BUNDLED ${JSON.stringify(process.argv.slice(2))}`);\n");
+  const client = path.join(root, 'cli', 'bin', 'omnihilbras.js');
+  const env = {
+    XDG_CONFIG_HOME: path.join(directory, 'config'),
+    OMNIHILBRAS_BUNDLED_SERVER: fake,
+    OMNIHILBRAS_LAUNCHER: path.join(directory, 'not-a-launcher.js'),
+  };
+
+  const bare = await runBin(client, [], env, directory);
+  assert.equal(bare.code, 0);
+  assert.match(bare.stdout, /BUNDLED \[\]/, 'a bare invocation did not reach the bundled server');
+
+  const start = await runBin(client, ['start', '--no-browser'], env, directory);
+  assert.match(start.stdout, /BUNDLED \["--no-browser"\]/, 'start must pass its flags, not its own word');
+
+  const help = await runBin(client, ['help'], env, directory);
+  assert.doesNotMatch(help.stdout, /BUNDLED/, 'verbs still belong to the client');
 });
 
 test('setup records the launcher so a reinstalled client still starts the servers', () => {

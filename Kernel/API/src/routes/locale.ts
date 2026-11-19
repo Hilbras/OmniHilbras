@@ -14,7 +14,26 @@ export async function handleLocaleRoute(ctx: RouteContext): Promise<boolean> {
     if (!/^[A-Za-z0-9_-]+$/.test(lang)) throw new ProviderError('INVALID_REQUEST', 'Invalid locale.', { publicMessage: 'Invalid locale.' });
     try {
       const here = dirname(fileURLToPath(import.meta.url));
-      const raw = await readFile(join(here, '..', '..', 'locales', `${lang}.json`), 'utf8');
+      /**
+       * Three layouts, because the same module runs from three places:
+       *
+       * - source: `src/routes` → `<package>/locales`;
+       * - compiled: `dist/src/routes` → `<package>/locales`;
+       * - bundled CLI: `server/gateway.mjs` with `locales` beside it.
+       *
+       * The compiled path was one `..` short, so a packaged gateway answered every locale with 404.
+       * Trying the candidates makes the location a fact the file can check rather than one it assumes.
+       */
+      const candidates = [
+        join(here, '..', '..', 'locales', `${lang}.json`),
+        join(here, '..', '..', '..', 'locales', `${lang}.json`),
+        join(here, 'locales', `${lang}.json`),
+      ];
+      let raw;
+      for (const candidate of candidates) {
+        try { raw = await readFile(candidate, 'utf8'); break; } catch { /* try the next layout */ }
+      }
+      if (raw === undefined) throw new Error('not found');
       sendJson(response, 200, JSON.parse(raw), origin);
     } catch {
       throw new ProviderError('NOT_FOUND', `Locale "${lang}" not found.`, { publicMessage: 'Locale not found.' });

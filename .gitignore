@@ -26,3 +26,6 @@ dashboard-token
 # Playwright output: traces, screenshots and videos the e2e run writes on failure.
 test-results/
 playwright-report/
+
+# Staged self-contained server for the published CLI (built by scripts/build-cli-server.mjs).
+cli/server/

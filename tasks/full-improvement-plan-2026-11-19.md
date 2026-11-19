@@ -59,6 +59,27 @@ Two reports after `3.70.0` shipped:
   and refuses only a shape it cannot recognise. Re-read live: the Global connection now has `MiniMax-M3` and
   `MiniMax-M3.1-Flash`, and its health is `healthy`.
 
+## Follow-up pass — `3.73.0`
+
+The user asked for 9router's terminal experience: an npm install that contains the project files, a bare
+command that opens a CLI, and occupied ports cleared. That reverses the earlier "the npm package is the
+client only" decision for the published manifest:
+
+- `scripts/build-cli-server.mjs` bundles `Kernel/API/dist/src/main.js` with esbuild into
+  `cli/server/gateway.mjs` (2.3 MB), copies the built dashboard and locales, and runs from `prepack`, so
+  `npm pack` and `npm publish` stage the server. `pnpm build:cli` stages from an existing build and
+  `pnpm smoke:cli` starts the staged server on alternate ports and checks both HTTP surfaces.
+- `cli/server/main.mjs` is the bundled launcher: it stops its own previous run, clears a port held by a
+  Node/Vite/pnpm process (`--force` for anything else), starts both children, waits for TCP, prints the
+  9router-style box, opens the dashboard and offers open/restart/exit. `cli/server/static.mjs` serves the
+  dashboard SPA and injects the gateway URL for custom ports.
+- The published client prefers the bundled launcher, then falls back to a registered checkout launcher.
+  Verbs stay in the client.
+- `esbuild` is a root devDependency and is allowed in `pnpm-workspace.yaml`; `playwright-core` is an
+  optional dependency of the CLI because the web-session providers load it dynamically.
+- The compiled gateway's locale path and `OMNIHILBRAS_BUILD_VERSION` were corrected so a bundled build
+  answers its version and its locales instead of `unknown` and 404.
+
 
 This plan covers everything from the review and the feedback. It is ordered by risk and by
 dependency, not by how visible a change is. Every phase ships completely: version bump, tag,

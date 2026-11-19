@@ -31,10 +31,13 @@ test('the published CLI package declares the shortcut and ships the files it nee
   assert.equal(fs.statSync(binPath).mode & 0o111, 0o111, 'and is executable');
 
   // Everything the bin imports must be in `files`, or the install produces a command that cannot run.
-  assert.deepEqual(cli.files.sort(), ['README.md', 'bin', 'commands', 'index.mjs', 'lib'].sort());
-  for (const directory of ['bin', 'commands', 'lib']) {
+  // `server` is staged by `prepack` and is not in git, so its committed source is checked here instead.
+  assert.deepEqual(cli.files.sort(), ['README.md', 'bin', 'commands', 'index.mjs', 'lib', 'server'].sort());
+  for (const directory of ['bin', 'commands', 'lib', 'server-src']) {
     assert.equal(fs.existsSync(path.join(root, 'cli', directory)), true, `cli/${directory} is packaged and exists`);
   }
+  assert.equal(cli.scripts.prepack, 'node ../scripts/build-cli-server.mjs', 'npm pack stages the bundled server');
+  assert.ok(cli.optionalDependencies?.['playwright-core'], 'the browser runtime is optional, not a startup requirement');
   assert.equal(cli.engines.node, '>=20.0.0', 'the runtime requirement is declared, not assumed');
 });
 
