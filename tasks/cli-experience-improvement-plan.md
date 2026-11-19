@@ -99,3 +99,8 @@ need a `docs/SPEC-SDK.md` line + `Kernel/API/test/` coverage; the `gateway-route
   `stop`/`restart`/`open`/`ps` registered in `cli/index.mjs`. `tests/cli-lifecycle.test.js` (8 cases: ownership
   decision, foreign-pid refusal, force override, path agreement, verb registration) and the extended
   `scripts/smoke-cli-server.mjs` (real `ps`→`stop` round-trip, record cleared) pass. `docs/CLI.md` updated.
+- **Phase 2 — complete in the tree (3.76.0).** `cli/lib/menu.mjs` adds a dependency-free arrow-key
+  `selectMenu` (reverse-video highlight, up/down/enter/esc/Ctrl-C, abort-signal cancel, numbered non-TTY
+  fallback) and a truthful `statusHeader`. The launcher's numbered prompt is replaced by the menu under a
+  live header read from `/health` (fail-open). `tests/cli-menu.test.js` (8 cases) drives the selector with a
+  fake keypress stream; the non-TTY smoke run is unaffected. `docs/CLI.md` updated.

@@ -19,9 +19,9 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { readBundledRecord, writeBundledRecord, clearBundledRecord } from '../lib/bundled-state.mjs';
+import { selectMenu, statusHeader } from '../lib/menu.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8'));
@@ -294,7 +294,7 @@ for (const file of [GATEWAY, STATIC, DASHBOARD]) {
 let children = {};
 let stopping = false;
 let spinner;
-let menu;
+let menuAbort;
 
 function killChildren() {
   for (const child of Object.values(children)) {
@@ -308,7 +308,7 @@ async function shutdown(code = 0) {
   if (stopping) return;
   stopping = true;
   spinner?.stop();
-  menu?.close();
+  menuAbort?.abort();
   killChildren();
   await Promise.all(Object.values(children).map((child) => child?.pid ? waitGone(child.pid, 1500) : Promise.resolve(true)));
   for (const child of Object.values(children)) {
@@ -422,18 +422,37 @@ async function start() {
   if (options.open) openBrowser(dashboardUrl);
 
   if (process.stdin.isTTY && process.stdout.isTTY && !options.log) {
-    menu = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const ask = () => {
-      menu.question('  [1] open dashboard  [2] restart  [3] exit  > ', async (answer) => {
-        if (stopping) return;
-        const choice = answer.trim();
-        if (choice === '1') { openBrowser(dashboardUrl); ask(); }
-        else if (choice === '2') { await restart(); ask(); }
-        else if (choice === '3') { await shutdown(0); }
-        else ask();
-      });
+    const gatewayUrl = `http://${LOOPBACK}:${options.gatewayPort}`;
+    const items = [{ label: 'Open dashboard' }, { label: 'Restart' }, { label: 'Exit' }];
+    // The header asks the gateway rather than asserting it: a gateway that did not answer reads as unknown,
+    // never as healthy. Refreshed each time the menu redraws, so a restart is reflected without a relaunch.
+    const header = async () => {
+      let health;
+      let version;
+      try {
+        const response = await fetch(`${gatewayUrl}/health`, { signal: AbortSignal.timeout(1500) });
+        const body = await response.json();
+        health = body.status;
+        version = body.build?.version;
+      } catch { /* fail-open: the menu still works when the gateway is slow or down */ }
+      return statusHeader({ dashboardUrl, gatewayUrl, health, version });
     };
-    ask();
+    const loop = async () => {
+      while (!stopping) {
+        menuAbort = new AbortController();
+        const choice = await selectMenu({
+          items,
+          title: `${paint(BOLD, 'OmniHilbras')} ${PKG.version}`,
+          header: await header(),
+          colour: COLOUR,
+          signal: menuAbort.signal,
+        });
+        if (stopping || choice === -1 || choice === 2) { await shutdown(0); return; }
+        if (choice === 0) { openBrowser(dashboardUrl); continue; }
+        if (choice === 1) { await restart(); return; }
+      }
+    };
+    void loop();
   }
 }
 

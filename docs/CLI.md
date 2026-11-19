@@ -16,7 +16,9 @@ There are three entry points with one verb set:
   invocation, or runs a verb itself.
 - **The bundled launcher** (`cli/server/main.mjs`, staged at pack time) spawns the esbuild-bundled
   gateway and the static dashboard server, clears an occupied port when its holder is Node/Vite/pnpm,
-  and shows a small menu.
+  and shows an **arrow-key menu** (Open dashboard / Restart / Exit) under a live status header read from
+  the gateway's `/health`. The menu and header are dependency-free (`cli/lib/menu.mjs`); off a terminal it
+  falls back to a numbered prompt.
 - **The checkout launcher** (`bin/omnihilbras.js`, private root package) runs `pnpm dev` and
   `pnpm dev:gateway` instead; it is used when the bundle is not staged and a checkout is registered.
 
