@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, protocol, session, shell, Tray } from 'electron';
-import { cpSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { readFile } from 'node:fs/promises';
@@ -569,6 +569,9 @@ function wireIpc() {
     });
     if (canceled || !filePath) return { saved: false };
     writeFileSync(filePath, payload.content, { mode: 0o600 });
+    // `mode` is ignored when the destination already exists, so an overwritten world-readable file
+    // kept its permissions. The gateway's own `atomicWrite` chmods after the rename for the same reason.
+    chmodSync(filePath, 0o600);
     return { saved: true, path: filePath };
   });
   ipcMain.handle('update:state', () => updateState);

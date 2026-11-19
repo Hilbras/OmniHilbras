@@ -133,7 +133,7 @@ function BackupPanel() {
             const parsed = JSON.parse(await selected.text()) as { backup?: unknown; format?: string };
             // Accept both the envelope itself and an API response that wrapped it in `backup`.
             const envelope = (parsed.backup ?? parsed) as { format?: string; version?: number };
-            if (envelope?.format !== 'omnihilbras-backup' || envelope.version !== 1) {
+            if (envelope?.format !== 'omnihilbras-backup') {
               throw new Error('not an OmniHilbras backup envelope');
             }
             setFile({ name: selected.name, envelope });

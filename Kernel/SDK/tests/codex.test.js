@@ -36,7 +36,7 @@ test('the model catalog is discovered from the account, not invented locally', a
     ] } };
   };
   const adapter = new CodexAdapter({ transport: catalog });
-  const models = await adapter.listModels({ credential: { type: 'oauth', value: 'access', email: 'me@example.com' } });
+  const models = await adapter.listModels({ credential: { type: 'oauth', value: 'access', email: 'me@example.com', accountId: 'acct-1' } });
   assert.equal(models.length, 2, 'a connected account is not one model');
   assert.deepEqual(models.map((m) => m.id), ['gpt-5.6-sol', 'gpt-5.4']);
   assert.equal(models[0].displayName, 'GPT 5.6 Sol');
@@ -46,11 +46,13 @@ test('the model catalog is discovered from the account, not invented locally', a
   assert.match(catalog.calls[0].url, /client_version=\d+\.\d+\.\d+/, 'the client version gates which entries come back');
   assert.equal(catalog.calls[0].headers.authorization, 'Bearer access');
   assert.equal(catalog.calls[0].headers.originator, 'codex_cli_rs');
+  assert.equal(catalog.calls[0].headers['ChatGPT-Account-ID'], 'acct-1', 'the catalog was read without naming the seat');
+  assert.equal(catalog.calls[0].headers['User-Agent'], `codex_cli_rs/${CODEX.cliVersion}`);
 });
 
 test('the catalog parser accepts every shape the endpoint has used', async () => {
   const entry = { id: 'gpt-5.4' };
-  for (const payload of [[entry], { data: [entry] }, { models: [entry] }, { results: [entry] }]) {
+  for (const payload of [[entry], { data: [entry] }, { models: [entry] }, { results: [entry] }, { items: [entry] }, { data: { models: [entry] } }]) {
     const transport = { calls: [], async request(input) { this.calls.push(input); return { status: 200, headers: new Headers(), data: payload }; }, async *stream() {} };
     const models = await new CodexAdapter({ transport }).listModels({ credential: { type: 'oauth', value: 'access' } });
     assert.deepEqual(models.map((m) => m.id), ['gpt-5.4'], JSON.stringify(payload));

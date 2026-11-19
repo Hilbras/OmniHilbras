@@ -49,7 +49,7 @@ test('the factory is given the saved connection, not just the provider id', asyn
   await resolver.resolve('multi', undefined, async () => [
     { id: 'connection-7', providerId: 'multi', endpoint: 'https://m.invalid/v1', name: 'Multi' },
   ]);
-  assert.deepEqual(seen, [{ providerId: 'multi', connection: { id: 'connection-7' } }]);
+  assert.deepEqual(seen, [{ providerId: 'multi', connection: { id: 'connection-7', endpoint: 'https://m.invalid/v1', name: 'Multi' } }]);
 });
 
 test('the resolution path and the health path now agree on the connection', async () => {

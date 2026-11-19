@@ -10,27 +10,36 @@ import { GatewayService, InMemoryApiKeyStore, InMemoryConnectionStore } from '..
  * the only thing deciding who is tried first.
  */
 
-function adapter(id, captured, { delayMs = 0, failAuth = false } = {}) {
+function adapter(id, captured, { delayMs = 0, failAuth = false, streaming = false } = {}) {
   return {
-    id, name: id, capabilities: { chat: true, streaming: false, models: true, embeddings: false },
+    id, name: id, capabilities: { chat: true, streaming, models: true, embeddings: false },
     async listModels() { return [{ id: `model-${id}`, providerId: id }]; },
     async healthCheck() { return { status: 'healthy', checkedAt: new Date().toISOString(), latencyMs: 1, verified: 'credential' }; },
     async chat(request) {
-      captured.push({ providerId: id, model: request.model });
+      captured.push({ kind: 'chat', providerId: id, model: request.model });
       if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
       if (failAuth) throw new ProviderError('AUTHENTICATION_FAILED', 'refused', { publicMessage: 'refused' });
       return { id: 'r', providerId: id, model: request.model, createdAt: new Date().toISOString(), message: { role: 'assistant', content: 'ok' }, finishReason: 'stop' };
     },
+    ...(streaming ? {
+      async *streamChat(request) {
+        captured.push({ kind: 'stream', providerId: id, model: request.model });
+        if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+        if (failAuth) throw new ProviderError('AUTHENTICATION_FAILED', 'refused', { publicMessage: 'refused' });
+        yield { id: 'c', providerId: id, model: request.model, delta: { content: 'ok' } };
+      },
+    } : {}),
   };
 }
 
-async function setup({ strategy = 'priority', failFirst = false, slowFirst = false } = {}) {
+async function setup({ strategy = 'priority', failFirst = false, slowFirst = false, streaming = false, hedgeAfterMs = 0 } = {}) {
   const captured = [];
   const store = new InMemoryConnectionStore();
-  const save = (id, providerId, priority, modelId) => store.save({
+  const save = (id, providerId, priority, modelId, resilience) => store.save({
     id, providerId, name: id, endpoint: `https://${providerId}.example/v1`, priority, proxyPool: 'none', enabled: true, modelIds: [modelId],
+    ...(resilience ? { resilience } : {}),
   }, { type: 'api-key', value: 'key' });
-  await save('conn-a', 'a', 1, 'model-a');
+  await save('conn-a', 'a', 1, 'model-a', hedgeAfterMs > 0 ? { hedgeAfterMs } : undefined);
   await save('conn-b', 'b', 2, 'model-b');
   const registry = new ProviderRegistry()
     /**
@@ -41,8 +50,8 @@ async function setup({ strategy = 'priority', failFirst = false, slowFirst = fal
      * the engine was behaving correctly (observed in `pnpm verify` as `['a','b','a']` against `['a','b','b']`).
      * A 200× gap cannot be inverted by a scheduler hiccup, which is what this assertion is entitled to assume.
      */
-    .register(adapter('a', captured, { delayMs: slowFirst ? 200 : 0, failAuth: failFirst }))
-    .register(adapter('b', captured, { delayMs: 1 }));
+    .register(adapter('a', captured, { delayMs: slowFirst ? 200 : 0, failAuth: failFirst, streaming }))
+    .register(adapter('b', captured, { delayMs: 1, streaming }));
   const virtual = new InMemoryVirtualModelStore();
   await virtual.save({
     id: 'oh/chat', name: 'Chat', strategy, targets: [
@@ -79,6 +88,23 @@ test('a virtual model sends the target upstream model, not the oh/ alias', async
   const outcome = await service.chatWithFailover(request, undefined, signal());
   assert.equal(outcome.attempts[0].connectionId, 'conn-a');
   assert.equal(captured[0].model, 'model-a');
+});
+
+test('a virtual model sends the target upstream model on a stream too', async () => {
+  const { captured, service } = await setup({ streaming: true });
+  const outcome = await service.streamChatWithFailover({ ...request, stream: true }, undefined, signal());
+  for await (const _chunk of outcome.chunks) { /* consume the stream */ }
+  const streamed = captured.find((entry) => entry.kind === 'stream');
+  assert.ok(streamed, 'the stream reached the adapter');
+  assert.equal(streamed.model, 'model-a', 'the upstream model was replaced by the public alias');
+});
+
+test('a virtual model keeps the upstream model when a hedge is enabled', async () => {
+  const { captured, service } = await setup({ slowFirst: true, hedgeAfterMs: 10 });
+  const outcome = await service.chatWithFailover(request, undefined, signal());
+  assert.ok(outcome.response, 'a route answered');
+  assert.ok(captured.length > 0, 'at least one attempt reached an adapter');
+  assert.equal(captured.some((entry) => entry.model === 'oh/chat'), false, 'a provider was sent the public alias');
 });
 
 test('priority follows target priority; round-robin alternates', async () => {
@@ -119,5 +145,5 @@ test('an unknown or disabled virtual id does not fall through to concrete routin
   const { service, virtual } = await setup();
   await assert.rejects(() => service.chatWithFailover({ ...request, model: 'oh/missing' }, undefined, signal()), /does not exist/);
   await virtual.save({ id: 'oh/chat', enabled: false, targets: [] });
-  await assert.rejects(() => service.chatWithFailover(request, undefined, signal()), /no enabled provider|no provider|no route/i);
+  await assert.rejects(() => service.chatWithFailover(request, undefined, signal()), /disabled|no enabled provider|no provider|no route/i);
 });

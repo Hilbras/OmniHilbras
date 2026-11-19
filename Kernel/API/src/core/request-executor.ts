@@ -144,6 +144,14 @@ export type RequestExecutorDeps = {
     allows(connectionId: string): boolean;
     recordSuccess(connectionId: string): void;
     recordFailure(connectionId: string): void;
+    /**
+     * Releases a half-open probe whose outcome is not evidence about the connection.
+     *
+     * A limiter refusal, a cancellation and an allowance refusal all obtained the probe but must
+     * not count as a provider failure or a success. Without this the probe stays “in flight”
+     * forever and every later request is refused.
+     */
+    recordAbandoned?(connectionId: string): void;
   };
   recordSuccess: (providerId: string, latencyMs: number, at: string, connectionId?: string) => void;
   recordSticky?: (model: string, connectionId: string) => void;
@@ -159,7 +167,7 @@ export type RequestExecutorDeps = {
    * the next unrelated one wait twice as long, and a model that had just been served still sat out a
    * cooldown it had already disproved.
    */
-  clearModelCooldown?: (providerId: string, modelId: string) => void;
+  clearModelCooldown?: (providerId: string, modelId: string, connectionId?: string) => void;
   /** Credits a connection for a request that was actually sent. */
   recordRateLimitUse: (connectionId: string) => void;
 };
@@ -192,6 +200,25 @@ export class RequestExecutor {
     const details = typeof error.details === 'object' && error.details !== null ? error.details as { retryAfterMs?: unknown } : {};
     const retryAfterMs = typeof details.retryAfterMs === 'number' ? details.retryAfterMs : undefined;
     this.deps.recordModelRateLimit?.(providerId, modelId, retryAfterMs === undefined ? {} : { retryAfterMs }, connectionId);
+  }
+
+  /**
+   * Settles a circuit-breaker attempt exactly once.
+   *
+   * `allows()` may have granted a half-open probe. Every exit that is not a success or a provider
+   * failure has to release it, or the breaker keeps `probing` true and refuses the connection until
+   * the process restarts. This is the one place that decision is made.
+   */
+  private settleBreaker(connectionId: string | undefined, outcome: 'success' | 'failure' | 'abandoned') {
+    if (!connectionId) return;
+    if (outcome === 'success') this.deps.breaker?.recordSuccess(connectionId);
+    else if (outcome === 'failure') this.deps.breaker?.recordFailure(connectionId);
+    else this.deps.breaker?.recordAbandoned?.(connectionId);
+  }
+
+  /** Whether an error is evidence about the connection rather than about the request or allowance. */
+  private isConnectionFailure(code: string, error: unknown) {
+    return !isCallerFault(code) && !isAllowanceRefusal(error);
   }
 
   async chat(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayChatOutcome> {
@@ -428,7 +455,10 @@ export class RequestExecutor {
          * have spent a timeout on is not spent, and the next route is tried immediately. The ledger records it as
          * `CIRCUIT_OPEN` rather than as a provider failure, because the provider was never asked.
          */
-        if (candidate.connectionId && this.deps.breaker && !this.deps.breaker.allows(candidate.connectionId)) {
+        const breakerGranted = candidate.connectionId && this.deps.breaker
+          ? this.deps.breaker.allows(candidate.connectionId)
+          : true;
+        if (!breakerGranted) {
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs: 0, errorCode: 'CIRCUIT_OPEN' });
           break;
         }
@@ -436,6 +466,8 @@ export class RequestExecutor {
           this.deps.enforceRateLimit(candidate);
         } catch (error) {
           const code = isProviderError(error) ? error.code : 'RATE_LIMITED';
+          // Nothing was sent, and a granted half-open probe is not evidence about the provider.
+          this.settleBreaker(candidate.connectionId, 'abandoned');
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs: 0, errorCode: code });
           /**
            * A **local** concurrency saturation is reported, not absorbed.
@@ -469,9 +501,10 @@ export class RequestExecutor {
           // Keyed by the connection as well as the provider: latency is a property of the account that
           // served the request, and two accounts of one vendor are not equally fast.
           this.deps.recordSuccess(candidate.providerId, latencyMs, new Date().toISOString(), candidate.connectionId);
-          if (candidate.connectionId) this.deps.breaker?.recordSuccess(candidate.connectionId);
-          if (input.model) this.deps.clearModelCooldown?.(candidate.providerId, input.model);
-          if (input.stickyEligible !== false && input.model && candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordSticky?.(input.model, candidate.connectionId);
+          this.settleBreaker(candidate.connectionId, 'success');
+          const servedModel = candidate.model ?? input.model;
+          if (servedModel) this.deps.clearModelCooldown?.(candidate.providerId, servedModel, candidate.connectionId);
+          if (input.stickyEligible !== false && servedModel && candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordSticky?.(servedModel, candidate.connectionId);
           if (candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordUsage?.(candidate.connectionId);
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: true, latencyMs });
           return { response, attempts };
@@ -489,12 +522,11 @@ export class RequestExecutor {
            * roughly half an hour. The router then skipped the healthy account as `unhealthy` and the
            * request failed with "Tried: zcode" while that account was working the whole time.
            */
-          if (!isCallerFault(code) && !isAllowanceRefusal(error)) {
+          const connectionFailure = this.isConnectionFailure(code, error);
+          if (connectionFailure) {
             this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider request failed.', candidate.connectionId);
-            // The same condition, deliberately: an allowance refusal or a caller fault is not evidence about the
-            // connection, and counting it here would open the breaker on a quota wall instead of an outage.
-            if (candidate.connectionId) this.deps.breaker?.recordFailure(candidate.connectionId);
           }
+          this.settleBreaker(candidate.connectionId, connectionFailure ? 'failure' : 'abandoned');
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt, ok: false, latencyMs, errorCode: code });
           lastError = error;
           const action = this.retryPolicy.afterFailure({
@@ -541,6 +573,12 @@ export class RequestExecutor {
       started.add(candidate);
       const controller = new AbortController();
       const startedAt = Date.now();
+      // The breaker is consulted before a hedge as it is before a sequential attempt. A hedge that
+      // bypassed an open breaker spent a timeout the breaker exists to avoid.
+      if (candidate.connectionId && this.deps.breaker && !this.deps.breaker.allows(candidate.connectionId)) {
+        attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: false, latencyMs: 0, errorCode: 'CIRCUIT_OPEN' });
+        return;
+      }
       // Enforced, then accounted for — the same order as the sequential path, for the same reason.
       //
       // This call was **missing** (1.52.0). The hedge recorded a use but never asked whether the
@@ -554,6 +592,7 @@ export class RequestExecutor {
       try {
         this.deps.enforceRateLimit(candidate);
       } catch (error) {
+        this.settleBreaker(candidate.connectionId, 'abandoned');
         attempts.push({
           providerId: candidate.providerId,
           attempt: 1,
@@ -576,7 +615,8 @@ export class RequestExecutor {
        * answered fine when asked on its own, because both attempts were the first account. The ledger named the
        * candidate, so the attempt list read as two accounts and the request was one account twice.
        */
-      const done = this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.deps.chat(candidate.providerId, request, deadline, scope, candidate.connectionId))
+      const effective = candidate.model ? { ...request, model: candidate.model } : request;
+      const done = this.deps.withDeadline(signal, candidate.resilience.timeoutMs, candidate.providerId, (deadline) => this.deps.chat(candidate.providerId, effective, deadline, scope, candidate.connectionId))
         .then(
           (response): Outcome => ({ candidate, ok: true, latencyMs: Date.now() - startedAt, response }),
           (error: unknown): Outcome => ({ candidate, ok: false, latencyMs: Date.now() - startedAt, error }),
@@ -599,13 +639,21 @@ export class RequestExecutor {
           // `abandoned` is what the winner branch sets, and it means "we stopped paying for this". The
           // attempt still cost money, so `recordRateLimitUse` stays where it is; only the *health* verdict
           // belongs to the request we are no longer waiting on.
-          if (abandoned.has(candidate)) return outcome;
+          if (abandoned.has(candidate)) {
+            this.settleBreaker(candidate.connectionId, 'abandoned');
+            return outcome;
+          }
           if (outcome.ok) {
             this.deps.recordSuccess(candidate.providerId, outcome.latencyMs, new Date().toISOString(), candidate.connectionId);
-            this.deps.clearModelCooldown?.(candidate.providerId, request.model);
+            this.settleBreaker(candidate.connectionId, 'success');
+            const servedModel = candidate.model ?? request.model;
+            this.deps.clearModelCooldown?.(candidate.providerId, servedModel, candidate.connectionId);
+            if (request.connectionId === undefined && servedModel && candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordSticky?.(servedModel, candidate.connectionId);
             if (candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) this.deps.recordUsage?.(candidate.connectionId);
           } else {
-            if (!isCallerFault(code ?? 'PROVIDER_REQUEST_FAILED') && !isAllowanceRefusal(outcome.error)) this.deps.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.', candidate.connectionId);
+            const connectionFailure = this.isConnectionFailure(code ?? 'PROVIDER_REQUEST_FAILED', outcome.error);
+            if (connectionFailure) this.deps.recordFailure(candidate.providerId, code ?? 'PROVIDER_REQUEST_FAILED', outcome.error instanceof Error ? outcome.error.message : 'The provider request failed.', candidate.connectionId);
+            this.settleBreaker(candidate.connectionId, connectionFailure ? 'failure' : 'abandoned');
           }
           attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: outcome.ok, latencyMs: outcome.latencyMs, ...(code ? { errorCode: code } : {}) });
           if (outcome.ok) {
@@ -692,6 +740,12 @@ export class RequestExecutor {
       const startedAt = Date.now();
       let opening: ChatChunk | undefined;
       let rest: AsyncIterator<ChatChunk> | undefined;
+      const effective = candidate.model ? { ...request, model: candidate.model } : request;
+      // The same breaker gate as the sequential path. A stream is still a paid attempt.
+      if (candidate.connectionId && this.deps.breaker && !this.deps.breaker.allows(candidate.connectionId)) {
+        attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: false, latencyMs: 0, errorCode: 'CIRCUIT_OPEN' });
+        continue;
+      }
       // Same rule as the chat path (1.56.0), and found by enumerating every `enforceRateLimit` call site
       // rather than by reasoning about it. Measured here with the limiter refusing the only candidate:
       //
@@ -705,18 +759,31 @@ export class RequestExecutor {
         this.deps.enforceRateLimit(candidate);
       } catch (error) {
         const code = isProviderError(error) ? error.code : 'RATE_LIMITED';
+        this.settleBreaker(candidate.connectionId, 'abandoned');
         attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
-        throw new ProviderError(code, 'This connection is at its rate limit.', {
+        const local = (isProviderError(error) ? error.details as { concurrencyLimited?: unknown } | undefined : undefined)?.concurrencyLimited === true;
+        if (local) {
+          throw new ProviderError(code, 'This connection is at its concurrency limit.', {
+            retryable: false,
+            publicMessage: 'This connection is at its concurrency limit. Wait for a running request to finish.',
+            details: { concurrencyLimited: true },
+            cause: error,
+          });
+        }
+        // The limiter refused before dispatch, so nothing was learned about the provider. A sibling
+        // route may still serve the stream; the old code threw here and ended the chain.
+        lastError = new ProviderError(code, 'This connection is at its rate limit.', {
           retryable: false,
           publicMessage: 'This connection is at its rate limit. Wait for the window to reset.',
           cause: error,
         });
+        continue;
       }
       try {
         this.deps.recordRateLimitUse(candidate.connectionId);
         const ttfbMs = candidate.resilience.ttfbMs && candidate.resilience.ttfbMs > 0 ? candidate.resilience.ttfbMs : candidate.resilience.timeoutMs;
         const opened = await this.deps.withDeadline(signal, ttfbMs, candidate.providerId, async (deadline) => {
-          const source = this.deps.streamChat(candidate.providerId, request, deadline, scope, candidate.connectionId)[Symbol.asyncIterator]();
+          const source = this.deps.streamChat(candidate.providerId, effective, deadline, scope, candidate.connectionId)[Symbol.asyncIterator]();
           const first = await source.next();
           if (first.done) throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before producing a chunk.');
           // The deadline has passed; the rest of the stream continues without it.
@@ -733,7 +800,13 @@ export class RequestExecutor {
         rest = opened.remainder[Symbol.asyncIterator]();
       } catch (error) {
         const code = isProviderError(error) ? error.code : 'PROVIDER_REQUEST_FAILED';
-        if (!isCallerFault(code) && !isAllowanceRefusal(error)) this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.', candidate.connectionId);
+        const cooldownWorthy = isProviderError(error)
+          && (error.code === 'RATE_LIMITED' || saysAccountRestricted(providerWordingOf(error)))
+          && !(typeof error.details === 'object' && error.details !== null && (error.details as { concurrencyLimited?: unknown }).concurrencyLimited === true);
+        if (cooldownWorthy) this.noteModelRateLimit(candidate.providerId, effective.model, error as ProviderError, candidate.connectionId);
+        const connectionFailure = this.isConnectionFailure(code, error);
+        if (connectionFailure) this.deps.recordFailure(candidate.providerId, code, error instanceof Error ? error.message : 'The provider stream failed.', candidate.connectionId);
+        this.settleBreaker(candidate.connectionId, connectionFailure ? 'failure' : 'abandoned');
         attempts.push({ providerId: candidate.providerId, connectionId: candidate.connectionId, attempt: 1, ok: false, latencyMs: Date.now() - startedAt, errorCode: code });
         lastError = error;
         // `canRetry: false`, because a stream walks the route chain once: once the first chunk has
@@ -773,7 +846,9 @@ export class RequestExecutor {
               // `if (completed)` *after* the loop — was dead code, and the test that guards it said so.
               if (next.done) {
                 executor.deps.recordSuccess(candidate.providerId, Date.now() - startedAt, new Date().toISOString(), candidate.connectionId);
-                executor.deps.clearModelCooldown?.(candidate.providerId, request.model);
+                executor.settleBreaker(candidate.connectionId, 'success');
+                executor.deps.clearModelCooldown?.(candidate.providerId, effective.model, candidate.connectionId);
+                if (request.connectionId === undefined && candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) executor.deps.recordSticky?.(effective.model, candidate.connectionId);
                 if (candidate.connectionId && !candidate.connectionId.startsWith('unmanaged:')) executor.deps.recordUsage?.(candidate.connectionId);
                 return;
               }
@@ -789,7 +864,10 @@ export class RequestExecutor {
             // poison a provider's health. That is the same defect as recording the failure as a success,
             // pointed the other way.
             const cancelled = signal?.aborted === true;
-            if (cancelled) throw error;
+            if (cancelled) {
+              executor.settleBreaker(candidate.connectionId, 'abandoned');
+              throw error;
+            }
             const code = isProviderError(error) ? error.code : 'PROVIDER_REQUEST_FAILED';
             executor.deps.recordFailure(
               candidate.providerId,
@@ -797,6 +875,7 @@ export class RequestExecutor {
               error instanceof Error ? error.message : 'The provider stream failed after it started.',
               candidate.connectionId,
             );
+            executor.settleBreaker(candidate.connectionId, 'failure');
             attempts.push({
               providerId: candidate.providerId,
               attempt: 1,

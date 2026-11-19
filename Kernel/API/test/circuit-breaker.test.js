@@ -63,6 +63,21 @@ test('the cooldown ends, one probe goes out, and a success closes it', () => {
   assert.equal(breaker.status('c').skipped, 1);
 });
 
+test('an inconclusive probe is released instead of latching the breaker forever', () => {
+  const time = clock();
+  const breaker = new CircuitBreaker(config, time.now);
+  for (let i = 0; i < 3; i += 1) breaker.recordFailure('c');
+  time.advance(1_000);
+
+  assert.equal(breaker.allows('c'), true, 'the probe was not allowed');
+  assert.equal(breaker.status('c').state, 'half-open');
+  // A limiter refusal or a cancellation is not evidence about the provider.
+  breaker.recordAbandoned('c');
+  assert.equal(breaker.allows('c'), true, 'the probe stayed in flight, so the route is banned');
+  breaker.recordSuccess('c');
+  assert.equal(breaker.status('c').state, 'closed');
+});
+
 test('a failed probe re-opens it with double the wait, and the wait keeps doubling to the ceiling', () => {
   const time = clock();
   const breaker = new CircuitBreaker(config, time.now);

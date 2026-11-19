@@ -8,6 +8,7 @@ import {
   type GatewaySettings,
 } from '../lib/gatewayClient';
 import { desktopBridge, type DesktopAppSettings, type UpdateState } from '../lib/electronBridge';
+import { useGatewayReload } from '../lib/useGatewayStatus';
 import { z } from 'zod';
 import { badgeTone } from '../ui/primitives';
 import { Switch } from '../ui/Switch';
@@ -65,6 +66,7 @@ export function SettingsContent() {
   const [port, setPort] = useState('');
   const [portError, setPortError] = useState<string | undefined>();
   const [testing, setTesting] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
     try {
       const stored = localStorage.getItem(THEME_KEY);
@@ -120,6 +122,7 @@ export function SettingsContent() {
     return () => controller.abort();
   }, [bridge, loadGateway]);
 
+  useGatewayReload(() => { void loadGateway(); }, [loadGateway]);
   const saveDesktop = useCallback(async (patch: Partial<DesktopAppSettings>, label: string) => {
     if (!bridge) return;
     setSaving(label);
@@ -241,7 +244,20 @@ export function SettingsContent() {
           disabled={requireApiKey === null || loading || Boolean(saving)}
           onChange={(next) => void toggleRequireApiKey(next)}
         />
-        <div className="flex items-center gap-2 py-3">
+        <div className="flex flex-wrap items-center gap-2 py-3">
+          <button type="button" onClick={async () => {
+            if (!settings) return;
+            try {
+              const gatewayUrl = `http://${settings.host}:${settings.port}`;
+              await navigator.clipboard.writeText(gatewayUrl);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2_000);
+            } catch {
+              flash('The clipboard is not available in this browser.', true);
+            }
+          }} disabled={!settings} className="btn-ghost !px-3 !py-2 !text-xs disabled:opacity-40">
+            {copied ? 'Copied gateway URL' : 'Copy gateway URL'}
+          </button>
           <button type="button" onClick={async () => {
             setTesting(true);
             try {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { InMemoryApiKeyStore, InMemoryConnectionStore, GatewayService, createGatewayServer } from '../dist/src/index.js';
 import { ProviderRegistry } from '../dist/src/core/index.js';
+import { gatewayBuild } from '../dist/src/core/build-info.js';
 
 function adapter(id) {
   return {
@@ -36,6 +37,7 @@ test('MCP initialize + tools/list + tools/call', async (t) => {
   assert.equal(init.status, 200);
   const initBody = await init.json();
   assert.equal(initBody.result.protocolVersion, '2024-11-05');
+  assert.equal(initBody.result.serverInfo.version, gatewayBuild().version, 'MCP reported a version that is not this build');
   assert.ok(initBody.result.capabilities.tools);
 
   const list = await gw.call({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });

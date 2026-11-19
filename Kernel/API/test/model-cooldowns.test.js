@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { HealthRegistry, LocalConnectionStore } from '../dist/src/index.js';
+import { HealthManager } from '../dist/src/core/health.js';
 
 /**
  * Cooldowns survive a restart, and they grow while an account keeps refusing.
@@ -51,8 +52,18 @@ test('a cooldown written before a restart is still in force after it', async (t)
   assert.equal(after.isModelCoolingDown('acct-1', 'another-model'), false, 'and only for that model');
 });
 
-test('the wait grows with each consecutive refusal and stops when the account answers', () => {
-  let now = 1_000_000;
+test('a success clears the cooldown under the connection id it was recorded with', () => {
+  // The record path has always been keyed by connection (a sibling account has its own allowance),
+  // while the clear path used the provider id. For a connection whose id differs from its provider
+  // — every second account — the delete missed and the ladder never reset.
+  const manager = new HealthManager({ adapters: async () => [], contextFor: async () => ({}) });
+  manager.recordModelRateLimit('provider', 'm', {}, 'acct-1');
+  assert.equal(manager.snapshotRegistry().isModelCoolingDown('acct-1', 'm'), true, 'the refusal was not recorded');
+  manager.clearModelCooldown('provider', 'm', 'acct-1');
+  assert.equal(manager.snapshotRegistry().isModelCoolingDown('acct-1', 'm'), false, 'the success did not clear the pair');
+});
+
+test('the wait grows with each consecutive refusal and stops when the account answers', () => {  let now = 1_000_000;
   const registry = new HealthRegistry(() => now);
   const waits = [];
   for (let attempt = 0; attempt < 4; attempt += 1) {

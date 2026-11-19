@@ -10,6 +10,7 @@ import type {
   ChatResponse,
   FinishReason,
   Model,
+  CredentialValidation,
   ProviderAdapter,
   ProviderCapabilities,
   ProviderCredential,
@@ -113,6 +114,8 @@ class MinimaxCodeAdapter implements ProviderAdapter {
   private readonly scope: string;
   private readonly audience: string;
   private readonly renewed = boundedMap<string, ProviderCredential>(maxRenewalMemoEntries);
+  /** One renewal per refresh token. MiniMax rotates single-use refresh tokens, so two posts lose one. */
+  private readonly refreshing = new Map<string, Promise<ProviderCredential>>();
 
   constructor(providerId: string, siteName: MinimaxCodeSiteName, options: MinimaxCodeAdapterOptions = {}) {
     this.id = providerId;
@@ -161,7 +164,7 @@ class MinimaxCodeAdapter implements ProviderAdapter {
     const userCode = typeof data.user_code === 'string' ? data.user_code : '';
     const hasDeviceCode = typeof data.device_code === 'string' && data.device_code.length > 0;
     const deviceCode = hasDeviceCode ? (data.device_code as string) : userCode;
-    const verificationUrl = data.verification_uri_complete ?? data.verification_uri ?? 'https://account.minimax.io/user/code';
+    const verificationUrl = data.verification_uri_complete ?? data.verification_uri ?? `${this.site.account}/user/code`;
     if (!userCode || !deviceCode) {
       throw new ProviderError('PROVIDER_REQUEST_FAILED', 'MiniMax did not return a device code.', { providerId: this.id });
     }
@@ -216,13 +219,21 @@ class MinimaxCodeAdapter implements ProviderAdapter {
         type: 'oauth',
         value: access,
         ...(typeof data.refresh_token === 'string' && data.refresh_token ? { refreshToken: data.refresh_token } : {}),
-        ...(typeof data.expires_in === 'number' ? { expiresAt: new Date(Date.now() + data.expires_in * 1000).toISOString() } : {}),
+        ...(expiresAtFrom(data.expires_in) ? { expiresAt: expiresAtFrom(data.expires_in)! } : {}),
       },
     };
   }
 
-  async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
-    const credential = await this.credential(context);
+  async validateCredential(credential: ProviderCredential | undefined, context: ProviderRequestContext = {}): Promise<CredentialValidation> {
+    if (!credential || credential.type !== 'oauth' || !credential.value) {
+      throw new ProviderError('AUTHENTICATION_FAILED', 'MiniMax Code needs an OAuth sign-in.', { providerId: this.id });
+    }
+    const startedAt = performance.now();
+    await this.listModels({ ...context, credential });
+    return { status: 'valid', checkedAt: new Date().toISOString(), latencyMs: Math.round(performance.now() - startedAt) };
+  }
+
+  async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {    const credential = await this.credential(context);
     const response = await this.transport.request<{ data?: ModelItem[] }>({
       method: 'GET',
       providerId: this.id,
@@ -381,15 +392,17 @@ class MinimaxCodeAdapter implements ProviderAdapter {
   }
 
   /**
-   * The scheduler's entry point: the same renewal a request performs, reachable without one.
+   * The scheduler's entry point: **force** a renewal now.
    *
-   * The value returned is what the vault stores, so a rotated refresh token survives a restart.
+   * It used to delegate to `credential()`, which returned the same credential unless the adapter's own
+   * ten-minute window said it was due. The renewal pass works on a thirty-minute window, so it could
+   * report a successful renewal while nothing was renewed.
    */
   async renewCredential(credential: ProviderCredential): Promise<ProviderCredential> {
     if (credential.type !== 'oauth' || !credential.refreshToken) {
       throw new ProviderError('AUTHENTICATION_FAILED', 'The MiniMax Code session has expired. Sign in again.', { providerId: this.id });
     }
-    return this.credential({ credential });
+    return this.refreshWith(credential.refreshToken);
   }
 
   private async credential(context: ProviderRequestContext): Promise<ProviderCredential> {
@@ -404,29 +417,38 @@ class MinimaxCodeAdapter implements ProviderAdapter {
     }
     const memo = this.renewed.get(current.value);
     if (memo) return memo;
+    return this.refreshWith(refresh);
+  }
 
-    const response = await this.postForm<TokenResponse>(
-      `${this.site.account}/oauth2/token`,
-      { grant_type: 'refresh_token', refresh_token: refresh, client_id: this.clientId },
-      undefined,
-      true,
-    );
-    const data = response.data ?? {};
-    const access = typeof data.access_token === 'string' ? data.access_token : '';
-    if (!access) {
-      throw new ProviderError('AUTHENTICATION_FAILED', data.error_description ?? 'MiniMax refused to renew the session. Sign in again.', {
-        providerId: this.id,
-      });
-    }
-    const renewed: ProviderCredential = {
-      type: 'oauth',
-      value: access,
-      ...(typeof data.refresh_token === 'string' && data.refresh_token ? { refreshToken: data.refresh_token } : { refreshToken: refresh }),
-      ...(typeof data.expires_in === 'number' ? { expiresAt: new Date(Date.now() + data.expires_in * 1000).toISOString() } : {}),
-    };
-    this.renewed.set(current.value, renewed);
-    await this.onTokensRefreshed?.(renewed);
-    return renewed;
+  private async refreshWith(refresh: string): Promise<ProviderCredential> {
+    const pending = this.refreshing.get(refresh);
+    if (pending) return pending;
+    const work = (async () => {
+      const response = await this.postForm<TokenResponse>(
+        `${this.site.account}/oauth2/token`,
+        { grant_type: 'refresh_token', refresh_token: refresh, client_id: this.clientId },
+        undefined,
+        true,
+      );
+      const data = response.data ?? {};
+      const access = typeof data.access_token === 'string' ? data.access_token : '';
+      if (!access) {
+        throw new ProviderError('AUTHENTICATION_FAILED', data.error_description ?? 'MiniMax refused to renew the session. Sign in again.', {
+          providerId: this.id,
+        });
+      }
+      const renewed: ProviderCredential = {
+        type: 'oauth',
+        value: access,
+        ...(typeof data.refresh_token === 'string' && data.refresh_token ? { refreshToken: data.refresh_token } : { refreshToken: refresh }),
+        ...(expiresAtFrom(data.expires_in) ? { expiresAt: expiresAtFrom(data.expires_in)! } : {}),
+      };
+      this.renewed.set(access, renewed);
+      await this.onTokensRefreshed?.(renewed);
+      return renewed;
+    })().finally(() => { this.refreshing.delete(refresh); });
+    this.refreshing.set(refresh, work);
+    return work;
   }
 
   private requestHeaders(credential: ProviderCredential): Record<string, string> {
@@ -553,6 +575,12 @@ function normalizeDeadline(data: DeviceCodeResponse): number | undefined {
     return data.expired_in < 1e12 ? data.expired_in : Math.max(1, Math.ceil((data.expired_in - Date.now()) / 1000));
   }
   return undefined;
+}
+
+/** A token lifetime, whether the provider sent it as a number or a numeric string. */
+function expiresAtFrom(value: unknown): string | undefined {
+  const seconds = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
+  return Number.isFinite(seconds) && seconds > 0 ? new Date(Date.now() + seconds * 1000).toISOString() : undefined;
 }
 
 function normalizeRole(role: string): ChatMessage['role'] {

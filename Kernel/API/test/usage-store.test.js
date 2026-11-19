@@ -154,6 +154,7 @@ test('the local store persists across instances', async (t) => {
   const { directory, store } = localStore();
   t.after(() => undefined);
   await store.record(entry({ model: 'persisted-model' }));
+  await store.flush();
 
   const reopened = new LocalUsageStore({ directory });
   const [record] = await reopened.list();
@@ -165,6 +166,7 @@ test('ids stay unique across a restart instead of restarting at 1', async (t) =>
   t.after(() => undefined);
   await store.record(entry());
   await store.record(entry());
+  await store.flush();
   const before = (await store.list()).map((record) => record.id);
 
   const reopened = new LocalUsageStore({ directory });
@@ -180,6 +182,7 @@ test('the usage file is written with the same 0600 as every other secret', async
   const { directory, store } = localStore();
   t.after(() => undefined);
   await store.record(entry());
+  await store.flush();
   const mode = (statSync(join(directory, 'usage.json')).mode & 0o777).toString(8);
   assert.equal(mode, '600', `the usage file is mode ${mode}; it lives beside the credential files and must match them`);
 });
@@ -188,6 +191,7 @@ test('the file on disk contains no content-shaped field even when handed one', a
   const { directory, store } = localStore();
   t.after(() => undefined);
   await store.record({ ...entry(), content: 'the user prompt', headers: { authorization: 'Bearer sk-secret' } });
+  await store.flush();
   const text = readFileSync(join(directory, 'usage.json'), 'utf8');
   assert.ok(!text.includes('the user prompt'), 'a prompt reached the usage file');
   assert.ok(!text.includes('sk-secret'), 'a credential-shaped value reached the usage file');
@@ -202,6 +206,7 @@ test('concurrent writes all land — the read-modify-write is serialised', async
   t.after(() => undefined);
   const total = 120;
   await Promise.all(Array.from({ length: total }, (_, index) => store.record(entry({ model: `m${index}` }))));
+  await store.flush();
 
   const reopened = new LocalUsageStore({ directory });
   assert.equal(await reopened.size(), total, `lost records under concurrency: ${await reopened.size()} of ${total}`);
@@ -216,6 +221,7 @@ test('a corrupt file does not stop the gateway — it is replaced on the next wr
   const reopened = new LocalUsageStore({ directory });
   assert.equal(await reopened.size(), 0, 'a corrupt file should read as no usage, not as a crash');
   await reopened.record(entry());
+  await reopened.flush();
   const after = new LocalUsageStore({ directory });
   assert.equal(await after.size(), 1, 'the corrupt file was not replaced on the next write');
 });

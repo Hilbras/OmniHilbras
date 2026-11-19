@@ -515,15 +515,12 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
     void listGatewayConnections(AbortSignal.timeout(CONNECTION_LOAD_TIMEOUT_MS))
       .then((connections) => {
         if (!active) return;
-        // A card that shares another's connection names its owner via `connectionProviderId`
-        // (`clinepass` → `cline`), so the lookup follows that. Without it this page would say "No
-        // connection yet" about an account that is already signed in on the sibling card.
-        const owner = provider.connectionProviderId ?? provider.catalogId ?? provider.id;
-        // **Every** connection for this provider, not just the first. `find` picked one and the page
-        // rendered as though that were the only account, so a second connection (allowed since the
-        // `addAccount` sign-in) existed on the gateway and was invisible here. The first is kept as `connection`
-        // for the panels written against a single account; the list is what the accounts table shows.
-        const saved = connections.filter((item) => item.providerId === owner && item.hasCredential);
+        // A provider's own connection wins. A card that shares another's connection names its owner
+        // via `connectionProviderId`; that is the fallback when no own account exists yet.
+        const ownId = provider.catalogId ?? provider.id;
+        const owner = provider.connectionProviderId ?? ownId;
+        const own = connections.filter((item) => item.providerId === ownId && item.hasCredential);
+        const saved = own.length > 0 ? own : connections.filter((item) => item.providerId === owner && item.hasCredential);
         setConnections(saved);
         const savedConnection = saved[0];
         setConnection(savedConnection);
@@ -982,8 +979,13 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
       // Re-read the whole list, not a single find: an add-account sign-in just landed **beside** the
       // first connection, and the accounts panel only updates when the plural state does. The
       // singular state targets the connection that was just saved.
+      const ownId = provider.catalogId ?? provider.id;
+      const owner = provider.connectionProviderId ?? ownId;
       const list = await listGatewayConnections()
-        .then((all) => all.filter((item) => item.providerId === (provider.connectionProviderId ?? provider.catalogId ?? provider.id) && item.hasCredential))
+        .then((all) => {
+          const own = all.filter((item) => item.providerId === ownId && item.hasCredential);
+          return own.length > 0 ? own : all.filter((item) => item.providerId === owner && item.hasCredential);
+        })
         .catch(() => undefined);
       if (list) setConnections(list);
       const next = list?.find((item) => item.id === saved.id) ?? saved;
@@ -1517,7 +1519,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
               ))}
             </select>
           </div>
-          <UsageContent providerId={provider.connectionProviderId ?? provider.id} connectionId={usageConnectionId} />
+          <UsageContent providerId={connection?.providerId ?? provider.connectionProviderId ?? provider.id} connectionId={usageConnectionId} />
         </div>
       ) : (
         <>

@@ -73,6 +73,24 @@ if (!readmeMatch) {
   }
 }
 
+/**
+ * The SPEC's status line is a second copy of the version, and it had gone stale for two releases.
+ * It is checked and fixed here for the same reason as the README line.
+ */
+const spec = read('docs/SPEC-SDK.md');
+const specPattern = /\*\*Status:\*\* Current — release (\d+\.\d+\.\d+)/;
+const specMatch = specPattern.exec(spec);
+if (!specMatch) {
+  problems.push('docs/SPEC-SDK.md has no "**Status:** Current — release x.y.z" line to check');
+} else if (specMatch[1] !== version) {
+  if (fix) {
+    write('docs/SPEC-SDK.md', spec.replace(specPattern, `**Status:** Current — release ${version}`));
+    fixed.push(`docs/SPEC-SDK.md → ${version}`);
+  } else {
+    problems.push(`docs/SPEC-SDK.md advertises ${specMatch[1]}, expected ${version}`);
+  }
+}
+
 /** The version the Cline adapters report as their client version. Both copies, because both send it. */
 for (const file of ['Kernel/SDK/cline/adapter/index.ts', 'Kernel/SDK/clinepass/lib/cline.ts']) {
   const source = read(file);

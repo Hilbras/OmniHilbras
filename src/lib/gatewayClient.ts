@@ -1116,6 +1116,12 @@ export type GatewayUsageRecord = {
   cacheWriteTokens?: number;
   reasoningTokens?: number;
   tokensEstimated?: boolean;
+  /** The id the response header carried, when the record has one. */
+  requestId?: string;
+  /** Per-attempt ledger, when the record carries it. */
+  path?: Array<{ providerId: string; connectionId?: string; outcome: string; errorCode?: string; latencyMs?: number }>;
+  /** Compression telemetry, when a saver ran. */
+  compression?: unknown;
 };
 
 export type GatewayUsageTotals = {
@@ -1309,7 +1315,7 @@ export type GatewayTokenSaverStats = {
   totalTokensSaved: number;
   totalBytesSaved: number;
   cache: { read: number; write: number };
-  savers: Array<{ id: string; kind: string; requests: number; requestsWithSavings: number; ran?: number; skipped?: number; tokensSaved: number; bytesSaved: number }>;
+  savers: Array<{ id: string; kind: string; requests: number; requestsWithSavings: number; ran?: number; skipped?: number; tokensSaved: number; bytesBefore?: number; bytesAfter?: number; bytesSaved: number; details?: Record<string, number> }>;
   byProvider: Array<{ providerId: string; requests: number; tokensSaved: number; bytesSaved: number }>;
 };
 

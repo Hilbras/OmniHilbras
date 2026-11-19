@@ -49,6 +49,14 @@ export type ConnectionRecord = {
    * the extra provider here; credential lookup follows this list, catalogue and routing do not.
    */
   providers?: ProviderId[];
+  /**
+   * The connection whose stored credential this one uses, when it deliberately shares one.
+   *
+   * Unlike `providerAlias`, this is a per-record link: it names the exact account, it is visible on
+   * the card, and it does not make every request for the provider follow a global map. A ClinePass
+   * OAuth account uses this; an API-key ClinePass account has its own credential and no link.
+   */
+  credentialConnectionId?: string;
   name: string;
   endpoint: string;
   priority: number;
@@ -139,6 +147,8 @@ export type ConnectionInput = {
   customModelIds?: string[];
   /** Other providers that share this record's credential — see `ConnectionRecord.providers`. */
   providers?: ProviderId[];
+  /** The connection whose credential this record uses — see `ConnectionRecord.credentialConnectionId`. */
+  credentialConnectionId?: string;
   modelMeta?: ModelMetaMap;
   resilience?: Partial<ResilienceSettings>;
   responsibility?: ConnectionResponsibility;
@@ -230,6 +240,8 @@ export interface ConnectionStore extends ConnectionCredentialStore {
   remove(connectionId: string): Promise<boolean>;
   /** Increments the connection’s successful-turn counter and stamps lastUsed. */
   recordUsage(connectionId: string): Promise<void>;
+  /** Persists a coalesced usage counter now. Optional for stores that have nothing to flush. */
+  flushUsage?(): Promise<void>;
   /**
    * Per account-and-model cooldowns, keyed `<connectionId>:<modelId>`.
    *
@@ -689,6 +701,7 @@ function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefi
     id: input.id!,
     providerId: normalized.providerId,
     ...(normalized.providers && normalized.providers.length > 0 ? { providers: normalized.providers } : {}),
+    ...(normalized.credentialConnectionId ?? existing?.credentialConnectionId ? { credentialConnectionId: normalized.credentialConnectionId ?? existing?.credentialConnectionId } : {}),
     name: normalized.name,
     endpoint: normalized.endpoint,
     priority: normalized.priority,
@@ -742,6 +755,9 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
   /** Per account-and-model cooldowns, keyed `<connectionId>:<modelId>`. */
   private modelCooldowns = new Map<string, ModelCooldown>();
   private mutationQueue: Promise<void> = Promise.resolve();
+  /** A usage counter changed but has not reached disk yet. */
+  private usageDirty = false;
+  private usageFlushTimer?: ReturnType<typeof setTimeout>;
   private loadPromise?: Promise<void>;
   /** Resolved once, so a save cannot disagree with the load about the bound. */
   private readonly maxConnections = resolveMaxConnections();
@@ -1153,15 +1169,42 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       await this.ensureLoaded();
       const record = this.connections.get(connectionId);
       if (!record) return;
-      const previous = record.requestCount;
-      const previousLastUsed = record.lastUsed;
       record.requestCount = (record.requestCount ?? 0) + 1;
       record.lastUsed = new Date().toISOString();
+      this.usageDirty = true;
+      this.scheduleUsageFlush();
+    });
+  }
+
+  /**
+   * A usage counter is bookkeeping for the next read, not a fact the request waits for.
+   *
+   * Writing the whole metadata file and `fsync`ing it on every successful request was a disk write
+   * on the hot path. The counters stay in memory and are coalesced here; a crash between flushes
+   * loses the last window, which is the same trade the API-key counter already documents.
+   */
+  private scheduleUsageFlush() {
+    if (this.usageFlushTimer) return;
+    this.usageFlushTimer = setTimeout(() => {
+      this.usageFlushTimer = undefined;
+      void this.flushUsage().catch(() => {
+        // Keep the dirty flag so the next request or shutdown retries rather than silently
+        // dropping a counter.
+        this.usageDirty = true;
+      });
+    }, 250);
+    this.usageFlushTimer.unref?.();
+  }
+
+  async flushUsage() {
+    if (!this.usageDirty) return;
+    await this.withMutation(async () => {
+      if (!this.usageDirty) return;
+      this.usageDirty = false;
       try {
         await this.persistMetadata();
       } catch (error) {
-        record.requestCount = previous;
-        record.lastUsed = previousLastUsed;
+        this.usageDirty = true;
         throw error;
       }
     });
@@ -1305,6 +1348,7 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
   const providerId = input.providerId.trim();
   if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(providerId)) throw new Error('providerId contains unsupported characters.');
   if (input.id !== undefined && !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(input.id)) throw new Error('connection id contains unsupported characters.');
+  if (input.credentialConnectionId !== undefined && !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(input.credentialConnectionId)) throw new Error('credentialConnectionId contains unsupported characters.');
   const name = input.name.trim();
   if (!name || name.length > 120 || /[\r\n\0]/.test(name)) throw new Error('Connection name must be between 1 and 120 characters.');
   const endpoint = input.endpoint.trim();
@@ -1328,6 +1372,7 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
     ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
     ...(input.modelPolicy === undefined ? {} : { modelPolicy: input.modelPolicy }),
     ...(input.providers === undefined || input.providers.length === 0 ? {} : { providers: input.providers }),
+    ...(input.credentialConnectionId === undefined ? {} : { credentialConnectionId: input.credentialConnectionId }),
     ...(modelIds === undefined ? {} : { modelIds }),
     ...(customModelIds === undefined ? {} : { customModelIds }),
     ...(input.resilience === undefined ? {} : { resilience: normalizeResilienceSettings(input.resilience) }),
@@ -1491,6 +1536,9 @@ function parseRecord(value: unknown): ConnectionRecord {
     ...(typeof value.credentialFingerprint === 'string' && value.credentialFingerprint ? { credentialFingerprint: value.credentialFingerprint } : {}),
     modelPolicy: value.modelPolicy === undefined ? 'all' : value.modelPolicy,
     ...(Array.isArray(value.providers) ? { providers: value.providers.filter((id): id is ProviderId => typeof id === 'string') } : {}),
+    ...(typeof value.credentialConnectionId === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(value.credentialConnectionId)
+      ? { credentialConnectionId: value.credentialConnectionId }
+      : {}),
     modelIds: modelLists.modelIds,
     customModelIds: modelLists.customModelIds,
     ...(value.modelMeta === undefined ? {} : { modelMeta: value.modelMeta as ModelMetaMap }),
@@ -1500,6 +1548,7 @@ function parseRecord(value: unknown): ConnectionRecord {
     id: input.id!,
     providerId: input.providerId,
     ...(input.providers && input.providers.length > 0 ? { providers: input.providers } : {}),
+    ...(input.credentialConnectionId ? { credentialConnectionId: input.credentialConnectionId } : {}),
     name: input.name,
     endpoint: input.endpoint,
     priority: input.priority,
@@ -1520,6 +1569,12 @@ function parseRecord(value: unknown): ConnectionRecord {
         }
       : {}),
     modelPolicy: input.modelPolicy ?? 'all',
+    // Usage counters are written to the metadata; without these two lines they were never read back,
+    // so every restart reset a connection to “never used” while the file still held the count.
+    ...(typeof value.requestCount === 'number' && Number.isFinite(value.requestCount) && value.requestCount >= 0
+      ? { requestCount: Math.floor(value.requestCount) }
+      : {}),
+    ...(typeof value.lastUsed === 'string' && value.lastUsed ? { lastUsed: value.lastUsed } : {}),
     ...(input.modelMeta ? { modelMeta: input.modelMeta } : {}),
     modelIds: input.modelIds ?? [],
     customModelIds: input.customModelIds ?? [],

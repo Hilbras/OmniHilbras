@@ -254,6 +254,9 @@ importers:
 
   Kernel/API:
     dependencies:
+      '@omnihilbras/sdk-100milionseek':
+        specifier: workspace:*
+        version: link:../SDK/100milionseek
       '@omnihilbras/sdk-agentrouter':
         specifier: workspace:*
         version: link:../SDK/agentrouter
@@ -428,6 +431,16 @@ importers:
         version: 26.6.2
       typescript:
         specifier: ^5.9.0
+        version: 5.9.3
+
+  Kernel/SDK/100milionseek:
+    dependencies:
+      '@omnihilbras/sdk-openai':
+        specifier: workspace:*
+        version: link:../openai
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
         version: 5.9.3
 
   Kernel/SDK/agentrouter:

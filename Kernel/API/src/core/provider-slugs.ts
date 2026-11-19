@@ -61,6 +61,7 @@ export const PROVIDER_SLUGS: Readonly<Record<string, string>> = {
   'agnes-ai': 'ag',
   agentrouter: 'agr',
   'aion-labs': 'aio',
+  '100milionseek': 'hms',
   nous: 'ns',
   beatapi: 'bt',
   kiraai: 'ka',

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { canonicalLoopbackHost, isLoopbackHostname, loopbackBaseUrl } from './core/index.js';
-import { assertLoopbackHost, createGatewayService, loadGatewayConfig, type GatewayConfig } from './core/config.js';
+import { assertLoopbackHost, createGatewayService, isContainerDeployment, loadGatewayConfig, type GatewayConfig } from './core/config.js';
 import { isCrossSiteRequest, isJsonRequest, isOauthCallbackNavigation, getRequestOrigin, resolveCorsOrigins, resolveInferenceBodyBytes, sendError, sendJson, setCors } from './core/http.js';
 import { createDashboardToken, dashboardTokenHeader, publishDashboardToken, tokenMatches } from './core/dashboard-token.js';
 import { isTrustedDashboard, type AuthContext } from './core/runtime.js';
@@ -207,7 +207,7 @@ export function createGatewayServer(service: GatewayService, options: GatewaySer
     };
     const responseOrigin = allowedOrigin ? requestOrigin : undefined;
     setCors(response, responseOrigin);
-    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage') || request.url?.startsWith('/v1/oauth') || request.url?.startsWith('/v1/virtual-models') || request.url?.startsWith('/v1/skills') || request.url?.startsWith('/v1/workspaces') || request.url?.startsWith('/v1/tunnels') || request.url?.startsWith('/v1/mitm') || request.url?.startsWith('/v1/proxy-pools') || request.url?.startsWith('/v1/provider-nodes') || request.url?.startsWith('/v1/observability') || request.url?.startsWith('/v1/pxpipe') || request.url?.startsWith('/v1/locale') || request.url?.startsWith('/v1/runtime') || request.url?.startsWith('/v1/audio') || request.url?.startsWith('/v1/search')) response.setHeader('cache-control', 'no-store');
+    if (request.url?.startsWith('/v1/connections') || request.url?.startsWith('/v1/keys') || request.url?.startsWith('/v1/settings') || request.url?.startsWith('/v1/usage') || request.url?.startsWith('/v1/oauth') || request.url?.startsWith('/v1/virtual-models') || request.url?.startsWith('/v1/skills') || request.url?.startsWith('/v1/workspaces') || request.url?.startsWith('/v1/tunnels') || request.url?.startsWith('/v1/mitm') || request.url?.startsWith('/v1/proxy-pools') || request.url?.startsWith('/v1/provider-nodes') || request.url?.startsWith('/v1/observability') || request.url?.startsWith('/v1/pxpipe') || request.url?.startsWith('/v1/locale') || request.url?.startsWith('/v1/runtime') || request.url?.startsWith('/v1/audio') || request.url?.startsWith('/v1/search') || request.url?.startsWith('/v1/token-saver') || request.url?.startsWith('/v1/backup')) response.setHeader('cache-control', 'no-store');
     /**
      * The LLM surface, counted per caller.
      *
@@ -258,8 +258,9 @@ export async function startGatewayServer(options: {
   onShutdownRequest?: () => void;
 } = {}) {
   const config = options.config ?? loadGatewayConfig(options.env);
-  assertLoopbackHost(config.host);
-  const bindHost = canonicalLoopbackHost(config.host);
+  if (!isContainerDeployment(options.env)) assertLoopbackHost(config.host);
+  // A container bind is already the operator's explicit opt-in; local mode keeps the canonical name.
+  const bindHost = isContainerDeployment(options.env) ? config.host : canonicalLoopbackHost(config.host);
   const publicBaseUrl = loopbackBaseUrl(config.host, config.port);
   // A partial override is a configuration error worth refusing at startup rather than at the click:
   // the client and its registered redirect URI only make sense as a pair.

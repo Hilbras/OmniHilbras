@@ -9,6 +9,7 @@
 import type { RouteContext } from './route-context.js';
 import { sendJson, readJsonBody, invalidRequest } from '../core/http.js';
 import { extractApiKey } from './inference.js';
+import { gatewayBuild } from '../core/build-info.js';
 
 const MCP_PATH = '/v1/mcp';
 
@@ -100,7 +101,7 @@ export async function handleMcpRoute(ctx: RouteContext): Promise<boolean> {
     sendJson(response, 200, rpcResult(id, {
       protocolVersion: '2024-11-05',
       capabilities: { tools: {} },
-      serverInfo: { name: 'omnihilbras-gateway', version: '3.12.1' },
+      serverInfo: { name: 'omnihilbras-gateway', version: gatewayBuild().version },
     }), origin);
     return true;
   }

@@ -158,6 +158,8 @@ export interface UsageStore {
   exportState?(): Promise<UsageBackupState>;
   /** Replaces every record, bounded by this store's `maxRecords` exactly as the load path is. */
   importState?(state: UsageBackupState): Promise<void>;
+  /** Persists coalesced records now. Optional for stores that write synchronously. */
+  flush?(): Promise<void>;
 }
 
 /** The store's own file shape, so a backup is the file it already writes rather than a second format. */
@@ -378,6 +380,8 @@ export class LocalUsageStore implements UsageStore {
   private sequence = 0;
   private mutationQueue: Promise<void> = Promise.resolve();
   private loaded = false;
+  private usageDirty = false;
+  private usageFlushTimer?: ReturnType<typeof setTimeout>;
 
   constructor(options: LocalUsageStoreOptions = {}) {
     this.path = options.path ?? join(options.directory ?? defaultConnectionDirectory(), 'usage.json');
@@ -432,8 +436,34 @@ export class LocalUsageStore implements UsageStore {
       const record = normalizeRecord({ ...entry, id: `req_${this.sequence.toString(36)}` });
       this.records.unshift(record);
       if (this.records.length > this.maxRecords) this.records.length = this.maxRecords;
-      await this.persist();
+      // Usage is a report, not the answer. Writing and `fsync`ing the whole file per request put a
+      // disk write on the hot path; keep the record in memory and coalesce the write.
+      this.usageDirty = true;
+      this.scheduleFlush();
       return record;
+    });
+  }
+
+  private scheduleFlush() {
+    if (this.usageFlushTimer) return;
+    this.usageFlushTimer = setTimeout(() => {
+      this.usageFlushTimer = undefined;
+      void this.flush().catch(() => { this.usageDirty = true; });
+    }, 250);
+    this.usageFlushTimer.unref?.();
+  }
+
+  async flush(): Promise<void> {
+    if (!this.usageDirty) return;
+    await this.withMutation(async () => {
+      if (!this.usageDirty) return;
+      this.usageDirty = false;
+      try {
+        await this.persist();
+      } catch (error) {
+        this.usageDirty = true;
+        throw error;
+      }
     });
   }
 
@@ -460,6 +490,7 @@ export class LocalUsageStore implements UsageStore {
     await this.withMutation(async () => {
       await this.ensureLoaded();
       this.records = [];
+      this.usageDirty = false;
       await this.persist();
     });
   }

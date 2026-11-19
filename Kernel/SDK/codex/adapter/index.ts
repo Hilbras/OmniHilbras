@@ -15,7 +15,7 @@ import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, M
  * deployment can move it without a rebuild, and so the value in use is a setting rather than a
  * claim buried in code.
  */
-const CODEX_CLI_VERSION = '0.154.0';
+const CODEX_CLI_VERSION = '0.159.2';
 
 /** The catalog URL for a client version. Built per call so an override actually reaches it. */
 export function codexModelsUrl(clientVersion: string = CODEX_CLI_VERSION) {
@@ -232,18 +232,34 @@ export class CodexAdapter implements ProviderAdapter {
    */
   async listModels(context: ProviderRequestContext = {}): Promise<Model[]> {
     const credential = await this.credential(context);
+    const data = await this.catalog(credential, this.clientVersion, context.signal);
+    const entries = catalogEntries(data);
+    if (entries.length === 0) {
+      const keys = data && typeof data === 'object' && !Array.isArray(data) ? Object.keys(data).join(', ') : 'an array';
+      throw new ProviderError('NOT_SUPPORTED', `Codex returned no models for this account (top-level keys: ${keys}). The catalog is filtered by client version, so an out-of-date OmniHilbras can be told the account has none.`, { providerId: this.id });
+    }
+    return entries.map(toModel(this.id, credential.email));
+  }
+
+  private async catalog(credential: Exclude<ProviderCredential, { type: 'none' }>, clientVersion: string, signal?: AbortSignal): Promise<CodexModelCatalog> {
+    const headers: Record<string, string> = {
+      accept: 'application/json',
+      authorization: `Bearer ${credential.value}`,
+      originator: CODEX.originator,
+      'User-Agent': `${CODEX.originator}/${clientVersion}`,
+    };
+    if (credential.type === 'oauth' && credential.accountId) {
+      assertSafeProviderHeaderValue('ChatGPT-Account-ID', credential.accountId, this.id);
+      headers['ChatGPT-Account-ID'] = credential.accountId;
+    }
     const { data } = await this.transport.request<CodexModelCatalog>({
       method: 'GET',
       providerId: this.id,
-      url: codexModelsUrl(this.clientVersion),
-      headers: { accept: 'application/json', authorization: `Bearer ${credential.value}`, originator: CODEX.originator },
-      ...(context.signal ? { signal: context.signal } : {}),
+      url: codexModelsUrl(clientVersion),
+      headers,
+      ...(signal ? { signal } : {}),
     });
-    const entries = catalogEntries(data);
-    if (entries.length === 0) {
-      throw new ProviderError('NOT_SUPPORTED', 'Codex returned no models for this account. The catalog is filtered by client version, so an out-of-date OmniHilbras can be told the account has none.', { providerId: this.id });
-    }
-    return entries.map(toModel(this.id, credential.email));
+    return data;
   }
 
   /**
@@ -384,11 +400,15 @@ export class CodexAdapter implements ProviderAdapter {
  * number would overstate what the account can actually send.
  */
 type CodexModelEntry = { id?: string; slug?: string; name?: string; display_name?: string; context_window?: number; contextWindow?: number; supported_input_modalities?: string[] };
-type CodexModelCatalog = CodexModelEntry[] | { data?: CodexModelEntry[]; models?: CodexModelEntry[]; results?: CodexModelEntry[] };
+type CodexModelCatalog = CodexModelEntry[] | { data?: CodexModelEntry[] | { models?: CodexModelEntry[] }; models?: CodexModelEntry[]; results?: CodexModelEntry[]; items?: CodexModelEntry[] };
 
 function catalogEntries(data: CodexModelCatalog | undefined): CodexModelEntry[] {
   if (Array.isArray(data)) return data;
-  return data?.data ?? data?.models ?? data?.results ?? [];
+  if (!data) return [];
+  const nested = data.data;
+  if (Array.isArray(nested)) return nested;
+  if (nested && typeof nested === 'object' && Array.isArray(nested.models)) return nested.models;
+  return data.models ?? data.results ?? data.items ?? [];
 }
 
 function toModel(providerId: string, email: string | undefined) {

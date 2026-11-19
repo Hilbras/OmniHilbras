@@ -5,13 +5,16 @@ import type { CredentialValidation, ProviderCredential, ProviderRequestContext }
 export const ollamaProviderId = 'ollama';
 
 export class OllamaAdapter extends OpenAICompatibleAdapter {
-  constructor(options: OpenAICompatibleAdapterOptions = {}) {
+  constructor(options: OpenAICompatibleAdapterOptions & { endpoint?: string } = {}) {
+    const { endpoint, ...transportOptions } = options;
     super({
       id: 'ollama',
       name: 'Ollama',
-      baseUrl: 'http://localhost:11434/v1',
-      auth: { header: 'Authorization', prefix: 'Bearer' },
-    }, options);
+      baseUrl: endpoint ?? 'http://localhost:11434/v1',
+      // A keyless local runtime must not be forced to present a credential. A proxied Ollama that
+      // does have a key still sends it, because `required: false` only removes the failure.
+      auth: { header: 'Authorization', prefix: 'Bearer', required: false },
+    }, transportOptions);
   }
 
   /**

@@ -52,6 +52,7 @@ const OPENAI_WIRE = [
   'agnes-ai',
   'agentrouter',
   'aion-labs',
+  '100milionseek',
   'anyrouter',
   'apinex',
   'coarena',

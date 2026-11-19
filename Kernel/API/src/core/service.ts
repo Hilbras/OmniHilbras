@@ -341,7 +341,7 @@ export class GatewayService {
   private readonly headroom?: { url: string; timeoutMs?: number; compressUserMessages?: boolean };
   private readonly pxpipe?: { url: string; timeoutMs?: number; minChars?: number };
   private readonly compressionTelemetry = new Map<string, SaverTelemetry>();
-  private readonly compressionCache = new Map<string, { messages: ChatRequest['messages']; telemetry?: SaverTelemetry }>();
+  private readonly compressionCache = new Map<string, { messages: ChatRequest['messages']; telemetry?: SaverTelemetry; signature: string }>();
   /** In-flight requests by saved account, for `maxConcurrentRequests`. */
   private readonly inFlight = new Map<string, number>();
   private readonly transport: HttpTransport;
@@ -697,6 +697,7 @@ export class GatewayService {
         allows: (connectionId) => this.breakers.allows(connectionId),
         recordSuccess: (connectionId) => this.breakers.recordSuccess(connectionId),
         recordFailure: (connectionId) => { this.breakers.recordFailure(connectionId); },
+        recordAbandoned: (connectionId) => { this.breakers.recordAbandoned(connectionId); },
       },
       recordSuccess: (providerId, latencyMs, at, connectionId) => {
         this.healthManager.recordSuccess(providerId, latencyMs, at, connectionId);
@@ -707,7 +708,7 @@ export class GatewayService {
       },
       recordFailure: (providerId, code, reason, connectionId) => this.healthManager.recordFailure(providerId, code, reason, connectionId),
       recordModelRateLimit: (providerId, modelId, input, connectionId) => this.healthManager.recordModelRateLimit(providerId, modelId, input, connectionId),
-      clearModelCooldown: (providerId, modelId) => this.healthManager.clearModelCooldown(providerId, modelId),
+      clearModelCooldown: (providerId, modelId, connectionId) => this.healthManager.clearModelCooldown(providerId, modelId, connectionId),
       recordRateLimitUse: (connectionId) => this.rateLimiter.record(connectionId),
       recordUsage: (connectionId) => { void this.connectionStore?.recordUsage(connectionId).catch(() => undefined); },
     });
@@ -715,7 +716,7 @@ export class GatewayService {
       .onDemand('cline', ({ connection }) => this.clineAdapter(connection?.id ?? 'cline'), { validateOnSave: true })
       // No `validateOnSave`: ClinePass stores no credential of its own — it reads Cline's connection
       // through the alias in `credential-manager.ts` — so there is nothing to prove at save time.
-      .onDemand('clinepass', ({ connection }) => this.clinepassAdapter(connection?.id ?? 'cline'))
+      .onDemand('clinepass', ({ connection }) => this.clinepassAdapter(connection?.id ?? 'clinepass'), { validateOnSave: true })
       .onDemand('apmix', () => this.apmixAdapter())
       .onDemand('beatapi', () => this.beatapiAdapter())
       // `validateOnSave`: Nous publishes its model catalog unauthenticated, so a save that only read
@@ -732,8 +733,8 @@ export class GatewayService {
       .onDemand(codexProviderId, ({ providerId, connection }) => this.codexAdapter(connection?.id ?? providerId))
       .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId))
       .onDemand(kilocodeProviderId, ({ providerId, connection }) => this.kilocodeAdapter(connection?.id ?? providerId))
-      .onDemand(minimaxCodeProviderId, ({ providerId, connection }) => this.minimaxCodeAdapter(connection?.id ?? providerId))
-      .onDemand(minimaxCodeGlobalProviderId, ({ providerId, connection }) => this.minimaxCodeAdapter(connection?.id ?? providerId))
+      .onDemand(minimaxCodeProviderId, ({ providerId, connection }) => this.minimaxCodeAdapter(connection?.id ?? providerId), { validateOnSave: true })
+      .onDemand(minimaxCodeGlobalProviderId, ({ providerId, connection }) => this.minimaxCodeAdapter(connection?.id ?? providerId), { validateOnSave: true })
       .onDemand(codebuddyCnProviderId, ({ providerId, connection }) => this.codebuddyAdapter(connection?.id ?? providerId))
       .onDemand(codebuddyIntlProviderId, ({ providerId, connection }) => this.codebuddyAdapter(connection?.id ?? providerId))
       .onDemand(qoderProviderId, ({ providerId, connection }) => this.qoderAdapter(connection?.id ?? providerId))
@@ -750,14 +751,15 @@ export class GatewayService {
     // dashboard card plus a shared OpenAI-compatible endpoint; their base URL and id now live in their own package.
     resolver = resolver.onDemand('agnes-ai', () => OWN_PROVIDER_ADAPTERS['agnes-ai']!());
     resolver = resolver.onDemand('agentrouter', () => OWN_PROVIDER_ADAPTERS['agentrouter']!());
-    resolver = resolver.onDemand('aion-labs', () => OWN_PROVIDER_ADAPTERS['aion-labs']!());
+    resolver = resolver.onDemand('aion-labs', ({ connection }) => OWN_PROVIDER_ADAPTERS['aion-labs']!({ transport: this.transport, ...(connection?.endpoint ? { endpoint: connection.endpoint } : {}) }), { validateOnSave: true });
+    resolver = resolver.onDemand('100milionseek', ({ connection }) => OWN_PROVIDER_ADAPTERS['100milionseek']!({ transport: this.transport, ...(connection?.endpoint ? { endpoint: connection.endpoint } : {}) }));
     resolver = resolver.onDemand('numes', () => OWN_PROVIDER_ADAPTERS['numes']!());
     resolver = resolver.onDemand('kiraai', () => OWN_PROVIDER_ADAPTERS['kiraai']!());
     resolver = resolver.onDemand('vengetic', () => OWN_PROVIDER_ADAPTERS['vengetic']!());
     resolver = resolver.onDemand('anyrouter', () => OWN_PROVIDER_ADAPTERS['anyrouter']!());
     resolver = resolver.onDemand('zro', () => OWN_PROVIDER_ADAPTERS['zro']!());
     resolver = resolver.onDemand('unorouter', () => OWN_PROVIDER_ADAPTERS['unorouter']!());
-    resolver = resolver.onDemand('ollama', () => OWN_PROVIDER_ADAPTERS['ollama']!());
+    resolver = resolver.onDemand('ollama', ({ connection }) => OWN_PROVIDER_ADAPTERS['ollama']!({ transport: this.transport, ...(connection?.endpoint ? { endpoint: connection.endpoint } : {}) }));
     resolver = resolver.onDemand('mistral', () => OWN_PROVIDER_ADAPTERS['mistral']!());
     resolver = resolver.onDemand('nara-router', () => OWN_PROVIDER_ADAPTERS['nara-router']!());
     resolver = resolver.onDemand('tokenharbor', () => OWN_PROVIDER_ADAPTERS['tokenharbor']!());
@@ -999,6 +1001,10 @@ export class GatewayService {
     this.stopHealthMonitor();
     this.stopTokenRenewal();
     this.codexCallbackListener.close();
+    // Persist the coalesced counters before the process exits. A failed flush is reported by the
+    // store, not allowed to keep the gateway alive.
+    await this.connectionStore?.flushUsage?.().catch(() => undefined);
+    await this.usageStore?.flush?.().catch(() => undefined);
     await this.apiKeyStore?.close?.();
   }
 
@@ -1137,9 +1143,30 @@ export class GatewayService {
   async ensureSharedCatalogConnections(signal?: AbortSignal) {
     for (const [aliasId, ownerId] of Object.entries(sharedCatalogProviders)) {
       const connections = await this.connections.list();
-      if (connections.some((connection) => connection.providerId === aliasId)) continue;
+      const existing = connections.find((connection) => connection.providerId === aliasId);
       const owner = connections.find((connection) => connection.providerId === ownerId && connection.hasCredential);
       if (!owner) continue;
+      if (existing) {
+        // Migrate the pre-link alias record. A record with its own API key has a credential type of
+        // `api-key`; only the deliberate `none` record is linked.
+        if (!existing.credentialConnectionId && existing.credentialType === 'none') {
+          try {
+            await this.connections.save({
+              id: existing.id,
+              providerId: aliasId,
+              name: existing.name,
+              endpoint: existing.endpoint,
+              priority: existing.priority,
+              proxyPool: existing.proxyPool,
+              modelPolicy: existing.modelPolicy,
+              credentialConnectionId: owner.id,
+            }, { type: 'none' }, signal, { tolerateDiscoveryFailure: true });
+          } catch (error) {
+            console.warn(`[shared-catalog] could not link ${aliasId}: ${error instanceof Error ? error.message : 'unknown error'}`);
+          }
+        }
+        continue;
+      }
       try {
         /**
          * A `none` credential, not a copy of the owner's.
@@ -1153,11 +1180,14 @@ export class GatewayService {
         await this.connections.save({
           id: aliasId,
           providerId: aliasId,
-          name: aliasId === 'clinepass' ? 'ClinePass (via Cline)' : aliasId,
+          name: aliasId === 'clinepass' ? 'ClinePass (linked to Cline)' : aliasId,
           endpoint: owner.endpoint,
           priority: owner.priority,
           proxyPool: owner.proxyPool,
           modelPolicy: owner.modelPolicy ?? 'all',
+          // A per-record link, not a global alias. ClinePass reads this exact account's credential;
+          // an API-key ClinePass connection has its own and carries no link.
+          credentialConnectionId: owner.id,
         }, { type: 'none' }, signal, { tolerateDiscoveryFailure: true });
       } catch (error) {
         // Best-effort still, but not silent: a shared card that could not be created is a real
@@ -1624,7 +1654,7 @@ export class GatewayService {
         proxyPool: 'none',
         modelPolicy: 'all',
       }),
-      save: (input, credential, pollSignal) => this.saveConnection(input, credential, pollSignal),
+      save: (input, credential, pollSignal) => this.saveConnection(input, credential, pollSignal, { tolerateDiscoveryFailure: true }),
     });
   }
 
@@ -2993,13 +3023,14 @@ export class GatewayService {
    * OAuth token rather than a key of its own. The renewal is wired back to the `cline` vault entry — the
    * one connection the two cards share — because the token it renews is that connection's.
    */
-  clinepassAdapter(connectionId = 'cline'): ProviderAdapter {
+  clinepassAdapter(connectionId = 'clinepass'): ProviderAdapter {
     const memo = this.clinepassAdapters.get(connectionId);
     if (memo) return memo;
     const adapter = new ClinePassAdapter({
       transport: this.transport,
       onTokensRefreshed: async (tokens) => {
-        await this.connectionStore?.set(connectionId, toClineCredential(tokens));
+        const record = (await this.connections.list()).find((connection) => connection.id === connectionId);
+        await this.connectionStore?.set(record?.credentialConnectionId ?? connectionId, toClineCredential(tokens));
       },
     });
     this.clinepassAdapters.set(connectionId, adapter);
@@ -3130,12 +3161,21 @@ export class GatewayService {
     for (const section of this.backupSections()) {
       if (section.store?.exportState) sections[section.name] = await section.store.exportState();
     }
-    return encryptBackup({
+    const envelope = encryptBackup({
       format: backupFormat,
       version: backupVersion,
       createdAt: new Date().toISOString(),
       ...sections,
     }, passphrase);
+    /**
+     * Read the file back before reporting it saved.
+     *
+     * The importer refuses an envelope over 20 MiB, while export enforced no bound: a machine with
+     * several web profiles could produce a backup this same build would not restore. Decrypting here
+     * makes that a failed export with a reason, not a saved file that fails at restore.
+     */
+    decryptBackup(envelope, passphrase);
+    return envelope;
   }
 
   /**
@@ -3228,10 +3268,27 @@ export class GatewayService {
     }
 
     const previous = await this.connectionStore.list();
+    // Snapshot every section before the first write. Validation is total, but a store's write can
+    // still fail (disk full, permission, metadata bound); without this a failure on the sixth store
+    // left the first five replaced while the UI said nothing was written.
+    const snapshots = new Map<string, unknown>();
     for (const section of sections) {
-      const state = validated.get(section.name);
-      if (state === undefined) continue;
-      await section.store!.importState!(state as never);
+      if (!validated.has(section.name) || !section.store?.exportState) continue;
+      snapshots.set(section.name, await section.store.exportState());
+    }
+    try {
+      for (const section of sections) {
+        const state = validated.get(section.name);
+        if (state === undefined) continue;
+        await section.store!.importState!(state as never);
+      }
+    } catch (error) {
+      for (const section of [...sections].reverse()) {
+        const snapshot = snapshots.get(section.name);
+        if (snapshot === undefined || !section.store?.importState) continue;
+        await section.store.importState(snapshot as never).catch(() => undefined);
+      }
+      throw error;
     }
 
     // Read back what the store actually holds. A write that resolves but stores nothing is the failure mode
@@ -3302,7 +3359,11 @@ export class GatewayService {
   private async preparedMessages(request: ChatRequest, scope: RequestScope | undefined, allowImageContext: boolean): Promise<ChatRequest['messages']> {
     const complete = completeToolRounds(request.messages);
     if (scope?.tokenSaver === false) return complete;
-    if (scope && this.compressionCache.has(scope.id)) return this.compressionCache.get(scope.id)!.messages;
+    const signature = JSON.stringify(complete);
+    const cached = scope ? this.compressionCache.get(scope.id) : undefined;
+    // The cache is per request, but a local-tool loop calls this again with a growing conversation.
+    // Returning the first round's result dropped the tool results added since.
+    if (cached && cached.signature === signature) return cached.messages;
     const store = this.tokenSaverStore;
     const saversActive = Boolean(this.tokenSaverConfig || this.historyTrim || this.headroom || this.pxpipe || this.caveman || this.ponytail);
     if (saversActive) {
@@ -3327,6 +3388,26 @@ export class GatewayService {
       };
       const size = () => Buffer.byteLength(JSON.stringify(messages), 'utf8');
 
+      /**
+       * The always-on tool-result shortener runs before every configured saver.
+       *
+       * It used to live only in the `else` branch, so setting `caveman`/`ponytail` alone disabled it and
+       * could make the prompt larger than a stock gateway. Its own saving is now in the same telemetry.
+       */
+      const beforeToolBytes = size();
+      const shortened = compressToolResults(complete) as SavableMessage[];
+      messages = shortened;
+      const afterToolBytes = size();
+      if (beforeToolBytes > afterToolBytes) {
+        record('tool-shortener', 'tool', 'ran', {
+          tokensSaved: Math.ceil((beforeToolBytes - afterToolBytes) / 4),
+          bytesBefore: beforeToolBytes,
+          bytesAfter: afterToolBytes,
+        });
+        totalTokensSaved += Math.ceil((beforeToolBytes - afterToolBytes) / 4);
+        totalBytesSaved += beforeToolBytes - afterToolBytes;
+      }
+
       if (this.tokenSaverConfig && store) {
         const beforeBytes = size();
         const compressed = compressMessages(messages, {
@@ -3340,15 +3421,19 @@ export class GatewayService {
         messages = compressed.value as SavableMessage[];
         if (compressed.stats.savedTokens > 0) {
           const afterBytes = size();
-          for (const route of compressed.stats.routes) {
+          for (const [index, route] of compressed.stats.routes.entries()) {
             record(route.strategy || route.kind, route.kind, 'ran', {
               tokensSaved: Math.max(0, route.originalTokens - route.compressedTokens),
-              bytesBefore: beforeBytes,
-              bytesAfter: afterBytes,
+              // The conversation delta belongs to the pass, not to every route: counting the whole
+              // before/after for each route reported the saving several times.
+              bytesBefore: index === 0 ? beforeBytes : 0,
+              bytesAfter: index === 0 ? afterBytes : 0,
             });
           }
           totalTokensSaved = compressed.stats.savedTokens;
           totalBytesSaved = Math.max(0, beforeBytes - afterBytes);
+        } else {
+          record('token-saver', 'text', 'skipped', { detail: 'no compression opportunity' });
         }
       }
 
@@ -3431,9 +3516,9 @@ export class GatewayService {
       if (scope) {
         if (telemetry) {
           this.compressionTelemetry.set(scope.id, telemetry);
-          this.compressionCache.set(scope.id, { messages: messages as ChatRequest['messages'], telemetry });
+          this.compressionCache.set(scope.id, { messages: messages as ChatRequest['messages'], telemetry, signature });
         } else {
-          this.compressionCache.set(scope.id, { messages: messages as ChatRequest['messages'] });
+          this.compressionCache.set(scope.id, { messages: messages as ChatRequest['messages'], signature });
         }
         while (this.compressionCache.size > 500) {
           const oldest = this.compressionCache.keys().next().value;
@@ -3768,10 +3853,13 @@ export class GatewayService {
       });
     }
     const canonical = providerAlias(providerId);
-    if (canonical && canonical !== providerId) {
-      // A shared card's routed connection is the alias record, which deliberately holds no token of
-      // its own. The credential lives on the owner's connection, and this is the one lookup that
-      // follows the alias.
+    // A connection with its own key/OAuth credential uses it. Only a keyless record with no per-record
+    // link falls back to the legacy provider alias.
+    const usesOwnCredential = saved?.credentialType === 'api-key' || saved?.credentialType === 'oauth';
+    if (!saved?.credentialConnectionId && !usesOwnCredential && canonical && canonical !== providerId) {
+      // A pre-link shared card's routed connection is the alias record, which deliberately holds no token
+      // of its own. The credential lives on the owner's connection, and this is the one lookup that
+      // follows the alias. A record with `credentialConnectionId` is handled by `context()` directly.
       const owner = await this.connections.firstWithCredentialFor(canonical);
       const context = await this.credentials.context(owner?.id ?? connectionId, providerId, signal);
       return scope ? withRequestScope(context, scope) : context;
@@ -3896,7 +3984,12 @@ export class GatewayService {
           publicMessage: `Virtual model "${model}" does not exist.`,
         });
       }
-      if (!virtual.enabled) return { candidates: [], skipped: [] };
+      if (!virtual.enabled) {
+        throw new ProviderError('INVALID_REQUEST', `Virtual model "${model}" is disabled.`, {
+          retryable: false,
+          publicMessage: `Virtual model "${model}" is disabled. Enable it on the Models page to use it.`,
+        });
+      }
       return this.planVirtual(virtual, connections, explicitProviderId, explicitConnectionId);
     }
     return this.routing.plan({

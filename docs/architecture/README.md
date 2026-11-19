@@ -37,9 +37,9 @@ pairing and release signing are deferred.
 priority, `requestsPerMinute`, optional `maxConcurrentRequests` and `proxyPool` name. Multiple rows for one
 provider are separate accounts, not one account with aliases.
 
-- Routing narrows to `x-omnihilbras-connection` when supplied; unknown and disabled accounts are refused.
+- Routing prefers `x-omnihilbras-connection` when supplied; the named account is spent first and its siblings remain behind it. Unknown and disabled accounts are refused.
 - `UsageRecord.connectionId` is the account attribution; the Usage tab filters by it.
-- `AUTHENTICATION_FAILED` is terminal for the named route.
+- `AUTHENTICATION_FAILED` is recorded against the account that owns the credential; a sibling is tried first because it is a different key, and the failure is reported when none is left.
 - `proxyPool` is not enforced by a transport yet. A non-`none` value is refused rather than sent direct;
   pretending the label isolates egress would be worse than the clear error.
 
@@ -71,11 +71,11 @@ that holds is one a machine re-derives.
 | Surface | Lines | Provider ids named | Note |
 | --- | --- | --- | --- |
 | `Kernel/API/src/core/routing.ts` | 790 | **0** | provider-agnostic; `isRetryableFailure` judges an unreadable answer a provider fault |
-| `Kernel/API/src/core/provider-resolver.ts` | 312 | 1 | enforced by a test that greps the file; the per-provider tables live in `provider-client-identity.ts` and `provider-responses-lane.ts` it reads |
-| `Kernel/API/src/core/circuit-breaker.ts` | 180 | **0** | per-connection closed → open → half-open; counts what it refused |
-| `Kernel/API/src/core/request-executor.ts` | 933 | **0** | the failover loop, the attempt ledger, the ordering |
+| `Kernel/API/src/core/provider-resolver.ts` | 311 | 1 | enforced by a test that greps the file; the per-provider tables live in `provider-client-identity.ts` and `provider-responses-lane.ts` it reads |
+| `Kernel/API/src/core/circuit-breaker.ts` | 192 | **0** | per-connection closed → open → half-open; counts what it refused |
+| `Kernel/API/src/core/request-executor.ts` | 1012 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 350 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 4203 | 51 | every `.onDemand()` registration, in one constructor |
+| `Kernel/API/src/core/service.ts` | 4296 | 52 | every `.onDemand()` registration, in one constructor |
 | `Kernel/API/src/core/http.ts` | 356 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 862 | 19 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 400 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
@@ -83,7 +83,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/routes/api-keys.ts` | 101 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
 | `Kernel/API/src/routes/status.ts` | 160 | **0** | `/health`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
-| `Kernel/API/src/server.ts` | 444 | **1** | refuses a half-configured Codex OAuth override at startup, and gives every request the id its record will carry |
+| `Kernel/API/src/server.ts` | 445 | **1** | refuses a half-configured Codex OAuth override at startup, and gives every request the id its record will carry |
 
 **The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
 provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a

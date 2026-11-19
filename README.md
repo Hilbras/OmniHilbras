@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.69.0**
+**Current version: 3.70.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -203,10 +203,10 @@ The order is fixed, and each step can be read back from `GET /v1/routing`.
    | --- | --- |
    | The allowance is gone (`429`, `402`, `403`, `404`, `5xx`, or wording like `quota exceeded`, `insufficient_quota`, `exceed quota limit`) | **Next account** — a sibling has its own allowance |
    | The account is *restricted* (`request illegal`, `unusual activity`, `账号存在异常行为`) | **Stop.** Asking the next account through the same fingerprint is how one restricted account becomes several |
-   | The credential is dead (`401`) | **Stop** and name that account — rotating would quietly bill a sibling while your broken key stays invisible |
+   | The credential is dead (`401`) | **Next account first** — a sibling has its own key and can answer — then stop and name that account when none is left. The dead credential is recorded against the account that owns it, so it stays visible |
    | The request is wrong (`INVALID_REQUEST`, `NOT_SUPPORTED`) | **Stop** — every account refuses it identically |
    | The account is busy (our own concurrency cap) | **Stop** with "at its concurrency limit" — nothing was sent |
-   | The provider is unwell (timeout, `5xx` without a body) | Retry its own budget, then move on |
+   | The provider is unwell (`5xx`) | **Next account** — a sibling may be on a healthier host; a timeout spends that connection's retry budget first |
 
 5. **Cool-downs are per account *and* model, and they persist.** A refusal stands down that account for that
    model — it is still used for every other model — for a wait that grows (`60 s × 2^(level-1)`, capped at 30
@@ -269,6 +269,11 @@ Integrations live under `Kernel/SDK/`, one adapter package per provider. Five ki
 - **Local runtime** — no credential at all. The connection is saved with `credential: "none"` rather than an
   invented empty key, which is why the save path asks you to say so.
 - **Custom endpoint** — any OpenAI-compatible base URL, with optional model and chat paths.
+
+Cline and ClinePass are two cards with their own connection records, model lists and usage attribution. Both
+accept a Cline API key; sign-in uses Cline's WorkOS session, and a ClinePass OAuth account links to the Cline
+account explicitly rather than through a global alias. 100milionseek is a free OpenAI-compatible provider
+(`https://100milionseek.top/v1`) with one `deepseek-v4.1-flash-free` model and a daily token allowance.
 
 Provider cards in `src/data/providers.ts` are **catalog metadata**: they show `—` metrics and `No connections`
 until a real connection exists, and never invent a measurement. Provider-specific behaviour and standing

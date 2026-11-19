@@ -1,9 +1,11 @@
 import { providerClientHeaders } from './provider-client-identity.js';
 import type { ProviderAdapter } from './index.js';
+import type { OpenAICompatibleAdapterOptions } from '@omnihilbras/sdk-openai';
 
 import { AgnesAiAdapter } from '@omnihilbras/sdk-agnes-ai';
 import { AgentrouterAdapter } from '@omnihilbras/sdk-agentrouter';
 import { AionLabsAdapter } from '@omnihilbras/sdk-aion-labs';
+import { OneHundredMillionSeekAdapter } from '@omnihilbras/sdk-100milionseek';
 import { NumesAdapter } from '@omnihilbras/sdk-numes';
 import { KiraaiAdapter } from '@omnihilbras/sdk-kiraai';
 import { VengeticAdapter } from '@omnihilbras/sdk-vengetic';
@@ -27,19 +29,21 @@ import { NvidiaAdapter } from '@omnihilbras/sdk-nvidia';
 import { CoarenaAdapter } from '@omnihilbras/sdk-coarena';
 
 /** One own adapter per provider id that had no dedicated package before phase 2. */
-export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, () => ProviderAdapter>> = Object.freeze({
+export type OwnAdapterOptions = { endpoint?: string; transport?: OpenAICompatibleAdapterOptions['transport'] };
+export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, (options?: OwnAdapterOptions) => ProviderAdapter>> = Object.freeze({
   'agnes-ai': () => new AgnesAiAdapter(),
   // AgentRouter gates on a client identity. Its own package owns the adapter; the gateway supplies the
   // environment-configured identity, so a host override still reaches the wire.
   'agentrouter': () => new AgentrouterAdapter({ headers: providerClientHeaders('agentrouter') }),
-  'aion-labs': () => new AionLabsAdapter(),
+  'aion-labs': (options) => new AionLabsAdapter(options?.transport ? { transport: options.transport } : {}),
+  '100milionseek': (options) => new OneHundredMillionSeekAdapter(options?.transport ? { transport: options.transport } : {}),
   'numes': () => new NumesAdapter(),
   'kiraai': () => new KiraaiAdapter(),
   'vengetic': () => new VengeticAdapter(),
   'anyrouter': () => new AnyrouterAdapter(),
   'zro': () => new ZroAdapter(),
   'unorouter': () => new UnorouterAdapter(),
-  'ollama': () => new OllamaAdapter(),
+  'ollama': (options) => new OllamaAdapter({ ...(options?.endpoint ? { endpoint: options.endpoint } : {}), ...(options?.transport ? { transport: options.transport } : {}) }),
   'mistral': () => new MistralAdapter(),
   'nara-router': () => new NaraRouterAdapter(),
   'tokenharbor': () => new TokenharborAdapter(),

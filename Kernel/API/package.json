@@ -1,6 +1,6 @@
 {
   "name": "@omnihilbras/kernel-api",
-  "version": "3.69.0",
+  "version": "3.70.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "@omnihilbras/sdk-agentrouter": "workspace:*",
     "@omnihilbras/sdk-agnes-ai": "workspace:*",
     "@omnihilbras/sdk-aion-labs": "workspace:*",
+    "@omnihilbras/sdk-100milionseek": "workspace:*",
     "@omnihilbras/sdk-anthropic": "workspace:*",
     "@omnihilbras/sdk-anyrouter": "workspace:*",
     "@omnihilbras/sdk-apinex": "workspace:*",

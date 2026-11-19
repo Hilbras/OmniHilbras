@@ -104,9 +104,21 @@ export class CircuitBreaker {
     return true;
   }
 
-  /** A success closes the breaker and resets the ladder: a recovered route starts from the base cooldown again. */
-  recordSuccess(key: string) {
+  /**
+   * Releases a probe without judging the connection.
+   *
+   * A granted half-open probe can end in a limiter refusal, a cancellation, or an allowance
+   * refusal. None of those is evidence about the provider. Without this, `probing` stays true and
+   * the next `allows()` refuses forever — a permanent ban from one inconclusive probe.
+   */
+  recordAbandoned(key: string) {
     const entry = this.entries.get(key);
+    if (!entry) return;
+    if (entry.state === 'half-open') entry.probing = false;
+  }
+
+  /** A success closes the breaker and resets the ladder: a recovered route starts from the base cooldown again. */
+  recordSuccess(key: string) {    const entry = this.entries.get(key);
     if (!entry) return;
     entry.state = 'closed';
     entry.failures = 0;

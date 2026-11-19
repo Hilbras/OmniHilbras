@@ -23,8 +23,9 @@
  * ever sent a request to, which answers a model listing, reports itself healthy and therefore displayed
  * **"just now"** under a heading about last use.
  *
- * **A permanent `0` is not a measurement either.** The gateway keeps no request counter at all — the
- * only `count()` in it belongs to browser locators — so there is no number to show and none to zero.
+ * **A permanent `0` is not a measurement either.** There was no request counter to report, so a
+ * connected card showed a permanent `0` that looked like a measurement. The gateway now keeps a
+ * per-connection counter, and the merge reads it when it exists.
  *
  * Both now stay exactly what the catalog said: a placeholder. The fields that *are* measured are
  * untouched, and `tests/provider-card-merge.test.js` asserts the general property rather than a list of
@@ -34,6 +35,23 @@
 
 import type { ProviderRecord } from '../components/ProviderCard';
 import type { GatewayConnection, GatewayHealth } from './gatewayClient';
+
+/**
+ * A stored ISO timestamp as a person reads it.
+ *
+ * The gateway records `lastUsed` as an ISO string. The catalog's placeholder is `never`, so the
+ * card needs a human form for the real value; printing the raw ISO string was the first version.
+ */
+export function formatLastUsed(value: string, now = Date.now()): string {
+  const at = Date.parse(value);
+  if (!Number.isFinite(at)) return value;
+  const delta = Math.max(0, now - at);
+  if (delta < 60_000) return 'just now';
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)} min ago`;
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)} h ago`;
+  if (delta < 7 * 86_400_000) return `${Math.floor(delta / 86_400_000)} d ago`;
+  return new Date(at).toLocaleDateString();
+}
 
 export function mergeGatewayConnections(providers: ProviderRecord[], connections: GatewayConnection[], health?: GatewayHealth): ProviderRecord[] {
   // Grouped, not a single-value Map: a provider can hold several accounts, and a `Map` keyed by
@@ -51,7 +69,10 @@ export function mergeGatewayConnections(providers: ProviderRecord[], connections
     // `cline`'s one connection) names its owner there. Otherwise a card's own id, or the catalog id it
     // was written under. Getting this wrong is silent — the card simply keeps its placeholders and reads
     // as unconnected — so the field is what makes sharing a deliberate statement rather than a guess.
-    const accounts = connectionsByProvider.get(provider.connectionProviderId ?? provider.catalogId ?? provider.id) ?? [];
+    const ownId = provider.catalogId ?? provider.id;
+    const accounts = connectionsByProvider.get(ownId)
+      ?? (provider.connectionProviderId ? connectionsByProvider.get(provider.connectionProviderId) : undefined)
+      ?? [];
     // The card's own connection is the first account, which is what every single-account field below
     // describes; `accountCount` carries how many there really are.
     const connection = accounts[0];
@@ -78,10 +99,10 @@ export function mergeGatewayConnections(providers: ProviderRecord[], connections
       // Measured: the models the connection actually imported.
       models: modelIds.length > 0 ? `${modelIds.length} models · ${connection.modelPolicy === 'free' ? 'free import' : 'all import'}` : connection.hasCredential ? 'No imported models' : '—',
       modelList: modelIds,
-      // Usage tracking now exists in the gateway (per-connection requestCount + lastUsed). Set these
+      // Usage tracking exists in the gateway (per-connection requestCount + lastUsed). Set these
       // from the tracking, never from health — a health poll is not usage.
       ...(connection.requestCount === undefined ? {} : { requests: String(connection.requestCount) }),
-      ...(connection.lastUsed === undefined ? {} : { lastUsed: connection.lastUsed }),
+      ...(connection.lastUsed === undefined ? {} : { lastUsed: formatLastUsed(connection.lastUsed) }),
     } satisfies ProviderRecord;
   });
 }

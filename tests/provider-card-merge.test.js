@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mergeGatewayConnections } from '../src/lib/providerCards.ts';
+import { formatLastUsed, mergeGatewayConnections } from '../src/lib/providerCards.ts';
 import { providerCatalog } from '../src/data/providers.ts';
 
 /**
@@ -101,7 +101,7 @@ test('every field the merge changes is traceable to the connection or the health
   assert.equal(after.status, 'connected');
   assert.equal(after.endpoint, 'https://proxy.example/v1', 'the connection’s own endpoint is used verbatim');
   assert.equal(after.requests, '7', 'the connection\'s requestCount is stringified verbatim');
-  assert.equal(after.lastUsed, '2026-11-12T10:00:00.000Z', 'the connection\'s lastUsed is passed through verbatim');
+  assert.equal(after.lastUsed, formatLastUsed('2026-11-12T10:00:00.000Z'), 'the connection\'s lastUsed is shown in human form');
 
   // `health` *is* on the measured side — it is the poll's verdict rendered as a bar — so it changes to
   // 100 here. I first asserted it could not, having carried the degraded case's expectation across by
@@ -151,7 +151,7 @@ const MEASURED_FIELDS = {
   // Usage tracking that now exists in the gateway: per-connection requestCount + lastUsed, set only
   // when the connection actually carries them. Never from health.
   requests: 'the connection requestCount, stringified',
-  lastUsed: 'the connection lastUsed ISO timestamp',
+  lastUsed: 'the connection lastUsed ISO timestamp, rendered as a relative time',
 };
 
 test('the merge changes only measured fields, whatever they are called', () => {
@@ -227,6 +227,20 @@ test('a card whose connection disappears goes back to being the catalog card', (
   assert.equal(afterDisconnect.models, '—');
 });
 
+test('a real lastUsed is shown in human form, not as a raw ISO string', () => {
+  const now = Date.parse('2026-11-19T12:00:00.000Z');
+  assert.equal(formatLastUsed('2026-11-19T11:59:30.000Z', now), 'just now');
+  assert.equal(formatLastUsed('2026-11-19T11:30:00.000Z', now), '30 min ago');
+  assert.equal(formatLastUsed('2026-11-19T09:00:00.000Z', now), '3 h ago');
+  assert.equal(formatLastUsed('2026-11-17T12:00:00.000Z', now), '2 d ago');
+
+  const thirtyMinutesAgo = new Date(Date.now() - 30 * 60_000).toISOString();
+  const card = mergeGatewayConnections(providerCatalog, [connection({ lastUsed: thirtyMinutesAgo })]).find((entry) => entry.id === 'openrouter');
+  assert.ok(card);
+  assert.equal(card.lastUsed, '30 min ago');
+  assert.doesNotMatch(card.lastUsed, /T\d\d:/, 'a raw ISO timestamp reached the card');
+});
+
 test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 13 until 1.43.0, then 22 (nine added: OpenAI-compatible or already adapted). 23 from 1.71.0,
 // which added `kimi-code` — the Kimi *subscription*, a separate account from the `kimi`
@@ -239,7 +253,7 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // sign-in on one side does not reach the other — the same split as `minimax-code`/`minimax-code-global`.
   // 48-49 added `agentrouter` and `aion-labs`; 50-51 added `grok-web` and `perplexity-web`.
   // All are catalog metadata, so the merge property still holds for them without a new case.
-  assert.equal(providerCatalog.length, 57, `the catalog now has ${providerCatalog.length} cards`);
+  assert.equal(providerCatalog.length, 58, `the catalog now has ${providerCatalog.length} cards`);
   const connected = mergeGatewayConnections(providerCatalog, [connection()], health());
   assert.equal(connected.length, providerCatalog.length, 'a merge must not add or drop a card');
   console.log(`    cards: ${providerCatalog.length}   fields that may change on a merge: 5   that may not: 2`);

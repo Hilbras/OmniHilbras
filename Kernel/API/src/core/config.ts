@@ -116,9 +116,24 @@ export class EnvironmentSecretStore implements SecretStore {
   }
 }
 
+/**
+ * Whether this process is explicitly a container deployment.
+ *
+ * The gateway refuses a non-loopback listener in local mode, and that refusal is a security property.
+ * A container is the one shape where the listener must be reachable from outside the container; the
+ * operator opts in by setting `OMNIHILBRAS_CONTAINER=1`, so a typo in `OMNIHILBRAS_HOST` alone still
+ * cannot widen the bind.
+ */
+export function isContainerDeployment(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
+  return ['1', 'true', 'on', 'yes'].includes((env.OMNIHILBRAS_CONTAINER ?? '').trim().toLowerCase());
+}
+
 export function loadGatewayConfig(env: Readonly<Record<string, string | undefined>> = process.env): GatewayConfig {
-  const host = canonicalLoopbackHost(env.OMNIHILBRAS_HOST ?? '127.0.0.1');
-  assertLoopbackHost(host);
+  const container = isContainerDeployment(env);
+  const requestedHost = (env.OMNIHILBRAS_HOST ?? (container ? '0.0.0.0' : '127.0.0.1')).trim();
+  const host = container ? requestedHost : canonicalLoopbackHost(requestedHost);
+  if (!container) assertLoopbackHost(host);
+  else if (!host) throw new Error('OMNIHILBRAS_HOST must not be empty in container mode.');
   parseMasterKey(env.OMNIHILBRAS_MASTER_KEY);
   const compatibleId = env.OMNIHILBRAS_COMPATIBLE_PROVIDER_ID ?? 'openai-compatible';
   const compatibleCredential = env[providerEnvKey(compatibleId)]

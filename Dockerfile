@@ -24,10 +24,14 @@ FROM node:20-alpine AS runtime
 RUN corepack enable && corepack prepare pnpm@12.5.1 --activate
 WORKDIR /app
 ENV NODE_ENV=production
+# The explicit container opt-in is what allows a non-loopback bind. The default host remains
+# 127.0.0.1 in a normal install; this image must be reachable through its published port.
+ENV OMNIHILBRAS_CONTAINER=1
+ENV OMNIHILBRAS_HOST=0.0.0.0
 COPY --from=build /app/Kernel/API/dist /app/Kernel/API/dist
 COPY --from=build /app/Kernel/API/package.json /app/Kernel/API/
 COPY --from=build /app/Kernel/Tools/dist /app/Kernel/Tools/dist
 COPY --from=build /app/Kernel/Tools/package.json /app/Kernel/Tools/
 COPY --from=build /app/node_modules /app/node_modules
-EXPOSE 8787
+EXPOSE 20138
 CMD ["node", "/app/Kernel/API/dist/src/main.js"]

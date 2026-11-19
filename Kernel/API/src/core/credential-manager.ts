@@ -66,19 +66,22 @@ export class CredentialManager {
    * renewal triggered while it looks would be the pass calling itself.
    */
   async context(connectionId: string, providerId: string, signal?: AbortSignal, options: { renew?: boolean; refuseWhenExpired?: boolean } = {}): Promise<ProviderRequestContext> {
-    const [stored, policy] = await Promise.all([
-      this.secrets.get(connectionId, providerId),
-      // A store without `list` simply has no policy to honour, so this is optional rather than
-      // fatal: an embedded service with a bare credential source is a supported shape.
-      this.connections.list().then((all) => all.find((entry) => entry.id === connectionId)?.modelPolicy),
-    ]);
-    const refreshable = stored && this.refresh && options.renew !== false
+    const all = await this.connections.list();
+    const record = all.find((entry) => entry.id === connectionId);
+    const policy = record?.modelPolicy;
+    // A linked record reads the credential of the connection it names. The provider id stays this
+    // card's, so a failure is attributed to the card the user asked for.
+    const sourceId = record?.credentialConnectionId ?? connectionId;
+    const credential = sourceId === connectionId
+      ? await this.secrets.get(connectionId, providerId)
+      : await this.secrets.get(sourceId, providerId);
+    const refreshable = credential && this.refresh && options.renew !== false
       // A probe reads the credential to *report* on it. `refuseWhenExpired: false` therefore keeps the stale
       // credential in hand instead of throwing, because a health sweep that dies on an expired session cannot tell
       // the dashboard which one expired — and the rejection surfaces after the sweep's own await, where nothing
       // catches it.
-      ? await this.refresh(connectionId, providerId, stored, { refuseWhenExpired: options.refuseWhenExpired !== false })
-      : stored;
+      ? await this.refresh(sourceId, providerId, credential, { refuseWhenExpired: options.refuseWhenExpired !== false })
+      : credential;
     return {
       credential: refreshable,
       ...(policy ? { importPolicy: policy as ModelImportPolicy } : {}),
@@ -95,9 +98,14 @@ export class CredentialManager {
    * unconnected provider look broken rather than unconnected.
    */
   async contextForProvider(providerId: string, signal?: AbortSignal, scope?: RequestScope, options: { renew?: boolean; refuseWhenExpired?: boolean } = {}): Promise<ProviderRequestContext> {
-    // A provider that shares another's credential reads the owner's connection. The **provider id stays
-    // this one** — it is passed to `context()` unchanged — so the adapter, and any failure it reports,
-    // is still attributed to the card the user asked for. Only the *lookup* follows the alias.
+    // A provider's own connection wins. A linked record (`credentialConnectionId`) is still its own
+    // account and policy; the link is followed when the credential is read, not here.
+    const own = await this.connections.firstWithCredentialFor(providerId);
+    if (own) {
+      const context = await this.context(own.id, providerId, signal, options);
+      return scope ? withRequestScope(context, scope) : context;
+    }
+    // Backwards compatibility for a shared card whose owner connection predates per-record links.
     const canonical = providerAlias(providerId) ?? providerId;
     const owner = await this.connections.firstWithCredentialFor(canonical);
     const context = await this.context(owner?.id ?? providerId, providerId, signal, options);

@@ -83,7 +83,7 @@ export type AdapterContext = {
    * under that value. Whichever caller built first won, which made the key depend on whether a
    * health probe or a request happened to arrive first.
    */
-  connection?: { id: string };
+  connection?: { id: string; endpoint?: string; name?: string };
 };
 
 /** Builds an adapter that cannot be constructed up front, because it needs per-connection state. */
@@ -218,14 +218,13 @@ export class ProviderResolver {
       adapters.push(adapter);
     }
     for (const [providerId, factory] of this.onDemandFactories) {
-      // A provider that shares another's credential is polled when **that** connection has one — the
-      // ClinePass card is served by the Cline connection. The connection *id* is still the owner's, but
-      // the factory is built for the provider that registered it, so the adapter and its failure text
-      // name the right card. This is the one place the alias touches the resolver.
+      // A provider's own connection wins. The alias fallback remains for a shared card whose owner
+      // connection existed before per-record credential links.
       const canonical = providerAlias(providerId) ?? providerId;
-      const connection = connections.find((item) => item.providerId === canonical && item.hasCredential);
+      const own = connections.find((item) => item.providerId === providerId && item.hasCredential);
+      const connection = own ?? connections.find((item) => item.providerId === canonical && item.hasCredential);
       if (!connection) continue;
-      adapters.push(factory({ providerId, connection: { id: connection.id } }));
+      adapters.push(factory({ providerId, connection: { id: connection.id, endpoint: connection.endpoint, name: connection.name } }));
     }
     return adapters;
   }
@@ -283,7 +282,7 @@ export class ProviderResolver {
       // this path and `active()` cannot disagree about which connection an adapter belongs to — and
       // the rest of the record stays the connection layer's business rather than becoming a second
       // opinion about the endpoint.
-      return factory({ providerId, ...(saved ? { connection: { id: saved.id } } : {}) });
+      return factory({ providerId, ...(saved ? { connection: { id: saved.id, endpoint: saved.endpoint, name: saved.name } } : {}) });
     }
 
     // A connection being saved is not in the store yet, so the caller can pass the endpoint it is

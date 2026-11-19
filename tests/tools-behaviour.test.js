@@ -94,7 +94,7 @@ const FORCED_WIRE = {
   opencode: 'opencode', 'opencode-go': 'opencode-go',
   openai: 'openai', openrouter: 'openai', 'openai-compatible': 'openai', apmix: 'openai', beatapi: 'openai',
   cline: 'openai', clinepass: 'openai', nous: 'openai',
-  'agnes-ai': 'openai', agentrouter: 'openai', 'aion-labs': 'openai', anyrouter: 'openai', apinex: 'openai',
+  'agnes-ai': 'openai', agentrouter: 'openai', 'aion-labs': 'openai', '100milionseek': 'openai', anyrouter: 'openai', apinex: 'openai',
   coarena: 'openai', custom: 'openai', deepseek: 'openai', groq: 'openai', grok: 'openai', kimi: 'openai',
   kiraai: 'openai', mistral: 'openai', 'nara-router': 'openai', nvidia: 'openai', numes: 'openai',
   ollama: 'openai', qwen: 'openai', 'qwen-token-plan': 'openai', tiarina: 'openai', tokenharbor: 'openai',

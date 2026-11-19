@@ -48,8 +48,8 @@ test('the tab follows the connection owner, so a shared-credential card is not e
   // card's own id would show an empty tab while the requests sat under the owner.
   assert.match(
     detail,
-    /<UsageContent providerId=\{provider\.connectionProviderId \?\? provider\.id\}/,
-    'the usage tab filters by the card id rather than the connection owner, so a shared-credential card shows nothing',
+    /<UsageContent providerId=\{connection\?\.providerId \?\? provider\.connectionProviderId \?\? provider\.id\}/,
+    'the usage tab filters by the card id rather than the connection it is actually using',
   );
   assert.match(detail, /<UsageContent providerId=/, 'the provider page no longer renders the usage view on its tab');
 });

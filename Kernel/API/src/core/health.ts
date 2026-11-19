@@ -100,8 +100,8 @@ export class HealthManager {
   }
 
   /** The account answered for this model, so the pair is no longer cooling. */
-  clearModelCooldown(providerId: string, modelId: string) {
-    this.registry.clearModelCooldown(providerId, modelId);
+  clearModelCooldown(providerId: string, modelId: string, connectionId?: string) {
+    this.registry.clearModelCooldown(connectionId ?? providerId, modelId);
   }
 
   setFailureThreshold(threshold: number) {
