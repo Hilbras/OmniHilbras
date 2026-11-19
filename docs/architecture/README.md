@@ -81,9 +81,9 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/routes/connections.ts` | 400 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
 | `Kernel/API/src/routes/inference.ts` | 1371 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and the auth gate |
 | `Kernel/API/src/routes/api-keys.ts` | 101 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
-| `Kernel/API/src/routes/status.ts` | 160 | **0** | `/health`, `/v1/system`, `/v1/routing`, and the build stamp |
+| `Kernel/API/src/routes/status.ts` | 220 | **0** | `/health`, `/`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
-| `Kernel/API/src/server.ts` | 445 | **1** | refuses a half-configured Codex OAuth override at startup, and gives every request the id its record will carry |
+| `Kernel/API/src/server.ts` | 457 | **1** | refuses a half-configured Codex OAuth override at startup, and gives every request the id its record will carry |
 
 **The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
 provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a

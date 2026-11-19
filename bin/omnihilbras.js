@@ -426,6 +426,9 @@ async function main() {
 
   const gateway = spawnOne('gateway', ['dev:gateway'], {
     OMNIHILBRAS_PORT: String(options.gatewayPort),
+    // So `GET /` on the gateway port sends a browser to the dashboard instead of a 404, which is what
+    // a person who types the "Gateway" line from the startup box deserves.
+    OMNIHILBRAS_DASHBOARD_URL: `http://localhost:${options.dashboardPort}/dashboard`,
     // The gateway's default CORS allowlist names the dashboard port (20137). A launcher on any other
     // port would proxy the dashboard's Origin (`localhost:<chosen port>`) and the gateway would refuse
     // every management call, including the log stream — the dashboard looks connected and every feed

@@ -100,6 +100,13 @@ instance = await startGatewayServer({
    * route, which would leave the child running and the vault mid-write.
    */
   onShutdownRequest: () => close(0),
+  /**
+   * Where the dashboard is, so `GET /` on the gateway port is not a 404.
+   *
+   * The launchers that start both halves know both ports, so they pass it; a gateway started alone has
+   * none and `GET /` answers a JSON index instead of guessing a port.
+   */
+  ...(process.env.OMNIHILBRAS_DASHBOARD_URL?.trim() ? { dashboardUrl: process.env.OMNIHILBRAS_DASHBOARD_URL.trim() } : {}),
 });
 markReady();
 

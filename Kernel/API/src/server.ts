@@ -70,6 +70,15 @@ export type GatewayServerOptions = {
    * variable must not leave a gateway that refuses every request.
    */
   requestsPerMinute?: number;
+  /**
+   * Where this gateway's dashboard is, when something started one alongside it.
+   *
+   * The gateway's `/` redirects a browser here, so the URL the launcher prints as "Gateway" is not a
+   * dead end. Deliberately absent rather than defaulted: a desktop app or container gateway has no
+   * dashboard on a known port, and sending a browser to a guessed `:20137` would be a 404 one step
+   * removed from the one this fixes. `GET /` answers a JSON index when it is unset.
+   */
+  dashboardUrl?: string;
   env?: Readonly<Record<string, string | undefined>>;
 };
 
@@ -256,6 +265,8 @@ export async function startGatewayServer(options: {
   apiKeyStore?: ApiKeyStore;
   healthIntervalMs?: number;
   onShutdownRequest?: () => void;
+  /** Where this gateway's dashboard is, for the `/` redirect. See `GatewayServerOptions.dashboardUrl`. */
+  dashboardUrl?: string;
 } = {}) {
   const config = options.config ?? loadGatewayConfig(options.env);
   if (!isContainerDeployment(options.env)) assertLoopbackHost(config.host);
@@ -284,6 +295,7 @@ export async function startGatewayServer(options: {
     maxBodyBytes: resolveInferenceBodyBytes(options.env),
     publicBaseUrl,
     dashboardToken,
+    ...(options.dashboardUrl ? { dashboardUrl: options.dashboardUrl } : {}),
     ...(options.onShutdownRequest ? { onShutdownRequest: options.onShutdownRequest } : {}),
   });
 

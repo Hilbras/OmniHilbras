@@ -346,6 +346,9 @@ async function start() {
       ...process.env,
       OMNIHILBRAS_PORT: String(options.gatewayPort),
       OMNIHILBRAS_BUILD_VERSION: PKG.version,
+      // So `GET /` on the gateway port sends a browser to the dashboard instead of a 404. The
+      // launcher is the only thing that knows both ports.
+      OMNIHILBRAS_DASHBOARD_URL: `http://localhost:${options.dashboardPort}/dashboard`,
       OMNIHILBRAS_CORS_ORIGINS: [...new Set([
         ...(process.env.OMNIHILBRAS_CORS_ORIGINS ?? '').split(',').map((origin) => origin.trim()).filter(Boolean),
         `http://localhost:${options.dashboardPort}`,

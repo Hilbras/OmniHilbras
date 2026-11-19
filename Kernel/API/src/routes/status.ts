@@ -4,6 +4,8 @@
 
 import type { RouteContext } from './route-context.js';
 import {
+  escapeHtml,
+  sendHtml,
   sendJson,
 } from '../core/http.js';
 import { decodeProviderId } from './connections.js';
@@ -45,6 +47,64 @@ export async function handleStatusRoute(ctx: RouteContext): Promise<boolean> {
       // operator makes when something looks wrong. "Which build is this" is exactly that question,
       // and answering it only from the settings route means the person debugging cannot reach it.
       sendJson(response, 200, { service: 'omnihilbras-gateway', build: gatewayBuild(), ...(await service.health(signal)) }, origin);
+      return true;
+    }
+
+    /**
+     * The gateway's own root, which people reach by typing the URL the launcher prints.
+     *
+     * It answered `404 {"code":"NOT_FOUND"}` for as long as the gateway has existed, on the reasoning
+     * that an API has no index page. That reasoning is right about an API and wrong about this URL:
+     * the startup box prints `Gateway http://127.0.0.1:20138` directly under `Dashboard http://localhost:20137`,
+     * so a person who types the second one reads a red error and reasonably concludes the server is
+     * broken. The two lines sit together precisely because they are the same product.
+     *
+     * So a browser is sent to the dashboard when this gateway knows where it is, and every other
+     * caller — `curl`, a health probe, a container check — gets a small JSON index of the gateway
+     * itself. The dashboard URL is **not guessed**: a gateway started by the desktop app or a
+     * container has no dashboard to point at, and inventing `:20137` for it would send a browser to
+     * a port nothing is listening on. `dashboardUrl` is set by the launchers that know.
+     */
+    if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/') {
+      /**
+       * Only a browser is redirected.
+       *
+       * A redirect is the right answer for the person who typed the URL, and a poor one for `curl`,
+       * a container health probe or an agent asking this port what it is: every one of them gets a
+       * 302 with an empty body and learns nothing. So the redirect is gated on the request actually
+       * asking for a page, and everything else reads a JSON index that *names* the dashboard when
+       * there is one. Both callers get an answer; neither is handed the other's format.
+       */
+      const wantsHtml = (request.headers.accept ?? '').includes('text/html');
+      if (wantsHtml && ctx.options.dashboardUrl) {
+        response.writeHead(302, {
+          location: ctx.options.dashboardUrl,
+          'cache-control': 'no-store',
+          'content-length': 0,
+        });
+        response.end();
+        return true;
+      }
+      if (wantsHtml) {
+        sendHtml(
+          response,
+          200,
+          `<!doctype html><meta charset="utf-8"><title>OmniHilbras gateway</title>` +
+            `<body style="font:14px system-ui;padding:2rem;max-width:44rem;margin:auto">` +
+            `<h1 style="font-size:1.1rem">OmniHilbras gateway is running</h1>` +
+            `<p>Build <code>${escapeHtml(gatewayBuild().version)}</code>. This port is the API, not the dashboard.</p>` +
+            `<p>Endpoints: <a href="/health">/health</a>, <code>/v1/models</code>, <code>/v1/chat/completions</code>.</p>` +
+            `<p>Start the dashboard with <code>omnihilbras</code>, or open the one you already run.</p></body>`,
+          origin,
+        );
+        return true;
+      }
+      sendJson(response, 200, {
+        service: 'omnihilbras-gateway',
+        build: gatewayBuild(),
+        ...(ctx.options.dashboardUrl ? { dashboard: ctx.options.dashboardUrl } : {}),
+        endpoints: { health: '/health', models: '/v1/models', chat: '/v1/chat/completions' },
+      }, origin);
       return true;
     }
 

@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.73.0
+**Status:** Current — release 3.74.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -178,6 +178,14 @@ The first local gateway exposes:
   `provider="unattributed"` rather than dropped, and a gateway with no usage store answers with only `up` and
   `build_info` instead of inventing zeros. **A management path**, like `/v1/usage`: it names every provider the gateway
   can reach and how it is failing, so it is refused with 401 without a credential.
+- `GET /` — what this port is. A browser is redirected (`302`, `no-store`) to the dashboard when the
+  launcher that started this gateway supplied one (`OMNIHILBRAS_DASHBOARD_URL`); a gateway started alone
+  answers a small page naming the command that starts a dashboard. A **non-browser** caller always gets
+  JSON — a `302` with an empty body tells `curl`, a container health probe and an agent nothing — and that
+  index carries `dashboard` when one exists and omits it otherwise, rather than guessing a port. It
+  answered a bare `404 {"code":"NOT_FOUND"}` before, which is correct for an API and wrong for the URL the
+  startup box prints directly under the dashboard's: a person who typed it read a red error and concluded
+  the server was broken.
 - `GET /health` — gateway and configured adapter health
 , plus a **`build`** object naming the version
   this process is and, when supplied at build time, the commit — read once at startup and never
