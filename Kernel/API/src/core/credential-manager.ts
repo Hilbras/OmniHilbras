@@ -66,8 +66,7 @@ export class CredentialManager {
    * renewal triggered while it looks would be the pass calling itself.
    */
   async context(connectionId: string, providerId: string, signal?: AbortSignal, options: { renew?: boolean; refuseWhenExpired?: boolean } = {}): Promise<ProviderRequestContext> {
-    const all = await this.connections.list();
-    const record = all.find((entry) => entry.id === connectionId);
+    const record = await this.connections.get(connectionId);
     const policy = record?.modelPolicy;
     // A linked record reads the credential of the connection it names. The provider id stays this
     // card's, so a failure is attributed to the card the user asked for.

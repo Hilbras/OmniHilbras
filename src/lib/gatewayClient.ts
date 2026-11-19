@@ -84,6 +84,8 @@ export type GatewayConnection = {
   modelPolicy: 'free' | 'all';
   modelIds: string[];
   customModelIds: string[];
+  /** When the provider's catalog was last read successfully; absent when it never was. */
+  catalogRefreshedAt?: string;
   /** Catalog metadata for `modelIds`, when the provider published any. */
   modelMeta?: ModelMetaMap;
   resilience: GatewayResilience;
@@ -1323,6 +1325,17 @@ export function getGatewayTokenSaverStats(period = '7d', signal?: AbortSignal) {
   return requestJson<GatewayTokenSaverStats>(`/v1/token-saver/stats?period=${encodeURIComponent(period)}`, { signal });
 }
 
+export type TokenSaverAnalysis = {
+  beforeBytes: number;
+  afterBytes: number;
+  tokensSaved: number;
+  savers: Array<{ id: string; kind: string; state: 'ran' | 'skipped'; tokensSaved: number; bytesBefore: number; bytesAfter: number; detail?: string }>;
+};
+
+export function analyzeGatewayTokenSaver(input: { text: string } | { messages: Array<{ role: string; content: string }> }, signal?: AbortSignal) {
+  return requestJson<TokenSaverAnalysis>('/v1/token-saver/analyze', { method: 'POST', body: JSON.stringify(input), signal });
+}
+
 /**
  * The newest published release, as the **gateway** read it.
  *
@@ -1667,8 +1680,24 @@ export function exportGatewayBackup(passphrase: string, signal?: AbortSignal) {
   }).then((body) => body.backup);
 }
 
-export function importGatewayBackup(passphrase: string, backup: unknown, signal?: AbortSignal) {
-  return requestJson<{
+export type GatewayBackupPreview = {
+  valid: true;
+  version: number;
+  createdAt?: string;
+  sections: Record<string, number>;
+  notCarried: string[];
+};
+
+export function verifyGatewayBackup(passphrase: string, backup: unknown, signal?: AbortSignal) {
+  return requestJson<GatewayBackupPreview>('/v1/backup/verify', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ passphrase, backup }),
+    ...(signal ? { signal } : {}),
+  });
+}
+
+export function importGatewayBackup(passphrase: string, backup: unknown, signal?: AbortSignal) {  return requestJson<{
     connections: number;
     strategies: number;
     aliases: number;

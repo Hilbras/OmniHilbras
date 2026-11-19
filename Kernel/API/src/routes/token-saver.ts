@@ -1,4 +1,5 @@
-import { invalidRequest, sendJson } from '../core/http.js';
+import { invalidRequest, isRecord, readJsonBody, sendJson } from '../core/http.js';
+import type { ChatMessage } from '../core/index.js';
 import { resolveUsagePeriod, usagePeriods, type UsagePeriod } from '../core/usage-breakdown.js';
 import type { RouteContext } from './route-context.js';
 
@@ -12,6 +13,21 @@ import type { RouteContext } from './route-context.js';
 export async function handleTokenSaverRoute(ctx: RouteContext): Promise<boolean> {
   const { request, response, url, service, origin } = ctx;
   if (!url.pathname.startsWith('/v1/token-saver/')) return false;
+
+  if (request.method === 'POST' && url.pathname === '/v1/token-saver/analyze') {
+    const body = await readJsonBody(request, 2 * 1024 * 1024);
+    if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+    const messages = Array.isArray(body.messages)
+      ? body.messages
+      : typeof body.text === 'string' && body.text.trim()
+        ? [{ role: 'user', content: body.text }]
+        : undefined;
+    if (!Array.isArray(messages) || messages.length === 0) throw invalidRequest('Send `messages` or a non-empty `text`.');
+    if (messages.length > 500) throw invalidRequest('The analysis accepts at most 500 messages.');
+    sendJson(response, 200, await service.analyzeTokenSaver(messages as ChatMessage[]), origin);
+    return true;
+  }
+
   if (request.method !== 'GET') {
     sendJson(response, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'Retrieval is a GET.' } }, origin);
     return true;

@@ -157,6 +157,10 @@ export class ConnectionManager {
     return this.store?.list() ?? [];
   }
 
+  async get(connectionId: string): Promise<ConnectionRecord | undefined> {
+    return this.store?.getRecord(connectionId);
+  }
+
   /** The first connection for a provider that actually holds a credential. */
   async firstWithCredentialFor(providerId: string): Promise<ConnectionRecord | undefined> {
     // A record that shares its credential names the extra providers in `providers` — ClinePass reads the
@@ -254,6 +258,7 @@ export class ConnectionManager {
           ...input,
           modelIds: [...discoveredModelIds, ...customModelIds],
           customModelIds,
+          ...(discovered.length > 0 ? { catalogRefreshedAt: new Date().toISOString() } : {}),
           // Custom ids are the operator's own and carry no catalog metadata, so only the
           // discovered half is described here.
           ...(discoveredMeta ? { modelMeta: { ...(input.modelMeta ?? {}), ...discoveredMeta } } : {}),

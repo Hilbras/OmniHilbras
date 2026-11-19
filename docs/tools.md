@@ -25,3 +25,16 @@ node /tmp/<probe>.mjs
 
 Most are deliberately written to print their own evidence rather than assert, because a probe that
 fails loudly on a live site has been pointed at the wrong thing.
+
+## Operator tools that are kept
+
+Two scripts are kept because they are repeatable and never run in CI:
+
+```bash
+pnpm audit:catalogs                 # refresh every saved model catalog; metadata reads, no inference
+pnpm benchmark:gateway --n 100      # local adapter only: gateway overhead floor, no provider bill
+```
+
+`audit:catalogs` needs a running gateway and prints `verified N, unverified M`; it refuses to call
+chat, streaming or a credential probe. `benchmark:gateway` runs against a loopback adapter that
+answers immediately, so its number is the gateway's own work — not a provider's network time.

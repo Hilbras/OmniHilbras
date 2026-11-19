@@ -34,6 +34,7 @@ function connections(records) {
   return new ConnectionManager(
     {
       async list() { return records; },
+      async getRecord(id) { return records.find((record) => record.id === id); },
       async save(input) { return input; },
       async remove() { return true; },
       async updateModels(id, ids) { return { id, modelIds: ids }; },

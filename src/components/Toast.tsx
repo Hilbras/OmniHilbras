@@ -117,7 +117,7 @@ function ToastViewport({ toasts, onDismiss }: { toasts: readonly Toast[]; onDism
           <div
             key={toast.id}
             role={toast.tone === 'error' ? 'alert' : 'status'}
-            className={`pointer-events-auto flex w-full max-w-md items-start gap-2.5 rounded-xl border px-3.5 py-3 text-xs shadow-lg backdrop-blur ${container}`}
+            className={`rise-in pointer-events-auto flex w-full max-w-md items-start gap-2.5 rounded-xl border px-3.5 py-3 text-xs shadow-lg backdrop-blur ${container}`}
           >
             <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             <p className="min-w-0 flex-1 leading-relaxed break-words">{toast.message}</p>

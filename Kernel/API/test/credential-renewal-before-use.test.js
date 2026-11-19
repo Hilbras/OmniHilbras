@@ -83,7 +83,7 @@ test('a probe still receives the stale credential instead of an error, because i
   // Health and the renewal pass read credentials to report on them. Throwing there made a sweep die on the session it
   // was trying to describe — and, in `service.test.js`, surfaced as an unhandled rejection after the test had ended.
   const secrets = { get: async () => ({ type: 'oauth', value: 'stale', refreshToken: 'r', expiresAt: past() }) };
-  const connections = { list: async () => [{ id: 'c', modelPolicy: 'all' }] };
+  const connections = { list: async () => [{ id: 'c', modelPolicy: 'all' }], get: async (id) => (id === 'c' ? { id: 'c', modelPolicy: 'all' } : undefined) };
   // Mirrors the service's callback: it renews, and when it cannot it either refuses or hands back what it read.
   const credentials = new CredentialManager(secrets, connections, async (_id, _provider, credential, { refuseWhenExpired }) => {
     if (refuseWhenExpired) throw new ProviderError('AUTHENTICATION_FAILED', 'This connection’s session expired. Sign in again.', { providerId: 'p' });

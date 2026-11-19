@@ -1,0 +1,17 @@
+{
+  "at": "2026-11-19T09:19:44.625Z",
+  "node": "v26.13.1",
+  "platform": "linux/x64",
+  "requests": 100,
+  "chat": {
+    "p50": 1.9661710000000312,
+    "p95": 4.626492000000042,
+    "max": 62.57075500000002
+  },
+  "stream": {
+    "p50": 2.06411700000001,
+    "p95": 3.9434820000000173,
+    "max": 8.25384299999996
+  },
+  "note": "local adapter, immediate answer; measures gateway overhead only, not provider network time"
+}

@@ -19,7 +19,7 @@ test('a linked ClinePass connection reads the owner credential without copying i
   const store = new InMemoryConnectionStore();
   await store.save(base('cline', 'cline'), { type: 'oauth', value: 'owner-token', refreshToken: 'owner-refresh' });
   await store.save(base('clinepass', 'clinepass', { credentialConnectionId: 'cline' }), { type: 'none' });
-  const credentials = new CredentialManager(store, { list: () => store.list() });
+  const credentials = new CredentialManager(store, { list: () => store.list(), get: (id) => store.getRecord(id) });
   const context = await credentials.context('clinepass', 'clinepass');
   assert.equal(context.credential?.type, 'oauth');
   assert.equal(context.credential && 'value' in context.credential ? context.credential.value : undefined, 'owner-token');
@@ -29,7 +29,7 @@ test('an API-key ClinePass connection uses its own credential and no owner', asy
   const store = new InMemoryConnectionStore();
   await store.save(base('cline', 'cline'), { type: 'oauth', value: 'owner-token' });
   await store.save(base('clinepass', 'clinepass'), { type: 'api-key', value: 'sk-clinepass' });
-  const credentials = new CredentialManager(store, { list: () => store.list() });
+  const credentials = new CredentialManager(store, { list: () => store.list(), get: (id) => store.getRecord(id) });
   const context = await credentials.context('clinepass', 'clinepass');
   assert.equal(context.credential?.type, 'api-key');
   assert.equal(context.credential && 'value' in context.credential ? context.credential.value : undefined, 'sk-clinepass');

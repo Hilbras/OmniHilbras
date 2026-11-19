@@ -25,8 +25,18 @@ async function sourceService() {
   return new GatewayService(new ProviderRegistry(), connections, connections, new InMemoryApiKeyStore(), { usageStore: usage });
 }
 
-test('a failed write on a later store leaves the earlier stores untouched', async () => {
+test('a backup can be read and counted before anything is written', async () => {
   const source = await sourceService();
+  const backup = await source.exportBackup(passphrase);
+  const target = new GatewayService(new ProviderRegistry(), new InMemoryConnectionStore(), new InMemoryConnectionStore(), new InMemoryApiKeyStore());
+  const preview = await target.verifyBackup(passphrase, backup);
+  assert.equal(preview.valid, true);
+  assert.equal(preview.sections.connections, 1);
+  assert.equal(preview.sections.usage, 1);
+  assert.equal((await target.listConnections()).length, 0, 'verification wrote into the target');
+});
+
+test('a failed write on a later store leaves the earlier stores untouched', async () => {  const source = await sourceService();
   const backup = await source.exportBackup(passphrase);
 
   const connections = new InMemoryConnectionStore();

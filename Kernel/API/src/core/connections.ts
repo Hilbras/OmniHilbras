@@ -87,6 +87,8 @@ export type ConnectionRecord = {
   updatedAt: string;
   /** How many turns this connection has successfully served. Undefined until the first. */
   requestCount?: number;
+  /** ISO timestamp of the last successful catalog read, or absent when it has never been read. */
+  catalogRefreshedAt?: string;
   /** ISO timestamp of the last successfully served turn. Undefined until the first. */
   lastUsed?: string;
   /** The account identity the credential carries (an OAuth email), when it has one. */
@@ -150,6 +152,8 @@ export type ConnectionInput = {
   /** The connection whose credential this record uses — see `ConnectionRecord.credentialConnectionId`. */
   credentialConnectionId?: string;
   modelMeta?: ModelMetaMap;
+  /** Set when a catalog read succeeded; not a caller-supplied value. */
+  catalogRefreshedAt?: string;
   resilience?: Partial<ResilienceSettings>;
   responsibility?: ConnectionResponsibility;
 };
@@ -208,6 +212,8 @@ export type ConnectionCredentialStore = ConnectionSecretStore;
 
 export interface ConnectionStore extends ConnectionCredentialStore {
   list(): Promise<ConnectionRecord[]>;
+  /** One record by connection id, without cloning the entire vault. */
+  getRecord(connectionId: string): Promise<ConnectionRecord | undefined>;
   save(input: ConnectionInput, credential: ProviderCredential): Promise<ConnectionRecord>;
   /**
    * @param options.replace Set by a catalog rescan. The provider is the authority on what
@@ -453,6 +459,11 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     return [...this.connections.values()].map((connection) => this.withPreview(connection));
   }
 
+  async getRecord(connectionId: string) {
+    const connection = this.connections.get(connectionId);
+    return connection ? this.withPreview(connection) : undefined;
+  }
+
   /**
    * The record as the gateway's readers see it: whether a credential exists, and the two facts about
    * it that are preview data rather than secrets — an OAuth account's email and the credential's kind.
@@ -495,7 +506,7 @@ export class InMemoryConnectionStore implements ConnectionStore, ConnectionSecre
     // A rescan that found the same ids still learned new metadata, so the metadata is
     // not gated on the id list having changed.
     if (!merged && !modelMeta) return cloneRecord(record);
-    const updated = { ...record, ...merged, ...(modelMeta ? { modelMeta } : {}), updatedAt: new Date().toISOString() };
+    const updated = { ...record, ...merged, ...(modelMeta ? { modelMeta } : {}), ...(options.replace ? { catalogRefreshedAt: new Date().toISOString() } : {}), updatedAt: new Date().toISOString() };
     this.connections.set(connectionId, updated);
     return cloneRecord(updated);
   }
@@ -735,6 +746,9 @@ function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefi
     // The four places that handle `modelMeta` all agreed with each other and disagreed with the one that
     // mattered, which is why a full-file reading of the store found nothing wrong.
     ...(normalized.modelMeta ?? existing?.modelMeta ? { modelMeta: normalized.modelMeta ?? existing?.modelMeta } : {}),
+    ...(normalized.catalogRefreshedAt ?? existing?.catalogRefreshedAt
+      ? { catalogRefreshedAt: normalized.catalogRefreshedAt ?? existing?.catalogRefreshedAt }
+      : {}),
     resilience: { ...defaultResilienceSettings, ...existing?.resilience, ...normalized.resilience },
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
@@ -824,6 +838,13 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
+  async getRecord(connectionId: string) {
+    await this.mutationQueue;
+    await this.ensureLoaded();
+    const connection = this.connections.get(connectionId);
+    return connection ? this.withPreview(connection) : undefined;
+  }
+
   /**
    * The record as the gateway's readers see it: whether a credential exists, and the two facts about
    * it that are preview data rather than secrets — an OAuth account's email and the credential's kind.
@@ -894,7 +915,7 @@ export class LocalConnectionStore implements ConnectionStore, ConnectionSecretSt
         : mergeAddedModelIds(record, modelIds);
       if (!merged && !modelMeta) return cloneRecord(record);
       const previous = record;
-      const updated = { ...record, ...merged, ...(modelMeta ? { modelMeta } : {}), updatedAt: new Date().toISOString() };
+      const updated = { ...record, ...merged, ...(modelMeta ? { modelMeta } : {}), ...(options.replace ? { catalogRefreshedAt: new Date().toISOString() } : {}), updatedAt: new Date().toISOString() };
       this.connections.set(connectionId, updated);
       try {
         await this.persistMetadata();
@@ -1369,6 +1390,7 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
     priority: input.priority,
     proxyPool,
     ...(modelMeta ? { modelMeta } : {}),
+    ...(input.catalogRefreshedAt ? { catalogRefreshedAt: input.catalogRefreshedAt } : {}),
     ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
     ...(input.modelPolicy === undefined ? {} : { modelPolicy: input.modelPolicy }),
     ...(input.providers === undefined || input.providers.length === 0 ? {} : { providers: input.providers }),
@@ -1542,6 +1564,7 @@ function parseRecord(value: unknown): ConnectionRecord {
     modelIds: modelLists.modelIds,
     customModelIds: modelLists.customModelIds,
     ...(value.modelMeta === undefined ? {} : { modelMeta: value.modelMeta as ModelMetaMap }),
+    ...(typeof value.catalogRefreshedAt === 'string' && !Number.isNaN(Date.parse(value.catalogRefreshedAt)) ? { catalogRefreshedAt: value.catalogRefreshedAt } : {}),
     ...(value.resilience === undefined ? {} : { resilience: value.resilience as Partial<ResilienceSettings> }),
   });
   return {
@@ -1576,6 +1599,7 @@ function parseRecord(value: unknown): ConnectionRecord {
       : {}),
     ...(typeof value.lastUsed === 'string' && value.lastUsed ? { lastUsed: value.lastUsed } : {}),
     ...(input.modelMeta ? { modelMeta: input.modelMeta } : {}),
+    ...(input.catalogRefreshedAt ? { catalogRefreshedAt: input.catalogRefreshedAt } : {}),
     modelIds: input.modelIds ?? [],
     customModelIds: input.customModelIds ?? [],
     resilience: normalizeResilienceSettings(input.resilience ?? {}),

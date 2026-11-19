@@ -45,6 +45,7 @@ import { dashboardRoutes, providerRoute, providerUsageRoute } from '../lib/route
 import { UsageContent } from './UsagePage';
 import type { ProviderRecord, ProviderStatus } from '../components/ProviderCard';
 import { badgeTone } from '../ui/primitives';
+import { formatLastUsed } from '../lib/providerCards';
 
 
 /**
@@ -1768,7 +1769,7 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
 
   What routing actually does is set the priority on a connection, and that control exists and works.
   */}
-          <div className="mt-5 space-y-3 border-t border-line pt-5"><div className="flex flex-col gap-0.5 text-xs sm:flex-row sm:items-center sm:justify-between"><span className="muted">Endpoint</span><button type="button" onClick={() => document.getElementById('endpoint')?.scrollIntoView({ behavior: 'smooth' })} className="min-w-0 max-w-full truncate text-left font-mono text-[10px] text-gold-text hover:underline sm:max-w-[180px]">{connection?.endpoint ?? provider.endpoint}</button></div><div className="flex items-center justify-between text-xs"><span className="muted">Priority</span><span className="font-mono text-[10px]">#{connection?.priority ?? 1}</span></div><div className="flex items-center justify-between text-xs"><span className="muted">Credentials</span><span className="flex items-center gap-1.5 font-mono text-[10px] text-success"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />local only</span></div></div>
+          <div className="mt-5 space-y-3 border-t border-line pt-5"><div className="flex flex-col gap-0.5 text-xs sm:flex-row sm:items-center sm:justify-between"><span className="muted">Endpoint</span><button type="button" onClick={() => document.getElementById('endpoint')?.scrollIntoView({ behavior: 'smooth' })} className="min-w-0 max-w-full truncate text-left font-mono text-[10px] text-gold-text hover:underline sm:max-w-[180px]">{connection?.endpoint ?? provider.endpoint}</button></div><div className="flex items-center justify-between text-xs"><span className="muted">Priority</span><span className="font-mono text-[10px]">#{connection?.priority ?? 1}</span></div><div className="flex items-center justify-between text-xs"><span className="muted">Catalog</span><span className="font-mono text-[10px]">{connection?.catalogRefreshedAt ? `refreshed ${formatLastUsed(connection.catalogRefreshedAt)}` : 'not read yet'}</span></div><div className="flex items-center justify-between text-xs"><span className="muted">Credentials</span><span className="flex items-center gap-1.5 font-mono text-[10px] text-success"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />local only</span></div></div>
           {connection && <ResiliencePanel connection={connection} routingState={routingState} onSave={saveResilience} strategy={routingState?.strategies?.[connection.providerId] ?? 'priority'} onStrategy={(next) => saveStrategy(connection.providerId, next)} />}
           <div className="mt-5 rounded-lg border border-gold/20 bg-gold-soft/45 p-3 text-[11px] leading-relaxed text-muted"><Sparkles className="mr-1 inline h-3.5 w-3.5 text-gold-text" aria-hidden="true" />{provider.id === 'openrouter' ? 'OpenRouter credentials are managed by the local gateway.' : 'Priority, resilience, enabled state and strategy are saved to the local gateway.'}</div>
         </section>

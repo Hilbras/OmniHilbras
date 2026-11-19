@@ -19,19 +19,22 @@
   normalisation, save tolerance and CN verification URL fixed; Aion has a real one-token credential check;
   100milionseek has a package, card, registry row, caps row, slug, logo and tests. Live Cline/MiniMax/Aion/100m
   checks need credentials.
-- **Phase 4 — partially implemented**: Codex sends the account/user-agent headers, has a current default version and
-  wider catalog shapes; the registry URL is fixed. Ollama is keyless again and honours a saved endpoint. Generic
-  OpenAI-shaped catalogs now keep context/modalities/pricing. The all-provider live audit script and
-  `catalogRefreshedAt` UI are still to do.
-- **Phase 5 — partially implemented**: token-saver shortener/cache/telemetry/no-store defects fixed; stats now expose
-  before/after bytes and skip reasons; Logs is a real history + live page with search, outcome filter, pause, export
-  and detail. The `/v1/analyze` lab endpoint and full backup UI are still to do.
+- **Phase 4 — implemented offline, live audit outstanding**: Codex sends the account/user-agent headers, has a
+  current default version and wider catalog shapes; the registry URL is fixed. Ollama is keyless again and honours a
+  saved endpoint. Generic OpenAI-shaped catalogs now keep context/modalities/pricing. `catalogRefreshedAt` is stored,
+  parsed and shown; `pnpm audit:catalogs` refreshes every saved catalog and reports verified/unverified without
+  inference. The live all-provider run needs credentials.
+- **Phase 5 — complete in the tree**: token-saver shortener/cache/telemetry/no-store defects fixed; stats expose
+  before/after bytes and skip reasons; `POST /v1/token-saver/analyze` runs the configured savers in memory without
+  storing text; Logs is a real history + live page with search, outcome filter, pause, export and detail; backup has
+  a dry-run verify endpoint and a preview in the import flow.
 - **Phase 6 — partially implemented**: the two web-session group headings are gone in favour of one grid, Settings has
-  live reload and a copy-URL action, Token Saver/Logs have skeletons. The shared `Dialog` primitive, full form
-  conversion and exit animations are still to do.
-- **Phase 7 — partially implemented**: backup import rolls back on a later write failure and export self-checks the
-  envelope; desktop backup save chmods an overwrite. The dry-run verify endpoint/UI, benchmark script and measured
-  connection-speed work are still to do.
+  live reload and a copy-URL action, Token Saver/Logs have skeletons, and the shared `Dialog` primitive now backs the
+  connection-method chooser. The remaining modal migrations and exit animations are still to do.
+- **Phase 7 — baseline and first optimization done**: `pnpm benchmark:gateway` records the local gateway overhead
+  floor (`docs/reports/gateway-overhead-2026-11-19.json`: p50 ~2 ms, p95 ~4.6 ms for non-streaming on this machine);
+  the credential path no longer lists and clones the whole vault to read one record. The dry-run verify is in; the
+  full UI wizard and the remaining transport measurements are still to do.
 - **E2E**: not run locally — Playwright's Chromium is not installed on this machine (`browserType.launch`). CI carries it.
 
 

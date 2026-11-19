@@ -29,6 +29,20 @@ export async function handleBackupRoute(ctx: RouteContext): Promise<boolean> {
     return true;
   }
 
+  if (request.method === 'POST' && url.pathname === '/v1/backup/verify') {
+    const body = await readJsonBody(request, maxBackupBytes);
+    if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+    const passphrase = readRequiredString(body, 'passphrase');
+    if (!isRecord(body.backup)) throw invalidRequest('backup must be an envelope object.');
+    try {
+      sendJson(response, 200, await service.verifyBackup(passphrase, body.backup), origin);
+    } catch (error) {
+      if (isProviderError(error)) throw error;
+      throw invalidRequest(error instanceof Error ? error.message : 'The backup could not be verified.');
+    }
+    return true;
+  }
+
   if (request.method === 'POST' && url.pathname === '/v1/backup/import') {
     const body = await readJsonBody(request, maxBackupBytes);
     if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');

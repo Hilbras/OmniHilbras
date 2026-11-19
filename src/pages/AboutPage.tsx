@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Code2, Download, FileKey2, Info, KeyRound, ShieldCheck, Upload } from 'lucide-react';
 import { DashboardShell } from '../components/DashboardShell';
 import { desktopBridge, type OmniBridge } from '../lib/electronBridge';
-import { exportGatewayBackup, importGatewayBackup } from '../lib/gatewayClient';
+import { exportGatewayBackup, importGatewayBackup, verifyGatewayBackup, type GatewayBackupPreview } from '../lib/gatewayClient';
 import { useGatewayStatus } from '../lib/useGatewayStatus';
 import { badgeTone } from '../ui/primitives';
 
@@ -17,6 +17,8 @@ function BackupPanel() {
   const [failed, setFailed] = useState(false);
   const [file, setFile] = useState<{ name: string; envelope: unknown } | undefined>();
   const [confirmed, setConfirmed] = useState(false);
+  const [preview, setPreview] = useState<GatewayBackupPreview | undefined>();
+  const [verifying, setVerifying] = useState(false);
 
   const passphraseProblem = passphrase.length > 0 && passphrase.length < 8
     ? 'Use at least 8 characters.'
@@ -59,6 +61,23 @@ function BackupPanel() {
       setMessage(error instanceof Error ? error.message : 'The backup could not be exported.');
     } finally {
       setBusy(undefined);
+    }
+  }
+
+  async function verifyBackup() {
+    if (!file || passphrase.length < 8) return;
+    setVerifying(true);
+    setFailed(false);
+    try {
+      const next = await verifyGatewayBackup(passphrase, file.envelope);
+      setPreview(next);
+      setMessage(`This file is readable: ${Object.entries(next.sections).map(([name, count]) => `${name} ${count}`).join(', ')}.`);
+    } catch (error) {
+      setPreview(undefined);
+      setFailed(true);
+      setMessage(error instanceof Error ? error.message : 'The backup could not be verified.');
+    } finally {
+      setVerifying(false);
     }
   }
 
@@ -137,6 +156,7 @@ function BackupPanel() {
               throw new Error('not an OmniHilbras backup envelope');
             }
             setFile({ name: selected.name, envelope });
+            setPreview(undefined);
             setFailed(false);
             setMessage(`Loaded ${selected.name}.`);
           } catch (cause) {
@@ -146,6 +166,20 @@ function BackupPanel() {
           }
         }} className="block w-full text-[11px] text-muted file:mr-3 file:rounded-md file:border file:border-line file:bg-bg-soft file:px-3 file:py-1.5 file:text-[11px] file:text-text" />
         {file && <p className="muted font-mono text-[10px]">selected: {file.name}</p>}
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => void verifyBackup()} disabled={!file || passphrase.length < 8 || verifying} className="btn-ghost !px-3 !py-2 !text-xs disabled:opacity-40">
+            {verifying ? 'Verifying…' : 'Verify file'}
+          </button>
+        </div>
+        {preview && (
+          <div className="rounded-lg border border-line bg-bg-soft p-3 text-[11px]">
+            <p className="font-semibold">This file is readable.</p>
+            <ul className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-[10px]">
+              {Object.entries(preview.sections).map(([name, count]) => <li key={name}>{name}: {count}</li>)}
+            </ul>
+            {preview.notCarried.length > 0 && <p className="muted mt-1">Not carried: {preview.notCarried.join(', ')}.</p>}
+          </div>
+        )}
         <label className="flex items-start gap-2 text-[11px] text-muted">
           <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-0.5" />
           I understand this replaces all current connections and API keys.

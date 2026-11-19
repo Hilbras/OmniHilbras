@@ -45,6 +45,8 @@
     "test:brand": "BRAND_STRICT=1 node --test tests/brand-assets.test.js",
     "brand": "node scripts/generate-brand.mjs",
     "release:audit": "node scripts/audit-release-trail.mjs",
+    "audit:catalogs": "node scripts/audit-model-catalogs.mjs",
+    "benchmark:gateway": "node scripts/benchmark-gateway.mjs",
     "build:android": "vite build --config vite.android.config.ts && node scripts/finalize-android.mjs",
     "android:add": "pnpm build:android && cap add android",
     "android:sync": "pnpm build:android && cap sync android",

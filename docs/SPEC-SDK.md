@@ -365,6 +365,9 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
   destination's own master key on import), settings (environment variables, not stored state) and the token
   saver's cache (memory only). A payload version 1 — which carried only `connections`, `strategies` and
   `apiKeys` — still imports. Management route.
+- `POST /v1/backup/verify` — body `{"passphrase": "...", "backup": envelope}`; decrypts and validates the
+  same way import does, returning per-section record counts, the payload version/createdAt and the sections
+  the file does not carry. It writes nothing, so an import can be previewed before it replaces anything.
 - `POST /v1/backup/import` — body `{"passphrase": "...", "backup": envelope, "confirmReplace": true}`.
   **Replaces every section the file carries** and leaves a store the file does not mention untouched. Every
   section is validated before any store is written, so an unreadable payload changes nothing anywhere rather
@@ -454,8 +457,11 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
 - `POST /v1/mcp` — Model Context Protocol JSON-RPC 2.0 endpoint. Methods: `initialize`, `tools/list`, `tools/call`. Tools: `list_connections`, `list_models`, `gateway_status`. Authenticated like the LLM surface (gateway API key or trusted dashboard origin). Management route.
 - `GET /v1/models` includes every enabled virtual model with `virtual: true` and `providers`, the target
   provider ids. The upstream model override is a routing detail; clients send the `oh/` id.
-- `GET /v1/token-saver/stats?period=` — per-saver and per-provider savings from usage records:
-  requests with telemetry vs with savings, estimated tokens/bytes saved, ran/skipped counts per saver,
+- `POST /v1/token-saver/analyze` — body `{"messages": [...]}` or `{"text": "..."}`. Runs the configured
+  savers in memory and returns before/after bytes, estimated tokens saved and one row per saver (`ran` or
+  `skipped` with the reason). The text is not stored, and no provider request is made; external savers are
+  called only when configured and still fail open.
+- `GET /v1/token-saver/stats?period=` — per-saver and per-provider savings from usage records:  requests with telemetry vs with savings, estimated tokens/bytes saved, ran/skipped counts per saver,
   and provider cache read/write. A request with no compression telemetry is counted but not attributed to
   a saver. Management route.
 - `GET /v1/token-saver/:id` — returns `{"id","content"}` for the original behind a

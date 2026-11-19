@@ -36,6 +36,20 @@ test('connection usage counters survive a restart after a flush', async (t) => {
   assert.ok(record?.lastUsed, 'the last-used stamp was lost');
 });
 
+test('a catalog refresh stamp survives a restart', async (t) => {
+  const directory = await tempDir(t);
+  const store = new LocalConnectionStore({ directory });
+  await store.save({
+    id: 'acct-1', providerId: 'p', name: 'Account', endpoint: 'https://p.example/v1',
+    priority: 1, proxyPool: 'none', enabled: true, modelIds: ['m'],
+  }, { type: 'api-key', value: 'key' });
+  await store.updateModels('acct-1', ['m'], undefined, { replace: true });
+
+  const reopened = new LocalConnectionStore({ directory });
+  const [record] = await reopened.list();
+  assert.ok(record?.catalogRefreshedAt, 'the catalog refresh stamp was not read back');
+});
+
 test('usage records survive a restart after a flush', async (t) => {
   const directory = await tempDir(t);
   const store = new LocalUsageStore({ directory });

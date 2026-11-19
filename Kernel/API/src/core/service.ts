@@ -3179,6 +3179,41 @@ export class GatewayService {
   }
 
   /**
+   * Reads a backup without writing it.
+   *
+   * The import button asked for consent with no evidence; this is the evidence. It decrypts, runs every
+   * section through the same parser the importer uses, and returns counts — no store is touched.
+   */
+  async verifyBackup(passphrase: string, envelope: unknown) {
+    const decrypted = decryptBackup(envelope, passphrase);
+    if (!isBackupRecord(decrypted) || decrypted.format !== backupFormat) throw notAGatewayBackup();
+    const payload = decrypted.version === 1
+      ? legacyBackupSections(decrypted)
+      : decrypted.version === backupVersion
+        ? decrypted
+        : (() => { throw notAGatewayBackup(); })();
+    const sections = this.backupSections();
+    const counts: Record<string, number> = {};
+    const notCarried: string[] = [];
+    for (const section of sections) {
+      const value = payload[section.name];
+      if (value === undefined) {
+        notCarried.push(section.name);
+        continue;
+      }
+      counts[section.name] = countSectionRecords(section.parse(value));
+    }
+    if (!('connections' in counts)) throw notAGatewayBackup();
+    return {
+      valid: true,
+      version: decrypted.version,
+      createdAt: typeof payload.createdAt === 'string' ? payload.createdAt : undefined,
+      sections: counts,
+      notCarried,
+    };
+  }
+
+  /**
    * The stores a backup carries, each paired with the parser that reads its section back.
    *
    * The parser is the store's own — the same function that reads its file — so a payload accepted here is
@@ -3536,9 +3571,97 @@ export class GatewayService {
     return compressed;
   }
 
+  /**
+   * Runs the configured savers over a conversation **without storing it**.
+   *
+   * The analysis page needs a real before/after, and `usage.json` deliberately carries no prompt
+   * content. This is the compromise: the request body is processed in memory and only counts,
+   * per-saver rows and reasons are returned. External savers may be called if configured; they fail
+   * open exactly as they do on the request path.
+   */
+  async analyzeTokenSaver(messages: ChatMessage[]): Promise<{
+    beforeBytes: number;
+    afterBytes: number;
+    tokensSaved: number;
+    savers: Array<{ id: string; kind: string; state: 'ran' | 'skipped'; tokensSaved: number; bytesBefore: number; bytesAfter: number; detail?: string }>;
+  }> {
+    const complete = completeToolRounds(messages);
+    const beforeBytes = Buffer.byteLength(JSON.stringify(complete), 'utf8');
+    let current = compressToolResults(complete) as SavableMessage[];
+    const rows: Array<{ id: string; kind: string; state: 'ran' | 'skipped'; tokensSaved: number; bytesBefore: number; bytesAfter: number; detail?: string }> = [];
+    const size = () => Buffer.byteLength(JSON.stringify(current), 'utf8');
+    const shortenedBytes = size();
+    if (shortenedBytes < beforeBytes) rows.push({ id: 'tool-shortener', kind: 'tool', state: 'ran', tokensSaved: Math.ceil((beforeBytes - shortenedBytes) / 4), bytesBefore: beforeBytes, bytesAfter: shortenedBytes });
+
+    if (this.tokenSaverConfig) {
+      const store = this.tokenSaverStore ?? new MemoryCcrStore(this.tokenSaverConfig.ccrLimit);
+      const before = size();
+      const compressed = compressMessages(current, {
+        targetRatio: this.tokenSaverConfig.targetRatio,
+        protectRecent: this.tokenSaverConfig.protectRecent,
+        compressUsers: this.tokenSaverConfig.compressUsers,
+        compressCode: this.tokenSaverConfig.compressCode,
+        reversible: this.tokenSaverConfig.reversible,
+        ccr: store,
+      });
+      current = compressed.value as SavableMessage[];
+      const after = size();
+      for (const [index, route] of compressed.stats.routes.entries()) {
+        rows.push({
+          id: route.strategy || route.kind,
+          kind: route.kind,
+          state: compressed.stats.savedTokens > 0 ? 'ran' : 'skipped',
+          tokensSaved: Math.max(0, route.originalTokens - route.compressedTokens),
+          bytesBefore: index === 0 ? before : 0,
+          bytesAfter: index === 0 ? after : 0,
+          ...(compressed.stats.savedTokens > 0 ? {} : { detail: 'no compression opportunity' }),
+        });
+      }
+    }
+    if (this.headroom) {
+      const before = size();
+      const result = await headroomCompress(current, 'analysis', this.headroom);
+      current = result.messages as SavableMessage[];
+      rows.push({ id: 'headroom', kind: 'text', state: result.applied ? 'ran' : 'skipped', tokensSaved: result.applied ? Math.ceil(Math.max(0, before - result.bytesAfter) / 4) : 0, bytesBefore: before, bytesAfter: result.bytesAfter, ...(result.applied ? {} : { detail: result.detail ? `${result.reason}: ${result.detail}` : result.reason }) });
+    }
+    if (this.pxpipe) {
+      const before = size();
+      const result = await pxpipeCompress(current, 'analysis', this.pxpipe);
+      current = result.messages as SavableMessage[];
+      rows.push({ id: 'pxpipe', kind: 'text', state: result.applied ? 'ran' : 'skipped', tokensSaved: result.applied ? Math.ceil(Math.max(0, before - result.bytesAfter) / 4) : 0, bytesBefore: before, bytesAfter: result.bytesAfter, ...(result.applied ? {} : { detail: result.detail ? `${result.reason}: ${result.detail}` : result.reason }) });
+    }
+    if (this.caveman) {
+      const before = size();
+      current = injectCaveman(current, this.caveman.level);
+      rows.push({ id: 'caveman', kind: 'prompt', state: 'ran', tokensSaved: 0, bytesBefore: before, bytesAfter: size(), detail: this.caveman.level });
+    }
+    if (this.ponytail) {
+      const before = size();
+      current = injectPonytail(current, this.ponytail.level);
+      rows.push({ id: 'ponytail', kind: 'prompt', state: 'ran', tokensSaved: 0, bytesBefore: before, bytesAfter: size(), detail: this.ponytail.level });
+    }
+    if (this.historyTrim) {
+      const before = size();
+      const trim = trimHistory(current, {
+        maxInputTokens: this.historyTrim.maxInputTokens,
+        keepRecent: this.historyTrim.keepRecent,
+        ccr: this.tokenSaverStore ?? new MemoryCcrStore(500),
+        reversible: this.tokenSaverConfig?.reversible,
+      });
+      current = trim.messages;
+      rows.push({ id: 'history-trim', kind: 'text', state: trim.trimmed > 0 ? 'ran' : 'skipped', tokensSaved: Math.max(0, trim.originalTokens - trim.trimmedTokens), bytesBefore: before, bytesAfter: size(), ...(trim.trimmed > 0 ? {} : { detail: 'under the trim threshold' }) });
+    }
+    const afterBytes = size();
+    return {
+      beforeBytes,
+      afterBytes,
+      tokensSaved: Math.max(0, Math.ceil((beforeBytes - afterBytes) / 4)),
+      savers: rows,
+    };
+  }
+
   /** Removes and returns the telemetry for one request, so a retry path cannot double-count it. */
-  takeCompressionTelemetry(requestId: string | undefined): SaverTelemetry | undefined {
-    if (!requestId) return undefined;
+  takeCompressionTelemetry(requestId: string | undefined): SaverTelemetry | undefined {    if (!requestId) return undefined;
     const telemetry = this.compressionTelemetry.get(requestId);
     if (telemetry) {
       this.compressionTelemetry.delete(requestId);
@@ -3842,7 +3965,7 @@ export class GatewayService {
    */
   private async contextForRequest(providerId: string, connectionId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<ProviderRequestContext> {
     if (!connectionId || connectionId.startsWith('unmanaged:')) return this.credentials.contextForProvider(providerId, signal, scope);
-    const saved = (await this.connections.list()).find((connection) => connection.id === connectionId);
+    const saved = await this.connections.get(connectionId);
     if (saved && saved.proxyPool !== 'none') {
       // Refusing is the honest outcome. Sending through the direct transport while the account says
       // it is isolated would leak the request from the wrong network identity, which is worse than a

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BarChart3, Coins, Cpu, Database } from 'lucide-react';
 import { DashboardShell } from '../components/DashboardShell';
-import { getGatewayTokenSaverStats, type GatewayTokenSaverStats } from '../lib/gatewayClient';
+import { getGatewayTokenSaverStats, analyzeGatewayTokenSaver, type GatewayTokenSaverStats, type TokenSaverAnalysis } from '../lib/gatewayClient';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 
@@ -25,6 +25,9 @@ export function TokenSaverContent() {
   const [stats, setStats] = useState<GatewayTokenSaverStats | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
+  const [analysisText, setAnalysisText] = useState('');
+  const [analysis, setAnalysis] = useState<TokenSaverAnalysis | undefined>();
+  const [analyzing, setAnalyzing] = useState(false);
 
   const load = useCallback((signal?: AbortSignal) => {
     setLoading(true);
@@ -43,6 +46,19 @@ export function TokenSaverContent() {
     return () => controller.abort();
   }, [load]);
   useGatewayReload(load);
+
+  const runAnalysis = async () => {
+    if (!analysisText.trim() || analyzing) return;
+    setAnalyzing(true);
+    setError(undefined);
+    try {
+      setAnalysis(await analyzeGatewayTokenSaver({ text: analysisText }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The analysis failed.');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   // A response can omit a section without being a failed request: an older gateway, a partial read, or an
   // endpoint that has not gathered that table yet. The page must say "no data", not blank the shell — the same
@@ -72,6 +88,36 @@ export function TokenSaverContent() {
         <div className="card p-4"><p className="muted text-[10px] uppercase tracking-wide">Bytes avoided</p><p className="mt-1 font-mono text-xl">{loading ? <Skeleton className="h-6 w-20" /> : formatBytes(stats?.totalBytesSaved ?? 0)}</p><p className="muted mt-1 text-[10px]">prompt payload</p></div>
         <div className="card p-4"><p className="muted text-[10px] uppercase tracking-wide">Requests compressed</p><p className="mt-1 font-mono text-xl">{loading ? <Skeleton className="h-6 w-24" /> : `${stats?.requestsWithSavings ?? 0} / ${stats?.requests ?? 0}`}</p><p className="muted mt-1 text-[10px]">with savings / all requests</p></div>
         <div className="card p-4"><p className="muted text-[10px] uppercase tracking-wide">Provider cache</p><p className="mt-1 font-mono text-xl">{loading ? <Skeleton className="h-6 w-24" /> : `${formatTokens(cache?.read ?? 0)} / ${formatTokens(cache?.write ?? 0)}`}</p><p className="muted mt-1 text-[10px]">read / write tokens</p></div>
+      </section>
+
+      <section className="card p-4" aria-label="Token saver analysis">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold">Analyse a conversation</h2>
+            <p className="muted mt-1 text-[11px]">Runs the configured savers in memory. The text is not stored and no provider request is made.</p>
+          </div>
+          <button type="button" onClick={() => void runAnalysis()} disabled={analyzing || !analysisText.trim()} className="btn-gold !px-3 !py-2 !text-xs disabled:opacity-40">
+            {analyzing ? 'Analysing…' : 'Analyse'}
+          </button>
+        </div>
+        <textarea value={analysisText} onChange={(event) => setAnalysisText(event.target.value)} rows={4} placeholder="Paste a conversation, a tool output, or a long prompt to see what the savers would do." aria-label="Conversation to analyse" className="input mt-3 w-full !text-xs" />
+        {analysis && (
+          <div className="mt-3 space-y-2 text-[11px]">
+            <p className="font-mono">
+              {formatBytes(analysis.beforeBytes)} → {formatBytes(analysis.afterBytes)} · ~{formatTokens(analysis.tokensSaved)} tokens saved
+            </p>
+            {analysis.savers.length === 0 ? <p className="muted">No saver changed this input.</p> : (
+              <ul className="divide-y divide-line">
+                {analysis.savers.map((saver) => (
+                  <li key={saver.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5 font-mono">
+                    <span>{saver.id} <span className="muted">· {saver.kind} · {saver.state}</span></span>
+                    <span className="muted">{formatBytes(saver.bytesBefore)} → {formatBytes(saver.bytesAfter)}{saver.detail ? ` · ${saver.detail}` : ''}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="card overflow-hidden" aria-label="Savings by saver">
