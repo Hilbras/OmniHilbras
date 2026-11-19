@@ -68,12 +68,22 @@ account can serve this" without a browser. Both want the answer as data, which i
 | `setup [--yes]` | First-run check with a menu: what is missing, install it (showing the command first), install the `omnihilbras` command itself, see the full report, deal with another version on this machine, or start the servers. `--yes` does the fixes without a terminal, which is also how the shortcut gets installed from a script. |
 | `doctor [--installs]` | The same checks as a report, and **changes nothing** — safe in a script or on someone else's machine. Exits `1` if something blocking was found. |
 | `status [--strict]` | Gateway identity and version, how many providers report healthy, and the ones that do not. `--strict` exits `1` if any provider is unhealthy. |
+| `ps` | The **bundled run** this command started: its pids, ports, uptime, and whether each process is still alive and still *ours*, plus the gateway's health when it answers. Distinct from `status`, which asks a gateway what it is. |
+| `open` | Opens the running bundled dashboard in a browser, at the port it actually listens on (from the run record, never a guess). Says so when nothing is running rather than opening a dead URL. |
+| `stop [--force]` | Stops the bundled gateway and dashboard. Each pid is **verified to be ours before it is signalled** — a reused or foreign pid is reported and left alone unless `--force`. The counterpart to the launcher's Ctrl-C, for a run started in another terminal. |
+| `restart [--force]` | `stop`, then start the bundled launcher again. Refuses rather than killing a foreign pid and starting a second copy. |
 | `providers [provider] [--all]` | Every saved **account** — which is what routing actually chooses between — with its enabled state, priority, model count, credential kind, and live routing state (ejected, waiting, last error). |
 | `models [--provider <id>] [--limit <n>]` | The model ids the gateway serves, grouped by provider prefix. These are the ids a client pastes into its config, e.g. `zc/glm-5.3-flash`. |
 | `test <provider or account> [--all]` | Probes accounts with `POST /v1/connections/:id/probe` — the same call the dashboard's Test button makes — so the two cannot disagree. A provider with several accounts tests **all** of them and exits `0` if any answered. |
 | `keys [--mint <name>]` | Lists key metadata (id, name, prefix, state). `--mint` creates one and prints its secret **once**, because the gateway cannot return it again. |
 | `routing [--problems]` | Live routing state: failures, ejection, rate-limit waits, measured latency, and each provider's strategy. `--problems` narrows to the ones with something to report. |
 | `logs [--limit <n>]` | Follows `/v1/logs/stream`: one line per finished request. It carries time, model, provider, connection, outcome, attempt count and request id — **never prompt content or a credential**, which is what makes it safe to pipe. |
+
+`ps`, `open`, `stop` and `restart` are **local process control**, not gateway calls: they read the run record
+the launcher writes to `$XDG_STATE_HOME/omnihilbras/bundled.json` and act on exactly the processes it started.
+The record path and the "is this pid still ours?" check live in one module, `cli/lib/bundled-state.mjs`, shared
+by the launcher and these verbs so the two cannot drift apart. A pid is never signalled on the strength of the
+record alone — it is verified against its command line first, because a pid can be reused.
 
 ## Authentication
 
@@ -101,6 +111,7 @@ cli/index.mjs             argument parsing, the verb table, exit codes
 cli/lib/config.mjs        where to talk, and what to talk with (the one place auth is decided)
 cli/lib/client.mjs        one HTTP call, one error shape
 cli/lib/output.mjs        colour, tables, and `--json`
+cli/lib/bundled-state.mjs the run record + ownership check, shared with the launcher (ps/open/stop/restart)
 cli/commands/*.mjs        one file per verb
 ```
 

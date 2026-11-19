@@ -6,16 +6,21 @@
  * It does not stub the gateway or the dashboard: it stages nothing itself, starts exactly the files a
  * published install gets, and checks both HTTP surfaces before a graceful shutdown. Run it after
  * `pnpm build:cli` (or let `npm pack` do that through `prepack`).
+ *
+ * Since 3.75.0 it also drives the lifecycle verbs (`ps`, `stop`) against that real run, so the convenience
+ * commands are proved end to end and not just unit-tested: the record the launcher writes is the record the
+ * verbs read, and `stop` actually ends the processes it started.
  */
 
-import { spawn } from 'node:child_process';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { spawn, execFileSync } from 'node:child_process';
+import { mkdtempSync, existsSync, rmSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const main = path.join(root, 'cli', 'server', 'main.mjs');
+const bin = path.join(root, 'cli', 'bin', 'omnihilbras.js');
 const dashboardPort = 20437;
 const gatewayPort = 20438;
 
@@ -40,13 +45,22 @@ function waitPort(port, timeoutMs = 30000) {
 }
 
 const config = mkdtempSync(path.join(os.tmpdir(), 'omnihilbras-smoke-'));
+const state = mkdtempSync(path.join(os.tmpdir(), 'omnihilbras-smoke-state-'));
+const verbEnv = { ...process.env, XDG_CONFIG_HOME: config, XDG_STATE_HOME: state, OMNIHILBRAS_GATEWAY_URL: `http://127.0.0.1:${gatewayPort}` };
 const child = spawn(process.execPath, [main, '--port', String(dashboardPort), '--gateway-port', String(gatewayPort), '--no-browser'], {
-  env: { ...process.env, XDG_CONFIG_HOME: config },
+  env: verbEnv,
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let output = '';
 child.stdout.on('data', (chunk) => { output += chunk; });
 child.stderr.on('data', (chunk) => { output += chunk; });
+const childClosed = new Promise((resolve) => child.once('close', resolve));
+
+/** Runs a client verb against this isolated run and parses its `--json` answer. */
+function verb(...args) {
+  const stdout = execFileSync(process.execPath, [bin, ...args, '--json'], { env: verbEnv, encoding: 'utf8', timeout: 20000 });
+  return JSON.parse(stdout);
+}
 
 let code = 1;
 try {
@@ -57,36 +71,39 @@ try {
   if (health.service !== 'omnihilbras-gateway') throw new Error(`unexpected health: ${JSON.stringify(health)}`);
   const shell = await fetch(`http://127.0.0.1:${dashboardPort}/dashboard`).then((response) => response.text());
   if (!shell.includes('__OMNIHILBRAS_GATEWAY_URL__')) throw new Error('the dashboard shell has no gateway address injection');
-  // The shell must point the browser at its OWN origin, not the gateway port: that is what makes management
-  // calls same-origin so the proxy below can attach the token. Asserting the old literal port is exactly the
-  // design this replaces.
   if (!/globalThis\.__OMNIHILBRAS_GATEWAY_URL__\s*=\s*window\.location\.origin/.test(shell)) {
     throw new Error('the dashboard shell does not point the browser at window.location.origin');
   }
 
-  // The fix, end to end. A management call the browser marks same-origin must be served by the gateway through
-  // the shipped proxy, which presents the token the freshly-started gateway just published. This is the call
-  // that answered 401 ("Gateway needs sign-in") before 3.74.1 on any install with key enforcement on — which is
-  // the default. The temp config dir has no api-keys.json, so enforcement is on here, which is the point.
-  const proxied = await fetch(`http://127.0.0.1:${dashboardPort}/v1/connections`, {
-    headers: { 'sec-fetch-site': 'same-origin', accept: 'application/json' },
-  });
+  // The fix from 3.74.1, end to end: a same-origin management call is served through the shipped proxy with
+  // the token the freshly-started gateway published; a cross-site request is not served as the dashboard.
+  const proxied = await fetch(`http://127.0.0.1:${dashboardPort}/v1/connections`, { headers: { 'sec-fetch-site': 'same-origin', accept: 'application/json' } });
   if (proxied.status !== 200) throw new Error(`a same-origin management call through the shipped proxy must be served, got ${proxied.status}`);
-
-  // And a request the browser would not mark same-origin is not served as the dashboard: enforcement stays on,
-  // the token is only presented for the page's own origin.
-  const crossSite = await fetch(`http://127.0.0.1:${dashboardPort}/v1/connections`, {
-    headers: { 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' },
-  });
+  const crossSite = await fetch(`http://127.0.0.1:${dashboardPort}/v1/connections`, { headers: { 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' } });
   if (crossSite.status === 200) throw new Error('a cross-site request must not be served as the dashboard');
 
-  console.log(`✔ bundled server: gateway ${health.build.version}, dashboard same-origin-proxied with enforcement on`);
+  // Lifecycle verbs (3.75.0) against the real run.
+  const before = verb('ps');
+  if (before.running !== true) throw new Error(`ps should report the run as running, got ${JSON.stringify(before)}`);
+  if (before.dashboardPort !== dashboardPort || before.gatewayPort !== gatewayPort) throw new Error(`ps reported the wrong ports: ${JSON.stringify(before)}`);
+
+  const stopped = verb('stop');
+  if (stopped.refused?.length) throw new Error(`stop refused its own pids: ${JSON.stringify(stopped.refused)}`);
+  // The launcher cascades a shutdown when its gateway exits; wait for it to finish.
+  await Promise.race([childClosed, new Promise((resolve) => setTimeout(resolve, 5000))]);
+  if (existsSync(path.join(state, 'omnihilbras', 'bundled.json'))) throw new Error('stop did not clear the run record');
+  const after = verb('ps');
+  if (after.running !== false) throw new Error(`ps after stop should report not running, got ${JSON.stringify(after)}`);
+
+  console.log(`✔ bundled server: gateway ${health.build.version}, same-origin proxy, ps/stop lifecycle`);
   code = 0;
 } catch (error) {
   console.error(`✖ ${error.message}`);
   console.error(output);
 } finally {
   child.kill('SIGTERM');
-  await new Promise((resolve) => child.once('close', resolve));
+  await Promise.race([childClosed, new Promise((resolve) => setTimeout(resolve, 3000))]);
+  rmSync(config, { recursive: true, force: true });
+  rmSync(state, { recursive: true, force: true });
 }
 process.exit(code);

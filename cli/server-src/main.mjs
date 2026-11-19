@@ -18,10 +18,10 @@
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { readBundledRecord, writeBundledRecord, clearBundledRecord } from '../lib/bundled-state.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8'));
@@ -34,11 +34,8 @@ const DEFAULT_GATEWAY_PORT = 20138;
 const LOOPBACK = '127.0.0.1';
 const READY_TIMEOUT_MS = 90_000;
 
-const STATE_DIR = process.env.XDG_STATE_HOME
-  ? path.join(process.env.XDG_STATE_HOME, 'omnihilbras')
-  : path.join(os.homedir(), '.local', 'state', 'omnihilbras');
-const PID_FILE = path.join(STATE_DIR, 'bundled.json');
-
+// The run record's path and read/write live in `cli/lib/bundled-state.mjs`, shared with the lifecycle verbs
+// so the launcher and `omnihilbras stop|ps|open|restart` cannot disagree about where the record is.
 const COLOUR = process.stdout.isTTY;
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
@@ -205,16 +202,15 @@ async function waitGone(pid, timeoutMs = 1500) {
 }
 
 function readPidFile() {
-  try { return JSON.parse(fs.readFileSync(PID_FILE, 'utf8')); } catch { return undefined; }
+  return readBundledRecord();
 }
 
 function writePidFile(record) {
-  fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(PID_FILE, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  writeBundledRecord(record);
 }
 
 function clearPidFile() {
-  try { fs.unlinkSync(PID_FILE); } catch { /* nothing to clear */ }
+  clearBundledRecord();
 }
 
 /** Stops the two processes this launcher started last time, and nothing else. */
