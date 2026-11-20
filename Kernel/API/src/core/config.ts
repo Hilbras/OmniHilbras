@@ -6,7 +6,7 @@ import { OpenAIAdapter } from '@omnihilbras/sdk-openai';
 import { OpenRouterAdapter } from '@omnihilbras/sdk-openrouter';
 import { LocalApiKeyStore, type ApiKeyStore } from './api-keys.js';
 import { assertPublicDestination } from './destination-check.js';
-import { LocalUsageStore } from './usage-store.js';
+import { createUsageStore, type UsageBackend } from './usage-store-sqlite.js';
 import { LocalVirtualModelStore } from './virtual-models.js';
 import { LocalSkillStore } from './skills.js';
 import { LocalWorkspaceStore } from './workspaces.js';
@@ -43,6 +43,8 @@ export type GatewayConfig = {
   recoveryCooldownMs: number;
   corsOrigins: string[];
   dataDir: string;
+  /** Usage persistence backend. JSON is the local-first default; SQLite is opt-in (Phase 3). */
+  usageBackend: UsageBackend;
   tokenSaver: {
     enabled: boolean;
     targetRatio: number;
@@ -154,6 +156,7 @@ export function loadGatewayConfig(env: Readonly<Record<string, string | undefine
     recoveryCooldownMs: parseNonNegativeInteger(env.OMNIHILBRAS_RECOVERY_COOLDOWN_MS, 30_000, 'OMNIHILBRAS_RECOVERY_COOLDOWN_MS', 3_600_000),
     corsOrigins: parseCorsOrigins(env.OMNIHILBRAS_CORS_ORIGINS),
     dataDir: env.OMNIHILBRAS_DATA_DIR?.trim() || defaultConnectionDirectory(env),
+    usageBackend: env.OMNIHILBRAS_USAGE_STORE?.trim().toLowerCase() === 'sqlite' ? 'sqlite' : 'json',
     ...(parseOptionalLimit(env.OMNIHILBRAS_MAX_OUTPUT_TOKENS, 1, 1_000_000) !== undefined ? { maxOutputTokensCap: parseOptionalLimit(env.OMNIHILBRAS_MAX_OUTPUT_TOKENS, 1, 1_000_000) } : {}),
     ...(parseOptionalLimit(env.OMNIHILBRAS_THINKING_BUDGET, 1024, 1_000_000) !== undefined ? { thinkingBudgetCap: parseOptionalLimit(env.OMNIHILBRAS_THINKING_BUDGET, 1024, 1_000_000) } : {}),
     ...(parseOptionalLimit(env.OMNIHILBRAS_HISTORY_TRIM_TOKENS, 1_000, 10_000_000) !== undefined
@@ -290,7 +293,7 @@ export function createGatewayService(config: GatewayConfig = loadGatewayConfig()
     //
     // `LocalUsageStore` writes through `atomicWrite`, so `usage.json` lands at 0600 in the same 0700
     // directory as the credentials, and is bounded by `maxRecords` on write.
-    usageStore: new LocalUsageStore({ directory: config.dataDir }),
+    usageStore: createUsageStore({ directory: config.dataDir, backend: config.usageBackend }),
     virtualModels: new LocalVirtualModelStore({ directory: config.dataDir }),
     skills: new LocalSkillStore({ directory: config.dataDir }),
     workspaces: new LocalWorkspaceStore({ directory: config.dataDir }),

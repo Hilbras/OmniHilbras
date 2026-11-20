@@ -194,7 +194,7 @@ export function parseUsageState(value: unknown): UsageBackupState {
  * Shared by the load path and the import path: a sequence reset to 0 would mint `req_1` again, and two
  * records with one id is a row the dashboard cannot tell from another.
  */
-function highestSequence(records: readonly UsageRecord[]): number {
+export function highestSequence(records: readonly UsageRecord[]): number {
   return records.reduce((max, record) => {
     const parsedId = /^req_([0-9a-z]+)$/.exec(record.id);
     const value = parsedId ? parseInt(parsedId[1]!, 36) : 0;
@@ -542,7 +542,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * latency, and the page's totals then disagree with its own rows. Dropping it is honest; repairing it would
  * be inventing.
  */
-function isUsageRecord(value: unknown): value is UsageRecord {
+export function isUsageRecord(value: unknown): value is UsageRecord {
   if (!isRecord(value)) return false;
   return (
     typeof value.id === 'string' &&
@@ -573,7 +573,7 @@ function isUsageAttempt(value: unknown): value is UsageAttempt {
 }
 
 /** Drops unknown keys, so a file edited by hand cannot widen what the dashboard is shown. */
-function normalizeRecord(record: UsageRecord): UsageRecord {
+export function normalizeRecord(record: UsageRecord): UsageRecord {
   return {
     id: record.id,
     at: record.at,

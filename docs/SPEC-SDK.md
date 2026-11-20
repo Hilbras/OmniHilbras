@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.79.0
+**Status:** Current — release 3.80.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -326,6 +326,12 @@ The first local gateway exposes:
   dim means it is configured and unused. There is no in-flight state on this page, so "active" does not mean
   "serving right now". Its animation stops when the tab is hidden or the canvas is off-screen, which is why the
   effect is affordable.
+  **Storage backend (3.80.0):** usage persists to `usage.json` by default. `OMNIHILBRAS_USAGE_STORE=sqlite`
+  selects an optional SQLite backend (`usage.db`, via the built-in `node:sqlite`, Node ≥22.5) behind the same
+  `UsageStore` interface; on a runtime without `node:sqlite` the gateway falls back to JSON rather than failing
+  to start. Both backends are bounded by `maxRecords`, share the same query/summary/normalisation helpers, and
+  answer identically (`Kernel/API/test/usage-store-contract.test.js` runs one contract against both). An existing
+  `usage.json` is imported into the database once, on first run. JSON remains the default; the database is opt-in.
 - `POST /v1/oauth/cline/start` — begin a sign-in; returns the sign-in URL, a session id, and a single-use `state`.
 - `GET /v1/oauth/cline/authorize` — build the Cline sign-in URL for a loopback callback.
 - `GET /v1/oauth/cline/callback` — where the provider redirects the browser; completes the exchange and reports the outcome.

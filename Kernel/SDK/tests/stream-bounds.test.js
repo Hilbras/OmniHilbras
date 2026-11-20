@@ -161,6 +161,64 @@ test('the bounds are named in the published types, so they cannot be renamed sil
     'the duration cap must have a default');
 });
 
+// Backpressure and reader release were the two streaming gaps the reliability report flagged as "not
+// measured" (docs/reports/streaming-reliability.md). The code already bounds the stream by `maxStreamBytes`
+// and releases the reader in a `finally`; these prove it, so a regression that buffers a slow consumer
+// without bound, or leaks the reader lock, fails here rather than in production.
+
+test('a slow consumer is still bounded by the byte cap', async (t) => {
+  // The server pushes ~26 KB at once; the consumer reads slowly (5 ms between chunks). The cap must refuse
+  // the stream after ~2 KB read rather than let the whole provider response accumulate for a slow client.
+  const server = await serve((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    for (let index = 0; index < 50; index += 1) res.write(`data: ${'x'.repeat(512)}\n\n`);
+    res.end();
+  });
+  t.after(server.close);
+
+  const transport = new FetchHttpTransport({ fetch: globalThis.fetch, maxStreamBytes: 2048, streamIdleTimeoutMs: 2000 });
+  let count = 0;
+  let outcome = 'completed';
+  try {
+    for await (const _ of transport.stream({ url: server.url, method: 'POST', headers: {}, body: '{}' })) {
+      count += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  } catch (error) {
+    outcome = error.code ?? error.name;
+  }
+  assert.equal(outcome, 'INVALID_RESPONSE', `a stream over the byte cap ended as ${outcome}`);
+  assert.ok(count < 50, `the slow consumer received ${count} chunks; the cap did not bound it`);
+});
+
+/** A fetch whose body reader records cancel/releaseLock, so cleanup can be asserted directly. */
+function spyFetch(chunks) {
+  const calls = { cancel: 0, releaseLock: 0 };
+  let index = 0;
+  const encoder = new TextEncoder();
+  const reader = {
+    read: async () => (index < chunks.length ? { done: false, value: encoder.encode(chunks[index++]) } : { done: true, value: undefined }),
+    cancel: async () => { calls.cancel += 1; },
+    releaseLock: () => { calls.releaseLock += 1; },
+  };
+  const fetch = async () => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'text/event-stream' }), body: { getReader: () => reader } });
+  return { calls, fetch };
+}
+
+test('the reader lock is released after a stream completes', async () => {
+  const { calls, fetch } = spyFetch(['data: {"choices":[{"delta":{"content":"hi"}}]}\n\n']);
+  const result = await drain(new FetchHttpTransport({ fetch }), 'http://127.0.0.1:9/v1/chat/completions');
+  assert.equal(result.outcome, 'completed');
+  assert.equal(calls.releaseLock, 1, 'the reader lock must be released on completion');
+});
+
+test('the reader lock is released even when the byte cap refuses the stream', async () => {
+  const { calls, fetch } = spyFetch(['x'.repeat(4096)]);
+  const result = await drain(new FetchHttpTransport({ fetch, maxStreamBytes: 1024 }), 'http://127.0.0.1:9/v1/chat/completions');
+  assert.equal(result.outcome, 'INVALID_RESPONSE');
+  assert.equal(calls.releaseLock, 1, 'the reader lock must be released on the error path too');
+});
+
 test('the DEFAULTS bound a stall, because every real caller omits the options', async (t) => {
   // Every other test here passes an explicit budget — which means a broken *default* would leave them all
   // green. Mutation-tested: setting the idle default to `0` failed only the source-shape assertion while
