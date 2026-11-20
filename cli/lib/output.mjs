@@ -52,6 +52,28 @@ export function createOutput({ json = false, stream = process.stdout } = {}) {
      * reason. The CLI has no dependencies at all, which is what keeps the trust surface the same size as
      * the launcher's.
      */
+    /**
+     * A framed card for a small set of labelled facts, matching the launcher menu's visual language.
+     * Additive: commands that print plain lines keep working, and `--json` still prints nothing here.
+     */
+    box(title, rows) {
+      if (json) return;
+      const clean = (text) => String(text).replace(/\x1b\[[0-9;]*m/g, '');
+      const lines = [title, ...rows.filter((row) => row !== undefined)];
+      const width = Math.max(...lines.map((line) => clean(line).length));
+      const glyph = colour
+        ? { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│' }
+        : { tl: '+', tr: '+', bl: '+', br: '+', h: '-', v: '|' };
+      const edge = `${glyph.tl}${glyph.h.repeat(width + 2)}${glyph.tr}`;
+      stream.write(`${edge}\n`);
+      lines.forEach((line, index) => {
+        const pad = ' '.repeat(Math.max(0, width - clean(line).length));
+        stream.write(`${glyph.v} ${line}${pad} ${glyph.v}\n`);
+        if (index === 0 && rows.length) stream.write(`${glyph.v}${' '.repeat(width + 2)}${glyph.v}\n`);
+      });
+      stream.write(`${glyph.bl}${glyph.h.repeat(width + 2)}${glyph.br}\n`);
+    },
+
     table(rows, headers) {
       if (json) return;
       if (rows.length === 0) {

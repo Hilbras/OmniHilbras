@@ -496,19 +496,42 @@ async function start() {
 
   if (process.stdin.isTTY && process.stdout.isTTY && !options.log) {
     const gatewayUrl = `http://${LOOPBACK}:${options.gatewayPort}`;
-    const items = [{ label: 'Open dashboard' }, { label: 'Restart' }, { label: 'Exit' }];
+    const items = [
+      { label: 'Open dashboard', description: 'Servers, providers and keys', section: 'Dashboard' },
+      { label: 'Providers', description: 'Connect an account or paste a key', section: 'Dashboard' },
+      { label: 'Models', description: 'Saved and catalogued models', section: 'Dashboard' },
+      { label: 'Usage', description: 'Requests, tokens and cost', section: 'Dashboard' },
+      { label: 'Logs', description: 'Live request log with filters', section: 'Dashboard' },
+      { label: 'Restart', description: 'Stop and start both servers', section: 'Server' },
+      { label: 'Exit', description: 'Stop both servers and close', section: 'Server' },
+    ];
     // The header asks the gateway rather than asserting it: a gateway that did not answer reads as unknown,
-    // never as healthy. Refreshed each time the menu redraws, so a restart is reflected without a relaunch.
+    // never as healthy. Uptime is computed from the timestamp the gateway reported, so a clock-skewed
+    // launcher cannot claim a process has been up longer than it has. Refreshed on every redraw so a
+    // restart is reflected without a relaunch.
+    const uptime = (startedAt) => {
+      const started = Date.parse(startedAt ?? '');
+      if (!Number.isFinite(started)) return undefined;
+      const minutes = Math.max(0, Math.floor((Date.now() - started) / 60_000));
+      if (minutes < 1) return '<1m';
+      if (minutes < 60) return `${minutes}m`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours}h ${minutes % 60}m`;
+      return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+    };
     const header = async () => {
       let health;
       let version;
+      let stats;
       try {
         const response = await fetch(`${gatewayUrl}/health`, { signal: AbortSignal.timeout(1500) });
         const body = await response.json();
         health = body.status;
         version = body.build?.version;
+        const running = uptime(body.build?.startedAt);
+        if (running) stats = { uptime: running };
       } catch { /* fail-open: the menu still works when the gateway is slow or down */ }
-      return statusHeader({ dashboardUrl, gatewayUrl, health, version, update: updateInfo });
+      return statusHeader({ dashboardUrl, gatewayUrl, health, version, update: updateInfo, stats });
     };
     const loop = async () => {
       while (!stopping) {
@@ -520,9 +543,10 @@ async function start() {
           colour: COLOUR,
           signal: menuAbort.signal,
         });
-        if (stopping || choice === -1 || choice === 2) { await shutdown(0); return; }
-        if (choice === 0) { openBrowser(dashboardUrl); continue; }
-        if (choice === 1) { await restart(); return; }
+        if (stopping || choice === -1 || choice === items.length - 1) { await shutdown(0); return; }
+        if (choice === items.length - 2) { await restart(); return; }
+        const routes = ['', '/providers', '/models', '/usage', '/logs'];
+        openBrowser(`${dashboardUrl}${routes[choice] ?? ''}`);
       }
     };
     void loop();

@@ -102,3 +102,61 @@ test('off a TTY it falls back to a numbered prompt', async () => {
   input.write('2\n');
   assert.equal(await pending, 1);
 });
+
+// The upgraded launcher panel. The original assertions above are the compatibility contract; these pin the
+// framing, grouping, help line and quick keys that make it a real TUI rather than a list of words.
+
+const richItems = [
+  { label: 'Open dashboard', description: 'Manage providers', section: 'Dashboard' },
+  { label: 'Providers', description: 'Connect an account', section: 'Dashboard' },
+  { label: 'Restart', description: 'Stop and start both servers', section: 'Server' },
+  { label: 'Exit', description: 'Stop both servers', section: 'Server' },
+];
+
+test('renderMenu draws a framed panel with grouped sections and descriptions', () => {
+  const frame = renderMenu({ title: 'OmniHilbras 3.88.0', items: richItems, selected: 1, header: 'STATUS', colour: false, width: 70 });
+  assert.match(frame, /^╭─+╮/, 'top border');
+  assert.match(frame, /╰─+╯$/, 'bottom border');
+  assert.match(frame, /│ > ★ Providers\s+Connect an account\s+│/, 'the selected row keeps its marker and shows its description');
+  assert.ok(frame.indexOf('DASHBOARD') < frame.indexOf('SERVER'), 'sections appear in item order');
+  assert.equal((frame.match(/DASHBOARD|SERVER/g) ?? []).length, 2, 'a section heading is printed once');
+});
+
+test('renderMenu prints the key hints as a footer', () => {
+  const frame = renderMenu({ items: richItems, colour: false, width: 70 });
+  assert.match(frame, /↑↓ navigate · Enter select · 1-9 quick · Esc exit/);
+  const custom = renderMenu({ items: richItems, colour: false, width: 70, footer: '↑↓ move · Enter go' });
+  assert.match(custom, /↑↓ move · Enter go/);
+  assert.doesNotMatch(custom, /1-9 quick/);
+});
+
+test('renderMenu truncates long lines to the requested width', () => {
+  const frame = renderMenu({ items: [{ label: 'A very long action label that will not fit in a narrow terminal', description: 'and a long description too' }], colour: false, width: 48 });
+  for (const line of frame.split('\n')) assert.ok(line.length <= 48, `line exceeds width: ${line}`);
+  assert.match(frame, /…/, 'the truncated line says so');
+});
+
+test('number keys and j/k move the selection', async () => {
+  const { input, output } = tty();
+  const pending = selectMenu({ items: richItems, input, output, colour: false });
+  input.emit('keypress', '3', { name: '3' });
+  input.emit('keypress', '', { name: 'return' });
+  assert.equal(await pending, 2, 'a number key jumps straight to that row');
+
+  const second = tty();
+  const pending2 = selectMenu({ items: richItems, input: second.input, output: second.output, colour: false });
+  second.input.emit('keypress', 'j', { name: 'j' });
+  second.input.emit('keypress', 'k', { name: 'k' });
+  second.input.emit('keypress', '', { name: 'return' });
+  assert.equal(await pending2, 0, 'j then k returns to the first row');
+});
+
+test('statusHeader shows only what the gateway reported about uptime and usage', () => {
+  const withStats = statusHeader({ dashboardUrl: 'd', gatewayUrl: 'g', health: 'healthy', stats: { uptime: '2h 14m', requests: 12, failed: 1 } });
+  assert.match(withStats, /Uptime\s+2h 14m/);
+  assert.match(withStats, /Requests\s+12 · 1 failed/);
+  const unmetered = statusHeader({ dashboardUrl: 'd', gatewayUrl: 'g', health: 'healthy', stats: { requests: 0, unmeasured: true } });
+  assert.match(unmetered, /not all metered/, 'zero and unmeasured are not the same claim');
+  const none = statusHeader({ dashboardUrl: 'd', gatewayUrl: 'g', health: 'healthy' });
+  assert.doesNotMatch(none, /Uptime|Requests/, 'absent facts stay absent');
+});

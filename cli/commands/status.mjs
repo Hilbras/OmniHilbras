@@ -32,11 +32,15 @@ export const status = {
     });
 
     const dot = health.status === 'healthy' ? out.ok('●') : out.warn('●');
-    out.title(`${dot} ${health.service ?? 'gateway'} ${health.build?.version ?? ''}`.trim());
-    out.line(`  ${out.muted('url')}        ${client.baseUrl}`);
-    out.line(`  ${out.muted('started')}    ${health.build?.startedAt ?? 'unknown'}`);
-    out.line(`  ${out.muted('auth')}       ${client.auth.kind === 'none' ? out.warn('none (no key and no dashboard token found)') : client.auth.kind}`);
-    out.line(`  ${out.muted('providers')}  ${providers.length - unhealthy.length}/${providers.length} reporting healthy`);
+    out.box(
+      `${dot} ${health.service ?? 'gateway'} ${health.build?.version ?? ''}`.trim(),
+      [
+        `${out.muted('url')}        ${client.baseUrl}`,
+        `${out.muted('started')}    ${health.build?.startedAt ?? 'unknown'}`,
+        `${out.muted('auth')}       ${client.auth.kind === 'none' ? out.warn('none (no key and no dashboard token found)') : client.auth.kind}`,
+        `${out.muted('providers')}  ${providers.length - unhealthy.length}/${providers.length} reporting healthy`,
+      ],
+    );
 
     if (unhealthy.length > 0) {
       out.line();

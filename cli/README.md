@@ -19,8 +19,11 @@ Bare `omnihilbras` is a launcher. It starts two processes that ship in the packa
 - `server/gateway.mjs` — the gateway, bundled from the workspace by esbuild;
 - `server/static.mjs` — a small static server for the built dashboard, which points at the gateway.
 
-It waits for both ports, prints a summary, opens `http://localhost:20137/dashboard`, and shows a menu
-to open the dashboard again, restart both, or exit. `Ctrl-C` stops both. If a port is already held by
+It waits for both ports, prints a summary, opens `http://localhost:20137/dashboard`, then shows a framed
+terminal panel: a live status header (dashboard, gateway, health, uptime), grouped shortcuts to the dashboard,
+providers, models, usage and logs, and a restart/exit section. `↑↓` or `j/k` move the highlight, `1`–`9` jump
+to a row, `Enter` selects, `Esc` stops both. The header asks `/health` on every redraw, so a gateway that did
+not answer reads as unknown rather than healthy. `Ctrl-C` stops both. If a port is already held by
 a Node/Vite/pnpm process it is stopped first; a different program is left alone unless you pass
 `--force`.
 
