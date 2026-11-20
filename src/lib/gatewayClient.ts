@@ -65,6 +65,8 @@ export type GatewayConnection = {
   endpoint: string;
   priority: number;
   proxyPool: string;
+  /** Allowance tier for routing preference; absent on older records. */
+  quotaTier?: 'paid' | 'cheap' | 'free';
   enabled: boolean;
   hasCredential: boolean;
   /** The account identity the credential carries (an OAuth email), when it has one. */
@@ -474,6 +476,7 @@ export type GatewayConnectionInput = {
   endpoint: string;
   priority?: number;
   proxyPool?: string;
+  quotaTier?: 'paid' | 'cheap' | 'free';
   modelPolicy?: 'free' | 'all';
 } & ({ apiKey: string; credential?: never } | { credential: 'none'; apiKey?: never });
 

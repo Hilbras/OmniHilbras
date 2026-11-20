@@ -62,6 +62,8 @@ export type ConnectionRecord = {
   priority: number;
   proxyPool: string;
   enabled: boolean;
+  /** Allowance tier for routing preference; absent on older records. */
+  quotaTier?: QuotaTier;
   hasCredential: boolean;
   /** Share traffic with the other balanced connections at the same priority, instead of always taking the first. */
   balance?: boolean;
@@ -134,6 +136,10 @@ export type ResilienceSettings = {
   hedgeAfterMs: number;
 };
 
+/** A connection's allowance tier, used to prefer paid accounts over cheap/free ones when both can serve. */
+export type QuotaTier = 'paid' | 'cheap' | 'free';
+export const quotaTierOrder: Record<QuotaTier, number> = { paid: 0, cheap: 1, free: 2 };
+
 export type ConnectionInput = {
   id?: string;
   providerId: ProviderId;
@@ -142,6 +148,7 @@ export type ConnectionInput = {
   priority: number;
   proxyPool: string;
   enabled?: boolean;
+  quotaTier?: QuotaTier;
   /** Set by the store on every save; not part of a caller's input in practice. */
   credentialFingerprint?: string;
   modelPolicy?: ModelImportPolicy;
@@ -731,6 +738,7 @@ function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefi
     endpoint: normalized.endpoint,
     priority: normalized.priority,
     proxyPool: normalized.proxyPool,
+    ...(normalized.quotaTier ?? existing?.quotaTier ? { quotaTier: normalized.quotaTier ?? existing?.quotaTier } : {}),
     enabled: normalized.enabled ?? existing?.enabled ?? true,
     hasCredential: true,
     // Read from the **raw** input, not `normalized`: `normalizeInput` does not carry this field (it is
@@ -1392,6 +1400,7 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
   if (!Number.isInteger(input.priority) || input.priority < 1 || input.priority > 1000) throw new Error('Connection priority must be an integer from 1 to 1000.');
   const proxyPool = input.proxyPool.trim();
   if (proxyPool.length > 128 || /[\r\n\0]/.test(proxyPool)) throw new Error('Proxy pool name is invalid.');
+  if (input.quotaTier !== undefined && !(input.quotaTier in quotaTierOrder)) throw new Error('Quota tier must be paid, cheap or free.');
   if (input.modelPolicy !== undefined && input.modelPolicy !== 'free' && input.modelPolicy !== 'all') throw new Error('Model import policy is invalid.');
   const modelIds = input.modelIds === undefined ? undefined : normalizeModelIds(input.modelIds);
   const customModelIds = input.customModelIds === undefined ? undefined : normalizeModelIds(input.customModelIds);
@@ -1403,6 +1412,7 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
     endpoint,
     priority: input.priority,
     proxyPool,
+    ...(input.quotaTier === undefined ? {} : { quotaTier: input.quotaTier }),
     ...(modelMeta ? { modelMeta } : {}),
     ...(input.catalogRefreshedAt ? { catalogRefreshedAt: input.catalogRefreshedAt } : {}),
     ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
@@ -1568,6 +1578,7 @@ function parseRecord(value: unknown): ConnectionRecord {
     endpoint: value.endpoint,
     priority: value.priority,
     proxyPool: value.proxyPool,
+    ...(typeof value.quotaTier === 'string' && value.quotaTier in quotaTierOrder ? { quotaTier: value.quotaTier as QuotaTier } : {}),
     enabled: value.enabled,
     ...(typeof value.credentialFingerprint === 'string' && value.credentialFingerprint ? { credentialFingerprint: value.credentialFingerprint } : {}),
     modelPolicy: value.modelPolicy === undefined ? 'all' : value.modelPolicy,
@@ -1590,6 +1601,7 @@ function parseRecord(value: unknown): ConnectionRecord {
     endpoint: input.endpoint,
     priority: input.priority,
     proxyPool: input.proxyPool,
+    ...(input.quotaTier === undefined ? {} : { quotaTier: input.quotaTier }),
     enabled: value.enabled,
     hasCredential: value.hasCredential,
     // Both are written to the metadata and were never read back: `normalizeInput` carries neither

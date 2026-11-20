@@ -140,3 +140,9 @@ New routes need a SPEC line + gateway test. The website is a separate Vercel dep
   and refreshes immediately on a notification; the 4 s poll remains the fallback (desktop keeps polling).
   `Kernel/API/test/events-route.test.js` (4 cases: admin gate, change notification with no data, no notification
   on a stable state, secret-free fingerprint) passes; SPEC + route guard green.
+- **Phase 6 — complete in the tree (3.82.0).** Combos and auto-fallback already existed: a virtual model
+  (`/v1/virtual-models`) is an ordered, strategy-driven combo, and health ejection + failover is the automatic
+  fallback. The genuine gap was the **quota tier**: an optional `quotaTier` (`paid`/`cheap`/`free`) on a connection
+  is validated in the save route, survives a store reopen, and sorts candidates paid → cheap → free before
+  priority (absent tier sorts as `paid`, so older records keep their placement). `quota-tier.test.js` (5 cases)
+  passes; the dashboard type and card show the tier. SPEC updated.

@@ -3,6 +3,13 @@
  */
 
 import { assertSafeProviderRequestUrl, type ModelImportPolicy, type ProviderCredential } from '../core/index.js';
+import { quotaTierOrder, type QuotaTier } from '../core/connections.js';
+
+/** Parses an optional allowance tier. An unknown value is refused, not silently downgraded. */
+function parseQuotaTier(value: unknown): QuotaTier {
+  if (typeof value !== 'string' || !(value in quotaTierOrder)) throw invalidRequest('quotaTier must be paid, cheap or free.');
+  return value as QuotaTier;
+}
 import type { RouteContext } from './route-context.js';
 import { gatewayBuild } from '../core/build-info.js';
 
@@ -15,6 +22,7 @@ type OpenRouterConnectionRequest = {
   priority: number;
   proxyPool: string;
   enabled?: boolean;
+  quotaTier?: QuotaTier;
   modelPolicy: ModelImportPolicy;
   credential: ProviderCredential;
 };
@@ -223,7 +231,7 @@ export const openRouterEndpoint = 'https://openrouter.ai/api/v1' as const;
 
 export function parseOpenRouterConnectionRequest(body: unknown): OpenRouterConnectionRequest {
   if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
-  assertOnlyFields(body, ['apiKey', 'name', 'priority', 'proxyPool', 'enabled', 'modelPolicy']);
+  assertOnlyFields(body, ['apiKey', 'name', 'priority', 'proxyPool', 'enabled', 'quotaTier', 'modelPolicy']);
   const name = parseBoundedString(body.name, 'name', 120);
   const priority = body.priority === undefined ? 1 : parsePriority(body.priority);
   const proxyPool = body.proxyPool === undefined ? 'none' : parseBoundedString(body.proxyPool, 'proxyPool', 128, true);
@@ -236,6 +244,7 @@ export function parseOpenRouterConnectionRequest(body: unknown): OpenRouterConne
     endpoint: openRouterEndpoint,
     priority,
     proxyPool,
+    ...(body.quotaTier === undefined ? {} : { quotaTier: parseQuotaTier(body.quotaTier) }),
     modelPolicy,
     ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
     credential: parseApiKey(body),
@@ -274,11 +283,11 @@ function parseConnectionCredential(body: Record<string, unknown>): ProviderCrede
   return { type: 'none' };
 }
 
-export function parseGenericConnectionRequest(body: unknown, providerId: string): { id?: string; providerId: string; name: string; endpoint: string; priority: number; proxyPool: string; enabled?: boolean; modelPolicy?: ModelImportPolicy; responsibility?: { owner?: string; purpose?: string }; resilience?: { timeoutMs?: number; maxRetries?: number; requestsPerMinute?: number; hedgeAfterMs?: number }; credential: ProviderCredential } {
+export function parseGenericConnectionRequest(body: unknown, providerId: string): { id?: string; providerId: string; name: string; endpoint: string; priority: number; proxyPool: string; enabled?: boolean; quotaTier?: QuotaTier; modelPolicy?: ModelImportPolicy; responsibility?: { owner?: string; purpose?: string }; resilience?: { timeoutMs?: number; maxRetries?: number; requestsPerMinute?: number; hedgeAfterMs?: number }; credential: ProviderCredential } {
   if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
   // `id` is accepted so a caller can add a second connection for a provider that
   // already has one. Omitting it reuses that provider's existing connection.
-  assertOnlyFields(body, ['apiKey', 'credential', 'name', 'endpoint', 'id', 'priority', 'proxyPool', 'enabled', 'modelPolicy', 'resilience', 'responsibility']);
+  assertOnlyFields(body, ['apiKey', 'credential', 'name', 'endpoint', 'id', 'priority', 'proxyPool', 'enabled', 'quotaTier', 'modelPolicy', 'resilience', 'responsibility']);
   const endpoint = body.endpoint === undefined ? '' : parseBoundedString(body.endpoint, 'endpoint', 2048);
   if (!endpoint) throw invalidRequest('endpoint is required.');
   assertSafeEndpoint(endpoint, providerId);
@@ -295,6 +304,7 @@ export function parseGenericConnectionRequest(body: unknown, providerId: string)
     priority,
     proxyPool,
     ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
+    ...(body.quotaTier === undefined ? {} : { quotaTier: parseQuotaTier(body.quotaTier) }),
     ...(body.modelPolicy === undefined ? {} : { modelPolicy: parseModelPolicy(body.modelPolicy) }),
     ...(body.responsibility === undefined ? {} : { responsibility: parseResponsibility(body.responsibility) }),
     ...(body.resilience === undefined

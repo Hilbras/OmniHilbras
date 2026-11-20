@@ -98,7 +98,9 @@ export function mergeGatewayConnections(providers: ProviderRecord[], connections
       /** How many accounts this provider holds — the number the card states, not a hardcoded one. */
       accountCount: accounts.length,
       // Measured: the models the connection actually imported.
-      models: modelIds.length > 0 ? `${modelIds.length} models · ${connection.modelPolicy === 'free' ? 'free import' : 'all import'}` : connection.hasCredential ? 'No imported models' : '—',
+      models: modelIds.length > 0
+        ? `${modelIds.length} models · ${connection.modelPolicy === 'free' ? 'free import' : 'all import'}${connection.quotaTier ? ` · ${connection.quotaTier} tier` : ''}`
+        : connection.hasCredential ? 'No imported models' : '—',
       modelList: modelIds,
       // Usage tracking exists in the gateway (per-connection requestCount + lastUsed). Set these
       // from the tracking, never from health — a health poll is not usage.

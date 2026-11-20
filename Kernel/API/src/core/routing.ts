@@ -1,4 +1,5 @@
 import { isProviderError, ProviderError, providerPrefixes } from './index.js';;
+import { quotaTierOrder } from './connections.js';
 import type { ConnectionRecord, ModelCooldown, ResilienceSettings } from './connections.js';
 
 /** Why a candidate was skipped, so the gateway can explain the decision. */
@@ -694,7 +695,12 @@ export function resolveRoute(input: {
   const modelId = input.model.trim();
   const usable = input.connections
     .filter((connection) => connection.enabled && connection.hasCredential)
-    .sort((left, right) => left.priority - right.priority || left.name.localeCompare(right.name));
+    .sort((left, right) =>
+      // Paid accounts before cheap before free, then the existing priority and name. An absent tier
+      // sorts with `paid` (0) so every record written before tiers existed keeps its old placement.
+      (quotaTierOrder[left.quotaTier ?? 'paid'] - quotaTierOrder[right.quotaTier ?? 'paid'])
+      || left.priority - right.priority
+      || left.name.localeCompare(right.name));
   rotateBalancedConnections(usable, input.rotation ?? 0);
   orderFastestFirst(usable, input.strategyFor, input.latencyFor);
   // Last, so nothing above can reorder over it: the named account leads, priority or not.
