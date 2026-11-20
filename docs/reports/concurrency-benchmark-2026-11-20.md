@@ -32,3 +32,12 @@ p99 1.15→1.07 ms (20% / 7.6%). Both show the current build faster on the gatew
 lets the LLM surface skip the 23 earlier handlers that all decline those paths, while `handleInferenceRoute`
 keeps its own auth gate — so no check is skipped. Round-trip latency remains noisy and is not claimed improved.
 
+## CPU-time A/B (most stable measure)
+
+Wall-clock p99 at 400 concurrent fetches swings by ±400 ms between identical runs because the client's
+`internalConnect`/`writev`/GC dominates. `scripts/benchmark-concurrency-cpu.mjs` measures
+`process.cpuUsage()` across a whole 400-request batch, with both builds loaded in one process and measured
+alternately over 11 rounds. CPU time reflects the work the gateway actually did; the client is identical for
+both builds. Measured: baseline 755.8 ms CPU/batch vs current 708.0 ms — a **6.3% reduction**. This is the
+most stable evidence that the fast dispatch improves the gateway's own path.
+

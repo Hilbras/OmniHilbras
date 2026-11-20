@@ -31,12 +31,14 @@ connection-save surface, not an invented OAuth flow.
 
 ## Phase 3 — Gateway registration and routes
 
-- [ ] One `.onDemand(<id>)` registration per id, resolving that id's package.
-- [ ] Own route surface: connection save/probe/models/quota paths use the registry row, not a dashboard-supplied base.
-- [ ] OAuth routes only for ids with a real flow (already present); API-key ids get no fake sign-in.
-- [ ] Verify: `pnpm verify`, `pnpm test:e2e`.
+- [x] One explicit `.onDemand('<id>', …)` registration per new id, resolving that id's own package.
+- [x] `ProviderResolver` uses the registry base as the default; a saved connection may override it with a custom endpoint.
+- [x] A guard checks every OAuth provider has its own start/session route, or names the connection owner it signs in
+      through (`clinepass` → `cline`); every OAuth route names a registry row.
+- [x] Verify: `pnpm verify` and `pnpm test:e2e` pass.
 
 ## Phase 4 — Docs and release
 
-- [ ] SPEC gets a provider-independence table; README states the rule.
-- [ ] Version bumps and releases per phase, per AGENTS.md.
+- [x] SPEC gets a provider-independence section; README states the rule.
+- [x] Version `3.69.0`, tag on `main`, GitHub release, npm publish confirmed with `npm view`, release audit clean.
+- [x] CI on `v3.69.0`: verify, e2e, Docker and desktop all green.
