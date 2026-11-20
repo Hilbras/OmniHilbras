@@ -146,3 +146,21 @@ New routes need a SPEC line + gateway test. The website is a separate Vercel dep
   is validated in the save route, survives a store reopen, and sorts candidates paid → cheap → free before
   priority (absent tier sorts as `paid`, so older records keep their placement). `quota-tier.test.js` (5 cases)
   passes; the dashboard type and card show the tier. SPEC updated.
+- **Phase 5 — already satisfied (verified, no change needed).** The cost/usage analytics view exists: `/v1/usage`
+  returns `byProvider`/`byModel`/`timeline` + honest `costUsd`/`pricedRequests`/`unpricedRequests` (SPEC-SDK.md:300),
+  rendered by `UsagePage.tsx`. The heavy charts are already lazy (`UsagePage.tsx:29-38` — `UsageCharts`,
+  `UsageTopology`), recharts is guarded by `tests/bundle-budget.test.js:145-168`, and `analyze:check` enforces the
+  budget. No redundant change was made; the guard is what keeps it true.
+- **Phase 2 — drift guard done (3.82.x), full consolidation deferred as high-risk.** `errors.ts` and `url.ts`
+  are byte-identical across all 54 vendored `lib/` copies; `tests/vendored-lib-drift.test.js` pins that (3 cases),
+  so a fix to one copy that misses the others fails in `pnpm test:repo`. `types.ts` (7 shapes) and
+  `transport.ts` (3) vary deliberately and are explicitly not pinned. A full move to one shared package touches
+  every SDK's build/bundle path and is deferred rather than risked on this pass; the guard contains the drift.
+- **Phase 7 — RTK half already satisfied; direct-translation deferred.** `Kernel/TokenSaver` already ships
+  `compressRtk`, `autoDetectFilter`, per-tool filters and telemetry (`TokenSaver/src/rtk.ts`, `filters/`,
+  `messages.ts`). Direct `source:target` format-translation routes are a new subsystem (a registry + route +
+  adapter wiring); deferred rather than shipped untested on this pass.
+- **Phase 8 / Phase 9 — deferred.** Accessibility audit + virtualization + design tokens and the optional
+  multi-user/teams + scale work are substantial independent efforts; recorded here rather than rushed. What is
+  already true: lazy pages/charts, a bundle budget, the two-entry allowlist for browser storage, and per-page
+  a11y primitives (focus trap / Escape / focus restore in dialogs).
