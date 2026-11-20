@@ -95,10 +95,10 @@ export class ApiKeyManager {
     });
   }
 
-  create(name: string) {
+  create(name: string, workspaceId?: string) {
     // The secret is returned exactly once, here, and never re-readable. Anything that wanted to
     // show it twice would have to store it, which is the thing this design avoids.
-    return this.mutate(() => this.requireStore().create(name));
+    return this.mutate(() => this.requireStore().create(name, workspaceId));
   }
 
   async setEnabled(id: string, enabled: boolean) {

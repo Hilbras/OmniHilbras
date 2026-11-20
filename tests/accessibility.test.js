@@ -124,3 +124,41 @@ test('every form field is named', async () => {
   }
   assert.deepEqual(problems, [], `a form field has no accessible name:\n${problems.join('\n')}`);
 });
+
+test('every dialog closes on Escape, traps focus, and restores it on close', async () => {
+  // These three primitives were once missing from the Models dialog. They are regression locks, not style.
+  const files = [
+    'src/pages/ModelsPage.tsx',
+    'src/pages/ApiKeysPage.tsx',
+    'src/components/OauthConnectDialog.tsx',
+    'src/components/KiroConnectDialog.tsx',
+    'src/components/WebCookieConnectDialog.tsx',
+    'src/components/AddProviderModal.tsx',
+  ];
+  const problems = [];
+  for (const file of files) {
+    let text;
+    try { text = await readFile(join(ROOT, file), 'utf8'); } catch { continue; }
+    // A dialog may implement the primitives itself or delegate to the shared Dialog primitive (which has all three).
+    const delegates = /<Dialog\b/.test(text) && !/role="dialog"/.test(text);
+    if (!delegates) {
+      if (!/Escape/.test(text)) problems.push(`${file}: no Escape handler`);
+      if (!/activeElement/.test(text)) problems.push(`${file}: no focus restoration`);
+      if (!/Tab/.test(text) && !/focusTrap/.test(text)) problems.push(`${file}: no focus trap`);
+    }
+  }
+  assert.deepEqual(problems, [], `a dialog lost an accessibility primitive:\n${problems.join('\n')}`);
+});
+
+test('no new hard-coded hex colours are added to the dashboard', async () => {
+  // 126 legacy hex literals exist in src/ (mostly deliberate terminal accents). This is a ratchet, not a
+  // clean-up mandate: the count may go down freely, but a new literal must use a design token instead.
+  const BASELINE = 126;
+  let total = 0;
+  for (const file of await tsxFiles(join(ROOT, 'src'))) {
+    const text = await readFile(file, 'utf8');
+    total += [...text.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].length;
+  }
+  assert.ok(total <= BASELINE, `src/ has ${total} hard-coded hex colours (baseline ${BASELINE}); use a design token`);
+});
+

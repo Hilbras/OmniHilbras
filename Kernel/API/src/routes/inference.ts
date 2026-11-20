@@ -8,6 +8,7 @@ import { requestIdOf } from '../core/http.js';
  */
 
 import { estimatePromptTokens, estimateTokens } from '../core/token-estimate.js';
+import { anthropicMessagesToChat, chatToMessagesBody, translatorFor } from '../core/format-translation.js';
 import { ProviderError, canonicalizeUsage, isLoopbackHostname, isPrivateHostname, isProviderError, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type MessageContent, type Model, type ProviderId, type ToolCall, type ToolDefinition } from '../core/index.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
@@ -67,6 +68,11 @@ export async function handleInferenceRoute(ctx: RouteContext): Promise<boolean> 
 
     if (request.method === 'POST' && url.pathname === '/v1/responses') {
       await handleResponses(request, response, service, options, origin, signal);
+      return true;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/messages') {
+      await handleMessages(request, response, service, options, origin, signal);
       return true;
     }
 
@@ -371,6 +377,80 @@ export async function handleResponses(request: IncomingMessage, response: Server
       ...toolSupportNote(chatRequest.tools, completion.providerId),
     },
   }, origin);
+}
+
+/**
+ * `POST /v1/messages`: the Anthropic Messages shape, translated directly to the chat request the adapters
+ * accept and the reply reframed back. Same chat path for routing, failover, usage and the key gate. Streaming
+ * is refused rather than served in the wrong shape — an Anthropic SSE event protocol is a separate surface.
+ */
+export async function handleMessages(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
+  const body = await readJsonBody(request, options.maxBodyBytes ?? maxInferenceBodyBytes);
+  if (isRecord(body) && body.stream === true) throw invalidRequest('stream is not supported on /v1/messages; use /v1/chat/completions for streaming.');
+  const translator = translatorFor('messages-api');
+  if (!translator) throw invalidRequest('No direct Anthropic Messages translator is registered.');
+  const chatRequest = parseChatRequest(translator.translate(body));
+  const explicitConnectionId = getExplicitConnectionId(request, body);
+  if (explicitConnectionId !== undefined) chatRequest.connectionId = explicitConnectionId;
+  const explicitProviderId = getExplicitProviderId(request, body);
+  const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request), requestIdOf(request));
+  const startedAt = Date.now();
+  let completion: ChatResponse;
+  let attempts: GatewayFailoverAttempt[];
+  try {
+    ({ response: completion, attempts } = await service.chatWithFailover(chatRequest, explicitProviderId, signal, scope));
+  } catch (error) {
+    const details = isProviderError(error) ? error.details : undefined;
+    const ledger: GatewayFailoverAttempt[] =
+      typeof details === 'object' && details !== null && Array.isArray((details as { attempts?: unknown }).attempts)
+        ? ((details as { attempts?: unknown[] }).attempts as GatewayFailoverAttempt[]) : [];
+    const cancelled = signal.aborted || (isProviderError(error) && error.code === 'CANCELLED');
+    recordUsage(service, {
+      model: chatRequest.model,
+      providerId: ledger[ledger.length - 1]?.providerId,
+      connectionId: servingConnection(ledger),
+      outcome: cancelled ? 'cancelled' : 'failure',
+      attempts: ledger.length,
+      latencyMs: Date.now() - startedAt,
+      ...(isProviderError(error) ? { errorCode: error.code } : {}),
+      requestId: scope.id,
+      ledger,
+    });
+    throw attachRequestId(error, scope);
+  }
+  const serving = attempts.find((attempt) => attempt.ok);
+  recordUsage(service, {
+    model: completion.model,
+    providerId: completion.providerId,
+    connectionId: serving?.connectionId,
+    outcome: 'success',
+    attempts: attempts.length,
+    latencyMs: Date.now() - startedAt,
+    ...(completion.usage ? { usage: completion.usage } : {}),
+    requestId: scope.id,
+    ledger: attempts,
+  });
+  const text = typeof completion.message.content === 'string' ? completion.message.content : '';
+  sendJson(response, 200, {
+    ...chatToMessagesBody({
+      id: completion.id,
+      model: completion.model,
+      createdAt: completion.createdAt,
+      content: text,
+      ...(completion.message.toolCalls ? { toolCalls: completion.message.toolCalls } : {}),
+      ...(completion.usage ? { usage: completion.usage } : {}),
+    }),
+    gateway: {
+      requestId: scope.id,
+      ...(attempts.length > 1 ? { attempts: attempts.map(toPublicAttempt) } : {}),
+      ...toolSupportNote(chatRequest.tools, completion.providerId),
+    },
+  }, origin);
+}
+
+/** Last serving connection id from a ledger, or undefined — shared by the translated routes' failure paths. */
+function servingConnection(ledger: readonly GatewayFailoverAttempt[]): string | undefined {
+  return ledger[ledger.length - 1]?.connectionId;
 }
 
 /**
@@ -1348,6 +1428,7 @@ export function isPublicLlmRoute(method: string | undefined, pathname: string) {
   return (method === 'GET' && pathname === '/v1/models')
     || (method === 'POST' && pathname === '/v1/chat/completions')
     || (method === 'POST' && pathname === '/v1/responses')
+    || (method === 'POST' && pathname === '/v1/messages')
     || (method === 'POST' && pathname === '/v1/embeddings')
     || (method === 'POST' && pathname === '/v1/images/generations')
     || (method === 'POST' && pathname === '/v1/messages/count_tokens');

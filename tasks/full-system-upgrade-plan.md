@@ -1,6 +1,6 @@
 # Full-system upgrade plan — frontend + backend
 
-**Created:** 2026-11-20 · **Baseline:** `3.79.0` · **Status:** starting Phase 1.
+**Created:** 2026-11-20 · **Baseline:** `3.79.0` · **Status:** all nine phases delivered (3.80.0 – 3.84.0); Phase 9 is a bounded foundation, not full tenant isolation.
 
 ## Goal
 
@@ -160,7 +160,16 @@ New routes need a SPEC line + gateway test. The website is a separate Vercel dep
   `compressRtk`, `autoDetectFilter`, per-tool filters and telemetry (`TokenSaver/src/rtk.ts`, `filters/`,
   `messages.ts`). Direct `source:target` format-translation routes are a new subsystem (a registry + route +
   adapter wiring); deferred rather than shipped untested on this pass.
-- **Phase 8 / Phase 9 — deferred.** Accessibility audit + virtualization + design tokens and the optional
-  multi-user/teams + scale work are substantial independent efforts; recorded here rather than rushed. What is
-  already true: lazy pages/charts, a bundle budget, the two-entry allowlist for browser storage, and per-page
-  a11y primitives (focus trap / Escape / focus restore in dialogs).
+- **Phase 8 — a11y + token ratchet done.** `tests/accessibility.test.js` now pins every dialog's Escape /
+  focus-trap / focus-restore primitives and ratchets hard-coded hex colours at the current baseline (126);
+  ApiKeysPage's Modal and WebCookieConnectDialog were missing a Tab focus trap and now have one. Large-list
+  handling and lazy pages/charts already exist. Typecheck + 6 a11y tests green.
+- **Phase 7 — direct format translation done.** `core/format-translation.ts` registers one `source → target`
+  pair (Anthropic Messages → chat), and `POST /v1/messages` serves Anthropic SDK clients by translating in and
+  reframing the reply out. `format-translation.test.js` + `messages-route.test.js` (9 cases), gateway suite green.
+  RTK filters were already present in `Kernel/TokenSaver`.
+- **Phase 9 — multi-user foundation done (partial by design).** An optional `workspaceId` on API keys is
+  validated at create, persisted, and round-tripped through the store and authentication
+  (`api-key-workspace.test.js`, 3 cases). Full per-request tenant isolation would thread identity through every
+  route/store and is deliberately not rushed; the plan marks this phase major/optional and the scope is stated
+  honestly in SPEC. Scale coordination (shared rate-limit budgets) stays a documented future item.

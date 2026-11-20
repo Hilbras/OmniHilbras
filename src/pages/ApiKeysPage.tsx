@@ -53,8 +53,17 @@ function maskPrefix(prefix: string) {
 function Modal({ title, description, children, onClose, width = 'max-w-md' }: { title: string; description?: string; children: ReactNode; onClose: () => void; width?: string }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    const focusables = () => [...(panelRef.current?.querySelectorAll<HTMLElement>('input, select, textarea, button:not([disabled])') ?? [])];
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') { onClose(); return; }
+      // Keep Tab inside the dialog so a keyboard user cannot reach the page behind it.
+      if (event.key !== 'Tab') return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
     // Where focus came from, so closing the dialog does not drop a keyboard user at the top of the document.
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;

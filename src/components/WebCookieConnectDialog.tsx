@@ -175,6 +175,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
   };
 
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // Returns focus to the control that opened the dialog, so closing it does not drop a keyboard user at the top of the page.
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -186,7 +187,15 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') { onClose(); return; }
+      // Keep Tab inside the dialog; a keyboard user must not reach the page behind it.
+      if (event.key !== 'Tab') return;
+      const items = [...(panelRef.current?.querySelectorAll<HTMLElement>('input, select, textarea, button:not([disabled]), a[href]') ?? [])];
+      if (items.length === 0) return;
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
@@ -297,6 +306,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
       }}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={`Connect ${providerName}`}

@@ -3093,8 +3093,8 @@ export class GatewayService {
   }
 
   /** Creating a key returns its secret exactly once; it is never readable again. */
-  createApiKey(name: string) {
-    return this.apiKeys.create(name);
+  createApiKey(name: string, workspaceId?: string) {
+    return this.apiKeys.create(name, workspaceId);
   }
 
   setApiKeyEnabled(id: string, enabled: boolean) {

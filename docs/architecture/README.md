@@ -79,8 +79,8 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/http.ts` | 356 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 904 | 20 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 410 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
-| `Kernel/API/src/routes/inference.ts` | 1371 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and the auth gate |
-| `Kernel/API/src/routes/api-keys.ts` | 101 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
+| `Kernel/API/src/routes/inference.ts` | 1452 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and the auth gate |
+| `Kernel/API/src/routes/api-keys.ts` | 105 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
 | `Kernel/API/src/routes/status.ts` | 220 | **0** | `/health`, `/`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
 | `Kernel/API/src/server.ts` | 459 | **1** | refuses a half-configured Codex OAuth override at startup, and gives every request the id its record will carry |

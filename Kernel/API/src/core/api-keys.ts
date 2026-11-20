@@ -29,6 +29,8 @@ export type ApiKeyRecord = {
   rpm?: number;
   /** ISO 8601. After this the key is refused, whether or not it is enabled. */
   expiresAt?: string;
+  /** Optional workspace this key belongs to (multi-user foundation); absent means unscoped. */
+  workspaceId?: string;
 };
 
 /** A freshly minted key. `key` is returned exactly once, at creation time. */
@@ -39,7 +41,7 @@ export type CreatedApiKey = {
 
 export interface ApiKeyStore {
   list(): Promise<ApiKeyRecord[]>;
-  create(name: string): Promise<CreatedApiKey>;
+  create(name: string, workspaceId?: string): Promise<CreatedApiKey>;
   setEnabled(id: string, enabled: boolean): Promise<ApiKeyRecord | undefined>;
   /** Renames a key. `undefined` when no key has that id — the route answers 404 rather than inventing one. */
   rename(id: string, name: string): Promise<ApiKeyRecord | undefined>;
@@ -114,7 +116,7 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
     return [...this.keys.values()].map((stored) => toRecord(stored)).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
-  async create(name: string) {
+  async create(name: string, workspaceId?: string) {
     const normalizedName = normalizeName(name);
     if (this.keys.size >= maxKeys) throw new ApiKeyLimitError();
     const secret = `${keyPrefix}${randomBytes(keySecretBytes).toString('base64url')}`;
@@ -122,6 +124,7 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
     const stored: StoredApiKey = {
       id: `${idPrefix}${randomBytes(9).toString('base64url')}`,
       name: normalizedName,
+      ...(workspaceId === undefined ? {} : { workspaceId }),
       prefix: secret.slice(0, keyPrefix.length + 8),
       keyHash: hashKey(secret),
       enabled: true,
@@ -247,7 +250,7 @@ export class LocalApiKeyStore implements ApiKeyStore {
     return [...this.keys.values()].map((stored) => toRecord(stored)).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
-  async create(name: string) {
+  async create(name: string, workspaceId?: string) {
     return this.withMutation(async () => {
       const normalizedName = normalizeName(name);
       await this.ensureLoaded();
@@ -257,6 +260,7 @@ export class LocalApiKeyStore implements ApiKeyStore {
       const stored: StoredApiKey = {
         id: `${idPrefix}${randomBytes(9).toString('base64url')}`,
         name: normalizedName,
+        ...(workspaceId === undefined ? {} : { workspaceId }),
         prefix: secret.slice(0, keyPrefix.length + 8),
         keyHash: hashKey(secret),
         enabled: true,
@@ -527,6 +531,7 @@ function toRecord(stored: StoredApiKey): ApiKeyRecord {
     requests: stored.requests ?? 0,
     ...(stored.rpm === undefined ? {} : { rpm: stored.rpm }),
     ...(stored.expiresAt === undefined ? {} : { expiresAt: stored.expiresAt }),
+    ...(stored.workspaceId === undefined ? {} : { workspaceId: stored.workspaceId }),
     ...(stored.lastUsedAt === undefined ? {} : { lastUsedAt: stored.lastUsedAt }),
   };
 }
@@ -588,6 +593,7 @@ function parseStoredKey(value: unknown): StoredApiKey {
   }
   if (value.rpm !== undefined && (!Number.isInteger(value.rpm) || (value.rpm as number) <= 0)) throw new Error('Local API key store contains an invalid key.');
   if (value.expiresAt !== undefined && (typeof value.expiresAt !== 'string' || Number.isNaN(Date.parse(value.expiresAt)))) throw new Error('Local API key store contains an invalid key.');
+  if (value.workspaceId !== undefined && (typeof value.workspaceId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(value.workspaceId))) throw new Error('Local API key store contains an invalid key.');
   return {
     id: value.id,
     name: normalizeName(value.name),
@@ -599,6 +605,7 @@ function parseStoredKey(value: unknown): StoredApiKey {
     requests: typeof value.requests === 'number' ? Math.floor(value.requests) : 0,
     ...(value.rpm === undefined ? {} : { rpm: value.rpm as number }),
     ...(value.expiresAt === undefined ? {} : { expiresAt: value.expiresAt as string }),
+    ...(value.workspaceId === undefined ? {} : { workspaceId: value.workspaceId as string }),
     ...(value.lastUsedAt === undefined ? {} : { lastUsedAt: value.lastUsedAt }),
   };
 }
