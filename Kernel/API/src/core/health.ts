@@ -165,6 +165,11 @@ export class HealthManager {
     return this.registry;
   }
 
+  /** A cheap change-detection string over stored health state; never probes a provider (Phase 4). */
+  healthFingerprint() {
+    return this.registry.fingerprint();
+  }
+
   recordModelRateLimit(providerId: string, modelId: string, input: { retryAfterMs?: number }, connectionId?: string) {
     this.registry.recordModelRateLimit(connectionId ?? providerId, modelId, input);
   }

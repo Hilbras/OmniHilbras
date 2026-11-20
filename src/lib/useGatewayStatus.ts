@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { gatewayBase, isGatewayReachable, onGatewayReachabilityChange } from './gatewayClient';
+import { gatewayBase, isGatewayReachable, onGatewayReachabilityChange, openGatewayStateStream } from './gatewayClient';
 import { desktopBridge } from './electronBridge';
 
 /**
@@ -139,9 +139,13 @@ export function useGatewayStatus(): GatewayState {
       }
     });
     const timer = window.setInterval(checkNow, POLL_MS);
+    // The gateway pushes a notification when connections or health change; refresh immediately on it
+    // instead of waiting out the poll. The poll stays as a fallback (desktop, a dropped stream, an error).
+    const closeStream = openGatewayStateStream(() => checkNow());
     checkNow();
     return () => {
       onChange();
+      closeStream();
       window.clearInterval(timer);
     };
   }, [checkNow]);

@@ -17,6 +17,7 @@ import { handleOauthRoute } from './routes/oauth.js';
 import { handleStatusRoute } from './routes/status.js';
 import { handleUsageRoute } from './routes/usage.js';
 import { handleLogsRoute } from './routes/logs.js';
+import { handleEventsRoute } from './routes/events.js';
 import { handleSettingsRoute } from './routes/settings.js';
 import { handleVirtualModelsRoute } from './routes/virtual-models.js';
 import { handleSkillsRoute } from './routes/skills.js';
@@ -104,6 +105,7 @@ const routes = [
   handleApiKeysRoute,
   handleUsageRoute,
   handleLogsRoute,
+  handleEventsRoute,
   handleSettingsRoute,
   handleVirtualModelsRoute,
   handleSkillsRoute,
@@ -401,7 +403,7 @@ export async function startGatewayServer(options: {
  * were already reachable, because `authorize()` returns before it can refuse anything. What changed is that
  * a gateway *with* keys enforced now answers the navigation the same way a gateway without them does.
  */
-const MANAGEMENT_PREFIXES = ['/metrics', '/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search'] as const;
+const MANAGEMENT_PREFIXES = ['/metrics', '/v1/connections', '/v1/keys', '/v1/oauth', '/v1/settings', '/v1/web-cookie', '/v1/routing', '/v1/usage', '/v1/providers', '/v1/logs', '/v1/events', '/v1/health', '/v1/system', '/v1/backup', '/v1/token-saver', '/v1/virtual-models', '/v1/skills', '/v1/workspaces', '/v1/tunnels', '/v1/mitm', '/v1/proxy-pools', '/v1/provider-nodes', '/v1/observability', '/v1/pxpipe', '/v1/locale', '/v1/audio/speech', '/v1/audio/transcriptions', '/v1/search'] as const;
 
 function isManagementPath(pathname: string) {
   return MANAGEMENT_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));

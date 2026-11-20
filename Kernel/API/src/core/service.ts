@@ -2996,6 +2996,29 @@ export class GatewayService {
   }
 
   /**
+   * A cheap, **secret-free** fingerprint of the state the dashboard displays, for change detection (Phase 4).
+   *
+   * The real-time channel polls this every second rather than probing providers or decrypting credentials.
+   * It covers connection membership/settings and stored health counters — the two things a page shows —
+   * and deliberately includes no credential, endpoint secret or usage content. Sorting by id makes map order
+   * irrelevant, so two identical states always produce the same string.
+   */
+  async stateFingerprint(): Promise<string> {
+    const connections = (await this.connections.list())
+      .map((connection) => [
+        connection.id,
+        connection.providerId,
+        connection.enabled,
+        connection.priority,
+        connection.hasCredential,
+        connection.modelIds?.length ?? 0,
+        connection.customModelIds?.length ?? 0,
+      ])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    return JSON.stringify({ connections, health: this.healthManager.healthFingerprint() });
+  }
+
+  /**
    * The connection list plus the one fact the dashboard cannot otherwise know: when each credential ends.
    *
    * Reported as *"the sign-in lasts about an hour and then I have to sign in again"* — and from the outside

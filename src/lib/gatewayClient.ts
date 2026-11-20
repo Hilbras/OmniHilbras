@@ -1311,6 +1311,75 @@ export function openGatewayLogStream(onEvent: (event: GatewayLogEvent) => void, 
   return () => source.close();
 }
 
+/**
+ * Opens the live state-change channel. Each notification means "connection or health changed, refresh" —
+ * the channel deliberately carries no data, so the caller refetches its own. Returns a function to close it.
+ *
+ * The desktop app keeps its existing polling (its bridge owns the log SSE and does not proxy this one yet);
+ * the browser uses EventSource in dev (the Vite proxy attaches the dashboard token) and a token-bearing fetch
+ * stream for a paired Android device or a remote browser, mirroring the log stream exactly.
+ */
+export type GatewayStateEvent = { type: 'state'; at: string };
+
+export function openGatewayStateStream(onChange: (event: GatewayStateEvent) => void): () => void {
+  if (desktopBridge()) return () => undefined;
+
+  const token = gatewayDeviceToken();
+  if (token && gatewayBaseUrl) {
+    const controller = new AbortController();
+    let closed = false;
+    const consume = async () => {
+      const response = await fetch(`${gatewayBaseUrl}/v1/events`, {
+        headers: { accept: 'text/event-stream', ...gatewayAuthHeaders() },
+        signal: controller.signal,
+        cache: 'no-store',
+      });
+      if (!response.ok || !response.body) return;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (!closed) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          for (const line of frame.split('\n')) {
+            if (!line.startsWith('data:')) continue;
+            try {
+              const event = JSON.parse(line.slice(5).trim()) as GatewayStateEvent;
+              if (event.type === 'state') onChange(event);
+            } catch {
+              // A keep-alive or partial line is not a notification.
+            }
+          }
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+    };
+    void consume().catch(() => undefined);
+    return () => {
+      closed = true;
+      controller.abort();
+    };
+  }
+
+  const url = import.meta.env.DEV ? '/v1/events' : gatewayBaseUrl ? `${gatewayBaseUrl}/v1/events` : '';
+  if (!url) return () => undefined;
+  const source = new EventSource(url);
+  source.onmessage = (message) => {
+    try {
+      const event = JSON.parse(message.data) as GatewayStateEvent;
+      if (event.type === 'state') onChange(event);
+    } catch {
+      // A line that is not a notification is skipped.
+    }
+  };
+  return () => source.close();
+}
+
 export type GatewayTokenSaverStats = {
   period: string;
   since?: string;

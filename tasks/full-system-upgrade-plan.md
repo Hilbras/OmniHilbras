@@ -132,3 +132,11 @@ New routes need a SPEC line + gateway test. The website is a separate Vercel dep
   normalisation helpers for exact parity; imports an existing `usage.json` once on first run.
   `Kernel/API/test/usage-store-contract.test.js` runs one contract against both backends (16 cases: ids, ordering,
   queries, totals, bound, forbidden fields, backup round-trip, reopen, factory default, migration). SPEC updated.
+- **Phase 4 — complete in the tree (3.81.0).** `GET /v1/events` pushes a small `{"type":"state"}` notification
+  when the gateway's cheap, secret-free `stateFingerprint()` (connection settings + stored health counters,
+  from an in-memory map — no provider probe, no credential decryption) changes. Server-side change detection
+  catches mutations from any source without instrumenting each one; `HealthRegistry.fingerprint()` and
+  `service.stateFingerprint()` are the single definitions. The browser opens the stream in `useGatewayStatus`
+  and refreshes immediately on a notification; the 4 s poll remains the fallback (desktop keeps polling).
+  `Kernel/API/test/events-route.test.js` (4 cases: admin gate, change notification with no data, no notification
+  on a stable state, secret-free fingerprint) passes; SPEC + route guard green.

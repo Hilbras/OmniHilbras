@@ -262,6 +262,22 @@ export class HealthRegistry {
   forget(providerId: string) {
     this.state.delete(providerId);
   }
+
+  /**
+   * A cheap, stable string over the stored health state, for change detection (Phase 4).
+   *
+   * Read from the in-memory map only — it never probes a provider — so the real-time state channel can poll
+   * it every second without spending a request. It changes when a failure, success, error or check time
+   * changes, which is exactly what the dashboard needs to know to refresh. Sorted so map order cannot make
+   * two identical states look different.
+   */
+  fingerprint(): string {
+    return JSON.stringify(
+      [...this.state.entries()]
+        .map(([key, value]) => [key, value.failures, value.successes, value.lastError ?? '', value.lastCheckedAt ?? ''])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    );
+  }
 }
 
 /**
