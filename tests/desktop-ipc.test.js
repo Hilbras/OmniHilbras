@@ -156,14 +156,16 @@ test('the app header is the title bar, with its own controls', () => {
   assert.match(read('./src/components/DashboardShell.tsx'), /window-drag/, 'the header is not draggable');
 });
 
-test('the desktop app serves its own pair: gateway 20128, web 20127', () => {
-  // The development pair is 20137/20138. The packaged app used to share the gateway port with `pnpm dev:gateway`,
-  // so an installed app and a checkout fought over one port and the loser moved to an ephemeral one without
-  // anyone asking. The two surfaces now have their own pair, and the old defaults migrate on upgrade.
+test('the desktop app serves its own pair: gateway 20198, web 20197', () => {
+  // The development pair is 20137/20138 and the original desktop pair was 20127/20128. The packaged app must
+  // not compete with either. Both ports are overridable at runtime so a built app can be moved without a rebuild.
   const main = read('./desktop/main.mjs');
-  assert.match(main, /const DESKTOP_GATEWAY_PORT = 20128;/, 'the desktop gateway port is not 20128');
-  assert.match(main, /const DESKTOP_WEB_PORT = 20127;/, 'the desktop web port is not 20127');
-  assert.match(main, /legacyPorts = new Set\(\[8787, 20137, 20138\]\)/, 'an upgraded install would keep an old port');
+  assert.match(main, /const DESKTOP_GATEWAY_PORT = 20198;/, 'the desktop gateway port is not 20198');
+  assert.match(main, /const DESKTOP_WEB_PORT = 20197;/, 'the desktop web port is not 20197');
+  assert.match(main, /legacyPorts = new Set\(\[8787, 20137, 20138, 20128\]\)/, 'an upgraded install would keep an old port');
+  assert.match(main, /legacyWebPorts = new Set\(\[20127\]\)/, 'the old web origin would stay trusted');
+  assert.match(main, /OMNIHILBRAS_WEB_PORT/, 'the web port cannot be overridden without rebuilding');
   assert.match(main, /port: preferredPort/, 'the supervisor is not given the resolved port');
-  assert.match(main, /OMNIHILBRAS_CORS_ORIGINS: \[/, 'the desktop origins are not built from the pair');
+  assert.match(main, /OMNIHILBRAS_CORS_ORIGINS: \['http:\/\/localhost:5173', 'http:\/\/127\.0\.0\.1:5173', \.\.\.corsOrigins\(\)\]/, 'the trusted origins are not built from the active pair');
+  assert.match(main, /saveUserConfig\(\{ gatewayPort: gateway\.port, webPort: resolvedWebPort \}\)/, 'the resolved pair is not persisted');
 });

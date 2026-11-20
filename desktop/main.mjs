@@ -51,18 +51,25 @@ function saveUserConfig(patch) {
 
 const userConfig = readUserConfig();
 const savedPort = Number(userConfig.gatewayPort);
+const savedWebPort = Number(userConfig.webPort);
 /*
- * The desktop pair, fixed and separate from the development pair.
- *
- * The app runs its gateway on 20128 and the web dashboard it talks to on 20127, so a packaged install and a
- * `pnpm dev` checkout never want the same port. An upgraded install keeps whatever port it saved, except
- * the three old defaults — 8787, then 20137, then 20138 — which become the new gateway port; leaving one of
- * them in place would keep serving an upgraded app on a port the new default also claims.
+ * The desktop pair, separate from both the development pair (20137/20138) and the original desktop pair
+ * (20127/20128). Both ports are overridable at runtime — `OMNIHILBRAS_PORT` for the gateway and
+ * `OMNIHILBRAS_WEB_PORT` for the web origin the gateway trusts — so a packaged build can be moved without
+ * rebuilding it. An upgraded install keeps its saved ports except the known old defaults, which migrate to
+ * this pair; leaving one in place would make an upgraded app claim a port another local surface expects.
  */
-const DESKTOP_GATEWAY_PORT = 20128;
-const DESKTOP_WEB_PORT = 20127;
-const legacyPorts = new Set([8787, 20137, 20138]);
+const DESKTOP_GATEWAY_PORT = 20198;
+const DESKTOP_WEB_PORT = 20197;
+const legacyPorts = new Set([8787, 20137, 20138, 20128]);
+const legacyWebPorts = new Set([20127]);
 const migratedPort = legacyPorts.has(savedPort) ? DESKTOP_GATEWAY_PORT : savedPort;
+const migratedWebPort = legacyWebPorts.has(savedWebPort) ? DESKTOP_WEB_PORT : savedWebPort;
+const resolvedWebPort = Number(process.env.OMNIHILBRAS_WEB_PORT) || migratedWebPort || DESKTOP_WEB_PORT;
+/** Every origin worth trusting: the active pair, the packaged defaults, and any explicitly overridden port. */
+const corsOrigins = () => [...new Set([resolvedWebPort, DESKTOP_WEB_PORT, preferredPort, DESKTOP_GATEWAY_PORT]
+  .filter((port) => Number.isInteger(port) && port > 0))]
+  .flatMap((port) => [`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
 // A test run must never take the main port from a dev gateway, so it asks for an ephemeral one
 // (`0`), which the supervisor resolves before it spawns.
 const testRun = process.env.OMNIHILBRAS_RANDOM_PORT === '1' || process.env.OMNIHILBRAS_SMOKE === '1';
@@ -89,6 +96,7 @@ function appSettings() {
     autoStartGateway: config.autoStartGateway !== false,
     checkUpdatesOnLaunch: config.checkUpdatesOnLaunch !== false,
     gatewayPort: (legacyPorts.has(Number(config.gatewayPort)) ? DESKTOP_GATEWAY_PORT : Number(config.gatewayPort)) || preferredPort,
+    webPort: (legacyWebPorts.has(Number(config.webPort)) ? DESKTOP_WEB_PORT : Number(config.webPort)) || resolvedWebPort,
   };
 }
 const logFile = join(app.getPath('userData'), 'logs', 'gateway.log');
@@ -110,15 +118,11 @@ const gateway = createGatewaySupervisor({
     OMNIHILBRAS_DATA_DIR: sharedDataDir,
     // The gateway trusts an origin it is asked from. The desktop dashboard is served from `app://`, which sends
     // no browser origin, but the app also opens links at the web port and the CLI dashboard lives there.
-    OMNIHILBRAS_CORS_ORIGINS: [
-      'http://localhost:5173', 'http://127.0.0.1:5173',
-      `http://localhost:${DESKTOP_WEB_PORT}`, `http://127.0.0.1:${DESKTOP_WEB_PORT}`,
-      `http://localhost:${DESKTOP_GATEWAY_PORT}`, `http://127.0.0.1:${DESKTOP_GATEWAY_PORT}`,
-    ].join(','),
+    OMNIHILBRAS_CORS_ORIGINS: ['http://localhost:5173', 'http://127.0.0.1:5173', ...corsOrigins()].join(','),
   },
 });
 const gatewayClient = createGatewayClient({ host: '127.0.0.1', port: () => gateway.port });
-saveUserConfig({ gatewayPort: gateway.port });
+saveUserConfig({ gatewayPort: gateway.port, webPort: resolvedWebPort });
 
 let window;
 let tray;
@@ -617,10 +621,21 @@ function wireIpc() {
       if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('The gateway port must be between 1024 and 65535.');
       next.gatewayPort = port;
     }
+    if ('webPort' in patch) {
+      const port = Number(patch.webPort);
+      if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('The web port must be between 1024 and 65535.');
+      next.webPort = port;
+    }
     const portChanged = next.gatewayPort !== undefined && next.gatewayPort !== gateway.port;
+    const webPortChanged = next.webPort !== undefined && next.webPort !== appSettings().webPort;
     saveUserConfig(next);
     if (next.gatewayPort !== undefined) gateway.setPort(next.gatewayPort);
-    if (portChanged && gateway.state === 'running') await gateway.restart();
+    if (webPortChanged) {
+      // The trusted-origin list is captured when the supervisor spawns; refresh it before a restart so the
+      // new web origin is accepted rather than silently refused.
+      gateway.options.env.OMNIHILBRAS_CORS_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173', ...corsOrigins()].join(',');
+    }
+    if ((portChanged || webPortChanged) && gateway.state === 'running') await gateway.restart();
     rebuildTrayMenu();
     return appSettings();
   });
