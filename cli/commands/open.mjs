@@ -17,8 +17,9 @@ export const open = {
   async run({ out }) {
     const record = readBundledRecord();
     const port = record?.dashboardPort;
+    const validPort = Number.isInteger(port) && port >= 1 && port <= 65535;
     const alive = Number.isSafeInteger(record?.staticPid) && record.staticPid > 0 && isPidAlive(record.staticPid);
-    if (!port || !alive) {
+    if (!validPort || !alive) {
       out.data({ opened: false, url: null });
       throw new CliError('No bundled dashboard is running.', { hint: 'Start one with `omnihilbras`, then `omnihilbras open`.' });
     }

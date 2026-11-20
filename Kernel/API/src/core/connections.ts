@@ -1400,7 +1400,7 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
   if (!Number.isInteger(input.priority) || input.priority < 1 || input.priority > 1000) throw new Error('Connection priority must be an integer from 1 to 1000.');
   const proxyPool = input.proxyPool.trim();
   if (proxyPool.length > 128 || /[\r\n\0]/.test(proxyPool)) throw new Error('Proxy pool name is invalid.');
-  if (input.quotaTier !== undefined && !(input.quotaTier in quotaTierOrder)) throw new Error('Quota tier must be paid, cheap or free.');
+  if (input.quotaTier !== undefined && !Object.hasOwn(quotaTierOrder, input.quotaTier)) throw new Error('Quota tier must be paid, cheap or free.');
   if (input.modelPolicy !== undefined && input.modelPolicy !== 'free' && input.modelPolicy !== 'all') throw new Error('Model import policy is invalid.');
   const modelIds = input.modelIds === undefined ? undefined : normalizeModelIds(input.modelIds);
   const customModelIds = input.customModelIds === undefined ? undefined : normalizeModelIds(input.customModelIds);
@@ -1578,7 +1578,7 @@ function parseRecord(value: unknown): ConnectionRecord {
     endpoint: value.endpoint,
     priority: value.priority,
     proxyPool: value.proxyPool,
-    ...(typeof value.quotaTier === 'string' && value.quotaTier in quotaTierOrder ? { quotaTier: value.quotaTier as QuotaTier } : {}),
+    ...(typeof value.quotaTier === 'string' && Object.hasOwn(quotaTierOrder, value.quotaTier) ? { quotaTier: value.quotaTier as QuotaTier } : {}),
     enabled: value.enabled,
     ...(typeof value.credentialFingerprint === 'string' && value.credentialFingerprint ? { credentialFingerprint: value.credentialFingerprint } : {}),
     modelPolicy: value.modelPolicy === undefined ? 'all' : value.modelPolicy,

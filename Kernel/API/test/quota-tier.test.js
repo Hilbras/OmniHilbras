@@ -63,6 +63,11 @@ test('quotaTier survives a save and a store reopen, and an invalid tier is refus
       store.save({ id: 'bad', providerId: 'fake', name: 'Bad', endpoint: 'https://example.invalid/v1', priority: 1, proxyPool: 'none', quotaTier: 'platinum', modelIds: ['m'], credential: { type: 'none' } }, { type: 'none' }),
       /Quota tier/,
     );
+    // `in` would accept inherited Object keys ('constructor', '__proto__') as a tier. Object.hasOwn must refuse.
+    await assert.rejects(
+      store.save({ id: 'proto', providerId: 'fake', name: 'Proto', endpoint: 'https://example.invalid/v1', priority: 1, proxyPool: 'none', quotaTier: 'constructor', modelIds: ['m'], credential: { type: 'none' } }, { type: 'none' }),
+      /Quota tier/,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

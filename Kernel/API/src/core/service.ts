@@ -3008,11 +3008,15 @@ export class GatewayService {
       .map((connection) => [
         connection.id,
         connection.providerId,
+        connection.name,
         connection.enabled,
         connection.priority,
+        connection.quotaTier ?? '',
         connection.hasCredential,
-        connection.modelIds?.length ?? 0,
-        connection.customModelIds?.length ?? 0,
+        connection.credentialType ?? '',
+        // Model *ids*, not just their count: swapping which models are imported must notify the page.
+        connection.modelIds ?? [],
+        connection.customModelIds ?? [],
       ])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
     return JSON.stringify({ connections, health: this.healthManager.healthFingerprint() });

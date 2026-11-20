@@ -178,6 +178,15 @@ test('restart --skip-update does not consult the registry', async () => {
   assert.doesNotMatch(lines.join('\n'), /Update available/, 'no update notice');
 });
 
+test('a stale child close from a deliberate restart cannot respawn a duplicate pair', () => {
+  // Code review 2026-11-20: onExit must ignore close events from the previous start's children.
+  const source = fs.readFileSync(path.join(root, 'cli/server-src/main.mjs'), 'utf8');
+  assert.match(source, /startGeneration/, 'a generation counter exists');
+  assert.match(source, /generation \!== startGeneration/, 'onExit ignores a stale generation');
+  const from = source.indexOf('let startGeneration');
+  assert.ok(from > -1, 'the generation is module-level, shared across starts');
+});
+
 test('the bundled launcher stops recorded pids through the ownership-verified helper', () => {
   // Security audit 2026-11-20: bare start used to SIGTERM every positive recorded pid with no cmdline check.
   const source = fs.readFileSync(path.join(root, 'cli/server-src/main.mjs'), 'utf8');

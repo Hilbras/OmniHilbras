@@ -308,6 +308,7 @@ for (const file of [GATEWAY, STATIC, DASHBOARD]) {
 
 let children = {};
 let stopping = false;
+let startGeneration = 0;
 let spinner;
 let menuAbort;
 
@@ -407,10 +408,14 @@ async function start() {
   // (the original behaviour). After that, it is a crash the restart policy may recover — bounded, so a
   // process that keeps dying immediately is reported rather than spun in a loop.
   let started = false;
+  // A deliberate restart kills the old children but their `close` events can land after the next start has
+  // begun. Capture this start's generation so a stale close cannot be read as a crash and spawn a duplicate
+  // pair over the new one (code review, 2026-11-20).
+  const generation = ++startGeneration;
   const childState = { gateway: { restarts: 0, startedAt: Date.now() }, dashboard: { restarts: 0, startedAt: Date.now() } };
   const respawn = { gateway: spawnGateway, dashboard: spawnDashboard };
   const onExit = (label) => (code) => {
-    if (stopping || options.background) return;
+    if (stopping || options.background || generation !== startGeneration) return;
     if (!started) {
       spinner?.stop();
       console.error(`${paint(RED, '✖')} the ${label} exited (code ${code}) before startup finished.`);

@@ -24,12 +24,17 @@ import {
  * ## Why optional, and why JSON stays the default
  *
  * The gateway's ten stores are JSON files, which is the right default for a local-first, zero-dependency
- * install. A database is the ceiling for analytics at scale and concurrent access, so this adds one
- * **behind the same `UsageStore` interface**, selected by config, without changing the default or breaking
- * an existing vault. `node:sqlite` is built into Node ≥22.5; on an older runtime it is absent, so the
- * factory falls back to the JSON store rather than failing to start. The driver is loaded through
- * `createRequire` at construction, never as a top-level import, so the module loads on any Node and the
- * esbuild CLI bundle keeps `node:sqlite` external.
+ * install. This adds an optional backend behind the same `UsageStore` interface, selected by config, without
+ * changing the default or breaking an existing vault. `node:sqlite` is built into Node ≥22.5; on an older
+ * runtime it is absent, so the factory falls back to the JSON store rather than failing to start. The driver
+ * is loaded through `createRequire` at construction, never as a top-level import, so the module loads on any
+ * Node and the esbuild CLI bundle keeps `node:sqlite` external.
+ *
+ * **Scope, honestly:** this is currently a **durability and on-disk format swap**, not a scale implementation.
+ * The bounded set is still held in memory and rewritten in one transaction on flush; there is no SQL-side
+ * query, incremental append, or multi-process concurrency path yet. It is the foundation for those — the
+ * interface and the migration are in place — but no claim of analytics-at-scale behaviour is made here.
+ * (Noted in code review, 2026-11-20.)
  *
  * ## Contract parity by construction
  *

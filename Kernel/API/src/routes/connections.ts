@@ -7,7 +7,7 @@ import { quotaTierOrder, type QuotaTier } from '../core/connections.js';
 
 /** Parses an optional allowance tier. An unknown value is refused, not silently downgraded. */
 function parseQuotaTier(value: unknown): QuotaTier {
-  if (typeof value !== 'string' || !(value in quotaTierOrder)) throw invalidRequest('quotaTier must be paid, cheap or free.');
+  if (typeof value !== 'string' || !Object.hasOwn(quotaTierOrder, value)) throw invalidRequest('quotaTier must be paid, cheap or free.');
   return value as QuotaTier;
 }
 import type { RouteContext } from './route-context.js';

@@ -69,6 +69,20 @@ export function commandLineForPid(pid, { platform = process.platform, procRoot =
       /* fall through to ps */
     }
   }
+  if (platform === 'win32') {
+    // Windows has no `ps`; without this branch the ownership check always fails and the launcher cannot stop
+    // its own recorded servers (code review, 2026-11-20). `tasklist` gives only the image name (node.exe),
+    // which cannot identify gateway.mjs vs static.mjs, so ask WMI for the full command line.
+    try {
+      const output = execFileSync('powershell', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
+      ], { encoding: 'utf8', timeout: 3000, windowsHide: true });
+      return output.trim();
+    } catch {
+      return '';
+    }
+  }
   try {
     return execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 3000, windowsHide: true }).trim();
   } catch {
