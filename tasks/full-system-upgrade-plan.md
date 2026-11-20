@@ -1,6 +1,6 @@
 # Full-system upgrade plan — frontend + backend
 
-**Created:** 2026-11-20 · **Baseline:** `3.79.0` · **Status:** all nine phases delivered (3.80.0 – 3.85.0), including Phase 9's acceptance work — multi-user isolation tested, a shared rate-limit store, and a measured 400-concurrent benchmark. Full per-request tenant authorization on every route remains a documented future item; the shared counter is a bound, not a lock-free guarantee.
+**Created:** 2026-11-20 · **Baseline:** `3.79.0` · **Status:** all nine phases delivered (3.80.0 – 3.86.0). Phase 9's acceptance is met with evidence: multi-user isolation tested, a shared rate-limit store, and a same-runtime A/B benchmark showing a real gateway-side improvement at 400 concurrent clients (fast LLM dispatch; round-trip remains client-noise dominated and is not claimed improved). Full per-request tenant authorization on every route remains a documented future item; the shared counter is a bound, not a lock-free guarantee.
 
 ## Goal
 
