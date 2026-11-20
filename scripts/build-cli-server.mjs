@@ -23,7 +23,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -40,6 +40,14 @@ const skipBuilds = process.argv.includes('--skip-builds');
 
 const run = (command, args, cwd = root) => execFileSync(command, args, { cwd, stdio: 'inherit' });
 
+/**
+ * Windows resolves `pnpm` to a `.cmd` shim, which `spawnSync` cannot execute without a shell (and Node
+ * refuses `.cmd` via `shell` outright since the 2024 batch-injection fix). Naming the shim is the honest
+ * fix: same arguments, same behaviour, and the CI desktop workflow ran this file on windows-latest, where
+ * `spawnSync pnpm ENOENT` failed every tag build.
+ */
+const packageManager = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+
 const steps = [
   ['SDK', ['build:sdk']],
   ['TokenSaver', ['build:token-saver']],
@@ -50,7 +58,7 @@ const steps = [
 if (!skipBuilds) {
   for (const [label, args] of steps) {
     process.stdout.write(`\n▸ ${label}\n`);
-    run('pnpm', args);
+    run(packageManager, args);
   }
 }
 
@@ -64,7 +72,7 @@ for (const file of ['main.mjs', 'static.mjs']) {
 
 // One ESM file. `--external:playwright-core` keeps the browser runtime optional; everything else,
 // including every workspace SDK, is in the bundle.
-run('pnpm', [
+run(packageManager, [
   'exec', 'esbuild', 'Kernel/API/dist/src/main.js',
   '--bundle',
   '--platform=node',
@@ -95,6 +103,20 @@ for (const file of required) {
   if (!existsSync(join(staged, file))) throw new Error(`The staged server is missing ${file}.`);
 }
 
+/**
+ * A directory's size, walked with Node instead of `du`.
+ *
+ * `du -sb` is GNU-only — BSD `du` (macOS runners) refuses the flag, and the desktop workflow failed every
+ * tag on that line. A walk over two entries is nothing; portability is the point of the check.
+ */
+const treeBytes = (target) => {
+  const stat = statSync(target);
+  if (stat.isFile()) return stat.size;
+  let total = 0;
+  for (const entry of readdirSync(target)) total += treeBytes(join(target, entry));
+  return total;
+};
+
 const version = JSON.parse(readFileSync(join(cli, 'package.json'), 'utf8')).version;
 const bytes = [
   'gateway.mjs',
@@ -102,8 +124,7 @@ const bytes = [
 ].reduce((total, entry) => {
   const target = join(staged, entry);
   if (!existsSync(target)) return total;
-  if (statSync(target).isFile()) return total + statSync(target).size;
-  return total + Number(execFileSync('du', ['-sb', target], { encoding: 'utf8' }).trim().split(/\s+/)[0]);
+  return total + treeBytes(target);
 }, 0);
 
 console.log(`\n✔ staged ${relative(root, staged)} for ${version} — ${(bytes / 1024 / 1024).toFixed(1)} MB`);

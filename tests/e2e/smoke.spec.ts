@@ -40,9 +40,12 @@ async function stubGateway(page: import('@playwright/test').Page) {
   }));
   await page.route('**/v1/connections*', (route) => route.fulfill({ json: { object: 'list', data: [], build: { version: 'test' } } }));
   await page.route('**/health', (route) => route.fulfill({ json: { status: 'ok', providers: [], build: { version: 'test', startedAt: new Date().toISOString() } } }));
-  // The live log tail is an EventSource, and a JSON body makes the browser refuse the stream with a console error
-  // that is about the stub, not the dashboard. An empty event-stream keeps the connection quiet and idle.
+  // The live log tail and the state-change channel are EventSources, and a JSON body makes the browser refuse
+  // the stream with a console error that is about the stub, not the dashboard. `/v1/events` opened on **every**
+  // dashboard route by the shell's status hook, so a missing stub here failed the whole-routes spec everywhere
+  // at once — the MIME error CI reported. Empty event-streams keep both connections quiet and idle.
   await page.route('**/v1/logs/stream*', (route) => route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' }, body: '' }));
+  await page.route('**/v1/events*', (route) => route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' }, body: '' }));
 }
 
 test('the model dialog closes on Escape and gives focus back to its opener', async ({ page }) => {

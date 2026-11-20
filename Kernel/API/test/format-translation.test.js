@@ -46,8 +46,56 @@ test('tool_use and tool_result translate to chat tool_calls and tool role', () =
   assert.deepEqual(chat.tools, [{ type: 'function', function: { name: 'read', description: 'Read a file', parameters: { type: 'object', properties: {} } } }]);
   assert.equal(chat.messages[0].role, 'assistant');
   assert.equal(chat.messages[0].tool_calls[0].id, 't1');
-  assert.equal(chat.messages[1].content[0].type, 'tool_result');
-  assert.equal(chat.messages[1].content[0].tool_call_id, 't1');
+  // A tool_result is its own chat message — emitting it as a user content part is refused by the chat
+  // parser, which is how every agent tool loop used to end in "The request is invalid."
+  assert.deepEqual(chat.messages[1], { role: 'tool', tool_call_id: 't1', content: 'done' });
+});
+
+test('a user message mixing text and tool_result fans out without losing the text', () => {
+  const chat = anthropicMessagesToChat({
+    model: 'm',
+    messages: [
+      { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 't1', content: 'first result' },
+        { type: 'text', text: 'Now continue.' },
+        { type: 'tool_result', tool_use_id: 't2', content: [{ type: 'text', text: 'second' }] },
+      ] },
+    ],
+  });
+  assert.deepEqual(chat.messages, [
+    { role: 'tool', tool_call_id: 't1', content: 'first result' },
+    { role: 'user', content: [{ type: 'text', text: 'Now continue.' }] },
+    { role: 'tool', tool_call_id: 't2', content: 'second' },
+  ]);
+});
+
+test('tool_choice, stop_sequences and thinking translate onto the chat vocabulary', () => {
+  const chat = anthropicMessagesToChat({
+    model: 'm',
+    tool_choice: { type: 'tool', name: 'read' },
+    stop_sequences: ['STOP', 'END'],
+    thinking: { type: 'enabled', budget_tokens: 4096 },
+    messages: [{ role: 'user', content: 'hi' }],
+  });
+  assert.equal(chat.tool_choice, 'required', 'a named Anthropic tool becomes a forced call');
+  assert.deepEqual(chat.stop, ['STOP', 'END']);
+  assert.equal(chat.reasoning_effort, 'medium', 'the thinking budget maps onto the shared effort levels');
+  assert.equal(anthropicMessagesToChat({ model: 'm', tool_choice: { type: 'auto' }, messages: [{ role: 'user', content: 'hi' }] }).tool_choice, 'auto');
+  assert.equal(anthropicMessagesToChat({ model: 'm', thinking: { type: 'enabled', budget_tokens: 10240 }, messages: [{ role: 'user', content: 'hi' }] }).reasoning_effort, 'high');
+});
+
+test('replayed thinking blocks become reasoning text instead of a refusal', () => {
+  const chat = anthropicMessagesToChat({
+    model: 'm',
+    messages: [
+      { role: 'assistant', content: [
+        { type: 'thinking', thinking: 'Let me look.' },
+        { type: 'text', text: 'Answer.' },
+      ] },
+    ],
+  });
+  assert.equal(chat.messages[0].reasoning_content, 'Let me look.');
+  assert.deepEqual(chat.messages[0].content, [{ type: 'text', text: 'Answer.' }]);
 });
 
 test('malformed blocks and missing messages are refused, not forwarded', () => {

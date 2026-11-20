@@ -168,6 +168,16 @@ New routes need a SPEC line + gateway test. The website is a separate Vercel dep
   pair (Anthropic Messages → chat), and `POST /v1/messages` serves Anthropic SDK clients by translating in and
   reframing the reply out. `format-translation.test.js` + `messages-route.test.js` (9 cases), gateway suite green.
   RTK filters were already present in `Kernel/TokenSaver`.
+- **Agent-compatibility fix (the "The request is invalid." report).** Three shapes a real agent turn sends were
+  refused with `INVALID_REQUEST` before any provider was reached: `stream: true` (agents stream by default),
+  `tool_result` blocks replayed in the history (emitted as a user content part the chat parser refuses), and the
+  object `tool_choice` forms agents send. All three now work: `/v1/messages` serves Anthropic's SSE event
+  protocol (message_start → content blocks → message_stop, failover decided before the first byte),
+  `tool_result` becomes its own `role: tool` chat message, `tool_choice` object forms map onto the shared
+  vocabulary, `stop_sequences` and `thinking.budget_tokens` are honoured, and replayed `thinking` blocks become
+  `reasoning_content` instead of a refusal. Evidence: reproduction against a local gateway, then
+  `messages-route.test.js` (6 cases, including a full tool loop and an SSE assertion set) and 4 new
+  `format-translation.test.js` cases; gateway suite 1189 green.
 - **Phase 9 — acceptance work done.** (1) Multi-user isolation tested: `workspaceId` on keys and connections,
   validated and round-tripped; `workspace-isolation.test.js` (3 cases) proves a workspace sees only its scoped
   connections plus shared ones, and the unscoped operator sees all. The boundary is stated honestly: this is a
@@ -178,5 +188,7 @@ New routes need a SPEC line + gateway test. The website is a separate Vercel dep
   clients, and alternates A/B over 9 rounds. Both runs show the current build faster (p50 0.77→0.72 ms,
   p99 7.97→6.86 ms in one; p50 0.49→0.39 ms, p99 1.15→1.07 ms in another). The fast dispatch for the LLM
   surface skips the 23 handlers that decline those paths while `handleInferenceRoute` keeps its own gate —
-  no check is skipped. Round-trip latency remains client-noise dominated and is not claimed improved. See
+  no check is skipped. Round-trip latency remains client-noise dominated and is not claimed improved. A
+  CPU-time A/B over 11 alternating rounds (both builds in one process, identical client) shows a stable
+  6.3% reduction in gateway CPU per 400-request batch — the most robust proof of the improvement. See
   `docs/reports/concurrency-benchmark-2026-11-20.md`.

@@ -8,7 +8,7 @@ import { requestIdOf } from '../core/http.js';
  */
 
 import { estimatePromptTokens, estimateTokens } from '../core/token-estimate.js';
-import { anthropicMessagesToChat, chatToMessagesBody, translatorFor } from '../core/format-translation.js';
+import { anthropicMessageId, anthropicMessagesToChat, anthropicUsage, chatToMessagesBody, translatorFor } from '../core/format-translation.js';
 import { ProviderError, canonicalizeUsage, isLoopbackHostname, isPrivateHostname, isProviderError, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type ImageRequest, type ImageResponse, type MessageContent, type Model, type ProviderId, type ToolCall, type ToolDefinition } from '../core/index.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteContext } from './route-context.js';
@@ -380,13 +380,156 @@ export async function handleResponses(request: IncomingMessage, response: Server
 }
 
 /**
+ * `stream: true` on `/v1/messages`: the chat stream re-framed as Anthropic's SSE event protocol.
+ *
+ * This is not a cosmetic rename of the chat stream. Anthropic SDK clients hold the stream open until they
+ * see `message_stop`, build `content` from `content_block_start`/`stop` pairs with contiguous indices, and
+ * feed `input_json_delta` fragments back as tool inputs. Emitting OpenAI `data: {...}` frames used to make
+ * the client report a malformed answer even though the provider had answered; refusing the stream made it
+ * a 400. Failover is still decided before the first byte is written, so a stream that cannot start stays a
+ * normal JSON error rather than a truncated SSE body.
+ */
+async function streamMessages(input: {
+  response: ServerResponse;
+  service: GatewayService;
+  origin: string | undefined;
+  signal: AbortSignal;
+  scope: RequestScope;
+  chatRequest: ChatRequest;
+  explicitProviderId: string | undefined;
+}) {
+  const { response, service, origin, signal, scope, chatRequest, explicitProviderId } = input;
+  const streamStartedAt = Date.now();
+  const outcome = await service.streamChatWithFailover(chatRequest, explicitProviderId, signal, scope);
+  response.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+    ...(origin ? { 'access-control-allow-origin': origin } : {}),
+  });
+  response.flushHeaders();
+
+  const id = anthropicMessageId(`resp_${scope.id}`);
+  let model = chatRequest.model;
+  let text = '';
+  let usage: ChatChunk['usage'];
+  let textBlockIndex: number | undefined;
+  let nextBlockIndex = 0;
+  type PendingTool = { id: string; name: string; arguments: string; blockIndex: number; started: boolean };
+  const toolBlocks = new Map<number, PendingTool>();
+  const servingOf = () => outcome.attempts.find((attempt) => attempt.ok);
+  const send = (event: string, data: unknown) => writeStreamData(response, `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`, signal);
+
+  try {
+    await send('message_start', {
+      type: 'message_start',
+      message: {
+        id, type: 'message', role: 'assistant', model,
+        content: [], stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      },
+    });
+
+    for await (const chunk of outcome.chunks) {
+      model = chunk.model || model;
+      if (chunk.usage) usage = chunk.usage;
+      if (chunk.delta.content) {
+        text += chunk.delta.content;
+        if (textBlockIndex === undefined) {
+          textBlockIndex = nextBlockIndex++;
+          await send('content_block_start', { type: 'content_block_start', index: textBlockIndex, content_block: { type: 'text', text: '' } });
+        }
+        await send('content_block_delta', { type: 'content_block_delta', index: textBlockIndex, delta: { type: 'text_delta', text: chunk.delta.content } });
+      }
+      for (const delta of chunk.delta.toolCalls ?? []) {
+        let call = toolBlocks.get(delta.index);
+        if (!call) {
+          // Reserve the block index on first sight so blocks stay in provider order even if a name
+          // arrives in a later chunk than another tool's.
+          call = { id: delta.id ?? `toolu_${scope.id}_${delta.index}`, name: '', arguments: '', blockIndex: nextBlockIndex++, started: false };
+          toolBlocks.set(delta.index, call);
+        }
+        if (delta.id) call.id = delta.id;
+        if (delta.function?.name) call.name = delta.function.name;
+        if (delta.function?.arguments) call.arguments += delta.function.arguments;
+        if (!call.started && call.name) {
+          call.started = true;
+          await send('content_block_start', { type: 'content_block_start', index: call.blockIndex, content_block: { type: 'tool_use', id: call.id, name: call.name, input: {} } });
+          if (call.arguments) {
+            await send('content_block_delta', { type: 'content_block_delta', index: call.blockIndex, delta: { type: 'input_json_delta', partial_json: call.arguments } });
+            call.arguments = '';
+          }
+        } else if (call.started && delta.function?.arguments) {
+          await send('content_block_delta', { type: 'content_block_delta', index: call.blockIndex, delta: { type: 'input_json_delta', partial_json: delta.function.arguments } });
+          call.arguments = '';
+        }
+      }
+    }
+
+    if (signal.aborted) {
+      recordUsage(service, {
+        model, providerId: servingOf()?.providerId, connectionId: servingOf()?.connectionId,
+        outcome: 'cancelled', attempts: outcome.attempts.length, latencyMs: Date.now() - streamStartedAt, requestId: scope.id,
+      });
+      if (!response.destroyed && !response.writableEnded) response.end();
+      return;
+    }
+
+    if (textBlockIndex !== undefined) {
+      await send('content_block_stop', { type: 'content_block_stop', index: textBlockIndex });
+    }
+    for (const call of toolBlocks.values()) {
+      if (!call.started) {
+        // A provider that never sent a name still owes the client a complete block pair.
+        await send('content_block_start', { type: 'content_block_start', index: call.blockIndex, content_block: { type: 'tool_use', id: call.id, name: call.name || 'tool', input: {} } });
+        if (call.arguments) await send('content_block_delta', { type: 'content_block_delta', index: call.blockIndex, delta: { type: 'input_json_delta', partial_json: call.arguments } });
+      }
+      await send('content_block_stop', { type: 'content_block_stop', index: call.blockIndex });
+    }
+    await send('message_delta', {
+      type: 'message_delta',
+      delta: { stop_reason: toolBlocks.size ? 'tool_use' : 'end_turn', stop_sequence: null },
+      usage: anthropicUsage(usage),
+    });
+    await send('message_stop', { type: 'message_stop' });
+
+    recordUsage(service, {
+      model, providerId: servingOf()?.providerId, connectionId: servingOf()?.connectionId,
+      outcome: 'success', attempts: outcome.attempts.length, latencyMs: Date.now() - streamStartedAt,
+      ...(usage ? { usage } : {}), requestId: scope.id,
+    });
+    response.end();
+  } catch (error) {
+    const cancelled = signal.aborted || (isProviderError(error) && error.code === 'CANCELLED');
+    recordUsage(service, {
+      model, providerId: servingOf()?.providerId ?? outcome.attempts[0]?.providerId,
+      connectionId: servingOf()?.connectionId ?? outcome.attempts[0]?.connectionId,
+      outcome: cancelled ? 'cancelled' : 'failure', attempts: outcome.attempts.length,
+      latencyMs: Date.now() - streamStartedAt,
+      ...(isProviderError(error) ? { errorCode: error.code } : {}), requestId: scope.id, ledger: outcome.attempts,
+    });
+    if (!response.destroyed && !signal.aborted) {
+      const envelope = toErrorEnvelope(error);
+      const message = typeof (envelope as { error?: { message?: unknown } }).error?.message === 'string'
+        ? (envelope as { error: { message: string } }).error.message : 'The provider request failed.';
+      await writeStreamData(response, `event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message } })}\n\n`, signal).catch(() => undefined);
+      response.end();
+    }
+  }
+}
+
+/**
  * `POST /v1/messages`: the Anthropic Messages shape, translated directly to the chat request the adapters
- * accept and the reply reframed back. Same chat path for routing, failover, usage and the key gate. Streaming
- * is refused rather than served in the wrong shape — an Anthropic SSE event protocol is a separate surface.
+ * accept and the reply reframed back. Same chat path for routing, failover, usage and the key gate.
+ *
+ * Agent clients (Claude Code, ZCode, the Anthropic SDK) send `stream: true` on every turn and replay tool
+ * results in the history. Refusing either used to answer `400 INVALID_REQUEST` before a provider was ever
+ * reached — which is exactly the "The request is invalid." users saw in every agent, on every provider.
+ * Both are now handled: streaming is emitted in Anthropic's SSE event protocol, and tool results are
+ * translated to chat `role: tool` messages by the translator.
  */
 export async function handleMessages(request: IncomingMessage, response: ServerResponse, service: GatewayService, options: GatewayServerOptions, origin: string | undefined, signal: AbortSignal) {
   const body = await readJsonBody(request, options.maxBodyBytes ?? maxInferenceBodyBytes);
-  if (isRecord(body) && body.stream === true) throw invalidRequest('stream is not supported on /v1/messages; use /v1/chat/completions for streaming.');
   const translator = translatorFor('messages-api');
   if (!translator) throw invalidRequest('No direct Anthropic Messages translator is registered.');
   const chatRequest = parseChatRequest(translator.translate(body));
@@ -395,6 +538,9 @@ export async function handleMessages(request: IncomingMessage, response: ServerR
   const explicitProviderId = getExplicitProviderId(request, body);
   const scope = service.startScope(chatRequest.model, explicitProviderId, tokenSaverEnabled(request), requestIdOf(request));
   const startedAt = Date.now();
+  if (chatRequest.stream) {
+    return await streamMessages({ response, service, origin, signal, scope, chatRequest, explicitProviderId });
+  }
   let completion: ChatResponse;
   let attempts: GatewayFailoverAttempt[];
   try {
@@ -1159,10 +1305,23 @@ export function parseReasoningEffort(value: unknown): 'low' | 'medium' | 'high' 
   throw invalidRequest('reasoning_effort must be one of NONE, MINIMAL, LOW, MEDIUM, HIGH, XHIGH, MAX.');
 }
 
-/** The tool-use policy a client may send. Anything else is refused, rather than forwarded to a provider that may read it as a default. */
+/**
+ * The tool-use policy a client may send.
+ *
+ * Agent clients send the object form on the OpenAI-compatible surface —
+ * `{ type: 'function', function: { name: 'Read' } }` — and the Anthropic form
+ * `{ type: 'tool', name: 'Read' }` on `/v1/messages`. Both mean "call a tool", which the shared chat request
+ * expresses as `required`. Refusing them answered `400 INVALID_REQUEST` before any provider was reached,
+ * so a client that merely forced a tool call could not use the gateway at all.
+ */
 export function parseToolChoice(value: unknown): 'auto' | 'none' | 'required' | undefined {
-  if (value === undefined) return undefined;
+  if (value === undefined || value === null) return undefined;
   if (value === 'auto' || value === 'none' || value === 'required') return value;
+  if (isRecord(value)) {
+    if (value.type === 'auto') return 'auto';
+    if (value.type === 'none') return 'none';
+    if (value.type === 'any' || value.type === 'required' || value.type === 'tool' || value.type === 'function') return 'required';
+  }
   throw invalidRequest('tool_choice must be auto, none or required.');
 }
 
