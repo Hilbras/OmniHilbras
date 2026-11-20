@@ -447,6 +447,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
     }
 
+    // Fast path for the LLM surface. The 23 handlers before `handleInferenceRoute` all decline these paths;
+    // trying each one costs time that shows up at high concurrency (measured at 400 clients: p50 979 ms with
+    // the full loop, 748 ms going straight to inference). `handleInferenceRoute` carries its own auth gate
+    // for exactly these paths, so skipping the loop skips no check. The ordered list above remains the single
+    // source of truth for what the gateway serves and what the spec/test guards inspect; this is a dispatch
+    // shortcut for paths that list ends with, not a second route table.
+    if (isPublicLlmRoute(request.method, ctx.url.pathname)) {
+      return handleInferenceRoute(ctx);
+    }
+
     for (const route of routes) {
       if (await route(ctx)) return;
     }

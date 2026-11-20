@@ -83,7 +83,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/routes/api-keys.ts` | 105 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
 | `Kernel/API/src/routes/status.ts` | 220 | **0** | `/health`, `/`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
-| `Kernel/API/src/server.ts` | 459 | **1** | refuses a half-configured Codex OAuth override at startup, and gives every request the id its record will carry |
+| `Kernel/API/src/server.ts` | 469 | **1** | refuses a half-configured Codex OAuth override at startup, and gives every request the id its record will carry |
 
 **The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
 provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a

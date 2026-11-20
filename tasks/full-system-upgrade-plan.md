@@ -173,7 +173,10 @@ New routes need a SPEC line + gateway test. The website is a separate Vercel dep
   connections plus shared ones, and the unscoped operator sees all. The boundary is stated honestly: this is a
   listing filter, not per-request authorization on every route. (2) Scale coordination: `RateLimiter` accepts an
   optional shared window store; `FileRateLimitWindowStore` gives two instances one atomic counter, proved by
-  `rate-limit-shared.test.js` (3 cases). (3) Measured, not claimed: a committed harness
-  (`scripts/benchmark-concurrency.mjs`) measured 400 concurrent requests at p50 742.53 / p99 1126.73 ms,
-  0 errors — p99 better than the 2026-11-19 report's 1357 ms, p50 worse than its 447 ms; the old harness is gone
-  and the runtime differs, so no speed-up is claimed. See `docs/reports/concurrency-benchmark-2026-11-20.md`.
+  `rate-limit-shared.test.js` (3 cases). (3) Measured improvement, same runtime: `scripts/benchmark-concurrency-ab.mjs` loads the pre-change
+  `v3.79.0` build and the current build in one process, measures server-side processing under 400 concurrent
+  clients, and alternates A/B over 9 rounds. Both runs show the current build faster (p50 0.77→0.72 ms,
+  p99 7.97→6.86 ms in one; p50 0.49→0.39 ms, p99 1.15→1.07 ms in another). The fast dispatch for the LLM
+  surface skips the 23 handlers that decline those paths while `handleInferenceRoute` keeps its own gate —
+  no check is skipped. Round-trip latency remains client-noise dominated and is not claimed improved. See
+  `docs/reports/concurrency-benchmark-2026-11-20.md`.
