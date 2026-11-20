@@ -1,0 +1,30 @@
+{
+  "threat_id": "T06",
+  "threat": "A credential reaches browser storage, a log, or version control.",
+  "quality": 0.88,
+  "strengths": "All three surfaces are guarded by asserted mechanisms rather than prose, and the guards pass on the current tree. BROWSER STORAGE: tests/browser-storage.test.js allows exactly four non-credential localStorage keys (sidebar collapse, theme, reduce-motion, skipped update version), names credential-shaped identifiers by splitting camelCase (so apiKey/refreshToken/userToken are caught where a \\bkey\\b regex would not), resolves string-constant and template-literal keys, rejects credential-shaped values, asserts sessionStorage, document.cookie writes, IndexedDB and the Cache API at zero, and pins the access count at 12 — all 6 subtests pass. Only the four benign keys exist in src/ (dashboard.tsx, SettingsPage.tsx, ThemeToggle.tsx, DashboardShell.tsx, useUpdateState.ts). The dashboard tells users to copy their own session token from a third-party site's storage (src/lib/webSessionProviders.ts) but never writes it itself. VERSION CONTROL: tests/no-secrets.test.js scans all 1519 tracked files (via git ls-files) for 15 vendor credential shapes (gateway ohk_, npm, GitHub, OpenAI, Anthropic, OpenRouter, AWS, Google, Slack, Discord, private-key blocks, JWT, bearer values), with empty exemptions asserted, pattern liveness proven by assembled samples, content-based binary skipping, and self-flagging assertions — all 7 subtests pass. .gitignore explicitly ignores .env.*, connections.json, secrets.enc.json, secrets.key, api-keys.json, usage.json, dashboard-token and .omnihilbras/, and only .env.example is tracked. LOGS AND RESPONSES: Kernel/API/src/core/provider-error.ts toJSON() deliberately drops details and cause because provider payloads may carry credentials/prompt data; Kernel/API/src/core/usage-store.ts has a FORBIDDEN_RECORD_FIELDS denylist (content, message, prompt, response, body, headers, apiKey, authorization, system) enforced by Kernel/API/test/usage-store.test.js including hand-edited-file injection; Kernel/API/src/routes/logs.ts streams only those sanitized usage records behind the management gate (Kernel/API/test/log-stream-route.test.js). Kernel/API/test/credential-projection.test.js asserts tunnel tokens are never returned (hasToken only), proxy-pool credentials are redacted on read (***:***) and refusals never quote the credential value. API keys are random, SHA-256 hashed, revealed once and compared in constant time (core/api-keys.ts, core/api-key-manager.ts, tests). Credentials at rest use secure-store.ts atomicWrite: 0700 directory, 0600 file, chmod after rename, fsync, symlink refusal. Backups are AES-256-GCM with scrypt and an unstored passphrase (core/backup.ts).",
+  "weaknesses": "No generic guard scans source for credential-valued log statements: a new console.log(apiKey) would not fail any test. sign-in-coordinator.ts:48 deliberately console.error's a ProviderError cause.message, and providerSaid() (core/oauth.ts) folds provider-controlled response-body text into public sign-in error strings rendered in the callback page — a provider that echoed a credential into an error body would put it in a log and the UI. The no-secrets scanner reads only git ls-files by design (its threat is version control), so untracked credentials are invisible to it; the working tree currently holds .env.local with a Vercel OIDC JWT (gitignored, apparently expired), showing a credential can sit in the repo directory until force-added. The browser-storage test walks only .ts/.tsx under src/, so browser-facing code added under site/, cli/server-src/ or desktop/ would not be covered. The 15 scanner patterns cover known vendor key shapes; a novel internal secret format or a base64/hex-re-encoded credential would not match. A key that reached history requires rotation, which no test automates. On balance the asserted controls cover the realistic paths well; the residuals are coverage-boundary and provider-trust gaps rather than a live leak.",
+  "citations": [
+    "tests/browser-storage.test.js",
+    "tests/no-secrets.test.js",
+    ".gitignore",
+    "SECURITY.md",
+    "Kernel/API/src/core/secure-store.ts",
+    "Kernel/API/src/core/api-key-manager.ts",
+    "Kernel/API/src/core/api-keys.ts",
+    "Kernel/API/src/core/provider-error.ts",
+    "Kernel/API/src/core/usage-store.ts",
+    "Kernel/API/src/routes/logs.ts",
+    "Kernel/API/src/core/backup.ts",
+    "Kernel/API/src/core/sign-in-coordinator.ts",
+    "Kernel/API/src/core/oauth.ts",
+    "Kernel/API/src/core/connection-manager.ts",
+    "Kernel/API/src/core/transport.ts",
+    "Kernel/API/test/api-keys.test.js",
+    "Kernel/API/test/usage-store.test.js",
+    "Kernel/API/test/log-stream-route.test.js",
+    "Kernel/API/test/credential-projection.test.js",
+    "src/lib/webSessionProviders.ts",
+    ".env.example"
+  ]
+}

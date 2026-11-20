@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.84.0
+**Status:** Current — release 3.85.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -3425,6 +3425,22 @@ public/providers/            # existing provider asset library
 docs/                        # specifications and architecture decisions
 tasks/                       # implementation plans and task lists
 ```
+
+## Workspaces and scale (Phase 9)
+
+`OMNIHILBRAS_REQUESTS_PER_MINUTE` bounds the LLM surface per caller in a fixed one-minute window. The default
+counter is in memory and **process-local**; a gateway that runs in more than one process must not claim it is
+global. `RateLimiter` accepts an optional shared window store; `FileRateLimitWindowStore` gives independent
+instances one atomic, file-backed counter (re-read before each write, temp file + rename). This coordinates a
+count, not a lock-free guarantee — a concurrent read-modify-write across processes can still race, and the
+spec says so. `rate-limit-shared.test.js` proves two limiters share a budget through one store.
+
+Connections and API keys may carry an optional `workspaceId` (validated identifier). A workspace-scoped listing
+returns that workspace's connections plus unscoped shared ones; the unscoped operator view sees all
+(`workspace-isolation.test.js`). This is a **listing filter**, not per-request authorization on every route —
+full tenant isolation for a hosted deployment remains a documented future item. The 400-concurrent overhead
+harness and its measured result (indicative, not an improvement claim) are in
+`docs/reports/concurrency-benchmark-2026-11-20.md`.
 
 ## Commands
 

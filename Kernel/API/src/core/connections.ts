@@ -64,6 +64,8 @@ export type ConnectionRecord = {
   enabled: boolean;
   /** Allowance tier for routing preference; absent on older records. */
   quotaTier?: QuotaTier;
+  /** Optional workspace this connection belongs to (multi-user foundation); absent means unscoped. */
+  workspaceId?: string;
   hasCredential: boolean;
   /** Share traffic with the other balanced connections at the same priority, instead of always taking the first. */
   balance?: boolean;
@@ -149,6 +151,7 @@ export type ConnectionInput = {
   proxyPool: string;
   enabled?: boolean;
   quotaTier?: QuotaTier;
+  workspaceId?: string;
   /** Set by the store on every save; not part of a caller's input in practice. */
   credentialFingerprint?: string;
   modelPolicy?: ModelImportPolicy;
@@ -739,6 +742,7 @@ function buildRecord(input: ConnectionInput, existing: ConnectionRecord | undefi
     priority: normalized.priority,
     proxyPool: normalized.proxyPool,
     ...(normalized.quotaTier ?? existing?.quotaTier ? { quotaTier: normalized.quotaTier ?? existing?.quotaTier } : {}),
+    ...(normalized.workspaceId ?? existing?.workspaceId ? { workspaceId: normalized.workspaceId ?? existing?.workspaceId } : {}),
     enabled: normalized.enabled ?? existing?.enabled ?? true,
     hasCredential: true,
     // Read from the **raw** input, not `normalized`: `normalizeInput` does not carry this field (it is
@@ -1401,6 +1405,7 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
   const proxyPool = input.proxyPool.trim();
   if (proxyPool.length > 128 || /[\r\n\0]/.test(proxyPool)) throw new Error('Proxy pool name is invalid.');
   if (input.quotaTier !== undefined && !Object.hasOwn(quotaTierOrder, input.quotaTier)) throw new Error('Quota tier must be paid, cheap or free.');
+  if (input.workspaceId !== undefined && (typeof input.workspaceId !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(input.workspaceId))) throw new Error('workspaceId contains unsupported characters.');
   if (input.modelPolicy !== undefined && input.modelPolicy !== 'free' && input.modelPolicy !== 'all') throw new Error('Model import policy is invalid.');
   const modelIds = input.modelIds === undefined ? undefined : normalizeModelIds(input.modelIds);
   const customModelIds = input.customModelIds === undefined ? undefined : normalizeModelIds(input.customModelIds);
@@ -1413,6 +1418,7 @@ function normalizeInput(input: ConnectionInput): ConnectionInput {
     priority: input.priority,
     proxyPool,
     ...(input.quotaTier === undefined ? {} : { quotaTier: input.quotaTier }),
+    ...(input.workspaceId === undefined ? {} : { workspaceId: input.workspaceId }),
     ...(modelMeta ? { modelMeta } : {}),
     ...(input.catalogRefreshedAt ? { catalogRefreshedAt: input.catalogRefreshedAt } : {}),
     ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
@@ -1579,6 +1585,7 @@ function parseRecord(value: unknown): ConnectionRecord {
     priority: value.priority,
     proxyPool: value.proxyPool,
     ...(typeof value.quotaTier === 'string' && Object.hasOwn(quotaTierOrder, value.quotaTier) ? { quotaTier: value.quotaTier as QuotaTier } : {}),
+    ...(typeof value.workspaceId === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(value.workspaceId) ? { workspaceId: value.workspaceId } : {}),
     enabled: value.enabled,
     ...(typeof value.credentialFingerprint === 'string' && value.credentialFingerprint ? { credentialFingerprint: value.credentialFingerprint } : {}),
     modelPolicy: value.modelPolicy === undefined ? 'all' : value.modelPolicy,

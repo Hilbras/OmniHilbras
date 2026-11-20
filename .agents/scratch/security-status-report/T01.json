@@ -1,0 +1,22 @@
+{
+  "threat_id": "T01",
+  "threat": "An unauthenticated local process reaches a state-changing management route (e.g. /v1/runtime install/start) and changes machine state.",
+  "quality": 0.5,
+  "strengths": "The gateway does have a centralized management gate at the single dispatch point in Kernel/API/src/server.ts (handleRequest, ~L441-448): '/v1/runtime' is explicitly in MANAGEMENT_PREFIXES (L406), so POST /v1/runtime/opencode/install and /start are covered and are not protected per-handler-by-omission. Kernel/API/test/admin-gate.test.js explicitly lists both runtime routes in its MANAGEMENT array (L66-69) and asserts a bare request (no Origin, no Authorization) gets 401 when enforcement is on (L73-81). A structural guard (same file, L120-164) cross-checks the router's served paths against the prefix list so a future route - including one that names a constant like runtimePrefix - cannot silently sit outside the gate (the comment records that this exact family was ungated for months). Defense in depth at the HTTP layer: loopback-only bind plus a Host-header check returning 421 (server.ts L139-146, L189-192) defeating DNS rebinding; CORS origin allowlist and cross-site request checks returning 403 (L193-206); a 415 content-type check (L251-254); no-store headers on management paths (L221); rate limiting on the LLM surface. A per-launch 256-bit dashboard token (core/dashboard-token.ts) uses constant-time comparison, is published only after a successful bind, is regenerated every start and stored 0600, and the shipped CLI proxy forwards it only for sec-fetch-site: same-origin requests (cli/server-src/static.mjs L151-155). API keys are random, SHA-256 hashed, one-time revealed and compared in constant time. Errors to non-dashboard callers are sanitized via sendError(..., isTrustedDashboard(auth)) (server.ts L256).",
+  "weaknesses": "The gate is conditional, not absolute: ApiKeyManager.authorize() returns early whenever enforcement is off or no store is configured (core/api-key-manager.ts L148-150), and admin-gate.test.js L101-108 deliberately asserts that with enforcement off the whole management surface - including /v1/runtime/opencode/install and /start - stays open to a bare local request ('the documented local mode'). In that configuration the threat is fully realized: opencode-runtime.ts install()/start() download a network artifact, chmod/write an executable into the data dir, write config/pid files (0600) and spawn a long-lived 'opencode serve --service' process, so an unauthenticated local process changes real machine state. Even with enforcement on, the in-scope actor (a same-user local process - SECURITY.md L30-32 states this is the threat model) can read the 0600 dashboard-token file (same UID) and set any allowlisted Origin (defaults include http://localhost:5173 etc., core/http.ts L21), making auth.kind='dashboard' (server.ts L211-218) and skipping the gate entirely; SECURITY.md L65-68 concedes a local process can obtain the token, and L157-159 lists Origin-based dashboard trust as an accepted limitation. There is no route-level authorization: AuthContext carries no scopes/roles (core/runtime.ts L79-93) and any key that passes the gate can reach install/start. The OAuth callback carve-out (server.ts L203, L441) is a further unauthenticated path and the preflight OPTIONS is answered before auth (SECURITY.md L166). Install integrity is only recorded (SHA) not verified because upstream publishes no checksum (SECURITY.md L162-164). Net: strong against browser/CSRF/DNS-rebinding vectors, but the specific local-process threat is achievable in the documented local mode and bypassable via token-file read, which is exactly the actor the policy says is in scope.",
+  "citations": [
+    "Kernel/API/src/server.ts",
+    "Kernel/API/src/routes/runtime.ts",
+    "Kernel/API/src/core/dashboard-token.ts",
+    "Kernel/API/src/core/api-key-manager.ts",
+    "Kernel/API/src/core/api-keys.ts",
+    "Kernel/API/src/core/runtime.ts",
+    "Kernel/API/src/core/http.ts",
+    "Kernel/API/src/core/opencode-runtime.ts",
+    "Kernel/API/test/admin-gate.test.js",
+    "Kernel/API/test/security-hardening.test.js",
+    "cli/server-src/static.mjs",
+    "SECURITY.md",
+    "docs/SPEC-SDK.md"
+  ]
+}

@@ -168,8 +168,12 @@ New routes need a SPEC line + gateway test. The website is a separate Vercel dep
   pair (Anthropic Messages → chat), and `POST /v1/messages` serves Anthropic SDK clients by translating in and
   reframing the reply out. `format-translation.test.js` + `messages-route.test.js` (9 cases), gateway suite green.
   RTK filters were already present in `Kernel/TokenSaver`.
-- **Phase 9 — multi-user foundation done (partial by design).** An optional `workspaceId` on API keys is
-  validated at create, persisted, and round-tripped through the store and authentication
-  (`api-key-workspace.test.js`, 3 cases). Full per-request tenant isolation would thread identity through every
-  route/store and is deliberately not rushed; the plan marks this phase major/optional and the scope is stated
-  honestly in SPEC. Scale coordination (shared rate-limit budgets) stays a documented future item.
+- **Phase 9 — acceptance work done.** (1) Multi-user isolation tested: `workspaceId` on keys and connections,
+  validated and round-tripped; `workspace-isolation.test.js` (3 cases) proves a workspace sees only its scoped
+  connections plus shared ones, and the unscoped operator sees all. The boundary is stated honestly: this is a
+  listing filter, not per-request authorization on every route. (2) Scale coordination: `RateLimiter` accepts an
+  optional shared window store; `FileRateLimitWindowStore` gives two instances one atomic counter, proved by
+  `rate-limit-shared.test.js` (3 cases). (3) Measured, not claimed: a committed harness
+  (`scripts/benchmark-concurrency.mjs`) measured 400 concurrent requests at p50 742.53 / p99 1126.73 ms,
+  0 errors — p99 better than the 2026-11-19 report's 1357 ms, p50 worse than its 447 ms; the old harness is gone
+  and the runtime differs, so no speed-up is claimed. See `docs/reports/concurrency-benchmark-2026-11-20.md`.

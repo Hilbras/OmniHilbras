@@ -1,0 +1,20 @@
+{
+  "threat_id": "T07",
+  "threat": "A stale or recycled recorded PID causes the CLI launcher to signal an unrelated same-user process.",
+  "quality": 0.75,
+  "strengths": "Both recorded-run paths gate signals on an identity check rather than liveness alone. The checkout launcher (bin/omnihilbras.js) records process groups in run.json (gatewayGroup/dashboardGroup, not bare pids, because pnpm's child binds the port), requires groupIsOurs(pgid) before every stopPreviousRun() signal, rejects non-integer/<=1 ids, and matches live /proc members' command lines against omnihilbras/vite; ports are confirmed held by our own previous run BEFORE anything is stopped, so a port typo cannot cost a running server, and signalGroup() targets -pgid. The published bundled path is stronger: cli/lib/bundled-state.mjs's stopBundledServers() filters to safe positive pids, checks liveness, then requires a server-specific command-line match (/gateway\\.mjs|static\\.mjs/) and leaves foreign/reused pids alone (refusals reported, record retained) unless --force is explicit. That one helper is now shared by the stop and restart verbs and, since e4ad081b (security audit 2026-11-20, finding 2), by the bare launcher's stopRecorded(), closing the previously unguarded SIGTERM-on-start. Command-line lookup is cross-platform there (/proc, WMI on Windows, ps on macOS). Records are 0600 in a 0700 XDG state dir; a generation counter prevents stale child-close events from respawning duplicates. tests/cli-lifecycle.test.js drives the stop decision with injected alive/commandLine/kill and proves a reused foreign pid is refused and never signalled; tests/launcher.test.js pins the group-ownership gate and the port-check-before-stop ordering. The repo also knows how to do two-factor process identification when it matters (Kernel/API/src/core/opencode-runtime.ts requires both cmdline markers AND our XDG state home in /proc/<pid>/environ).",
+  "weaknesses": "The checkout launcher still degrades to exactly the naive check this threat describes: groupIsOurs() returns pidIsAlive(pgid) (a bare process.kill(pid,0)) whenever processGroupMembers() finds no members — always on macOS/Windows (no /proc) and on Linux when a group has dissolved but its numeric id is now a live unrelated same-user PID — and signalGroup() then falls back from kill(-pgid) to kill(pgid), which would signal that unrelated process. Its positive check is a loose substring ('omnihilbras' or 'vite'), the same shape the file's own header condemns in the reference launcher (editor/grep/str); another project's Vite server or a shell/grep whose argv contains the word qualifies, and members.some() means one matching member vouches for the whole group. Neither record uses its stored startedAt to bind the process start time (e.g. /proc stat field 22), so PID recycling is not actually detected beyond command-line coincidence, and check-then-kill is TOCTOU. tests/launcher.test.js is source-text assertion only and never exercises a real recycled pid or group, and the bundled decision tests inject commandLine() so the real /proc/WMI/ps readers are untested. cli/server-src/main.mjs clearPort() (adjacent but same-user process safety) kills a port holder without --force whenever its command matches the broad /node|vite|pnpm|omnihilbras|next-server/i regex. Finally the two schemes (run.json groups vs bundled.json pids) coexist with different identity rules, a drift surface even though both currently check something. Net: the confirmed audit gap is fixed and the common path is solid; the residuals are the Linux-empty-group/non-Linux liveness fallbacks, loose markers and no start-time binding.",
+  "citations": [
+    "bin/omnihilbras.js",
+    "cli/lib/bundled-state.mjs",
+    "cli/server-src/main.mjs",
+    "cli/commands/stop.mjs",
+    "cli/commands/restart.mjs",
+    "tests/launcher.test.js",
+    "tests/cli-lifecycle.test.js",
+    "Kernel/API/src/core/opencode-runtime.ts",
+    "Kernel/API/test/opencode-orphan-adoption.test.js",
+    "docs/threats.json",
+    "AGENTS.md"
+  ]
+}

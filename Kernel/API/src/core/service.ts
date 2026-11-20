@@ -2996,6 +2996,19 @@ export class GatewayService {
   }
 
   /**
+   * Connections visible to one workspace (multi-user isolation, Phase 9).
+   *
+   * A connection with no `workspaceId` is unscoped and visible to every caller; a scoped connection is only
+   * returned to the matching workspace. Pass `undefined` for an unscoped caller (the operator's dashboard),
+   * which sees everything — this is a *listing filter*, not yet a per-request authorization boundary on every
+   * route; that larger threading is deliberately out of scope here.
+   */
+  async listConnectionsForWorkspace(workspaceId?: string) {
+    const all = await this.connections.list();
+    return workspaceId === undefined ? all : all.filter((connection) => connection.workspaceId === undefined || connection.workspaceId === workspaceId);
+  }
+
+  /**
    * A cheap, **secret-free** fingerprint of the state the dashboard displays, for change detection (Phase 4).
    *
    * The real-time channel polls this every second rather than probing providers or decrypting credentials.

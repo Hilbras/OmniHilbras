@@ -1,3 +1,7 @@
+import { readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
 /**
  * An inbound limit on the LLM surface.
  *
@@ -32,7 +36,70 @@ export type RateLimiterOptions = {
   /** Requests per minute per caller. `0` disables the limit. */
   perMinute: number;
   now?: () => number;
+  /**
+   * Optional shared window store. Two limiters over the same store coordinate their counts — the bounded
+   * foundation for a multi-instance gateway. In-memory (the default) stays process-local and is honest about it.
+   */
+  store?: RateLimitWindowStore;
 };
+
+/** A window for one caller, as stored. */
+export type RateWindow = { count: number; startedAt: number };
+
+/**
+ * Shared state for rate-limit windows. Deliberately tiny: read one caller, write one caller, and list for pruning.
+ * A file-backed implementation gives independent processes a common counter; an in-memory one is the default.
+ */
+export interface RateLimitWindowStore {
+  get(caller: string): RateWindow | undefined;
+  set(caller: string, window: RateWindow): void;
+  entries(): Array<[string, RateWindow]>;
+  delete(caller: string): void;
+}
+
+/** In-memory store: the current, process-local behaviour, extracted so both modes share one contract. */
+export class MemoryRateLimitWindowStore implements RateLimitWindowStore {
+  private readonly windows = new Map<string, RateWindow>();
+  get(caller: string) { return this.windows.get(caller); }
+  set(caller: string, window: RateWindow) { this.windows.set(caller, window); }
+  entries() { return [...this.windows.entries()]; }
+  delete(caller: string) { this.windows.delete(caller); }
+}
+
+/**
+ * File-backed window store. Each process holds a snapshot; a write re-reads from disk before mutating so two
+ * limiters over the same file share a counter. Writes are atomic (temp file + rename) so a crash cannot leave a
+ * half-written ledger. This coordinates counts, not lock-free concurrency — a burst from several processes can
+ * still race between the read and the write; the gateway documents that as a bound, not a guarantee.
+ */
+export class FileRateLimitWindowStore implements RateLimitWindowStore {
+  private readonly path: string;
+  private cache = new Map<string, RateWindow>();
+  private loadedAt = 0;
+  constructor(filePath: string) { this.path = filePath; }
+  private reload() {
+    try {
+      const parsed = JSON.parse(readFileSync(this.path, 'utf8')) as Record<string, RateWindow>;
+      this.cache = new Map(Object.entries(parsed));
+    } catch {
+      this.cache = new Map();
+    }
+    this.loadedAt = Date.now();
+  }
+  private persist() {
+    const tmp = `${this.path}.${randomUUID()}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(Object.fromEntries(this.cache))}
+`, { mode: 0o600 });
+    renameSync(tmp, this.path);
+  }
+  get(caller: string) {
+    if (Date.now() - this.loadedAt > 250) this.reload();
+    return this.cache.get(caller);
+  }
+  set(caller: string, window: RateWindow) { this.reload(); this.cache.set(caller, window); this.persist(); }
+  entries() { this.reload(); return [...this.cache.entries()]; }
+  delete(caller: string) { this.reload(); this.cache.delete(caller); this.persist(); }
+}
 
 const windowMs = 60_000;
 
@@ -40,13 +107,14 @@ const windowMs = 60_000;
 export const defaultRequestsPerMinute = 600;
 
 export class RateLimiter {
-  private readonly windows = new Map<string, { count: number; startedAt: number }>();
+  private readonly store: RateLimitWindowStore;
   private readonly perMinute: number;
   private readonly now: () => number;
 
   constructor(options: RateLimiterOptions) {
     this.perMinute = Math.max(0, Math.floor(options.perMinute));
     this.now = options.now ?? (() => Date.now());
+    this.store = options.store ?? new MemoryRateLimitWindowStore();
   }
 
   get enabled() {
@@ -57,28 +125,29 @@ export class RateLimiter {
   check(caller: string): RateLimitDecision {
     if (!this.enabled) return { allowed: true, retryAfterMs: 0, limit: 0, remaining: 0 };
     const at = this.now();
-    const window = this.windows.get(caller);
+    const window = this.store.get(caller);
     if (!window || at - window.startedAt >= windowMs) {
-      this.windows.set(caller, { count: 1, startedAt: at });
+      this.store.set(caller, { count: 1, startedAt: at });
       return { allowed: true, retryAfterMs: 0, limit: this.perMinute, remaining: this.perMinute - 1 };
     }
     if (window.count >= this.perMinute) {
       return { allowed: false, retryAfterMs: Math.max(0, window.startedAt + windowMs - at), limit: this.perMinute, remaining: 0 };
     }
-    window.count += 1;
-    return { allowed: true, retryAfterMs: 0, limit: this.perMinute, remaining: this.perMinute - window.count };
+    const updated = { ...window, count: window.count + 1 };
+    this.store.set(caller, updated);
+    return { allowed: true, retryAfterMs: 0, limit: this.perMinute, remaining: this.perMinute - updated.count };
   }
 
   /** Drops expired windows, so a long-lived gateway does not accumulate one entry per key ever seen. */
   prune() {
     const at = this.now();
-    for (const [caller, window] of this.windows) {
-      if (at - window.startedAt >= windowMs) this.windows.delete(caller);
+    for (const [caller, window] of this.store.entries()) {
+      if (at - window.startedAt >= windowMs) this.store.delete(caller);
     }
   }
 
   get trackedCallers() {
-    return this.windows.size;
+    return this.store.entries().length;
   }
 }
 

@@ -1,0 +1,27 @@
+{
+  "threat_id": "T02",
+  "threat": "A browser page on another origin obtains the dashboard token or makes the gateway trust it as the dashboard.",
+  "quality": 0.85,
+  "strengths": "A per-launch 256-bit dashboard token is minted on every start, published only after the port is bound, stored 0600 in a 0700 state directory, compared in constant time, and regenerated on restart (Kernel/API/src/core/dashboard-token.ts, Kernel/API/test/dashboard-token.test.js, Kernel/API/test/dashboard-token-bind-order.test.js). The browser never holds it: both the Vite dev proxy and the shipped CLI static proxy read the file server-side and attach the token only when the browser marks the request sec-fetch-site: same-origin, with the shipped proxy also stripping any caller-supplied Origin and token header before deciding (vite.config.ts, cli/server-src/static.mjs). The gateway grants auth.kind='dashboard' only when the request has an exact allowlisted Origin AND a matching token; management paths not so trusted fall through to the API-key gate (Kernel/API/src/server.ts L193-218, L441-448). A loopback-only bind plus a Host-header check returning 421 defeats DNS rebinding; non-allowlisted Origins get 403, wildcard CORS is refused, and cross-site requests are refused except exact OAuth callback navigations (Kernel/API/src/core/http.ts, core/url.ts, core/config.ts). Targeted tests pin that an allowlisted Origin without the token gets 401, that a cross-site page through the shipped proxy does not get a 200, that a rebinding Host gets 421, and that the served shell points the browser at its own origin (tests/cli-dashboard-proxy.test.js, Kernel/API/test/server.test.js). Browser storage is restricted by test to two non-credential keys with sessionStorage, cookies, IndexedDB and the Cache API at zero, and no renderer module references credential material (tests/browser-storage.test.js, tests/desktop-ipc.test.js).",
+  "weaknesses": "The token is optional at the createGatewayServer boundary: when an embedder omits options.dashboardToken, tokenOk is unconditionally true and Origin alone decides dashboard trust (server.ts L213-215). startGatewayServer always supplies one and a structural test asserts that, but the weaker branch is reachable by direct embedders, and SECURITY.md records Origin-based trust as an accepted limitation. The proxy's trust signal is sec-fetch-site, a browser-set hint rather than a cryptographic proof: a same-user local process can forge it against the loopback dev proxy and receive the token, which the docs concede. The dev proxy also copies every caller header except host and only overwrites the token header on a same-origin request, so a cross-origin caller that already knew the token could forward it (CORS and the gateway's Origin allowlist still constrain this, so it is defence in depth rather than a live bypass). The default CORS allowlist is broad - 5173, 5174, 20137, 20138 on both loopback names plus https://localhost and http://localhost - so any local service on one of those origins is an acceptable origin, though still tokenless. The cross-origin tests drive raw HTTP with hand-set headers rather than a real browser page, so the browser's forbidden-header enforcement is assumed rather than exercised. SECURITY.md L62-64 still says the token protects only the dev dashboard and that a production build has no proxy, which is stale since the shipped CLI server began proxying in 3.74.1; that drift could mislead a reviewer about the real boundary. Net: against the stated actor (a web page on another origin with no local code execution) I found no path to the token or to dashboard trust; the residuals are boundary/configuration assumptions and embedder ergonomics, not an exploitable browser-origin flaw.",
+  "citations": [
+    "Kernel/API/src/server.ts",
+    "Kernel/API/src/core/dashboard-token.ts",
+    "Kernel/API/src/core/http.ts",
+    "Kernel/API/src/core/runtime.ts",
+    "Kernel/API/src/core/secure-store.ts",
+    "Kernel/API/src/core/config.ts",
+    "Kernel/API/src/core/url.ts",
+    "Kernel/API/test/dashboard-token.test.js",
+    "Kernel/API/test/dashboard-token-bind-order.test.js",
+    "Kernel/API/test/server.test.js",
+    "cli/server-src/static.mjs",
+    "tests/cli-dashboard-proxy.test.js",
+    "tests/browser-storage.test.js",
+    "tests/desktop-ipc.test.js",
+    "vite.config.ts",
+    "src/lib/gatewayClient.ts",
+    "SECURITY.md",
+    "docs/SPEC-SDK.md"
+  ]
+}

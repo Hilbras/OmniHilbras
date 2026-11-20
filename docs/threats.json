@@ -1,0 +1,37 @@
+[
+  {
+    "threat_id": "T01",
+    "threat": "An unauthenticated local process reaches a state-changing management route (e.g. /v1/runtime install/start) and changes machine state.",
+    "domain": "access-control"
+  },
+  {
+    "threat_id": "T02",
+    "threat": "A browser page on another origin obtains the dashboard token or makes the gateway trust it as the dashboard.",
+    "domain": "browser-auth"
+  },
+  {
+    "threat_id": "T03",
+    "threat": "A provider-supplied endpoint or a stored connection causes a server-side request to a private/internal destination (SSRF).",
+    "domain": "ssrf"
+  },
+  {
+    "threat_id": "T04",
+    "threat": "A crafted backup envelope makes key derivation consume unbounded CPU and stalls the gateway event loop.",
+    "domain": "resource-exhaustion"
+  },
+  {
+    "threat_id": "T05",
+    "threat": "A prompt-influenced model escapes an operator-approved local-tool root via a symlink and reads outside files.",
+    "domain": "tool-isolation"
+  },
+  {
+    "threat_id": "T06",
+    "threat": "A credential reaches browser storage, a log, or version control.",
+    "domain": "secrets"
+  },
+  {
+    "threat_id": "T07",
+    "threat": "A stale or recycled recorded PID causes the CLI launcher to signal an unrelated same-user process.",
+    "domain": "process-safety"
+  }
+]

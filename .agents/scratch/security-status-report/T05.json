@@ -1,0 +1,18 @@
+{
+  "threat_id": "T05",
+  "threat": "A prompt-influenced model escapes an operator-approved local-tool root via a symlink and reads outside files.",
+  "quality": 0.87,
+  "strengths": "A dedicated executor (Kernel/API/src/core/local-tool-executor.ts) enforces realpath containment on both the caller-supplied path (resolveInside/chooseRoot) and every file produced by directory enumeration (containedInRoots), which is exactly the symlink-inside-an-approved-root escape path. local_read realpaths and then reads the canonical path; local_grep skips enumerated entries whose realpath lands outside every approved root. Commit e4ad081b fixed audit finding 4 (medium) with a regression test that plants a symlink to an outside secret and asserts the marker is absent; all five executor tests pass locally and the built dist contains the fix. The surface is opt-in (OMNIHILBRAS_LOCAL_TOOLS=1 AND absolute OMNIHILBRAS_LOCAL_TOOL_ROOTS), exposes only read/glob/grep with no shell, write or network capability, caps output at 64 KiB, and is bounded to four tool rounds; build-time guards assert the realpath usage and absence of process/write/network APIs, and the SPEC states the realpath guarantee.",
+  "weaknesses": "Check-then-use TOCTOU remains in local_grep: containedInRoots() calls realpathSync on a file but the following readFileSync(file) reads the original, possibly symlinked path, so an actor able to swap the link in that window could still escape — not reachable by the read-only model itself, but weaker than O_NOFOLLOW/openat. The revalidation is applied at the grep read site rather than inside walk(), so a future tool that reads walked files could silently reintroduce the bug; local_glob does not re-realpath enumerated entries (only names are returned today, so no content leak, but symlink metadata is exposed). Hardlinks are indistinguishable to realpath (not a model capability here). The secondary local-tool-root surface, the OpenCode bridge, delegates path enforcement to upstream OpenCode: 'project' mode denies external_directory but has no repo-level symlink regression test, and the default mode deliberately allows reads anywhere the gateway user can, so an operator-approved root is not the default posture there. Generic fs errors are returned to the model via error.message and may echo absolute host paths.",
+  "citations": [
+    "Kernel/API/src/core/local-tool-executor.ts",
+    "Kernel/API/test/local-tool-executor.test.js",
+    "Kernel/API/src/core/service.ts",
+    "Kernel/Tools/src/localTools.ts",
+    "tests/local-tools.test.js",
+    "docs/SPEC-SDK.md",
+    "README.md",
+    "Kernel/API/src/core/opencode-service.ts",
+    "Kernel/API/test/opencode-service.test.js"
+  ]
+}

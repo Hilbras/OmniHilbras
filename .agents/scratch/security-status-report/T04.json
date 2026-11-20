@@ -1,0 +1,19 @@
+{
+  "threat_id": "T04",
+  "threat": "A crafted backup envelope makes key derivation consume unbounded CPU and stalls the gateway event loop.",
+  "quality": 0.8,
+  "strengths": "The precise unbounded-CPU vector is closed in Kernel/API/src/core/backup.ts: boundedKdf() runs before any scryptSync and rejects envelope-supplied KDF parameters unless N/r/p are safe integers >= 1, N is a power of two in [2, 65536], r <= 32, p <= 16 and 128*N*r <= 64 MiB; scryptSync is additionally passed maxmem: 64 MiB. This matters because maxmem bounds 128*N*r but not p, and p is the cheap way for a tiny envelope to multiply CPU. Validation is ordered so format/version/cipher/kdf.name/field-type checks and the 20 MiB MAX_ENVELOPE_CHARS payload cap all precede the KDF (backup.ts L73-87), while the HTTP layer caps the request body at 25 MiB by both content-length and streamed byte count (routes/backup.ts L5, core/http.ts L53-65). The bound is centralized in decryptBackup, so all three callers - export read-back (service.ts L3158), verify (L3169) and import (L3264) - are covered with no unguarded path. A named regression test (test/backup.test.js L109-124) feeds p=1e8, p=-1, N=1<<20, N=3, r=1<<20, p=1.5 and a string p, asserts each is refused with /KDF parameters/ before scrypt work, and confirms genuine defaults still round-trip; the suite passes 7/7. /v1/backup is in the management prefix list (server.ts L406), so with key enforcement on an unauthenticated caller is rejected (test/admin-gate.test.js). The fix is committed (e4ad081b 'Fix four security-audit findings', 2026-11-20) and is present in the live dist build and the published CLI gateway bundle (cli/server/gateway.mjs).",
+  "weaknesses": "The mitigation bounds per-envelope cost but does not remove the event-loop stall named in the threat: decryption still uses synchronous scryptSync, so even an accepted envelope at the top of the allowed range (N=16384, r=8, p=16) measured ~856 ms of blocking CPU on this machine; there is no worker-thread/async handoff or wall-clock budget, only parameter proxies. There is also no request-rate limit on this surface: the RateLimiter in core/rate-limit.ts is applied only to public LLM routes (server.ts L234-237, isPublicLlmRoute), not to /v1/backup/verify or /import, so an authorized caller - or any local process when key enforcement is off, the documented local mode - can replay expensive-but-bounded envelopes and keep the loop busy. The scryptSync call sits outside decryptBackup's try/catch (backup.ts L82-87 vs L88), so parameter sets that pass the application bound but exceed OpenSSL's own maxmem - e.g. N=65536/r=8/p=16 or N=16384/r=32/p=16, both allowed by 128*N*r <= 64 MiB - throw 'Invalid scrypt params', which escapes as a generic bad request; a fast failure rather than a stall, but an untested edge. The regression test probes a handful of hostile values rather than the accepted boundaries (p=16, N=65536, r=32 are not asserted as accepted), and the passphrase has a minimum but no maximum length (only the 25 MiB body cap contains it). Finally, the packaged desktop artifacts under release/ (app.asar and app.asar.unpacked/.../core/backup.js, built 2026-11-12) predate the 2026-11-20 fix and still carry unbounded scryptSync, so an operator running those binaries rather than the source/dist or the npm CLI bundle is unprotected until they are rebuilt.",
+  "citations": [
+    "Kernel/API/src/core/backup.ts",
+    "Kernel/API/src/routes/backup.ts",
+    "Kernel/API/src/core/http.ts",
+    "Kernel/API/src/core/service.ts",
+    "Kernel/API/src/server.ts",
+    "Kernel/API/src/core/rate-limit.ts",
+    "Kernel/API/test/backup.test.js",
+    "Kernel/API/test/backup-route.test.js",
+    "Kernel/API/test/admin-gate.test.js",
+    "release/linux-unpacked/resources/app.asar.unpacked/Kernel/API/dist/src/core/backup.js"
+  ]
+}
