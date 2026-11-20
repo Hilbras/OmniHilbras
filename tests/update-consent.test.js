@@ -24,13 +24,16 @@ const preload = readFileSync(join(root, 'desktop', 'preload.cjs'), 'utf8');
 // reads the surface that renders it rather than the file it used to be in.
 const banner = readFileSync(join(root, 'src', 'components', 'UpdateIndicator.tsx'), 'utf8');
 const bridge = readFileSync(join(root, 'src', 'lib', 'electronBridge.ts'), 'utf8');
+const hook = readFileSync(join(root, 'src', 'lib', 'useUpdateState.ts'), 'utf8');
+const settings = readFileSync(join(root, 'src', 'pages', 'SettingsPage.tsx'), 'utf8');
 
 test('the main process reports whether it can prove an update', () => {
   assert.match(main, /function updateTrust\(\)/, 'there must be one place that decides this');
   assert.match(main, /OMNIHILBRAS_UPDATE_PUBLIC_KEY/, 'and it must look for a pinned key');
   // It must not claim a proof it does not have.
   assert.match(main, /return \{ signed: false, reason: 'No release-signing key is configured/, 'an unconfigured build says so');
-  assert.match(main, /\.\.\.updateTrust\(\)/, 'the state sent to the renderer carries it');
+  assert.match(main, /const trust = updateTrust\(\)/, 'the state builder reads it once');
+  assert.match(main, /\.\.\.trust, \.\.\.updateState, \.\.\.next/, 'a caller-provided reason cannot be overwritten by the signing paragraph');
 });
 
 test('an unverified update cannot be installed without an explicit decision', () => {
@@ -42,12 +45,16 @@ test('an unverified update cannot be installed without an explicit decision', ()
   assert.match(main, /ipcMain\.handle\('update:install', \(_event, options\) => installUpdate\(options \?\? \{\}\)\)/);
 });
 
-test('the confirmation is in the interface, not only in the main process', () => {
+test('one consent helper is used by every surface that can install', () => {
   assert.match(bridge, /install: \(options\?: \{ allowUnsigned\?: boolean \}\) => Promise<void>/, 'the bridge carries the option');
   assert.match(bridge, /signed\?: boolean/, 'and the state carries the verdict');
-  assert.match(banner, /window\.confirm\(/, 'the banner asks');
-  assert.match(banner, /state\.signed === false/, 'only when the update cannot be proved');
-  assert.match(banner, /allowUnsigned: true/, 'and only the confirmed path passes the flag');
+  assert.match(hook, /export function confirmUnsignedUpdate\(/, 'the decision has one home');
+  assert.match(hook, /window\.confirm\(/, 'and it asks the person');
+  assert.match(hook, /state\?\.signed !== false\) return true/, 'a proved update needs no prompt');
+  assert.match(settings, /confirmUnsignedUpdate\(update\)/, 'Settings uses the same helper');
+  assert.match(settings, /allowUnsigned: update\?\.signed === false/, 'and forwards the decision');
+  assert.doesNotMatch(banner, /trustReason \?\? 'This update cannot be verified'/, 'the popup must not ask a second time');
+  assert.match(banner, /onClick=\{\(\) => void install\(\)\}/, 'the popup calls the same path');
 });
 
 test('the preload forwards the option rather than inventing it', () => {

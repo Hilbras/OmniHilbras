@@ -227,12 +227,25 @@ function updateTrust() {
 let pendingDebFile;
 let pendingDebPath = '';
 
-/** Windows NSIS, signed macOS and Linux AppImage can replace themselves; a .deb cannot. */
+/** The `.deb` and macOS zip selected from an update feed, if it lists one. */
+let pendingZipFile;
+/**
+ * Only a build whose installer can replace itself may auto-install.
+ *
+ * A Linux .deb is handed to the system package manager, and macOS CI publishes a dmg only —
+ * `MacUpdater` needs a zip in the feed and throws `ERR_UPDATER_ZIP_FILE_NOT_FOUND` without one.
+ * Offering "Install and restart" for those builds was a button that could only fail.
+ */
 function canSelfUpdate() {
-  return process.platform !== 'linux' || Boolean(process.env.APPIMAGE);
+  if (process.platform === 'linux') return Boolean(process.env.APPIMAGE);
+  if (process.platform === 'darwin') return Boolean(pendingZipFile);
+  return true; // Windows NSIS
 }
 function setUpdateState(next) {
-  updateState = { ...updateState, ...next, ...updateTrust() };
+  const trust = updateTrust();
+  // Trust is a fact about this build, not a verdict about the latest check: merging it last used to
+  // overwrite the real `reason` of an error or skip with the signing paragraph. Keep both fields.
+  updateState = { ...trust, ...updateState, ...next, trustReason: trust.reason };
   send('update:state', updateState);
 }
 
@@ -259,6 +272,9 @@ async function loadUpdater() {
     pendingDebFile = process.platform === 'linux' && !process.env.APPIMAGE
       ? files.find((file) => typeof file?.url === 'string' && file.url.endsWith('.deb'))
       : undefined;
+    pendingZipFile = process.platform === 'darwin'
+      ? files.find((file) => typeof file?.url === 'string' && file.url.endsWith('.zip'))
+      : undefined;
     pendingDebPath = '';
     const debUpdate = Boolean(pendingDebFile);
     const canInstall = canSelfUpdate() || debUpdate;
@@ -280,6 +296,7 @@ async function loadUpdater() {
   });
   autoUpdater.on('update-not-available', () => {
     pendingDebFile = undefined;
+    pendingZipFile = undefined;
     pendingDebPath = '';
     setUpdateState({ status: 'current' });
   });
@@ -929,7 +946,12 @@ if (!locked) {
       }
     }
     broadcastState();
-    if (appSettings().checkUpdatesOnLaunch) setTimeout(() => { void checkForUpdates(); }, 5_000);
+    if (appSettings().checkUpdatesOnLaunch) {
+      setTimeout(() => { void checkForUpdates(); }, 5_000);
+      // The docs promise a timer: a long-running tray app cannot rely on launch alone. Six hours matches
+      // the gateway's own release cache, so the two surfaces do not disagree by hours about "latest".
+      setInterval(() => { void checkForUpdates(); }, 6 * 60 * 60 * 1000).unref();
+    }
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
       else showWindow();

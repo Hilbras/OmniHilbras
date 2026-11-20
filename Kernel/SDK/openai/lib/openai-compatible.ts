@@ -1,4 +1,5 @@
 import { ProviderError } from './errors.js';
+import { normalizeCatalogModel } from './model-normalize.js';
 import { readResponsesFrame, responsesLaneFor, responsesLaneRefusal, rememberResponsesLane, toResponsesBody, toResponsesChatResponse, type ResponsesPayload, type ResponsesStreamEvent } from './responses-lane.js';
 import { parseSseJson, parseSseStream } from './streaming.js';
 import { FetchHttpTransport, type HttpTransport } from './transport.js';
@@ -151,40 +152,6 @@ type OpenAIModelEntry = {
   };
 };
 
-function firstNumber(...values: Array<number | undefined>): number | undefined {
-  for (const value of values) {
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
-  }
-  return undefined;
-}
-
-/**
- * Pricing from an OpenAI-shaped catalog, without inventing a unit.
- *
- * A `/models` payload may state per-token prices under `prompt`/`completion` (OpenRouter's shape) or
- * already-normalised per-1M prices. Only the two named fields are trusted as per-token; a bare price
- * the shape does not identify is left out rather than multiplied by a guess.
- */
-function modelPricing(value: OpenAIModelEntry['pricing']): Model['pricing'] | undefined {
-  if (!value) return undefined;
-  const perMillion = (input: unknown): number | undefined => {
-    const parsed = typeof input === 'number' ? input : typeof input === 'string' ? Number(input) : Number.NaN;
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed * 1_000_000 : undefined;
-  };
-  const explicit = (input: unknown): number | undefined =>
-    typeof input === 'number' && Number.isFinite(input) && input >= 0 ? input : undefined;
-  const pricing: NonNullable<Model['pricing']> = {
-    ...(explicit(value.inputPer1M) === undefined ? {} : { inputPer1M: explicit(value.inputPer1M)! }),
-    ...(explicit(value.outputPer1M) === undefined ? {} : { outputPer1M: explicit(value.outputPer1M)! }),
-    ...(explicit(value.cacheReadPer1M) === undefined ? {} : { cacheReadPer1M: explicit(value.cacheReadPer1M)! }),
-    ...(explicit(value.cacheWritePer1M) === undefined ? {} : { cacheWritePer1M: explicit(value.cacheWritePer1M)! }),
-    ...(perMillion(value.prompt) === undefined ? {} : { inputPer1M: perMillion(value.prompt)! }),
-    ...(perMillion(value.completion) === undefined ? {} : { outputPer1M: perMillion(value.completion)! }),
-    ...(perMillion(value.input_cache_read) === undefined ? {} : { cacheReadPer1M: perMillion(value.input_cache_read)! }),
-  };
-  return Object.keys(pricing).length > 0 ? pricing : undefined;
-}
-
 export class OpenAICompatibleAdapter implements ProviderAdapter {
   readonly id: string;
   readonly name: string;
@@ -257,23 +224,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     const data = response.data;
     const entries = Array.isArray(data) ? data : data?.data ?? data?.models ?? data?.results ?? data?.items;
     if (!Array.isArray(entries)) throw invalidResponse(this.id, `Provider model list is missing data (top-level keys: ${data && typeof data === 'object' ? Object.keys(data).join(', ') : 'none'}).`);
-    return entries.flatMap((model) => {
-      if (!model.id) return [];
-      const contextWindow = firstNumber(model.context_length, model.context_window, model.max_context_length, model.max_context_window);
-      const inputModalities = model.input_modalities ?? model.architecture?.input_modalities;
-      const outputModalities = model.output_modalities ?? model.architecture?.output_modalities;
-      const pricing = modelPricing(model.pricing);
-      return [{
-        id: model.id,
-        providerId: this.id,
-        ...(model.display_name ?? model.name ? { displayName: model.display_name ?? model.name } : {}),
-        ...(model.owned_by ? { ownedBy: model.owned_by } : {}),
-        ...(contextWindow === undefined ? {} : { contextWindow }),
-        ...(inputModalities?.length ? { inputModalities } : {}),
-        ...(outputModalities?.length ? { outputModalities } : {}),
-        ...(pricing ? { pricing } : {}),
-      } satisfies Model];
-    });
+    return entries.flatMap((model) => (typeof model.id === 'string' && model.id ? [normalizeCatalogModel(model, this.id)] : []));
   }
 
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {

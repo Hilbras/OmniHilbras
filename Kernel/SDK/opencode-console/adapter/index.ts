@@ -1,7 +1,7 @@
 import { ProviderError } from '../lib/errors.js';
 import { FetchHttpTransport } from '../lib/transport.js';
 import type { HttpTransport } from '../lib/transport.js';
-import { compactPricing, normalizeContextWindow, normalizeModalities, perMillionPrice } from '../lib/pricing.js';
+import { normalizeCatalogModel } from '../lib/model-normalize.js';
 import { AnthropicAdapter } from '../lib/anthropic.js';
 import { OpenAICompatibleAdapter } from '../lib/openai-compatible.js';
 import { zenConversationSeed, zenContractSatisfied, isZenFreeTierRefusalError, zenFreeTierRefusal, zenSessionId, zenGatedToolChoice, zenUserAgent } from '../lib/zen-free-tier.js';
@@ -133,30 +133,10 @@ function isGoogleLane(lane: string) {
  * together, and it quotes per 1M tokens where OpenRouter quotes per token.
  */
 export function describeConsoleModel(id: string, entry: ConsoleModelConfig | undefined, providerId: string): Model {
-  const displayName = typeof entry?.name === 'string' && entry.name.trim() ? entry.name.trim().slice(0, 200) : undefined;
-  const contextWindow = normalizeContextWindow(entry?.limit?.context);
-  const inputModalities = normalizeModalities(entry?.modalities?.input);
-  const outputModalities = normalizeModalities(entry?.modalities?.output);
-  const cost = entry?.cost;
-  const inputPer1M = perMillionPrice(cost?.input);
-  const outputPer1M = perMillionPrice(cost?.output);
-  const cacheReadPer1M = perMillionPrice(cost?.cache_read);
-  const cacheWritePer1M = perMillionPrice(cost?.cache_write);
-  const pricing = compactPricing({
-    ...(inputPer1M === undefined ? {} : { inputPer1M }),
-    ...(outputPer1M === undefined ? {} : { outputPer1M }),
-    ...(cacheReadPer1M === undefined ? {} : { cacheReadPer1M }),
-    ...(cacheWritePer1M === undefined ? {} : { cacheWritePer1M }),
-  });
-  return {
-    id,
-    providerId,
-    ...(displayName ? { displayName } : {}),
-    ...(contextWindow ? { contextWindow } : {}),
-    ...(inputModalities ? { inputModalities } : {}),
-    ...(outputModalities ? { outputModalities } : {}),
-    ...(pricing ? { pricing } : {}),
-  };
+  if (!entry) return { id, providerId }; // only the id was stated; no metadata source to claim
+  // The Console states prices, limits and modalities in its own names; the shared normalizer reads
+  // every field it publishes, including max output and cost, without inventing a missing one.
+  return normalizeCatalogModel({ ...entry, id }, providerId);
 }
 
 /**

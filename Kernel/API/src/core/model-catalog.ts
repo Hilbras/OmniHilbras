@@ -1,6 +1,7 @@
 import { isProviderError } from './provider-error.js';
 import { ProviderError, qualifiedModelId, type Model, type ModelImportPolicy, type ProviderAdapter, type ProviderCredential, type ProviderRequestContext } from './index.js';;
 import { notSupported } from './capability.js';
+import { modelMetaPriceOrder } from './connections.js';
 import type { ConnectionManager } from './connection-manager.js';
 import type { CredentialManager } from './credential-manager.js';
 import type { VirtualModelStore } from './virtual-models.js';
@@ -60,12 +61,38 @@ export class ModelCatalog {
         // here is what puts `context_window` on `/v1/models`; without it a 1M-context model looked like a
         // model with no declared window to any client that reads the OpenAI list.
         const meta = connection.modelMeta?.[modelId];
+        // Every fact the provider stated is reconstructed here, so /v1/models and the dashboard see the
+        // same catalog the adapter discovered. An absent field stays absent — no invented zero or family.
+        const prices = meta?.p;
+        const pricing: Model['pricing'] | undefined = prices && prices.some((value) => value !== null)
+          ? Object.fromEntries(modelMetaPriceOrder.map((key, index) => [key, prices[index] ?? undefined]).filter(([, value]) => value !== undefined)) as Model['pricing']
+          : undefined;
         return {
           id: qualifiedModelId(connection.providerId, modelId),
           modelId,
           providerId: connection.providerId,
           ...(meta?.n ? { displayName: meta.n } : {}),
           ...(meta?.c ? { contextWindow: meta.c } : {}),
+          ...(meta?.mo ? { maxOutputTokens: meta.mo } : {}),
+          ...(meta?.d ? { description: meta.d } : {}),
+          ...(meta?.a?.length ? { aliases: meta.a } : {}),
+          ...(meta?.cr ? { createdAt: meta.cr } : {}),
+          ...(meta?.kc ? { knowledgeCutoff: meta.kc } : {}),
+          ...(meta?.ex ? { expiresAt: meta.ex } : {}),
+          ...(meta?.st ? { status: meta.st } : {}),
+          ...(meta?.cs ? { canonicalSlug: meta.cs } : {}),
+          ...(meta?.tk ? { tokenizer: meta.tk } : {}),
+          ...(meta?.sp?.length ? { supportedParameters: meta.sp } : {}),
+          ...(meta?.rs ? { reasoning: {
+            ...(typeof meta.rs.de === 'boolean' ? { defaultEnabled: meta.rs.de } : {}),
+            ...(typeof meta.rs.ma === 'boolean' ? { mandatory: meta.rs.ma } : {}),
+            ...(meta.rs.eff ? { defaultEffort: meta.rs.eff } : {}),
+            ...(meta.rs.efforts?.length ? { supportedEfforts: meta.rs.efforts } : {}),
+          } } : {}),
+          ...(meta?.src ? { source: meta.src as Model['source'] } : {}),
+          ...(meta?.i?.length ? { inputModalities: meta.i } : {}),
+          ...(meta?.o?.length ? { outputModalities: meta.o } : {}),
+          ...(pricing ? { pricing } : {}),
         };
       }));
       const unavailable: GatewayModelList['unavailable'] = [];

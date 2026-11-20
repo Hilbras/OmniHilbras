@@ -1,4 +1,5 @@
 import { ProviderError } from './errors.js';
+import { normalizeCatalogModel } from './model-normalize.js';
 import { parseSseJson, parseSseStream } from './streaming.js';
 import { FetchHttpTransport, type HttpTransport } from './transport.js';
 import { assertSafeProviderHeaderName, assertSafeProviderHeaderValue, normalizeProviderBaseUrl, resolveProviderUrl, sanitizeProviderHeaders } from './url.js';
@@ -191,7 +192,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     const data = response.data?.data;
     if (!Array.isArray(data)) throw invalidResponse(this.id, 'Provider model list is missing data.');
 
-    return data.flatMap((model) => model.id ? [{ id: model.id, providerId: this.id, ownedBy: model.owned_by }] : []);
+    return data.flatMap((model) => model.id && typeof model.id === 'string' ? [normalizeCatalogModel(model, this.id)] : []);
   }
 
   async chat(request: ChatRequest, context: ProviderRequestContext = {}): Promise<ChatResponse> {

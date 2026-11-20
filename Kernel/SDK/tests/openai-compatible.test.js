@@ -74,7 +74,7 @@ test('OpenAI-compatible adapter lists models and normalizes stream chunks', asyn
     chunks.push(chunk);
   }
 
-  assert.deepEqual(models, [{ id: 'acme-1', providerId: 'acme', ownedBy: 'acme' }]);
+  assert.deepEqual(models, [{ id: 'acme-1', providerId: 'acme', ownedBy: 'acme', source: 'provider' }], 'a catalog entry says where its facts came from');
   assert.deepEqual(chunks.map((chunk) => chunk.delta.content), ['hi', ' there']);
   assert.equal(chunks[1].finishReason, 'stop');
   assert.deepEqual(chunks[1].usage, { inputTokens: 3, outputTokens: 2, totalTokens: 5 });

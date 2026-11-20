@@ -25,6 +25,19 @@ import { getGatewayLatestRelease } from './gatewayClient';
  * does not hide 3.50.0.
  */
 
+/**
+ * One consent decision for every surface that can install an update.
+ *
+ * Until release signing exists the main process refuses a silent install; the person must agree. Both the
+ * sidebar popup and Settings use this helper, so a new caller cannot accidentally become the one that skips
+ * the prompt. The reason shown is the one the main process reported, not a generic warning.
+ */
+export function confirmUnsignedUpdate(state: Pick<UpdateState, 'signed' | 'trustReason'> | undefined): boolean {
+  if (state?.signed !== false) return true;
+  return typeof window !== 'undefined'
+    && window.confirm(`${state.trustReason ?? 'This update cannot be verified.'}\n\nInstall it anyway?`);
+}
+
 /** How the surface should read, whichever source produced it. */
 export type UpdateView = UpdateState & {
   source: 'desktop' | 'github';
@@ -204,12 +217,27 @@ export function useUpdateState() {
     return next;
   }, [bridge]);
 
-  const install = useCallback(async (options?: { allowUnsigned?: boolean }) => {
+  const installRaw = useCallback(async (options?: { allowUnsigned?: boolean }) => {
     if (!bridge) return;
     // `install` returns nothing: the main process relaunches, and progress arrives as events on the
     // subscription above. Anything this returned would be a state the app is about to stop existing in.
     await bridge.updates.install(options);
   }, [bridge]);
+
+  /**
+   * One consent path for every surface that can install. Settings used to call the bridge directly and
+   * always failed on an unsigned build, because only the sidebar popup passed `allowUnsigned`. Asking here
+   * also means the reason a person is being asked for is the one the main process actually reported.
+   */
+  const install = useCallback(async (options?: { allowUnsigned?: boolean }) => {
+    if (!bridge) return;
+    let allowUnsigned = options?.allowUnsigned === true;
+    if (!allowUnsigned) {
+      if (!confirmUnsignedUpdate(state)) return;
+      allowUnsigned = state?.signed === false;
+    }
+    await installRaw({ ...options, allowUnsigned });
+  }, [bridge, installRaw, state]);
 
   const check = useCallback(async () => {
     if (bridge) {

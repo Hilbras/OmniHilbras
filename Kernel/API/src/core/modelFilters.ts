@@ -12,20 +12,8 @@
  * because a full catalog runs to hundreds of entries per connection and this is written
  * into a metadata file with a hard size cap.
  */
-export type ModelMeta = {
-  /** Display name. */
-  n?: string;
-  /** Context window in tokens. */
-  c?: number;
-  /** Declared input modalities. */
-  i?: readonly string[];
-  /** Declared output modalities. */
-  o?: readonly string[];
-  /** Per 1M tokens: input, output, cache read, cache write. */
-  p?: readonly number[];
-};
-
-export type ModelMetaMap = Record<string, ModelMeta>;
+// One definition: the store owns the shape; this module only reads it.
+import type { ModelMeta, ModelMetaMap } from './connections.js';
 
 /** The price fields, in the order `p` stores them. */
 const priceKeys = ['input', 'output', 'cacheRead', 'cacheWrite'] as const;
@@ -34,6 +22,14 @@ export type PriceField = (typeof priceKeys)[number];
 export type ModelFacets = {
   displayName?: string;
   contextWindow?: number;
+  /** Maximum output tokens, only when the provider stated one. */
+  maxOutputTokens?: number;
+  description?: string;
+  status?: string;
+  /** Provider-stated parameter names; `tools` here means the catalog declared tool support. */
+  supportedParameters: string[];
+  reasoning?: NonNullable<ModelMeta['rs']>;
+  source?: string;
   inputModalities: string[];
   outputModalities: string[];
   prices: Partial<Record<PriceField, number>>;
@@ -65,6 +61,12 @@ export function modelFacets(meta: ModelMeta | undefined): ModelFacets {
   return {
     ...(meta?.n ? { displayName: meta.n } : {}),
     ...(meta?.c ? { contextWindow: meta.c } : {}),
+    ...(meta?.mo ? { maxOutputTokens: meta.mo } : {}),
+    ...(meta?.d ? { description: meta.d } : {}),
+    ...(meta?.st ? { status: meta.st } : {}),
+    ...(meta?.src ? { source: meta.src } : {}),
+    ...(meta?.rs ? { reasoning: meta.rs } : {}),
+    supportedParameters: [...(meta?.sp ?? [])],
     inputModalities,
     outputModalities,
     prices,

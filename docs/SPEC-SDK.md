@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.89.0
+**Status:** Current — release 3.90.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -210,7 +210,14 @@ The first local gateway exposes:
   two pages, one fact, two answers. The providers summary used to read a hardcoded `92%` labelled
   "last 24 hours", with `GET /health` called on every load and its result merged into the cards and
   then discarded. Both now read the report they display, and both label a credential check as one.
-- `GET /v1/models` — normalized models from configured adapters.
+- `GET /v1/models` — normalized models from configured adapters, carrying **every fact the provider's
+  catalog stated**: context window, max output tokens, description, aliases, release/knowledge/expiry
+  dates, status, canonical name, tokenizer, supported parameters, reasoning shape, stated modalities and
+  all published price dimensions. A provider that states only an id gets only an id — absent fields are
+  never defaulted to zero, `"text"`, or an inferred price. Records carry `source: 'provider'` or
+  `'static-catalog'` so a labelled heuristic is never passed off as measured. The same fields survive
+  connection save, restart and `POST /v1/connections/:id/models/refresh` and are shown on the provider
+  page; prices are indexed by a fixed slot order, so an output-only quote cannot become an input price.
 - `GET /v1/connections` — connection metadata without credentials, plus `credentialExpiresAt` and `credentialState` (`valid`, `expiring`, `expired`, `unknown`, `none`). The expiry is the OAuth credential's own, the same field the renewal pass filters on: `expiring` means the pass will renew it inside its window, `expired` means renewal did not happen or was refused, and `none` is a deliberately keyless connection rather than an unreadable one. A connection's refused refresh is recorded against **that connection**, not its provider, so one dead account cannot mark a live sibling.
 - `POST /v1/connections/:providerId/check` — validate a candidate API key for any provider without
   saving it. Accepts `{ apiKey }`, and optionally `endpoint` for a proxied or self-hosted provider; a
@@ -3525,7 +3532,7 @@ measurement, and `Kernel/API/test/spec-success-criteria.mjs` fails if any stops 
       `build` script; every `Kernel/SDK/<provider>/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **280 files** in `Kernel/SDK/` — 54 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url` and `bounded-map` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 53: it measures providers, this counts files.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **290 files** in `Kernel/SDK/` — 54 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url`, `bounded-map` and — for the OpenAI-shaped providers — `model-normalize` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 53: it measures providers, this counts files.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

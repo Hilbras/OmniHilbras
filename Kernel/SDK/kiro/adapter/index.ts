@@ -1155,6 +1155,8 @@ export class KiroAdapter implements ProviderAdapter {
       providerId: this.id,
       displayName: model.name,
       ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
+      ...(model.maxOutputTokens ? { maxOutputTokens: model.maxOutputTokens } : {}),
+      source: 'static-catalog' as const,
     }));
   }
 

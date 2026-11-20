@@ -237,7 +237,7 @@ test('the pinned capture decodes: the real catalog shape, through the adapter', 
   assert.equal(ids.includes('cohere/embed-5-fast'), false, 'an embeddings model must not be offered as chat');
   assert.ok(ids.includes('upstage/solar-mini4:free'));
   const free = models.find((model) => model.id === 'upstage/solar-mini4:free');
-  assert.deepEqual(free.pricing, { inputPer1M: 0, outputPer1M: 0 }, 'a zero price is stated, not dropped');
+  assert.deepEqual(free.pricing, { inputPer1M: 0, outputPer1M: 0, cacheReadPer1M: 0 }, 'every stated zero is kept, including the cache price');
   const paid = models.find((model) => model.id.startsWith('liquid/'));
   assert.ok(paid.pricing.inputPer1M > 0 && paid.pricing.outputPer1M > 0, 'a captured per-token price is converted to per-1M');
   assert.ok(paid.contextWindow >= 1024, 'the context window is read from the listing');

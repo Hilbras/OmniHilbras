@@ -44,12 +44,17 @@ jobs:
             artifact: |
               release/*.deb
               release/*.AppImage
+              release/latest-linux.yml
           - os: windows-latest
             target: --win nsis
-            artifact: release/*.exe
+            artifact: |
+              release/*.exe
+              release/latest.yml
           - os: macos-latest
             target: --mac dmg
-            artifact: release/*.dmg
+            artifact: |
+              release/*.dmg
+              release/latest-mac.yml
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

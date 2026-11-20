@@ -61,16 +61,40 @@ import { ConnectionMetadataLimitError, ConnectionModelLimitError, modelMetaPrice
  */
 export function modelMetaFor(models: readonly Model[]): ModelMetaMap | undefined {
   const meta: ModelMetaMap = {};
+  const string = (value: string | undefined, limit: number) => typeof value === 'string' && value.trim() && value.length <= limit ? value.trim() : undefined;
+  const list = (value: readonly string[] | undefined, limit: number) => Array.isArray(value)
+    ? [...new Set(value.filter((item) => typeof item === 'string' && item.length <= 64).map((item) => item.trim()).filter(Boolean))].slice(0, limit)
+    : [];
   for (const model of models) {
-    const prices = modelMetaPriceOrder
-      .map((key) => model.pricing?.[key])
-      .filter((value): value is number => typeof value === 'number');
+    // A fixed-length price array keeps each dimension indexed by `modelMetaPriceOrder`; an absent
+    // dimension is null, never silently shifted left into the next one.
+    const prices: (number | null)[] = modelMetaPriceOrder.map((key) => {
+      const value = model.pricing?.[key];
+      return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000 ? value : null;
+    });
     const entry: ModelMeta = {
-      ...(model.displayName ? { n: model.displayName } : {}),
-      ...(model.contextWindow ? { c: model.contextWindow } : {}),
-      ...(model.inputModalities?.length ? { i: [...model.inputModalities] } : {}),
-      ...(model.outputModalities?.length ? { o: [...model.outputModalities] } : {}),
-      ...(prices.length ? { p: prices } : {}),
+      ...(string(model.displayName, 200) ? { n: string(model.displayName, 200) } : {}),
+      ...(model.contextWindow && Number.isInteger(model.contextWindow) && model.contextWindow <= 10_000_000 ? { c: model.contextWindow } : {}),
+      ...(model.maxOutputTokens && Number.isInteger(model.maxOutputTokens) && model.maxOutputTokens <= 10_000_000 ? { mo: model.maxOutputTokens } : {}),
+      ...(list(model.inputModalities, 8).length ? { i: list(model.inputModalities, 8) } : {}),
+      ...(list(model.outputModalities, 8).length ? { o: list(model.outputModalities, 8) } : {}),
+      ...(prices.some((value) => value !== null) ? { p: prices } : {}),
+      ...(string(model.description, 2000) ? { d: string(model.description, 2000) } : {}),
+      ...(list(model.aliases, 16).length ? { a: list(model.aliases, 16) } : {}),
+      ...(string(model.createdAt, 40) ? { cr: string(model.createdAt, 40) } : {}),
+      ...(string(model.knowledgeCutoff, 40) ? { kc: string(model.knowledgeCutoff, 40) } : {}),
+      ...(string(model.expiresAt, 40) ? { ex: string(model.expiresAt, 40) } : {}),
+      ...(string(model.status, 40) ? { st: string(model.status, 40) } : {}),
+      ...(string(model.canonicalSlug, 200) ? { cs: string(model.canonicalSlug, 200) } : {}),
+      ...(string(model.tokenizer, 80) ? { tk: string(model.tokenizer, 80) } : {}),
+      ...(list(model.supportedParameters, 64).length ? { sp: list(model.supportedParameters, 64) } : {}),
+      ...(model.reasoning ? { rs: {
+        ...(typeof model.reasoning.defaultEnabled === 'boolean' ? { de: model.reasoning.defaultEnabled } : {}),
+        ...(typeof model.reasoning.mandatory === 'boolean' ? { ma: model.reasoning.mandatory } : {}),
+        ...(string(model.reasoning.defaultEffort, 40) ? { eff: string(model.reasoning.defaultEffort, 40) } : {}),
+        ...(list(model.reasoning.supportedEfforts, 16).length ? { efforts: list(model.reasoning.supportedEfforts, 16) } : {}),
+      } } : {}),
+      ...(model.source ? { src: model.source } : {}),
     };
     if (Object.keys(entry).length > 0) meta[model.id] = entry;
   }

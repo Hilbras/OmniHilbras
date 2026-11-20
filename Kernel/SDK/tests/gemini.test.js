@@ -91,7 +91,7 @@ test('GeminiAdapter lists models and normalizes streaming chunks', async () => {
     chunks.push(chunk);
   }
 
-  assert.deepEqual(models, [{ id: 'gemini-2.5-flash', providerId: 'gemini', displayName: 'Gemini Flash', contextWindow: 1048576, capabilities: { chat: true, streaming: false } }]);
+  assert.deepEqual(models, [{ id: 'gemini-2.5-flash', providerId: 'gemini', displayName: 'Gemini Flash', contextWindow: 1048576, capabilities: { chat: true, streaming: false }, source: 'provider' }]);
   assert.equal(transport.calls[1].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse');
   assert.deepEqual(chunks.map((chunk) => chunk.delta.content), ['Hi', ' there']);
   assert.equal(chunks.at(-1).finishReason, 'stop');

@@ -84,7 +84,7 @@ type ModelItem = { id?: string; name?: string };
  * successful sign-in saved a connection with zero models. The legacy `data` array is still accepted,
  * because some lanes and older captures use it.
  */
-type CatalogModelMeta = { name?: unknown; limit?: { context?: unknown } };
+type CatalogModelMeta = { name?: unknown; limit?: { context?: unknown; output?: unknown } };
 type CatalogProvider = {
   providerId?: string;
   config?: {
@@ -115,12 +115,17 @@ function catalogModels(providerId: string, body: CatalogBody): Model[] {
     const context = meta && typeof meta.limit === 'object' && meta.limit && typeof meta.limit.context === 'number'
       ? meta.limit.context
       : undefined;
+    const maxOutput = meta && typeof meta.limit === 'object' && meta.limit && typeof meta.limit.output === 'number'
+      ? meta.limit.output
+      : undefined;
     const displayName = meta && typeof meta.name === 'string' && meta.name ? meta.name : undefined;
     models.push({
       id: rawId,
       providerId,
       ...(displayName ? { displayName } : {}),
       ...(context ? { contextWindow: context } : {}),
+      ...(maxOutput ? { maxOutputTokens: maxOutput } : {}),
+      source: 'provider' as const,
     });
   };
 

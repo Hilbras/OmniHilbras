@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.89.0**
+**Current version: 3.90.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -399,9 +399,11 @@ The desktop shell owns the local gateway so the app can start and stop it withou
 - **Gateway lifecycle** — start, stop, restart, port changes, and a bounded restart policy: a crash is a
   restart, not a dead app, and five consecutive crashes stop trying.
 - **Logs** stream into the dashboard over the preload bridge.
-- **Release-feed updates** — the app checks the GitHub release feed, downloads an installer, and can install
-  and restart. Windows NSIS, macOS and the Linux AppImage replace themselves; a `.deb` downloads and opens the
-  system installer. An update that cannot be proved asks first, because there is no signing key yet.
+- **Release-feed updates** — the app checks the GitHub release feed on launch and every six hours, downloads
+  an installer, and can install and restart when that platform's feed supports it. Windows NSIS and the Linux
+  AppImage replace themselves; a `.deb` downloads and opens the system installer; macOS needs a zip in the
+  feed, so a dmg-only release offers the release page instead of a button that could only fail. An update that
+  cannot be proved asks first, because there is no signing key yet.
 - **The sidebar says when an update exists**, directly under the gateway badge: the new version, Download or
   Install and restart depending on what this build can do, and a **skip this version** remembered for that
   release only. The desktop reads the state its own main process keeps (it checks on launch and on a timer);

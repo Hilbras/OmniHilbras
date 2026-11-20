@@ -45,6 +45,9 @@ export function UpdateIndicator({ collapsed }: { collapsed: boolean }) {
   if (!state) return null;
   // Only the states that are worth taking space for. `checking` is silent because a check that finds
   // nothing is the normal case, and a spinner that appears on every load is noise.
+  // Errors stay in Settings rather than becoming a permanent sidebar badge: a browser whose GitHub check
+  // failed must not shout "new version" with no version, and a second `status` landmark breaks the page's
+  // accessibility contract. The Settings reason is now the real error, not the signing paragraph.
   const interesting = state.status === 'available' || state.status === 'downloading' || state.status === 'downloaded';
   if (!interesting) return null;
 
@@ -223,7 +226,7 @@ function UpdatePopup({
         </div>
 
         {/* The desktop's own actions first: a build that can replace itself should not be walked past them. */}
-        {state.status === 'available' && download && (
+        {state.status === 'available' && download && state.canInstall && (
           <button
             type="button"
             onClick={() => void download()}
@@ -232,23 +235,14 @@ function UpdatePopup({
             Download
           </button>
         )}
-        {state.status === 'downloaded' && install && (
+        {state.status === 'downloaded' && install && state.canInstall && (
           <button
             type="button"
-            onClick={() => {
-              /**
-               * An unverified update is a decision, not a click-through.
-               *
-               * `signed` comes from the main process: until release signing exists it is `false`, and this
-               * confirm is what turns "the feed said so" into "the operator agreed". The reason travels with
-               * it, so the prompt can say why rather than asking about nothing.
-               */
-              if (state.signed === false && !window.confirm(`${state.trustReason ?? 'This update cannot be verified.'}\n\nInstall it anyway?`)) return;
-              void install(state.signed === false ? { allowUnsigned: true } : undefined);
-            }}
+            // Consent lives in `install()` so Settings and this popup cannot disagree about it.
+            onClick={() => void install()}
             className="btn-gold mt-4 !px-3 !py-2 !text-xs"
           >
-            Install and restart
+            {state.installMethod === 'deb' ? 'Open installer' : 'Install and restart'}
           </button>
         )}
 

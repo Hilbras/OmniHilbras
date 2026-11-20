@@ -1,5 +1,5 @@
 import { ProviderError } from '../lib/errors.js';
-import { compactPricing, normalizeContextWindow, normalizeModalities, perTokenPrice } from '../lib/pricing.js';
+import { normalizeCatalogModel } from '../lib/model-normalize.js';
 import { FetchHttpTransport, type HttpResponse, type HttpTransport } from '../lib/transport.js';
 import { assertSafeProviderHeaderValue, assertSafeProviderRequestUrl, normalizeProviderBaseUrl, resolveProviderUrl } from '../lib/url.js';
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterConfig } from '../lib/openai-compatible.js';
@@ -175,31 +175,9 @@ function normalizeOpenRouterModel(value: unknown, providerId: string): Model | u
   if (!isRecord(value) || typeof value.id !== 'string') return undefined;
   const id = value.id.trim();
   if (!id || id.length > 256 || !/^[a-z0-9~][a-z0-9._:/~-]*$/i.test(id)) return undefined;
-  const displayName = typeof value.name === 'string' && value.name.length <= 200 ? value.name : undefined;
-  const contextWindow = normalizeContextWindow(value.context_length);
-  // OpenRouter states all three, and this adapter already read them for its own free and
-  // text-output checks and then discarded them. They are the reason a price or a vision
-  // filter can be honest on this provider.
-  const architecture = isRecord(value.architecture) ? value.architecture : undefined;
-  const inputModalities = normalizeModalities(architecture?.input_modalities);
-  const outputModalities = normalizeModalities(architecture?.output_modalities);
-  const rawPricing = isRecord(value.pricing) ? value.pricing : undefined;
-  const pricing = compactPricing({
-    // OpenRouter quotes per token, as strings.
-    ...(perTokenPrice(rawPricing?.prompt) === undefined ? {} : { inputPer1M: perTokenPrice(rawPricing?.prompt) }),
-    ...(perTokenPrice(rawPricing?.completion) === undefined ? {} : { outputPer1M: perTokenPrice(rawPricing?.completion) }),
-    ...(perTokenPrice(rawPricing?.input_cache_read) === undefined ? {} : { cacheReadPer1M: perTokenPrice(rawPricing?.input_cache_read) }),
-    ...(perTokenPrice(rawPricing?.input_cache_write) === undefined ? {} : { cacheWritePer1M: perTokenPrice(rawPricing?.input_cache_write) }),
-  });
-  return {
-    id,
-    providerId,
-    ...(displayName ? { displayName } : {}),
-    ...(contextWindow ? { contextWindow } : {}),
-    ...(inputModalities ? { inputModalities } : {}),
-    ...(outputModalities ? { outputModalities } : {}),
-    ...(pricing ? { pricing } : {}),
-  };
+  // One mapping for every catalog field, shared with the refresh path and the other providers. The
+  // id shape above is the provider-specific part; everything else is stated data, not our invention.
+  return normalizeCatalogModel(value, providerId);
 }
 
 function supportsTextOutput(value: unknown) {

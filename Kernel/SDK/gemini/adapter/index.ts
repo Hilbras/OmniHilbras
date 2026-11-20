@@ -43,6 +43,8 @@ type GeminiModelList = {
     name?: string;
     displayName?: string;
     inputTokenLimit?: number;
+    outputTokenLimit?: number;
+    description?: string;
     supportedGenerationMethods?: string[];
   }>;
 };
@@ -87,6 +89,9 @@ export class GeminiAdapter implements ProviderAdapter {
         providerId: this.id,
         displayName: model.displayName,
         contextWindow: model.inputTokenLimit,
+        ...(typeof model.outputTokenLimit === 'number' ? { maxOutputTokens: model.outputTokenLimit } : {}),
+        ...(model.description ? { description: model.description } : {}),
+        source: 'provider' as const,
         capabilities: { chat: true, streaming: model.supportedGenerationMethods.includes('streamGenerateContent') },
       }];
     });

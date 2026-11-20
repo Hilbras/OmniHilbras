@@ -231,11 +231,17 @@ function ModelRow({ model, prefix, facets, onCopy, onTest, onRemove, testing, re
   const badges: string[] = [];
   if (input) badges.push(input === output ? input : `${input} in · ${output ?? '?'} out`);
   if (context) badges.push(`${context} ctx`);
+  // Only provider-stated facts become badges. A missing max-output or tool declaration is not a guess.
+  if (facets.maxOutputTokens) badges.push(`${contextLabel(facets.maxOutputTokens)} out`);
+  if (facets.supportedParameters.includes('tools')) badges.push('Tools');
+  if (facets.reasoning) badges.push('Reasoning');
+  if (facets.status) badges.push(facets.status);
   if (facets.acceptsImage) badges.push('Vision');
   else if (facets.inputModalities.length > 0) badges.push('Text');
   return (
     <div
       className="flex flex-col gap-3 rounded-xl border border-line bg-bg-soft/45 p-3.5 sm:flex-row sm:items-center sm:justify-between"
+      title={facets.description ?? undefined}
     >
       <div className="flex min-w-0 items-center gap-3">
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? badgeTone.bad : 'border-line bg-surface text-muted'}`}>

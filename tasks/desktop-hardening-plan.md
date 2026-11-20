@@ -54,8 +54,10 @@ External blockers, not code defects:
       Linux smoke test; Windows/macOS smoke where a display or xvfb is available.
 - [x] Signing hooks read env (`CSC_LINK`, `CSC_KEY_PASSWORD`, Apple ID vars); unsigned builds still
       succeed and say so.
-- [x] Auto-update: `electron-updater` with GitHub provider, disabled unless the build is signed and
-      a release feed exists; never claim an update check succeeded when it was skipped.
+- [x] Auto-update: `electron-updater` with GitHub provider. Checks are packaged-only; unsigned builds still
+      check but require explicit consent before installing. CI must publish the `latest*.yml` channel manifest
+      on every platform (asserted by `tests/update-feed.test.js`), because a feed with only binaries makes
+      every check fail. A dmg-only macOS feed cannot self-update; it is sold as a release-page link instead.
 - [x] Document: Wine or a Windows runner is required for `.exe`; certificates for signed builds.
 
 ## 4. Security hardening

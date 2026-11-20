@@ -9,6 +9,7 @@ import {
 } from '../lib/gatewayClient';
 import { desktopBridge, type DesktopAppSettings, type UpdateState } from '../lib/electronBridge';
 import { useGatewayReload } from '../lib/useGatewayStatus';
+import { confirmUnsignedUpdate } from '../lib/useUpdateState';
 import { z } from 'zod';
 import { badgeTone } from '../ui/primitives';
 import { Switch } from '../ui/Switch';
@@ -161,7 +162,11 @@ export function SettingsContent() {
     try {
       if (action === 'check') setUpdate(await bridge.updates.check());
       else if (action === 'download') setUpdate(await bridge.updates.download());
-      else await bridge.updates.install();
+      else {
+        // Same consent helper as the sidebar popup; the main process refuses a silent unsigned install.
+        if (!confirmUnsignedUpdate(update)) return;
+        await bridge.updates.install({ allowUnsigned: update?.signed === false });
+      }
     } catch (error) {
       flash(error instanceof Error ? error.message : 'The update action failed.', true);
     } finally {

@@ -269,6 +269,8 @@ export type ModelPricing = {
   outputPer1M?: number;
   cacheReadPer1M?: number;
   cacheWritePer1M?: number;
+  /** Reasoning-token price, when the provider publishes one. */
+  reasoningPer1M?: number;
 };
 
 export type Model = {
@@ -277,6 +279,25 @@ export type Model = {
   displayName?: string;
   ownedBy?: string;
   contextWindow?: number;
+  /** Maximum output tokens the provider's catalog stated — never a gateway default. */
+  maxOutputTokens?: number;
+  description?: string;
+  aliases?: readonly string[];
+  createdAt?: string;
+  knowledgeCutoff?: string;
+  expiresAt?: string;
+  /** The provider's own status string when published, e.g. `active` or `deprecated`. */
+  status?: string;
+  canonicalSlug?: string;
+  tokenizer?: string;
+  /** Parameter names the provider says it accepts, e.g. `tools` or `temperature`. */
+  supportedParameters?: readonly string[];
+  reasoning?: {
+    defaultEnabled?: boolean;
+    mandatory?: boolean;
+    defaultEffort?: string;
+    supportedEfforts?: readonly string[];
+  };
   capabilities?: ProviderCapabilities;
   /**
    * Declared modalities, e.g. `['text']` or `['text', 'image', 'pdf']`. Only present
@@ -286,6 +307,8 @@ export type Model = {
   inputModalities?: readonly string[];
   outputModalities?: readonly string[];
   pricing?: ModelPricing;
+  /** Where these facts came from. A heuristic capability is labelled, never passed off as measured. */
+  source?: 'provider' | 'static-catalog' | 'heuristic';
   /** True for an `oh/` virtual model; its provider list is the set of target accounts. */
   virtual?: boolean;
   providers?: string[];

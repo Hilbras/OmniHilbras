@@ -22,12 +22,36 @@ export type ModelMeta = {
   n?: string;
   /** Context window in tokens. */
   c?: number;
+  /** Maximum output tokens the provider stated. */
+  mo?: number;
   /** Declared input modalities, e.g. `['text', 'image']`. */
   i?: readonly string[];
   /** Declared output modalities. */
   o?: readonly string[];
-  /** Per 1M tokens: input, output, cache read, cache write. */
-  p?: readonly number[];
+  /**
+   * Per 1M tokens in `modelMetaPriceOrder`. A `null` slot means the provider did not state that
+   * dimension. Sparse arrays used to be dropped into the slots from the left, which made an
+   * output-only price read as an input price — the fixed positions are the fix.
+   */
+  p?: readonly (number | null)[];
+  /** Provider description of the model. */
+  d?: string;
+  /** Alternate ids the provider publishes. */
+  a?: readonly string[];
+  /** Release date, knowledge cutoff and expiry, when published. */
+  cr?: string;
+  kc?: string;
+  ex?: string;
+  /** Provider's own status, canonical name and tokenizer. */
+  st?: string;
+  cs?: string;
+  tk?: string;
+  /** Parameter names the provider says it accepts. */
+  sp?: readonly string[];
+  /** Reasoning shape the provider published. */
+  rs?: { de?: boolean; ma?: boolean; eff?: string; efforts?: readonly string[] };
+  /** `provider`, `static-catalog` or `heuristic` — a heuristic fact is labelled as one. */
+  src?: string;
 };
 
 /** Everything a provider's catalog told us, keyed by model id. */
@@ -1773,13 +1797,16 @@ function cloneRecord(record: ConnectionRecord): ConnectionRecord {
 function cloneModelMeta(meta: ModelMetaMap): ModelMetaMap {
   const copy: ModelMetaMap = {};
   for (const [id, entry] of Object.entries(meta)) {
-    copy[id] = {
-      ...(entry.n === undefined ? {} : { n: entry.n }),
-      ...(entry.c === undefined ? {} : { c: entry.c }),
-      ...(entry.i === undefined ? {} : { i: [...entry.i] }),
-      ...(entry.o === undefined ? {} : { o: [...entry.o] }),
-      ...(entry.p === undefined ? {} : { p: [...entry.p] }),
-    };
+    // Copy every declared field, not the five this function knew before the catalog was enriched: a
+    // clone that drops a field silently is indistinguishable from the provider never having stated it.
+    const next: ModelMeta = { ...entry };
+    if (entry.i) next.i = [...entry.i];
+    if (entry.o) next.o = [...entry.o];
+    if (entry.p) next.p = [...entry.p];
+    if (entry.a) next.a = [...entry.a];
+    if (entry.sp) next.sp = [...entry.sp];
+    if (entry.rs?.efforts) next.rs = { ...entry.rs, efforts: [...entry.rs.efforts] };
+    copy[id] = next;
   }
   return copy;
 }
@@ -1796,26 +1823,49 @@ function normalizeModelMeta(value: unknown): ModelMetaMap | undefined {
   if (!isRecord(value)) return undefined;
   const out: ModelMetaMap = {};
   let kept = 0;
+  const text = (raw: unknown, limit: number) => typeof raw === 'string' && raw.trim() && raw.length <= limit ? raw.trim() : undefined;
+  const list = (raw: unknown, limit: number) => {
+    if (!Array.isArray(raw) || raw.length > limit) return undefined;
+    const values = raw.filter((item): item is string => typeof item === 'string' && item.length <= 64 && /^[a-z0-9._:+/-]{1,64}$/i.test(item));
+    return values.length ? [...new Set(values.map((item) => item.toLowerCase()))] : undefined;
+  };
   for (const [id, raw] of Object.entries(value)) {
     if (kept >= maxModelMetaEntries) break;
     if (!id || id.length > 256 || !isRecord(raw)) continue;
     const entry: ModelMeta = {};
-    if (typeof raw.n === 'string' && raw.n.trim() && raw.n.length <= 200) entry.n = raw.n.trim();
+    const name = text(raw.n, 200);
+    if (name) entry.n = name;
     if (typeof raw.c === 'number' && Number.isInteger(raw.c) && raw.c > 0 && raw.c <= 10_000_000) entry.c = raw.c;
-    const modalities = (input: unknown) => {
-      if (!Array.isArray(input) || input.length > 8) return undefined;
-      const list = input.filter((item): item is string => typeof item === 'string' && /^[a-z0-9-]{1,32}$/i.test(item));
-      return list.length > 0 ? [...new Set(list.map((item) => item.toLowerCase()))] : undefined;
-    };
-    const i = modalities(raw.i);
-    const o = modalities(raw.o);
+    if (typeof raw.mo === 'number' && Number.isInteger(raw.mo) && raw.mo > 0 && raw.mo <= 10_000_000) entry.mo = raw.mo;
+    const i = list(raw.i, 8);
+    const o = list(raw.o, 8);
     if (i) entry.i = i;
     if (o) entry.o = o;
-    if (Array.isArray(raw.p)) {
-      const prices = raw.p
-        .slice(0, modelMetaPriceOrder.length)
-        .filter((item): item is number => typeof item === 'number' && Number.isFinite(item) && item >= 0 && item <= 1_000_000);
-      if (prices.length > 0) entry.p = prices;
+    if (Array.isArray(raw.p) && raw.p.length <= modelMetaPriceOrder.length) {
+      // A missing slot stays null. Filtering first would shift a later price into an earlier dimension.
+      const prices = raw.p.map((item) => (typeof item === 'number' && Number.isFinite(item) && item >= 0 && item <= 1_000_000 ? item : null));
+      if (prices.some((item) => item !== null)) entry.p = prices;
+    }
+    const fields: Array<[keyof ModelMeta, number]> = [
+      ['d', 2000], ['cr', 40], ['kc', 40], ['ex', 40], ['st', 40], ['cs', 200], ['tk', 80], ['src', 24],
+    ];
+    for (const [key, limit] of fields) {
+      const parsed = text(raw[key as string], limit);
+      if (parsed) (entry as Record<string, unknown>)[key] = parsed;
+    }
+    const aliases = list(raw.a, 16);
+    if (aliases) entry.a = aliases;
+    const params = list(raw.sp, 64);
+    if (params) entry.sp = params;
+    if (isRecord(raw.rs)) {
+      const reason: NonNullable<ModelMeta['rs']> = {};
+      if (typeof raw.rs.de === 'boolean') reason.de = raw.rs.de;
+      if (typeof raw.rs.ma === 'boolean') reason.ma = raw.rs.ma;
+      const effort = text(raw.rs.eff, 40);
+      if (effort) reason.eff = effort;
+      const efforts = list(raw.rs.efforts, 16);
+      if (efforts) reason.efforts = efforts;
+      if (Object.keys(reason).length) entry.rs = reason;
     }
     if (Object.keys(entry).length > 0) {
       out[id] = entry;

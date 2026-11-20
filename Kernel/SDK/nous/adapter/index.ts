@@ -1,5 +1,6 @@
 import { ProviderError } from '../lib/errors.js';
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '../lib/openai-compatible.js';
+import { normalizeCatalogModel } from '../lib/model-normalize.js';
 import { parseSseJson, parseSseStream } from '../lib/streaming.js';
 import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
 import type {
@@ -124,28 +125,8 @@ type NousRawModel = {
 
 type NousCatalog = { data?: unknown };
 
-function positiveInteger(value: unknown): number | undefined {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
 
-function pricePer1M(value: unknown): number | undefined {
-  if (value === null || value === undefined || value === '') return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) return undefined;
-  // The catalog quotes USD per token. A zero is a real zero and must stay one, so a free model reads as
-  // free rather than as a price nobody stated.
-  return Math.round(parsed * 1_000_000 * 1e6) / 1e6;
-}
-
-/**
- * Whether a catalog entry is a chat model.
- *
- * Nous's catalog also carries embeddings and image-only entries. They are not valid chat completions
- * models, so offering them would put a row in the model list whose every request fails — the reference
- * project filters on the same field. An entry that states no modalities at all is kept: silence is not
- * evidence that it is not a chat model.
- */
+/** Keep embeddings and image-only entries out of a chat model list; silence about modalities is not a refusal. */
 function isTextCapable(model: NousRawModel): boolean {
   const modalities = model.architecture?.output_modalities;
   return !Array.isArray(modalities) || modalities.length === 0 || modalities.includes('text');
@@ -324,19 +305,10 @@ export class NousAdapter extends OpenAICompatibleAdapter {
       if (!isTextCapable(model)) return [];
       const id = typeof model.id === 'string' ? model.id.trim() : '';
       if (!id) return [];
-      const contextWindow = positiveInteger(model.context_length) ?? positiveInteger(model.top_provider?.context_length);
-      const inputPer1M = pricePer1M(model.pricing?.prompt);
-      const outputPer1M = pricePer1M(model.pricing?.completion);
-      return [{
-        id,
-        providerId: nousProviderId,
-        ...(typeof model.name === 'string' && model.name ? { displayName: model.name } : {}),
-        ...(contextWindow ? { contextWindow } : {}),
-        outputModalities: ['text'],
-        ...(inputPer1M !== undefined || outputPer1M !== undefined
-          ? { pricing: { ...(inputPer1M !== undefined ? { inputPer1M } : {}), ...(outputPer1M !== undefined ? { outputPer1M } : {}) } }
-          : {}),
-      } satisfies Model];
+      // The generic mapper reads every field Nous publishes — price, context, max output, dates,
+      // aliases, supported parameters — instead of the five this adapter used to keep. Text capability
+      // is still checked here: a catalog entry that cannot answer a chat request is not a chat model.
+      return [normalizeCatalogModel({ ...model, id }, nousProviderId) satisfies Model];
     });
 
     // First-party models first, preserving the catalog's order inside each group (sort is stable).
