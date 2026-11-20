@@ -124,7 +124,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   private readonly unwrap?: OpenAICompatibleAdapterConfig['unwrapResponse'];
   private readonly headers: Record<string, string>;
   private readonly maxTokensField: 'max_tokens' | 'max_completion_tokens';
-  private readonly transport: HttpTransport;
+  protected readonly transport: HttpTransport;
 
   constructor(config: OpenAICompatibleAdapterConfig, options: OpenAICompatibleAdapterOptions = {}) {
     this.id = config.id;
@@ -337,7 +337,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     return resolveProviderUrl(this.baseUrl, path, this.id);
   }
 
-  private requestHeaders(credential: ProviderCredential | undefined, accept: string) {
+  protected requestHeaders(credential: ProviderCredential | undefined, accept: string) {
     const headers: Record<string, string> = {
       accept,
       ...this.headers,
@@ -352,7 +352,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     return headers;
   }
 
-  private toRequestBody(request: ChatRequest, stream: boolean) {
+  protected toRequestBody(request: ChatRequest, stream: boolean) {
     assertNoProviderOptions(request, this.id);
     const body: Record<string, unknown> = {
       model: request.model,

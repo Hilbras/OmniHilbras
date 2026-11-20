@@ -1,15 +1,19 @@
 import { ProviderError } from '../lib/errors.js';
 import { OpenAICompatibleAdapter, type OpenAICompatibleAdapterOptions } from '../lib/openai-compatible.js';
+import { parseSseJson, parseSseStream } from '../lib/streaming.js';
 import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
 import type {
   ChatChunk,
   ChatRequest,
   ChatResponse,
   CredentialValidation,
+  FinishReason,
   Model,
   ProviderCredential,
   ProviderHealth,
   ProviderRequestContext,
+  TokenUsage,
+  ToolCallDelta,
 } from '../lib/types.js';
 
 export const nousProviderId = 'nous';
@@ -69,6 +73,44 @@ type AgentKeyAnswer = { api_key?: unknown; key_id?: unknown; expires_at?: unknow
 export const NOUS_FALLBACK_VALIDATION_MODEL = 'upstage/solar-mini4:free';
 /** How long a chosen probe model is reused before the public catalog is read again. */
 const PROBE_MODEL_TTL_MS = 5 * 60_000;
+
+/**
+ * The attribution tags Nous requires on inference requests.
+ *
+ * The reference project measured the refusal: without a `user=` tag the inference host answers 400 with
+ * "missing user tag", which our generic OpenAI wire never sends. The keys matter, not the product name —
+ * we send our own. Applied only to the resolved Nous chat URL, never to a custom endpoint a user saved.
+ */
+const NOUS_ATTRIBUTION_TAGS = ['product=omnihilbras', 'client=omnihilbras', 'user=omnihilbras'] as const;
+
+/**
+ * Nous's reasoning wire shape.
+ *
+ * The generic OpenAI-compatible base sends `reasoning_effort` at the top level. Nous's own first-party
+ * client sends a nested `reasoning: { enabled, effort }` — the API does not advertise the top-level field
+ * for every model. Both rewrites live here: the shared vendored adapter gained only `protected` request
+ * helpers in every copy, so a provider's wire rules stay in its own adapter rather than in shared code.
+ */
+function nousWireBody(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...body };
+  const tags = Array.isArray(out.tags) ? [...out.tags] : [];
+  for (const fallback of NOUS_ATTRIBUTION_TAGS) {
+    const prefix = fallback.slice(0, fallback.indexOf('=') + 1);
+    // Keep a caller's non-empty value for a key; fill only the missing or blank ones. A blank value
+    // does not satisfy the upstream requirement, which is why a presence check alone is not enough.
+    const kept = tags.filter((tag) => typeof tag !== 'string' || !tag.startsWith(prefix) || tag.slice(prefix.length).trim().length > 0);
+    if (!kept.some((tag) => typeof tag === 'string' && tag.startsWith(prefix))) kept.push(fallback);
+    tags.length = 0;
+    tags.push(...kept);
+  }
+  out.tags = [...new Set(tags)];
+  const effort = out.reasoning_effort;
+  if (typeof effort === 'string' && effort) {
+    out.reasoning = { enabled: true, effort };
+    delete out.reasoning_effort;
+  }
+  return out;
+}
 
 type NousRawModel = {
   id?: unknown;
@@ -132,8 +174,7 @@ export type NousAdapterOptions = OpenAICompatibleAdapterOptions & {
 };
 
 export class NousAdapter extends OpenAICompatibleAdapter {
-  // The base keeps its transport private; this is the same instance the gateway supplied, used by the
-  // probe, which is a request the generic base never makes.
+  // The same transport the gateway supplied, used by the probe — a request the generic base never makes.
   private readonly probeTransport: HttpTransport;
   private readonly chatUrl: string;
   private readonly modelsUrl: string;
@@ -159,6 +200,11 @@ export class NousAdapter extends OpenAICompatibleAdapter {
     this.chatUrl = `${baseUrl}/chat/completions`;
     this.modelsUrl = `${baseUrl}/models`;
     this.onTokensRefreshed = options.onTokensRefreshed;
+  }
+
+  /** Add the two Nous wire requirements to every inference body without changing the shared base. */
+  protected toRequestBody(request: ChatRequest, stream: boolean): Record<string, unknown> {
+    return nousWireBody(super.toRequestBody(request, stream));
   }
 
   // ── sign-in ────────────────────────────────────────────────────────────────
@@ -328,12 +374,12 @@ export class NousAdapter extends OpenAICompatibleAdapter {
           'content-type': 'application/json',
           Authorization: `Bearer ${value}`,
         },
-        body: JSON.stringify({
+        body: JSON.stringify(nousWireBody({
           model,
           messages: [{ role: 'user', content: 'ping' }],
           max_tokens: 1,
           stream: false,
-        }),
+        })),
         ...(context.signal ? { signal: context.signal } : {}),
       });
     } catch (error) {
@@ -377,8 +423,80 @@ export class NousAdapter extends OpenAICompatibleAdapter {
     return super.chat(request, { ...context, credential: this.asRequestCredential(await this.credential(context)) });
   }
 
-  async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
-    yield* super.streamChat(request, { ...context, credential: this.asRequestCredential(await this.credential(context)) });
+  /**
+   * Nous reasoning streams need their own reader.
+   *
+   * The generic base counts a delta as meaningful only when it carries role, content, tool calls,
+   * finish reason or usage. Nous reasoning models often emit only `reasoning_content` for a long stretch,
+   * and an agent tool round can end with reasoning and no answer text. The base threw `INVALID_RESPONSE`
+   * ("stream ended before completion") for that, and dropped the reasoning even when it did arrive.
+   * Here reasoning is meaningful, is forwarded in `delta.reasoning`, and a reasoning-only ending produces
+   * one explicit empty text chunk with `finishReason: stop` — an honest empty answer, not a broken stream.
+   * A stream with no payload at all, or no `[DONE]`, is still an invalid response.
+   */
+  async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<NousChunk> {
+    const events = this.transport.stream({
+      method: 'POST',
+      providerId: nousProviderId,
+      url: this.chatUrl,
+      headers: this.requestHeaders(this.asRequestCredential(await this.credential(context)), 'text/event-stream'),
+      body: JSON.stringify(this.toRequestBody(request, true)),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+
+    let sawPayload = false;
+    let sawMeaningfulPayload = false;
+    let sawReasoning = false;
+    let sawText = false;
+    let sawDone = false;
+
+    for await (const event of parseSseStream(events)) {
+      if (event.data.trim() === '[DONE]') {
+        sawDone = true;
+        break;
+      }
+      const payload = parseSseJson<NousStreamChunk>(event, nousProviderId);
+      if (!payload) continue;
+      sawPayload = true;
+      if (payload.error) throw nousStreamError(payload.error);
+
+      const choice = payload.choices?.[0];
+      const delta = choice?.delta;
+      const reasoning = nousReasoningText(delta);
+      if (reasoning) sawReasoning = true;
+      if (reasoning || delta?.role || delta?.content || delta?.tool_calls?.length || choice?.finish_reason || payload.usage) {
+        sawMeaningfulPayload = true;
+      }
+      if (delta?.content) sawText = true;
+      yield {
+        id: payload.id ?? `stream-${request.model}`,
+        providerId: nousProviderId,
+        model: payload.model ?? request.model,
+        delta: {
+          ...(delta?.role ? { role: nousRole(delta.role) } : {}),
+          ...(delta?.content ? { content: delta.content } : {}),
+          ...(reasoning ? { reasoning } : {}),
+          ...(delta?.tool_calls?.length ? { toolCalls: delta.tool_calls.map(nousToolCallDelta) } : {}),
+        },
+        ...(choice?.finish_reason ? { finishReason: nousFinishReason(choice.finish_reason) } : {}),
+        ...(payload.usage ? { usage: nousUsage(payload.usage) } : {}),
+      };
+    }
+
+    if (!sawPayload || !sawMeaningfulPayload || !sawDone) {
+      throw new ProviderError('INVALID_RESPONSE', 'The provider stream ended before completion.', { providerId: nousProviderId });
+    }
+    if (sawReasoning && !sawText) {
+      // The turn really answered — with thinking only. An empty text chunk says that plainly instead of
+      // leaving the client waiting for a content block that will never arrive.
+      yield {
+        id: `stream-${request.model}`,
+        providerId: nousProviderId,
+        model: request.model,
+        delta: { content: '' },
+        finishReason: 'stop',
+      };
+    }
   }
 
   /**
@@ -590,6 +708,84 @@ export class NousAdapter extends OpenAICompatibleAdapter {
       };
     }
   }
+}
+
+/** The streamed chunk this adapter emits: the gateway's shape plus the reasoning delta it forwards. */
+type NousChunk = ChatChunk & { delta: ChatChunk['delta'] & { reasoning?: string } };
+
+type NousStreamChunk = {
+  id?: string;
+  model?: string;
+  error?: { message?: unknown; error?: { message?: unknown } };
+  choices?: Array<{
+    delta?: {
+      role?: string;
+      content?: string | null;
+      /** Nous's first-party field, and the alternate spelling some gateways emit. */
+      reasoning_content?: string;
+      reasoning?: string | { content?: string; text?: string; summary?: string };
+      tool_calls?: Array<{ index?: number; id?: string; type?: string; function?: { name?: string; arguments?: string } }>;
+    };
+    finish_reason?: string | null;
+  }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number };
+    completion_tokens_details?: { reasoning_tokens?: number };
+  };
+};
+
+function nousReasoningText(delta: NonNullable<NonNullable<NousStreamChunk['choices']>[number]['delta']> | undefined): string | undefined {
+  if (!delta) return undefined;
+  const direct = typeof delta.reasoning_content === 'string' && delta.reasoning_content ? delta.reasoning_content : undefined;
+  if (direct) return direct;
+  const nested = delta.reasoning;
+  if (typeof nested === 'string') return nested || undefined;
+  if (nested && typeof nested === 'object') {
+    const text = nested.content ?? nested.text ?? nested.summary;
+    return typeof text === 'string' && text ? text : undefined;
+  }
+  return undefined;
+}
+
+function nousRole(role: string) {
+  return role === 'assistant' || role === 'system' || role === 'tool' ? role : 'user';
+}
+
+function nousFinishReason(reason: string): FinishReason {
+  if (reason === 'stop' || reason === 'length' || reason === 'tool_calls' || reason === 'content_filter') return reason;
+  if (reason === 'function_call') return 'tool_calls';
+  return 'other';
+}
+
+function nousToolCallDelta(call: NonNullable<NonNullable<NonNullable<NousStreamChunk['choices']>[number]['delta']>['tool_calls']>[number]): ToolCallDelta {
+  return {
+    index: call.index ?? 0,
+    ...(call.id ? { id: call.id } : {}),
+    ...(call.type ? { type: 'function' as const } : {}),
+    ...(call.function?.name || call.function?.arguments ? { function: {
+      ...(call.function.name ? { name: call.function.name } : {}),
+      ...(call.function.arguments ? { arguments: call.function.arguments } : {}),
+    } } : {}),
+  };
+}
+
+function nousUsage(usage: NonNullable<NousStreamChunk['usage']>): TokenUsage {
+  return {
+    inputTokens: usage.prompt_tokens,
+    outputTokens: usage.completion_tokens,
+    totalTokens: usage.total_tokens,
+    ...(usage.prompt_tokens_details?.cached_tokens === undefined ? {} : { cacheReadTokens: usage.prompt_tokens_details.cached_tokens }),
+    ...(usage.completion_tokens_details?.reasoning_tokens === undefined ? {} : { reasoningTokens: usage.completion_tokens_details.reasoning_tokens }),
+  };
+}
+
+function nousStreamError(error: unknown) {
+  const payload = error as { message?: unknown; error?: { message?: unknown } } | undefined;
+  const detail = typeof payload?.error?.message === 'string' ? payload.error.message : typeof payload?.message === 'string' ? payload.message : '';
+  return new ProviderError('PROVIDER_REQUEST_FAILED', detail ? `The provider stream returned an error: ${detail}` : 'The provider stream returned an error.', { providerId: nousProviderId });
 }
 
 export * from '../lib/openai-compatible.js';

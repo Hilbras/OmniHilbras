@@ -414,6 +414,7 @@ async function streamMessages(input: {
   let text = '';
   let usage: ChatChunk['usage'];
   let textBlockIndex: number | undefined;
+  let thinkingBlockIndex: number | undefined;
   let nextBlockIndex = 0;
   type PendingTool = { id: string; name: string; arguments: string; blockIndex: number; started: boolean };
   const toolBlocks = new Map<number, PendingTool>();
@@ -433,6 +434,16 @@ async function streamMessages(input: {
     for await (const chunk of outcome.chunks) {
       model = chunk.model || model;
       if (chunk.usage) usage = chunk.usage;
+      // A thinking model's reasoning is a content block of its own, not prose. A Nous free model can
+      // spend most of a turn here, and agent clients build the reply from these blocks — dropping them
+      // made a successful reasoning turn look like an empty answer.
+      if (chunk.delta.reasoning) {
+        if (thinkingBlockIndex === undefined) {
+          thinkingBlockIndex = nextBlockIndex++;
+          await send('content_block_start', { type: 'content_block_start', index: thinkingBlockIndex, content_block: { type: 'thinking', thinking: '' } });
+        }
+        await send('content_block_delta', { type: 'content_block_delta', index: thinkingBlockIndex, delta: { type: 'thinking_delta', thinking: chunk.delta.reasoning } });
+      }
       if (chunk.delta.content) {
         text += chunk.delta.content;
         if (textBlockIndex === undefined) {
@@ -475,6 +486,9 @@ async function streamMessages(input: {
       return;
     }
 
+    if (thinkingBlockIndex !== undefined) {
+      await send('content_block_stop', { type: 'content_block_stop', index: thinkingBlockIndex });
+    }
     if (textBlockIndex !== undefined) {
       await send('content_block_stop', { type: 'content_block_stop', index: textBlockIndex });
     }

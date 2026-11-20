@@ -8,7 +8,7 @@ import { InMemorySecretStore, ProviderRegistry } from '../dist/src/core/index.js
 // reply; these assert the shape a client actually sees, plus the auth boundary and the two shapes that made
 // every agent turn fail with "The request is invalid." before a provider was reached (stream and tool_result).
 
-function recordingProvider(seen, streaming = false) {
+function recordingProvider(seen, streaming = false, reasoning = false) {
   return {
     id: 'custom',
     name: 'Custom',
@@ -21,6 +21,7 @@ function recordingProvider(seen, streaming = false) {
     },
     async *streamChat(providerId, request) {
       seen.push(request);
+      if (reasoning) yield { id: 'chunk_0', providerId, model: request.model, delta: { reasoning: 'Thinking.' } };
       yield { id: 'chunk_1', providerId, model: request.model, delta: { content: 'po' } };
       yield { id: 'chunk_1', providerId, model: request.model, delta: { content: 'ng' } };
       yield {
@@ -32,10 +33,10 @@ function recordingProvider(seen, streaming = false) {
   };
 }
 
-async function start(t, seen, streaming = false) {
+async function start(t, seen, streaming = false, reasoning = false) {
   const apiKeys = new InMemoryApiKeyStore();
   const key = (await apiKeys.create('messages')).key;
-  const registry = new ProviderRegistry().register(recordingProvider(seen, streaming));
+  const registry = new ProviderRegistry().register(recordingProvider(seen, streaming, reasoning));
   const store = new InMemoryConnectionStore();
   await store.save({ id: 'custom', providerId: 'custom', name: 'Custom', endpoint: 'https://f.example/v1', priority: 1, enabled: true, proxyPool: 'none', modelPolicy: 'all', resilience: { maxRetries: 0, requestsPerMinute: 0, timeoutMs: 5_000, hedgeAfterMs: 0 } }, { type: 'api-key', value: 'k' });
   const service = new GatewayService(registry, new InMemorySecretStore({}), store, apiKeys, { failureThreshold: 1_000 });
@@ -159,4 +160,25 @@ test('the chat route accepts the object tool_choice agents send', async (t) => {
   });
   assert.equal(response.status, 200);
   assert.equal(seen[0].toolChoice, 'required');
+});
+
+
+test('a thinking model streams its reasoning as an Anthropic thinking block', async (t) => {
+  const seen = [];
+  const { base, key } = await start(t, seen, true, true);
+  const response = await post(base, key, { model: 'fake-1', stream: true, messages: [{ role: 'user', content: 'think' }] });
+  assert.equal(response.status, 200);
+  const text = await response.text();
+  const events = text.trim().split('\n\n').map((frame) => {
+    const lines = frame.split('\n');
+    return { event: lines.find((line) => line.startsWith('event: '))?.slice(7), data: JSON.parse(lines.find((line) => line.startsWith('data: '))?.slice(6) ?? '{}') };
+  });
+  const thinking = events.find((entry) => entry.event === 'content_block_start' && entry.data.content_block?.type === 'thinking');
+  assert.ok(thinking, 'reasoning arrives as a thinking content block, not as answer text');
+  const delta = events.find((entry) => entry.event === 'content_block_delta' && entry.data.delta?.type === 'thinking_delta');
+  assert.equal(delta.data.delta.thinking, 'Thinking.');
+  const thinkingIndex = thinking.data.index;
+  assert.ok(events.some((entry) => entry.event === 'content_block_stop' && entry.data.index === thinkingIndex), 'the thinking block is closed');
+  const answer = events.find((entry) => entry.event === 'content_block_delta' && entry.data.delta?.type === 'text_delta');
+  assert.equal(answer.data.delta.text, 'po', 'the answer text is still a separate text block');
 });

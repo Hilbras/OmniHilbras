@@ -359,3 +359,96 @@ test('expiry is answered without a request, and answered "cannot say" when it ca
   assert.equal(adapter.isCredentialExpired({ type: 'api-key', value: 'v' }), undefined, 'a key has no expiry to read');
   assert.equal(adapter.isCredentialExpired({ type: 'oauth', value: 'v', expiresAt: 'not-a-date' }), undefined, 'unreadable is not "not expired"');
 });
+
+// The agent-facing failure the user reported: reasoning free models answered with text-free streams, and
+// the generic OpenAI reader called that INVALID_RESPONSE while dropping the reasoning. These tests pin the
+// Nous-specific wire fixes without sending a request to Nous.
+
+function streamTransport(frames) {
+  const calls = [];
+  return {
+    calls,
+    async request(request) {
+      calls.push(request);
+      return { status: 200, headers: new Headers(), data: { choices: [{ message: { role: 'assistant', content: 'ok' } }] } };
+    },
+    async *stream(request) { calls.push(request); yield* frames; },
+  };
+}
+
+const frame = (payload) => `data: ${JSON.stringify(payload)}\n\n`;
+const DONE = 'data: [DONE]\n\n';
+const credential = { type: 'api-key', value: 'k' };
+const request = { model: 'qwen/qwen4-max:free', messages: [{ role: 'user', content: 'ping' }] };
+
+test('inference bodies carry the attribution tags Nous requires', async () => {
+  const transport = streamTransport([]);
+  await new NousAdapter({ transport }).chat(request, { credential });
+  const body = JSON.parse(transport.calls[0].body);
+  assert.deepEqual(body.tags.sort(), ['client=omnihilbras', 'product=omnihilbras', 'user=omnihilbras']);
+  assert.equal(transport.calls[0].url, `${NOUS_BASE_URL}/chat/completions`);
+});
+
+test('the credential probe carries the same attribution tags as chat', async () => {
+  const probeTransport = transportFor(probeHandler());
+  await new NousAdapter({ transport: probeTransport }).validateCredential(credential);
+  const probe = JSON.parse(probeTransport.calls.find((call) => call.method === 'POST').body);
+  assert.ok(probe.tags.includes('user=omnihilbras'), 'a probe without tags draws a 400 from Nous');
+});
+
+test('reasoning effort is sent in Nous\'s nested shape, not top-level', async () => {
+  const transport = streamTransport([]);
+  await new NousAdapter({ transport }).chat({ ...request, reasoningEffort: 'high' }, { credential });
+  const body = JSON.parse(transport.calls[0].body);
+  assert.deepEqual(body.reasoning, { enabled: true, effort: 'high' });
+  assert.equal(body.reasoning_effort, undefined, 'the generic field must not reach Nous');
+});
+
+test('a reasoning delta is forwarded and counted as a meaningful payload', async () => {
+  const frames = [
+    frame({ id: 'c1', choices: [{ delta: { reasoning_content: 'Let me think.' }, finish_reason: null }] }),
+    frame({ id: 'c1', choices: [{ delta: { content: 'Answer.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 2 } }),
+    DONE,
+  ];
+  const transport = streamTransport(frames);
+  const chunks = [];
+  for await (const chunk of new NousAdapter({ transport }).streamChat(request, { credential })) chunks.push(chunk);
+  assert.deepEqual(chunks.map((chunk) => chunk.delta.reasoning).filter(Boolean), ['Let me think.']);
+  assert.deepEqual(chunks.map((chunk) => chunk.delta.content).filter(Boolean), ['Answer.']);
+  assert.equal(chunks.at(-1).finishReason, 'stop');
+  assert.equal(chunks.at(-1).usage.outputTokens, 2);
+});
+
+test('a reasoning-only stream is an honest empty answer, not INVALID_RESPONSE', async () => {
+  // This is the recorded failure: five agent turns on qwen/qwen4-max:free ended after reasoning with 2
+  // attempts each and errorCode INVALID_RESPONSE. Reasoning is a real answer shape, not a broken stream.
+  const frames = [
+    frame({ id: 'c1', choices: [{ delta: { reasoning_content: 'Thinking hard.' } }] }),
+    frame({ id: 'c1', choices: [{ delta: { reasoning_content: ' Still thinking.' } }] }),
+    DONE,
+  ];
+  const transport = streamTransport(frames);
+  const chunks = [];
+  for await (const chunk of new NousAdapter({ transport }).streamChat(request, { credential })) chunks.push(chunk);
+  assert.equal(chunks.filter((chunk) => chunk.delta.reasoning).length, 2, 'reasoning is preserved');
+  assert.deepEqual(chunks.at(-1).delta, { content: '' }, 'the empty answer is explicit');
+  assert.equal(chunks.at(-1).finishReason, 'stop');
+});
+
+test('a nested reasoning object is understood as well as the first-party field', async () => {
+  const frames = [frame({ choices: [{ delta: { reasoning: { content: 'Nested.' } } }] }), DONE];
+  const transport = streamTransport(frames);
+  const chunks = [];
+  for await (const chunk of new NousAdapter({ transport }).streamChat(request, { credential })) chunks.push(chunk);
+  assert.equal(chunks[0].delta.reasoning, 'Nested.');
+});
+
+test('a stream with no payload or no [DONE] is still an invalid response', async () => {
+  for (const frames of [[], [frame({ choices: [{ delta: { content: 'partial' } }] })]]) {
+    const transport = streamTransport(frames);
+    await assert.rejects(
+      async () => { for await (const _chunk of new NousAdapter({ transport }).streamChat(request, { credential })) { /* drain */ } },
+      (error) => error.code === 'INVALID_RESPONSE' && /ended before completion/.test(error.message),
+    );
+  }
+});
