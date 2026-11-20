@@ -38,15 +38,15 @@ const source = join(cli, 'server-src');
  */
 const skipBuilds = process.argv.includes('--skip-builds');
 
-const run = (command, args, cwd = root) => execFileSync(command, args, { cwd, stdio: 'inherit' });
-
 /**
- * Windows resolves `pnpm` to a `.cmd` shim, which `spawnSync` cannot execute without a shell (and Node
- * refuses `.cmd` via `shell` outright since the 2024 batch-injection fix). Naming the shim is the honest
- * fix: same arguments, same behaviour, and the CI desktop workflow ran this file on windows-latest, where
- * `spawnSync pnpm ENOENT` failed every tag build.
+ * `pnpm` is a `.cmd` shim on Windows, and Node refuses to spawn `.cmd` without a shell — first as ENOENT
+ * (a `spawnSync` cannot execute a shim), then as EINVAL once the shim is named explicitly, because the
+ * 2024 batch-injection fix blocks `.cmd` without a shell outright. Going through `cmd.exe` on Windows is
+ * the supported path: it resolves `pnpm` from PATH itself, and every argument here is space-free, so the
+ * shell join cannot split one. Linux and macOS keep the direct spawn they always had.
  */
-const packageManager = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+const run = (command, args, cwd = root) => execFileSync(command, args, { cwd, stdio: 'inherit', shell: process.platform === 'win32' });
+const packageManager = 'pnpm';
 
 const steps = [
   ['SDK', ['build:sdk']],
