@@ -51,6 +51,25 @@ export function encryptBackup(payload: unknown, passphrase: string): BackupEnvel
   };
 }
 
+/**
+ * The KDF parameters travel with the envelope so an old backup stays readable. They are **untrusted input**,
+ * though: `scryptSync` is synchronous and CPU cost scales with p (and with N/r), while `maxmem` bounds only
+ * `128*N*r`. Without an application bound, a tiny crafted envelope could stall the gateway's event loop
+ * before any section is validated (security audit, 2026-11-20). Accept only bounded, well-formed parameters.
+ */
+function boundedKdf(kdf: BackupEnvelope['kdf'] | undefined): { N: number; r: number; p: number } {
+  const N = kdf?.N ?? KDF.N;
+  const r = kdf?.r ?? KDF.r;
+  const p = kdf?.p ?? KDF.p;
+  if (![N, r, p].every((value) => Number.isSafeInteger(value) && value >= 1)) {
+    throw new Error('The backup uses invalid KDF parameters.');
+  }
+  if (N < 2 || (N & (N - 1)) !== 0 || N > 65_536 || r > 32 || p > 16 || 128 * N * r > 64 * 1024 * 1024) {
+    throw new Error('The backup uses unsupported KDF parameters.');
+  }
+  return { N, r, p };
+}
+
 export function decryptBackup(envelope: unknown, passphrase: string): unknown {
   const secret = assertPassphrase(passphrase);
   if (!envelope || typeof envelope !== 'object') throw new Error('The backup file is not an envelope.');
@@ -59,10 +78,11 @@ export function decryptBackup(envelope: unknown, passphrase: string): unknown {
   if (value.cipher !== 'aes-256-gcm' || value.kdf?.name !== 'scrypt') throw new Error('The backup uses an unsupported cipher.');
   if (typeof value.data !== 'string' || value.data.length > MAX_ENVELOPE_CHARS) throw new Error('The backup payload is too large.');
   if (typeof value.iv !== 'string' || typeof value.tag !== 'string' || typeof value.kdf.salt !== 'string') throw new Error('The backup is missing its encryption parameters.');
+  const { N, r, p } = boundedKdf(value.kdf);
   const key = scryptSync(secret, Buffer.from(value.kdf.salt, 'base64'), 32, {
-    N: value.kdf.N ?? KDF.N,
-    r: value.kdf.r ?? KDF.r,
-    p: value.kdf.p ?? KDF.p,
+    N,
+    r,
+    p,
     maxmem: 64 * 1024 * 1024,
   });
   try {

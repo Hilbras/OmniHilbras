@@ -177,3 +177,15 @@ test('restart --skip-update does not consult the registry', async () => {
   assert.equal(fetchCalls, 0, 'no registry call with --skip-update');
   assert.doesNotMatch(lines.join('\n'), /Update available/, 'no update notice');
 });
+
+test('the bundled launcher stops recorded pids through the ownership-verified helper', () => {
+  // Security audit 2026-11-20: bare start used to SIGTERM every positive recorded pid with no cmdline check.
+  const source = fs.readFileSync(path.join(root, 'cli/server-src/main.mjs'), 'utf8');
+  assert.match(source, /stopBundledServers\(record\)/, 'the launcher uses the shared verified stop');
+  assert.match(source, /waitPidGone\(pid\)/, 'and waits for the pids it did stop');
+  const from = source.indexOf('async function stopRecorded');
+  const stopRecorded = source.slice(from, source.indexOf('\n}\n', from) + 3, );
+  assert.doesNotMatch(stopRecorded, /process\.kill\(/, 'no direct kill on recorded pids');
+  assert.doesNotMatch(stopRecorded, /signalPid\(/, 'no unverified signal helper');
+  assert.match(stopRecorded, /refused/, 'a refused (foreign) pid is handled rather than signalled');
+});

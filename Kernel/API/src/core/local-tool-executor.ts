@@ -67,6 +67,28 @@ function chooseRoot(roots: readonly string[], input: string): string {
   throw new Error('Path is outside the approved local tool roots.');
 }
 
+/**
+ * Re-validates a file that came from a directory walk, not from the tool call's path.
+ *
+ * `chooseRoot` realpaths only the path the caller supplied. `walk` enumerates children with `readdirSync`,
+ * and a symlink inside an approved root is a `Dirent` that is not a directory — reading it follows it to a
+ * target potentially outside every approved root. The executor's own contract ("a symlink cannot lead out
+ * of the sandbox") applies to enumerated files too, so each is realpath-checked before it is read
+ * (security audit, 2026-11-20).
+ */
+function containedInRoots(file: string, roots: readonly string[]): boolean {
+  for (const root of roots) {
+    try {
+      const realFile = realpathSync(file);
+      const rel = relative(realpathSync(root), realFile);
+      if (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) return true;
+    } catch {
+      // A broken or unreadable symlink is not a readable file inside the root.
+    }
+  }
+  return false;
+}
+
 function cap(text: string): string {
   return Buffer.byteLength(text) > LOCAL_TOOL_MAX_BYTES
     ? `${text.slice(0, LOCAL_TOOL_MAX_BYTES)}\n… [truncated at ${LOCAL_TOOL_MAX_BYTES} bytes]`
@@ -114,6 +136,7 @@ export async function executeLocalTool(call: LocalToolCall, roots: readonly stri
       const files = statSync(path).isDirectory() ? (await walk(path, '*', 100)).map((name) => resolve(path, name)) : [path];
       const lines: string[] = [];
       for (const file of files) {
+        if (!containedInRoots(file, roots)) continue;
         const text = readFileSync(file, 'utf8');
         for (const line of text.split('\n')) {
           if (line.includes(call.pattern)) lines.push(`${relative(roots[0]!, file)}: ${line}`);

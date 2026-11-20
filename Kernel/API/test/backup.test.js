@@ -105,3 +105,21 @@ test('an unreadable API-key backup is refused before anything changes', async ()
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
+
+test('hostile KDF parameters are refused before any scrypt work', () => {
+  // Security audit 2026-11-20: envelope-supplied p is untrusted and scryptSync is synchronous. maxmem bounds
+  // 128*N*r but not p, so a small crafted envelope could stall the gateway event loop.
+  const envelope = encryptBackup(payload, 'correct horse battery');
+  for (const kdf of [{ p: 100_000_000 }, { p: -1 }, { N: 1 << 20 }, { N: 3 }, { r: 1 << 20 }, { p: 1.5 }]) {
+    assert.throws(
+      () => decryptBackup({ ...envelope, kdf: { ...envelope.kdf, ...kdf } }, 'correct horse battery'),
+      /KDF parameters/,
+      `KDF override ${JSON.stringify(kdf)} must be refused before the synchronous KDF`,
+    );
+  }
+  const tampered = { ...envelope, kdf: { ...envelope.kdf, p: '4' } };
+  assert.throws(() => decryptBackup(tampered, 'correct horse battery'), /KDF parameters/);
+  // A backup written with the real defaults still round-trips after the bound.
+  assert.deepEqual(decryptBackup(envelope, 'correct horse battery'), payload);
+});
+

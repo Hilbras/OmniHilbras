@@ -48,6 +48,19 @@ test('a path outside the root, or a symlink out of it, is refused', async () => 
   assert.match(escaped.content, /outside the approved/);
 });
 
+test('local_grep does not follow a symlink out of the approved root', async () => {
+  // Security audit 2026-11-20: walk() enumerates children; a symlink is not a directory, so it was passed
+  // straight to readFileSync and its outside target was returned with an in-root label.
+  const root = sandbox();
+  const secret = join(tmpdir(), `oh-local-secret-${Date.now()}`);
+  writeFileSync(secret, 'SUPERSECRET_MARKER\n');
+  symlinkSync(secret, join(root, 'leak'));
+
+  const grep = await executeLocalTool({ name: 'local_grep', path: '.', pattern: 'SUPERSECRET_MARKER' }, [root]);
+  assert.equal(grep.isError, false);
+  assert.doesNotMatch(grep.content, /SUPERSECRET_MARKER/, 'an enumerated symlink must not leak outside content');
+});
+
 test('a disabled gateway reports that local tools are off rather than reading a file', async () => {
   const result = await executeLocalTool({ name: 'local_read', path: 'notes.txt' }, []);
   assert.equal(result.isError, true);

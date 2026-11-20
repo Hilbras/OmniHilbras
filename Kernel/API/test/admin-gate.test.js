@@ -63,6 +63,10 @@ const MANAGEMENT = [
   ['POST', '/v1/keys', { name: 'probe' }],
   ['POST', '/v1/backup/export', { passphrase: 'probe-passphrase' }],
   ['GET', '/v1/token-saver/abcdef123456'],
+  // The runtime install/start family changes machine state (downloads an executable, spawns a service).
+  // These are the two routes the security audit found outside the gate.
+  ['POST', '/v1/runtime/opencode/install', {}],
+  ['POST', '/v1/runtime/opencode/start', {}],
   ['PUT', '/v1/settings/require-api-key', { requireApiKey: false }],
 ];
 
@@ -123,8 +127,15 @@ test('the prefix list and the router agree, so a new management route cannot be 
   for (const file of readdirSync(routesDir)) {
     if (!file.endsWith('.ts')) continue;
     const source = readFileSync(new URL(file, routesDir), 'utf8');
+    // Resolve `const fooPrefix = '/v1/…'` before scanning: a route that names a constant instead of a
+    // literal was invisible to this guard (the runtime family it hid was ungated for months).
+    const constants = new Map([...source.matchAll(/const\s+(\w+Prefix)\s*=\s*'(\/v1\/[a-z-]+)'/g)].map((m) => [m[1], m[2]]));
     for (const match of source.matchAll(/pathname\s*(?:===|\.startsWith\()\s*'(\/v1\/[a-z-]+)/g)) {
       served.add(match[1]);
+    }
+    for (const match of source.matchAll(/pathname\s*(?:===|\.startsWith\()\s*(?:`\$\{(\w+Prefix)\}|(\w+Prefix))/g)) {
+      const value = constants.get(match[1] ?? match[2]);
+      if (value) served.add(value);
     }
   }
   const server = readFileSync(new URL('../src/server.ts', import.meta.url), 'utf8');

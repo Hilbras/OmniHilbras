@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readBundledRecord, writeBundledRecord, clearBundledRecord, bundledStateDir } from '../lib/bundled-state.mjs';
+import { readBundledRecord, writeBundledRecord, clearBundledRecord, bundledStateDir, stopBundledServers, waitPidGone } from '../lib/bundled-state.mjs';
 import { selectMenu, statusHeader } from '../lib/menu.mjs';
 import { restartDecision, MAX_RESTARTS } from '../lib/restart-policy.mjs';
 import { checkForUpdate, updateCommand } from '../lib/update.mjs';
@@ -219,14 +219,23 @@ function clearPidFile() {
   clearBundledRecord();
 }
 
-/** Stops the two processes this launcher started last time, and nothing else. */
+/**
+ * Stops the two processes this launcher started last time, and nothing else.
+ *
+ * A recorded pid is evidence of a past run, never authority to signal: it can outlive its process and be
+ * recycled. This now uses the same ownership-verified helper as the `stop`/`restart` verbs — a live pid whose
+ * command line is not one of this launcher's servers is reported and left alone, and the record is only
+ * cleared when nothing was refused. (Security audit, 2026-11-20.)
+ */
 async function stopRecorded() {
   const record = readPidFile();
   if (!record) return;
-  const pids = [record.gatewayPid, record.staticPid].filter((pid) => Number.isSafeInteger(pid) && pid > 0);
-  for (const pid of pids) signalPid(pid, 'SIGTERM');
-  for (const pid of pids) await waitGone(pid);
-  clearPidFile();
+  const { stopped, refused } = stopBundledServers(record);
+  await Promise.all(stopped.map((pid) => waitPidGone(pid)));
+  for (const entry of refused) {
+    console.log(paint(DIM, `Left pid ${entry.pid} alone: not one of this launcher's servers.`));
+  }
+  if (refused.length === 0) clearPidFile();
 }
 
 /**
