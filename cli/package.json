@@ -1,6 +1,6 @@
 {
   "name": "@hilbras/omnihilbras",
-  "version": "3.90.5",
+  "version": "3.90.6",
   "private": false,
   "description": "The OmniHilbras gateway, dashboard and CLI in one command.",
   "license": "MIT",

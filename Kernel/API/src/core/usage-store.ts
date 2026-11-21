@@ -80,6 +80,11 @@ export type UsageRecord = {
   outcome: UsageOutcome;
   /** Set when `outcome` is `failure` — the provider's error code, not a generic message. */
   errorCode?: string;
+  /**
+   * A stream that ended without a terminal finish reason. The request succeeded in the sense that nothing threw,
+   * but the agent's tool loop may have been cut off — a stopped turn and a completed one used to be identical here.
+   */
+  incomplete?: boolean;
   /** Total attempts across every route, so a failover is visible as more than one. */
   attempts: number;
   /**
@@ -557,6 +562,7 @@ export function isUsageRecord(value: unknown): value is UsageRecord {
     typeof value.attempts === 'number' &&
     Number.isFinite(value.attempts) &&
     (value.requestId === undefined || typeof value.requestId === 'string') &&
+    (value.incomplete === undefined || typeof value.incomplete === 'boolean') &&
     (value.path === undefined || (Array.isArray(value.path) && value.path.every(isUsageAttempt)))
   );
 }
@@ -582,6 +588,7 @@ export function normalizeRecord(record: UsageRecord): UsageRecord {
     ...(typeof record.connectionId === 'string' ? { connectionId: record.connectionId } : {}),
     outcome: record.outcome,
     ...(typeof record.errorCode === 'string' ? { errorCode: record.errorCode } : {}),
+    ...(record.incomplete === true ? { incomplete: true } : {}),
     attempts: record.attempts,
     latencyMs: record.latencyMs,
     ...(typeof record.inputTokens === 'number' ? { inputTokens: record.inputTokens } : {}),

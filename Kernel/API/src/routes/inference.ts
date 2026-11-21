@@ -431,9 +431,11 @@ async function streamMessages(input: {
       },
     });
 
+    let providerFinish: string | undefined;
     for await (const chunk of outcome.chunks) {
       model = chunk.model || model;
       if (chunk.usage) usage = chunk.usage;
+      if (chunk.finishReason) providerFinish = chunk.finishReason;
       // A thinking model's reasoning is a content block of its own, not prose. A Nous free model can
       // spend most of a turn here, and agent clients build the reply from these blocks — dropping them
       // made a successful reasoning turn look like an empty answer.
@@ -492,17 +494,22 @@ async function streamMessages(input: {
     if (textBlockIndex !== undefined) {
       await send('content_block_stop', { type: 'content_block_stop', index: textBlockIndex });
     }
-    for (const call of toolBlocks.values()) {
+    // A call with no name cannot be executed. Emitting one as `name: 'tool'` used to send the agent after a tool
+    // nobody declared; skip it and close only complete blocks.
+    const completeCalls = [...toolBlocks.values()].filter((call) => call.name);
+    for (const call of completeCalls) {
       if (!call.started) {
-        // A provider that never sent a name still owes the client a complete block pair.
-        await send('content_block_start', { type: 'content_block_start', index: call.blockIndex, content_block: { type: 'tool_use', id: call.id, name: call.name || 'tool', input: {} } });
+        await send('content_block_start', { type: 'content_block_start', index: call.blockIndex, content_block: { type: 'tool_use', id: call.id, name: call.name, input: {} } });
         if (call.arguments) await send('content_block_delta', { type: 'content_block_delta', index: call.blockIndex, delta: { type: 'input_json_delta', partial_json: call.arguments } });
       }
       await send('content_block_stop', { type: 'content_block_stop', index: call.blockIndex });
     }
     await send('message_delta', {
       type: 'message_delta',
-      delta: { stop_reason: toolBlocks.size ? 'tool_use' : 'end_turn', stop_sequence: null },
+      delta: {
+        stop_reason: completeCalls.length ? 'tool_use' : providerFinish === 'length' ? 'max_tokens' : 'end_turn',
+        stop_sequence: null,
+      },
       usage: anthropicUsage(usage),
     });
     await send('message_stop', { type: 'message_stop' });
@@ -510,6 +517,7 @@ async function streamMessages(input: {
     recordUsage(service, {
       model, providerId: servingOf()?.providerId, connectionId: servingOf()?.connectionId,
       outcome: 'success', attempts: outcome.attempts.length, latencyMs: Date.now() - streamStartedAt,
+      incomplete: providerFinish === undefined,
       ...(usage ? { usage } : {}), requestId: scope.id,
     });
     response.end();
@@ -650,10 +658,12 @@ async function streamResponses(input: {
   const servingOf = () => outcome.attempts.find((attempt) => attempt.ok);
 
   try {
+    let providerFinish: string | undefined;
     for await (const chunk of outcome.chunks) {
       id = chunk.id || id;
       model = chunk.model || model;
       if (chunk.usage) usage = chunk.usage;
+      if (chunk.finishReason) providerFinish = chunk.finishReason;
       if (chunk.delta.content) {
         text += chunk.delta.content;
         await writeStreamData(response, `event: response.output_text.delta\ndata: ${JSON.stringify({ type: 'response.output_text.delta', delta: chunk.delta.content })}\n\n`, signal);
@@ -687,6 +697,13 @@ async function streamResponses(input: {
       return;
     }
     const completedCalls: ToolCall[] = [...toolCalls.values()].map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments || '{}' } }));
+    // A strict Responses client waits for `output_item.done` before it runs a function. Announcing an item and
+    // ending the stream without ever completing it made the agent abandon the tool round and answer prose.
+    for (const [index, call] of [...toolCalls.entries()]) {
+      const itemId = `fc_${id}_${index}`;
+      await writeStreamData(response, `event: response.function_call_arguments.done\ndata: ${JSON.stringify({ type: 'response.function_call_arguments.done', output_index: index, item_id: itemId, arguments: call.arguments || '{}' })}\n\n`, signal);
+      await writeStreamData(response, `event: response.output_item.done\ndata: ${JSON.stringify({ type: 'response.output_item.done', output_index: index, item: { type: 'function_call', id: itemId, call_id: call.id, name: call.name, arguments: call.arguments || '{}', status: 'completed' } })}\n\n`, signal);
+    }
     const completed = chatToResponsesBody({
       id,
       model,
@@ -695,7 +712,7 @@ async function streamResponses(input: {
       ...(completedCalls.length ? { toolCalls: completedCalls } : {}),
       ...(usage ? { usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens } } : {}),
     });
-    await writeStreamData(response, `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: { ...completed, gateway: { requestId: scope.id, ...toolSupportNote(chatRequest.tools, servingOf()?.providerId) } } })}\n\n`, signal);
+    await writeStreamData(response, `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: { ...completed, status: providerFinish === 'length' ? 'incomplete' : completed.status, gateway: { requestId: scope.id, ...toolSupportNote(chatRequest.tools, servingOf()?.providerId) } } })}\n\n`, signal);
     recordUsage(service, {
       model,
       providerId: servingOf()?.providerId,
@@ -703,6 +720,7 @@ async function streamResponses(input: {
       outcome: 'success',
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
+      incomplete: providerFinish === undefined,
       ...(usage ? { usage } : {}),
       requestId: scope.id,
     });
@@ -770,6 +788,8 @@ function recordUsage(
     attempts: number;
     latencyMs: number;
     errorCode?: string;
+    /** The stream ended without a terminal finish reason — a success record that may still be a halted agent turn. */
+    incomplete?: boolean;
     usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number; estimated?: boolean };
     /** The prompt, for a provider that reports nothing. Used only when `usage` is absent. */
     messages?: readonly unknown[];
@@ -818,6 +838,7 @@ function recordUsage(
       attempts: input.attempts,
       latencyMs: Math.max(0, Math.round(input.latencyMs)),
       ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+      ...(input.incomplete ? { incomplete: true } : {}),
       ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
       ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
       ...(usage?.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
@@ -952,6 +973,7 @@ async function handleChatRequest(input: {
      * role announcement is sent) and which a client that does not care about it ignores.
      */
     let toolsNoteSent = false;
+    let providerFinish: string | undefined;
     for await (const chunk of outcome.chunks) {
       if (!toolsNoteSent) {
         toolsNoteSent = true;
@@ -963,6 +985,7 @@ async function handleChatRequest(input: {
         }
       }
       if (chunk.usage) streamUsage = chunk.usage;
+      if (chunk.finishReason) providerFinish = chunk.finishReason;
       if (typeof chunk.delta === 'string') text += chunk.delta;
       await writeStreamData(response, `data: ${JSON.stringify(toOpenAIChunk(chunk))}\n\n`, signal);
     }
@@ -1003,6 +1026,7 @@ async function handleChatRequest(input: {
       outcome: 'success',
       attempts: outcome.attempts.length,
       latencyMs: Date.now() - streamStartedAt,
+      incomplete: providerFinish === undefined,
       ...(streamUsage ? { usage: streamUsage } : {}),
       messages: chatRequest.messages,
       responseText: text,

@@ -293,11 +293,29 @@ function messagesFinishReason(reason: string | undefined): FinishReason {
   return 'stop';
 }
 
-function toMessagesBody(request: ChatRequest) {
+export function toMessagesBody(request: ChatRequest) {
   const system = request.messages.filter((message) => message.role === 'system').map(messageText).filter(Boolean);
   const messages = request.messages
     .filter((message) => message.role !== 'system')
-    .map((message) => ({ role: message.role === 'assistant' ? 'assistant' : 'user', content: messageText(message) }));
+    .map((message) => {
+      // The Messages lane speaks `tool_use`/`tool_result` blocks, not a flat string. Flattening an assistant call
+      // left a result with no call, so the model answered prose and `tool_use` stopped starting the next round.
+      if (message.role === 'assistant' && message.toolCalls?.length) {
+        const blocks: Array<Record<string, unknown>> = [];
+        const text = messageText(message);
+        if (text) blocks.push({ type: 'text', text });
+        for (const call of message.toolCalls) {
+          let input: unknown = {};
+          try { input = JSON.parse(call.function.arguments); } catch { input = call.function.arguments; }
+          blocks.push({ type: 'tool_use', id: call.id, name: call.function.name, input });
+        }
+        return { role: 'assistant', content: blocks };
+      }
+      if (message.role === 'tool' && message.toolCallId) {
+        return { role: 'user', content: [{ type: 'tool_result', tool_use_id: message.toolCallId, content: messageText(message) }] };
+      }
+      return { role: message.role === 'assistant' ? 'assistant' : 'user', content: messageText(message) };
+    });
   const body: Record<string, unknown> = {
     model: request.model,
     messages,
@@ -311,15 +329,26 @@ function toMessagesBody(request: ChatRequest) {
   return body;
 }
 
-function toMessagesChatResponse(payload: MessagesPayload, requestedModel: string, providerId: string): ChatResponse {
+export function toMessagesChatResponse(payload: MessagesPayload, requestedModel: string, providerId: string): ChatResponse {
   const text = (payload.content ?? []).filter((part) => part.type === 'text' && typeof part.text === 'string').map((part) => part.text).join('');
+  // A `tool_use` block is the call the agent must run; the gateway validates and forwards it. Without this, the
+  // response claimed `finish_reason: tool_calls` with no call payload — indistinguishable from a finished turn.
+  const toolCalls = (payload.content ?? [])
+    .filter((part) => part.type === 'tool_use' && part.id && part.name)
+    .map((part) => ({
+      id: part.id!, type: 'function' as const,
+      function: {
+        name: part.name!,
+        arguments: typeof part.input === 'string' ? part.input : JSON.stringify(part.input ?? {}),
+      },
+    }));
   return {
     id: payload.id ?? `msg-${requestedModel}`,
     providerId,
     model: payload.model ?? requestedModel,
     createdAt: new Date().toISOString(),
-    message: { role: 'assistant', content: text },
-    finishReason: messagesFinishReason(payload.stop_reason),
+    message: { role: 'assistant', content: text, ...(toolCalls.length ? { toolCalls } : {}) },
+    finishReason: toolCalls.length ? 'tool_calls' : messagesFinishReason(payload.stop_reason),
     usage: payload.usage
       ? {
         inputTokens: payload.usage.input_tokens,

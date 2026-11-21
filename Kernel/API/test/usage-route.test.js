@@ -181,6 +181,21 @@ test('a completed stream is recorded once, as a success', async (t) => {
   assert.equal(body.totals.succeeded, 1);
 });
 
+test('a stream with no terminal finish is recorded as an incomplete success', async (t) => {
+  // The mock provider above emits chunks with no finishReason — the exact shape of a turn that ends without
+  // saying it is done. It used to be indistinguishable from a completed agent turn in usage.json.
+  const gw = await gateway({ provider: provider({ chunks: 4 }) });
+  t.after(gw.close);
+  const response = await gw.post({ stream: true }, { accept: 'text/event-stream' });
+  await response.text();
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  const records = await gw.usage.list();
+  assert.equal(records.length, 1);
+  assert.equal(records[0].outcome, 'success');
+  assert.equal(records[0].incomplete, true, 'a turn that never finished must be visible as incomplete');
+});
+
 test('a stream that dies mid-answer records a failure, not a success', async (t) => {
   const gw = await gateway({ provider: provider({ chunks: 2, failWith: Object.assign(new Error('upstream died'), { code: 'PROVIDER_REQUEST_FAILED' }) }) });
   t.after(gw.close);

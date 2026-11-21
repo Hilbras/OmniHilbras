@@ -713,6 +713,11 @@ function messageText(content: MessageContent): string {
     .join('');
 }
 
+/** A tool result's input may be an object or a JSON string; Kiro accepts either but not `[object Object]`. */
+function parseToolInput(argumentsText: string): unknown {
+  try { return JSON.parse(argumentsText); } catch { return argumentsText; }
+}
+
 /**
  * Joins a tool call's argument fragments. Kiro streams each call as several `toolUseEvent` frames
  * sharing one id, so the arguments are the concatenation of their `input` strings, in order.
@@ -750,12 +755,36 @@ export function toKiroBody(request: ChatRequest, conversationId: string, credent
   const system = request.messages.filter((message) => message.role === 'system').map((message) => messageText(message.content)).filter(Boolean);
   const turns = request.messages.filter((message) => message.role !== 'system');
   const current = turns[turns.length - 1];
-  const history = turns.slice(0, -1).map((message) => ({
-    [message.role === 'assistant' ? 'assistantResponseMessage' : 'userInputMessage']: {
-      content: messageText(message.content),
-      ...(message.role === 'assistant' ? { modelId: request.model } : { modelId: request.model, origin: 'AI_EDITOR' }),
-    },
-  }));
+  // Kiro's history is not a flat message list: an assistant call lives in `toolUses` on the assistant turn and its
+  // result in `toolResults` on the following user turn. Flattening both to text left an orphan result, so the model
+  // answered prose and the agent's loop ended after the first round.
+  const history = turns.slice(0, -1).map((message) => {
+    if (message.role === 'assistant') {
+      return { assistantResponseMessage: {
+        content: messageText(message.content),
+        modelId: request.model,
+        ...(message.toolCalls?.length ? { toolUses: message.toolCalls.map((call) => ({
+          toolUseId: call.id,
+          name: call.function.name,
+          input: parseToolInput(call.function.arguments),
+        })) } : {}),
+      } };
+    }
+    if (message.role === 'tool') {
+      return { userInputMessage: {
+        content: messageText(message.content),
+        modelId: request.model,
+        origin: 'AI_EDITOR',
+        userInputMessageContext: {
+          toolResults: [{
+            toolUseId: message.toolCallId ?? '',
+            content: [{ text: messageText(message.content) }],
+          }],
+        },
+      } };
+    }
+    return { userInputMessage: { content: messageText(message.content), modelId: request.model, origin: 'AI_EDITOR' } };
+  });
   const content = [system.length ? system.join('\n\n') : '', messageText(current?.content ?? '')].filter(Boolean).join('\n\n');
   // A profile scopes the session to an IAM Identity Center profile and is absent for a
   // plain Builder ID or social sign-in. It is sent **only when there is one**: an empty

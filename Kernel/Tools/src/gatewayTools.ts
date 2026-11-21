@@ -27,18 +27,26 @@ export function gatewayToolDefinitions(): ToolDefinition[] {
 }
 
 /**
- * Wire name → the caller's original name for tools folded by `withGatewayTools`.
+ * Wire name → the caller's original name for a tool whose spelling was folded on the way out.
  *
- * The upstream sees the lowercase canonical name, but the agent declared `Read` and expects a call to
- * `Read`. Without this map the gateway's own allow-list sees `read` as undeclared and drops the call —
- * a turn that ends with `finish_reason: stop` and no tool call, which is the silent halt an agent reports.
+ * The upstream sees a lowercased name, but the agent declared `Read` and expects a call to `Read`. Without this map
+ * the gateway's allow-list sees `read` as undeclared, drops the call and rewrites `finish_reason: tool_calls` to
+ * `stop` — the silent mid-task halt an agent reports. The fold is not OpenCode-specific: any provider may normalise
+ * casing, so the map is built from every declared name, not only the gateway's canonical three.
+ *
+ * A name that folds onto another declared name is left alone — otherwise `Read` and `read` declared together would
+ * both map to one of the two, and a genuine call could be renamed into the wrong tool.
  */
 export function gatewayToolNameMap(tools: readonly ToolDefinition[] | undefined, toolChoice?: string): Map<string, string> {
   const renamed = new Map<string, string>();
   if (toolChoice === 'required' || toolChoice === 'none') return renamed;
-  for (const tool of tools ?? []) {
-    const lower = tool.name.trim().toLowerCase();
-    if ((GATEWAY_TOOL_NAMES as readonly string[]).includes(lower) && lower !== tool.name) renamed.set(lower, tool.name);
+  const names = (tools ?? []).map((tool) => tool.name).filter((name) => typeof name === 'string' && name.length > 0);
+  const declared = new Set(names);
+  for (const name of names) {
+    const lower = name.trim().toLowerCase();
+    if (!lower || lower === name || declared.has(lower)) continue;
+    if (names.some((other) => other !== name && other.trim().toLowerCase() === lower)) continue;
+    renamed.set(lower, name);
   }
   return renamed;
 }

@@ -18,6 +18,7 @@ import type {
   ProviderRequestContext,
   ProviderResourceQuota,
   TokenUsage,
+  ToolCall,
 } from '../lib/types.js';
 
 import {
@@ -261,14 +262,28 @@ class QoderAdapter implements ProviderAdapter {
     let usage: TokenUsage | undefined;
     let id = `chat-${request.model}`;
     let model = request.model;
+    const calls = new Map<number, ToolCall>();
     for await (const chunk of this.streamChat(request, context)) {
       if (chunk.delta.content) content += chunk.delta.content;
+      for (const delta of chunk.delta.toolCalls ?? []) {
+        const call = calls.get(delta.index) ?? { id: '', type: 'function' as const, function: { name: '', arguments: '' } };
+        if (delta.id) call.id = delta.id;
+        if (delta.function?.name) call.function.name += delta.function.name;
+        if (delta.function?.arguments) call.function.arguments += delta.function.arguments;
+        calls.set(delta.index, call);
+      }
       if (chunk.finishReason) finishReason = chunk.finishReason;
       if (chunk.usage) usage = chunk.usage;
       if (chunk.id) id = chunk.id;
       if (chunk.model) model = chunk.model;
     }
-    return { id, providerId: this.id, model, createdAt: new Date().toISOString(), message: { role: 'assistant', content }, finishReason, ...(usage ? { usage } : {}) };
+    const toolCalls = [...calls.values()];
+    return {
+      id, providerId: this.id, model, createdAt: new Date().toISOString(),
+      message: { role: 'assistant', content, ...(toolCalls.length ? { toolCalls } : {}) },
+      ...(toolCalls.length && finishReason === 'stop' ? { finishReason: 'tool_calls' as const } : { finishReason }),
+      ...(usage ? { usage } : {}),
+    };
   }
 
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
@@ -558,16 +573,26 @@ function fnv1a(input: string): string {
   return hash.toString(16).padStart(8, '0') + input.length.toString(16).padStart(8, '0');
 }
 
-function normalizeMessages(messages: readonly ChatMessage[]): { messages: Array<{ role: string; content: unknown }>; systemText: string } {
+function normalizeMessages(messages: readonly ChatMessage[]): { messages: Array<{ role: string; content: unknown; tool_calls?: unknown; tool_call_id?: string }>; systemText: string } {
   const systemParts: string[] = [];
-  const out: Array<{ role: string; content: unknown }> = [];
+  const out: Array<{ role: string; content: unknown; tool_calls?: unknown; tool_call_id?: string }> = [];
   for (const message of messages) {
     if (message.role === 'system') {
       const text = typeof message.content === 'string' ? message.content : contentToText(message.content);
       if (text) systemParts.push(text);
       continue;
     }
-    out.push({ role: message.role, content: normalizeContent(message.content) });
+    out.push({
+      role: message.role,
+      content: normalizeContent(message.content),
+      // An assistant call and the result that answers it must travel together. Dropping either used to leave an
+      // orphan tool result, so the model answered prose and the agent's loop ended after one round.
+      ...(message.toolCalls?.length ? { tool_calls: message.toolCalls.map((call) => ({
+        id: call.id, type: 'function',
+        function: { name: call.function.name, arguments: call.function.arguments },
+      })) } : {}),
+      ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+    });
   }
   return { messages: out, systemText: systemParts.join('\n\n') };
 }

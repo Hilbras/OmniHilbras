@@ -62,13 +62,18 @@ export function healToolIds<T extends ToolMessage>(messages: readonly T[]): T[] 
   });
 }
 
-function answeredIds(message: ToolMessage | undefined): Set<string> {
+function answeredIds(messages: readonly ToolMessage[], start: number): Set<string> {
   const out = new Set<string>();
-  if (!message || message.role !== 'tool') return out;
-  if (message.toolCallId) out.add(message.toolCallId);
-  // A caller may batch results into one message; the ids are then in the content parts or a list on the message.
-  const list = (message as ToolMessage & { toolCallIds?: readonly string[] }).toolCallIds;
-  if (Array.isArray(list)) for (const id of list) if (typeof id === 'string') out.add(id);
+  // Results for one assistant turn are commonly sent as one message per call. Checking only the next message left
+  // every call after the first unanswered, and the empty results inserted below broke strict tool-result cardinality.
+  for (let index = start; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message || message.role !== 'tool') break;
+    if (message.toolCallId) out.add(message.toolCallId);
+    // A caller may batch results into one message; the ids are then in a list on the message.
+    const list = (message as ToolMessage & { toolCallIds?: readonly string[] }).toolCallIds;
+    if (Array.isArray(list)) for (const id of list) if (typeof id === 'string') out.add(id);
+  }
   return out;
 }
 
@@ -84,7 +89,7 @@ export function fillMissingToolResponses<T extends ToolMessage>(messages: readon
     out.push(message);
     const calls = message.role === 'assistant' ? message.toolCalls ?? [] : [];
     if (calls.length === 0) continue;
-    const answered = answeredIds(originals[index + 1]);
+    const answered = answeredIds(originals, index + 1);
     for (const call of calls) {
       if (answered.has(call.id)) continue;
       out.push({ role: 'tool', content: '', toolCallId: call.id } as T);

@@ -143,12 +143,16 @@ export function LogsContent() {
     let success = 0;
     let failure = 0;
     let cancelled = 0;
+    let incomplete = 0;
     let retried = 0;
     let latencyTotal = 0;
     const errors = new Map<string, number>();
     const failingProviders = new Map<string, number>();
     for (const row of filtered) {
-      if (row.outcome === 'success') success += 1;
+      if (row.outcome === 'success') {
+        success += 1;
+        if ('incomplete' in row && row.incomplete) incomplete += 1;
+      }
       else if (row.outcome === 'failure') {
         failure += 1;
         if (row.errorCode) errors.set(row.errorCode, (errors.get(row.errorCode) ?? 0) + 1);
@@ -160,7 +164,7 @@ export function LogsContent() {
     const topError = [...errors.entries()].sort((a, b) => b[1] - a[1])[0];
     const topOffender = [...failingProviders.entries()].sort((a, b) => b[1] - a[1])[0];
     return {
-      success, failure, cancelled, retried,
+      success, failure, cancelled, incomplete, retried,
       total: filtered.length,
       avgLatencyMs: filtered.length ? Math.round(latencyTotal / filtered.length) : 0,
       errorCodes: [...errors.keys()].sort(),
@@ -255,6 +259,9 @@ export function LogsContent() {
           <span className="text-success">{detection.success} succeeded</span>
           <span className={detection.failure ? 'text-danger font-semibold' : 'muted'}>{detection.failure} failed</span>
           <span className="muted">{detection.cancelled} cancelled</span>
+          <span className={detection.incomplete ? 'text-gold-text font-semibold' : 'muted'}>
+            {detection.incomplete} incomplete{/* a stream that ended without a terminal finish — often a halted agent turn */}
+          </span>
           <span className="muted">{detection.retried} needed retries</span>
           <span className="muted">avg {detection.avgLatencyMs} ms</span>
           {detection.topError && (
@@ -284,6 +291,7 @@ export function LogsContent() {
                   <span className="truncate">
                     {row.model} · {row.providerId ?? 'no provider'} · {row.attempts} {row.attempts === 1 ? 'attempt' : 'attempts'}
                     {'errorCode' in row && row.errorCode ? ` · ${row.errorCode}` : ''}
+                    {'incomplete' in row && row.incomplete ? ' · no terminal finish' : ''}
                   </span>
                   <span className={row.outcome === 'success' ? 'text-success' : row.outcome === 'failure' ? 'text-danger' : 'muted'}>
                     {row.outcome} · {row.latencyMs} ms

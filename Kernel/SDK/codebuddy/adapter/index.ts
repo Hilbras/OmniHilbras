@@ -19,6 +19,7 @@ import type {
   ProviderRequestContext,
   ProviderResourceQuota,
   TokenUsage,
+  ToolCall,
   ToolDefinition,
 } from '../lib/types.js';
 
@@ -416,22 +417,33 @@ class CodeBuddyAdapter implements ProviderAdapter {
     let content = '';
     let finishReason: FinishReason = 'stop';
     let usage: TokenUsage | undefined;
+    // A call's id, name and arguments arrive in separate deltas. Aggregating only content used to drop every
+    // tool call, so the agent received `finish_reason: stop` and ended its loop after the first round.
+    const calls = new Map<number, ToolCall>();
 
     for await (const chunk of this.streamChat({ ...request, stream: false }, context)) {
       id = chunk.id || id;
       model = chunk.model || model;
       if (chunk.delta.content) content += chunk.delta.content;
+      for (const delta of chunk.delta.toolCalls ?? []) {
+        const call = calls.get(delta.index) ?? { id: '', type: 'function' as const, function: { name: '', arguments: '' } };
+        if (delta.id) call.id = delta.id;
+        if (delta.function?.name) call.function.name += delta.function.name;
+        if (delta.function?.arguments) call.function.arguments += delta.function.arguments;
+        calls.set(delta.index, call);
+      }
       if (chunk.finishReason) finishReason = chunk.finishReason;
       if (chunk.usage) usage = chunk.usage;
     }
+    const toolCalls = [...calls.values()];
 
     return {
       id,
       providerId: this.id,
       model,
       createdAt: new Date().toISOString(),
-      message: { role: 'assistant', content },
-      finishReason,
+      message: { role: 'assistant', content, ...(toolCalls.length ? { toolCalls } : {}) },
+      ...(toolCalls.length && finishReason === 'stop' ? { finishReason: 'tool_calls' as const } : { finishReason }),
       ...(usage ? { usage } : {}),
     };
   }

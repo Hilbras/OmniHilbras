@@ -40,6 +40,36 @@ test('a folded tool name is accepted and restored to the caller\'s spelling', as
   assert.equal(output[0].delta.toolCalls[0].function.name, 'Read', 'the agent sees its own tool name');
 });
 
+test('a non-OpenCode tool folded to lowercase by a provider is still restored', async () => {
+  // The rename map must not be limited to the three gateway-injected names: any provider may lowercase a tool name.
+  const tools = [
+    { name: 'Bash', parameters: { type: 'object', properties: {} } },
+    { name: 'WebSearch', parameters: { type: 'object', properties: {} } },
+  ];
+  const renames = gatewayToolNameMap(tools);
+  assert.deepEqual([...renames], [['bash', 'Bash'], ['websearch', 'WebSearch']]);
+  const declared = [...tools.map((tool) => tool.name), ...renames.keys()];
+  const { calls, issues } = validateToolCalls(
+    [{ id: 'c1', type: 'function', function: { name: 'bash', arguments: '{}' } }], declared,
+  );
+  assert.equal(issues.length, 0, 'the lowercase call is not dropped as undeclared');
+  assert.equal(calls.length, 1);
+
+  async function* chunks() {
+    yield { delta: { toolCalls: [{ index: 0, function: { name: 'bash', arguments: '{}' } }] } };
+  }
+  const output = [];
+  for await (const chunk of guardToolStream(chunks(), declared, { allowed: [], blocked: [] }, renames)) output.push(chunk);
+  assert.equal(output[0].delta.toolCalls[0].function.name, 'Bash', 'the agent sees its own tool name');
+});
+
+test('a casing collision between two declared tools is left alone', () => {
+  const renames = gatewayToolNameMap([
+    { name: 'Read' }, { name: 'read' },
+  ]);
+  assert.equal(renames.size, 0, 'the gateway cannot guess which tool a folded call meant');
+});
+
 test('OpenCode free-tier lanes no longer promise forced tool calls', () => {
   for (const id of ['opencode', 'opencode-go', 'opencode-console']) {
     assert.deepEqual(toolCaps(id).toolChoice, ['auto', 'none'], `${id} must not claim forcing`);

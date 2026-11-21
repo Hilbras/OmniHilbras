@@ -123,3 +123,15 @@ Fixes 1–3 are small, testable and address the reproduced failures directly. Fi
 4. **Console bridge scoped**: turns that declare tools use the native free lane; the local-service path never flattens an agent tool loop, and its text history now records calls and results explicitly.
 
 Still open from the original plan: recording a `success` outcome without a terminal finish check (visibility only), and choosing a stable per-identity session key across tool rounds for Zen/Console (the Go lane is already stable; no runtime evidence tied the session key to a halt). Verified with `tests/opencode-tool-loop.test.js`, `pnpm verify` and e2e.
+
+## Generic fixes (2026-11-21, `3.90.6`)
+
+The same symptom was reported with providers other than OpenCode, so the causes above were re-traced across the gateway rather than only the three free lanes. Fixes shipped in this release:
+
+1. **Tool-name folding is general, not OpenCode-only** (`gatewayToolNameMap`, `Kernel/Tools/src/gatewayTools.ts`). Any declared tool whose name is lowercased on the wire is now mapped back to the caller's spelling and accepted by the allow-list; a case collision between two declared tools is left alone rather than guessed. The earlier map handled only `glob`/`grep`/`read`.
+2. **Per-provider adapters that dropped calls were repaired**: CodeBuddy and Qoder non-streaming `chat()` now aggregate streamed call deltas by index and report `tool_calls`; Qoder replays `tool_calls`/`tool_call_id`; Kiro's history uses `toolUses`/`toolResults` instead of flat text; the OpenCode Go and Zen Messages lanes emit `tool_use`/`tool_result` blocks and parse `tool_use` replies into real calls with a matching finish reason.
+3. **Tool-history repair checks every result for an assistant turn**, not just the next message (`Kernel/Tools/src/toolHistory.ts`), so one result per call no longer produces duplicate empty answers.
+4. **SSE writers carry terminal state**: `/v1/messages` maps a provider `length` finish to `max_tokens` and no longer emits a tool block named `tool` for a nameless call; `/v1/responses` emits `function_call_arguments.done` and `output_item.done` before `response.completed` and marks a truncated turn `incomplete`.
+5. **A halt is now visible in usage data**: SSE success records carry `incomplete: true` when no terminal finish reason was observed (`usage-store.ts`, `inference.ts`, `gatewayClient.ts`, `LogsPage.tsx`). A stopped agent turn no longer looks identical to a completed one in `/v1/usage` or the dashboard.
+
+Regression tests: `tests/opencode-tool-loop.test.js`, `tests/agent-tool-loop-adapters.test.js`, `Kernel/Tools/test/toolHistory.test.js`, `Kernel/API/test/usage-route.test.js`. Still open: stable session affinity for Zen/Console (no runtime evidence tying it to a halt).

@@ -1116,6 +1116,8 @@ export type GatewayUsageRecord = {
   connectionId?: string;
   outcome: 'success' | 'failure' | 'cancelled';
   errorCode?: string;
+  /** The stream ended without a terminal finish — a success that may still be a halted agent turn. */
+  incomplete?: boolean;
   attempts: number;
   latencyMs: number;
   inputTokens?: number;
@@ -1219,6 +1221,8 @@ export type GatewayLogEvent = {
   connectionId?: string;
   outcome: 'success' | 'failure' | 'cancelled';
   errorCode?: string;
+  /** The stream ended without a terminal finish — a success that may still be a halted agent turn. */
+  incomplete?: boolean;
   attempts: number;
   latencyMs: number;
   requestId?: string;
