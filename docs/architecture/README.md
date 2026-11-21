@@ -75,7 +75,7 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/circuit-breaker.ts` | 192 | **0** | per-connection closed → open → half-open; counts what it refused |
 | `Kernel/API/src/core/request-executor.ts` | 1012 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 382 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 4421 | 52 | every `.onDemand()` registration, in one constructor |
+| `Kernel/API/src/core/service.ts` | 4429 | 52 | every `.onDemand()` registration, in one constructor |
 | `Kernel/API/src/core/http.ts` | 356 | **0** | the vocabulary every route shares |
 | `Kernel/API/src/routes/oauth.ts` | 904 | 20 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 410 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |

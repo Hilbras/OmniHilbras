@@ -3770,12 +3770,20 @@ export class GatewayService {
     const { calls: valid, issues, repaired } = validateToolCalls(wireCalls, declared);
     for (const issue of issues) console.warn(`[tools] ${providerId} returned a call that was not forwarded: ${issue.name} — ${issue.reason}`);
     for (const fix of repaired) console.log(`[tools] ${providerId} repaired arguments on call ${fix.index}: ${fix.repairs.join(', ')}`);
-    if (valid.length === wireCalls.length && repaired.length === 0) return { ...response, message: { ...response.message, ...(valid.length ? { toolCalls: valid } : {}) } };
+    // A call that survived is a tool turn whatever the provider called its finish reason. Gemini reports `STOP`
+    // next to a `functionCall`, and Claude Code's final stream chunk hardcodes `stop`; a client that keys its loop
+    // on the finish reason then ends the turn with an executable call in hand. Derive the truth from the calls.
+    const finishReason = valid.length > 0 && response.finishReason !== 'tool_calls'
+      ? 'tool_calls' as const
+      : response.finishReason;
+    if (valid.length === wireCalls.length && repaired.length === 0) {
+      return { ...response, finishReason, message: { ...response.message, ...(valid.length ? { toolCalls: valid } : {}) } };
+    }
     const { toolCalls: _dropped, ...rest } = response.message;
     return {
       ...response,
+      finishReason: valid.length === 0 && response.finishReason === 'tool_calls' ? 'stop' as const : finishReason,
       message: valid.length > 0 ? { ...rest, toolCalls: valid } : rest,
-      ...(valid.length === 0 && response.finishReason === 'tool_calls' ? { finishReason: 'stop' as const } : {}),
     };
   }
 

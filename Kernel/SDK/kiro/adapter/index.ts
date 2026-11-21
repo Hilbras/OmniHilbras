@@ -792,6 +792,16 @@ export function toKiroBody(request: ChatRequest, conversationId: string, credent
   // `400 Improperly formed request` for it.
   const profileArn = credential?.type === 'oauth' ? credential.accountId : undefined;
   const tools = request.tools?.length ? request.tools.map(toKiroToolSpecification) : undefined;
+  // A normal tool round ends with the result, not with a user message. Without this the final result was flattened
+  // into text, leaving the assistant's `toolUse` in history unanswered and ending the loop.
+  const currentToolResults = current?.role === 'tool' ? [{
+    toolUseId: current.toolCallId ?? '',
+    content: [{ text: messageText(current.content) }],
+  }] : undefined;
+  const currentContext = {
+    ...(tools ? { tools } : {}),
+    ...(currentToolResults ? { toolResults: currentToolResults } : {}),
+  };
   return {
     conversationState: {
       chatTriggerType: 'MANUAL',
@@ -801,7 +811,7 @@ export function toKiroBody(request: ChatRequest, conversationId: string, credent
           content,
           modelId: request.model,
           origin: 'AI_EDITOR',
-          ...(tools ? { userInputMessageContext: { tools } } : {}),
+          ...(Object.keys(currentContext).length ? { userInputMessageContext: currentContext } : {}),
         },
       },
       history,

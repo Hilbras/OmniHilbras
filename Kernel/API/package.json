@@ -1,6 +1,6 @@
 {
   "name": "@omnihilbras/kernel-api",
-  "version": "3.90.6",
+  "version": "3.90.7",
   "private": true,
   "type": "module",
   "scripts": {

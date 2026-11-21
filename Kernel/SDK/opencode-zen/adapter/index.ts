@@ -323,6 +323,17 @@ export function toMessagesBody(request: ChatRequest) {
     stream: false,
   };
   if (system.length > 0) body.system = system.join('\n\n');
+  // A preserved tool result is only half the loop: the model must also receive the definitions it can call. Without
+  // these the agent's turn reaches the provider with no tools at all, so the model says it has none and stops.
+  if (request.tools?.length) {
+    body.tools = request.tools.map((tool) => ({
+      name: tool.name,
+      ...(tool.description ? { description: tool.description } : {}),
+      input_schema: tool.parameters ?? { type: 'object', properties: {} },
+    }));
+    if (request.toolChoice === 'required') body.tool_choice = { type: 'any' };
+    else if (request.toolChoice === 'auto') body.tool_choice = { type: 'auto' };
+  }
   if (request.temperature !== undefined) body.temperature = request.temperature;
   if (request.topP !== undefined) body.top_p = request.topP;
   if (request.stop?.length) body.stop = [...request.stop];
@@ -541,6 +552,14 @@ export class ZenAdapter implements ProviderAdapter {
     }
 
     const isResponses = lane === 'responses';
+    // This lane has no tool wire in this adapter: definitions were never sent and returned calls were never
+    // parsed, so an agent saw a turn with no tools. Refuse by name instead of pretending the tools were accepted.
+    if (isResponses && request.tools?.length) {
+      throw new ProviderError('NOT_SUPPORTED', 'OpenCode Zen does not serve tools on the responses lane.', {
+        providerId: this.id,
+        publicMessage: 'This model routes to OpenCode Zen’s responses lane, which cannot run tool calls. Choose a chat-lane model.',
+      });
+    }
     const response = await this.transport.request<ResponsesPayload | MessagesPayload>({
       method: 'POST',
       providerId: this.id,

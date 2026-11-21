@@ -31,6 +31,20 @@ test('the OpenCode Messages lane replays calls and results as tool_use / tool_re
   }
 });
 
+test('the OpenCode Messages lane sends tool definitions upstream', () => {
+  const request = {
+    model: 'claude-x',
+    messages: [{ role: 'user', content: 'hi' }],
+    toolChoice: 'required',
+    tools: [{ name: 'Read', description: 'read a file', parameters: { type: 'object', properties: { path: { type: 'string' } } } }],
+  };
+  for (const build of [toMessagesBody, toZenMessagesBody]) {
+    const body = build(request);
+    assert.deepEqual(body.tools, [{ name: 'Read', description: 'read a file', input_schema: { type: 'object', properties: { path: { type: 'string' } } } }]);
+    assert.deepEqual(body.tool_choice, { type: 'any' }, 'a forced call is mapped to Anthropic any');
+  }
+});
+
 test('the OpenCode Messages lane returns a tool_use block as a real tool call', () => {
   const payload = {
     id: 'msg1',
@@ -57,6 +71,13 @@ test('Kiro history keeps assistant toolUses and the toolResults they answer', ()
     { toolUseId: 'c1', name: 'glob', input: { pattern: '*' } },
   ]);
   assert.deepEqual(state.history[2].userInputMessage.userInputMessageContext.toolResults, [
+    { toolUseId: 'c1', content: [{ text: 'a.ts' }] },
+  ]);
+});
+
+test('a tool result as the final Kiro message still names the call it answers', () => {
+  const body = toKiroBody({ model: 'kiro-model', messages: history }, 'conv-2');
+  assert.deepEqual(body.conversationState.currentMessage.userInputMessage.userInputMessageContext.toolResults, [
     { toolUseId: 'c1', content: [{ text: 'a.ts' }] },
   ]);
 });

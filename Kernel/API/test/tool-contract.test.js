@@ -168,3 +168,18 @@ test('a streamed call to an undeclared tool never reaches the client', async () 
   assert.deepEqual(emitted, [], 'the blocked call was streamed to the client');
   assert.equal(chunks.at(-1).finishReason, 'stop', 'the stream still ended as a tool call');
 });
+
+test('a returned tool call makes the turn a tool turn whatever finish reason the provider reported', async () => {
+  // Gemini answers a function-call turn with `STOP`, and Claude Code hardcodes `stop` on its final stream chunk.
+  // Clients that key their loop on finish_reason stopped there with a perfectly good call in their hands.
+  const { service } = harness({
+    response: () => ({
+      id: 'r', providerId: 'openai', model: 'm', createdAt: new Date().toISOString(),
+      message: { role: 'assistant', content: null, toolCalls: [call('read', '{"path":"a.ts"}')] },
+      finishReason: 'stop',
+    }),
+  });
+  const response = await service.chat('openai', { model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('read')] });
+  assert.equal(response.message.toolCalls?.length, 1);
+  assert.equal(response.finishReason, 'tool_calls', 'the gateway derives the terminal state from the call it forwards');
+});

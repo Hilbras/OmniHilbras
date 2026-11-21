@@ -135,3 +135,19 @@ The same symptom was reported with providers other than OpenCode, so the causes 
 5. **A halt is now visible in usage data**: SSE success records carry `incomplete: true` when no terminal finish reason was observed (`usage-store.ts`, `inference.ts`, `gatewayClient.ts`, `LogsPage.tsx`). A stopped agent turn no longer looks identical to a completed one in `/v1/usage` or the dashboard.
 
 Regression tests: `tests/opencode-tool-loop.test.js`, `tests/agent-tool-loop-adapters.test.js`, `Kernel/Tools/test/toolHistory.test.js`, `Kernel/API/test/usage-route.test.js`. Still open: stable session affinity for Zen/Console (no runtime evidence tying it to a halt).
+
+## All-provider audit (2026-11-21, `3.90.7`)
+
+The user reported the same "I have no tools" answer with every provider, so all 54 provider adapters were audited against one checklist: does `caps.ts` claim tools, does the adapter send `tools`/`tool_choice`, does replay keep `toolCalls`/`toolCallId`, does `chat()` aggregate streamed calls and report `tool_calls`, and does `streamChat` emit them?
+
+- **38 OK**, including the 30-odd providers on the shared `openai-compatible` helper, the Anthropic/ZCode/Kilocode/Minimax-code wires, and CodeBuddy/Qoder/Kiro after the `3.90.6` repairs.
+- **10 by design**: `codex` refuses tools explicitly; the cookie/browser providers (`chatgpt-web`, `gemini-web`, `deepseek-web`, `duckduckgo-web`, `grok-web`, `perplexity-web`, `qwen-web`, `tokenharbor-web`) have `tools: false` by contract.
+- **6 had real defects**, all now fixed:
+  - `opencode-go`/`opencode-zen` Messages lane: history and replies preserved calls, but `tools`/`tool_choice` were never sent upstream — the model was never offered a tool. Both now map definitions to Anthropic `tools` and `tool_choice: {type: any|auto}`.
+  - The same adapters' Responses lane had no tool wire at all: it now refuses tool-bearing turns by name with `NOT_SUPPORTED` instead of silently dropping them. Streaming already refused those lanes.
+  - `gemini`, `claude-code`, `nous`: a function-call turn can carry `finishReason: 'stop'` instead of `'tool_calls'`. Rather than patch each adapter, the gateway now derives the terminal state from the calls it actually forwards — in `validatedToolResponse` for `chat()` and in `guardToolStream` for SSE. This covers every provider that reports calls with an unrecognised or hardcoded finish reason.
+  - `kiro`: the final message in a tool round is usually the result, and only history turns were mapped to `toolResults`; the last result was flattened to text and its `toolUse` left unanswered. The current message now carries `toolResults` too.
+
+An in-process gateway probe confirmed tool definitions arrive intact at the adapter on `/v1/chat/completions`, `/v1/messages` and `/v1/responses`, so no gateway-wide stripping is happening. The remaining "no tools" answer is therefore either a provider on one of the broken lanes above (now fixed or refusing honestly) or an agent session whose tools were never enabled by the client app.
+
+Regression tests: `tests/agent-tool-loop-adapters.test.js`, `Kernel/API/test/tool-contract.test.js`.

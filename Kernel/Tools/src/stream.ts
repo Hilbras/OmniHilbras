@@ -89,7 +89,11 @@ export function guardToolStream<T extends StreamChunk>(
       // call it already received never happened, which is the same lie in the other direction.
       const finishReason = chunk.finishReason === 'tool_calls' && report.allowed.length === 0 && blocked.size > 0 && kept.length === 0
         ? 'stop'
-        : chunk.finishReason;
+        : chunk.finishReason === 'stop' && report.allowed.length > 0
+          // Some providers close a tool turn with `stop` despite having streamed a call (Claude Code, Nous). The
+          // agent sees a finished turn and never runs the call. Forwarded calls are the ground truth.
+          ? 'tool_calls'
+          : chunk.finishReason;
       yield {
         ...chunk,
         delta: { ...delta, toolCalls: kept },
