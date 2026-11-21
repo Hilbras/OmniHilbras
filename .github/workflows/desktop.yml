@@ -51,9 +51,10 @@ jobs:
               release/*.exe
               release/latest.yml
           - os: macos-latest
-            target: --mac dmg
+            target: --mac dmg zip
             artifact: |
               release/*.dmg
+              release/*.zip
               release/latest-mac.yml
     runs-on: ${{ matrix.os }}
     steps:

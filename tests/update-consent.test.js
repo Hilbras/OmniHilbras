@@ -54,7 +54,7 @@ test('one consent helper is used by every surface that can install', () => {
   assert.match(settings, /confirmUnsignedUpdate\(update\)/, 'Settings uses the same helper');
   assert.match(settings, /allowUnsigned: update\?\.signed === false/, 'and forwards the decision');
   assert.doesNotMatch(banner, /trustReason \?\? 'This update cannot be verified'/, 'the popup must not ask a second time');
-  assert.match(banner, /onClick=\{\(\) => void install\(\)\}/, 'the popup calls the same path');
+  assert.match(banner, /void install\(\)\.then/, 'the popup calls the same path and handles a declined consent');
 });
 
 test('the preload forwards the option rather than inventing it', () => {

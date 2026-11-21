@@ -320,7 +320,16 @@ async function checkForUpdates(manual = false) {
   try {
     const active = await loadUpdater();
     setUpdateState({ status: 'checking' });
-    await active.checkForUpdates();
+    const result = await active.checkForUpdates();
+    // electron-updater resolves `null` when this package type cannot check at all (a plain unpacked
+    // Linux directory without APPIMAGE, for instance). No event fires in that case: without this branch
+    // the state stays `checking` forever, and the UI hides that state, so the click shows nothing.
+    if (!result) {
+      const reason = 'This build cannot check for updates: no self-updating package type was detected. Install the packaged build for your platform.';
+      gateway.pushLog('stderr', `Update check unavailable: ${reason}\n`);
+      setUpdateState({ status: 'error', reason });
+      if (manual) throw new Error(reason);
+    }
     return updateState;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -338,7 +347,9 @@ async function downloadDebUpdate() {
   if (typeof pendingDebFile.sha512 !== 'string' || pendingDebFile.sha512.length === 0) {
     throw new Error('The update feed did not provide a checksum for the .deb.');
   }
-  const url = new URL(pendingDebFile.url, `https://github.com/Hilbras/OmniHilbras/releases/download/v${version}/`).toString();
+  // `/releases/latest/download/<asset>` follows the same release the feed described. Deriving the tag
+  // from our own version string was one more way for the URL and the feed to disagree.
+  const url = new URL(pendingDebFile.url, 'https://github.com/Hilbras/OmniHilbras/releases/latest/download/').toString();
   setUpdateState({ status: 'downloading', percent: 0 });
   const response = await fetch(url);
   if (!response.ok) throw new Error(`The .deb download failed with HTTP ${response.status}.`);
@@ -354,12 +365,21 @@ async function downloadDebUpdate() {
 }
 
 async function downloadUpdate() {
-  const active = await loadUpdater();
-  if (!active) throw new Error('Updates are only available in an installed build.');
-  if (updateState.installMethod === 'deb') return downloadDebUpdate();
-  setUpdateState({ status: 'downloading', percent: 0 });
-  await active.downloadUpdate();
-  return updateState;
+  try {
+    const active = await loadUpdater();
+    if (!active) throw new Error('Updates are only available in an installed build.');
+    if (updateState.installMethod === 'deb') return await downloadDebUpdate();
+    setUpdateState({ status: 'downloading', percent: 0 });
+    await active.downloadUpdate();
+    return updateState;
+  } catch (error) {
+    // A failed download used to leave the state at "downloading 85%" forever and reject a promise the
+    // sidebar discarded. The state must say what happened, whatever surface asked for it.
+    const reason = error instanceof Error ? error.message : String(error);
+    gateway.pushLog('stderr', `Update download failed: ${reason}\n`);
+    setUpdateState({ status: 'error', reason });
+    throw error;
+  }
 }
 
 async function installUpdate(options = {}) {
@@ -923,7 +943,10 @@ function createWindow() {
           gatewayUrl: globalThis.__OMNIHILBRAS_GATEWAY_URL__ ?? null,
           clipboardBridge: typeof window.omnihilbras?.clipboard?.writeText === 'function',
         })`);
-        console.log(`SMOKE ${JSON.stringify({ url: window.webContents.getURL(), title, probe, cycle, controls, shells, feed, text, server: gateway.snapshot() })}`);
+        // A check that returns no result used to leave the state at `checking` forever with no event and
+        // no visible UI. Drive it here so a packaged smoke run proves the state reaches a terminal value.
+        await checkForUpdates();
+        console.log(`SMOKE ${JSON.stringify({ url: window.webContents.getURL(), title, probe, cycle, controls, shells, feed, text, updateStatus: updateState.status, updateReason: updateState.reason, server: gateway.snapshot() })}`);
       } catch (error) {
         console.log(`SMOKE-ERROR ${error instanceof Error ? error.message : String(error)}`);
       }

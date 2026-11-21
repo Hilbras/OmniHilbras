@@ -229,14 +229,17 @@ export function useUpdateState() {
    * always failed on an unsigned build, because only the sidebar popup passed `allowUnsigned`. Asking here
    * also means the reason a person is being asked for is the one the main process actually reported.
    */
-  const install = useCallback(async (options?: { allowUnsigned?: boolean }) => {
-    if (!bridge) return;
+  const install = useCallback(async (options?: { allowUnsigned?: boolean }): Promise<'installed' | 'cancelled' | undefined> => {
+    if (!bridge) return undefined;
     let allowUnsigned = options?.allowUnsigned === true;
     if (!allowUnsigned) {
-      if (!confirmUnsignedUpdate(state)) return;
+      // A declined prompt used to be indistinguishable from a successful click: nothing happened, and
+      // nobody was told why. Return the outcome so the surface can say the install was cancelled.
+      if (!confirmUnsignedUpdate(state)) return 'cancelled';
       allowUnsigned = state?.signed === false;
     }
     await installRaw({ ...options, allowUnsigned });
+    return 'installed';
   }, [bridge, installRaw, state]);
 
   const check = useCallback(async () => {

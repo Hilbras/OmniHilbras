@@ -21,7 +21,7 @@ test('every desktop platform publishes the channel manifest electron-updater nee
     'Linux must upload latest-linux.yml beside the packages');
   assert.match(workflow, /release\/\*\.exe\s*\n\s*release\/latest\.yml/,
     'Windows must upload latest.yml beside the installer');
-  assert.match(workflow, /release\/\*\.dmg\s*\n\s*release\/latest-mac\.yml/,
+  assert.match(workflow, /release\/\*\.dmg\s*\n\s*release\/\*\.zip\s*\n\s*release\/latest-mac\.yml/,
     'macOS must upload latest-mac.yml beside the dmg');
   assert.match(workflow, /if-no-files-found: error/, 'a missing manifest must fail the build, not silently ship');
 });
@@ -42,4 +42,28 @@ test('a long-running app actually rechecks, and failures are visible', () => {
   assert.match(main, /status: 'error'/, 'errors are logged into update state');
   assert.match(indicator, /Errors stay in Settings/, 'but a failed check does not become a permanent badge');
   assert.match(main, /trustReason: trust\.reason/, 'the actual reason survives the trust merge');
+});
+
+test('an inactive updater cannot leave the state stuck at checking', () => {
+  assert.match(main, /const result = await active\.checkForUpdates\(\)/, 'the check result is inspected');
+  assert.match(main, /if \(!result\) \{[\s\S]*?status: 'error', reason \}\)\;/, 'a null result becomes an explicit error');
+  assert.match(main, /This build cannot check for updates/, 'the reason says what the user can do');
+  assert.match(main, /await checkForUpdates\(\);\n\s*console\.log\(`SMOKE/, 'the smoke run drives a check');
+  const smoke = readFileSync(join(root, 'scripts/app-smoke.mjs'), 'utf8');
+  assert.match(smoke, /updateStatus === 'checking'/, 'a stuck check fails the smoke run');
+});
+
+test('a failed download is reported instead of hanging at 85 percent', () => {
+  assert.match(main, /async function downloadUpdate\(\) \{\s*try \{/, 'download errors are caught');
+  assert.match(main, /Update download failed:/, 'and logged');
+  assert.match(main, /setUpdateState\(\{ status: 'error', reason \}\)/, 'and pushed to the UI');
+  assert.match(indicator, /actionError/, 'the popup has somewhere to show it');
+  assert.match(indicator, /void download\(\)\.catch/, 'a rejected download is handled in the popup');
+  assert.match(indicator, /void install\(\)\.then/, 'so is a declined consent');
+  assert.match(indicator, /void install\(\)\.then[\s\S]*?\.catch/, 'and a rejected install');
+});
+
+test('macOS publishes a zip so MacUpdater has the asset it needs', () => {
+  assert.match(workflow, /target: --mac dmg zip/, 'the build makes both formats');
+  assert.match(workflow, /release\/\*\.zip/, 'and the release publishes the zip');
 });

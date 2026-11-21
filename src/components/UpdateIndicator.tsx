@@ -145,13 +145,14 @@ function UpdatePopup({
   version: string | undefined;
   releaseUrl: string | undefined;
   download: (() => Promise<UpdateState | undefined>) | undefined;
-  install: ((options?: { allowUnsigned?: boolean }) => Promise<void>) | undefined;
+  install: ((options?: { allowUnsigned?: boolean }) => Promise<'installed' | 'cancelled' | undefined>) | undefined;
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
   const [stop, setStop] = useState<'idle' | 'stopping' | 'stopped' | 'failed'>('idle');
   const [stopError, setStopError] = useState<string | undefined>(undefined);
+  const [actionError, setActionError] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -224,10 +225,11 @@ function UpdatePopup({
         </div>
 
         {/* The desktop's own actions first: a build that can replace itself should not be walked past them. */}
+        {actionError && <p role="alert" className="mt-3 text-[11px] leading-relaxed text-danger">{actionError}</p>}
         {state.status === 'available' && download && state.canInstall && (
           <button
             type="button"
-            onClick={() => void download()}
+            onClick={() => { setActionError(undefined); void download().catch((error: unknown) => setActionError(error instanceof Error ? error.message : 'The download failed.')); }}
             className="btn-gold mt-4 !px-3 !py-2 !text-xs"
           >
             Download
@@ -237,7 +239,7 @@ function UpdatePopup({
           <button
             type="button"
             // Consent lives in `install()` so Settings and this popup cannot disagree about it.
-            onClick={() => void install()}
+            onClick={() => { setActionError(undefined); void install().then((result) => { if (result === 'cancelled') setActionError('Install cancelled — the update was not verified.'); }).catch((error: unknown) => setActionError(error instanceof Error ? error.message : 'The install failed.')); }}
             className="btn-gold mt-4 !px-3 !py-2 !text-xs"
           >
             {state.installMethod === 'deb' ? 'Open installer' : 'Install and restart'}

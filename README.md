@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.90.1**
+**Current version: 3.90.2**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each

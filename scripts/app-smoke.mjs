@@ -56,6 +56,7 @@ try {
   if (!result.probe?.ok) failures.push(`IPC probe failed: ${JSON.stringify(result.probe)}`);
   if (result.cycle?.stopped !== 'stopped') failures.push(`stop did not reach stopped: ${JSON.stringify(result.cycle)}`);
   if (result.cycle?.started !== 'running') failures.push(`start did not reach running: ${JSON.stringify(result.cycle)}`);
+  if (result.updateStatus === 'checking') failures.push(`the update check never left 'checking' (${result.updateReason ?? 'no reason'})`);
   if (!String(result.feed ?? '').includes('streaming')) failures.push('the request feed never connected');
   if (!String(result.feed ?? '').includes('failure')) failures.push('the request feed received no event');
   if (result.server?.state !== 'running') failures.push(`gateway ended in ${result.server?.state}`);

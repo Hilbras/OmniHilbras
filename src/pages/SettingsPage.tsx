@@ -165,7 +165,10 @@ export function SettingsContent() {
       else if (action === 'download') setUpdate(await bridge.updates.download());
       else {
         // Same consent helper as the sidebar popup; the main process refuses a silent unsigned install.
-        if (!confirmUnsignedUpdate(update)) return;
+        if (!confirmUnsignedUpdate(update)) {
+          flash('Install cancelled — the update was not verified.', true);
+          return;
+        }
         await bridge.updates.install({ allowUnsigned: update?.signed === false });
       }
     } catch (error) {
