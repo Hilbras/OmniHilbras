@@ -334,7 +334,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     }
   }
 
-  private url(path: string) {
+  protected url(path: string) {
     return resolveProviderUrl(this.baseUrl, path, this.id);
   }
 

@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.90.2
+**Status:** Current — release 3.90.3
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -596,6 +596,13 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
   to be reported as `INVALID_RESPONSE` and lose the thinking — the actual cause of agent turns on free
   reasoning models failing with 2 attempts each. It now yields the reasoning plus one explicit empty text
   chunk with `finishReason: stop`. A stream with no payload or no `[DONE]` is still an invalid response.
+  **Vengetic validates candidate keys with an authenticated catalog read.** Its `GET /v1/models` answers
+  401 with no key and 401 with a bogus key, so listing models through it is a real credential check;
+  `NvidiaAdapter` must not borrow this shortcut because NVIDIA's catalog is public. Vengetic's
+  `/v1/usage` response shape is not published, so `quota()` reports only fields it can positively
+  interpret (`rpm`, `tpm`, `rpd`, concurrency) and refuses with `NOT_SUPPORTED` rather than showing a
+  guessed zero. Both behaviours are asserted in `Kernel/SDK/tests/vengetic.test.js`, and the adapter now
+  runs the shared provider contract.
 - `POST /v1/oauth/kilocode/start` — begin a Kilo Code sign-in. A custom device flow: the response carries
   a `userCode` and a `verificationUrl`, and the same code is polled until Kilo Code approves it. Kilo
   Code answers `202`/`403`/`410` for pending/denied/expired rather than the RFC 8628 error codes, so the

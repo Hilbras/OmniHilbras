@@ -524,7 +524,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'vengetic',
     name: 'Vengetic',
-    description: 'OpenAI-compatible relay at api.vengetic.biz.id.',
+    description: 'Indonesian OpenAI-compatible relay. Its free tier is a developer trial: 15 requests/minute, 100/day and one concurrent request.',
     category: 'Multi-model provider',
     group: 'free-tier',
     status: 'available',
@@ -538,7 +538,7 @@ export const providerCatalog: ProviderRecord[] = [
     color: '#8b5cf6',
     initial: 'V',
     endpoint: 'https://api.vengetic.biz.id/v1',
-    apiKeysUrl: 'https://api.vengetic.biz.id',
+    apiKeysUrl: 'https://vengetic.biz.id/login',
     modelList: [],
   },
   {

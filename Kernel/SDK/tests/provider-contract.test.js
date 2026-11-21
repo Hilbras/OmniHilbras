@@ -7,6 +7,7 @@ import test from 'node:test';
 import { runProviderContract, CONTRACT_TEXT } from './provider-contract.js';
 import { framesFor, scriptedTransport } from './harness/scripted-transport.js';
 import { OpenAIAdapter } from '../openai/dist/adapter/index.js';
+import { VengeticAdapter } from '../vengetic/dist/adapter/index.js';
 import { ProviderError } from '../openai/dist/lib/errors.js';
 import { OpenRouterAdapter } from '../openrouter/dist/adapter/index.js';
 import { OpenAICompatibleAdapter } from '../openai/dist/adapter/index.js';
@@ -55,6 +56,15 @@ const providers = [
     make: () => {
       const { stub, transport: t } = transport('openai');
       return { adapter: new OpenAIAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    // Vengetic is an OpenAI-wire relay with an authenticated catalog; its provider-specific
+    // credential check and quota parser are asserted in vengetic.test.js.
+    name: 'vengetic',
+    make: () => {
+      const { stub, transport: t } = transport('openai');
+      return { adapter: new VengeticAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
     },
   },
   {
@@ -348,7 +358,6 @@ const NOT_YET_CONTRACTED = {
   'aion-labs': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'numes': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'kiraai': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
-  'vengetic': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'anyrouter': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'zro': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'unorouter': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',

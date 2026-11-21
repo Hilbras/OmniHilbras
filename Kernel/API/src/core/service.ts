@@ -762,7 +762,7 @@ export class GatewayService {
     resolver = resolver.onDemand('100milionseek', ({ connection }) => OWN_PROVIDER_ADAPTERS['100milionseek']!({ transport: this.transport, ...(connection?.endpoint ? { endpoint: connection.endpoint } : {}) }));
     resolver = resolver.onDemand('numes', () => OWN_PROVIDER_ADAPTERS['numes']!());
     resolver = resolver.onDemand('kiraai', () => OWN_PROVIDER_ADAPTERS['kiraai']!());
-    resolver = resolver.onDemand('vengetic', () => OWN_PROVIDER_ADAPTERS['vengetic']!());
+    resolver = resolver.onDemand('vengetic', () => OWN_PROVIDER_ADAPTERS['vengetic']!({ transport: this.transport }));
     resolver = resolver.onDemand('anyrouter', () => OWN_PROVIDER_ADAPTERS['anyrouter']!());
     resolver = resolver.onDemand('zro', () => OWN_PROVIDER_ADAPTERS['zro']!());
     resolver = resolver.onDemand('unorouter', () => OWN_PROVIDER_ADAPTERS['unorouter']!());

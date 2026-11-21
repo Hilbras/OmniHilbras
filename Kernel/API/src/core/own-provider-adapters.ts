@@ -39,7 +39,7 @@ export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, (options?: OwnAdapte
   '100milionseek': (options) => new OneHundredMillionSeekAdapter(options?.transport ? { transport: options.transport } : {}),
   'numes': () => new NumesAdapter(),
   'kiraai': () => new KiraaiAdapter(),
-  'vengetic': () => new VengeticAdapter(),
+  'vengetic': (options) => new VengeticAdapter(options?.transport ? { transport: options.transport } : {}),
   'anyrouter': () => new AnyrouterAdapter(),
   'zro': () => new ZroAdapter(),
   'unorouter': () => new UnorouterAdapter(),
