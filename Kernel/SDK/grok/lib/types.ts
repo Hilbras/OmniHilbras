@@ -269,6 +269,8 @@ export type Model = {
   /** The provider's own status string when published, e.g. `active` or `deprecated`. */
   status?: string;
   canonicalSlug?: string;
+  /** Provider model_type when published, e.g. `vlm`. */
+  modelType?: string;
   tokenizer?: string;
   /** Parameter names the provider says it accepts, e.g. `tools` or `temperature`. */
   supportedParameters?: readonly string[];
@@ -301,7 +303,15 @@ export type ProviderCapability =
   | 'embeddings'
   | 'images'
   | 'audio'
-  | 'search';
+  | 'search'
+  | 'tools'
+  | 'reasoning'
+  | 'vision'
+  | 'pdf'
+  | 'audioInput'
+  | 'videoInput'
+  | 'imageOutput'
+  | 'audioOutput';
 
 export type ProviderCapabilities = Partial<Record<ProviderCapability, boolean>>;
 

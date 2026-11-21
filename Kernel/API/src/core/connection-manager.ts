@@ -88,6 +88,8 @@ export function modelMetaFor(models: readonly Model[]): ModelMetaMap | undefined
       ...(string(model.canonicalSlug, 200) ? { cs: string(model.canonicalSlug, 200) } : {}),
       ...(string(model.tokenizer, 80) ? { tk: string(model.tokenizer, 80) } : {}),
       ...(list(model.supportedParameters, 64).length ? { sp: list(model.supportedParameters, 64) } : {}),
+      ...(model.modelType ? { mt: model.modelType } : {}),
+      ...(model.capabilities && Object.keys(model.capabilities).length ? { cp: model.capabilities } : {}),
       ...(model.reasoning ? { rs: {
         ...(typeof model.reasoning.defaultEnabled === 'boolean' ? { de: model.reasoning.defaultEnabled } : {}),
         ...(typeof model.reasoning.mandatory === 'boolean' ? { ma: model.reasoning.mandatory } : {}),

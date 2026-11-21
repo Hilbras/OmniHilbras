@@ -8,6 +8,7 @@ import { runProviderContract, CONTRACT_TEXT } from './provider-contract.js';
 import { framesFor, scriptedTransport } from './harness/scripted-transport.js';
 import { OpenAIAdapter } from '../openai/dist/adapter/index.js';
 import { VengeticAdapter } from '../vengetic/dist/adapter/index.js';
+import { NvidiaAdapter } from '../nvidia/dist/adapter/index.js';
 import { ProviderError } from '../openai/dist/lib/errors.js';
 import { OpenRouterAdapter } from '../openrouter/dist/adapter/index.js';
 import { OpenAICompatibleAdapter } from '../openai/dist/adapter/index.js';
@@ -56,6 +57,15 @@ const providers = [
     make: () => {
       const { stub, transport: t } = transport('openai');
       return { adapter: new OpenAIAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
+    },
+  },
+  {
+    // NVIDIA is OpenAI-wire on completion; its public catalog and translated reasoning control are
+    // asserted in nvidia.test.js and it now runs the shared contract.
+    name: 'nvidia',
+    make: () => {
+      const { stub, transport: t } = transport('openai');
+      return { adapter: new NvidiaAdapter({ transport: t }), script: (parts, options) => { stub.set(parts, options); return async () => {}; } };
     },
   },
   {
@@ -374,7 +384,6 @@ const NOT_YET_CONTRACTED = {
   'qwen-token-plan': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'groq': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'grok': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
-  'nvidia': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'coarena': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
 };
 

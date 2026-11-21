@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.90.3
+**Status:** Current — release 3.90.4
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -603,6 +603,14 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
   interpret (`rpm`, `tpm`, `rpd`, concurrency) and refuses with `NOT_SUPPORTED` rather than showing a
   guessed zero. Both behaviours are asserted in `Kernel/SDK/tests/vengetic.test.js`, and the adapter now
   runs the shared provider contract.
+  **NVIDIA validates keys with a real inference probe.** Its `/v1/models` is public (HTTP 200 with no key
+  and with a bogus key), so a catalog read proves reachability only: `healthCheck` reports `degraded` with
+  that reason, and `validateCredential` sends one 1-token `chat/completions` request through the free
+  tier before reporting a key valid. NVIDIA interprets `reasoning_effort` as the UI-level field described
+  on its model pages; the wire receives `chat_template_kwargs` (`enable_thinking`, `medium_effort`, and
+  `force_nonempty_content` when tools are declared), and only that narrow provider option is passed
+  through. Provider-stated `supports_tools`, `supports_thinking` and `model_type` are carried into the
+  catalog. Asserted in `Kernel/SDK/tests/nvidia.test.js`.
 - `POST /v1/oauth/kilocode/start` — begin a Kilo Code sign-in. A custom device flow: the response carries
   a `userCode` and a `verificationUrl`, and the same code is polled until Kilo Code approves it. Kilo
   Code answers `202`/`403`/`410` for pending/denied/expired rather than the RFC 8628 error codes, so the

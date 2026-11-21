@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, scryptSync } from 'node:crypto';
 import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { assertSafeProviderRequestUrl, type ModelImportPolicy, type ProviderCredential, type ProviderId } from './index.js';;
+import { assertSafeProviderRequestUrl, type ModelImportPolicy, type ProviderCapabilities, type ProviderCredential, type ProviderId } from './index.js';;
 import { atomicWrite, defaultStateDirectory, ensureSecureDirectory, isNodeError, readOptionalFile, readOptionalText } from './secure-store.js';
 import { DEFAULT_TIMEOUT_MS } from './timeout-policy.js';
 import type { ConnectionSecretStore } from './runtime.js';
@@ -42,6 +42,10 @@ export type ModelMeta = {
   cr?: string;
   kc?: string;
   ex?: string;
+  /** Provider-stated capabilities, e.g. `tools` or `reasoning`. */
+  cp?: ProviderCapabilities;
+  /** Provider's model_type when published. */
+  mt?: string;
   /** Provider's own status, canonical name and tokenizer. */
   st?: string;
   cs?: string;
@@ -1805,6 +1809,7 @@ function cloneModelMeta(meta: ModelMetaMap): ModelMetaMap {
     if (entry.p) next.p = [...entry.p];
     if (entry.a) next.a = [...entry.a];
     if (entry.sp) next.sp = [...entry.sp];
+    if (entry.cp) next.cp = { ...entry.cp };
     if (entry.rs?.efforts) next.rs = { ...entry.rs, efforts: [...entry.rs.efforts] };
     copy[id] = next;
   }
@@ -1855,6 +1860,15 @@ function normalizeModelMeta(value: unknown): ModelMetaMap | undefined {
     }
     const aliases = list(raw.a, 16);
     if (aliases) entry.a = aliases;
+    const modelType = text(raw.mt, 64);
+    if (modelType) entry.mt = modelType;
+    if (isRecord(raw.cp)) {
+      const caps: NonNullable<ModelMeta['cp']> = {};
+      for (const key of ['chat', 'streaming', 'models', 'embeddings', 'images', 'audio', 'search', 'tools', 'reasoning', 'vision', 'pdf', 'audioInput', 'videoInput', 'imageOutput', 'audioOutput'] as const) {
+        if (raw.cp[key] === true) caps[key] = true;
+      }
+      if (Object.keys(caps).length) entry.cp = caps;
+    }
     const params = list(raw.sp, 64);
     if (params) entry.sp = params;
     if (isRecord(raw.rs)) {

@@ -174,7 +174,7 @@ const NO_CAPTURE_YET = {
   'qwen-token-plan': 'the provider-independence migration gave this id its own package, but its wire is the same OpenAI-compatible shape the shared base class serves; a capture would duplicate that one, so only its id and base URL are owned here',
   'groq': 'the provider-independence migration gave this id its own package, but its wire is the same OpenAI-compatible shape the shared base class serves; a capture would duplicate that one, so only its id and base URL are owned here',
   'grok': 'the provider-independence migration gave this id its own package, but its wire is the same OpenAI-compatible shape the shared base class serves; a capture would duplicate that one, so only its id and base URL are owned here',
-  'nvidia': 'the provider-independence migration gave this id its own package, but its wire is the same OpenAI-compatible shape the shared base class serves; a capture would duplicate that one, so only its id and base URL are owned here',
+  'nvidia': 'the OpenAI wire is covered by the shared contract (nvidia is now contracted); its public-catalog key probe and chat_template_kwargs translation are pinned in nvidia.test.js',
   'coarena': 'the provider-independence migration gave this id its own package, but its wire is the same OpenAI-compatible shape the shared base class serves; a capture would duplicate that one, so only its id and base URL are owned here',
 };
 

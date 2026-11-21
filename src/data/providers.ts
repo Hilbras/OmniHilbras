@@ -1377,7 +1377,7 @@ export const providerCatalog: ProviderRecord[] = [
   {
     id: 'nvidia',
     name: 'NVIDIA',
-    description: 'NVIDIA NIM catalog of open models on its OpenAI-compatible endpoint.',
+    description: 'NVIDIA NIM catalog of open models. Developer-program access: up to 40 rpm and 10,000 requests/day; Check sends a real 1-token probe.',
     category: 'Model provider',
     group: 'free-tier',
     // Placeholders, because this catalog is the state a card shows when the gateway has no connection
@@ -1395,7 +1395,7 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'N',
     logo: providerLogoMap.nvidia,
     endpoint: 'https://integrate.api.nvidia.com/v1',
-    apiKeysUrl: 'https://build.nvidia.com/',
+    apiKeysUrl: 'https://build.nvidia.com/settings/api-keys',
     modelList: [],
   },
   {

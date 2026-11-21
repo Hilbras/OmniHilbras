@@ -56,6 +56,6 @@ export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, (options?: OwnAdapte
   'qwen-token-plan': () => new QwenTokenPlanAdapter(),
   'groq': () => new GroqAdapter(),
   'grok': () => new GrokAdapter(),
-  'nvidia': () => new NvidiaAdapter(),
+  'nvidia': (options) => new NvidiaAdapter(options?.transport ? { transport: options.transport } : {}),
   'coarena': () => new CoarenaAdapter(),
 });

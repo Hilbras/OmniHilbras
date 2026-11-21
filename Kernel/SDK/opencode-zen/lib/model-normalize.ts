@@ -79,6 +79,12 @@ export function normalizeCatalogModel(value: unknown, providerId: string): Model
     ?? (typeof architecture.modality === 'string' && architecture.modality ? [architecture.modality] : undefined);
   const outputModalities = strings(raw.output_modalities ?? architecture.output_modalities ?? modalities.output);
   // `pricing` is the OpenRouter/OpenAI per-token shape; `cost` is OpenCode Console's per-1M shape.
+  // Some catalogs (notably NVIDIA's) state capability flags explicitly. Only a `true` is a fact;
+  // absence stays absent rather than becoming `false` with a meaning nobody stated.
+  const capabilities: Model['capabilities'] = {
+    ...(raw.supports_tools === true ? { tools: true } : {}),
+    ...(raw.supports_thinking === true ? { reasoning: true } : {}),
+  };
   const pricing = pricingFrom(raw.pricing ?? raw.cost, raw.pricing !== undefined);
   return {
     id: text(raw.id) ?? '',
@@ -96,6 +102,8 @@ export function normalizeCatalogModel(value: unknown, providerId: string): Model
     ...(text(raw.canonical_slug) ? { canonicalSlug: text(raw.canonical_slug) } : {}),
     ...(text(architecture.tokenizer) ? { tokenizer: text(architecture.tokenizer) } : {}),
     ...(strings(raw.supported_parameters) ? { supportedParameters: strings(raw.supported_parameters) } : {}),
+    ...(text(raw.model_type) ? { modelType: text(raw.model_type) } : {}),
+    ...(capabilities && Object.keys(capabilities).length ? { capabilities } : {}),
     ...(reasoningFrom(raw.reasoning) ? { reasoning: reasoningFrom(raw.reasoning) } : {}),
     ...(inputModalities ? { inputModalities } : {}),
     ...(outputModalities ? { outputModalities } : {}),

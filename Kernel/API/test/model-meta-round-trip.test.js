@@ -52,6 +52,8 @@ test('every catalog field survives the store round trip', async (t) => {
     status: 'active',
     canonicalSlug: 'vendor/model',
     tokenizer: 'o200k',
+    modelType: 'vlm',
+    capabilities: { chat: true, tools: true, reasoning: true, vision: true },
     supportedParameters: ['tools', 'temperature'],
     reasoning: { defaultEnabled: true, mandatory: false, defaultEffort: 'medium', supportedEfforts: ['low', 'high'] },
     source: 'provider',
@@ -71,6 +73,8 @@ test('every catalog field survives the store round trip', async (t) => {
   assert.equal(meta.st, 'active');
   assert.equal(meta.cs, 'vendor/model');
   assert.equal(meta.tk, 'o200k');
+  assert.equal(meta.mt, 'vlm');
+  assert.deepEqual(meta.cp, { chat: true, tools: true, reasoning: true, vision: true });
   assert.deepEqual(meta.sp, ['tools', 'temperature']);
   assert.deepEqual(meta.rs, { de: true, ma: false, eff: 'medium', efforts: ['low', 'high'] });
   assert.equal(meta.src, 'provider');

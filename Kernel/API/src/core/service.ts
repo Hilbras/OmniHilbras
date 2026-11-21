@@ -779,7 +779,7 @@ export class GatewayService {
     resolver = resolver.onDemand('qwen-token-plan', () => OWN_PROVIDER_ADAPTERS['qwen-token-plan']!());
     resolver = resolver.onDemand('groq', () => OWN_PROVIDER_ADAPTERS['groq']!());
     resolver = resolver.onDemand('grok', () => OWN_PROVIDER_ADAPTERS['grok']!());
-    resolver = resolver.onDemand('nvidia', () => OWN_PROVIDER_ADAPTERS['nvidia']!());
+    resolver = resolver.onDemand('nvidia', () => OWN_PROVIDER_ADAPTERS['nvidia']!({ transport: this.transport }), { validateOnSave: true });
     resolver = resolver.onDemand('coarena', () => OWN_PROVIDER_ADAPTERS['coarena']!());
     this.providers = resolver;
     this.credentialLifecycle = new CredentialLifecycle({

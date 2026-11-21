@@ -83,6 +83,8 @@ export class ModelCatalog {
           ...(meta?.cs ? { canonicalSlug: meta.cs } : {}),
           ...(meta?.tk ? { tokenizer: meta.tk } : {}),
           ...(meta?.sp?.length ? { supportedParameters: meta.sp } : {}),
+          ...(meta?.mt ? { modelType: meta.mt } : {}),
+          ...(meta?.cp ? { capabilities: meta.cp } : {}),
           ...(meta?.rs ? { reasoning: {
             ...(typeof meta.rs.de === 'boolean' ? { defaultEnabled: meta.rs.de } : {}),
             ...(typeof meta.rs.ma === 'boolean' ? { mandatory: meta.rs.ma } : {}),
