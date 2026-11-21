@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Check, CircleAlert, Cookie, ExternalLink, LoaderCircle, LogIn, ShieldAlert, Tag } from 'lucide-react';
 import { providerSlug } from '@omnihilbras/kernel-api/public';
 import { listGatewayConnections, requestJson, type GatewayConnection } from '../lib/gatewayClient';
+import { copyText } from '../lib/copyText';
 
 /**
  * Connecting to a Web Cookie provider.
@@ -436,7 +437,7 @@ export function WebCookieConnectDialog({ provider: descriptor, riskNotice, riskS
                         {' '}
                         <button
                           type="button"
-                          onClick={() => void navigator.clipboard?.writeText(step.snippet as string).catch(() => undefined)}
+                          onClick={() => void copyText(step.snippet as string)}
                           title="Copy this line"
                           className="mt-1 block w-full overflow-x-auto rounded border border-line bg-bg-soft px-1.5 py-1 text-left font-mono text-[10px] text-gold-text hover:border-gold/50"
                         >

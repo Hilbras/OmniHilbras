@@ -10,6 +10,7 @@ import {
 import { desktopBridge, type DesktopAppSettings, type UpdateState } from '../lib/electronBridge';
 import { useGatewayReload } from '../lib/useGatewayStatus';
 import { confirmUnsignedUpdate } from '../lib/useUpdateState';
+import { copyText } from '../lib/copyText';
 import { z } from 'zod';
 import { badgeTone } from '../ui/primitives';
 import { Switch } from '../ui/Switch';
@@ -265,14 +266,13 @@ export function SettingsContent() {
         <div className="flex flex-wrap items-center gap-2 py-3">
           <button type="button" onClick={async () => {
             if (!settings) return;
-            try {
-              const gatewayUrl = `http://${settings.host}:${settings.port}`;
-              await navigator.clipboard.writeText(gatewayUrl);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2_000);
-            } catch {
-              flash('The clipboard is not available in this browser.', true);
+            const gatewayUrl = `http://${settings.host}:${settings.port}`;
+            if (!await copyText(gatewayUrl)) {
+              flash('The clipboard is not available here. Select the address and copy it by hand.', true);
+              return;
             }
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2_000);
           }} disabled={!settings} className="btn-ghost !px-3 !py-2 !text-xs disabled:opacity-40">
             {copied ? 'Copied gateway URL' : 'Copy gateway URL'}
           </button>

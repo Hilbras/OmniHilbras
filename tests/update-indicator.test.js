@@ -99,7 +99,7 @@ test('the update button opens a popup with the command, a copy, and the two acti
    * same property is `Kernel/API/test/system-shutdown.test.js`, which drives the route the button calls.
    */
   assert.match(indicator, /setPopupOpen\(true\)/, 'the card button opens the popup');
-  assert.match(indicator, /navigator\.clipboard\.writeText\(INSTALL_COMMAND\)/, 'the copy copies the command it shows');
+  assert.match(indicator, /copyText\(INSTALL_COMMAND\)/, 'the copy copies the command it shows, through the desktop bridge where needed');
   assert.match(indicator, /Update release/, 'and the release is one of the two actions');
   assert.match(indicator, /shutdownGateway\(/, 'with the gateway stop as the other');
   assert.match(indicator, /window\.confirm\('Stop the gateway now/, 'the stop asks first, in its own words');

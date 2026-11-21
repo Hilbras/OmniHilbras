@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Copy, ExternalLink, Power, X } from 'lucide-react';
 import type { UpdateState } from '../lib/electronBridge';
 import { shutdownGateway } from '../lib/gatewayClient';
+import { copyText } from '../lib/copyText';
 import { useUpdateState } from '../lib/useUpdateState';
 
 /**
@@ -164,14 +165,11 @@ function UpdatePopup({
   }, [onClose]);
 
   const copyCommand = async () => {
-    try {
-      await navigator.clipboard.writeText(INSTALL_COMMAND);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2_000);
-    } catch {
-      // A browser that refuses the clipboard leaves the command selectable, and nothing is claimed about a
-      // copy that did not happen.
-    }
+    // A surface that refuses the clipboard leaves the command selectable; nothing is claimed about a
+    // copy that did not happen.
+    if (!await copyText(INSTALL_COMMAND)) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2_000);
   };
 
   const stopGateway = async () => {

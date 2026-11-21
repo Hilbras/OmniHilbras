@@ -1,5 +1,19 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// The dashboard reads this URL while its modules evaluate, so it must be set before any page script runs.
+// Without it a packaged app prints the development default (20138) instead of the port this app owns.
+try {
+  const gatewayPort = ipcRenderer.sendSync('gateway:port');
+  if (Number.isInteger(gatewayPort) && gatewayPort > 0) {
+    // contextIsolation keeps the preload's globalThis separate from the page's: exposeInMainWorld is
+    // the only way the dashboard's `globalThis.__OMNIHILBRAS_GATEWAY_URL__` read sees this value.
+    contextBridge.exposeInMainWorld('__OMNIHILBRAS_GATEWAY_URL__', `http://127.0.0.1:${gatewayPort}`);
+  }
+} catch {
+  // No main handler in an older or embedded shell: the dashboard keeps its documented fallback.
+}
+
+
 /**
  * The renderer's whole native surface.
  *
@@ -34,6 +48,9 @@ contextBridge.exposeInMainWorld('omnihilbras', {
     save: (content, filename) => ipcRenderer.invoke('backup:save', { content, filename }),
   },
   appInfo: () => ipcRenderer.invoke('app:info'),
+  clipboard: {
+    writeText: (text) => ipcRenderer.invoke('clipboard:write', text),
+  },
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   /**
    * Signing a provider in, in a window this app opens.

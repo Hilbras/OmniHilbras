@@ -25,6 +25,7 @@ import {
   type GatewayApiKey,
 } from '../lib/gatewayClient';
 import { useGatewayReload } from '../lib/useGatewayStatus';
+import { copyText } from '../lib/copyText';
 import { badgeTone } from '../ui/primitives';
 import { Switch } from '../ui/Switch';
 
@@ -107,12 +108,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
     <button
       type="button"
       onClick={() => {
-        const write = navigator.clipboard?.writeText(value);
-        if (!write) {
-          setOutcome('failed');
-          return;
-        }
-        void write.then(() => setOutcome('copied')).catch(() => setOutcome('failed'));
+        void copyText(value).then((ok) => setOutcome(ok ? 'copied' : 'failed'));
       }}
       aria-label={outcome === 'copied' ? `${label} copied` : outcome === 'failed' ? `${label} could not be copied` : `Copy ${label}`}
       title={outcome === 'failed' ? 'The clipboard refused the write. Select the text and copy it by hand.' : undefined}

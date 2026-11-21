@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { DashboardShell } from '../components/DashboardShell';
 import { getGatewaySystemStats, listGatewayConnections, openGatewayLogStream, type GatewayLogEvent, type GatewaySystemStats } from '../lib/gatewayClient';
 import { desktopBridge, type DesktopServerLog, type DesktopServerSnapshot } from '../lib/electronBridge';
+import { copyText } from '../lib/copyText';
 import { badgeTone } from '../ui/primitives';
 
 const MAX_PROCESS_LINES = 200;
@@ -192,12 +193,10 @@ export function AppHomeContent() {
 
   const copyLogs = useCallback(() => {
     const text = processLogs.map((entry) => `[${entry.stream}] ${entry.line}`).join('\n');
-    const write = navigator.clipboard?.writeText(text);
-    if (!write) return;
-    void write.then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1_500);
-    }).catch(() => setCopied(false));
+    void copyText(text).then((ok) => {
+      setCopied(ok);
+      if (ok) window.setTimeout(() => setCopied(false), 1_500);
+    });
   }, [processLogs]);
 
   const state = snapshot?.state ?? 'stopped';

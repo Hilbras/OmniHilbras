@@ -89,6 +89,8 @@ export type OmniBridge = {
     save: (content: string, filename: string) => Promise<{ saved: boolean; path?: string }>;
   };
   appInfo: () => Promise<{ version: string; platform: string; arch: string; packaged: boolean; electron: string; chrome: string; node: string }>;
+  /** The OS clipboard is owned by the main process; `app://` pages cannot rely on navigator.clipboard. */
+  clipboard: { writeText: (text: string) => Promise<boolean> };
   /** Open a provider sign-in (or another documented link) in the default browser. */
   openExternal: (url: string) => Promise<void>;
   settings: {

@@ -75,8 +75,8 @@ test('a copy that fails says so instead of doing nothing', () => {
   // `if (!write) return;` was a button that silently did nothing when the clipboard API was unavailable — the same
   // defect as claiming a copy that never happened, in the other direction.
   assert.match(page, /outcome === 'failed' \? `\$\{label\} could not be copied`/, 'a refused copy is reported');
-  assert.match(page, /if \(!write\) \{\s*setOutcome\('failed'\);\s*return;/, 'a missing clipboard API is a silent no-op again');
-  assert.doesNotMatch(page, /if \(!write\) return;/, 'the silent early return is back');
+  assert.match(page, /copyText\(value\)\.then\(\(ok\) => setOutcome\(ok \? 'copied' : 'failed'\)\)/, 'the shared helper reports a failed write');
+  assert.doesNotMatch(page, /navigator\.clipboard/, 'the browser-only API is no longer reached from this page');
 });
 
 test('closing a dialog gives focus back to the control that opened it', () => {

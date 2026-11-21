@@ -50,6 +50,8 @@ try {
   if (result.title !== 'OmniHilbras — Dashboard') failures.push(`unexpected title ${result.title}`);
   if (result.shells?.shells !== 1) failures.push(`nested dashboard shell: ${result.shells?.shells}`);
   if (result.shells?.serversHeadings !== 1) failures.push(`Servers heading count ${result.shells?.serversHeadings}`);
+  if (result.shells?.gatewayUrl !== `http://127.0.0.1:${result.server.port}`) failures.push(`renderer gateway URL is ${result.shells?.gatewayUrl}, gateway is on ${result.server.port}`);
+  if (result.shells?.clipboardBridge !== true) failures.push('the renderer has no clipboard bridge');
   if (!result.controls?.minimize || !result.controls?.maximize || !result.controls?.draggable) failures.push(`window controls incomplete: ${JSON.stringify(result.controls)}`);
   if (!result.probe?.ok) failures.push(`IPC probe failed: ${JSON.stringify(result.probe)}`);
   if (result.cycle?.stopped !== 'stopped') failures.push(`stop did not reach stopped: ${JSON.stringify(result.cycle)}`);

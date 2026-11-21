@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { Footer } from './components/Footer';
 import { Navbar } from './components/Navbar';
+import { copyText } from './lib/copyText';
 import { ParticleBackground } from './components/ParticleBackground';
 import { RoutePreview } from './components/RoutePreview';
 import { ScrollProgress } from './components/ScrollProgress';
@@ -289,14 +290,9 @@ function DocsSection() {
   const code = codeSamples[language];
 
   async function copyCode() {
-    if (!navigator.clipboard) return;
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setCopied(false);
-    }
+    if (!await copyText(code)) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
   }
 
   return (

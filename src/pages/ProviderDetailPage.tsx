@@ -29,6 +29,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { AddProviderModal, type NewProvider } from '../components/AddProviderModal';
+import { copyText } from '../lib/copyText';
 import { ConnectionMethodDialog } from '../components/ConnectionMethodDialog';
 import { EnabledSwitch } from '../components/EnabledSwitch';
 import { KiroConnectDialog } from '../components/KiroConnectDialog';
@@ -1448,14 +1449,9 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
   }
 
   async function copyModel(model: string) {
-    if (!navigator.clipboard) return;
-    try {
-      await navigator.clipboard.writeText(model);
-      setCopiedModel(model);
-      window.setTimeout(() => setCopiedModel(null), 1600);
-    } catch {
-      setCopiedModel(null);
-    }
+    if (!await copyText(model)) return;
+    setCopiedModel(model);
+    window.setTimeout(() => setCopiedModel(null), 1600);
   }
 
   return (

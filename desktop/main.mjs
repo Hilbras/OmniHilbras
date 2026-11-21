@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, protocol, session, shell, Tray } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, protocol, session, shell, Tray } from 'electron';
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -657,6 +657,16 @@ function wireIpc() {
     return appSettings();
   });
 
+  // The renderer needs the gateway's real port before its modules evaluate: a dashboard that falls back
+  // to the development default prints 20138 even though this app owns a different one. A sync reply lets
+  // the preload set the global before any page script runs.
+  ipcMain.on('gateway:port', (event) => { event.returnValue = gateway.port; });
+  // `app://` pages have no reliable navigator.clipboard in Electron. The main process owns the OS clipboard.
+  ipcMain.handle('clipboard:write', (_event, text) => {
+    if (typeof text !== 'string' || text.length > 1_000_000) throw new Error('Nothing to copy.');
+    clipboard.writeText(text);
+    return true;
+  });
   ipcMain.handle('gateway:request', async (_event, request) => {
     try {
       return await gatewayClient.request(request ?? {});
@@ -907,7 +917,12 @@ function createWindow() {
           }
           return { minimize, maximize, draggable, before, after };
         })()`);
-        const shells = await window.webContents.executeJavaScript(`({ shells: document.querySelectorAll('.dashboard-shell').length, serversHeadings: [...document.querySelectorAll('h1,h2')].filter((node) => node.textContent === 'Servers').length })`);
+        const shells = await window.webContents.executeJavaScript(`({
+          shells: document.querySelectorAll('.dashboard-shell').length,
+          serversHeadings: [...document.querySelectorAll('h1,h2')].filter((node) => node.textContent === 'Servers').length,
+          gatewayUrl: globalThis.__OMNIHILBRAS_GATEWAY_URL__ ?? null,
+          clipboardBridge: typeof window.omnihilbras?.clipboard?.writeText === 'function',
+        })`);
         console.log(`SMOKE ${JSON.stringify({ url: window.webContents.getURL(), title, probe, cycle, controls, shells, feed, text, server: gateway.snapshot() })}`);
       } catch (error) {
         console.log(`SMOKE-ERROR ${error instanceof Error ? error.message : String(error)}`);
