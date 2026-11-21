@@ -25,3 +25,15 @@ test('local tools are only added to the non-streaming chat path', () => {
   assert.match(service, /applyToolContract\(providerId, request, false, connectionId\)/, 'streaming does not explicitly decline local tools');
   assert.doesNotMatch(service, /applyToolContract\(providerId, request, true\)/, 'a stale two-argument call remains');
 });
+
+test('a local tool round restores caller names exactly like the direct chat path', () => {
+  // The direct path passed `contracted.renames` to `validatedToolResponse`; the local-tool loop used
+  // to omit it. A provider folding `Read` to `read` then returned `read`, and an agent that declared
+  // `Read` saw a call it could not recognise — the same drift as the stream path before 3.90.5.
+  const service = read('Kernel/API/src/core/service.ts');
+  const start = service.indexOf('private async runLocalToolRounds');
+  const end = service.indexOf('async chat(', start);
+  assert.ok(start >= 0 && end > start, 'the local tool loop could not be located');
+  const body = service.slice(start, end);
+  assert.match(body, /validatedToolResponse\([\s\S]*contracted\.renames/, 'a local tool round drops the caller name map');
+});

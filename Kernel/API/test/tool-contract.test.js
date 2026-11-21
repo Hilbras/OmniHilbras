@@ -112,6 +112,25 @@ test('a forced call on an OpenCode free lane is refused by name before any provi
   );
 });
 
+test('a Zen Messages-lane stream refuses by name before any chunk or request', async () => {
+  // The lane cannot stream tools. Silently answering with a finished non-stream turn used to break an
+  // agent waiting for deltas; refusing before the first byte is the honest answer and must not spend a
+  // request. `streamChat` is an async generator, so its body runs on first iteration.
+  const { ZenAdapter } = await import('../../SDK/opencode-zen/dist/adapter/index.js');
+  let used = false;
+  const transport = {
+    async request() { used = true; throw new Error('the refusing lane reached the transport'); },
+    async *stream() { used = true; throw new Error('the refusing lane reached the transport'); },
+  };
+  const adapter = new ZenAdapter({ transport });
+  const chunks = adapter.streamChat(
+    { model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }], tools: [tool('read')] },
+    { credential: { type: 'api-key', value: 'k' } },
+  );
+  await assert.rejects(async () => { for await (const _chunk of chunks) { /* collect */ } }, (error) => error.code === 'NOT_SUPPORTED' && /Streaming is not implemented/.test(error.message));
+  assert.equal(used, false, 'the refusal cost an upstream request');
+});
+
 test('tool history is healed before it reaches a provider', async () => {
   const { requests, service } = harness();
   await service.chat('openai', {

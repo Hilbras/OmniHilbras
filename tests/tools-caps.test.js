@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +45,23 @@ test('every catalogue and gateway provider has a row in the tool table', () => {
   const rows = new Set(toolProviderIds());
   const missing = [...new Set([...catalogIds(), ...gatewayIds()])].filter((id) => !rows.has(id));
   assert.deepEqual(missing, [], `providers with no tool decision: ${missing.join(', ')}`);
+});
+
+test('every SDK adapter package is covered by a caps row or a named alias', () => {
+  // Three packages carry a different name from the provider id they serve: `codebuddy` serves both
+  // regional cards, `opencode-zen` is `opencode`, and `zcode-start-plan` is `zcode`. A new adapter
+  // package must state which of those it is; it cannot quietly inherit a tool decision.
+  const aliases = new Set(['codebuddy', 'opencode-zen', 'zcode-start-plan']);
+  const sdk = join(ROOT, 'Kernel', 'SDK');
+  const adapters = readdirSync(sdk, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => {
+      try { readFileSync(join(sdk, name, 'adapter', 'index.ts')); return true; } catch { return false; }
+    });
+  const rows = new Set(toolProviderIds());
+  const uncovered = adapters.filter((id) => !rows.has(id) && !aliases.has(id));
+  assert.deepEqual(uncovered, [], `adapter packages with no tool decision: ${uncovered.join(', ')}`);
 });
 
 test('every row names a provider that exists', () => {

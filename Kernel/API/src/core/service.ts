@@ -3836,7 +3836,7 @@ export class GatewayService {
    */
   private async runLocalToolRounds(
     providerId: string,
-    contracted: { request: ChatRequest; declared: readonly string[] },
+    contracted: { request: ChatRequest; declared: readonly string[]; renames: ReadonlyMap<string, string> },
     adapter: ProviderAdapter,
     signal: AbortSignal | undefined,
     scope: RequestScope | undefined,
@@ -3854,7 +3854,7 @@ export class GatewayService {
       const response = this.validatedToolResponse(providerId, contracted.declared, await adapter.chat!(
         this.withRequestLimits({ ...contracted.request, model: await this.upstreamModelFor(providerId, connectionId, contracted.request.model), messages: prepared }),
         context,
-      ));
+      ), contracted.renames);
       last = response;
 
       if (native) {

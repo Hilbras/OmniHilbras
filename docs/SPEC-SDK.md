@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.92.0
+**Status:** Current — release 3.92.1
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -1160,6 +1160,13 @@ the caller's definitions, so a generated "unavailable" tool can never win `tool_
 version stays configurable through `OMNIHILBRAS_ZEN_USER_AGENT`. Which models are gated is decided by the `-free` suffix rather
 than a list, because the upstream rotates its free lineup — six models were delisted and replaced inside a
 week.
+
+One `gatewayToolNameMap` is the canonical wire→caller name map. The non-streaming guard, the stream
+guard and the local-tool round all apply it; a local round that omitted it used to return `read` to a
+client that declared `Read`, which an agent saw as a call it never offered. Streaming on the Messages
+and Responses lanes refuses before the first byte with `NOT_SUPPORTED` rather than answering with a
+finished non-stream turn, and the refusal costs no upstream request. Every adapter package is covered
+by a caps row or a named alias, asserted at test time rather than left to a reader.
 
 ### Where the refusal actually happens
 
