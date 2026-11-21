@@ -98,6 +98,17 @@ export type AdapterFactory = (context: AdapterContext) => ProviderAdapter;
  * and could fail on a network the connection does not otherwise need. The original code handled
  * this by naming Cline in a literal branch; this is the same decision, stated where it is visible.
  */
+/**
+ * What the gateway can honestly answer when asked to check a candidate credential.
+ *
+ * - `credential`: the adapter has a real validator (a 1-token probe, a session check, etc.).
+ * - `models`: an authenticated catalog read proves the key. Never use this for a provider whose
+ *   model list is public — that reports a bogus key as valid, which is the NVIDIA bug.
+ * - `none`: nothing can be checked before saving. The sign-in, device flow or token exchange is
+ *   the proof; saying otherwise is how a Check button reports a green result for an empty string.
+ */
+export type CredentialValidationStrategy = 'credential' | 'models' | 'none';
+
 export type OnDemandOptions = {
   /**
    * Prove the credential before storing it, for a provider that is absent from the registry and
@@ -107,6 +118,11 @@ export type OnDemandOptions = {
    * button starts opening browsers.
    */
   validateOnSave?: boolean;
+  /**
+   * What a Check request may do with a candidate key. Defaults to `none` so an undeclared provider
+   * cannot silently inherit a catalog read that proves nothing.
+   */
+  validation?: CredentialValidationStrategy;
 };
 
 export class ProviderResolver {
@@ -175,6 +191,25 @@ export class ProviderResolver {
     const registered = this.registry.get(providerId);
     if (registered) return Boolean(registered.validateCredential);
     return this.onDemandOptions.get(providerId)?.validateOnSave === true;
+  }
+
+  /**
+   * How the Check route may answer for this provider.
+   *
+   * A registered adapter is asked what it implements; an on-demand one is asked what it declared.
+   * `none` is the default rather than a guess, because a public catalog would otherwise make every
+   * unchecked provider answer "valid" for any string.
+   */
+  validationStrategy(providerId: string): CredentialValidationStrategy {
+    const registered = this.registry.get(providerId);
+    if (registered) return registered.validateCredential ? 'credential' : 'none';
+    return this.onDemandOptions.get(providerId)?.validation ?? 'none';
+  }
+
+  /** Whether an on-demand registration stated its strategy, rather than inheriting the safe default. */
+  hasDeclaredValidation(providerId: string): boolean {
+    const options = this.onDemandOptions.get(providerId);
+    return Boolean(options && Object.prototype.hasOwnProperty.call(options, 'validation'));
   }
 
   /** The ids this resolver builds on demand, in registration order. */

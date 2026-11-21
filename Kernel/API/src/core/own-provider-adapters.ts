@@ -1,6 +1,7 @@
 import { providerClientHeaders } from './provider-client-identity.js';
 import type { ProviderAdapter } from './index.js';
 import type { OpenAICompatibleAdapterOptions } from '@omnihilbras/sdk-openai';
+import type { CredentialValidationStrategy } from './provider-resolver.js';
 
 import { AgnesAiAdapter } from '@omnihilbras/sdk-agnes-ai';
 import { AgentrouterAdapter } from '@omnihilbras/sdk-agentrouter';
@@ -30,32 +31,52 @@ import { CoarenaAdapter } from '@omnihilbras/sdk-coarena';
 
 /** One own adapter per provider id that had no dedicated package before phase 2. */
 export type OwnAdapterOptions = { endpoint?: string; transport?: OpenAICompatibleAdapterOptions['transport'] };
-export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, (options?: OwnAdapterOptions) => ProviderAdapter>> = Object.freeze({
-  'agnes-ai': () => new AgnesAiAdapter(),
+
+/**
+ * A factory and the answer its provider can honestly give to a Check request.
+ *
+ * `validation` used to be scattered across service registrations, so a provider whose catalog is
+ * public could inherit a "list models" check that accepted any string as a key. Keeping the strategy
+ * beside the factory makes the two impossible to drift apart: a row declares both what it builds and
+ * what that thing can prove. `none` is the default decision, never the absence of a decision.
+ */
+export type OwnAdapterEntry = {
+  create: (options?: OwnAdapterOptions) => ProviderAdapter;
+  validation: CredentialValidationStrategy;
+};
+
+/** Forward only the options an adapter actually accepts; the rest keep their zero-argument shape. */
+const withTransport = (options?: OwnAdapterOptions): OpenAICompatibleAdapterOptions =>
+  options?.transport ? { transport: options.transport } : {};
+
+export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, OwnAdapterEntry>> = Object.freeze({
+  'agnes-ai': { validation: 'none', create: (options) => new AgnesAiAdapter(withTransport(options)) },
   // AgentRouter gates on a client identity. Its own package owns the adapter; the gateway supplies the
   // environment-configured identity, so a host override still reaches the wire.
-  'agentrouter': () => new AgentrouterAdapter({ headers: providerClientHeaders('agentrouter') }),
-  'aion-labs': (options) => new AionLabsAdapter(options?.transport ? { transport: options.transport } : {}),
-  '100milionseek': (options) => new OneHundredMillionSeekAdapter(options?.transport ? { transport: options.transport } : {}),
-  'numes': () => new NumesAdapter(),
-  'kiraai': () => new KiraaiAdapter(),
-  'vengetic': (options) => new VengeticAdapter(options?.transport ? { transport: options.transport } : {}),
-  'anyrouter': () => new AnyrouterAdapter(),
-  'zro': () => new ZroAdapter(),
-  'unorouter': () => new UnorouterAdapter(),
-  'ollama': (options) => new OllamaAdapter({ ...(options?.endpoint ? { endpoint: options.endpoint } : {}), ...(options?.transport ? { transport: options.transport } : {}) }),
-  'mistral': () => new MistralAdapter(),
-  'nara-router': () => new NaraRouterAdapter(),
-  'tokenharbor': () => new TokenharborAdapter(),
-  'apinex': () => new ApinexAdapter(),
-  'tiarina': () => new TiarinaAdapter(),
-  'xkiro': () => new XkiroAdapter(),
-  'kimi': () => new KimiAdapter(),
-  'deepseek': () => new DeepseekAdapter(),
-  'qwen': () => new QwenAdapter(),
-  'qwen-token-plan': () => new QwenTokenPlanAdapter(),
-  'groq': () => new GroqAdapter(),
-  'grok': () => new GrokAdapter(),
-  'nvidia': (options) => new NvidiaAdapter(options?.transport ? { transport: options.transport } : {}),
-  'coarena': () => new CoarenaAdapter(),
+  'agentrouter': { validation: 'none', create: (options) => new AgentrouterAdapter({ headers: providerClientHeaders('agentrouter'), ...withTransport(options) }) },
+  'aion-labs': { validation: 'credential', create: (options) => new AionLabsAdapter({ ...withTransport(options), ...(options?.endpoint ? { endpoint: options.endpoint } : {}) }) },
+  '100milionseek': { validation: 'none', create: (options) => new OneHundredMillionSeekAdapter({ ...withTransport(options), ...(options?.endpoint ? { endpoint: options.endpoint } : {}) }) },
+  'numes': { validation: 'none', create: (options) => new NumesAdapter(withTransport(options)) },
+  'kiraai': { validation: 'none', create: (options) => new KiraaiAdapter(withTransport(options)) },
+  'vengetic': { validation: 'credential', create: (options) => new VengeticAdapter(withTransport(options)) },
+  'anyrouter': { validation: 'none', create: (options) => new AnyrouterAdapter(withTransport(options)) },
+  'zro': { validation: 'none', create: (options) => new ZroAdapter(withTransport(options)) },
+  'unorouter': { validation: 'none', create: (options) => new UnorouterAdapter(withTransport(options)) },
+  'ollama': { validation: 'none', create: (options) => new OllamaAdapter({ ...withTransport(options), ...(options?.endpoint ? { endpoint: options.endpoint } : {}) }) },
+  'mistral': { validation: 'none', create: (options) => new MistralAdapter(withTransport(options)) },
+  'nara-router': { validation: 'none', create: (options) => new NaraRouterAdapter(withTransport(options)) },
+  'tokenharbor': { validation: 'none', create: (options) => new TokenharborAdapter(withTransport(options)) },
+  'apinex': { validation: 'none', create: (options) => new ApinexAdapter(withTransport(options)) },
+  'tiarina': { validation: 'none', create: (options) => new TiarinaAdapter(withTransport(options)) },
+  'xkiro': { validation: 'none', create: (options) => new XkiroAdapter(withTransport(options)) },
+  'kimi': { validation: 'none', create: (options) => new KimiAdapter(withTransport(options)) },
+  'deepseek': { validation: 'none', create: (options) => new DeepseekAdapter(withTransport(options)) },
+  'qwen': { validation: 'none', create: (options) => new QwenAdapter(withTransport(options)) },
+  'qwen-token-plan': { validation: 'none', create: (options) => new QwenTokenPlanAdapter(withTransport(options)) },
+  'groq': { validation: 'none', create: (options) => new GroqAdapter(withTransport(options)) },
+  'grok': { validation: 'none', create: (options) => new GrokAdapter(withTransport(options)) },
+  // NVIDIA's catalog is public, so `none` would be a lie in the other direction: the adapter proves
+  // the key with a real 1-token inference. This is why the strategy lives beside the factory.
+  'nvidia': { validation: 'credential', create: (options) => new NvidiaAdapter(withTransport(options)) },
+  'coarena': { validation: 'none', create: (options) => new CoarenaAdapter(withTransport(options)) },
 });

@@ -339,7 +339,7 @@ export function AddProviderModal({ open, initialProviderId, initialModelPolicy, 
 
                 <p className="mt-3 text-[11px] leading-relaxed text-muted">No active proxy pools available. Create one in Proxy Pools first.</p>
                 <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gold-text" aria-hidden="true" />{requiresKey
-                  ? `The key is checked against ${selected.name} through the loopback gateway and stored encrypted on this machine. It never reaches browser storage.`
+                  ? `Where ${selected.name} can prove a candidate key, Check asks the loopback gateway before anything is stored; where it cannot, the gateway says so rather than guessing. Stored keys are encrypted on this machine and never reach browser storage.`
                   : 'This provider needs no key, so nothing is stored for it.'}</p>
               </>
             ) : (

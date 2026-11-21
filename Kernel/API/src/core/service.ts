@@ -712,75 +712,94 @@ export class GatewayService {
       recordRateLimitUse: (connectionId) => this.rateLimiter.record(connectionId),
       recordUsage: (connectionId) => { void this.connectionStore?.recordUsage(connectionId).catch(() => undefined); },
     });
+    // `validation` answers one question: what may the Check button prove about a *candidate* key.
+    // A browser-based or device-flow sign-in is its own proof and declares `none` — running its
+    // validator here would open a browser or re-check a grant the provider already approved.
     let resolver = new ProviderResolver(registry, this.transport)
-      .onDemand('cline', ({ connection }) => this.clineAdapter(connection?.id ?? 'cline'), { validateOnSave: true })
+      .onDemand('cline', ({ connection }) => this.clineAdapter(connection?.id ?? 'cline'), { validateOnSave: true, validation: 'credential' })
       // No `validateOnSave`. The exchange has already proved the grant, and the inherited check reads
       // the account endpoint — which says nothing about the tier and is one more way for a completed
       // sign-in to be reported as a failure. Discovery imports the tier with a tolerated failure, as
       // every other OAuth flow does.
-      .onDemand('clinepass', ({ connection }) => this.clinepassAdapter(connection?.id ?? 'clinepass'))
-      .onDemand('apmix', () => this.apmixAdapter())
-      .onDemand('beatapi', () => this.beatapiAdapter())
+      .onDemand('clinepass', ({ connection }) => this.clinepassAdapter(connection?.id ?? 'clinepass'), { validation: 'none' })
+      .onDemand('apmix', () => this.apmixAdapter(), { validation: 'none' })
+      .onDemand('beatapi', () => this.beatapiAdapter(), { validation: 'none' })
       // `validateOnSave`: Nous publishes its model catalog unauthenticated, so a save that only read
       // the catalog would accept any string as a key. The adapter proves it with one 1-token inference.
-      .onDemand('nous', ({ providerId, connection }) => this.nousAdapter(connection?.id ?? providerId), { validateOnSave: true })
-      .onDemand('opencode', () => this.zenAdapter())
+      .onDemand('nous', ({ providerId, connection }) => this.nousAdapter(connection?.id ?? providerId), { validateOnSave: true, validation: 'credential' })
+      .onDemand('opencode', () => this.zenAdapter(), { validation: 'credential' })
       // OpenCode Go is the same wire on the subscription lane (`/zen/go`), so it is the same adapter with
       // a different base and id. `validateOnSave`: both lanes judge a key — measured on Zen, where the
       // listing answers 401 for a bad one — so a save proves it rather than trusting it.
-      .onDemand('opencode-go', () => this.opencodeGoAdapter(), { validateOnSave: true })
-      .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId))
-      .onDemand(kimiCodeProviderId, ({ providerId, connection }) => this.kimiCodeAdapter(connection?.id ?? providerId))
-      .onDemand(claudeCodeProviderId, ({ providerId, connection }) => this.claudeCodeAdapter(connection?.id ?? providerId))
-      .onDemand(codexProviderId, ({ providerId, connection }) => this.codexAdapter(connection?.id ?? providerId))
-      .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId))
-      .onDemand(kilocodeProviderId, ({ providerId, connection }) => this.kilocodeAdapter(connection?.id ?? providerId))
+      .onDemand('opencode-go', () => this.opencodeGoAdapter(), { validateOnSave: true, validation: 'credential' })
+      .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId), { validation: 'credential' })
+      .onDemand(kimiCodeProviderId, ({ providerId, connection }) => this.kimiCodeAdapter(connection?.id ?? providerId), { validation: 'none' })
+      .onDemand(claudeCodeProviderId, ({ providerId, connection }) => this.claudeCodeAdapter(connection?.id ?? providerId), { validation: 'none' })
+      .onDemand(codexProviderId, ({ providerId, connection }) => this.codexAdapter(connection?.id ?? providerId), { validation: 'credential' })
+      .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId), { validation: 'credential' })
+      .onDemand(kilocodeProviderId, ({ providerId, connection }) => this.kilocodeAdapter(connection?.id ?? providerId), { validation: 'none' })
       // **No `validateOnSave`.** It was added in 3.70.0 and is the reason both MiniMax sign-ins ended
       // at "Sign-in did not finish": the device flow completed, then the pre-flight probe read the
       // agent host's catalog — which is not what the sign-in proved — and any refusal there discarded
       // a grant the provider had just approved. The token exchange is the proof. Discovery still reads
       // the catalog afterwards, with a tolerated failure, so a slow catalog cannot lose a real session.
-      .onDemand(minimaxCodeProviderId, ({ providerId, connection }) => this.minimaxCodeAdapter(connection?.id ?? providerId))
-      .onDemand(minimaxCodeGlobalProviderId, ({ providerId, connection }) => this.minimaxCodeAdapter(connection?.id ?? providerId))
-      .onDemand(codebuddyCnProviderId, ({ providerId, connection }) => this.codebuddyAdapter(connection?.id ?? providerId))
-      .onDemand(codebuddyIntlProviderId, ({ providerId, connection }) => this.codebuddyAdapter(connection?.id ?? providerId))
-      .onDemand(qoderProviderId, ({ providerId, connection }) => this.qoderAdapter(connection?.id ?? providerId))
-      .onDemand(chatGptWebProviderId, ({ providerId, connection }) => this.chatGptWebAdapter(connection?.id ?? providerId))
-      .onDemand(geminiWebProviderId, ({ providerId, connection }) => this.geminiWebAdapter(connection?.id ?? providerId))
-      .onDemand(duckduckgoWebProviderId, () => this.duckDuckGoWebAdapter())
-      .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter())
-      .onDemand(deepseekWebV2ProviderId, () => this.deepSeekV2Adapter())
-      .onDemand(tokenHarborWebProviderId, () => this.tokenHarborWebAdapter())
-      .onDemand(grokWebProviderId, () => this.grokWebAdapter())
-      .onDemand(perplexityWebProviderId, () => this.perplexityWebAdapter())
-      .onDemand(zcodeProviderId, ({ providerId, connection }) => this.zcodeAdapter(connection?.id ?? providerId));
+      .onDemand(minimaxCodeProviderId, ({ providerId, connection }) => this.minimaxCodeAdapter(connection?.id ?? providerId), { validation: 'none' })
+      .onDemand(minimaxCodeGlobalProviderId, ({ providerId, connection }) => this.minimaxCodeAdapter(connection?.id ?? providerId), { validation: 'none' })
+      .onDemand(codebuddyCnProviderId, ({ providerId, connection }) => this.codebuddyAdapter(connection?.id ?? providerId), { validation: 'none' })
+      .onDemand(codebuddyIntlProviderId, ({ providerId, connection }) => this.codebuddyAdapter(connection?.id ?? providerId), { validation: 'none' })
+      .onDemand(qoderProviderId, ({ providerId, connection }) => this.qoderAdapter(connection?.id ?? providerId), { validation: 'none' })
+      // Browser-backed sessions declare `none`: their validators open a browser, so a Check on an
+      // unsaved cookie would launch one and report an unrelated network result as a key verdict.
+      .onDemand(chatGptWebProviderId, ({ providerId, connection }) => this.chatGptWebAdapter(connection?.id ?? providerId), { validation: 'none' })
+      .onDemand(geminiWebProviderId, ({ providerId, connection }) => this.geminiWebAdapter(connection?.id ?? providerId), { validation: 'none' })
+      .onDemand(duckduckgoWebProviderId, () => this.duckDuckGoWebAdapter(), { validation: 'none' })
+      .onDemand(deepseekWebProviderId, () => this.deepSeekAdapter(), { validation: 'none' })
+      .onDemand(deepseekWebV2ProviderId, () => this.deepSeekV2Adapter(), { validation: 'none' })
+      .onDemand(tokenHarborWebProviderId, () => this.tokenHarborWebAdapter(), { validation: 'credential' })
+      .onDemand(grokWebProviderId, () => this.grokWebAdapter(), { validation: 'none' })
+      .onDemand(perplexityWebProviderId, () => this.perplexityWebAdapter(), { validation: 'none' })
+      .onDemand(zcodeProviderId, ({ providerId, connection }) => this.zcodeAdapter(connection?.id ?? providerId), { validation: 'credential' });
     // Every provider id owns its adapter. These rows are the 24 ids that previously existed only as a
     // dashboard card plus a shared OpenAI-compatible endpoint; their base URL and id now live in their own package.
-    resolver = resolver.onDemand('agnes-ai', () => OWN_PROVIDER_ADAPTERS['agnes-ai']!());
-    resolver = resolver.onDemand('agentrouter', () => OWN_PROVIDER_ADAPTERS['agentrouter']!());
-    resolver = resolver.onDemand('aion-labs', ({ connection }) => OWN_PROVIDER_ADAPTERS['aion-labs']!({ transport: this.transport, ...(connection?.endpoint ? { endpoint: connection.endpoint } : {}) }), { validateOnSave: true });
-    resolver = resolver.onDemand('100milionseek', ({ connection }) => OWN_PROVIDER_ADAPTERS['100milionseek']!({ transport: this.transport, ...(connection?.endpoint ? { endpoint: connection.endpoint } : {}) }));
-    resolver = resolver.onDemand('numes', () => OWN_PROVIDER_ADAPTERS['numes']!());
-    resolver = resolver.onDemand('kiraai', () => OWN_PROVIDER_ADAPTERS['kiraai']!());
-    resolver = resolver.onDemand('vengetic', () => OWN_PROVIDER_ADAPTERS['vengetic']!({ transport: this.transport }));
-    resolver = resolver.onDemand('anyrouter', () => OWN_PROVIDER_ADAPTERS['anyrouter']!());
-    resolver = resolver.onDemand('zro', () => OWN_PROVIDER_ADAPTERS['zro']!());
-    resolver = resolver.onDemand('unorouter', () => OWN_PROVIDER_ADAPTERS['unorouter']!());
-    resolver = resolver.onDemand('ollama', ({ connection }) => OWN_PROVIDER_ADAPTERS['ollama']!({ transport: this.transport, ...(connection?.endpoint ? { endpoint: connection.endpoint } : {}) }));
-    resolver = resolver.onDemand('mistral', () => OWN_PROVIDER_ADAPTERS['mistral']!());
-    resolver = resolver.onDemand('nara-router', () => OWN_PROVIDER_ADAPTERS['nara-router']!());
-    resolver = resolver.onDemand('tokenharbor', () => OWN_PROVIDER_ADAPTERS['tokenharbor']!());
-    resolver = resolver.onDemand('apinex', () => OWN_PROVIDER_ADAPTERS['apinex']!());
-    resolver = resolver.onDemand('tiarina', () => OWN_PROVIDER_ADAPTERS['tiarina']!());
-    resolver = resolver.onDemand('xkiro', () => OWN_PROVIDER_ADAPTERS['xkiro']!());
-    resolver = resolver.onDemand('kimi', () => OWN_PROVIDER_ADAPTERS['kimi']!());
-    resolver = resolver.onDemand('deepseek', () => OWN_PROVIDER_ADAPTERS['deepseek']!());
-    resolver = resolver.onDemand('qwen', () => OWN_PROVIDER_ADAPTERS['qwen']!());
-    resolver = resolver.onDemand('qwen-token-plan', () => OWN_PROVIDER_ADAPTERS['qwen-token-plan']!());
-    resolver = resolver.onDemand('groq', () => OWN_PROVIDER_ADAPTERS['groq']!());
-    resolver = resolver.onDemand('grok', () => OWN_PROVIDER_ADAPTERS['grok']!());
-    resolver = resolver.onDemand('nvidia', () => OWN_PROVIDER_ADAPTERS['nvidia']!({ transport: this.transport }), { validateOnSave: true });
-    resolver = resolver.onDemand('coarena', () => OWN_PROVIDER_ADAPTERS['coarena']!());
+    // Each row names its adapter literal because the provider-card guards read registrations from
+    // source. What changed is that every row now passes `this.transport`: 24 of them used to fall
+    // back to the SDK's 30 s default and lose a slow reasoning turn before the gateway's deadline.
+    // The validation strategy comes from the same table as the factory, so it cannot disagree.
+    const own = (id: string) => {
+      const entry = OWN_PROVIDER_ADAPTERS[id]!;
+      return {
+        factory: ({ connection }: { connection?: { id: string; endpoint?: string; name?: string } }) => entry.create({
+          transport: this.transport,
+          ...(connection?.endpoint ? { endpoint: connection.endpoint } : {}),
+        }),
+        validation: entry.validation,
+      };
+    };
+    resolver = resolver.onDemand('agnes-ai', own('agnes-ai').factory, { validation: own('agnes-ai').validation });
+    resolver = resolver.onDemand('agentrouter', own('agentrouter').factory, { validation: own('agentrouter').validation });
+    resolver = resolver.onDemand('aion-labs', own('aion-labs').factory, { validateOnSave: true, validation: own('aion-labs').validation });
+    resolver = resolver.onDemand('100milionseek', own('100milionseek').factory, { validation: own('100milionseek').validation });
+    resolver = resolver.onDemand('numes', own('numes').factory, { validation: own('numes').validation });
+    resolver = resolver.onDemand('kiraai', own('kiraai').factory, { validation: own('kiraai').validation });
+    resolver = resolver.onDemand('vengetic', own('vengetic').factory, { validation: own('vengetic').validation });
+    resolver = resolver.onDemand('anyrouter', own('anyrouter').factory, { validation: own('anyrouter').validation });
+    resolver = resolver.onDemand('zro', own('zro').factory, { validation: own('zro').validation });
+    resolver = resolver.onDemand('unorouter', own('unorouter').factory, { validation: own('unorouter').validation });
+    resolver = resolver.onDemand('ollama', own('ollama').factory, { validation: own('ollama').validation });
+    resolver = resolver.onDemand('mistral', own('mistral').factory, { validation: own('mistral').validation });
+    resolver = resolver.onDemand('nara-router', own('nara-router').factory, { validation: own('nara-router').validation });
+    resolver = resolver.onDemand('tokenharbor', own('tokenharbor').factory, { validation: own('tokenharbor').validation });
+    resolver = resolver.onDemand('apinex', own('apinex').factory, { validation: own('apinex').validation });
+    resolver = resolver.onDemand('tiarina', own('tiarina').factory, { validation: own('tiarina').validation });
+    resolver = resolver.onDemand('xkiro', own('xkiro').factory, { validation: own('xkiro').validation });
+    resolver = resolver.onDemand('kimi', own('kimi').factory, { validation: own('kimi').validation });
+    resolver = resolver.onDemand('deepseek', own('deepseek').factory, { validation: own('deepseek').validation });
+    resolver = resolver.onDemand('qwen', own('qwen').factory, { validation: own('qwen').validation });
+    resolver = resolver.onDemand('qwen-token-plan', own('qwen-token-plan').factory, { validation: own('qwen-token-plan').validation });
+    resolver = resolver.onDemand('groq', own('groq').factory, { validation: own('groq').validation });
+    resolver = resolver.onDemand('grok', own('grok').factory, { validation: own('grok').validation });
+    resolver = resolver.onDemand('nvidia', own('nvidia').factory, { validateOnSave: true, validation: own('nvidia').validation });
+    resolver = resolver.onDemand('coarena', own('coarena').factory, { validation: own('coarena').validation });
     this.providers = resolver;
     this.credentialLifecycle = new CredentialLifecycle({
       adapterFor: (providerId) => { try { return this.registry.get(providerId); } catch { return undefined; } },
@@ -4227,9 +4246,30 @@ export class GatewayService {
      */
     const adapter = await this.resolveAdapter(providerId);
     const context: ProviderRequestContext = { credential, ...(signal ? { signal } : {}) };
-    if (!adapter.validateCredential) throw notSupported(adapter, 'credential validation');
-    const result = await adapter.validateCredential(credential, context);
-    return { providerId, valid: true, checkedAt: result?.checkedAt ?? new Date().toISOString(), ...(result?.latencyMs === undefined ? {} : { latencyMs: result.latencyMs }) };
+    const strategy = this.providers.validationStrategy(providerId);
+    if (strategy === 'none') {
+      throw new ProviderError('NOT_SUPPORTED', `${providerId} cannot check a key before it is saved.`, {
+        providerId,
+        publicMessage: `${providerId} cannot check a candidate key. Its sign-in is its proof, or the check would prove nothing; save the connection and use Test to check the saved credential.`,
+      });
+    }
+    if (strategy === 'credential') {
+      if (!adapter.validateCredential) throw notSupported(adapter, 'credential validation');
+      const result = await adapter.validateCredential(credential, context);
+      return { providerId, valid: true, checkedAt: result?.checkedAt ?? new Date().toISOString(), ...(result?.latencyMs === undefined ? {} : { latencyMs: result.latencyMs }) };
+    }
+    // `models`: an authenticated catalog read is a real check only for a provider whose catalog
+    // refuses unauthenticated reads. A declaration here is a claim that this was measured.
+    if (!adapter.listModels) throw notSupported(adapter, 'credential validation');
+    const startedAt = Date.now();
+    const models = await adapter.listModels(context);
+    if (!Array.isArray(models) || models.length === 0) {
+      throw new ProviderError('PROVIDER_UNAVAILABLE', `${providerId} listed no models for this key.`, {
+        providerId,
+        publicMessage: `${providerId} accepted the request but listed no models, so the key cannot be confirmed.`,
+      });
+    }
+    return { providerId, valid: true, checkedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt };
   }
 
   /**
@@ -4258,7 +4298,10 @@ export class GatewayService {
       await adapter.listModels(context);
       return { providerId: connection.providerId, valid: true, checkedAt: new Date().toISOString(), latencyMs: Date.now() - startedAt };
     }
-    throw notSupported(adapter, 'credential validation');
+    throw new ProviderError('NOT_SUPPORTED', `${connection.providerId} has no saved-credential check.`, {
+      providerId: connection.providerId,
+      publicMessage: `${connection.providerId} exposes neither a credential check nor a model catalog, so this connection cannot be tested from here.`,
+    });
   }
 
   private async withProviderLock<T>(providerId: string, operation: () => Promise<T>) {

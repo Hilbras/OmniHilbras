@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.90.7
+**Status:** Current — release 3.91.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -224,7 +224,12 @@ The first local gateway exposes:
   supplied endpoint goes through the same address check as a saved one. `/openrouter/check` is this
   route with that provider in the path, not a second route — see below. **The dashboard's Check button
   uses this for every provider**, and reports only what comes back; a check that cannot be performed is
-  stated in the UI rather than simulated.
+  stated in the UI rather than simulated. What "can be performed" means is declared per registration:
+  `credential` runs the adapter's own validator, `models` proves the key with an authenticated catalog
+  read (never one whose list is public), and `none` answers `501 NOT_SUPPORTED` with a sentence saying
+  why — the sign-in or device flow is the proof, and a browser-backed validator must not be launched
+  by a Check. The strategy lives beside the adapter factory, and a guard refuses a registration that
+  leaves it undeclared.
 - `PUT /v1/connections/openrouter` — validate again, discover the selected model policy, then upsert the single local OpenRouter connection.
 - `POST /v1/connections/:id/models` — add validated model IDs to a saved connection. A non-empty array is
   required: adding nothing is a mistake.
