@@ -79,6 +79,16 @@ test('a model no connection lists still routes, because a provider can serve a m
   assert.deepEqual(decision.skipped, [], 'and nothing is reported as skipped, because nothing was');
 });
 
+test('an unowned namespaced model is refused, not dispatched to every provider', async () => {
+  // A bare unknown name is a genuine fallback: a provider may serve a model its catalog omitted.
+  // `unknown/model` is different — the first segment names a provider, so trying every connection
+  // was a guess that used to take 9–90 s and several paid calls before failing.
+  const { instance } = engine();
+  const decision = await instance.plan({ connections: [connection()], model: 'unknown/model' });
+  assert.deepEqual(decision.candidates, []);
+  assert.deepEqual(decision.skipped, [{ providerId: 'p', reason: 'no-models' }]);
+});
+
 test('with no connections at all, the requested provider is served directly', async () => {
   // An embedded service — a registry and a secret store, no connection store — has nothing to route
   // on. An empty route list would be a confusing way of saying *you have not configured anything

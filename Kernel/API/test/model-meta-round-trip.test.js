@@ -40,6 +40,7 @@ async function roundTrip(t, modelMeta) {
 test('every catalog field survives the store round trip', async (t) => {
   const full = modelMetaFor([{
     id: 'vendor/model',
+    upstreamModelId: 'vendor/tier/model',
     providerId: 'fake',
     displayName: 'Vendor Model',
     contextWindow: 1_000_000,
@@ -62,6 +63,7 @@ test('every catalog field survives the store round trip', async (t) => {
     pricing: { inputPer1M: 2, outputPer1M: 8, cacheReadPer1M: 0.5, cacheWritePer1M: 4 },
   }]);
   const meta = await roundTrip(t, full);
+  assert.equal(meta.u, 'vendor/tier/model');
   assert.equal(meta.n, 'Vendor Model');
   assert.equal(meta.c, 1_000_000);
   assert.equal(meta.mo, 128_000);

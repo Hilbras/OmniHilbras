@@ -18,6 +18,8 @@ import { SecretStore as ProviderSecretStore } from './index.js';;
  * a full catalog runs to hundreds of entries per connection.
  */
 export type ModelMeta = {
+  /** The provider's own wire id, when it differs from the public id this entry is keyed by. */
+  u?: string;
   /** Display name. */
   n?: string;
   /** Context window in tokens. */
@@ -1852,7 +1854,7 @@ function normalizeModelMeta(value: unknown): ModelMetaMap | undefined {
       if (prices.some((item) => item !== null)) entry.p = prices;
     }
     const fields: Array<[keyof ModelMeta, number]> = [
-      ['d', 2000], ['cr', 40], ['kc', 40], ['ex', 40], ['st', 40], ['cs', 200], ['tk', 80], ['src', 24],
+      ['u', 256], ['d', 2000], ['cr', 40], ['kc', 40], ['ex', 40], ['st', 40], ['cs', 200], ['tk', 80], ['src', 24],
     ];
     for (const [key, limit] of fields) {
       const parsed = text(raw[key as string], limit);

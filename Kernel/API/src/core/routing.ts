@@ -737,19 +737,24 @@ export function resolveRoute(input: {
   /**
    * The fallback pool when nothing lists the model.
    *
-   * It is **every usable connection** when the name carries no family, and that is deliberate: a
-   * provider can serve a model its catalog omits, and `routing.test.js` pins it ("a model no
-   * connection lists still routes"). The cost is real, though — an unknown id was dispatched to 11
-   * providers over 9–90 s before the client was told nothing could serve it. Narrowing it would break
-   * the documented behaviour, so it stays as the test requires.
+   * A bare name still uses the documented all-connection pool: a provider can serve a model its
+   * catalog omits, and `routing.test.js` pins that. A **namespaced** name is different — its first
+   * segment names a provider, so trying every connection was not a fallback but a guess. An unknown
+   * `vendor/model` used to be dispatched to 11 providers over 9–90 s before the client was told
+   * nothing could serve it. Only connections whose id or slug is that prefix may take it now.
    */
   const sameFamily = family === undefined || !input.familyOf
     ? usable
     : usable.filter((connection) => input.familyOf!(connection.providerId) === family);
-  if (matching.length === 0 && family !== undefined && input.familyOf && sameFamily.length === 0) {
+  const slash = modelId.indexOf('/');
+  const namespacedPrefix = slash > 0 ? modelId.slice(0, slash) : undefined;
+  const prefixOwners = namespacedPrefix
+    ? usable.filter((connection) => connection.providerId === namespacedPrefix || providerPrefixes(connection.providerId).includes(namespacedPrefix))
+    : [];
+  if (matching.length === 0 && ((namespacedPrefix && prefixOwners.length === 0) || (family !== undefined && input.familyOf && sameFamily.length === 0))) {
     return { candidates: [], skipped: usable.map((connection) => ({ providerId: connection.providerId, reason: 'no-models' as const })) };
   }
-  const fallbackPool = matching.length > 0 ? matching : sameFamily;
+  const fallbackPool = matching.length > 0 ? matching : (namespacedPrefix ? prefixOwners : sameFamily);
   /**
    * Whether the provider's own id is also the id of one of its connections.
    *

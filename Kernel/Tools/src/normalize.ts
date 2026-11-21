@@ -1,5 +1,5 @@
 import { repairArguments } from './args.js';
-import { toolCaps } from './caps.js';
+import { toolCaps, type ToolCaps } from './caps.js';
 import { dedupeToolDefinitions } from './toolDedupe.js';
 import type { NormalizedToolRequest, ToolCall, ToolDefinition, ToolRequest, ToolRequestNotes } from './types.js';
 
@@ -96,8 +96,11 @@ function emptyNotes(providerId: string): ToolRequestNotes {
  * Sanitising is not optional: a name and description are client input that becomes instructions on the provider's
  * side, and a duplicate or oversized schema is a refusal from the provider that reads as our bug.
  */
-export function normalizeToolsRequest<T extends ToolRequest>(request: T, providerId: string): NormalizedToolRequest<T> {
-  const caps = toolCaps(providerId);
+export function normalizeToolsRequest<T extends ToolRequest>(request: T, providerId: string, capsOverride?: ToolCaps): NormalizedToolRequest<T> {
+  // A provider row is the floor. A caller that already proved this particular model refuses tools may
+  // pass a narrower row; the reverse is deliberately impossible, because a catalog that claims tools
+  // cannot give a function-calling surface to a provider that has none.
+  const caps = capsOverride ?? toolCaps(providerId);
   const notes = { ...emptyNotes(providerId), assumed: caps.assumed === true };
   const hasTools = Array.isArray(request.tools) && request.tools.length > 0;
   const choice = request.toolChoice;

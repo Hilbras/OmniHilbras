@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.91.0
+**Status:** Current — release 3.92.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -1488,6 +1488,21 @@ publishes. `Model` therefore carries optional `inputModalities`, `outputModaliti
 | OpenRouter | `context_length` | `architecture.input_modalities` | `pricing.prompt` / `completion`, **per token** |
 | OpenCode Console | `limit.context` | `modalities.input` | `cost.input` / `output`, **per 1M** |
 | Cline, Zen API key, generic | not published | not published | not published |
+
+`Model.upstreamModelId` records a wire id that differs from the public id (a vendor tier prefix,
+a rotating free suffix). It is persisted as `ModelMeta.u`, restored on `/v1/models`, and preferred at
+dispatch only when explicitly stated — an absent field leaves the ordinary prefix strip in place, so
+an adapter that restores its own tier cannot be double-prefixed. ClinePass is the first provider to
+declare one.
+
+Tool capability is checked at **two** keys, not one. The provider row in `Kernel/Tools/src/caps.ts`
+stays the authority; a catalog may narrow a specific model with `capabilities.tools === false`, looked
+up by full id before the stripped id and then spelling variants. A catalog cannot widen a provider
+that has no function-calling surface, and `/v1/models` reports the narrower answer too.
+
+An unowned **namespaced** model id is no longer sent to every usable connection. Bare names keep the
+documented fallback; `vendor/model` names a provider in its first segment, so only that provider's
+connections may serve it, and an unknown prefix is refused instead of trying a dozen paid routes.
 
 The two quoting styles are the reason prices are normalised at the edge. OpenRouter
 publishes per-token strings (`"0.0000025"`), Zen publishes per-1M numbers (`2.5`), and

@@ -15,6 +15,7 @@ import { removeChatGptWebProfile } from '../providers/chatgptWeb.js';
 import { ensureOpencodeService } from './opencode-runtime.js';
 import { CLINE_OAUTH } from '@omnihilbras/sdk-cline';
 import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResults, isProviderError, toolResultBytes, type AudioSpeechRequest, type AudioSpeechResponse, type AudioTranscriptionRequest, type AudioTranscriptionResponse, type ChatChunk, type ChatMessage, type ChatRequest, type ChatResponse, type EmbeddingRequest, type EmbeddingResponse, type HttpTransport, type ImageRequest, type ImageResponse, type Model, type ModelImportPolicy, type ModelPricing, type ProviderAdapter, type ProviderCredential, type ProviderHealth, type ProviderQuota, type ProviderRegistry, type ProviderRequestContext } from './index.js';
+import { narrowedToolCaps } from './modelCapabilities.js';
 import { ChatGptWebAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, type ChatGptWebDriver } from '@omnihilbras/sdk-chatgpt-web';
 import { CLAUDE_CODE, ClaudeCodeAdapter, claudeCodeProviderId } from '@omnihilbras/sdk-claude-code';
 import { ClinePassAdapter } from '@omnihilbras/sdk-clinepass';
@@ -959,6 +960,24 @@ export class GatewayService {
   /** A requested name that is a saved alias is replaced by the model it points at; any other name is returned as given. */
   private resolvedModel(model: string): string {
     return this.aliasSnapshot.get(model.trim())?.model ?? model;
+  }
+
+  /**
+   * The id a provider must receive, including a catalog-recorded upstream id when one was stated.
+   *
+   * A public id can differ from the wire id (an adapter strips a vendor tier prefix, or a provider
+   * rotates a `:free` suffix). The catalog records that difference as `u`. Only an explicit value
+   * overrides the normal prefix strip — an absent one means the bare id is the wire id, and guessing
+   * otherwise would double-prefix adapters that already restore their own tier.
+   */
+  private async upstreamModelFor(providerId: string, connectionId: string | undefined, requested: string): Promise<string> {
+    const resolved = this.resolvedModel(requested);
+    const bare = bareModelFor(resolved, providerId);
+    if (!connectionId) return bare;
+    const connection = (await this.connections.list()).find((entry) => entry.id === connectionId);
+    if (!connection?.modelMeta) return bare;
+    const meta = connection.modelMeta[resolved] ?? connection.modelMeta[bare] ?? connection.modelMeta[requested];
+    return meta?.u ?? bare;
   }
 
   /** Saves a model alias and makes it routable at once. */
@@ -3726,9 +3745,11 @@ export class GatewayService {
    * `null` means the request carried no tools and no `tool_choice`, which is the common case: the whole cost of this
    * feature for a client that does not use tools is one map lookup.
    */
-  private applyToolContract(providerId: string, request: ChatRequest, includeLocalTools = false): { request: ChatRequest; declared: readonly string[]; renames: ReadonlyMap<string, string> } {
+  private async applyToolContract(providerId: string, request: ChatRequest, includeLocalTools = false, connectionId?: string): Promise<{ request: ChatRequest; declared: readonly string[]; renames: ReadonlyMap<string, string> }> {
     try {
-      const { request: normalized, notes } = normalizeToolsRequest(request, providerId);
+      const connection = connectionId ? (await this.connections.list()).find((entry) => entry.id === connectionId) : undefined;
+      const effectiveCaps = narrowedToolCaps(request.model, connection, toolCaps(providerId));
+      const { request: normalized, notes } = normalizeToolsRequest(request, providerId, effectiveCaps);
       if (notes.stripped) console.warn(`[tools] ${providerId} does not serve tools; ${(request.tools ?? []).length} definition(s) removed`);
       if (notes.assumed) console.warn(`[tools] ${providerId} has no capability row; assuming tools with auto/none`);
       for (const drop of notes.dropped) console.warn(`[tools] ${providerId} dropped "${drop.name}": ${drop.reason}`);
@@ -3757,7 +3778,7 @@ export class GatewayService {
       }
       // Local tools are exposed only when the operator opted in AND the provider can really call a function.
       // A browser-session provider gets the prompt form instead, applied in `runLocalToolRounds`.
-      if (includeLocalTools && this.localToolRoots.length > 0 && toolCaps(providerId).tools) {
+      if (includeLocalTools && this.localToolRoots.length > 0 && (effectiveCaps?.tools ?? toolCaps(providerId).tools)) {
         outbound = { ...outbound, tools: [...(outbound.tools ?? []), ...localToolDefinitions()] } as ChatRequest;
         // The gateway declared these tools, so a call naming one is legitimate even though the client did not.
         declaredNames = [...declaredNames, ...LOCAL_TOOL_NAMES];
@@ -3831,7 +3852,7 @@ export class GatewayService {
       const prepared = await this.preparedMessages({ ...contracted.request, messages }, scope, adapter.imageContext === true);
       const context = await this.contextForRequest(providerId, connectionId, signal, scope);
       const response = this.validatedToolResponse(providerId, contracted.declared, await adapter.chat!(
-        this.withRequestLimits({ ...contracted.request, model: bareModelFor(this.resolvedModel(contracted.request.model), providerId), messages: prepared }),
+        this.withRequestLimits({ ...contracted.request, model: await this.upstreamModelFor(providerId, connectionId, contracted.request.model), messages: prepared }),
         context,
       ));
       last = response;
@@ -3865,12 +3886,12 @@ export class GatewayService {
   async chat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): Promise<ChatResponse> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.chat || adapter.capabilities.chat !== true) throw notSupported(adapter, 'chat');
-    const contracted = this.applyToolContract(providerId, request, true);
+    const contracted = await this.applyToolContract(providerId, request, true, connectionId);
     const release = await this.acquireConcurrency(connectionId);
     try {
       const local = await this.runLocalToolRounds(providerId, contracted, adapter, signal, scope, connectionId);
       if (local) return local;
-      const response = await adapter.chat(this.withRequestLimits({ ...contracted.request, model: bareModelFor(this.resolvedModel(contracted.request.model), providerId), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+      const response = await adapter.chat(this.withRequestLimits({ ...contracted.request, model: await this.upstreamModelFor(providerId, connectionId, contracted.request.model), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
       return this.validatedToolResponse(providerId, contracted.declared, response, contracted.renames);
     } finally {
       release();
@@ -3880,10 +3901,10 @@ export class GatewayService {
   async *streamChat(providerId: string, request: ChatRequest, signal?: AbortSignal, scope?: RequestScope, connectionId?: string): AsyncIterable<ChatChunk> {
     const adapter = await this.resolveAdapter(providerId, undefined, connectionId);
     if (!adapter.streamChat || adapter.capabilities.streaming !== true) throw notSupported(adapter, 'streaming');
-    const contracted = this.applyToolContract(providerId, request);
+    const contracted = await this.applyToolContract(providerId, request, false, connectionId);
     const release = await this.acquireConcurrency(connectionId);
     try {
-      const chunks = adapter.streamChat(this.withRequestLimits({ ...contracted.request, model: bareModelFor(this.resolvedModel(contracted.request.model), providerId), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
+      const chunks = adapter.streamChat(this.withRequestLimits({ ...contracted.request, model: await this.upstreamModelFor(providerId, connectionId, contracted.request.model), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
       const report: { allowed: string[]; blocked: { index: number; name: string }[] } = { allowed: [], blocked: [] };
       try {
         yield* guardToolStream(chunks, contracted.declared, report, contracted.renames);
@@ -3945,7 +3966,7 @@ export class GatewayService {
     if (adapter.capabilities.embeddings !== true || typeof adapter.embed !== 'function') throw notSupported(adapter, 'embeddings');
     const release = await this.acquireConcurrency(connectionId);
     try {
-      return await adapter.embed({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId) }, await this.contextForRequest(providerId, connectionId, signal, scope));
+      return await adapter.embed({ ...request, model: await this.upstreamModelFor(providerId, connectionId, request.model) }, await this.contextForRequest(providerId, connectionId, signal, scope));
     } finally {
       release();
     }
@@ -3956,7 +3977,7 @@ export class GatewayService {
     if (adapter.capabilities.images !== true || typeof adapter.image !== 'function') throw notSupported(adapter, 'images');
     const release = await this.acquireConcurrency(connectionId);
     try {
-      return await adapter.image({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId) }, await this.contextForRequest(providerId, connectionId, signal, scope));
+      return await adapter.image({ ...request, model: await this.upstreamModelFor(providerId, connectionId, request.model) }, await this.contextForRequest(providerId, connectionId, signal, scope));
     } finally {
       release();
     }
@@ -3967,7 +3988,7 @@ export class GatewayService {
     if (adapter.capabilities.audio !== true || typeof adapter.audio !== 'function') throw notSupported(adapter, 'audio');
     const release = await this.acquireConcurrency(connectionId);
     try {
-      return await adapter.audio({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId) }, await this.contextForRequest(providerId, connectionId, signal, scope));
+      return await adapter.audio({ ...request, model: await this.upstreamModelFor(providerId, connectionId, request.model) }, await this.contextForRequest(providerId, connectionId, signal, scope));
     } finally {
       release();
     }
@@ -3978,7 +3999,7 @@ export class GatewayService {
     if (adapter.capabilities.audio !== true || typeof adapter.transcribe !== 'function') throw notSupported(adapter, 'audio');
     const release = await this.acquireConcurrency(connectionId);
     try {
-      return await adapter.transcribe({ ...request, model: bareModelFor(this.resolvedModel(request.model), providerId) }, await this.contextForRequest(providerId, connectionId, signal, scope));
+      return await adapter.transcribe({ ...request, model: await this.upstreamModelFor(providerId, connectionId, request.model) }, await this.contextForRequest(providerId, connectionId, signal, scope));
     } finally {
       release();
     }

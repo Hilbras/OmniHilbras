@@ -1547,7 +1547,7 @@ export function toOpenAIModel(model: Model) {
      * norm and saying so on every model is noise a client has to filter; the negative is the one worth a sentence, and
      * it is what lets an agent be told "this model cannot call tools" before spending a turn discovering it.
      */
-    ...(toolCaps(model.providerId).tools ? {} : { tools: false as const }),
+    ...((model.capabilities?.tools === false ? false : toolCaps(model.providerId).tools) ? {} : { tools: false as const }),
   };
 }
 

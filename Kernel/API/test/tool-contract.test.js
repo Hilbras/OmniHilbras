@@ -90,22 +90,22 @@ test('a call naming a tool the client never declared is dropped, and the turn st
   assert.equal(response.finishReason, 'stop', 'a turn with no forwarded call still reported tool_calls');
 });
 
-test('the free-tier declaration comes from the gateway and contains no shell tool', () => {
+test('the free-tier declaration comes from the gateway and contains no shell tool', async () => {
   // `applyToolContract` is private in TypeScript but is the exact seam the gateway applies before every adapter.
   // Driving it directly avoids resolving a real OpenCode adapter (and a real key) in a unit test.
   const { service } = harness();
-  const { request } = service.applyToolContract('opencode', { model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+  const { request } = await service.applyToolContract('opencode', { model: 'm', messages: [{ role: 'user', content: 'hi' }] });
   const names = (request.tools ?? []).map((entry) => entry.name);
   assert.deepEqual(names, ['glob', 'grep', 'read'], 'the SDKs no longer declare tools; the gateway must supply them');
   assert.equal(names.includes('bash'), false, 'a shell tool reached a provider request');
 });
 
-test('a forced call on an OpenCode free lane is refused by name before any provider is called', () => {
+test('a forced call on an OpenCode free lane is refused by name before any provider is called', async () => {
   // Its capability row states `auto`/`none`: these lanes have always refused `required`. Claiming
   // otherwise made the refusal terminal *after* a request had started, which silently ended agent turns.
   const { service } = harness();
-  assert.throws(
-    () => service.applyToolContract('opencode', {
+  await assert.rejects(
+    service.applyToolContract('opencode', {
       model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('write')], toolChoice: 'required',
     }),
     (error) => error.code === 'NOT_SUPPORTED' && /cannot honour tool_choice/.test(error.message),

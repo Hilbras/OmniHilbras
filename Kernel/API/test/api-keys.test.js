@@ -395,8 +395,13 @@ test('a plain client with only a key and a model ID is routed to the saved catal
   assert.equal((await imported.json()).provider, 'fake');
   assert.deepEqual(seen, ['stealth/space-bunny-alpha'], 'the model ID reaches the provider untouched');
 
-  const unlisted = await agentChat(baseUrl, 'paid/never-imported', { authorization: `Bearer ${created.key}` });
-  assert.equal(unlisted.status, 200, 'a single connection serves any model the provider knows');
+  const unlisted = await agentChat(baseUrl, 'never-imported', { authorization: `Bearer ${created.key}` });
+  assert.equal(unlisted.status, 200, 'a single connection serves any bare name the provider knows');
+
+  // A first segment that names no connected provider is not a family to guess from. It used to fan
+  // out to every connection (9–90 s and several paid calls before a refusal); it is refused now.
+  const namespaced = await agentChat(baseUrl, 'paid/never-imported', { authorization: `Bearer ${created.key}` });
+  assert.equal(namespaced.status, 502, 'an unowned namespaced id is not dispatched on a guess');
 });
 
 test('an explicit provider header still overrides the catalog', async (t) => {

@@ -73,6 +73,7 @@ export function modelMetaFor(models: readonly Model[]): ModelMetaMap | undefined
       return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1_000_000 ? value : null;
     });
     const entry: ModelMeta = {
+      ...(string(model.upstreamModelId, 256) ? { u: string(model.upstreamModelId, 256) } : {}),
       ...(string(model.displayName, 200) ? { n: string(model.displayName, 200) } : {}),
       ...(model.contextWindow && Number.isInteger(model.contextWindow) && model.contextWindow <= 10_000_000 ? { c: model.contextWindow } : {}),
       ...(model.maxOutputTokens && Number.isInteger(model.maxOutputTokens) && model.maxOutputTokens <= 10_000_000 ? { mo: model.maxOutputTokens } : {}),

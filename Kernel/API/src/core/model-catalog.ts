@@ -70,6 +70,7 @@ export class ModelCatalog {
         return {
           id: qualifiedModelId(connection.providerId, modelId),
           modelId,
+          ...(meta?.u ? { upstreamModelId: meta.u } : {}),
           providerId: connection.providerId,
           ...(meta?.n ? { displayName: meta.n } : {}),
           ...(meta?.c ? { contextWindow: meta.c } : {}),

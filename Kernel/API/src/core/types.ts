@@ -275,6 +275,8 @@ export type ModelPricing = {
 
 export type Model = {
   id: string;
+  /** The provider's own wire id when it differs from the public catalog id. Absent means `id`. */
+  upstreamModelId?: string;
   providerId: ProviderId;
   displayName?: string;
   ownedBy?: string;

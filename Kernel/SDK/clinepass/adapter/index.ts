@@ -94,7 +94,10 @@ export class ClinePassAdapter extends ClineAdapter {
     // The tiers are at the top level of the body, with no `data` envelope — read live, not assumed.
     const tier = response.data?.clinePass ?? [];
     const ids = tier.flatMap((entry) => (typeof entry?.id === 'string' && entry.id.startsWith(CLINE_PASS_MODEL_PREFIX) ? [entry.id] : []));
-    return [...new Set(ids)].map((id) => ({ id: withoutClinePassPrefix(id), providerId: this.id }));
+    // Keep the vendor's own id alongside the public one. The gateway sends the recorded upstream id
+    // when it has one; `upstream()` below still restores the prefix for callers that reach the adapter
+    // directly, and it will not double-prefix an id that already carries the tier.
+    return [...new Set(ids)].map((id) => ({ id: withoutClinePassPrefix(id), upstreamModelId: id, providerId: this.id }));
   }
 
   /** Cline's catalog names the tier on every id, so the prefix goes back on before a request leaves. */
