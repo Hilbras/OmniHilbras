@@ -100,12 +100,16 @@ test('the free-tier declaration comes from the gateway and contains no shell too
   assert.equal(names.includes('bash'), false, 'a shell tool reached a provider request');
 });
 
-test('a forced call keeps only the caller’s tools, never the generated declaration', () => {
+test('a forced call on an OpenCode free lane is refused by name before any provider is called', () => {
+  // Its capability row states `auto`/`none`: these lanes have always refused `required`. Claiming
+  // otherwise made the refusal terminal *after* a request had started, which silently ended agent turns.
   const { service } = harness();
-  const { request } = service.applyToolContract('opencode', {
-    model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('write')], toolChoice: 'required',
-  });
-  assert.deepEqual((request.tools ?? []).map((entry) => entry.name), ['write']);
+  assert.throws(
+    () => service.applyToolContract('opencode', {
+      model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [tool('write')], toolChoice: 'required',
+    }),
+    (error) => error.code === 'NOT_SUPPORTED' && /cannot honour tool_choice/.test(error.message),
+  );
 });
 
 test('tool history is healed before it reaches a provider', async () => {

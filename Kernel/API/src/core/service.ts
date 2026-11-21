@@ -4,7 +4,7 @@ import { OWN_PROVIDER_ADAPTERS } from './own-provider-adapters.js';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
 import { NousAdapter } from '@omnihilbras/sdk-nous';
-import { GATEWAY_TOOL_PROVIDERS, LOCAL_TOOL_NAMES, LOCAL_TOOL_PROMPT, ToolContractError, guardToolStream, isLocalToolName, localToolDefinitions, normalizeToolsRequest, parseNativeToolCall, parsePromptToolCall, toolCaps, validateToolCalls, withGatewayTools } from '@omnihilbras/tools';
+import { GATEWAY_TOOL_PROVIDERS, LOCAL_TOOL_NAMES, LOCAL_TOOL_PROMPT, ToolContractError, gatewayToolNameMap, guardToolStream, isLocalToolName, localToolDefinitions, normalizeToolsRequest, parseNativeToolCall, parsePromptToolCall, toolCaps, validateToolCalls, withGatewayTools } from '@omnihilbras/tools';
 import { ZenAdapter } from '@omnihilbras/sdk-opencode-zen';
 import { OpenCodeGoAdapter } from '@omnihilbras/sdk-opencode-go';
 import { ZcodeAdapter, zcodeProviderId } from '@omnihilbras/sdk-zcode-start-plan';
@@ -3707,7 +3707,7 @@ export class GatewayService {
    * `null` means the request carried no tools and no `tool_choice`, which is the common case: the whole cost of this
    * feature for a client that does not use tools is one map lookup.
    */
-  private applyToolContract(providerId: string, request: ChatRequest, includeLocalTools = false): { request: ChatRequest; declared: readonly string[] } {
+  private applyToolContract(providerId: string, request: ChatRequest, includeLocalTools = false): { request: ChatRequest; declared: readonly string[]; renames: ReadonlyMap<string, string> } {
     try {
       const { request: normalized, notes } = normalizeToolsRequest(request, providerId);
       if (notes.stripped) console.warn(`[tools] ${providerId} does not serve tools; ${(request.tools ?? []).length} definition(s) removed`);
@@ -3729,6 +3729,10 @@ export class GatewayService {
       // own definitions: a generated "unavailable" tool must never be the thing a forced choice selects.
       let declaredNames = declared;
       let outbound = normalized;
+      // Folding `Read` to `read` on the wire is harmless only if a returned `read` is still treated as
+      // the caller's tool and renamed back before the client sees it.
+      const renames = gatewayToolNameMap(normalized.tools, normalized.toolChoice);
+      if (renames.size > 0) declaredNames = [...declaredNames, ...renames.keys()];
       if (GATEWAY_TOOL_PROVIDERS.has(providerId) && !(normalized.toolChoice === 'required' && kept.length > 0)) {
         outbound = { ...normalized, tools: withGatewayTools(normalized.tools) } as ChatRequest;
       }
@@ -3739,7 +3743,7 @@ export class GatewayService {
         // The gateway declared these tools, so a call naming one is legitimate even though the client did not.
         declaredNames = [...declaredNames, ...LOCAL_TOOL_NAMES];
       }
-      return { request: outbound, declared: declaredNames };
+      return { request: outbound, declared: declaredNames, renames };
     } catch (error) {
       if (error instanceof ToolContractError) {
         throw new ProviderError('NOT_SUPPORTED', error.message, { providerId: error.providerId, publicMessage: error.publicMessage });
@@ -3756,13 +3760,17 @@ export class GatewayService {
    * forwarded; what does not is dropped and logged, and a turn whose only call was dropped no longer claims
    * `finish_reason: tool_calls`.
    */
-  private validatedToolResponse(providerId: string, declared: readonly string[], response: ChatResponse): ChatResponse {
+  private validatedToolResponse(providerId: string, declared: readonly string[], response: ChatResponse, renames: ReadonlyMap<string, string> = new Map()): ChatResponse {
     const calls = response.message.toolCalls;
     if (!calls?.length) return response;
-    const { calls: valid, issues, repaired } = validateToolCalls(calls, declared);
+    const wireCalls = calls.map((call) => {
+      const original = renames.get(call.function.name);
+      return original ? { ...call, function: { ...call.function, name: original } } : call;
+    });
+    const { calls: valid, issues, repaired } = validateToolCalls(wireCalls, declared);
     for (const issue of issues) console.warn(`[tools] ${providerId} returned a call that was not forwarded: ${issue.name} — ${issue.reason}`);
     for (const fix of repaired) console.log(`[tools] ${providerId} repaired arguments on call ${fix.index}: ${fix.repairs.join(', ')}`);
-    if (valid.length === calls.length && repaired.length === 0) return response;
+    if (valid.length === wireCalls.length && repaired.length === 0) return { ...response, message: { ...response.message, ...(valid.length ? { toolCalls: valid } : {}) } };
     const { toolCalls: _dropped, ...rest } = response.message;
     return {
       ...response,
@@ -3836,7 +3844,7 @@ export class GatewayService {
       const local = await this.runLocalToolRounds(providerId, contracted, adapter, signal, scope, connectionId);
       if (local) return local;
       const response = await adapter.chat(this.withRequestLimits({ ...contracted.request, model: bareModelFor(this.resolvedModel(contracted.request.model), providerId), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
-      return this.validatedToolResponse(providerId, contracted.declared, response);
+      return this.validatedToolResponse(providerId, contracted.declared, response, contracted.renames);
     } finally {
       release();
     }
@@ -3851,7 +3859,7 @@ export class GatewayService {
       const chunks = adapter.streamChat(this.withRequestLimits({ ...contracted.request, model: bareModelFor(this.resolvedModel(contracted.request.model), providerId), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
       const report: { allowed: string[]; blocked: { index: number; name: string }[] } = { allowed: [], blocked: [] };
       try {
-        yield* guardToolStream(chunks, contracted.declared, report);
+        yield* guardToolStream(chunks, contracted.declared, report, contracted.renames);
       } finally {
         for (const blocked of report.blocked) {
           console.warn(`[tools] ${providerId} streamed a call to "${blocked.name}", which the client did not declare; its deltas were dropped`);

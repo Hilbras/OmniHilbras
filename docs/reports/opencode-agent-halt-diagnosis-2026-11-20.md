@@ -100,7 +100,7 @@ The chat SSE writer records `success` whenever the async iterator ends without t
 
 ---
 
-## Ranked fix plan
+## Ranked fix plan (items 1–4 applied; see note below)
 
 | # | Fix | Where |
 |---|---|---|
@@ -113,3 +113,13 @@ The chat SSE writer records `success` whenever the async iterator ends without t
 | 7 | Use a stable session key per downstream identity across tool rounds (the Go lane already does) | `zen-free-tier.ts`, Console gated path |
 
 Fixes 1–3 are small, testable and address the reproduced failures directly. Fix 6 is what makes any future recurrence visible in the usage store.
+
+
+## Applied fixes (2026-11-21)
+
+1. **Tool-name folding repaired**: `gatewayToolNameMap()` records wire→caller names, the allow-list accepts both spellings, and non-streaming replies and SSE deltas are renamed back before the agent sees them.
+2. **Gated history repaired**: Zen, Go and the Console direct free lane replay assistant `tool_calls` next to the results they answer.
+3. **Forced choice aligned**: `caps.ts` states `auto`/`none` for all three OpenCode ids, so the gateway refuses by name before a provider call instead of a terminal mid-request refusal.
+4. **Console bridge scoped**: turns that declare tools use the native free lane; the local-service path never flattens an agent tool loop, and its text history now records calls and results explicitly.
+
+Still open from the original plan: recording a `success` outcome without a terminal finish check (visibility only), and choosing a stable per-identity session key across tool rounds for Zen/Console (the Go lane is already stable; no runtime evidence tied the session key to a halt). Verified with `tests/opencode-tool-loop.test.js`, `pnpm verify` and e2e.

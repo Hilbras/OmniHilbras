@@ -54,6 +54,12 @@ function toGatedMessage(message: ChatMessage) {
     content: messageText(message),
     ...(message.name ? { name: message.name } : {}),
     ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+    // A tool result names the call it answers. Dropping the assistant call left an orphan result:
+    // the model saw a tool answer with no request, wrote prose, and the agent's loop ended early.
+    ...(message.toolCalls?.length ? { tool_calls: message.toolCalls.map((call) => ({
+      id: call.id, type: 'function',
+      function: { name: call.function.name, arguments: call.function.arguments },
+    })) } : {}),
   };
 }
 

@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.90.4
+**Status:** Current — release 3.90.5
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -1334,6 +1334,17 @@ compatible adapter appends the whole chat path.
 saved connection's catalog and stores the result, keeping custom models. Without it a
 connection saved with no models has no way back short of signing in again, which for a
 device flow means another browser approval.
+
+#### OpenCode agent tool loops
+
+Three silent halt points were repaired: a caller's `Read`/`Glob` is folded to the gateway's lowercase
+tool name on the wire but mapped **back** before the allow-list check and before the reply reaches the
+agent (`gatewayToolNameMap`); the free-tier replay in Zen, Go and the Console direct lane now carries
+assistant `tool_calls` beside the `tool_result` they answer; and an agent turn that declares tools uses
+the native free lane rather than the Console local bridge, whose prompt is a flattened string that
+cannot express a function call. OpenCode's capability rows now state `auto`/`none` only — the free tier
+has always refused `required`, and claiming otherwise made the refusal terminal mid-request. Asserted
+in `tests/opencode-tool-loop.test.js`. `finish_reason` still reaches the client from the stream unchanged.
 
 #### The free tier is served through the OpenCode app's own service
 

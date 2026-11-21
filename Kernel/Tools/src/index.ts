@@ -9,7 +9,7 @@ export { dedupeToolDefinitions } from './toolDedupe.js';
 export { repairArguments, MAX_ARGUMENTS_BYTES } from './args.js';
 export type { RepairedArguments } from './args.js';
 export type { NormalizedToolRequest, ToolCall, ToolCallDelta, ToolDefinition, ToolMessage, ToolRequest, ToolRequestNotes, ToolResponse, ToolChoice } from './types.js';
-export { GATEWAY_TOOL_NAMES, GATEWAY_TOOL_PROVIDERS, gatewayToolDefinitions, withGatewayTools } from './gatewayTools.js';
+export { GATEWAY_TOOL_NAMES, GATEWAY_TOOL_PROVIDERS, gatewayToolDefinitions, gatewayToolNameMap, withGatewayTools } from './gatewayTools.js';
 export { LOCAL_TOOL_NAMES, LOCAL_TOOL_MAX_BYTES, LOCAL_TOOL_PROMPT, isLocalToolName, localToolDefinitions, parseNativeToolCall, parsePromptToolCall } from './localTools.js';
 export type { LocalToolCall, LocalToolName } from './localTools.js';
 export { guardToolStream } from './stream.js';

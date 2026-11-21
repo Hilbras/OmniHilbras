@@ -44,6 +44,7 @@ export function guardToolStream<T extends StreamChunk>(
   chunks: AsyncIterable<T>,
   declared: readonly string[],
   report: StreamGuardReport = { allowed: [], blocked: [] },
+  renames: ReadonlyMap<string, string> = new Map(),
 ): AsyncIterable<T> {
   const allowedNames = new Set(declared);
   const names = new Map<number, string>();
@@ -65,7 +66,10 @@ export function guardToolStream<T extends StreamChunk>(
 
       const kept: ToolCallDelta[] = [];
       for (const piece of deltas) {
-        const name = piece.function?.name;
+        // A name folded to the gateway's canonical spelling is still the caller's tool: check and
+        // forward the original name so the agent can recognise its own call.
+        const wireName = piece.function?.name;
+        const name = wireName ? (renames.get(wireName) ?? wireName) : undefined;
         if (name) names.set(piece.index, name);
         const resolved = names.get(piece.index);
         if (resolved && allowedNames.size > 0 && !allowedNames.has(resolved)) {
@@ -77,7 +81,7 @@ export function guardToolStream<T extends StreamChunk>(
         }
         if (blocked.has(piece.index)) continue;
         if (resolved && !report.allowed.includes(resolved)) report.allowed.push(resolved);
-        kept.push(piece);
+        kept.push(name && wireName && name !== wireName ? { ...piece, function: { ...piece.function, name } } : piece);
       }
 
       // Only a turn with **no** forwarded call stops being a tool-call turn. An earlier chunk may have emitted an

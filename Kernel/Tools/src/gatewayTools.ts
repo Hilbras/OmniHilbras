@@ -27,6 +27,23 @@ export function gatewayToolDefinitions(): ToolDefinition[] {
 }
 
 /**
+ * Wire name → the caller's original name for tools folded by `withGatewayTools`.
+ *
+ * The upstream sees the lowercase canonical name, but the agent declared `Read` and expects a call to
+ * `Read`. Without this map the gateway's own allow-list sees `read` as undeclared and drops the call —
+ * a turn that ends with `finish_reason: stop` and no tool call, which is the silent halt an agent reports.
+ */
+export function gatewayToolNameMap(tools: readonly ToolDefinition[] | undefined, toolChoice?: string): Map<string, string> {
+  const renamed = new Map<string, string>();
+  if (toolChoice === 'required' || toolChoice === 'none') return renamed;
+  for (const tool of tools ?? []) {
+    const lower = tool.name.trim().toLowerCase();
+    if ((GATEWAY_TOOL_NAMES as readonly string[]).includes(lower) && lower !== tool.name) renamed.set(lower, tool.name);
+  }
+  return renamed;
+}
+
+/**
  * The caller's definitions first, then the gateway's where missing.
  *
  * A casing variant is folded onto the canonical lowercase name rather than added twice, which is what the adapters

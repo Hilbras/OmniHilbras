@@ -80,9 +80,6 @@ const OPENAI_WIRE = [
 /** Their own wire, with a mapping this repository wrote and tests assert. */
 const FORCED_WITH_MAPPING = ['anthropic', 'gemini', 'codebuddy-cn', 'codebuddy-intl', 'kilocode', 'minimax-code', 'minimax-code-global', 'zcode'] as const;
 
-/** OpenCode's three lanes. Zen and Go delegate to the OpenAI-compatible base; Console's free tier dictates `auto`. */
-const OPENCODE_FORCED = ['opencode', 'opencode-go'] as const;
-
 /**
  * Tools work; forcing does not.
  *
@@ -91,7 +88,12 @@ const OPENCODE_FORCED = ['opencode', 'opencode-go'] as const;
  * `{type:"any"}` and was simply mislabelled by a grep that missed its mapping function, and `gemini`, which had no
  * mapping at all until `toolConfig.functionCallingConfig.mode` was added.
  */
-const NO_FORCING = ['claude-code', 'kimi-code', 'kiro', 'qoder', 'opencode-console'] as const;
+/**
+ * OpenCode's lanes accept tools but their free tier dictates `auto`/`none`: a forced call was refused
+ * only after the request reached the adapter, and routing treats that refusal as terminal. Saying so
+ * here makes the edge refuse by name before a provider is called, which is the project's stated rule.
+ */
+const NO_FORCING = ['claude-code', 'kimi-code', 'kiro', 'qoder', 'opencode', 'opencode-go', 'opencode-console'] as const;
 
 /** Tools are refused on the wire, not merely ignored: `codex/adapter/index.ts:423` throws when one is present. */
 const TOOLS_REFUSED = ['codex'] as const;
@@ -113,7 +115,7 @@ function build(): Record<string, ToolCaps> {
   const table: Record<string, ToolCaps> = {};
   const forced: readonly ToolChoice[] = ['auto', 'none', 'required'];
   const neutral: readonly ToolChoice[] = ['auto', 'none'];
-  for (const id of [...OPENAI_WIRE, ...FORCED_WITH_MAPPING, ...OPENCODE_FORCED]) {
+  for (const id of [...OPENAI_WIRE, ...FORCED_WITH_MAPPING]) {
     table[id] = { tools: true, toolChoice: forced, web: false };
   }
   for (const id of NO_FORCING) table[id] = { tools: true, toolChoice: neutral, web: false };

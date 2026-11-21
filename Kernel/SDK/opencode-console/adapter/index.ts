@@ -373,6 +373,9 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
    */
   private async localTurn(request: ChatRequest, context: ProviderRequestContext): Promise<{ text: string; reasoning?: string; finish?: string; model?: string } | undefined> {
     if (!this.localService) return undefined;
+    // The bridge carries a flattened prompt, not a function-calling wire. An agent turn with tools must
+    // use the direct free lane, which now replays assistant calls and returns native tool calls.
+    if (request.tools?.length) return undefined;
     try {
       // The gateway hands an adapter a bare model id, so the reference the service wants is rebuilt
       // here: `opc/deepseek-v4.1-flash-free` arrives as `deepseek-v4.1-flash-free` and leaves as
@@ -389,7 +392,7 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
   }
 
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
-    const service = this.localService;
+    const service = request.tools?.length ? undefined : this.localService;
     if (service?.stream) {
       const id = `opencode-service-${this.now().toString(36)}`;
       const queue: Array<{ text?: string; reasoning?: string }> = [];
@@ -529,6 +532,10 @@ export class OpencodeConsoleAdapter implements ProviderAdapter {
         role: message.role,
         content: message.content,
         ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+        ...(message.toolCalls?.length ? { tool_calls: message.toolCalls.map((call) => ({
+          id: call.id, type: 'function',
+          function: { name: call.function.name, arguments: call.function.arguments },
+        })) } : {}),
       })),
       stream: true,
       // The gateway has already merged its declaration into `request.tools`; no tool is invented here.
@@ -853,9 +860,11 @@ function flattenForService(messages: ChatRequest['messages']): string {
       : Array.isArray(content)
         ? content.map((part) => (part as { text?: string })?.text ?? '').join('')
         : '';
-    if (!text.trim()) continue;
+    const calls = message.toolCalls?.map((call) => `${call.function.name}(${call.function.arguments})`).join(', ');
+    if (!text.trim() && !calls && !message.toolCallId) continue;
     const label = message.role === 'assistant' ? 'Assistant' : message.role === 'system' ? 'System' : message.role === 'tool' ? 'Tool' : 'User';
-    lines.push(`${label}: ${text}`);
+    const detail = calls ? ` [called ${calls}]` : message.toolCallId ? ` [result of ${message.toolCallId}]` : '';
+    lines.push(`${label}: ${text}${detail}`);
   }
   return lines.join('\n\n');
 }
