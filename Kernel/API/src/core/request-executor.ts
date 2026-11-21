@@ -216,9 +216,38 @@ export class RequestExecutor {
     else this.deps.breaker?.recordAbandoned?.(connectionId);
   }
 
-  /** Whether an error is evidence about the connection rather than about the request or allowance. */
+  /**
+   * Whether an error is evidence about the connection rather than about the request or allowance.
+   *
+   * An unmatched 4xx is about the *request*: the provider understood us and refused what we sent.
+   * Cooling the connection for it lets one caller's bad model id eject a healthy account for everyone
+   * else, which is the same mistake as counting a caller fault — we just used to see the status only
+   * as `PROVIDER_REQUEST_FAILED`. The allowance and auth statuses keep their own rules: 401/402/403
+   * are account facts, and 429 is a rate limit already handled by the cooldown path.
+   */
   private isConnectionFailure(code: string, error: unknown) {
-    return !isCallerFault(code) && !isAllowanceRefusal(error);
+    if (isCallerFault(code) || isAllowanceRefusal(error)) return false;
+    if (isProviderError(error) && typeof error.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 500 && ![401, 402, 403, 429].includes(error.statusCode)) return false;
+    return true;
+  }
+
+  /**
+   * Wait only as long as the provider explicitly asked, and never past the caller's cancellation.
+   *
+   * `Retry-After` was parsed into `details.retryAfterMs` and then ignored: a retry fired immediately,
+   * got the same refusal again, and spent a second request for nothing. A longer delay than this cap
+   * is a model/account cooldown, not a retry wait — that decision belongs to the routing layer.
+   */
+  private async waitForRetryAfter(error: unknown, signal?: AbortSignal): Promise<void> {
+    const details = isProviderError(error) ? error.details as { retryAfterMs?: unknown } | undefined : undefined;
+    const stated = typeof details?.retryAfterMs === 'number' && Number.isFinite(details.retryAfterMs) ? details.retryAfterMs : 0;
+    const ms = Math.min(Math.max(0, stated), 5_000);
+    if (ms === 0 || signal?.aborted) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      const onAbort = () => { clearTimeout(timer); resolve(); };
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 
   async chat(request: ChatRequest, explicitProviderId: string | undefined, signal?: AbortSignal, scope?: RequestScope): Promise<GatewayChatOutcome> {
@@ -539,6 +568,7 @@ export class RequestExecutor {
           });
           if (action === 'stop') throw attachAttempts(error, attempts);
           if (action === 'next-route') break;
+          if (action === 'retry') await this.waitForRetryAfter(error, signal);
         }
       }
     }

@@ -347,6 +347,44 @@ test('a stream the client cancels is neither a success nor a provider failure', 
   );
 });
 
+test('an unmatched 4xx is a fact about the request, not evidence against the connection', async () => {
+  // A dead model id used to arrive as `PROVIDER_REQUEST_FAILED` with a 404 status and count as a
+  // connection failure, so one caller's stale id cooled a healthy account for everyone else.
+  const { executor, calls } = harness({
+    candidates: [candidate('a'), candidate('b')],
+    chat: async (providerId) => {
+      if (providerId === 'a') throw new ProviderError('PROVIDER_REQUEST_FAILED', 'model not found on this plan', { statusCode: 404 });
+      return response('b answered');
+    },
+  });
+  const outcome = await executor.chat(request(), undefined);
+  assert.equal(outcome.response.message.content, 'b answered');
+  assert.deepEqual(calls.failure, [], 'the refusing model id must not be filed against provider a');
+});
+
+test('an explicit Retry-After is waited before the same route is retried', async () => {
+  // `details.retryAfterMs` was parsed from the header and then ignored: the retry fired immediately,
+  // got the same refusal, and spent a second upstream request for nothing.
+  let attempts = 0;
+  const startedAt = Date.now();
+  const { executor } = harness({
+    candidates: [candidate('a', { maxRetries: 1 })],
+    chat: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new ProviderError('PROVIDER_REQUEST_FAILED', 'service asks for a pause', {
+          retryable: true, details: { retryAfterMs: 40 },
+        });
+      }
+      return response('answered after the wait');
+    },
+  });
+  const outcome = await executor.chat(request(), undefined);
+  assert.equal(outcome.response.message.content, 'answered after the wait');
+  assert.equal(attempts, 2);
+  assert.ok(Date.now() - startedAt >= 30, `the retry did not honour the 40 ms Retry-After (${Date.now() - startedAt} ms)`);
+});
+
 test('THE INVARIANT: the executor names no provider', () => {
   // Checked against the SDK's actual adapter ids rather than "any hyphenated string".
   //
