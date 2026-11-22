@@ -230,7 +230,7 @@ function ModelRow({ model, prefix, facets, onCopy, onTest, onRemove, testing, re
   // Only badges the provider actually stated are shown. A missing price is not "Free",
   // and an unstated modality is not "Text".
   const badges: string[] = [];
-  if (input) badges.push(input === output ? input : `${input} in · ${output ?? '?'} out`);
+  if (input) badges.push(input === output ? `${input}/M in & out` : `${input}/M in · ${output ?? '?'}/M out`);
   if (context) badges.push(`${context} ctx`);
   // Only provider-stated facts become badges. A missing max-output or tool declaration is not a guess.
   if (facets.maxOutputTokens) badges.push(`${contextLabel(facets.maxOutputTokens)} out`);
@@ -248,7 +248,22 @@ function ModelRow({ model, prefix, facets, onCopy, onTest, onRemove, testing, re
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${testState === 'ok' ? 'border-success/25 bg-success/10 text-success' : testState === 'error' ? badgeTone.bad : 'border-line bg-surface text-muted'}`}>
           {testing ? <LoaderCircle className="h-4 w-4 animate-spin text-gold-text" aria-hidden="true" /> : testState === 'ok' ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : testState === 'error' ? <CircleAlert className="h-4 w-4" aria-hidden="true" /> : <Cpu className="h-4 w-4" aria-hidden="true" />}
         </span>
-        <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><p className="truncate text-xs font-semibold" title={`${prefix}/${model}`}>{prefix}/{model}</p>{facets.displayName && facets.displayName !== model && <p className="truncate text-[10px] text-muted">{facets.displayName}</p>}{testLatencyMs !== undefined && testState === 'ok' && <span title={testNote || undefined} className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms{testNote ? ' · reasoning only' : ''}</span>}{testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}{badges.map((badge) => <span key={badge} className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[9px] text-muted">{badge}</span>)}</div><code className="mt-1 block truncate font-mono text-[10px] text-muted">{prefix}/{model}</code>{testState === 'error' && testError && <p className="mt-1 text-[10px] leading-relaxed text-danger/90">{testError}</p>}</div>
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <p className="truncate text-xs font-semibold" title={`${prefix}/${model}`}>{prefix}/{model}</p>
+            {facets.displayName && facets.displayName !== model && <p className="truncate text-[10px] text-muted">{facets.displayName}</p>}
+            {testLatencyMs !== undefined && testState === 'ok' && <span title={testNote || undefined} className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] text-success"><Clock3 className="h-3 w-3" aria-hidden="true" />Ping {testLatencyMs} ms{testNote ? ' · reasoning only' : ''}</span>}
+            {testState === 'error' && <span title={testError} className="shrink-0 font-mono text-[10px] text-danger">Test failed</span>}
+          </div>
+          {/* Catalog facts belong under the id, not beside it: context, both prices, output cap and
+              capabilities are a second line the eye can scan down a list of models. */}
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {badges.length > 0
+              ? badges.map((badge) => <span key={badge} className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[9px] text-muted">{badge}</span>)
+              : <span className="font-mono text-[10px] text-muted">No catalog details reported</span>}
+          </div>
+          {testState === 'error' && testError && <p className="mt-1 text-[10px] leading-relaxed text-danger/90">{testError}</p>}
+        </div>
       </div>
       <div className="flex items-center gap-1.5">
         <button type="button" onClick={onCopy} aria-label={`Copy ${model} model ID`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-gold-text"><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>
@@ -1570,7 +1585,10 @@ export function ProviderDetailContent({ provider, tab = 'overview' }: { provider
                 : `${connections.length} accounts`}</span></div>
         <div className="p-4 sm:p-5">
           {connectionAdded ? (
-            <div className="flex flex-col gap-3">
+            <div
+              className={`flex flex-col gap-3${connections.length > 5 ? ' max-h-[34rem] overflow-y-auto pr-1' : ''}`}
+              data-account-scroll={connections.length > 5 ? 'true' : undefined}
+            >
               {/* Every connection, not just the first: a provider can hold several accounts, and this
                   card used to render one row while its own header counted two. The first is the one the
                   page's single-connection panels describe; the rest are listed here so nothing is
