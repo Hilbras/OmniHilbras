@@ -16,7 +16,7 @@ test('a model row puts catalog facts under the id, not beside it', () => {
   const between = page.slice(idLine, badgesLine);
   assert.match(between, /<\/div>/, 'the id line closes before the facts begin');
   assert.match(between, /className="mt-1 flex flex-wrap/, 'the facts are a wrapped second line');
-  assert.doesNotMatch(between, /<code /, 'the id is not repeated under itself');
+  assert.match(between, /<code className="mt-1 block truncate font-mono/, 'the id is still repeated in monospace under the name');
   assert.match(page, /\$\{input\}\/M in/, 'prices are labelled per million tokens');
   assert.match(page, /\$\{context\} ctx/, 'context is still shown');
 });

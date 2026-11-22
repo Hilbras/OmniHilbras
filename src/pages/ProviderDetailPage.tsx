@@ -257,6 +257,7 @@ function ModelRow({ model, prefix, facets, onCopy, onTest, onRemove, testing, re
           </div>
           {/* Catalog facts belong under the id, not beside it: context, both prices, output cap and
               capabilities are a second line the eye can scan down a list of models. */}
+          <code className="mt-1 block truncate font-mono text-[10px] text-muted">{prefix}/{model}</code>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             {badges.length > 0
               ? badges.map((badge) => <span key={badge} className="shrink-0 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[9px] text-muted">{badge}</span>)
