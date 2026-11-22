@@ -26,6 +26,8 @@ const banner = readFileSync(join(root, 'src', 'components', 'UpdateIndicator.tsx
 const bridge = readFileSync(join(root, 'src', 'lib', 'electronBridge.ts'), 'utf8');
 const hook = readFileSync(join(root, 'src', 'lib', 'useUpdateState.ts'), 'utf8');
 const settings = readFileSync(join(root, 'src', 'pages', 'SettingsPage.tsx'), 'utf8');
+const provider = readFileSync(join(root, 'src', 'components', 'UpdatePromptProvider.tsx'), 'utf8');
+const dashboard = readFileSync(join(root, 'src', 'dashboardApp.tsx'), 'utf8');
 
 test('the main process reports whether it can prove an update', () => {
   assert.match(main, /function updateTrust\(\)/, 'there must be one place that decides this');
@@ -45,15 +47,20 @@ test('an unverified update cannot be installed without an explicit decision', ()
   assert.match(main, /ipcMain\.handle\('update:install', \(_event, options\) => installUpdate\(options \?\? \{\}\)\)/);
 });
 
-test('one consent helper is used by every surface that can install', () => {
+test('one in-app question is used by every surface that can install', () => {
   assert.match(bridge, /install: \(options\?: \{ allowUnsigned\?: boolean \}\) => Promise<void>/, 'the bridge carries the option');
   assert.match(bridge, /signed\?: boolean/, 'and the state carries the verdict');
-  assert.match(hook, /export function confirmUnsignedUpdate\(/, 'the decision has one home');
-  assert.match(hook, /window\.confirm\(/, 'and it asks the person');
-  assert.match(hook, /state\?\.signed !== false\) return true/, 'a proved update needs no prompt');
-  assert.match(settings, /confirmUnsignedUpdate\(update\)/, 'Settings uses the same helper');
-  assert.match(settings, /allowUnsigned: update\?\.signed === false/, 'and forwards the decision');
-  assert.doesNotMatch(banner, /trustReason \?\? 'This update cannot be verified'/, 'the popup must not ask a second time');
+  assert.match(hook, /useUpdateConsent\(\)/, 'the hook asks the shared provider');
+  assert.match(hook, /confirmInstall\(state\)/, 'for an install');
+  assert.match(hook, /confirmDownload\(state\)/, 'and for a download');
+  assert.doesNotMatch(hook, /window\.confirm\(/, 'a native prompt cannot be styled or kept consistent');
+  assert.match(provider, /<Dialog /, 'the question is a dashboard dialog, not a native one');
+  assert.match(provider, /state\.trustReason/, 'and it shows the reason the main process reported');
+  assert.match(provider, /runUpdateInstall\(current\.state\)/, 'accepting an automatic question installs');
+  assert.equal((dashboard.match(/<UpdatePromptProvider>/g) ?? []).length, 1, 'the provider is mounted once, not per surface');
+  assert.match(settings, /installUpdate\?\.\(\)/, 'Settings uses the hook action, not the bridge');
+  assert.doesNotMatch(settings, /bridge\.updates\.install\(/, 'no second consent path in Settings');
+  assert.match(banner, /useUpdateConsent\(\)/, 'the popup knows a question is stacked above it');
   assert.match(banner, /void install\(\)\.then/, 'the popup calls the same path and handles a declined consent');
 });
 

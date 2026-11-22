@@ -9,7 +9,7 @@ import {
 } from '../lib/gatewayClient';
 import { desktopBridge, type DesktopAppSettings, type UpdateState } from '../lib/electronBridge';
 import { useGatewayReload } from '../lib/useGatewayStatus';
-import { confirmUnsignedUpdate } from '../lib/useUpdateState';
+import { useUpdateState } from '../lib/useUpdateState';
 import { copyText } from '../lib/copyText';
 import { z } from 'zod';
 import { badgeTone } from '../ui/primitives';
@@ -57,6 +57,9 @@ function KeyValue({ label, value }: { label: string; value: ReactNode }) {
 
 export function SettingsContent() {
   const bridge = desktopBridge();
+  // The same actions the sidebar uses, including the shared download/install questions. The local
+  // `update` state below is only for display; it must not become a second way to perform an action.
+  const { check: checkUpdate, download: downloadUpdate, install: installUpdate } = useUpdateState();
   const [settings, setSettings] = useState<GatewaySettings | undefined>();
   const [preferences, setPreferences] = useState<DesktopAppSettings | undefined>();
   const [update, setUpdate] = useState<UpdateState | undefined>();
@@ -161,15 +164,15 @@ export function SettingsContent() {
     if (!bridge) return;
     setSaving(`update-${action}`);
     try {
-      if (action === 'check') setUpdate(await bridge.updates.check());
-      else if (action === 'download') setUpdate(await bridge.updates.download());
-      else {
-        // Same consent helper as the sidebar popup; the main process refuses a silent unsigned install.
-        if (!confirmUnsignedUpdate(update)) {
-          flash('Install cancelled — the update was not verified.', true);
-          return;
-        }
-        await bridge.updates.install({ allowUnsigned: update?.signed === false });
+      if (action === 'check') {
+        const next = await checkUpdate();
+        if (next) setUpdate(next);
+      } else if (action === 'download') {
+        const next = await downloadUpdate?.();
+        if (next) setUpdate(next);
+      } else {
+        const result = await installUpdate?.();
+        if (result === 'cancelled') flash('Install cancelled — the update was not accepted.', true);
       }
     } catch (error) {
       flash(error instanceof Error ? error.message : 'The update action failed.', true);

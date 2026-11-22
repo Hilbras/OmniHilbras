@@ -85,9 +85,12 @@ test('the notice is re-checked, and can be dismissed for one version only', () =
   assert.match(hook, /RELEASE_CACHE_MS/, 'behind a cache, so the interval is cheap');
   assert.match(hook, /Date.now\(\) - checkedAtRef.current < REFOCUS_MIN_INTERVAL_MS/, 'and focus is rate-limited');
 
-  // Dismissal is per version, so skipping one release does not hide the next.
-  assert.match(hook, /const skippedVersionKey = 'omnihilbras\.update\.skipped';/, 'the dismissed version is remembered');
+  // Dismissal is per version, so skipping one release does not hide the next. The key now lives in its
+  // own module because the auto-prompt provider must answer the same question as the badge.
+  const skip = read('src/lib/updateSkip.ts');
+  assert.match(skip, /export const skippedVersionKey = 'omnihilbras\.update\.skipped';/, 'the dismissed version is remembered');
   assert.match(hook, /version === skipped/, 'and compared by value, not as a boolean flag');
+  assert.match(hook, /from '\.\/updateSkip'/, 'the hook and the prompt share one memory');
 });
 
 test('the update button opens a popup with the command, a copy, and the two actions', () => {

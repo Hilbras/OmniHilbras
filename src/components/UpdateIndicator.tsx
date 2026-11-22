@@ -5,6 +5,7 @@ import type { UpdateState } from '../lib/electronBridge';
 import { shutdownGateway } from '../lib/gatewayClient';
 import { copyText } from '../lib/copyText';
 import { useUpdateState } from '../lib/useUpdateState';
+import { useUpdateConsent } from './UpdatePromptProvider';
 
 /**
  * "A newer version exists" — in the sidebar, directly under the gateway badge.
@@ -153,17 +154,20 @@ function UpdatePopup({
   const [stop, setStop] = useState<'idle' | 'stopping' | 'stopped' | 'failed'>('idle');
   const [stopError, setStopError] = useState<string | undefined>(undefined);
   const [actionError, setActionError] = useState<string | undefined>(undefined);
+  const { promptOpen } = useUpdateConsent();
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialogRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    // The consent dialog is stacked above this popup. Escape belongs to the topmost dialog; closing
+    // both at once made a declined question look like a cancelled update.
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape' && !promptOpen) onClose(); };
     window.addEventListener('keydown', onKeyDown);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       previous?.focus();
     };
-  }, [onClose]);
+  }, [onClose, promptOpen]);
 
   const copyCommand = async () => {
     // A surface that refuses the clipboard leaves the command selectable; nothing is claimed about a

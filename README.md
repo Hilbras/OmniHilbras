@@ -24,7 +24,7 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
-**Current version: 3.92.2**
+**Current version: 3.93.0**
 
 OmniHilbras sits between your application and the model providers you already use. It gives every client one
 OpenAI-compatible endpoint, keeps credentials on your machine, and decides which saved connection serves each
@@ -403,7 +403,11 @@ The desktop shell owns the local gateway so the app can start and stop it withou
   an installer, and can install and restart when that platform's feed supports it. Windows NSIS and the Linux
   AppImage replace themselves; a `.deb` downloads and opens the system installer; macOS needs a zip in the
   feed, so a dmg-only release offers the release page instead of a button that could only fail. An update that
-  cannot be proved asks first, because there is no signing key yet.
+  cannot be proved asks first, because there is no signing key yet. Both decisions are now explicit: when a
+  newer release is found the app asks **Download now? / Not now**, and when the download finishes it asks
+  **Install and restart? / Not now**. Accepting starts the action; declining leaves the badge in place so the
+  same buttons can be used later, and does not skip the version. The unsigned warning is part of the install
+  question rather than a second native prompt, and the main process still refuses a silent unsigned install.
 - **The sidebar says when an update exists**, directly under the gateway badge: the new version, Download or
   Install and restart depending on what this build can do, and a **skip this version** remembered for that
   release only. The desktop reads the state its own main process keeps (it checks on launch and on a timer);

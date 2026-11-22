@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useUpdateConsent } from '../components/UpdatePromptProvider';
 import { version as repoVersion } from 'virtual:omnihilbras-version';
 import { desktopBridge, type UpdateState } from './electronBridge';
 import { compareVersions } from './versionCompare.mjs';
 import { getGatewayLatestRelease } from './gatewayClient';
+import { readSkippedVersion, writeSkippedVersion } from './updateSkip';
+import { runUpdateDownload, runUpdateInstall } from './updateActions';
 
 /**
  * One answer to "is there a newer version?", wherever the dashboard is running.
@@ -26,16 +29,14 @@ import { getGatewayLatestRelease } from './gatewayClient';
  */
 
 /**
- * One consent decision for every surface that can install an update.
+ * Why an install needs a person's agreement, as reported by the main process.
  *
- * Until release signing exists the main process refuses a silent install; the person must agree. Both the
- * sidebar popup and Settings use this helper, so a new caller cannot accidentally become the one that skips
- * the prompt. The reason shown is the one the main process reported, not a generic warning.
+ * The question itself is asked by `UpdatePromptProvider` in an in-app dialog — a native `window.confirm`
+ * was easy for one surface to skip and impossible to show consistently with the rest of the dashboard.
+ * This is only the sentence that belongs in the dialog when the build is unsigned.
  */
-export function confirmUnsignedUpdate(state: Pick<UpdateState, 'signed' | 'trustReason'> | undefined): boolean {
-  if (state?.signed !== false) return true;
-  return typeof window !== 'undefined'
-    && window.confirm(`${state.trustReason ?? 'This update cannot be verified.'}\n\nInstall it anyway?`);
+export function unsignedTrustReason(state: Pick<UpdateState, 'signed' | 'trustReason'> | undefined): string | undefined {
+  return state?.signed === false ? state.trustReason ?? 'This update cannot be verified.' : undefined;
 }
 
 /** How the surface should read, whichever source produced it. */
@@ -53,34 +54,6 @@ const RELEASE_CACHE_MS = 6 * 60 * 60 * 1000;
 const REFOCUS_MIN_INTERVAL_MS = 30 * 60 * 1000;
 /** A slow registry must never hold up the UI, so the request is abandoned rather than awaited forever. */
 const RELEASE_TIMEOUT_MS = 4_000;
-
-/**
- * The version a person asked not to be told about again.
- *
- * `localStorage` rather than the database: it is a per-browser display preference about a version *string*,
- * holds nothing sensitive, and losing it costs one repeated notice. The storage guard in
- * `tests/browser-storage.test.js` requires this key on its allowlist with a sentence saying what it holds —
- * this is that key.
- */
-const skippedVersionKey = 'omnihilbras.update.skipped';
-
-function readSkippedVersion(): string | undefined {
-  try {
-    return window.localStorage.getItem(skippedVersionKey)?.trim() || undefined;
-  } catch {
-    // Storage can be denied by the browser's settings; a preference that cannot be read is not an error.
-    return undefined;
-  }
-}
-
-function writeSkippedVersion(version: string | undefined) {
-  try {
-    if (version) window.localStorage.setItem(skippedVersionKey, version);
-    else window.localStorage.removeItem(skippedVersionKey);
-  } catch {
-    // Same: the notice comes back next time, which is a cosmetic cost, not a failure.
-  }
-}
 
 /** A module-level cache, so several components mounting at once make one request. */
 let releaseCache: { at: number; state: UpdateState } | undefined;
@@ -150,6 +123,7 @@ export { compareVersions };
 
 export function useUpdateState() {
   const bridge = desktopBridge();
+  const consent = useUpdateConsent();
   const [state, setState] = useState<UpdateState | undefined>(bridge ? undefined : { status: 'idle' });
   const [skipped, setSkipped] = useState<string | undefined>(() => readSkippedVersion());
   const checkedAtRef = useRef(0);
@@ -212,16 +186,19 @@ export function useUpdateState() {
    */
   const download = useCallback(async () => {
     if (!bridge) return undefined;
-    const next = await bridge.updates.download();
+    // A manual button press is a fresh request even if the automatic question was declined.
+    consent.clearDecline('download');
+    if (!await consent.confirmDownload(state)) return undefined;
+    const next = await runUpdateDownload();
     if (next) setState(next);
     return next;
-  }, [bridge]);
+  }, [bridge, consent, state]);
 
-  const installRaw = useCallback(async (options?: { allowUnsigned?: boolean }) => {
+  const installRaw = useCallback(async (state: UpdateState | undefined) => {
     if (!bridge) return;
     // `install` returns nothing: the main process relaunches, and progress arrives as events on the
     // subscription above. Anything this returned would be a state the app is about to stop existing in.
-    await bridge.updates.install(options);
+    await runUpdateInstall(state);
   }, [bridge]);
 
   /**
@@ -229,18 +206,15 @@ export function useUpdateState() {
    * always failed on an unsigned build, because only the sidebar popup passed `allowUnsigned`. Asking here
    * also means the reason a person is being asked for is the one the main process actually reported.
    */
-  const install = useCallback(async (options?: { allowUnsigned?: boolean }): Promise<'installed' | 'cancelled' | undefined> => {
+  const install = useCallback(async (_options?: { allowUnsigned?: boolean }): Promise<'installed' | 'cancelled' | undefined> => {
     if (!bridge) return undefined;
-    let allowUnsigned = options?.allowUnsigned === true;
-    if (!allowUnsigned) {
-      // A declined prompt used to be indistinguishable from a successful click: nothing happened, and
-      // nobody was told why. Return the outcome so the surface can say the install was cancelled.
-      if (!confirmUnsignedUpdate(state)) return 'cancelled';
-      allowUnsigned = state?.signed === false;
-    }
-    await installRaw({ ...options, allowUnsigned });
+    // The automatic prompt already asked; a manual button press asks again. Either way the unsigned
+    // answer is derived from the main process's own trust report, not from a caller's guess.
+    consent.clearDecline('install');
+    if (!await consent.confirmInstall(state)) return 'cancelled';
+    await installRaw(state);
     return 'installed';
-  }, [bridge, installRaw, state]);
+  }, [bridge, consent, installRaw, state]);
 
   const check = useCallback(async () => {
     if (bridge) {

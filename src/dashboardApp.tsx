@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { Suspense, useEffect, useRef, type ReactNode } from 'react';
 import { DashboardShell } from './components/DashboardShell';
+import { UpdatePromptProvider } from './components/UpdatePromptProvider';
 import { getProviderById } from './data/providers';
 import { fallbackProvider } from './data/providerFallback';
 import { dashboardRoutes } from './lib/routes';
@@ -130,6 +131,7 @@ function DashboardRoutes() {
   const pageDescription = provider ? 'Provider connection details' : pageDescriptions[activePage];
 
   return (
+    <UpdatePromptProvider>
     <DashboardShell activePage={activePage} pageTitle={pageTitle} pageDescription={pageDescription}>
       {/*
         * **No pathname `key` on the wrapper.** It used to force a full unmount/remount on
@@ -161,6 +163,7 @@ function DashboardRoutes() {
         </Suspense>
       </PageTransition>
     </DashboardShell>
+    </UpdatePromptProvider>
   );
 }
 
