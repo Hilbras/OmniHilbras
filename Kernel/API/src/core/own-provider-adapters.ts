@@ -1,4 +1,5 @@
 import { providerClientHeaders } from './provider-client-identity.js';
+import { providerResponsesPath } from './provider-responses-lane.js';
 import type { ProviderAdapter } from './index.js';
 import type { OpenAICompatibleAdapterOptions } from '@omnihilbras/sdk-openai';
 import type { CredentialValidationStrategy } from './provider-resolver.js';
@@ -53,7 +54,13 @@ export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, OwnAdapterEntry>> = 
   'agnes-ai': { validation: 'none', create: (options) => new AgnesAiAdapter(withTransport(options)) },
   // AgentRouter gates on a client identity. Its own package owns the adapter; the gateway supplies the
   // environment-configured identity, so a host override still reaches the wire.
-  'agentrouter': { validation: 'none', create: (options) => new AgentrouterAdapter({ headers: providerClientHeaders('agentrouter'), ...withTransport(options) }) },
+  'agentrouter': { validation: 'none', create: (options) => new AgentrouterAdapter({
+    headers: providerClientHeaders('agentrouter'),
+    // The dedicated adapter used to miss this, so a model whose refusal named /responses was thrown
+    // back to the caller instead of being retried on the lane that serves it.
+    ...(providerResponsesPath('agentrouter') ? { responsesPath: providerResponsesPath('agentrouter') } : {}),
+    ...withTransport(options),
+  }) },
   'aion-labs': { validation: 'credential', create: (options) => new AionLabsAdapter({ ...withTransport(options), ...(options?.endpoint ? { endpoint: options.endpoint } : {}) }) },
   '100milionseek': { validation: 'none', create: (options) => new OneHundredMillionSeekAdapter({ ...withTransport(options), ...(options?.endpoint ? { endpoint: options.endpoint } : {}) }) },
   'numes': { validation: 'none', create: (options) => new NumesAdapter(withTransport(options)) },

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OpenAICompatibleAdapter } from '../openai/dist/lib/openai-compatible.js';
+import { AgentrouterAdapter } from '../agentrouter/dist/adapter/index.js';
 import { forgetResponsesLanes } from '../openai/dist/lib/responses-lane.js';
 import { FetchHttpTransport } from '../openai/dist/lib/transport.js';
 
@@ -85,6 +86,21 @@ function adapterFor(fetchImpl, config = {}) {
 }
 
 const turn = (model) => ({ model, messages: [{ role: 'user', content: 'hi' }] });
+
+test('the dedicated AgentRouter adapter switches lanes on the relay\'s own refusal', async () => {
+  // The gateway builds this class, not the generic adapter the other cases use. Without `responsesPath`
+  // the refusal below was thrown straight to the caller — the exact error a user reported for
+  // gpt-6.1-sol. The wording is theirs, verbatim, so this tests the discriminator they actually sent.
+  forgetResponsesLanes();
+  const wording = '模型 gpt-6.1-sol 不支持 /v1/chat/completions 接口，请改用 /v1/responses（OpenAI Responses API）。Model gpt-6.1-sol does not support /v1/chat/completions, please use /v1/responses instead. (request id: 2026112305393';
+  const script = scriptedFetch({ refusesChat: (body) => (body.model === 'gpt-6.1-sol' ? { status: 400, body: { error: { message: wording } } } : undefined) });
+  const adapter = new AgentrouterAdapter({ responsesPath: '/responses', transport: new FetchHttpTransport({ fetch: script.impl }) });
+
+  const response = await adapter.chat(turn('gpt-6.1-sol'), { credential: CREDENTIAL });
+
+  assert.equal(response.message.content, 'hello from responses');
+  assert.deepEqual(script.calls.map((call) => call.path), ['/v1/chat/completions', '/v1/responses']);
+});
 
 test('a model the relay refuses on the chat path is answered on the Responses path', async () => {
   forgetResponsesLanes();
