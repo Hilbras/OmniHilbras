@@ -202,17 +202,41 @@ test('Codex requests force streamed, non-stored Responses with client headers an
   assert.equal(chunks.at(-1).usage.inputTokens, 2);
 });
 
-test('Codex maps supported roles and text content and rejects unsupported content and tools', async () => {
+test('Codex carries a replayed tool round and tool definitions on its Responses wire', async () => {
   const frames = [`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'ok' })}\n\n`, `data: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed' } })}\n\n`];
   const transport = transportFor(frames);
   const adapter = new CodexAdapter({ clientId: 'approved-client', transport });
-  for await (const _chunk of adapter.streamChat({ model: 'm', messages: [{ role: 'system', content: 'policy' }, { role: 'tool', content: 'result' }] }, { credential: { type: 'oauth', value: 'access' } })) { }
-  assert.deepEqual(JSON.parse(transport.calls[0].body).input.map((entry) => entry.role), ['developer', 'tool']);
+  const tools = [{ name: 'lookup', description: 'find a file', parameters: { type: 'object', properties: {} } }];
+  const messages = [
+    { role: 'system', content: 'policy' },
+    { role: 'assistant', content: null, toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{"path":"a.ts"}' } }] },
+    { role: 'tool', content: 'found', toolCallId: 'call_1' },
+  ];
+  for await (const _chunk of adapter.streamChat({ model: 'm', messages, tools }, { credential: { type: 'oauth', value: 'access' } })) { }
+  const body = JSON.parse(transport.calls[0].body);
+  assert.deepEqual(body.input[0], { role: 'developer', content: [{ type: 'input_text', text: 'policy' }] });
+  assert.deepEqual(body.input[1], { type: 'function_call', call_id: 'call_1', name: 'lookup', arguments: '{"path":"a.ts"}' });
+  assert.deepEqual(body.input[2], { type: 'function_call_output', call_id: 'call_1', output: 'found' });
+  assert.deepEqual(body.tools, [{ type: 'function', name: 'lookup', description: 'find a file', parameters: { type: 'object', properties: {} } }]);
+
   const image = new CodexAdapter({ clientId: 'approved-client', transport: transportFor(frames) });
   await assert.rejects(async () => { for await (const _chunk of image.streamChat({ model: 'm', messages: [{ role: 'user', content: [{ type: 'image_url', imageUrl: { url: 'https://example.invalid/image.png' } }] }] }, { credential: { type: 'oauth', value: 'access' } })) { } }, /text content only/);
-  await assert.rejects(async () => { for await (const _chunk of adapter.streamChat({ model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [{ name: 'lookup', parameters: {} }] }, { credential: { type: 'oauth', value: 'access' } })) { } }, /tool definitions/);
+  await assert.rejects(async () => { for await (const _chunk of adapter.streamChat({ model: 'm', messages: [{ role: 'user', content: 'hi' }], tools, toolChoice: 'required' }, { credential: { type: 'oauth', value: 'access' } })) { } }, /force a tool call/);
   const empty = new CodexAdapter({ clientId: 'approved-client', transport: transportFor([]) });
   await assert.rejects(async () => { for await (const _chunk of empty.streamChat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }, { credential: { type: 'oauth', value: 'access' } })) { } }, /without response.completed/);
+});
+
+test('a tool-only Codex turn yields one assembled call and a tool_calls finish reason', async () => {
+  const frames = [
+    `data: ${JSON.stringify({ type: 'response.output_item.added', output_index: 0, item: { type: 'function_call', call_id: 'call_9', name: 'lookup' } })}\n\n`,
+    `data: ${JSON.stringify({ type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"path":' })}\n\n`,
+    `data: ${JSON.stringify({ type: 'response.function_call_arguments.delta', output_index: 0, delta: '"a.ts"}' })}\n\n`,
+    `data: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed' } })}\n\n`,
+  ];
+  const adapter = new CodexAdapter({ clientId: 'approved-client', transport: transportFor(frames) });
+  const response = await adapter.chat({ model: 'm', messages: [{ role: 'user', content: 'find a.ts' }], tools: [{ name: 'lookup', parameters: {} }] }, { credential: { type: 'oauth', value: 'access' } });
+  assert.equal(response.finishReason, 'tool_calls');
+  assert.deepEqual(response.message.toolCalls, [{ id: 'call_9', type: 'function', function: { name: 'lookup', arguments: '{"path":"a.ts"}' } }]);
 });
 
 test('expired Codex credentials refresh over the injected transport and persist rotating refresh tokens', async () => {

@@ -113,9 +113,25 @@ test('every provider whose row claims forcing has a driven wire', async () => {
     assert.ok(t.requests.length > 0, `${wire} never reached its transport`);
     expect();
     if (wire !== 'openai') continue;
+    // Codex is the one wire here that refuses forcing but does serve tools. A forced call is refused by
+    // name before a request; a normal turn carries flat Responses function definitions.
+    const codexTransport = {
+      requests: [],
+      async request() { return { status: 200, headers: new Headers(), data: {} }; },
+      async *stream(request) {
+        this.requests.push(request);
+        yield `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'ok' })}\n\n`;
+        yield `data: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed' } })}\n\n`;
+      },
+    };
+    const codex = new CodexAdapter({ transport: codexTransport });
+    await codex.chat({ model: 'gpt-5', messages, tools }, { credential: { type: 'oauth', value: 'tok' } });
+    assert.deepEqual(JSON.parse(codexTransport.requests.at(-1).body).tools, [
+      { type: 'function', name: 'read', description: 'read a file', parameters: { type: 'object', properties: { path: { type: 'string' } } } },
+    ]);
     await assert.rejects(
-      () => new CodexAdapter({ transport: bodyTransport() }).chat({ model: 'gpt-5', messages, tools }, { credential: { type: 'oauth', value: 'tok' } }),
-      /does not support tool definitions/,
+      () => new CodexAdapter({ transport: bodyTransport() }).chat({ model: 'gpt-5', messages, tools, toolChoice: 'required' }, { credential: { type: 'oauth', value: 'tok' } }),
+      /force a tool call/,
     );
   }
 });

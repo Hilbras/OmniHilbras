@@ -3,7 +3,8 @@ import { parseSseJson, parseSseStream } from '../lib/streaming.js';
 import { FetchHttpTransport, type HttpTransport } from '../lib/transport.js';
 import { assertSafeProviderHeaderValue } from '../lib/url.js';
 import { boundedMap } from '../lib/bounded-map.js';
-import type { ChatChunk, ChatMessage, ChatRequest, ChatResponse, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderQuota, ProviderRequestContext, ProviderResourceQuota, TokenUsage } from '../lib/types.js';
+import { codexToolDelta, toCodexInput, toCodexTools } from '../lib/responses-tools.js';
+import type { ChatChunk, ChatRequest, ChatResponse, FinishReason, Model, ProviderAdapter, ProviderCredential, ProviderHealth, ProviderQuota, ProviderRequestContext, ProviderResourceQuota, TokenUsage } from '../lib/types.js';
 
 /**
  * The Codex CLI version this adapter presents.
@@ -164,7 +165,7 @@ function refusalReason(data: TokenRefusal | undefined): string | undefined {
   return `${reason}${code}`;
 }
 
-type CodexEvent = { type?: string; response?: { id?: string; model?: string; status?: string; incomplete_details?: { reason?: string }; usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; input_tokens_details?: { cached_tokens?: number }; output_tokens_details?: { reasoning_tokens?: number } }; error?: { message?: string } }; item_id?: string; delta?: string; text?: string; error?: { message?: string }; };
+type CodexEvent = { type?: string; response?: { id?: string; model?: string; status?: string; incomplete_details?: { reason?: string }; usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; input_tokens_details?: { cached_tokens?: number }; output_tokens_details?: { reasoning_tokens?: number } }; error?: { message?: string } }; item_id?: string; output_index?: number; item?: { type?: string; call_id?: string; name?: string }; delta?: string; text?: string; error?: { message?: string }; };
 
 export function codexAuthorizeUrl(input: { clientId: string; redirectUri: string; state: string; codeChallenge: string }) {
   const url = new URL(CODEX.authorizationUrl);
@@ -319,8 +320,33 @@ export class CodexAdapter implements ProviderAdapter {
     const chunks: ChatChunk[] = [];
     for await (const chunk of this.streamChat(request, context)) chunks.push(chunk);
     const text = chunks.map((chunk) => chunk.delta.content ?? '').join('');
+    // Responses streams a call's id/name once and its arguments in pieces. Assemble by index so an
+    // agent receives one executable call, not a trail of fragments it cannot run.
+    const byIndex = new Map<number, { id: string; name: string; arguments: string }>();
+    for (const chunk of chunks) {
+      for (const delta of chunk.delta.toolCalls ?? []) {
+        const call = byIndex.get(delta.index) ?? { id: '', name: '', arguments: '' };
+        if (delta.id) call.id = delta.id;
+        if (delta.function?.name) call.name = delta.function.name;
+        if (delta.function?.arguments) call.arguments += delta.function.arguments;
+        byIndex.set(delta.index, call);
+      }
+    }
+    const toolCalls = [...byIndex.entries()].sort(([a], [b]) => a - b).map(([, call]) => ({
+      id: call.id || `call-${call.name || 'tool'}`,
+      type: 'function' as const,
+      function: { name: call.name, arguments: call.arguments || '{}' },
+    }));
     const final = chunks.at(-1);
-    return { id: final?.id ?? `codex-${request.model}`, providerId: this.id, model: final?.model ?? request.model, createdAt: new Date(this.now()).toISOString(), message: { role: 'assistant', content: text }, finishReason: final?.finishReason ?? 'stop', ...(final?.usage ? { usage: final.usage } : {}) };
+    return {
+      id: final?.id ?? `codex-${request.model}`,
+      providerId: this.id,
+      model: final?.model ?? request.model,
+      createdAt: new Date(this.now()).toISOString(),
+      message: { role: 'assistant', content: text || null, ...(toolCalls.length ? { toolCalls } : {}) },
+      finishReason: toolCalls.length ? 'tool_calls' : final?.finishReason ?? 'stop',
+      ...(final?.usage ? { usage: final.usage } : {}),
+    };
   }
 
   async *streamChat(request: ChatRequest, context: ProviderRequestContext = {}): AsyncIterable<ChatChunk> {
@@ -333,8 +359,21 @@ export class CodexAdapter implements ProviderAdapter {
     }
     const responseId = `codex-${sessionId}`;
     assertSupportedRequest(request);
-    const body = { model: request.model, input: request.messages.map(toInput), stream: true, store: false, ...(request.maxOutputTokens === undefined ? {} : { max_output_tokens: request.maxOutputTokens }), ...(request.temperature === undefined ? {} : { temperature: request.temperature }), ...(request.topP === undefined ? {} : { top_p: request.topP }), ...(request.stop === undefined ? {} : { stop: [...request.stop] }) };
+    const tools = toCodexTools(request);
+    const body = {
+      model: request.model,
+      input: toCodexInput(request.messages),
+      stream: true,
+      store: false,
+      ...(tools ? { tools } : {}),
+      ...(request.toolChoice === undefined ? {} : { tool_choice: request.toolChoice }),
+      ...(request.maxOutputTokens === undefined ? {} : { max_output_tokens: request.maxOutputTokens }),
+      ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+      ...(request.topP === undefined ? {} : { top_p: request.topP }),
+      ...(request.stop === undefined ? {} : { stop: [...request.stop] }),
+    };
     let received = false;
+    let sawTool = false;
     let completed = false;
     for await (const event of parseSseStream(this.transport.stream({ method: 'POST', providerId: this.id, url: CODEX.apiUrl, headers, body: JSON.stringify(body), ...(context.signal ? { signal: context.signal } : {}) }))) {
       const data = parseSseJson<CodexEvent>(event, this.id);
@@ -345,11 +384,21 @@ export class CodexAdapter implements ProviderAdapter {
       } else if (data.type === 'response.refusal.delta' && typeof data.delta === 'string') {
         received = true;
         yield { id: data.response?.id ?? responseId, providerId: this.id, model: data.response?.model ?? request.model, delta: { content: data.delta } };
-      } else if (data.type === 'response.completed') {
+      } else {
+        const toolCall = codexToolDelta(data);
+        if (toolCall) {
+          // A tool-only turn has no text delta at all. Treating that as an empty answer used to end
+          // agent loops before the call reached the client.
+          received = true;
+          sawTool = true;
+          yield { id: data.response?.id ?? responseId, providerId: this.id, model: data.response?.model ?? request.model, delta: { toolCalls: [toolCall] } };
+        }
+      }
+      if (data.type === 'response.completed') {
         if (data.response?.status !== 'completed' && data.response?.status !== 'incomplete') throw new ProviderError('PROVIDER_REQUEST_FAILED', `Codex completed with unexpected status: ${data.response?.status ?? 'unknown'}.`, { providerId: this.id });
         const usage = usageFrom(data.response?.usage);
         completed = true;
-        yield { id: data.response?.id ?? responseId, providerId: this.id, model: data.response?.model ?? request.model, delta: {}, finishReason: codexFinishReason(data.response.status), ...(usage ? { usage } : {}) };
+        yield { id: data.response?.id ?? responseId, providerId: this.id, model: data.response?.model ?? request.model, delta: {}, finishReason: sawTool ? 'tool_calls' : codexFinishReason(data.response.status), ...(usage ? { usage } : {}) };
       } else if (data.type === 'response.failed' || data.type === 'error') {
         throw new ProviderError('PROVIDER_REQUEST_FAILED', data.error?.message ?? data.response?.error?.message ?? data.response?.incomplete_details?.reason ?? 'Codex failed to complete the response.', { providerId: this.id });
       }
@@ -440,18 +489,13 @@ function createSessionId() {
 }
 
 function assertSupportedRequest(request: ChatRequest): void {
-  if (request.tools?.length || request.toolChoice !== undefined) throw new ProviderError('INVALID_REQUEST', 'Codex adapter does not support tool definitions or tool choice.', { providerId: codexProviderId });
+  // Tool definitions and a replayed tool round are now part of this adapter. Forced choice is not
+  // advertised: the capability table refuses it by name before a request, and a caller reaching the
+  // adapter directly gets the same answer rather than an unmeasured field on the wire.
+  if (request.toolChoice === 'required') throw new ProviderError('NOT_SUPPORTED', 'Codex cannot be told to force a tool call. Use auto or omit tool_choice.', { providerId: codexProviderId });
   for (const message of request.messages) {
-    if (message.toolCalls?.length || message.toolCallId !== undefined || message.name !== undefined || message.reasoning !== undefined || message.thinking !== undefined || message.isError !== undefined) throw new ProviderError('INVALID_REQUEST', 'Codex adapter does not support tool calls or auxiliary message metadata.', { providerId: codexProviderId });
     if (message.content !== null && typeof message.content !== 'string' && message.content.some((part) => part.type !== 'text')) throw new ProviderError('INVALID_REQUEST', 'Codex adapter supports text content only.', { providerId: codexProviderId });
   }
-}
-
-function toInput(message: ChatMessage) {
-  const type = message.role === 'assistant' ? 'output_text' : 'input_text';
-  const text = typeof message.content === 'string' ? message.content : Array.isArray(message.content) ? message.content.map((part) => part.text).join('') : '';
-  const role = message.role === 'system' ? 'developer' : message.role;
-  return { role, content: [{ type, text }] };
 }
 
 function tokenCredential(data: TokenPayload, now = Date.now(), fallbackRefreshToken?: string): ProviderCredential {

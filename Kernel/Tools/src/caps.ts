@@ -93,10 +93,9 @@ const FORCED_WITH_MAPPING = ['anthropic', 'gemini', 'codebuddy-cn', 'codebuddy-i
  * only after the request reached the adapter, and routing treats that refusal as terminal. Saying so
  * here makes the edge refuse by name before a provider is called, which is the project's stated rule.
  */
-const NO_FORCING = ['claude-code', 'kimi-code', 'kiro', 'qoder', 'opencode', 'opencode-go', 'opencode-console'] as const;
+const NO_FORCING = ['claude-code', 'kimi-code', 'kiro', 'qoder', 'opencode', 'opencode-go', 'opencode-console', 'codex'] as const;
 
-/** Tools are refused on the wire, not merely ignored: `codex/adapter/index.ts:423` throws when one is present. */
-const TOOLS_REFUSED = ['codex'] as const;
+/** Codex serves real function calls on its Responses wire; it simply cannot be told to force one. */
 
 /** Cookie/browser sessions. No tools, by contract — see the module comment. */
 export const WEB_PROVIDERS = [
@@ -119,7 +118,6 @@ function build(): Record<string, ToolCaps> {
     table[id] = { tools: true, toolChoice: forced, web: false };
   }
   for (const id of NO_FORCING) table[id] = { tools: true, toolChoice: neutral, web: false };
-  for (const id of TOOLS_REFUSED) table[id] = { tools: false, toolChoice: [], web: false };
   for (const id of WEB_PROVIDERS) table[id] = { tools: false, toolChoice: [], web: true };
   return table;
 }

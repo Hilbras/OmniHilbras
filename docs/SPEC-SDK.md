@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.93.3
+**Status:** Current — release 3.94.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -991,9 +991,14 @@ without the flag grants nothing.
 | Group | Providers | Behaviour |
 | --- | --- | --- |
 | Forced | OpenAI-compatible wires, `anthropic`, `gemini`, `codebuddy-*`, `kilocode`, `minimax-code*`, `zcode`, `opencode`, `opencode-go` | `auto`, `none` and `required` are honoured, each in the provider's own vocabulary; on `opencode`/`opencode-go` a **gated free model** refuses `required` by name, because its upstream accepts only `auto`/`none` |
-| No forcing | `claude-code`, `kimi-code`, `kiro`, `qoder`, `opencode-console` | tools are served; `required` is refused |
-| Refused | `codex` | the adapter throws on tools, so the table says so rather than letting the provider do it |
+| No forcing | `claude-code`, `kimi-code`, `kiro`, `qoder`, `opencode-console`, `codex` | tools are served; `required` is refused |
+| Refused | — | no provider currently has an adapter that refuses tools outright |
 | Web sessions | `chatgpt-web`, `gemini-web`, `duckduckgo-web`, `deepseek-web`, `deepseek-web-v2`, `tokenharbor-web`, `grok-web`, `perplexity-web`, `qwen-web` | tools are removed before the adapter sees them |
+
+Codex serves tools on its Responses wire: definitions are flat `{type:'function', name, parameters}`, an
+assistant call is a `function_call` item, and a result is a `function_call_output` keyed by `call_id`. A
+tool-only turn is not an empty answer — it ends with `finish_reason: tool_calls`. Forced choice is not
+advertised, because the backend's support for it has not been measured; the gateway refuses it by name.
 
 Web sessions are excluded on purpose. They drive a page, not an API with a function-calling surface; smuggling a schema
 into a chat box produced prose that looked like a refusal and cost a turn to discover. `tests/tools-caps.test.js` fails
@@ -3587,7 +3592,7 @@ measurement, and `Kernel/API/test/spec-success-criteria.mjs` fails if any stops 
       `build` script; every `Kernel/SDK/<provider>/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **290 files** in `Kernel/SDK/` — 54 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url`, `bounded-map` and — for the OpenAI-shaped providers — `model-normalize` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 53: it measures providers, this counts files.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **291 files** in `Kernel/SDK/` — 54 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url`, `bounded-map` and — for the OpenAI-shaped providers — `model-normalize` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `responses-tools`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 53: it measures providers, this counts files.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

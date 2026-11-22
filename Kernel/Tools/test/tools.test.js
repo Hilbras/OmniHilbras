@@ -20,10 +20,11 @@ test('a web provider is a web provider, and serves no tools', () => {
   }
 });
 
-test('codex refuses tools on its own wire, so the table says so', () => {
-  // `codex/adapter/index.ts:423` throws when tools are present. A row claiming otherwise would produce a request that
-  // fails at the provider instead of a contract that fails here.
-  assert.equal(toolCaps('codex').tools, false);
+test('codex serves tools but cannot force them, so the table says so', () => {
+  // The adapter carries flat Responses function definitions and replays tool rounds as function_call /
+  // function_call_output items. Forced choice is the one shape it refuses by name before a request.
+  assert.equal(toolCaps('codex').tools, true);
+  assert.deepEqual(toolCaps('codex').toolChoice, ['auto', 'none']);
 });
 
 test('an unlisted provider is conservative and says it was a guess', () => {
