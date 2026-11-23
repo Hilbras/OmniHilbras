@@ -1,6 +1,6 @@
 # Spec: OmniHilbras Gateway and Provider SDK
 
-**Status:** Current — release 3.96.0
+**Status:** Current — release 3.97.0
 
 This document is the contract behind the gateway and its provider packages. It is intentionally more
 specific than the [README](../README.md): a route, an error code or a provider boundary written here is
@@ -411,6 +411,9 @@ account" means. Returns `{ authorizeUrl, flowId, expiresAt, pollIntervalSec }`; 
   missing confirmation is a 400; a wrong passphrase or a damaged envelope is refused before anything is
   changed. Management route.
 - `POST /v1/images/generations` — generate images, OpenAI shape `{model, prompt, n?, size?, quality?, response_format?, user?}`; returns `{created, data:[{url?, b64_json?, revised_prompt?}], provider, gateway}`. Authenticated like the LLM surface.
+- `POST /v1/videos/generations` — create a video job (billable surface). Body `{model, prompt, ...}`; `model` may carry a `provider/` prefix, and `x-omnihilbras-connection` pins the account. `POST /v1/videos/edits` and `POST /v1/videos/extensions` are the same job-creation surface. A job that reaches a video-capable adapter returns `{id, connectionId?, status?}` where `id` is the upstream `request_id` verbatim — creation never invents a URL — and the response echoes `x-omnihilbras-connection` so the client can poll the same account.
+- `GET /v1/videos/:id` — poll a video job. The creating connection is named by `x-omnihilbras-connection` (or `?connection=`); `?provider=` is a fallback only, and a poll naming neither is refused — the gateway keeps no global job table. A successful poll returns the upstream `status` verbatim and `video.url` **only** when the upstream itself reports completion and published a URL; a pending answer has no URL at all.
+  `xai` is the one bundled adapter that declares `video`; it POSTs `videos/<action>` and GETs `videos/<id>` through the gateway transport with the pinned connection's credential, and strips only its own `xai/` model prefix before forwarding. Every other provider answers `NOT_SUPPORTED` by name with the one planned attempt in `details.attempts`. Refusals, successes and client aborts are all written to the usage ledger; no path fabricates a job id or a completion URL. A new provider opts in from its own SDK package, never from a changed capability list in 54 vendored copies.
 - `GET /v1/virtual-models` — every persisted virtual model, enabled or disabled. A virtual model id must
   start with `oh/`; a target names a saved connection and an upstream model that connection lists.
 - `POST /v1/virtual-models` — create. Body `{id, name?, enabled?, strategy?, targets[], routerModel?, confidenceThreshold?, sessionSticky?, judgeModel?, quorum?, graceMs?, hardTimeoutMs?}`; `strategy` is
@@ -494,6 +497,7 @@ The dashboard reads these four stores read-only on `/dashboard/mitm`, `/dashboar
   read one and stopped nothing, because the instance actually running was recorded in the other.
 - `POST /v1/audio/speech` — TTS (implemented). `POST /v1/audio/transcriptions` — STT (implemented). `POST /v1/search` — search (DuckDuckGo instant answer).
 - `POST /v1/mcp` — Model Context Protocol JSON-RPC 2.0 endpoint over **Streamable HTTP**. Methods: `initialize`, `tools/list`, `tools/call`; notifications (a request with no `id`) are acknowledged with `202` and no body. Tools: `list_connections`, `list_models`, `gateway_status`. `2025-11-25` is negotiated by default, `2024-11-05` is accepted and returned when a client asks for it, and a version this build does not know falls back to `2025-11-25`; an invalid `MCP-Protocol-Version` header is refused with 400. Clients must send `Accept: application/json, text/event-stream` (otherwise 406), and a browser `Origin` outside the gateway's allowlist is refused with 403. `GET` is answered with an explicit 405 (`Allow: POST, OPTIONS`) because this gateway has no server-initiated messages to stream; the keep-alive tools remain three introspection calls. Authenticated like the LLM surface (gateway API key or trusted dashboard origin). Management route.
+- `GET /v1/mcp/plugins` — operator-registered stdio plugin ids from `<gateway state>/mcp-plugins.json` (each entry: `id`, absolute `command`, optional `args`); a request can never name a command. `GET /v1/mcp/plugins/stream/:id` — SSE stream of newline-delimited JSON-RPC frames from that plugin's child, bounded to 50,000 characters per tool-result text block; the child is killed when the last subscriber leaves or the client aborts. `POST /v1/mcp/plugins/message/:id` — send one newline-delimited JSON-RPC frame to that child (202 on accept); a tool named `shell` is refused by name and filtered out of `tools/list` answers. Children spawn with `shell: false` and an argv array, are supervised per id, and require the same gateway key and browser `Origin` gates as `/v1/mcp`. No plugin id is spawned unless the operator registered it.
 - `GET /v1/models` includes every enabled virtual model with `virtual: true` and `providers`, the target
   provider ids. The upstream model override is a routing detail; clients send the `oh/` id.
 - `POST /v1/token-saver/analyze` — body `{"messages": [...]}` or `{"text": "..."}`. Runs the configured
@@ -676,6 +680,10 @@ The dashboard reads these four stores read-only on `/dashboard/mitm`, `/dashboar
 - `GET /v1/oauth/claude-code/session/:id` — whether a started Claude Code sign-in is pending, connected,
   failed, or expired. A well-formed id that does not exist is `404`; an id that is not a plausible session
   id is `400`, refused before any lookup. The PKCE verifier is never in this response.
+- `POST /v1/oauth/claude/start` — begin a `claude` sign-in: authorization code with PKCE S256 in the user's browser, on the `claude` card's own connection rather than Claude Code's. Returns the URL to open and the session id to poll; the verifier and state stay on the session.
+- `GET /v1/oauth/claude/callback/:sessionId` — where Claude redirects the browser. The session id rides in the path, and an authorization code is claimed before the single exchange. Exempt from the cross-site guard and the API-key gate because a top-level navigation carries neither.
+- `GET /v1/oauth/claude/session/:id` — pending, connected, failed or expired; a well-formed unknown id is `404` and a malformed one is `400`. The PKCE verifier is never part of this answer.
+- `POST /v1/oauth/claude/exchange` — finish a sign-in from a pasted `{sessionId, code, redirectUri, codeVerifier?}`. `redirectUri` must equal the one stored at start, byte for byte; a presented `codeVerifier` must match the stored verifier in constant time. The value sent upstream is always the session's own, so a wrong verifier is refused before the code is spent.
 - `POST /v1/oauth/codex/start` — begin a Codex OAuth authorization-code flow with PKCE. With no local
   configuration this uses the public Codex CLI OAuth client and its registered loopback redirect
   (`http://localhost:1455/auth/callback`); because that port is not the gateway's own, the gateway
@@ -705,6 +713,11 @@ The dashboard reads these four stores read-only on `/dashboard/mitm`, `/dashboar
   `minimal_client_version` and answers `200` with the missing ones silently dropped — a stale client
   version is therefore reported, not mistaken for an account with no models. `POST
   /v1/connections/:id/models/refresh` re-reads it on demand from the provider page.
+  **The shipped `clientVersion` is `0.171.0`**, raised from `0.159.2` to match the published client.
+  That is a catalog-gate inference, not a measured backend acceptance: no live Codex turn was made to
+  prove that this identity is accepted, only that it is the version npm publishes and that every
+  identity string the adapter emits is derived from the one constant. The historical curl-probe note at
+  the end of this document is a dated observation and is deliberately left as it was.
 - `POST /v1/chat/completions` — normalized gateway chat request/response.
   `tool_choice` accepts the string vocabulary (`auto`/`none`/`required`) **and the object forms agent clients
   send**: OpenAI's `{type:"function", function:{name}}` and Anthropic's `{type:"tool", name}` / `{type:"any"}`
@@ -3604,7 +3617,7 @@ measurement, and `Kernel/API/test/spec-success-criteria.mjs` fails if any stops 
       `build` script; every `Kernel/SDK/<provider>/package.json` declares no React dependency.
 - [x] The SDK exposes stable normalized types and a provider registry. — `ProviderRegistry` is exported,
       and the adapter contract suite runs against it.
-- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **291 files** in `Kernel/SDK/` — 54 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url`, `bounded-map` and — for the OpenAI-shaped providers — `model-normalize` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `responses-tools`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 53: it measures providers, this counts files.
+- [x] Core adapters are implemented: OpenAI, Anthropic, Gemini, and OpenAI-compatible, with a real OpenRouter adapter for authenticated connection management. — **301 files** in `Kernel/SDK/` — 56 provider folders, each self-contained: its own `adapter/index.ts` plus the `lib/` copies of `types`, `transport`, `streaming`, `errors`, `url`, `bounded-map` and — for the OpenAI-shaped providers — `model-normalize` that it needs. The duplication is deliberate — a provider must be removable without touching the others — so this count is the price, stated rather than hidden. `openai-compatible` is no longer a provider: it was inlined into the four providers that extended it. The helpers (`deepseek-pow`, `zen-free-tier`, `responses-lane`, `responses-tools`, `qoder/constants`, `qoder/encoding`) and `qwen-web` are not protocol adapters, which is why the capture guard counts 55: it measures providers, this counts files.
 - [x] A provider with a different protocol can be added through a capability-specific adapter without
       modifying the gateway core. — **10 registrations in `service.ts`, 0 provider-id conditionals in
       `routing.ts` or `service.ts`.** Proved by 1.43.0, which added nine providers as catalog entries and

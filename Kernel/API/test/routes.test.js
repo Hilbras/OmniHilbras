@@ -110,7 +110,11 @@ test('the dispatcher tries every route module, in the order the old chain used',
   // carries the authentication gate for the LLM surface.
   // `Metrics` sits beside `Status` because that is what it is — the machine-readable half of the same answer — and
   // before `Inference` for the same reason every management route is: the gate must not shadow it.
-  assert.deepEqual(order, ['Status', 'Metrics', 'Connections', 'Backup', 'TokenSaver', 'Oauth', 'ApiKeys', 'Usage', 'Logs', 'Events', 'Settings', 'VirtualModels', 'Skills', 'Workspaces', 'Tunnels', 'Mitm', 'ProxyPools', 'ProviderNodes', 'Observability', 'Pxpipe', 'Locale', 'Runtime', 'Media', 'Mcp', 'Fetch', 'Inference']);
+  // `McpPlugins` sits next to `Mcp`, sharing its key and Origin gates while spawning only
+  // operator-registered children. `Video` is registered just before `Inference`: it is a billable LLM surface with its own
+  // connection-bound poll, but the dispatcher excludes it from inference's fast path so one module
+  // owns the paths. `Inference` still stays last.
+  assert.deepEqual(order, ['Status', 'Metrics', 'Connections', 'Backup', 'TokenSaver', 'Oauth', 'ApiKeys', 'Usage', 'Logs', 'Events', 'Settings', 'VirtualModels', 'Skills', 'Workspaces', 'Tunnels', 'Mitm', 'ProxyPools', 'ProviderNodes', 'Observability', 'Pxpipe', 'Locale', 'Runtime', 'Media', 'Mcp', 'McpPlugins', 'Fetch', 'Video', 'Inference']);
   // Every module that exists must actually be wired in: a module with routes but no entry here is
   // a module whose routes 404, which no unit test would catch.
   for (const { name } of modules) {

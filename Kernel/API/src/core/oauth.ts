@@ -50,7 +50,16 @@ export function sessionIdFromCallbackPath(pathname: string): string | undefined 
  * also carries `code` and `state` as ordinary query parameters.
  */
 export const claudeCodeCallbackPath = '/v1/oauth/claude-code/callback';
+/** The separate `claude` card's own callback; it must not share Claude Code's sign-in session. */
+export const claudeCallbackPath = '/v1/oauth/claude/callback';
 export const codexCallbackPath = '/v1/oauth/codex/callback';
+
+/** Pulls the `claude` sign-in id out of a callback path, if it carries one. */
+export function claudeSessionIdFromCallbackPath(pathname: string): string | undefined {
+  if (!pathname.startsWith(`${claudeCallbackPath}/`)) return undefined;
+  const id = pathname.slice(claudeCallbackPath.length + 1).split('/')[0] ?? '';
+  return /^[A-Za-z0-9_-]{16,128}$/.test(id) ? id : undefined;
+}
 
 /** Pulls the Claude Code sign-in id out of a callback path, if it carries one. */
 export function claudeCodeSessionIdFromCallbackPath(pathname: string): string | undefined {

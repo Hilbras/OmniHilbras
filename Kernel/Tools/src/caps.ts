@@ -95,7 +95,7 @@ const FORCED_WITH_MAPPING = ['anthropic', 'gemini', 'codebuddy-cn', 'codebuddy-i
  * only after the request reached the adapter, and routing treats that refusal as terminal. Saying so
  * here makes the edge refuse by name before a provider is called, which is the project's stated rule.
  */
-const NO_FORCING = ['claude-code', 'kimi-code', 'kiro', 'qoder', 'opencode', 'opencode-go', 'opencode-console', 'codex'] as const;
+const NO_FORCING = ['claude', 'claude-code', 'kimi-code', 'kiro', 'qoder', 'opencode', 'opencode-go', 'opencode-console', 'codex', 'xai'] as const;
 
 /** Codex serves real function calls on its Responses wire; it simply cannot be told to force one. */
 

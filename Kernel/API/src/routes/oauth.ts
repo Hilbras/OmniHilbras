@@ -8,7 +8,7 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { claudeCodeCallbackPath, claudeCodeSessionIdFromCallbackPath, clineCallbackPath, codexCallbackPath, sessionIdFromCallbackPath } from '../core/oauth.js';
+import { claudeCallbackPath, claudeCodeCallbackPath, claudeCodeSessionIdFromCallbackPath, claudeSessionIdFromCallbackPath, clineCallbackPath, codexCallbackPath, sessionIdFromCallbackPath } from '../core/oauth.js';
 import type { RouteContext } from './route-context.js';
 
 export const codexCallbackRoutePath = codexCallbackPath;
@@ -489,6 +489,69 @@ export async function handleOauthRoute(ctx: RouteContext): Promise<boolean> {
       const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/codex/session/'.length)).trim();
       if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
       const status = service.codexSignInStatus(sessionId);
+      if (!status) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
+        return true;
+      }
+      sendJson(response, 200, status, origin);
+      return true;
+    }
+
+    /**
+     * `claude` — the plain authorization-code + PKCE sign-in, on its own card and connection.
+     * The session id rides in the callback path; the redirect is checked again at exchange time.
+     */
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/claude/start') {
+      const body = await readJsonBody(request, maxKeyBodyBytes);
+      const { addAccount, targetConnectionId } = readSignInTarget(body);
+      sendJson(response, 201, service.startClaudeSignIn(options.publicBaseUrl ?? 'http://127.0.0.1:20138', addAccount, targetConnectionId), origin);
+      return true;
+    }
+
+    if (request.method === 'GET' && (url.pathname === claudeCallbackPath || url.pathname.startsWith(`${claudeCallbackPath}/`))) {
+      const sessionId = claudeSessionIdFromCallbackPath(url.pathname);
+      const code = url.searchParams.get('code') ?? '';
+      const raw = `${code}${url.hash}`;
+      const status = sessionId && code ? await service.completeClaudeCallback({ sessionId, raw }, signal) : undefined;
+      const ok = status?.status === 'connected';
+      const message = ok
+        ? `Connected to ${(status?.connection as { name?: string } | undefined)?.name ?? 'Claude'}.`
+        : status?.error ?? 'This callback did not identify a Claude sign-in. Start again from OmniHilbras.';
+      const nonce = scriptNonce();
+      sendHtml(response, 200, oauthCallbackPage('Claude', ok, message, nonce, sessionId), origin, nonce);
+      return true;
+    }
+
+    if (request.method === 'GET' && url.pathname.startsWith('/v1/oauth/claude/session/')) {
+      const sessionId = decodeSessionId(url.pathname.slice('/v1/oauth/claude/session/'.length)).trim();
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(sessionId)) throw invalidRequest('Unknown sign-in session.');
+      const status = service.claudeSignInStatus(sessionId);
+      if (!status) {
+        sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
+        return true;
+      }
+      sendJson(response, 200, status, origin);
+      return true;
+    }
+
+    /**
+     * The manual exchange, for a code the browser could not deliver as a navigation. Both the
+     * redirect and the verifier are checked against the stored session before the code is spent.
+     */
+    if (request.method === 'POST' && url.pathname === '/v1/oauth/claude/exchange') {
+      const body = await readJsonBody(request, maxConnectionBodyBytes);
+      if (!isRecord(body)) throw invalidRequest('Request body must be a JSON object.');
+      assertOnlyFields(body, ['sessionId', 'code', 'redirectUri', 'codeVerifier']);
+      const sessionId = readRequiredString(body, 'sessionId');
+      const code = readRequiredString(body, 'code');
+      const redirectUri = readRequiredString(body, 'redirectUri');
+      const codeVerifier = readOptionalString(body, 'codeVerifier');
+      const status = await service.completeClaudeCallback({
+        sessionId,
+        raw: code,
+        redirectUri,
+        ...(codeVerifier !== undefined ? { codeVerifier } : {}),
+      }, signal);
       if (!status) {
         sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Unknown sign-in session.' } }, origin);
         return true;

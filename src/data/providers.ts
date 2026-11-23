@@ -43,6 +43,9 @@ export const providerLogoMap = {
   // Claude Code is the Anthropic *subscription*, reached by OAuth — a separate account from the
   // metered `anthropic` API key. Its own card and its own mark, for the same reason `kimi-code` has.
   'claude-code': '/providers/claude.svg',
+  // The `claude` authorization-code card signs in as the same vendor but keeps its own
+  // connection; it shares the committed mark, not the Claude Code account.
+  claude: '/providers/claude.svg',
   codex: '/providers/codex.svg',
   moonshot: '/providers/moonshot.svg',
   groq: '/providers/groq.svg',
@@ -1079,6 +1082,30 @@ export const providerCatalog: ProviderRecord[] = [
     riskSeverity: 'standard',
   },
   {
+    id: 'claude',
+    name: 'Claude',
+    description: 'The Claude authorization-code sign-in (PKCE). Its own connection and catalog, separate from the Claude Code subscription card.',
+    category: 'Model provider',
+    group: 'oauth',
+    // Catalog placeholders: every number here is overwritten by a connection and a health poll.
+    status: 'available',
+    auth: 'OAuth',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#d97757',
+    initial: 'CL',
+    logo: providerLogoMap.claude,
+    endpoint: 'https://api.anthropic.com',
+    apiKeysUrl: 'https://claude.ai/settings',
+    modelList: [],
+    riskNotice:
+      'This card signs in with your Claude account through an authorization-code flow. Anthropic’s consumer terms do not permit using a Claude subscription for third-party API access, and the grant is separate from the Claude Code card’s credential. Use the Anthropic API-key card for metered access.',
+    riskSeverity: 'standard',
+  },
+  {
     id: 'codex',
     name: 'Codex',
     description:
@@ -1529,6 +1556,27 @@ export const providerCatalog: ProviderRecord[] = [
     initial: 'F',
     endpoint: 'https://api.fireworks.ai/inference/v1',
     apiKeysUrl: 'https://fireworks.ai/account/api-keys',
+    modelList: [],
+  },
+  {
+    id: 'xai',
+    name: 'xAI',
+    description: 'xAI\'s OpenAI-compatible API, served with its own saved account. A key is stored in the gateway vault and sent to xAI, never to the browser.',
+    category: 'Model provider',
+    group: 'api-key',
+    // Catalog placeholders: nothing here is a measurement until a connection and a health poll report one.
+    status: 'available',
+    auth: 'API key',
+    models: '—',
+    latency: '—',
+    requests: '0',
+    lastUsed: 'never',
+    health: 0,
+    color: '#1d1d1f',
+    initial: 'X',
+    logo: providerLogoMap.xai,
+    endpoint: 'https://api.x.ai/v1',
+    apiKeysUrl: 'https://console.x.ai/',
     modelList: [],
   },
   {

@@ -4,7 +4,7 @@ import { OWN_PROVIDER_ADAPTERS } from './own-provider-adapters.js';
 import { ApmixAdapter } from '@omnihilbras/sdk-apmix';
 import { BeatApiAdapter } from '@omnihilbras/sdk-beatapi';
 import { NousAdapter } from '@omnihilbras/sdk-nous';
-import { GATEWAY_TOOL_PROVIDERS, LOCAL_TOOL_NAMES, LOCAL_TOOL_PROMPT, ToolContractError, gatewayToolNameMap, guardToolStream, isLocalToolName, localToolDefinitions, normalizeToolsRequest, parseNativeToolCall, parsePromptToolCall, toolCaps, validateToolCalls, withGatewayTools } from '@omnihilbras/tools';
+import { GATEWAY_TOOL_PROVIDERS, LOCAL_TOOL_NAMES, LOCAL_TOOL_PROMPT, ToolContractError, cloakClaudeTools, gatewayToolNameMap, guardToolStream, isLocalToolName, localToolDefinitions, normalizeToolsRequest, parseNativeToolCall, parsePromptToolCall, restoreClaudeToolName, shouldCloakTools, toolCaps, validateToolCalls, withGatewayTools } from '@omnihilbras/tools';
 import { ZenAdapter } from '@omnihilbras/sdk-opencode-zen';
 import { OpenCodeGoAdapter } from '@omnihilbras/sdk-opencode-go';
 import { ZcodeAdapter, zcodeProviderId } from '@omnihilbras/sdk-zcode-start-plan';
@@ -18,6 +18,7 @@ import { FetchHttpTransport, ProviderError, completeToolRounds, compressToolResu
 import { narrowedToolCaps } from './modelCapabilities.js';
 import { ChatGptWebAdapter, chatGptWebCredential, chatGptWebModels, isFreeChatGptPlan, parseChatGptStorageState, chatGptWebProviderId, type ChatGptWebDriver } from '@omnihilbras/sdk-chatgpt-web';
 import { CLAUDE_CODE, ClaudeCodeAdapter, claudeCodeProviderId } from '@omnihilbras/sdk-claude-code';
+import { CLAUDE, ClaudeAdapter, claudeProviderId } from '@omnihilbras/sdk-claude';
 import { ClinePassAdapter } from '@omnihilbras/sdk-clinepass';
 import { deepSeekWebCredential, deepseekWebProviderId, deepseekWebV2ProviderId, DeepSeekWebAdapter } from '@omnihilbras/sdk-deepseek-web';
 import { DuckDuckGoWebAdapter, duckduckgoWebProviderId, DUCKDUCKGO_WEB, normalizeDuckDuckGoWebCookie, freeDuckDuckGoWebModels, type DuckDuckGoWebDriver } from '@omnihilbras/sdk-duckduckgo-web';
@@ -52,6 +53,7 @@ import { MinimaxCodeSessionStore, minimaxCodeSiteEndpoint, minimaxCodeGlobalProv
 import { QoderSessionStore, qoderProviderId, type QoderSessionStatus } from '../providers/qoder.js';
 import { qoderSignRequest } from '../providers/qoderCosy.js';
 import { ClaudeCodeSessionStore, beginClaudeCodeSignIn, completeClaudeCodeSignIn, type ClaudeCodeSessionStatus } from '../providers/claudeCode.js';
+import { ClaudeSessionStore, beginClaudeSignIn, completeClaudeSignIn, type ClaudeSessionStatus } from '../providers/claude.js';
 import { CodexAdapter, codexProviderId } from '@omnihilbras/sdk-codex';
 import { beginCodexSignIn, CodexSessionStore, completeCodexSignIn, resolveCodexConfig, type CodexSignInStatus } from '../providers/codexOAuth.js';
 import { CodexCallbackListener } from './codexCallbackListener.js';
@@ -208,6 +210,18 @@ const renewalWindowMs = 30 * 60_000;
  * existing importer of `service.js` keeps working without learning a second path for the same type.
  */
 export type { GatewayFailoverAttempt, GatewayChatOutcome, GatewayStreamOutcome, GatewayEmbedOutcome, GatewayImageOutcome } from './request-executor.js';
+
+/** The two video operations the gateway can ask a video-capable adapter to perform. */
+export type GatewayVideoRequest =
+  | { kind: 'create'; action: string; body: Record<string, unknown> }
+  | { kind: 'poll'; id: string };
+
+/** Only what the upstream actually stated: an id, an optional status, an optional completed URL. */
+export type GatewayVideoJob = { id: string; status?: string; videoUrl?: string };
+
+type VideoCapableAdapter = ProviderAdapter & {
+  video?: (request: GatewayVideoRequest, context?: ProviderRequestContext) => Promise<GatewayVideoJob>;
+};
 
 /**
  * The credential surface the service needs, keyed by connection id.
@@ -393,6 +407,9 @@ export class GatewayService {
   private readonly minimaxAdapters = new Map<string, ProviderAdapter>();
   private qoder?: ProviderAdapter;
   private readonly claudeCodeSessions = new ClaudeCodeSessionStore();
+  private readonly claudeSessions = new ClaudeSessionStore();
+  /** Built on demand per connection, so signing in is what constructs it. */
+  private readonly claudeAdapters = new Map<string, ClaudeAdapter>();
   /** Built on demand per connection, so signing in is what constructs it. */
   private readonly claudeCodeAdapters = new Map<string, ClaudeCodeAdapter>();
   private readonly codexSessions = new CodexSessionStore();
@@ -765,6 +782,7 @@ export class GatewayService {
       .onDemand(opencodeConsoleProviderId, ({ providerId, connection }) => this.opencodeConsoleAdapter(connection?.id ?? providerId), { validation: 'credential' })
       .onDemand(kimiCodeProviderId, ({ providerId, connection }) => this.kimiCodeAdapter(connection?.id ?? providerId), { validation: 'none' })
       .onDemand(claudeCodeProviderId, ({ providerId, connection }) => this.claudeCodeAdapter(connection?.id ?? providerId), { validation: 'none' })
+      .onDemand(claudeProviderId, ({ providerId, connection }) => this.claudeAdapter(connection?.id ?? providerId), { validation: 'none' })
       .onDemand(codexProviderId, ({ providerId, connection }) => this.codexAdapter(connection?.id ?? providerId), { validation: 'credential' })
       .onDemand(kiroProviderId, ({ providerId, connection }) => this.kiroAdapter(connection?.id ?? providerId), { validation: 'credential' })
       .onDemand(kilocodeProviderId, ({ providerId, connection }) => this.kilocodeAdapter(connection?.id ?? providerId), { validation: 'none' })
@@ -830,9 +848,12 @@ export class GatewayService {
     resolver = resolver.onDemand('grok', own('grok').factory, { validation: own('grok').validation });
     resolver = resolver.onDemand('nvidia', own('nvidia').factory, { validateOnSave: true, validation: own('nvidia').validation });
     resolver = resolver.onDemand('coarena', own('coarena').factory, { validation: own('coarena').validation });
-    // Two keyed routers served by the shared OpenAI-compatible adapter, with no dedicated SDK package.
+    // Keyed routers served by the shared OpenAI-compatible adapter, with no dedicated SDK package.
     resolver = resolver.onDemand('together', own('together').factory, { validation: own('together').validation });
     resolver = resolver.onDemand('fireworks', own('fireworks').factory, { validation: own('fireworks').validation });
+    // xAI is its own connection, not a second name for Grok's saved key. Its chat surface is the
+    // OpenAI wire; video generation is a separate route and currently refuses every request.
+    resolver = resolver.onDemand('xai', own('xai').factory, { validation: own('xai').validation });
     this.providers = resolver;
     this.credentialLifecycle = new CredentialLifecycle({
       adapterFor: (providerId) => { try { return this.registry.get(providerId); } catch { return undefined; } },
@@ -1837,6 +1858,49 @@ export class GatewayService {
         name: 'Claude Code',
         // The endpoint is fixed by the adapter; recorded so an operator can see which host it reaches.
         endpoint: CLAUDE_CODE.server,
+        priority: 1,
+        proxyPool: 'none',
+        modelPolicy: 'all',
+      }, credential, signal),
+    });
+  }
+
+  /** Start a `claude` sign-in. Its verifier and state live on its own session, never in a URL. */
+  startClaudeSignIn(publicBaseUrl: string, addAccount = false, targetConnectionId?: string) {
+    return beginClaudeSignIn({
+      store: this.claudeSessions,
+      publicBaseUrl,
+      connectionId: targetConnectionId ?? (addAccount ? `claude-${randomUUID().replace(/-/g, '').slice(0, 12)}` : claudeProviderId),
+    });
+  }
+
+  claudeSignInStatus(sessionId: string) {
+    const session = this.claudeSessions.get(sessionId);
+    return session ? this.claudeSessions.publicStatus(session) : undefined;
+  }
+
+  /**
+   * Finish a `claude` sign-in from either the browser callback or the exchange route.
+   *
+   * `redirectUri` and `codeVerifier` are optional because a browser navigation cannot supply them;
+   * when the exchange route supplies them they are checked exactly against the session before a code
+   * is spent. The verifier sent upstream is always the session's own.
+   */
+  completeClaudeCallback(input: { sessionId: string; raw: string; redirectUri?: string; codeVerifier?: string }, signal?: AbortSignal): Promise<ClaudeSessionStatus | undefined> {
+    const sessionId = input.sessionId;
+    return completeClaudeSignIn({
+      store: this.claudeSessions,
+      sessionId,
+      raw: input.raw,
+      ...(input.redirectUri !== undefined ? { redirectUri: input.redirectUri } : {}),
+      ...(input.codeVerifier !== undefined ? { codeVerifier: input.codeVerifier } : {}),
+      transport: this.transport,
+      ...(signal ? { signal } : {}),
+      saveConnection: async ({ credential }) => this.saveConnection({
+        id: this.claudeSessions.get(sessionId)?.connectionId ?? claudeProviderId,
+        providerId: claudeProviderId,
+        name: 'Claude',
+        endpoint: CLAUDE.server,
         priority: 1,
         proxyPool: 'none',
         modelPolicy: 'all',
@@ -2851,6 +2915,21 @@ export class GatewayService {
     return adapter;
   }
 
+  /** The `claude` card's own adapter and renewal memo; it never borrows Claude Code's connection. */
+  claudeAdapter(connectionId: string): ClaudeAdapter {
+    const memo = this.claudeAdapters.get(connectionId);
+    if (memo) return memo;
+    const adapter = new ClaudeAdapter({
+      transport: this.transport,
+      onTokensRefreshed: async (credential) => {
+        if (!this.connectionStore) return;
+        await this.connectionStore.set(connectionId, credential).catch(() => undefined);
+      },
+    });
+    this.claudeAdapters.set(connectionId, adapter);
+    return adapter;
+  }
+
   codexAdapter(connectionId: string): CodexAdapter {
     return new CodexAdapter({
       clientId: this.gatewayConfig?.codex.clientId ?? '',
@@ -3789,7 +3868,7 @@ export class GatewayService {
     return scopeId ? this.toolContractNotes.get(scopeId) : undefined;
   }
 
-  private async applyToolContract(providerId: string, request: ChatRequest, includeLocalTools = false, connectionId?: string, scopeId?: string): Promise<{ request: ChatRequest; declared: readonly string[]; renames: ReadonlyMap<string, string> }> {
+  private async applyToolContract(providerId: string, request: ChatRequest, includeLocalTools = false, connectionId?: string, scopeId?: string): Promise<{ request: ChatRequest; declared: readonly string[]; renames: ReadonlyMap<string, string>; cloaked: boolean }> {
     try {
       const connection = connectionId ? (await this.connections.list()).find((entry) => entry.id === connectionId) : undefined;
       const effectiveCaps = narrowedToolCaps(request.model, connection, toolCaps(providerId));
@@ -3835,6 +3914,19 @@ export class GatewayService {
       // the caller's tool and renamed back before the client sees it.
       const renames = gatewayToolNameMap(normalized.tools, normalized.toolChoice);
       if (renames.size > 0) declaredNames = [...declaredNames, ...renames.keys()];
+      // Claude connections carry the Claude Code tool surface: client names get a stable suffix and
+      // unavailable decoys are declared beside them. The restore map shares the request's lifetime, so
+      // the same map that hid a name is the one that reveals it — before the allow-list guard, never
+      // after. Decoy names map to a name no client declared, so a decoy call is blocked by that guard.
+      // The allow list above is deliberately built *before* the cloak map is merged: a wire name is not
+      // a name the client declared just because we happened to put it on the wire.
+      let cloaked = false;
+      if (shouldCloakTools(providerId, connection)) {
+        const result = cloakClaudeTools(outbound);
+        outbound = result.request;
+        cloaked = result.renames.size > 0;
+        for (const [wire, original] of result.renames) renames.set(wire, original);
+      }
       if (GATEWAY_TOOL_PROVIDERS.has(providerId) && !(normalized.toolChoice === 'required' && kept.length > 0)) {
         outbound = { ...normalized, tools: withGatewayTools(normalized.tools) } as ChatRequest;
       }
@@ -3847,7 +3939,7 @@ export class GatewayService {
       }
       toolContract.forwarded = (outbound.tools ?? []).length;
       this.noteToolContract(scopeId, toolContract);
-      return { request: outbound, declared: declaredNames, renames };
+      return { request: outbound, declared: declaredNames, renames, cloaked };
     } catch (error) {
       if (error instanceof ToolContractError) {
         throw new ProviderError('NOT_SUPPORTED', error.message, { providerId: error.providerId, publicMessage: error.publicMessage });
@@ -3864,12 +3956,17 @@ export class GatewayService {
    * forwarded; what does not is dropped and logged, and a turn whose only call was dropped no longer claims
    * `finish_reason: tool_calls`.
    */
-  private validatedToolResponse(providerId: string, declared: readonly string[], response: ChatResponse, renames: ReadonlyMap<string, string> = new Map()): ChatResponse {
+  private validatedToolResponse(providerId: string, declared: readonly string[], response: ChatResponse, renames: ReadonlyMap<string, string> = new Map(), cloaked = false): ChatResponse {
     const calls = response.message.toolCalls;
     if (!calls?.length) return response;
+    const allowed = new Set(declared);
     const wireCalls = calls.map((call) => {
-      const original = renames.get(call.function.name);
-      return original ? { ...call, function: { ...call.function, name: original } } : call;
+      const original = cloaked
+        ? restoreClaudeToolName(call.function.name, renames, allowed)
+        : renames.get(call.function.name);
+      return original && original !== call.function.name
+        ? { ...call, function: { ...call.function, name: original } }
+        : call;
     });
     const { calls: valid, issues, repaired } = validateToolCalls(wireCalls, declared);
     for (const issue of issues) console.warn(`[tools] ${providerId} returned a call that was not forwarded: ${issue.name} — ${issue.reason}`);
@@ -3900,7 +3997,7 @@ export class GatewayService {
    */
   private async runLocalToolRounds(
     providerId: string,
-    contracted: { request: ChatRequest; declared: readonly string[]; renames: ReadonlyMap<string, string> },
+    contracted: { request: ChatRequest; declared: readonly string[]; renames: ReadonlyMap<string, string>; cloaked: boolean },
     adapter: ProviderAdapter,
     signal: AbortSignal | undefined,
     scope: RequestScope | undefined,
@@ -3918,7 +4015,7 @@ export class GatewayService {
       const response = this.validatedToolResponse(providerId, contracted.declared, await adapter.chat!(
         this.withRequestLimits({ ...contracted.request, model: await this.upstreamModelFor(providerId, connectionId, contracted.request.model), messages: prepared }),
         context,
-      ), contracted.renames);
+      ), contracted.renames, contracted.cloaked);
       last = response;
 
       if (native) {
@@ -3956,9 +4053,47 @@ export class GatewayService {
       const local = await this.runLocalToolRounds(providerId, contracted, adapter, signal, scope, connectionId);
       if (local) return local;
       const response = await adapter.chat(this.withRequestLimits({ ...contracted.request, model: await this.upstreamModelFor(providerId, connectionId, contracted.request.model), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
-      return this.validatedToolResponse(providerId, contracted.declared, response, contracted.renames);
+      return this.validatedToolResponse(providerId, contracted.declared, response, contracted.renames, contracted.cloaked);
     } finally {
       release();
+    }
+  }
+
+  /**
+   * The streaming half of Claude cloaking. A tool name arrives in exactly one delta
+   * (`content_block_start` on the provider wire), so restoring it here is enough for the rest of the
+   * call's deltas to be recognised. Decoy names restore to a name no client declared, which the guard
+   * below drops along with their arguments.
+   */
+  private async *restoreStreamToolNames(
+    chunks: AsyncIterable<ChatChunk>,
+    renames: ReadonlyMap<string, string>,
+    declared: readonly string[],
+    cloaked: boolean,
+  ): AsyncIterable<ChatChunk> {
+    if (!cloaked) {
+      yield* chunks;
+      return;
+    }
+    const allowed = new Set(declared);
+    for await (const chunk of chunks) {
+      const pieces = chunk.delta?.toolCalls;
+      if (!pieces?.length) {
+        yield chunk;
+        continue;
+      }
+      yield {
+        ...chunk,
+        delta: {
+          ...chunk.delta,
+          toolCalls: pieces.map((piece) => {
+            const wire = piece.function?.name;
+            if (!wire || !piece.function) return piece;
+            const original = restoreClaudeToolName(wire, renames, allowed);
+            return original === wire ? piece : { ...piece, function: { ...piece.function, name: original } };
+          }),
+        },
+      };
     }
   }
 
@@ -3971,7 +4106,12 @@ export class GatewayService {
       const chunks = adapter.streamChat(this.withRequestLimits({ ...contracted.request, model: await this.upstreamModelFor(providerId, connectionId, contracted.request.model), messages: await this.preparedMessages(contracted.request, scope, adapter.imageContext === true) }), await this.contextForRequest(providerId, connectionId, signal, scope));
       const report: { allowed: string[]; blocked: { index: number; name: string }[] } = { allowed: [], blocked: [] };
       try {
-        yield* guardToolStream(chunks, contracted.declared, report, contracted.renames);
+        yield* guardToolStream(
+          this.restoreStreamToolNames(chunks, contracted.renames, contracted.declared, contracted.cloaked),
+          contracted.declared,
+          report,
+          contracted.renames,
+        );
       } finally {
         for (const blocked of report.blocked) {
           console.warn(`[tools] ${providerId} streamed a call to "${blocked.name}", which the client did not declare; its deltas were dropped`);
@@ -4802,6 +4942,61 @@ export class GatewayService {
   async supportsWebFetch(providerId: string): Promise<boolean> {
     const adapter = await this.resolveAdapter(providerId).catch(() => undefined);
     return (adapter?.capabilities as Record<string, unknown> | undefined)?.webFetch === true;
+  }
+
+  /**
+   * Whether a named provider declares video generation.
+   *
+   * Reading the flag here rather than duplicating a capability list in the route means an adapter
+   * opts in from its own package, without editing 54 vendored type copies or the HTTP handler.
+   */
+  async supportsVideoGeneration(providerId: string): Promise<boolean> {
+    const adapter = await this.resolveAdapter(providerId).catch(() => undefined);
+    return (adapter?.capabilities as Record<string, unknown> | undefined)?.video === true;
+  }
+
+  /**
+   * The one video round-trip, resolved against the pinned connection.
+   *
+   * The adapter is resolved with the connection id so a saved endpoint override reaches the same
+   * adapter chat uses, and the credential comes from `contextForRequest` — never from the request
+   * body or from a provider-wide fallback. An adapter that declares video but has no handler is
+   * refused by name: the capability is a claim, and a claim without a handler is not a job.
+   */
+  async createVideoGeneration(providerId: string, connectionId: string | undefined, action: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<GatewayVideoJob> {
+    return this.runVideoGeneration(providerId, connectionId, { kind: 'create', action, body }, signal);
+  }
+
+  async pollVideoGeneration(providerId: string, connectionId: string | undefined, id: string, signal?: AbortSignal): Promise<GatewayVideoJob> {
+    return this.runVideoGeneration(providerId, connectionId, { kind: 'poll', id }, signal);
+  }
+
+  private async runVideoGeneration(providerId: string, connectionId: string | undefined, request: GatewayVideoRequest, signal?: AbortSignal): Promise<GatewayVideoJob> {
+    const adapter = await this.resolveAdapter(providerId, undefined, connectionId).catch(() => undefined) as VideoCapableAdapter | undefined;
+    const attempts: GatewayFailoverAttempt[] = [{
+      providerId,
+      ...(connectionId ? { connectionId } : {}),
+      attempt: 1,
+      ok: false,
+      latencyMs: 0,
+      errorCode: 'NOT_SUPPORTED',
+    }];
+    const refuse = (message: string): never => {
+      throw new ProviderError('NOT_SUPPORTED', message, {
+        providerId,
+        retryable: false,
+        publicMessage: message,
+        details: { attempts },
+      });
+    };
+    if (!adapter || (adapter.capabilities as Record<string, unknown> | undefined)?.video !== true) {
+      return refuse(`Provider "${providerId}" does not declare video generation; no video job was created and no job URL was invented.`);
+    }
+    if (typeof adapter.video !== 'function') {
+      return refuse(`Provider "${providerId}" declares video generation, but no generation handler is wired; no video job was created and no job URL was invented.`);
+    }
+    const context = await this.contextForRequest(providerId, connectionId, signal);
+    return adapter.video.call(adapter, request, context);
   }
 
   /** The virtual-model catalog, or `undefined` when this build has no persisted store. */

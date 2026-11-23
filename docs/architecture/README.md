@@ -75,15 +75,15 @@ that holds is one a machine re-derives.
 | `Kernel/API/src/core/circuit-breaker.ts` | 192 | **0** | per-connection closed → open → half-open; counts what it refused |
 | `Kernel/API/src/core/request-executor.ts` | 1049 | **0** | the failover loop, the attempt ledger, the ordering |
 | `Kernel/API/src/core/connection-manager.ts` | 383 | **0** | one error mapper, one catalog merge, one lock scope |
-| `Kernel/API/src/core/service.ts` | 4918 | 52 | every `.onDemand()` registration, in one constructor |
-| `Kernel/API/src/core/http.ts` | 356 | **0** | the vocabulary every route shares |
-| `Kernel/API/src/routes/oauth.ts` | 904 | 20 | the module a provider split would help most |
+| `Kernel/API/src/core/service.ts` | 5113 | 54 | every `.onDemand()` registration, in one constructor |
+| `Kernel/API/src/core/http.ts` | 357 | **0** | the vocabulary every route shares |
+| `Kernel/API/src/routes/oauth.ts` | 967 | 14 | the module a provider split would help most |
 | `Kernel/API/src/routes/connections.ts` | 410 | 1 | one OpenRouter save shortcut, the generic quota route, the build stamp, and the route that forgets an added model |
-| `Kernel/API/src/routes/inference.ts` | 1739 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/messages` (Anthropic shape + SSE), and the auth gate |
+| `Kernel/API/src/routes/inference.ts` | 1758 | **0** | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/messages` (Anthropic shape + SSE), the video path constants, and the auth gate |
 | `Kernel/API/src/routes/api-keys.ts` | 105 | **0** | the key list, the one mutable setting, and the PATCH that either pauses or renames — never both |
 | `Kernel/API/src/routes/status.ts` | 220 | **0** | `/health`, `/`, `/v1/system`, `/v1/routing`, and the build stamp |
 | `Kernel/API/src/core/codexCallbackListener.ts` | 92 | **0** | the loopback socket a registered redirect points at |
-| `Kernel/API/src/server.ts` | 471 | **1** | refuses a half-configured Codex OAuth override at startup, and gives every request the id its record will carry |
+| `Kernel/API/src/server.ts` | 483 | **1** | refuses a half-configured Codex OAuth override at startup, dispatches the video surface, and gives every request the id its record will carry |
 
 **The Core was far more provider-neutral than it looked.** The non-zero cells above are the entire
 provider-specific surface of the gateway core, and none of it is a scattered conditional — it is a

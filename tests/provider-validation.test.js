@@ -73,3 +73,48 @@ test('the together and fireworks registrations are real OpenAI-compatible chat a
     assert.match(chatCall.body ?? '', /router-model/, `${id} dropped the requested model`);
   }
 });
+
+test('a bogus key is refused by every provider that declares a credential check', async () => {
+  // The scripted transport answers 401 to everything, which is what a real vendor answers for a key
+  // nobody owns. A Check that still reports green here would be the false pass this file exists for.
+  const credentialIds = ids.filter((id) => service.providers.validationStrategy(id) === 'credential');
+  assert.ok(credentialIds.length >= 10, `only ${credentialIds.length} credential strategies were found; the guard would pass vacuously`);
+  for (const id of credentialIds) {
+    const transport = scriptedTransport({ wireFormat: 'openai', catalog: ['public-model'] });
+    transport.set([], { refuseWith: 401 });
+    const scripted = new GatewayService(
+      new ProviderRegistry(),
+      new InMemorySecretStore({}),
+      new InMemoryConnectionStore(),
+      new InMemoryApiKeyStore(),
+      { transport },
+    );
+    await assert.rejects(
+      scripted.validateConnectionCredential(id, { type: 'api-key', value: 'bogus-key' }),
+      (error) => error.code === 'AUTHENTICATION_FAILED' || error.code === 'NOT_SUPPORTED',
+      `${id} accepted a bogus key`,
+    );
+  }
+});
+
+test('a public model catalog is never the sole proof of a candidate key', async () => {
+  // A `/models` list that answers 200 for any string is not evidence. Providers that cannot prove a
+  // key declare `none`, and the gateway refuses a Check before making a request at all — no adapter
+  // is allowed to quietly fall back to "the catalog answered, so the key is good".
+  for (const id of ids.filter((candidate) => service.providers.validationStrategy(candidate) === 'none')) {
+    const transport = scriptedTransport({ wireFormat: 'openai', catalog: ['public-model'] });
+    const scripted = new GatewayService(
+      new ProviderRegistry(),
+      new InMemorySecretStore({}),
+      new InMemoryConnectionStore(),
+      new InMemoryApiKeyStore(),
+      { transport },
+    );
+    await assert.rejects(
+      scripted.validateConnectionCredential(id, { type: 'api-key', value: 'bogus-key' }),
+      (error) => error.code === 'NOT_SUPPORTED',
+      `${id} accepted a key on a public catalog`,
+    );
+    assert.equal(transport.seen.length, 0, `${id} sent a key-check request although it declared no check`);
+  }
+});

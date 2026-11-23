@@ -38,3 +38,7 @@ export class OpenAIAdapter extends OpenAICompatibleAdapter {
   }
 }
 export * from '../lib/openai-compatible.js';
+// Additive re-exports for sibling SDK packages that speak a non-chat wire (xAI's video jobs).
+// These were already the implementation behind the adapter; naming them here keeps a consumer from
+// depending on a `dist/lib/...` deep path that a build layout change could break.
+export { normalizeProviderBaseUrl, resolveProviderUrl } from '../lib/url.js';

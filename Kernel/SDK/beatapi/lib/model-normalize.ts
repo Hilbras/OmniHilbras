@@ -82,8 +82,10 @@ export function normalizeCatalogModel(value: unknown, providerId: string): Model
   // Some catalogs (notably NVIDIA's) state capability flags explicitly. Only a `true` is a fact;
   // absence stays absent rather than becoming `false` with a meaning nobody stated.
   const capabilities: Model['capabilities'] = {
-    ...(raw.supports_tools === true ? { tools: true } : {}),
-    ...(raw.supports_thinking === true ? { reasoning: true } : {}),
+    // An explicit false is a statement by the provider, not an absent opinion: narrowing a
+    // tools-capable provider to one model that cannot call tools needs the false to survive here.
+    ...(raw.supports_tools === false ? { tools: false } : (raw.supports_tools === true ? { tools: true } : {})),
+    ...(raw.supports_thinking === false ? { reasoning: false } : (raw.supports_thinking === true ? { reasoning: true } : {})),
   };
   const pricing = pricingFrom(raw.pricing ?? raw.cost, raw.pricing !== undefined);
   return {

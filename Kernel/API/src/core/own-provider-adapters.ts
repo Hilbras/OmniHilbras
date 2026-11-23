@@ -29,6 +29,7 @@ import { GroqAdapter } from '@omnihilbras/sdk-groq';
 import { GrokAdapter } from '@omnihilbras/sdk-grok';
 import { NvidiaAdapter } from '@omnihilbras/sdk-nvidia';
 import { CoarenaAdapter } from '@omnihilbras/sdk-coarena';
+import { XaiAdapter } from '@omnihilbras/sdk-xai';
 
 /** One own adapter per provider id that had no dedicated package before phase 2. */
 export type OwnAdapterOptions = { endpoint?: string; transport?: OpenAICompatibleAdapterOptions['transport'] };
@@ -102,4 +103,11 @@ export const OWN_PROVIDER_ADAPTERS: Readonly<Record<string, OwnAdapterEntry>> = 
   'coarena': { validation: 'none', create: (options) => new CoarenaAdapter(withTransport(options)) },
   'together': openAiRouter('together', 'Together AI', 'https://api.together.xyz/v1'),
   'fireworks': openAiRouter('fireworks', 'Fireworks AI', 'https://api.fireworks.ai/inference/v1'),
+  // xAI has its own SDK package because its video-job surface is not the shared chat wire. `none` is
+  // declared, not inherited: no authenticated credential check was measured, and xAI's catalog is
+  // public enough that a bogus key would look valid. Its own id keeps its own vault entry.
+  'xai': {
+    validation: 'none',
+    create: (options) => new XaiAdapter({ ...(options?.endpoint ? { endpoint: options.endpoint } : {}), ...withTransport(options) }),
+  },
 });

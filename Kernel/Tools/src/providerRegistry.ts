@@ -42,6 +42,7 @@ export const PROVIDER_REGISTRY: Readonly<Record<string, ProviderRegistryRow>> = 
   "perplexity-web": { id: "perplexity-web", name: "Perplexity Web", baseUrl: "https://www.perplexity.ai", auth: "web", formats: ["web"] },
   "kimi": { id: "kimi", name: "Kimi", baseUrl: "https://api.moonshot.ai/v1", modelsUrl: "https://api.moonshot.ai/v1/models", auth: "api-key", formats: ["openai"] },
   "kimi-code": { id: "kimi-code", name: "Kimi Code", baseUrl: "https://api.kimi.com", modelsUrl: "https://api.kimi.com/models", auth: "oauth", formats: ["openai"] },
+  "claude": { id: "claude", name: "Claude", baseUrl: "https://api.anthropic.com", modelsUrl: "https://api.anthropic.com/models", auth: "oauth", formats: ["claude"] },
   "claude-code": { id: "claude-code", name: "Claude Code", baseUrl: "https://api.anthropic.com", modelsUrl: "https://api.anthropic.com/models", auth: "oauth", formats: ["claude"] },
   "codex": { id: "codex", name: "Codex", baseUrl: "https://chatgpt.com/backend-api/codex/responses", modelsUrl: "https://chatgpt.com/backend-api/codex/models", auth: "oauth", formats: ["responses"] },
   "qoder": { id: "qoder", name: "Qoder", baseUrl: "https://api3.qoder.sh", modelsUrl: "https://api3.qoder.sh/models", auth: "oauth", formats: ["openai"] },
@@ -55,6 +56,8 @@ export const PROVIDER_REGISTRY: Readonly<Record<string, ProviderRegistryRow>> = 
   "zcode": { id: "zcode", name: "ZCode (Start Plan)", baseUrl: "https://zcode.z.ai", modelsUrl: "https://zcode.z.ai/models", auth: "oauth", formats: ["openai"] },
   "groq": { id: "groq", name: "Groq", baseUrl: "https://api.groq.com/openai/v1", modelsUrl: "https://api.groq.com/openai/v1/models", auth: "api-key", formats: ["openai"] },
   "grok": { id: "grok", name: "Grok", baseUrl: "https://api.x.ai/v1", modelsUrl: "https://api.x.ai/v1/models", auth: "api-key", formats: ["openai"] },
+  // A separate xAI account slot, not an alias of Grok: two saved keys must not share one catalog or usage.
+  "xai": { id: "xai", name: "xAI", baseUrl: "https://api.x.ai/v1", modelsUrl: "https://api.x.ai/v1/models", auth: "api-key", formats: ["openai"] },
   "nvidia": { id: "nvidia", name: "NVIDIA", baseUrl: "https://integrate.api.nvidia.com/v1", modelsUrl: "https://integrate.api.nvidia.com/v1/models", auth: "api-key", formats: ["openai"] },
   "together": { id: "together", name: "Together AI", baseUrl: "https://api.together.xyz/v1", modelsUrl: "https://api.together.xyz/v1/models", auth: "api-key", formats: ["openai"] },
   "fireworks": { id: "fireworks", name: "Fireworks AI", baseUrl: "https://api.fireworks.ai/inference/v1", modelsUrl: "https://api.fireworks.ai/inference/v1/models", auth: "api-key", formats: ["openai"] },

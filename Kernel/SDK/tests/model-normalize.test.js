@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { normalizeCatalogModel } from '../openai/dist/lib/model-normalize.js';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 
 /**
  * The one catalog mapper every OpenAI-shaped provider now uses. It is deliberately honest: a field is set
@@ -72,4 +74,33 @@ test('per-1M shapes are not multiplied again, and a zero price stays zero', () =
 test('an unusable id is refused rather than mapped to an empty record', () => {
   const model = normalizeCatalogModel({ name: 'no id' }, 'fake');
   assert.equal(model.id, '');
+});
+
+test('an explicit false survives normalization and can therefore narrow a provider', () => {
+  const model = normalizeCatalogModel({
+    id: 'vendor/no-tools',
+    supports_tools: false,
+    supports_thinking: false,
+  }, 'fake');
+  assert.deepEqual(model.capabilities, { tools: false, reasoning: false });
+});
+
+test('all ten vendored copies preserve an explicit false, so a one-copy edit cannot drift quietly', () => {
+  // The first version of this suite imported only openai/dist. A change to one source copy then
+  // passed here while nine adapters kept dropping the false, which is the drift this guard exists for.
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  const { fileURLToPath } = require('node:url');
+  const root = fileURLToPath(new URL('../../../', import.meta.url));
+  const ids = ['apmix', 'beatapi', 'cline', 'clinepass', 'nous', 'openai', 'opencode-console', 'opencode-go', 'opencode-zen', 'openrouter'];
+  const expected = [
+    'raw.supports_tools === false ? { tools: false }',
+    'raw.supports_thinking === false ? { reasoning: false }',
+  ];
+  for (const id of ids) {
+    const source = readFileSync(join(root, 'Kernel', 'SDK', id, 'lib', 'model-normalize.ts'), 'utf8');
+    for (const line of expected) {
+      assert.ok(source.includes(line), `${id}/lib/model-normalize.ts dropped the false-preservation branch (${line})`);
+    }
+  }
 });

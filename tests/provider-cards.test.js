@@ -329,13 +329,17 @@ test('THE COUNT, asserted so it cannot drift quietly', () => {
   // 55 from 3.28.0: `zcode`, a ZCode Start Plan OAuth card with its own adapter and standalone sign-in.
   // 59-60 added the `together` and `fireworks` keyed routers: generic OpenAI-compatible adapters
   // registered beside their validation decision, with no dedicated SDK package and no measured claims.
-  assert.equal(all.length, 60, `the catalog now has ${all.length} cards`);
-  // Seventeen cards claim OAuth and the gateway serves seventeen start routes. `clinepass` used to be
+  // 61 added `xai` from the parity backlog: its own card, registry row, caps row and vault entry, with
+  // no OAuth claim and no measured metrics until a connection reports them.
+  // 62 added `claude` — the authorization-code + PKCE sibling of `claude-code`, with its own card,
+  // adapter, caps row, sign-in routes and connection rather than borrowing the subscription's grant.
+  assert.equal(all.length, 62, `the catalog now has ${all.length} cards`);
+  // Eighteen cards claim OAuth and the gateway serves eighteen start routes. `clinepass` used to be
   // the odd one out when it shared Cline's connection; it has its own route now. `claude-code` and
   // `codex` sign in through `server.ts` routes this scan reads too.
-  assert.equal(oauthCapableProviders().size, 17, 'the gateway serves an OAuth start route for seventeen providers');
+  assert.equal(oauthCapableProviders().size, 18, 'the gateway serves an OAuth start route for eighteen providers');
   const oauthClaiming = all.filter((card) => card.auth === 'OAuth' || card.authModes?.includes('oauth'));
-  assert.equal(oauthClaiming.length, 17, 'seventeen cards claim an OAuth sign-in: fifteen named OAuth, and Nous Research and the two OpenCode cards which offer it beside a key');
+  assert.equal(oauthClaiming.length, 18, 'eighteen cards claim an OAuth sign-in: sixteen named OAuth, and Nous Research and the two OpenCode cards which offer it beside a key');
   console.log(`    cards: ${all.length}   claiming OAuth: ${oauthClaiming.length}   gateway OAuth routes: ${oauthCapableProviders().size}   claiming a measurement: 0`);
 });
 
@@ -364,4 +368,13 @@ test('the Gemini Web driver checks the sign-in wall before the composer, because
     assert.ok(wall !== -1 && composer !== -1, `${name} no longer checks both the wall and the composer`);
     assert.ok(wall < composer, `${name} checks the composer before the sign-in wall, so a signed-out page can read as connected`);
   }
+});
+
+test('every catalog card has a row in the generated provider defect register', () => {
+  // The register is generated from the cards and the external registry; a card added without
+  // regenerating leaves a row missing, which is the only way a new id can enter the product silently.
+  const register = readFileSync(join(ROOT, 'docs', 'architecture', 'provider-defects.md'), 'utf8');
+  const rows = new Set([...register.matchAll(/^\| `([^`]+)` \|/gm)].map((match) => match[1]));
+  const missing = providerCatalog.map((card) => card.id).filter((id) => !rows.has(id));
+  assert.deepEqual(missing, [], `cards without a defect-register row: ${missing.join(', ')}`);
 });

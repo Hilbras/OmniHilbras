@@ -1,6 +1,6 @@
 {
   "name": "@omnihilbras/kernel-api",
-  "version": "3.96.0",
+  "version": "3.97.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -21,6 +21,7 @@
     "@omnihilbras/sdk-apmix": "workspace:*",
     "@omnihilbras/sdk-beatapi": "workspace:*",
     "@omnihilbras/sdk-chatgpt-web": "workspace:*",
+    "@omnihilbras/sdk-claude": "workspace:*",
     "@omnihilbras/sdk-claude-code": "workspace:*",
     "@omnihilbras/sdk-cline": "workspace:*",
     "@omnihilbras/sdk-clinepass": "workspace:*",
@@ -62,6 +63,7 @@
     "@omnihilbras/sdk-tokenharbor-web": "workspace:*",
     "@omnihilbras/sdk-unorouter": "workspace:*",
     "@omnihilbras/sdk-vengetic": "workspace:*",
+    "@omnihilbras/sdk-xai": "workspace:*",
     "@omnihilbras/sdk-xkiro": "workspace:*",
     "@omnihilbras/sdk-zcode-start-plan": "workspace:*",
     "@omnihilbras/sdk-zro": "workspace:*",

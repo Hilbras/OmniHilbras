@@ -53,14 +53,28 @@ function refusal(status, body, providerId) {
  * single default id, such an adapter returns an empty list and the contract's attribution assertion
  * fails for a reason that has nothing to do with attribution.
  */
-export function scriptedTransport({ wireFormat = 'openai', catalog = ['contract-model'] } = {}) {
+export function scriptedTransport({ wireFormat = 'openai', catalog = ['contract-model'], video, token } = {}) {
   const state = { mode: 'ok', parts: [], status: 200, body: undefined };
   const seen = [];
   const errors = [];
+  /**
+   * Video jobs are asynchronous, so one scripted transport must answer a sequence: create, then one
+   * or more polls. Each `/videos` round-trip consumes the next entry; an exhausted script answers an
+   * empty object, so an adapter that invents a request id, a status or a URL fails loudly.
+   */
+  const videoScript = Array.isArray(video) ? video : [];
+  const videoSeen = [];
+  /** OAuth token steps, one per exchange, so a test can assert what was sent on the wire. */
+  const tokenScript = Array.isArray(token) ? token : (token ? [token] : []);
+  const tokenSeen = [];
 
   const transport = {
     /** Everything the adapter asked for, for assertions about the wire. */
     seen,
+    /** Only the video round-trips, in order, for assertions about create/poll framing. */
+    videoSeen,
+    /** Token exchanges, in order, with the parsed body for redirect/verifier assertions. */
+    tokenSeen,
     /** Set by a test to model a refusal that the transport itself must not treat as one. */
     /**
      * `refuseWith` accepts a bare status or a full shape.
@@ -80,6 +94,29 @@ export function scriptedTransport({ wireFormat = 'openai', catalog = ['contract-
     },
     async request(request) {
       seen.push({ url: request.url, method: request.method, headers: request.headers, body: request.body });
+      if (isTokenRequest(request)) {
+        let body;
+        try { body = JSON.parse(request.body ?? '{}'); } catch { body = {}; }
+        tokenSeen.push({ url: request.url, method: request.method, headers: request.headers, body });
+        const step = tokenScript[tokenSeen.length - 1] ?? { access_token: 'scripted-token', refresh_token: 'scripted-refresh', expires_in: 3600 };
+        if (step.error) throw step.error;
+        if (typeof step.httpStatus === 'number' && step.httpStatus >= 400) throw refusal(step.httpStatus, step.data ?? {}, providerIdFor(request));
+        return {
+          status: typeof step.httpStatus === 'number' ? step.httpStatus : 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          data: step.data ?? step,
+        };
+      }
+      if (isVideoRequest(request)) {
+        videoSeen.push({ url: request.url, method: request.method, headers: request.headers, body: request.body });
+        const step = videoScript[videoSeen.length - 1] ?? {};
+        if (step.error) throw step.error;
+        return {
+          status: typeof step.httpStatus === 'number' ? step.httpStatus : 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          data: step.data ?? step,
+        };
+      }
       if (state.mode === 'refuse' && state.status >= 400) {
         // A real transport classifies a non-2xx and throws a ProviderError. The contract asserts
         // on what the adapter does with that, so the throw is what has to happen here.
@@ -122,6 +159,16 @@ export function scriptedTransport({ wireFormat = 'openai', catalog = ['contract-
  */
 function isRecommendedRequest(request) {
   return /\/ai\/cline\/recommended-models\b/.test(request.url);
+}
+
+/** OAuth token exchanges must never be answered with a chat completion. */
+function isTokenRequest(request) {
+  return /\/oauth\/token(?:\?|$)/.test(request.url);
+}
+
+/** Video jobs use their own sequence; they must never be answered with a chat completion. */
+function isVideoRequest(request) {
+  return /\/videos(?:\/|$)/.test(request.url);
 }
 
 function isModelsRequest(request) {

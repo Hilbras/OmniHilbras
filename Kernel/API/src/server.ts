@@ -12,7 +12,8 @@ import { handleMetricsRoute } from './routes/metrics.js';
 import { handleConnectionsRoute } from './routes/connections.js';
 import { handleBackupRoute } from './routes/backup.js';
 import { handleTokenSaverRoute } from './routes/token-saver.js';
-import { extractApiKey, handleInferenceRoute, isPublicLlmRoute } from './routes/inference.js';
+import { extractApiKey, handleInferenceRoute, isPublicLlmRoute, isVideoRoute } from './routes/inference.js';
+import { handleVideoRoute } from './routes/video.js';
 import { handleOauthRoute } from './routes/oauth.js';
 import { handleStatusRoute } from './routes/status.js';
 import { handleUsageRoute } from './routes/usage.js';
@@ -32,6 +33,7 @@ import { handleLocaleRoute } from './routes/locale.js';
 import { handleRuntimeRoute } from './routes/runtime.js';
 import { handleMediaRoute } from './routes/media.js';
 import { handleMcpRoute } from './routes/mcp.js';
+import { handleMcpPluginsRoute } from './routes/mcpPlugins.js';
 import { handleFetchRoute } from './routes/fetch.js';
 import type { RouteContext } from './routes/route-context.js';
 import type { ApiKeyStore } from './core/api-keys.js';
@@ -40,6 +42,12 @@ import type { GatewayService } from './core/service.js';
 import { resolveCodexConfig } from './providers/codexOAuth.js';
 
 export type GatewayServerOptions = {
+  /**
+   * Where the operator's MCP plugin registry lives. Defaults to the gateway service's own state
+   * directory. Overridable so a test can register a local child fixture without touching a real
+   * installation — the override names a directory of operator state, never a request-supplied path.
+   */
+  mcpPluginsDir?: string;
   /** Backwards-compatible single-origin option for tests and embedders. */
   corsOrigin?: string;
   /** Exact browser origins allowed to call the local gateway. */
@@ -121,7 +129,11 @@ const routes = [
   handleRuntimeRoute,
   handleMediaRoute,
   handleMcpRoute,
+  handleMcpPluginsRoute,
   handleFetchRoute,
+  // Billable video jobs. Registered before inference so the route table has one owner for the
+  // `/v1/videos/*` paths; the fast path below skips inference for them too.
+  handleVideoRoute,
   // Last, because it carries the authentication gate for the LLM surface and must not shadow
   // anything above.
   handleInferenceRoute,
@@ -455,7 +467,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     // for exactly these paths, so skipping the loop skips no check. The ordered list above remains the single
     // source of truth for what the gateway serves and what the spec/test guards inspect; this is a dispatch
     // shortcut for paths that list ends with, not a second route table.
-    if (isPublicLlmRoute(request.method, ctx.url.pathname)) {
+    if (isPublicLlmRoute(request.method, ctx.url.pathname) && !isVideoRoute(request.method, ctx.url.pathname)) {
       return handleInferenceRoute(ctx);
     }
 

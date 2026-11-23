@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { narrowedToolCaps } from '../dist/src/core/modelCapabilities.js';
+import { modelMetaFor } from '../dist/src/core/connection-manager.js';
 
 /**
  * A provider can serve tools while one of its models cannot. The catalog already stores that fact as
@@ -33,4 +34,16 @@ test('a provider without tools stays without tools whatever the catalog says', (
 test('no metadata is the ordinary case and costs one lookup', () => {
   assert.equal(narrowedToolCaps('model', undefined, row), undefined);
   assert.equal(narrowedToolCaps('model', { providerId: 'p' }, row), undefined);
+});
+
+
+test('a catalog entry stating supports_tools:false reaches modelMeta and narrows the provider', () => {
+  const models = [{
+    id: 'vendor/no-tools', providerId: 'p', capabilities: { tools: false }, source: 'provider',
+  }];
+  const meta = modelMetaFor(models);
+  assert.deepEqual(meta['vendor/no-tools'].cp, { tools: false });
+  const caps = narrowedToolCaps('vendor/no-tools', connection(meta, 'p'), row);
+  assert.equal(caps?.tools, false);
+  assert.deepEqual(caps?.toolChoice, []);
 });

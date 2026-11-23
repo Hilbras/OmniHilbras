@@ -1,7 +1,7 @@
 import { isProviderError } from './provider-error.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ProviderError, publicProviderMessage, type ModelImportPolicy } from './index.js';;
-import { claudeCodeCallbackPath, clineCallbackPath } from './oauth.js';
+import { claudeCallbackPath, claudeCodeCallbackPath, clineCallbackPath } from './oauth.js';
 import type { GatewayServerOptions } from '../server.js';
 import { codexCallbackRoutePath } from '../routes/oauth.js';
 
@@ -111,6 +111,7 @@ export function isOauthCallbackNavigation(request: IncomingMessage) {
   // canonical callback always renders a safe outcome page; only an active session can exchange.
   return path === clineCallbackPath || path.startsWith(`${clineCallbackPath}/`)
     || path === claudeCodeCallbackPath || path.startsWith(`${claudeCodeCallbackPath}/`)
+    || path === claudeCallbackPath || path.startsWith(`${claudeCallbackPath}/`)
     || path === codexCallbackRoutePath;
 }
 

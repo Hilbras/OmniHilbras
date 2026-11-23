@@ -385,6 +385,8 @@ const NOT_YET_CONTRACTED = {
   'groq': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'grok': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
   'coarena': 'Its own package owns only the provider id and base URL; the completion path is the shared OpenAI-compatible wire the generic harness already covers, so a separate contract run would duplicate that one.',
+  xai: 'Its chat is the shared OpenAI-compatible wire; video jobs are async and need a funded xAI account, so the create/poll wire is contracted with a scripted transport in video-route.test.js instead',
+  claude: 'The Messages wire is driven by a scripted transport in claude.test.js and the PKCE grant by oauth-claude.test.js; a real capture would need an OAuth grant this machine does not hold',
 };
 
 test('an adapter that can tell when a credential expired never throws and never guesses', () => {
