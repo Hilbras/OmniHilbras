@@ -1,0 +1,12 @@
+{
+  "cycle": 1,
+  "step": 1,
+  "status": "running",
+  "stopped": false,
+  "last_reports": {
+    "full_comparison": null,
+    "provider_comparison": null,
+    "improvement_plan": null
+  },
+  "history": []
+}
