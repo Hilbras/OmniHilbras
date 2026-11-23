@@ -14,3 +14,8 @@ export { LOCAL_TOOL_NAMES, LOCAL_TOOL_MAX_BYTES, LOCAL_TOOL_PROMPT, isLocalToolN
 export type { LocalToolCall, LocalToolName } from './localTools.js';
 export { guardToolStream } from './stream.js';
 export type { StreamChunk, StreamGuardReport } from './stream.js';
+export {
+  CLAUDE_TOOL_SUFFIX, CLAUDE_TOOL_PROVIDERS, CLAUDE_DECOY_TOOL_NAMES, DECOY_CALL_NAME,
+  cloakClaudeTools, restoreClaudeToolName, shouldCloakTools,
+} from './toolCloaking.js';
+export type { CloakedTools } from './toolCloaking.js';
