@@ -176,7 +176,10 @@ const NO_CAPTURE_YET = {
   'grok': 'the provider-independence migration gave this id its own package, but its wire is the same OpenAI-compatible shape the shared base class serves; a capture would duplicate that one, so only its id and base URL are owned here',
   'nvidia': 'the OpenAI wire is covered by the shared contract (nvidia is now contracted); its public-catalog key probe and chat_template_kwargs translation are pinned in nvidia.test.js',
   'coarena': 'the provider-independence migration gave this id its own package, but its wire is the same OpenAI-compatible shape the shared base class serves; a capture would duplicate that one, so only its id and base URL are owned here',
+  'xai': 'video jobs are asynchronous and need a funded xAI account for real upstream bytes; the create/poll framing, credential forwarding and bounded URL disclosure are asserted against a scripted transport in Kernel/API/test/video-route.test.js rather than a fabricated capture',
+  'claude': 'an OAuth authorization-code grant has no reusable capture without a signed-in Claude account; the PKCE S256 exchange, exact redirect check and refusal paths are asserted with a scripted token endpoint in Kernel/API/test/oauth-claude.test.js',
 };
+
 
 test('the fixtures directory holds only captures, named for the adapter they came from', () => {
   const files = readdirSync(FIXTURES);
